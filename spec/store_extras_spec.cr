@@ -1,0 +1,114 @@
+require "./spec_helper"
+
+private def with_store(&)
+  path = File.tempname("gori-extra", ".db")
+  store = Gori::Store.open(path)
+  begin
+    yield store
+  ensure
+    store.close
+    File.delete?(path)
+    File.delete?("#{path}-wal")
+    File.delete?("#{path}-shm")
+  end
+end
+
+describe "Gori::Store scope rules + settings (v3)" do
+  it "persists scope rules" do
+    with_store do |store|
+      store.scope_rules.should be_empty
+      store.add_scope_rule("acme.test")
+      store.add_scope_rule("acme.test") # UNIQUE → no dup
+      store.add_scope_rule("*.shop.test")
+      store.scope_rules.should eq(["*.shop.test", "acme.test"])
+      store.remove_scope_rule("acme.test")
+      store.scope_rules.should eq(["*.shop.test"])
+    end
+  end
+
+  it "persists settings" do
+    with_store do |store|
+      store.setting("scope_enabled").should be_nil
+      store.set_setting("scope_enabled", "1")
+      store.setting("scope_enabled").should eq("1")
+      store.set_setting("scope_enabled", "0") # upsert
+      store.setting("scope_enabled").should eq("0")
+    end
+  end
+end
+
+describe "Gori::Store h2 raw frame log (v5)" do
+  it "records a connection and its frames, read back in order" do
+    with_store do |store|
+      conn = store.insert_h2_connection("acme.test", 443, "h2")
+      store.insert_h2_frame(conn, "out", 0x1_u8, 0x4_u8, 1_u32, "hdrblock".to_slice) # HEADERS
+      store.insert_h2_frame(conn, "in", 0x0_u8, 0x1_u8, 1_u32, "body".to_slice)      # DATA END_STREAM
+
+      store.count_h2_frames(conn).should eq(2)
+      frames = store.h2_frames(conn)
+      frames.size.should eq(2)
+      frames[0].direction.should eq("out")
+      frames[0].type.should eq(1)
+      frames[0].stream_id.should eq(1)
+      frames[0].length.should eq("hdrblock".bytesize)
+      String.new(frames[0].payload).should eq("hdrblock")
+      frames[1].direction.should eq("in")
+      frames[1].type.should eq(0)
+      String.new(frames[1].payload).should eq("body")
+    end
+  end
+end
+
+describe "Gori::Store match rules (v4)" do
+  it "creates, lists, toggles, and deletes rules" do
+    with_store do |store|
+      store.match_rules.should be_empty
+      id = store.insert_rule(Gori::Store::RuleTarget::Response, "Server: nginx", "Server: gori")
+      store.insert_rule(Gori::Store::RuleTarget::Request, "secret", "")
+
+      rules = store.match_rules
+      rules.size.should eq(2)
+      first = store.match_rules.find!(&.id.==(id))
+      first.target.should eq(Gori::Store::RuleTarget::Response)
+      first.pattern.should eq("Server: nginx")
+      first.replacement.should eq("Server: gori")
+      first.enabled?.should be_true
+
+      store.set_rule_enabled(id, false)
+      store.match_rules.find!(&.id.==(id)).enabled?.should be_false
+
+      store.delete_rule(id)
+      store.match_rules.map(&.pattern).should eq(["secret"])
+    end
+  end
+end
+
+describe "Gori::Store findings (v3)" do
+  it "creates, reads, updates, counts, and deletes findings" do
+    with_store do |store|
+      store.count_findings.should eq(0)
+      id = store.insert_finding("Reflected XSS on /search", Gori::Store::Severity::High, "acme.test", 42_i64)
+      store.insert_finding("Verbose error", Gori::Store::Severity::Low, "acme.test", nil)
+
+      store.count_findings.should eq(2)
+      f = store.get_finding(id).not_nil!
+      f.title.should eq("Reflected XSS on /search")
+      f.severity.should eq(Gori::Store::Severity::High)
+      f.host.should eq("acme.test")
+      f.flow_id.should eq(42)
+      f.notes.should eq("")
+
+      # ordered by severity desc
+      store.findings.first.id.should eq(id)
+
+      store.update_finding(id, severity: Gori::Store::Severity::Critical, notes: "PoC: <script>…")
+      updated = store.get_finding(id).not_nil!
+      updated.severity.should eq(Gori::Store::Severity::Critical)
+      updated.notes.should eq("PoC: <script>…")
+
+      store.delete_finding(id)
+      store.count_findings.should eq(1)
+      store.get_finding(id).should be_nil
+    end
+  end
+end

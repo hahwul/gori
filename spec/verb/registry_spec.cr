@@ -1,0 +1,267 @@
+require "../spec_helper"
+
+include Gori::Verb
+
+# Minimal recording ExecContext for exercising handlers.
+private class FakeContext < ExecContext
+  property selected : Int64? = nil
+  property tab : Symbol = :history
+  getter calls = [] of Symbol
+
+  def quit! : Nil
+    @calls << :quit
+  end
+
+  def leave_project : Nil
+    @calls << :leave_project
+  end
+
+  def current_tab : Symbol
+    @tab
+  end
+
+  def focus_pane(pane : Symbol) : Nil
+    @calls << :focus_pane
+  end
+
+  def status(message : String) : Nil
+    @calls << :status
+  end
+
+  def open_palette : Nil
+    @calls << :open_palette
+  end
+
+  def close_overlay : Nil
+    @calls << :close_overlay
+  end
+
+  def focus_tab(tab : Symbol) : Nil
+    @calls << tab
+  end
+
+  def cycle_tab(delta : Int32) : Nil
+    @calls << :cycle_tab
+  end
+
+  def move_selection(delta : Int32) : Nil
+    @calls << :move
+  end
+
+  def open_detail : Nil
+    @calls << :open_detail
+  end
+
+  def close_detail : Nil
+    @calls << :close_detail
+  end
+
+  def toggle_follow : Nil
+    @calls << :toggle_follow
+  end
+
+  def selected_flow_id : Int64?
+    @selected
+  end
+
+  def copy_selection : Nil
+    @calls << :copy
+  end
+
+  def history_query : Nil
+    @calls << :history_query
+  end
+
+  def scroll_detail(delta : Int32) : Nil
+    @calls << :scroll_detail
+  end
+
+  def toggle_detail_pane : Nil
+    @calls << :toggle_detail_pane
+  end
+
+  def replay_selected : Nil
+    @calls << :replay_selected
+  end
+
+  def replay_send : Nil
+    @calls << :replay_send
+  end
+
+  def sitemap_move(delta : Int32) : Nil
+    @calls << :sitemap_move
+  end
+
+  def sitemap_toggle : Nil
+    @calls << :sitemap_toggle
+  end
+
+  def sitemap_expand : Nil
+    @calls << :sitemap_expand
+  end
+
+  def sitemap_collapse : Nil
+    @calls << :sitemap_collapse
+  end
+
+  def scope_open : Nil
+    @calls << :scope_open
+  end
+
+  def scope_add_host : Nil
+    @calls << :scope_add_host
+  end
+
+  def rules_open : Nil
+    @calls << :rules_open
+  end
+
+  def finding_create : Nil
+    @calls << :finding_create
+  end
+
+  def findings_new : Nil
+    @calls << :findings_new
+  end
+
+  def findings_move(delta : Int32) : Nil
+    @calls << :findings_move
+  end
+
+  def findings_open : Nil
+    @calls << :findings_open
+  end
+
+  def finding_close : Nil
+    @calls << :finding_close
+  end
+
+  def findings_delete : Nil
+    @calls << :findings_delete
+  end
+
+  def finding_severity(delta : Int32) : Nil
+    @calls << :finding_severity
+  end
+
+  def finding_edit_notes : Nil
+    @calls << :finding_edit_notes
+  end
+
+  def toggle_capture : Nil
+    @calls << :toggle_capture
+  end
+
+  def intercept_toggle : Nil
+    @calls << :intercept_toggle
+  end
+
+  def intercept_forward : Nil
+    @calls << :intercept_forward
+  end
+
+  def intercept_drop : Nil
+    @calls << :intercept_drop
+  end
+
+  def intercept_forward_all : Nil
+    @calls << :intercept_forward_all
+  end
+
+  def selected_intercept_id : Int64?
+    @selected
+  end
+
+  def export_ca : Nil
+    @calls << :export_ca
+  end
+end
+
+describe Gori::Verb do
+  describe "P1: one definition feeds both keymap and palette" do
+    it "resolves the same verb id via a chord AND a palette search" do
+      reg = Gori::Verbs.registry
+      keymap = Keymap.build(reg)
+
+      # keybinding path: ctrl-p (Global) -> app.palette
+      via_key = keymap.lookup(Chord.new("p", ctrl: true), Scope::Body)
+      via_key.should eq("app.palette")
+
+      # palette path: fuzzy "palette" -> app.palette, same id
+      via_palette = reg.search("palette", FakeContext.new).map(&.id)
+      via_palette.should contain("app.palette")
+    end
+  end
+
+  describe Keymap do
+    it "prefers a scope-specific binding then falls back to Global" do
+      reg = Gori::Verbs.registry
+      keymap = Keymap.build(reg)
+
+      # escape in PaletteOpen -> palette.close (scope-specific)
+      keymap.lookup(Chord.new("escape"), Scope::PaletteOpen).should eq("palette.close")
+      # escape in HistoryDetail -> detail.close (different verb, same chord)
+      keymap.lookup(Chord.new("escape"), Scope::HistoryDetail).should eq("detail.close")
+      # "q" is Global (back to projects) -> resolves from any scope
+      keymap.lookup(Chord.new("q"), Scope::Body).should eq("app.back")
+      # an unbound chord
+      keymap.lookup(Chord.new("z"), Scope::Body).should be_nil
+      # scope-specific: the top menu navigates horizontally, the body vertically
+      keymap.lookup(Chord.new("right"), Scope::Sidebar).should eq("sidebar.next")
+      keymap.lookup(Chord.new("down"), Scope::Sidebar).should eq("sidebar.enter")
+      keymap.lookup(Chord.new("down"), Scope::Body).should eq("body.down")
+    end
+
+    it "supports multiple chords per verb" do
+      reg = Gori::Verbs.registry
+      keymap = Keymap.build(reg)
+      keymap.lookup(Chord.new("j"), Scope::Body).should eq("body.down")
+      keymap.lookup(Chord.new("down"), Scope::Body).should eq("body.down")
+    end
+  end
+
+  describe Registry do
+    it "gates verbs by availability (P4) and hides cursor verbs from the palette" do
+      reg = Gori::Verbs.registry
+      ctx = FakeContext.new
+
+      # no selection -> open-detail unavailable, copy unavailable
+      ids = reg.search("", ctx).map(&.id)
+      ids.should_not contain("body.open")
+      ids.should_not contain("history.copy")
+      ids.should_not contain("body.down") # hidden
+
+      ctx.selected = 5_i64
+      ids2 = reg.search("", ctx).map(&.id)
+      ids2.should contain("body.open")
+      ids2.should contain("history.copy")
+    end
+
+    it "fuzzy-ranks results and rejects non-subsequence queries" do
+      reg = Gori::Verbs.registry
+      ctx = FakeContext.new
+      reg.search("quit", ctx).first.id.should eq("app.quit")
+      reg.search("zzxq-nope", ctx).should be_empty
+    end
+
+    it "rejects duplicate ids" do
+      reg = Registry.new
+      reg.register(Definition.new("dup", "A", "", Scope::Global) { |_| nil })
+      expect_raises(Gori::Error, /duplicate/) do
+        reg.register(Definition.new("dup", "B", "", Scope::Global) { |_| nil })
+      end
+    end
+  end
+
+  describe "handler execution" do
+    it "runs through Definition#call and returns the handler's status message" do
+      ctx = FakeContext.new
+      verb = Definition.new("t.msg", "T", "", Scope::Global) { |_c| "did it" }
+      verb.call(ctx).should eq("did it")
+
+      reg = Gori::Verbs.registry
+      reg["app.quit"].call(ctx)
+      ctx.calls.should contain(:quit)
+    end
+  end
+end

@@ -1,0 +1,28 @@
+name: gori
+version: 0.1.0
+
+authors:
+  - hahwul <hahwul@gmail.com>
+
+targets:
+  gori:
+    main: src/main.cr
+
+crystal: '>= 1.20.2'
+
+license: Apache-2.0
+
+dependencies:
+  termisu:
+    github: omarluq/termisu
+    version: ~> 0.4.5
+  db:
+    github: crystal-lang/crystal-db
+    version: ~> 0.14
+  sqlite3:
+    github: crystal-lang/crystal-sqlite3
+    version: ~> 0.23
+
+development_dependencies:
+  ameba:
+    github: crystal-ameba/ameba
