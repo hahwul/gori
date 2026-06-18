@@ -31,7 +31,7 @@ describe Gori::Tui::InterceptView do
       view.reload(ic)
       backend = MemoryBackend.new(100, 12)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
-      backend.contains?("INTERCEPT QUEUE (1)").should be_true
+      backend.contains?("QUEUE (1)").should be_true # framed queue pane title
       backend.contains?("REQ").should be_true
       backend.contains?("acme.test/login").should be_true
     end

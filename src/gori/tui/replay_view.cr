@@ -1,6 +1,7 @@
 require "uri"
 require "./screen"
 require "./theme"
+require "./frame"
 require "./text_area"
 require "../store"
 require "../replay/engine"
@@ -62,12 +63,26 @@ module Gori::Tui
       {"http", "", 0}
     end
 
-    def focus_next : Nil
-      @focus = case @focus
-               when :request  then :response
-               when :response then :target
-               else                :request
-               end
+    # --- focus ring (driven by the Runner's Tab/Shift-Tab) ---
+    # Pane order top-to-bottom: target ▸ request ▸ response. focus_first/last are
+    # the ends of the ring; pane_advance returns false when it would step off an
+    # end (the Runner then wraps focus back to the tab bar).
+    PANE_ORDER = [:target, :request, :response]
+
+    def focus_first : Nil
+      @focus = :target
+    end
+
+    def focus_last : Nil
+      @focus = :response
+    end
+
+    def pane_advance(dir : Int32) : Bool
+      i = PANE_ORDER.index(@focus) || 0
+      ni = i + dir
+      return false if ni < 0 || ni >= PANE_ORDER.size
+      @focus = PANE_ORDER[ni]
+      true
     end
 
     def apply(result : Replay::Result) : Nil
@@ -130,54 +145,55 @@ module Gori::Tui
         return
       end
 
-      render_target(screen, rect, focused && @focus == :target)
-      hint = "tab focus · ^R send · esc back"
-      screen.text({rect.right - hint.size - 1, rect.x}.max, rect.y, hint, Theme::MUTED)
-      screen.hline(rect.x, rect.y + 1, rect.w)
+      # target pane: a 3-row card on top; request | response cards fill the rest.
+      target_h = {rect.h, 3}.min
+      render_target(screen, Rect.new(rect.x, rect.y, rect.w, target_h), focused && @focus == :target)
 
-      content = Rect.new(rect.x, rect.y + 2, rect.w, {rect.h - 2, 0}.max)
+      content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
       return if content.h <= 0
-      mid = content.x + content.w // 2
-      left = Rect.new(content.x, content.y, {mid - content.x, 0}.max, content.h)
-      right = Rect.new(mid + 1, content.y, {content.right - mid - 1, 0}.max, content.h)
-      screen.vline(mid, content.y, content.h)
-
+      half = {(content.w - 1) // 2, 1}.max
+      left = Rect.new(content.x, content.y, half, content.h)
+      right = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
       render_request(screen, left, focused && @focus == :request)
       render_response(screen, right, focused && @focus == :response)
     end
 
+    private def pane_border(focused : Bool) : Color
+      focused ? Theme::FOCUS_GOLD : Theme::BORDER
+    end
+
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
-      prefix = "target › "
-      screen.text(rect.x + 1, rect.y, prefix, focused ? Theme::ACCENT : Theme::MUTED)
-      base = rect.x + 1 + prefix.size
-      screen.text(base, rect.y, @target, Theme::TEXT_BRIGHT, width: rect.w - prefix.size - 2)
+      return if rect.h < 2
+      Frame.card(screen, rect, "target", bg: Theme::BG, border: pane_border(focused))
+      row = rect.y + 1
+      screen.text(rect.x + 2, row, "›", focused ? Theme::ACCENT : Theme::MUTED)
+      base = rect.x + 4
+      screen.text(base, row, @target, Theme::TEXT_BRIGHT, width: {rect.w - 6, 1}.max)
       if focused
         cx = base + @tcx
         ch = @tcx < @target.size ? @target[@tcx] : ' '
-        screen.cell(cx, rect.y, ch, Theme::BG, Theme::ACCENT)
+        screen.cell(cx, row, ch, Theme::BG, Theme::ACCENT)
       end
     end
 
     private def render_request(screen : Screen, rect : Rect, focused : Bool) : Nil
-      return if rect.empty?
+      return if rect.w < 2 || rect.h < 2
       label = @http2 ? "REQUEST (h2)" : "REQUEST"
-      screen.text(rect.x + 1, rect.y, label, focused ? Theme::TEXT_BRIGHT : Theme::MUTED,
-        attr: focused ? Attribute::Bold : Attribute::None)
-      @editor.render(screen, Rect.new(rect.x + 1, rect.y + 1, {rect.w - 1, 0}.max, {rect.h - 1, 0}.max), cursor: focused)
+      Frame.card(screen, rect, label, bg: Theme::BG, border: pane_border(focused))
+      @editor.render(screen, rect.inset(1, 1), cursor: focused)
     end
 
     private def render_response(screen : Screen, rect : Rect, focused : Bool) : Nil
-      return if rect.empty?
-      title_fg = focused ? Theme::TEXT_BRIGHT : Theme::MUTED
-      screen.text(rect.x + 1, rect.y, "RESPONSE", title_fg, attr: focused ? Attribute::Bold : Attribute::None)
-      # sub-tab: response | diff
-      tx = rect.x + 11
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "RESPONSE", bg: Theme::BG, border: pane_border(focused))
+      # response | diff toggle rides the top border, right of the title
+      tx = rect.x + 12
       tx = screen.text(tx, rect.y, " response ", @resp_mode == :response ? Theme::TEXT_BRIGHT : Theme::MUTED,
         @resp_mode == :response ? Theme::ACCENT_BG : Theme::BG) + 1
       screen.text(tx, rect.y, " diff ", @resp_mode == :diff ? Theme::TEXT_BRIGHT : Theme::MUTED,
         @resp_mode == :diff ? Theme::ACCENT_BG : Theme::BG)
 
-      body = Rect.new(rect.x + 1, rect.y + 1, {rect.w - 1, 0}.max, {rect.h - 1, 0}.max)
+      body = rect.inset(1, 1)
       @resp_mode == :diff ? render_diff(screen, body) : render_text(screen, body, response_lines)
     end
 

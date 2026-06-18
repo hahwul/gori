@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./frame"
 require "../scope"
 
 module Gori::Tui
@@ -69,12 +70,12 @@ module Gori::Tui
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      screen.fill(box, Theme::PANEL)
-      draw_border(screen, box)
+      Frame.card(screen, box, "SCOPE", border: Theme::BORDER_FOCUS)
 
+      # state meta, right-aligned on the title bar (title-left / meta-right header)
       state = @scope.enabled? ? "on" : "off"
-      screen.text(box.x + 2, box.y, " SCOPE ", Theme::TEXT_BRIGHT, Theme::PANEL, Attribute::Bold)
-      screen.text(box.x + 9, box.y, "lens:#{state} · #{@scope.patterns.size} host(s)", Theme::MUTED, Theme::PANEL)
+      meta = "lens:#{state} · #{@scope.patterns.size} host(s)"
+      screen.text({box.right - meta.size - 2, box.x + 10}.max, box.y, meta, Theme::MUTED, Theme::PANEL)
 
       # input line
       prefix = "add › "
@@ -83,12 +84,12 @@ module Gori::Tui
       screen.text(base, box.y + 1, @input, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
       ch = @icx < @input.size ? @input[@icx] : ' '
       screen.cell(base + @icx, box.y + 1, ch, Theme::BG, Theme::ACCENT)
-      screen.hline(box.x + 1, box.y + 2, w - 2, fg: Theme::BORDER, bg: Theme::PANEL)
+      Frame.tee_divider(screen, box, box.y + 2)
 
       list_top = box.y + 3
-      list_h = box.bottom - 2 - list_top
+      list_h = box.bottom - 1 - list_top
       if @scope.patterns.empty?
-        screen.text(box.x + 2, list_top, "(no patterns — type a host and press ↵)", Theme::MUTED, Theme::PANEL)
+        screen.text(box.x + 3, list_top, "(no patterns — type a host and press ↵)", Theme::MUTED, Theme::PANEL)
       else
         (0...list_h).each do |i|
           break if i >= @scope.patterns.size
@@ -96,19 +97,10 @@ module Gori::Tui
           selected = i == @selected
           bg = selected ? Theme::ACCENT_BG : Theme::PANEL
           screen.fill(Rect.new(box.x + 1, py, w - 2, 1), bg)
-          screen.cell(box.x + 2, py, selected ? '▸' : ' ', Theme::ACCENT, bg)
-          screen.text(box.x + 4, py, @scope.patterns[i], selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg)
+          screen.cell(box.x + 1, py, selected ? '▎' : ' ', Theme::ACCENT, bg)
+          screen.text(box.x + 3, py, @scope.patterns[i], selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: w - 5)
         end
       end
-
-      screen.text(box.x + 2, box.bottom - 1, "↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done", Theme::MUTED, Theme::PANEL)
-    end
-
-    private def draw_border(screen : Screen, box : Rect) : Nil
-      screen.hline(box.x, box.y, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.hline(box.x, box.bottom - 1, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.vline(box.x, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.vline(box.right - 1, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
     end
   end
 end

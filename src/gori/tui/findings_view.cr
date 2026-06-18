@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./frame"
 require "./text_area"
 require "../store"
 
@@ -129,7 +130,10 @@ module Gori::Tui
         y = top + i
         selected = idx == @selected
         bg = selected ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::BG
-        screen.fill(Rect.new(rect.x, y, rect.w, 1), bg) if selected
+        if selected
+          screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
+          screen.cell(rect.x, y, '▎', Theme::ACCENT, bg)
+        end
         screen.text(rect.x + 1, y, severity_badge(f.severity), severity_color(f.severity), bg, Attribute::Bold)
         title_fg = selected ? Theme::TEXT_BRIGHT : Theme::TEXT
         screen.text(rect.x + 11, y, f.title, title_fg, bg, width: rect.w - 24)
@@ -228,17 +232,13 @@ module Gori::Tui
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      screen.fill(box, Theme::PANEL)
-      screen.hline(box.x, box.y, w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.hline(box.x, box.bottom - 1, w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.text(box.x + 2, box.y, " NEW FINDING ", Theme::TEXT_BRIGHT, Theme::PANEL, Attribute::Bold)
+      Frame.card(screen, box, "NEW FINDING", border: Theme::BORDER_FOCUS)
       prefix = "title › "
       screen.text(box.x + 2, box.y + 2, prefix, Theme::ACCENT, Theme::PANEL)
       base = box.x + 2 + prefix.size
       screen.text(base, box.y + 2, @title, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
       ch = @cx < @title.size ? @title[@cx] : ' '
       screen.cell(base + @cx, box.y + 2, ch, Theme::BG, Theme::ACCENT)
-      screen.text(box.x + 2, box.bottom - 1, " ↵ create · esc cancel ", Theme::MUTED, Theme::PANEL)
     end
   end
 end

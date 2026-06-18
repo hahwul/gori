@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./frame"
 require "./text_area"
 require "../interceptor"
 
@@ -86,68 +87,93 @@ module Gori::Tui
       @editor.move(dr, dc) if @editing
     end
 
+    # --- focus ring (driven by the Runner's Tab/Shift-Tab) ---
+    # Two panes: queue (editing off) ▸ detail editor (editing on). Entering the
+    # detail pane starts editing the selected item; pane_advance returns false at
+    # an end so the Runner wraps focus back to the tab bar.
+    def focus_first : Nil
+      @editing = false
+    end
+
+    def focus_last : Nil
+      toggle_edit unless @editing
+    end
+
+    def pane_advance(dir : Int32) : Bool
+      if dir > 0
+        return false if @editing # detail → off the end (to the tab bar)
+        return false unless selected_item
+        toggle_edit # queue → detail (start editing)
+        true
+      else
+        return false unless @editing # queue → off the end (to the tab bar)
+        @editing = false             # detail → queue
+        true
+      end
+    end
+
     # --- rendering -----------------------------------------------------------
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
-      hint = @editing ? "type to edit · f forward · esc stop" : "j/k move · ↵/e edit · f forward · d drop · F all"
-      screen.text(rect.x + 1, rect.y, "INTERCEPT QUEUE (#{@items.size})", Theme::TEXT_BRIGHT, attr: Attribute::Bold)
-      screen.text({rect.right - hint.size - 1, rect.x}.max, rect.y, hint, Theme::MUTED)
-      screen.hline(rect.x, rect.y + 1, rect.w)
-
-      content = Rect.new(rect.x, rect.y + 2, rect.w, {rect.h - 2, 0}.max)
-      return if content.h <= 0
-
       if @items.empty?
-        screen.text(content.x + 1, content.y, "no held messages", Theme::MUTED)
-        screen.text(content.x + 1, content.y + 2, "turn intercept on (i) — held requests/responses appear here", Theme::MUTED)
+        Frame.card(screen, rect, "INTERCEPT", bg: Theme::BG, border: pane_border(focused))
+        inner = rect.inset(1, 1)
+        screen.text(inner.x + 1, inner.y, "no held messages", Theme::MUTED)
+        screen.text(inner.x + 1, inner.y + 2, "turn intercept on (i) — held requests/responses appear here", Theme::MUTED)
         return
       end
 
-      mid = content.x + content.w // 3
-      left = Rect.new(content.x, content.y, {mid - content.x, 0}.max, content.h)
-      right = Rect.new(mid + 1, content.y, {content.right - mid - 1, 0}.max, content.h)
-      screen.vline(mid, content.y, content.h)
+      half = {rect.w // 3, 1}.max
+      left = Rect.new(rect.x, rect.y, half, rect.h)
+      right = Rect.new(rect.x + half + 1, rect.y, {rect.w - half - 1, 0}.max, rect.h)
       render_list(screen, left, focused && !@editing)
       render_detail(screen, right, focused && @editing)
     end
 
+    private def pane_border(focused : Bool) : Color
+      focused ? Theme::FOCUS_GOLD : Theme::BORDER
+    end
+
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
-      ensure_visible(rect.h)
-      (0...rect.h).each do |i|
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "QUEUE (#{@items.size})", bg: Theme::BG, border: pane_border(focused))
+      inner = rect.inset(1, 1)
+      ensure_visible(inner.h)
+      (0...inner.h).each do |i|
         idx = @scroll + i
         break if idx >= @items.size
         it = @items[idx]
-        y = rect.y + i
+        y = inner.y + i
         selected = idx == @selected
         bg = selected ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::BG
-        screen.fill(Rect.new(rect.x, y, rect.w, 1), bg) if selected
+        if selected
+          screen.fill(Rect.new(inner.x, y, inner.w, 1), bg)
+          screen.cell(inner.x, y, '▎', Theme::ACCENT, bg)
+        end
         badge, bcolor = it.kind.request? ? {"REQ", Theme::YELLOW} : {"RES", Theme::ACCENT}
-        screen.text(rect.x + 1, y, badge, bcolor, bg, Attribute::Bold)
+        screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
         label = it.kind.request? ? "#{it.method} #{it.host}#{it.target}" : "#{it.host} #{it.target}"
-        screen.text(rect.x + 5, y, label, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: rect.w - 12)
-        age = "#{(Time.instant - it.held_at).total_seconds.to_i}s"
-        screen.text(rect.right - age.size - 1, y, age, Theme::MUTED, bg)
+        screen.text(inner.x + 5, y, label, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: {inner.w - 6, 1}.max)
       end
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
-      return if rect.empty?
+      return if rect.w < 2 || rect.h < 2
       it = selected_item
+      title = it.nil? ? "DETAIL" : (it.kind.request? ? "REQUEST (held)" : "RESPONSE (held)")
+      Frame.card(screen, rect, title, bg: Theme::BG, border: pane_border(focused))
+      inner = rect.inset(1, 1)
       unless it
-        screen.text(rect.x + 1, rect.y, "—", Theme::MUTED)
+        screen.text(inner.x, inner.y, "—", Theme::MUTED)
         return
       end
-      title = it.kind.request? ? "REQUEST (held)" : "RESPONSE (held)"
-      screen.text(rect.x + 1, rect.y, title, @editing ? Theme::TEXT_BRIGHT : Theme::MUTED,
-        attr: @editing ? Attribute::Bold : Attribute::None)
-      body = Rect.new(rect.x + 1, rect.y + 1, {rect.w - 1, 0}.max, {rect.h - 1, 0}.max)
       if @editing && @loaded_id == it.id
-        @editor.render(screen, body, cursor: focused)
+        @editor.render(screen, inner, cursor: focused)
       else
         String.new(it.raw).split('\n').map(&.rstrip('\r')).each_with_index do |line, i|
-          break if i >= body.h
-          screen.text(body.x, body.y + i, line, Theme::TEXT, width: body.w)
+          break if i >= inner.h
+          screen.text(inner.x, inner.y + i, line, Theme::TEXT, width: inner.w)
         end
       end
     end

@@ -98,7 +98,10 @@ module Gori::Tui
         y = rect.y + i
         selected = ri == @selected
         bg = selected ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::BG
-        screen.fill(Rect.new(rect.x, y, rect.w, 1), bg) if selected
+        if selected
+          screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
+          screen.cell(rect.x, y, '▎', Theme::ACCENT, bg)
+        end
 
         marker = node.leaf? ? " " : (node.expanded ? "▾" : "▸")
         x = rect.x + 1 + depth * 2

@@ -5,6 +5,7 @@ require "../fuzzy"
 require "./geometry"
 require "./screen"
 require "./theme"
+require "./frame"
 
 module Gori::Tui
   # The startup screen: choose a project to open. New + Temp are always shown at
@@ -204,8 +205,8 @@ module Gori::Tui
 
       # Center the header part (title + top rows + search). Box height is capped so
       # the overall menu doesn't grow unbounded and centering stays reasonable.
-      header_visual = 3 + 2 # title/sub + new/temp/search + breathing
-      top = {(h - (header_visual + 8)) // 2, 1}.max   # assume ~8 for box
+      header_visual = 3 + 2                         # title/sub + new/temp/search + breathing
+      top = {(h - (header_visual + 8)) // 2, 1}.max # assume ~8 for box
 
       centered(screen, top, "gori", Theme::TEXT_BRIGHT, w, Attribute::Bold)
       centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme::MUTED, w)
@@ -226,22 +227,27 @@ module Gori::Tui
           search_y = y
           # Search row - the "area" under New/Temp. Typing only works when this
           # row is selected (we have entered the search).
-          screen.fill(Rect.new(cx, y, cw, 1), bg) if selected
-          screen.text(cx + 1, y, "›", selected ? Theme::ACCENT : Theme::MUTED, bg)
-          qx = cx + 3
+          if selected
+            screen.fill(Rect.new(cx, y, cw, 1), bg)
+            screen.cell(cx, y, '▎', Theme::ACCENT, bg)
+          end
+          screen.text(cx + 2, y, "›", selected ? Theme::ACCENT : Theme::MUTED, bg)
+          qx = cx + 4
           if @query.empty?
             screen.text(qx, y, "search projects...", Theme::MUTED, bg)
           else
-            screen.text(qx, y, @query, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: cw - 5)
+            screen.text(qx, y, @query, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: cw - 6)
             if selected
               screen.cell(qx + @query.size, y, '_', Theme::ACCENT, bg)
             end
           end
         else
           # New or Temp
-          screen.fill(Rect.new(cx, y, cw, 1), bg) if selected
-          screen.cell(cx + 1, y, selected ? '▸' : ' ', Theme::ACCENT, bg)
-          screen.text(cx + 3, y, label, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg)
+          if selected
+            screen.fill(Rect.new(cx, y, cw, 1), bg)
+            screen.cell(cx, y, '▎', Theme::ACCENT, bg)
+          end
+          screen.text(cx + 2, y, label, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg)
           screen.text(cx + cw - meta.size - 2, y, meta, Theme::MUTED, bg) unless meta.empty?
         end
       end
@@ -252,20 +258,11 @@ module Gori::Tui
         available = h - box_y - 3 # room for bottom hint
         box_h = [available, 8].min.clamp(4, available)
         box = Rect.new(cx, box_y, cw, box_h)
-        screen.fill(box, Theme::PANEL)
-        draw_border(screen, box)
+        title = @query.empty? ? "Projects (#{fp.size})" : "Matches (#{fp.size})"
+        Frame.card(screen, box, title)
 
-        # box title
-        title = if @query.empty?
-          "Projects (#{fp.size})"
-        else
-          "Matches (#{fp.size})"
-        end
-        screen.text(box.x + 2, box.y, title, Theme::TEXT_BRIGHT, Theme::PANEL, Attribute::Bold)
-        screen.hline(box.x + 1, box.y + 1, cw - 2, fg: Theme::BORDER, bg: Theme::PANEL)
-
-        list_top = box.y + 2
-        list_h = box.h - 3
+        list_top = box.y + 1
+        list_h = box.h - 2
         ensure_results_visible(list_h)
 
         if fp.empty?
@@ -280,8 +277,8 @@ module Gori::Tui
             is_selected = (ri + 3 == @selected)
             bg = is_selected ? Theme::ACCENT_BG : Theme::PANEL
             screen.fill(Rect.new(box.x + 1, py, cw - 2, 1), bg) if is_selected
-            screen.cell(box.x + 2, py, is_selected ? '▸' : ' ', Theme::ACCENT, bg)
-            screen.text(box.x + 4, py, proj.name, is_selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: cw - 10)
+            screen.cell(box.x + 1, py, is_selected ? '▎' : ' ', Theme::ACCENT, bg)
+            screen.text(box.x + 3, py, proj.name, is_selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: cw - 8)
             meta = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
             screen.text(box.right - meta.size - 2, py, meta, Theme::MUTED, bg) unless meta.empty?
           end
@@ -307,18 +304,11 @@ module Gori::Tui
       screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme::BG, attr: attr)
     end
 
-    private def draw_border(screen : Screen, box : Rect) : Nil
-      screen.hline(box.x, box.y, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.hline(box.x, box.bottom - 1, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.vline(box.x, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.vline(box.right - 1, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
-    end
-
     private def list_rows : Array({String, String})
       list = [
         {"+ New project", ""},
         {"~ Temp project", "ephemeral · not saved"},
-        {"🔍 Search", @query.empty? ? "type to filter" : @query}
+        {"🔍 Search", @query.empty? ? "type to filter" : @query},
       ]
       filtered_projects.each do |project|
         meta = project.last_modified.try { |t| relative_time(Time.utc - t) } || "new"

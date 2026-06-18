@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./frame"
 require "../verb"
 
 module Gori::Tui
@@ -59,15 +60,13 @@ module Gori::Tui
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-
-      screen.fill(box, Theme::PANEL)
-      draw_border(screen, box)
+      Frame.card(screen, box, "COMMANDS", border: Theme::BORDER_FOCUS)
 
       # query line
-      screen.text(box.x + 2, box.y + 1, "›", Theme::ACCENT)
+      screen.text(box.x + 2, box.y + 1, "›", Theme::ACCENT, Theme::PANEL)
       screen.text(box.x + 4, box.y + 1, @query, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - 6)
       screen.cell(box.x + 4 + @query.size, box.y + 1, '_', Theme::ACCENT, Theme::PANEL)
-      screen.hline(box.x + 1, box.y + 2, w - 2, fg: Theme::BORDER, bg: Theme::PANEL)
+      Frame.tee_divider(screen, box, box.y + 2)
 
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top
@@ -78,19 +77,13 @@ module Gori::Tui
         active = i == @selected
         bg = active ? Theme::ACCENT_BG : Theme::PANEL
         screen.fill(Rect.new(box.x + 1, ry, w - 2, 1), bg)
-        screen.text(box.x + 2, ry, verb.title, active ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: w - 18)
+        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme::ACCENT, bg)
+        screen.text(box.x + 3, ry, verb.title, active ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: w - 19)
         if chord = verb.chords.first?
           hint = chord.label
           screen.text(box.right - hint.size - 2, ry, hint, Theme::MUTED, bg)
         end
       end
-    end
-
-    private def draw_border(screen : Screen, box : Rect) : Nil
-      screen.hline(box.x, box.y, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.hline(box.x, box.bottom - 1, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.vline(box.x, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.vline(box.right - 1, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
     end
   end
 end

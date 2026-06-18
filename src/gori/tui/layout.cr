@@ -5,16 +5,18 @@ module Gori::Tui
   #
   #   (empty margin top)
   #   ┌────────────────────────────────┐  (inset by padding)
-  #   │  topbar / menu                 │
-  #   │  body                          │
+  #   │  topbar                        │  row 0
+  #   │  menu (tab segments)           │  row 1
+  #   │  ────────────────────────────  │  row 2: header hairline rule
+  #   │  body                          │  row 3+
   #   │                                │
-  #   ├────────────────────────────────┤
-  #   │  status                        │
+  #   │  status                        │  bottom row
   #   (empty margin bottom)
   struct Layout
     getter topbar : Rect # row 0: logo + project + right-aligned indicators (inset)
     getter menu : Rect   # row 1: horizontal tab menu (inset)
-    getter body : Rect   # inset content area
+    getter rule : Rect   # row 2: header hairline separating chrome from body
+    getter body : Rect   # inset content area (row 3+)
     getter status : Rect # bottom row: contextual key hints (inset)
 
     # Horizontal and vertical padding (Grok Build style) to avoid content
@@ -22,7 +24,7 @@ module Gori::Tui
     H_PADDING = 2
     V_PADDING = 1
 
-    def initialize(@topbar, @menu, @body, @status)
+    def initialize(@topbar, @menu, @rule, @body, @status)
     end
 
     def self.compute(width : Int32, height : Int32) : Layout
@@ -35,9 +37,10 @@ module Gori::Tui
 
       topbar = Rect.new(x, y0 + 0, inner_w, 1)
       menu = Rect.new(x, y0 + 1, inner_w, 1)
+      rule = Rect.new(x, y0 + 2, inner_w, 1)
       status = Rect.new(x, y0 + inner_h - 1, inner_w, 1)
-      body = Rect.new(x, y0 + 2, inner_w, {inner_h - 3, 0}.max)
-      new(topbar, menu, body, status)
+      body = Rect.new(x, y0 + 3, inner_w, {inner_h - 4, 0}.max)
+      new(topbar, menu, rule, body, status)
     end
 
     # The terminal must be at least this big to render meaningfully

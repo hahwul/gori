@@ -15,7 +15,7 @@ describe Gori::Tui::Rect do
 end
 
 describe Gori::Tui::Layout do
-  it "splits the screen into topbar / menu / body (inset with padding) / status" do
+  it "splits the screen into topbar / menu / rule / body (inset with padding) / status" do
     l = Layout.compute(100, 30)
     hpad = Layout::H_PADDING
     vpad = Layout::V_PADDING
@@ -23,8 +23,9 @@ describe Gori::Tui::Layout do
     ih = 30 - 2 * vpad
     l.topbar.should eq(Rect.new(hpad, vpad + 0, iw, 1))
     l.menu.should eq(Rect.new(hpad, vpad + 1, iw, 1))
+    l.rule.should eq(Rect.new(hpad, vpad + 2, iw, 1)) # header hairline under the tabs
     l.status.should eq(Rect.new(hpad, vpad + ih - 1, iw, 1))
-    l.body.should eq(Rect.new(hpad, vpad + 2, iw, ih - 3)) # inset vertically and horizontally
+    l.body.should eq(Rect.new(hpad, vpad + 3, iw, ih - 4)) # inset vertically and horizontally
   end
 
   it "still accepts the original min size in usable? (padding handled inside)" do
@@ -59,7 +60,7 @@ describe Gori::Tui::Screen do
 end
 
 describe Gori::Tui::Chrome do
-  it "renders the horizontal tab menu and highlights the active one" do
+  it "renders the segmented tab menu and brightens the active one when focused" do
     backend = MemoryBackend.new(90, 2)
     screen = Screen.new(backend)
     Chrome.render_menu(screen, Rect.new(0, 1, 90, 1),
@@ -68,17 +69,18 @@ describe Gori::Tui::Chrome do
     backend.contains?("History").should be_true
     backend.contains?("Intercept").should be_true
     backend.contains?("Sitemap").should be_true
-    backend.row(1).should contain("▸")           # active+focused marker
-    backend.row(1).should contain("(3)")         # held-message badge on Intercept
-    backend.fg_at(3, 1).should eq(Theme::ACCENT) # active label (col 3, after "▸ ") uses accent
+    backend.contains?("(3)").should be_true # held-message badge on Intercept
+    # active segment ` History ` starts at col 2 (rect.x+1 fill, +1 pad); bright accent.
+    backend.fg_at(2, 1).should eq(Theme::ACCENT)
+    backend.fg_at(12, 1).should eq(Theme::MUTED) # an inactive label is muted
   end
 
-  it "marks the active tab without a focus band when the menu is unfocused" do
+  it "settles the active segment to bold TEXT (no accent) when the menu is unfocused" do
     backend = MemoryBackend.new(90, 2)
     Chrome.render_menu(Screen.new(backend), Rect.new(0, 1, 90, 1),
       active_tab: :history, focused: false)
-    backend.row(1).should contain("·") # active marker, dimmed
-    backend.row(1).should_not contain("▸")
+    backend.fg_at(2, 1).should eq(Theme::TEXT) # active but body-focused: present, not lit
+    backend.fg_at(2, 1).should_not eq(Theme::ACCENT)
   end
 
   it "renders the top bar with capture indicator" do
@@ -90,5 +92,33 @@ describe Gori::Tui::Chrome do
     backend.row(0).should contain("acme")
     backend.row(0).should contain("rec")
     backend.row(0).should contain("scope:2")
+  end
+end
+
+describe Gori::Tui::Frame do
+  it "frames a rounded card with corners and an embedded title" do
+    backend = MemoryBackend.new(30, 6)
+    screen = Screen.new(backend)
+    Frame.card(screen, Rect.new(0, 0, 20, 5), "SCOPE")
+
+    backend.row(0).should contain("╭")     # rounded top-left
+    backend.row(0).should contain("╮")     # rounded top-right
+    backend.row(0).should contain("SCOPE") # title rides the top edge
+    backend.row(4).should contain("╰")     # rounded bottom-left
+    backend.row(4).should contain("╯")     # rounded bottom-right
+    backend.grid[2][0].should eq('│')      # left edge
+    backend.grid[2][19].should eq('│')     # right edge
+  end
+
+  it "draws a tee divider that joins the side borders" do
+    backend = MemoryBackend.new(30, 6)
+    screen = Screen.new(backend)
+    box = Rect.new(0, 0, 20, 5)
+    Frame.card(screen, box)
+    Frame.tee_divider(screen, box, 2)
+
+    backend.grid[2][0].should eq('├')
+    backend.grid[2][19].should eq('┤')
+    backend.row(2).should contain("─")
   end
 end

@@ -14,5 +14,6 @@ end
 require "./tui/geometry"
 require "./tui/theme"
 require "./tui/screen"
+require "./tui/frame"
 require "./tui/layout"
 require "./tui/chrome"

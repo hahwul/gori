@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./frame"
 require "../rules"
 
 module Gori::Tui
@@ -92,12 +93,11 @@ module Gori::Tui
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      screen.fill(box, Theme::PANEL)
-      draw_border(screen, box)
+      Frame.card(screen, box, "MATCH & REPLACE", border: Theme::BORDER_FOCUS)
 
       rules = @rules.rules
-      screen.text(box.x + 2, box.y, " MATCH & REPLACE ", Theme::TEXT_BRIGHT, Theme::PANEL, Attribute::Bold)
-      screen.text(box.x + 19, box.y, "#{@rules.enabled_count}/#{rules.size} active", Theme::MUTED, Theme::PANEL)
+      meta = "#{@rules.enabled_count}/#{rules.size} active"
+      screen.text({box.right - meta.size - 2, box.x + 20}.max, box.y, meta, Theme::MUTED, Theme::PANEL)
 
       prefix = "add › "
       screen.text(box.x + 2, box.y + 1, prefix, Theme::ACCENT, Theme::PANEL)
@@ -105,37 +105,32 @@ module Gori::Tui
       screen.text(base, box.y + 1, @input, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
       ch = @icx < @input.size ? @input[@icx] : ' '
       screen.cell(base + @icx, box.y + 1, ch, Theme::BG, Theme::ACCENT)
-      screen.hline(box.x + 1, box.y + 2, w - 2, fg: Theme::BORDER, bg: Theme::PANEL)
+      Frame.tee_divider(screen, box, box.y + 2)
 
       list_top = box.y + 3
-      list_h = box.bottom - 2 - list_top
+      list_h = box.bottom - 1 - list_top
       if rules.empty?
-        screen.text(box.x + 2, list_top, "(none — e.g.  resp: Old => New )", Theme::MUTED, Theme::PANEL)
+        screen.text(box.x + 3, list_top, "(none — e.g.  resp: Old => New )", Theme::MUTED, Theme::PANEL)
       else
         (0...list_h).each do |i|
           break if i >= rules.size
-          rule = rules[i]
-          py = list_top + i
-          selected = i == @selected
-          bg = selected ? Theme::ACCENT_BG : Theme::PANEL
-          screen.fill(Rect.new(box.x + 1, py, w - 2, 1), bg)
-          mark = rule.enabled? ? '✓' : '·'
-          screen.cell(box.x + 2, py, mark, rule.enabled? ? Theme::ACCENT : Theme::MUTED, bg)
-          tag = rule.target.request? ? "REQ" : "RES"
-          screen.text(box.x + 4, py, tag, rule.enabled? ? Theme::TEXT : Theme::MUTED, bg)
-          desc = "#{rule.pattern} → #{rule.replacement}"
-          screen.text(box.x + 8, py, desc, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: w - 10)
+          render_rule_row(screen, box, rules[i], list_top + i, w, i == @selected)
         end
       end
-
-      screen.text(box.x + 2, box.bottom - 1, "↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done", Theme::MUTED, Theme::PANEL)
     end
 
-    private def draw_border(screen : Screen, box : Rect) : Nil
-      screen.hline(box.x, box.y, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.hline(box.x, box.bottom - 1, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.vline(box.x, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
-      screen.vline(box.right - 1, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
+    # One row in the rule list: selection bar, enabled `✓`/`·`, REQ/RES tag, rule.
+    private def render_rule_row(screen : Screen, box : Rect, rule : Store::MatchRule,
+                                py : Int32, w : Int32, selected : Bool) : Nil
+      bg = selected ? Theme::ACCENT_BG : Theme::PANEL
+      screen.fill(Rect.new(box.x + 1, py, w - 2, 1), bg)
+      screen.cell(box.x + 1, py, selected ? '▎' : ' ', Theme::ACCENT, bg)
+      mark = rule.enabled? ? '✓' : '·'
+      screen.cell(box.x + 3, py, mark, rule.enabled? ? Theme::ACCENT : Theme::MUTED, bg)
+      tag = rule.target.request? ? "REQ" : "RES"
+      screen.text(box.x + 5, py, tag, rule.enabled? ? Theme::TEXT : Theme::MUTED, bg)
+      desc = "#{rule.pattern} → #{rule.replacement}"
+      screen.text(box.x + 9, py, desc, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: w - 11)
     end
   end
 end

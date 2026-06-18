@@ -55,13 +55,15 @@ module Gori
         "intercept.forward-all", "Forward all held", "Forward every held message",
         Verb::Scope::Intercept, available: intercept_selected) { |ctx| ctx.intercept_forward_all; nil }
 
+      # Tab/Shift-Tab are the focus ring (handled directly in the Runner); these
+      # bracket chords remain a from-anywhere shortcut to cycle tabs.
       r.register Verb::Definition.new(
         "nav.next-tab", "Next tab", "Focus the next tab", Verb::Scope::Global,
-        [Verb::Chord.new("tab"), Verb::Chord.new("]")]) { |ctx| ctx.cycle_tab(1); nil }
+        [Verb::Chord.new("]")]) { |ctx| ctx.cycle_tab(1); nil }
 
       r.register Verb::Definition.new(
         "nav.prev-tab", "Previous tab", "Focus the previous tab", Verb::Scope::Global,
-        [Verb::Chord.new("tab", shift: true), Verb::Chord.new("[")]) { |ctx| ctx.cycle_tab(-1); nil }
+        [Verb::Chord.new("[")]) { |ctx| ctx.cycle_tab(-1); nil }
 
       # Direct tab focus (mirrors the sidebar).
       {

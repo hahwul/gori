@@ -223,7 +223,10 @@ module Gori::Tui
         bg = selected ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::BG
         fg = selected ? Theme::TEXT_BRIGHT : Theme::TEXT
 
-        screen.fill(Rect.new(rect.x, y, rect.w, 1), bg) if selected
+        if selected
+          screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
+          screen.cell(rect.x, y, '▎', Theme::ACCENT, bg)
+        end
         screen.text(time_x, y, fmt_time(row.created_at), Theme::MUTED, bg)
         screen.text(method_x, y, row.method, Theme.method_color(row.method), bg)
         screen.text(proto_x, y, row.scheme.upcase, Theme::MUTED, bg)

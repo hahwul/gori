@@ -108,11 +108,23 @@ module Gori::Tui
       return handle_scope_key(ev) if @overlay == :scope
       return handle_rules_key(ev) if @overlay == :rules
       return handle_finding_new_key(ev) if @overlay == :finding_new
+      # Text-entry modes own Tab (complete) + Esc within themselves — let them run
+      # before the global focus ring claims Tab.
+      return handle_query_key(ev) if @active_tab == :history && @overlay == :none && @focus == :body && @history.querying?
+      return handle_findings_notes_key(ev) if @active_tab == :findings && @overlay == :none && @focus == :body && @findings.editing_notes?
+
+      # Unified focus ring: Tab / Shift-Tab move focus across the tab bar and the
+      # current tab's panes (tab-bar ▸ pane1 ▸ pane2 ▸ tab-bar). Claimed here so it
+      # wins over the per-tab body editors below (Replay used to hijack Tab).
+      # termisu decodes Shift-Tab as the distinct BackTab key (not Tab+shift).
+      if @overlay == :none && (ev.key.tab? || ev.key.back_tab?)
+        focus_advance(ev.key.back_tab? || ev.shift? ? -1 : 1)
+        return
+      end
+
       return handle_replay_key(ev) if @active_tab == :replay && @overlay == :none && @focus == :body
       return handle_notes_key(ev) if @active_tab == :notes && @overlay == :none && @focus == :body
       return handle_intercept_key(ev) if @active_tab == :intercept && @overlay == :none && @focus == :body
-      return handle_query_key(ev) if @active_tab == :history && @overlay == :none && @focus == :body && @history.querying?
-      return handle_findings_notes_key(ev) if @active_tab == :findings && @overlay == :none && @focus == :body && @findings.editing_notes?
 
       chord = Keybind.from_event(ev)
       return unless chord
@@ -323,10 +335,6 @@ module Gori::Tui
         replay_send
       elsif key.escape?
         focus_pane(:menu)
-      elsif key.tab?
-        if v = current_replay_view
-          v.focus_next
-        end
       else
         view = current_replay_view
         return if view.nil?
@@ -459,6 +467,7 @@ module Gori::Tui
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
         findings_count: @session.store.count_findings, intercept_count: @session.interceptor.pending_count,
         replay_count: @replays.size)
+      Chrome.render_rule(screen, layout.rule)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, hints: @toast || key_hints,
         capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?)
@@ -502,65 +511,84 @@ module Gori::Tui
       when :scope       then "type host · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
       when :rules       then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
       when :finding_new then "type title · ↵ create · esc cancel"
-      when :detail      then "tab switch pane · ↑/↓ scroll · esc back"
+      when :detail      then "↹ switch pane · ↑/↓ scroll · esc back"
       else
-        return "←/→ tab · ↵/↓ open · 1-7 jump · Ctrl-P cmds · q projects · Q quit" if @focus == :menu
+        # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
+        return "←/→ switch tab · ↹/↵ enter · 1-7 jump · ^P cmds · q projects · Q quit" if @focus == :menu
         body_hints
       end
     end
 
+    # Body hints end with the focus-ring reminder: ↹ moves between panes, esc pops
+    # back to the tab bar.
     private def body_hints : String
       case @active_tab
       when :history
         @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
-                           : "↑/↓ move · ↵ open · ^R replay (new tab) · F finding · y copy · / filter · i intercept · esc menu"
+                           : "↑/↓ move · ↵ open · ^R replay · F finding · y copy · / filter · i intercept · esc tabs"
       when :intercept
-        @intercept.editing? ? "type to edit · f forward · esc stop" \
-                            : "j/k move · ↵/e edit · f forward · d drop · F all · esc menu"
-      when :replay   then "tab field · type to edit · ^R send · ^1-9 switch · esc menu"
-      when :notes    then "type to edit · esc menu"
-      when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc menu"
+        @intercept.editing? ? "type to edit · f forward · ⇧↹ queue · esc tabs" \
+                            : "↑/↓ move · ↵/e edit · f forward · d drop · F all · ↹ detail · esc tabs"
+      when :replay   then "↹/⇧↹ pane · type to edit · ^R send · ^1-9 session · esc tabs"
+      when :notes    then "type to edit · ↹/esc tabs"
+      when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
         @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
-                               : "↑/↓ move · ↵ open · n new · d delete · ← menu"
-      else "Ctrl-P cmds · q projects · Q quit"
+                               : "↑/↓ move · ↵ open · n new · d delete · esc tabs"
+      else "↹/esc tabs · ^P cmds · q projects · Q quit"
       end
     end
 
     private def render_body(screen : Screen, rect : Rect) : Nil
+      body_focused = @focus == :body
       case @active_tab
       when :history
+        # Single body pane; the detail view is a drill-in within the same frame.
         if @overlay == :detail
-          @history.render_detail(screen, rect)
+          render_framed(screen, rect, body_focused) { |inner| @history.render_detail(screen, inner) }
         else
-          @history.render_list(screen, rect, focused: @focus == :body)
+          render_framed(screen, rect, body_focused) { |inner| @history.render_list(screen, inner, focused: body_focused) }
         end
       when :replay
+        # The Replay sub-tab strip rides above the panes; the view frames its own
+        # target/request/response panes and gold-lights the focused one.
         body_rect = rect
         if @replays.size > 0
-          sub_h = 1
-          sub_rect = Rect.new(rect.x, rect.y, rect.w, sub_h)
-          body_rect = Rect.new(rect.x, rect.y + sub_h, rect.w, rect.h - sub_h) if rect.h > sub_h
+          sub_rect = Rect.new(rect.x, rect.y, rect.w, 1)
+          body_rect = Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1) if rect.h > 1
           render_replay_subtabs(screen, sub_rect)
         end
         if v = current_replay_view
-          v.render(screen, body_rect, focused: @focus == :body)
+          v.render(screen, body_rect, focused: body_focused)
         else
-          screen.text(rect.x + 1, rect.y, "no replays — use ^R from History", Theme::MUTED)
+          render_framed(screen, body_rect, body_focused) do |inner|
+            screen.text(inner.x + 1, inner.y, "no replays — use ^R from History", Theme::MUTED)
+          end
         end
       when :sitemap
-        @sitemap.render(screen, rect, focused: @focus == :body)
+        render_framed(screen, rect, body_focused) { |inner| @sitemap.render(screen, inner, focused: body_focused) }
       when :findings
-        @findings.render(screen, rect, focused: @focus == :body)
+        render_framed(screen, rect, body_focused) { |inner| @findings.render(screen, inner, focused: body_focused) }
       when :notes
-        @notes.render(screen, rect, focused: @focus == :body)
+        render_framed(screen, rect, body_focused) { |inner| @notes.render(screen, inner, focused: body_focused) }
       when :intercept
         @intercept.reload(@session.interceptor) # live refresh (50ms loop)
-        @intercept.render(screen, rect, focused: @focus == :body)
+        @intercept.render(screen, rect, focused: body_focused) # view frames its own panes
       else
-        screen.text(rect.x + 1, rect.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme::MUTED)
-        screen.text(rect.x + 1, rect.y + 2, "History is the home for v1.", Theme::MUTED)
+        render_framed(screen, rect, body_focused) do |inner|
+          screen.text(inner.x + 1, inner.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme::MUTED)
+          screen.text(inner.x + 1, inner.y + 2, "History is the home for v1.", Theme::MUTED)
+        end
       end
+    end
+
+    # Frames a single body pane and yields the inset interior to draw into. The
+    # outline is gold (FOCUS_GOLD) when the body holds focus, hairline at rest.
+    private def render_framed(screen : Screen, rect : Rect, focused : Bool, & : Rect ->) : Nil
+      # Body panes are outline-only on the canvas (bg = BG), distinct from the
+      # lifted PANEL-filled modal overlays. Gold outline when focused.
+      Frame.card(screen, rect, bg: Theme::BG, border: focused ? Theme::FOCUS_GOLD : Theme::BORDER)
+      yield rect.inset(1, 1)
     end
 
     # --- ExecContext (verbs drive the UI through these) ----------------------
@@ -595,6 +623,7 @@ module Gori::Tui
     def focus_pane(pane : Symbol) : Nil
       @focus = pane
       @overlay = :none
+      view_focus_first if pane == :body
     end
 
     def focus_tab(tab : Symbol) : Nil
@@ -602,6 +631,7 @@ module Gori::Tui
       @focus = :body # jumping to a tab drills straight into its content
       @overlay = :none
       on_enter_tab
+      view_focus_first
     end
 
     def cycle_tab(delta : Int32) : Nil
@@ -609,6 +639,47 @@ module Gori::Tui
       @active_tab = Chrome.tab_at((idx + delta) % Chrome::TABS.size)
       @overlay = :none
       on_enter_tab
+      # Switching tabs on the bar (menu focus) just moves the highlight; switching
+      # while in the body drops into the new tab's first pane.
+      view_focus_first if @focus == :body
+    end
+
+    # --- unified focus ring (tab-bar ◂▸ body panes) --------------------------
+
+    # Tab (+1) / Shift-Tab (-1) move focus one step around the ring: from the tab
+    # bar into the body's first/last pane, between panes, then back to the bar.
+    private def focus_advance(dir : Int32) : Nil
+      if @focus == :menu
+        @focus = :body
+        dir > 0 ? view_focus_first : view_focus_last
+      else
+        @focus = :menu unless view_pane_advance(dir)
+      end
+    end
+
+    # Step the focused pane within the active tab; false when there's no further
+    # pane in `dir` (the ring then wraps back to the tab bar). Single-pane tabs
+    # have nowhere to go, so any step exits to the bar.
+    private def view_pane_advance(dir : Int32) : Bool
+      case @active_tab
+      when :replay    then current_replay_view.try(&.pane_advance(dir)) || false
+      when :intercept then @intercept.pane_advance(dir)
+      else                 false
+      end
+    end
+
+    private def view_focus_first : Nil
+      case @active_tab
+      when :replay    then current_replay_view.try(&.focus_first)
+      when :intercept then @intercept.focus_first
+      end
+    end
+
+    private def view_focus_last : Nil
+      case @active_tab
+      when :replay    then current_replay_view.try(&.focus_last)
+      when :intercept then @intercept.focus_last
+      end
     end
 
     # Refresh a tab's data when it becomes active (the Sitemap is derived from

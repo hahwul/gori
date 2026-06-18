@@ -5,7 +5,10 @@ module Gori::Tui
   module Theme
     BG            = Color.from_hex("#0a0a0b") # near-black canvas
     PANEL         = Color.from_hex("#141417") # top bar / status / overlays (lifted)
-    BORDER        = Color.from_hex("#2a2a30") # hairline dividers
+    ELEVATED      = Color.from_hex("#1b1b1f") # one notch above PANEL: header band, active segment
+    BORDER        = Color.from_hex("#2a2a30") # hairline dividers (resting)
+    BORDER_FOCUS  = Color.from_hex("#3a3a42") # brighter hairline for an active modal card
+    FOCUS_GOLD    = Color.from_hex("#c2a05a") # subtle gold: the focused body pane's outline/pane
     ACCENT        = Color.from_hex("#fafafa") # the white highlight (Grok signature)
     ACCENT_BG     = Color.from_hex("#26262c") # selection band (focused pane)
     SELECTION_DIM = Color.from_hex("#19191c") # selection band (unfocused pane)

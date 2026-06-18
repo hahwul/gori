@@ -16,8 +16,8 @@ module Gori
         [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.move_selection(-1); nil }
 
       r.register Verb::Definition.new(
-        "body.leave", "Back to sidebar", "Return focus to the sidebar", Verb::Scope::Body,
-        [Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.focus_pane(:sidebar); nil }
+        "body.leave", "Back to tab bar", "Return focus to the tab bar", Verb::Scope::Body,
+        [Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.focus_pane(:menu); nil }
 
       r.register Verb::Definition.new(
         "body.open", "Open flow detail", "View the selected request/response", Verb::Scope::Body,
