@@ -15,12 +15,22 @@ describe Gori::Tui::Rect do
 end
 
 describe Gori::Tui::Layout do
-  it "splits the screen into topbar / menu / body (full width) / status" do
+  it "splits the screen into topbar / menu / body (inset with padding) / status" do
     l = Layout.compute(100, 30)
-    l.topbar.should eq(Rect.new(0, 0, 100, 1))
-    l.menu.should eq(Rect.new(0, 1, 100, 1))
-    l.status.should eq(Rect.new(0, 29, 100, 1))
-    l.body.should eq(Rect.new(0, 2, 100, 27)) # full width, below the two top rows
+    hpad = Layout::H_PADDING
+    vpad = Layout::V_PADDING
+    iw = 100 - 2 * hpad
+    ih = 30 - 2 * vpad
+    l.topbar.should eq(Rect.new(hpad, vpad + 0, iw, 1))
+    l.menu.should eq(Rect.new(hpad, vpad + 1, iw, 1))
+    l.status.should eq(Rect.new(hpad, vpad + ih - 1, iw, 1))
+    l.body.should eq(Rect.new(hpad, vpad + 2, iw, ih - 3)) # inset vertically and horizontally
+  end
+
+  it "still accepts the original min size in usable? (padding handled inside)" do
+    Layout.usable?(40, 8).should be_true
+    Layout.usable?(39, 8).should be_false
+    Layout.usable?(40, 7).should be_false
   end
 
   it "flags too-small terminals" do
