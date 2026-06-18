@@ -18,8 +18,9 @@ module Gori::Tui
     def initialize(@term : Termisu, @registry : ProjectRegistry)
       @backend = TermisuBackend.new(@term)
       @projects = @registry.list
-      @query = "" # drives live fuzzy filter over @projects (New/Temp unaffected)
+      @query = "" # current search filter; only editable when Search row selected
       @selected = 0
+      @results_scroll = 0
       @mode = :list # :list | :new
       @name = ""
       @resized = false # set on a Resize event → next frame full-repaints
@@ -68,15 +69,16 @@ module Gori::Tui
       # typing perform fuzzy filtering on the projects listed below it.
       # This avoids the previous always-on live filter which was inconvenient.
       if key.up?
-        @selected = (@selected - 1) % entry_count
+        @selected = (@selected - 1).clamp(0, entry_count - 1)
       elsif key.down?
-        @selected = (@selected + 1) % entry_count
+        @selected = (@selected + 1).clamp(0, entry_count - 1)
       elsif key.enter?
         return activate
       elsif key.backspace?
         if @selected == 2 && !@query.empty?
           @query = @query[0, @query.size - 1]
           @selected = 2
+          @results_scroll = 0
         end
       elsif key.escape?
         if @query.empty?
@@ -91,6 +93,7 @@ module Gori::Tui
         # Only when the Search row is selected (we have "entered" it).
         @query += c
         @selected = 2
+        @results_scroll = 0
       elsif ev.ctrl? && key.lower_n?
         # ctrl-n: quick new. If query has text, prefill (or direct-create).
         name = @query.strip
@@ -115,10 +118,10 @@ module Gori::Tui
       when 1
         open_temp
       when 2
-        # "Entered" search row via ↵: jump to first result if any (so you can
-        # quickly confirm the current filter).
+        # Enter while on Search row: immediately pick the top match if any.
+        # (Arrow down into the box if you want to choose a different result.)
         if filtered_projects.any?
-          @selected = 3
+          return filtered_projects[0]
         end
         nil
       else
@@ -190,28 +193,37 @@ module Gori::Tui
     # Layout (search is *not* live-by-default):
     #   New
     #   Temp
+    #   [blank for breathing room]
     #   🔍 Search   <--- arrow here ("enter" the search area) then type for fuzzy
-    #   <gap>
+    #   [gap]
     #   project matches (or all when no query)
     private def render_list(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
       fp = filtered_projects
       rows = list_rows
       has_projects = !fp.empty?
-      visual = rows.size + (has_projects ? 1 : 0) # gap after search before projects
-      header_lines = 2 # title, subtitle (search is a list row, not top bar)
-      top = {(h - (header_lines + visual)) // 2, 1}.max
+
+      # Center the header part (title + top rows + search). Box height is capped so
+      # the overall menu doesn't grow unbounded and centering stays reasonable.
+      header_visual = 3 + 2 # title/sub + new/temp/search + breathing
+      top = {(h - (header_visual + 8)) // 2, 1}.max   # assume ~8 for box
 
       centered(screen, top, "gori", Theme::TEXT_BRIGHT, w, Attribute::Bold)
       centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme::MUTED, w)
 
       ey0 = top + 2
+      search_y = nil
       rows.each_with_index do |(label, meta), i|
-        y = ey0 + i + ((i >= 3 && has_projects) ? 1 : 0)
+        if i > 2
+          break
+        end
+        # Spacing: consecutive New/Temp, +1 blank before Search
+        y = ey0 + i + (i >= 2 ? 1 : 0)
         next if y >= h - 1
         selected = i == @selected
         bg = selected ? Theme::ACCENT_BG : Theme::BG
 
         if i == 2
+          search_y = y
           # Search row - the "area" under New/Temp. Typing only works when this
           # row is selected (we have entered the search).
           screen.fill(Rect.new(cx, y, cw, 1), bg) if selected
@@ -226,11 +238,53 @@ module Gori::Tui
             end
           end
         else
-          # New, Temp, or project rows
+          # New or Temp
           screen.fill(Rect.new(cx, y, cw, 1), bg) if selected
           screen.cell(cx + 1, y, selected ? '▸' : ' ', Theme::ACCENT, bg)
           screen.text(cx + 3, y, label, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg)
           screen.text(cx + cw - meta.size - 2, y, meta, Theme::MUTED, bg) unless meta.empty?
+        end
+      end
+
+      # Now draw the results as a bordered scrollable box below the search row.
+      if search_y
+        box_y = search_y + 2
+        available = h - box_y - 3 # room for bottom hint
+        box_h = [available, 8].min.clamp(4, available)
+        box = Rect.new(cx, box_y, cw, box_h)
+        screen.fill(box, Theme::PANEL)
+        draw_border(screen, box)
+
+        # box title
+        title = if @query.empty?
+          "Projects (#{fp.size})"
+        else
+          "Matches (#{fp.size})"
+        end
+        screen.text(box.x + 2, box.y, title, Theme::TEXT_BRIGHT, Theme::PANEL, Attribute::Bold)
+        screen.hline(box.x + 1, box.y + 1, cw - 2, fg: Theme::BORDER, bg: Theme::PANEL)
+
+        list_top = box.y + 2
+        list_h = box.h - 3
+        ensure_results_visible(list_h)
+
+        if fp.empty?
+          msg = @query.empty? ? "no projects yet" : "no matches"
+          screen.text(box.x + 2, list_top, msg, Theme::MUTED, Theme::PANEL)
+        else
+          (0...list_h).each do |vi|
+            ri = @results_scroll + vi
+            break if ri >= fp.size
+            proj = fp[ri]
+            py = list_top + vi
+            is_selected = (ri + 3 == @selected)
+            bg = is_selected ? Theme::ACCENT_BG : Theme::PANEL
+            screen.fill(Rect.new(box.x + 1, py, cw - 2, 1), bg) if is_selected
+            screen.cell(box.x + 2, py, is_selected ? '▸' : ' ', Theme::ACCENT, bg)
+            screen.text(box.x + 4, py, proj.name, is_selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: cw - 10)
+            meta = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
+            screen.text(box.right - meta.size - 2, py, meta, Theme::MUTED, bg) unless meta.empty?
+          end
         end
       end
 
@@ -253,6 +307,13 @@ module Gori::Tui
       screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme::BG, attr: attr)
     end
 
+    private def draw_border(screen : Screen, box : Rect) : Nil
+      screen.hline(box.x, box.y, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
+      screen.hline(box.x, box.bottom - 1, box.w, fg: Theme::BORDER, bg: Theme::PANEL)
+      screen.vline(box.x, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
+      screen.vline(box.right - 1, box.y, box.h, fg: Theme::BORDER, bg: Theme::PANEL)
+    end
+
     private def list_rows : Array({String, String})
       list = [
         {"+ New project", ""},
@@ -264,6 +325,20 @@ module Gori::Tui
         list << {project.name, meta}
       end
       list
+    end
+
+    private def ensure_results_visible(list_h : Int32) : Nil
+      return if @selected < 3
+      pi = @selected - 3
+      total = filtered_projects.size
+      if pi < @results_scroll
+        @results_scroll = pi
+      elsif pi >= @results_scroll + list_h
+        @results_scroll = pi - list_h + 1
+      end
+      @results_scroll = 0 if @results_scroll < 0
+      max_s = [total - list_h, 0].max
+      @results_scroll = max_s if @results_scroll > max_s
     end
 
     private def relative_time(span : Time::Span) : String
