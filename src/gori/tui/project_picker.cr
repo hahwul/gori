@@ -69,7 +69,7 @@ module Gori::Tui
         @selected = (@selected - 1) % entry_count
       elsif key.down?
         @selected = (@selected + 1) % entry_count
-      elsif key.enter? || key.right?
+      elsif key.enter?
         return activate
       elsif key.backspace?
         return if @query.empty?
