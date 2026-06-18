@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./frame"
 require "../store"
 require "../ql"
 require "../scope"
@@ -26,6 +27,7 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @follow = true
+      @filter_dirty = false # a filtered view needs a coalesced reload after draining
       @query = ""
       @qcx = 0
       @querying = false
@@ -49,16 +51,31 @@ module Gori::Tui
     # Load flows (oldest-first so newest sit at the bottom), applying the Scope
     # lens AND the QL query.
     def reload(store : Store) : Nil
+      prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
       combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(@query))
       @rows = store.search(combined, PAGE).reverse!
       @index = {} of Int64 => Int32
       @rows.each_with_index { |r, i| @index[r.id] = i }
-      @selected = @follow ? {@rows.size - 1, 0}.max : @selected.clamp(0, {@rows.size - 1, 0}.max)
+      @filter_dirty = false
+      @selected =
+        if @follow
+          {@rows.size - 1, 0}.max
+        elsif prev_id && (idx = @index[prev_id]?)
+          idx # keep the highlight on the same flow across a reload
+        else
+          @selected.clamp(0, {@rows.size - 1, 0}.max)
+        end
+    end
+
+    # Apply any filtered-view staleness accumulated during a drain cycle in ONE
+    # reload (vs reloading per flow event — a search+reverse of up to PAGE rows).
+    def flush_filter(store : Store) : Nil
+      reload(store) if @filter_dirty
     end
 
     def on_event(event : Store::FlowEvent, store : Store) : Nil
       if filtering?
-        reload(store) # re-apply the filter against the new state
+        @filter_dirty = true # coalesce: the Runner reloads once after draining
         return
       end
       case event.kind
@@ -202,7 +219,7 @@ module Gori::Tui
       screen.text(host_x, hdr_y, "HOST", Theme::MUTED)
       screen.text(path_x, hdr_y, "PATH", Theme::MUTED)
       screen.text(status_x, hdr_y, "STATUS", Theme::MUTED)
-      screen.hline(rect.x, hdr_y + 1, rect.w)
+      Frame.inner_divider(screen, rect, hdr_y + 1)
 
       list_top = hdr_y + 2
       list_h = {rect.bottom - list_top, 0}.max
@@ -270,7 +287,7 @@ module Gori::Tui
               end
       screen.text(rect.x + 1, rect.y, title, Theme::ACCENT, attr: Attribute::Bold)
       screen.text(rect.x + 12, rect.y, "tab: switch · esc: back", Theme::MUTED)
-      screen.hline(rect.x, rect.y + 1, rect.w)
+      Frame.inner_divider(screen, rect, rect.y + 1)
 
       lines = detail_lines
       top = rect.y + 2

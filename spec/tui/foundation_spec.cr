@@ -83,6 +83,14 @@ describe Gori::Tui::Chrome do
     backend.fg_at(2, 1).should_not eq(Theme::ACCENT)
   end
 
+  it "windows the tab strip so the active tab stays visible when the row is too narrow" do
+    backend = MemoryBackend.new(30, 2)
+    Chrome.render_menu(Screen.new(backend), Rect.new(0, 1, 30, 1),
+      active_tab: :agent, focused: true) # last tab — can't all fit in 30 cols
+    backend.contains?("Agent").should be_true # scrolled into view, not dropped
+    backend.row(1).should contain("‹")        # indicator that earlier tabs are hidden
+  end
+
   it "renders the top bar with capture indicator" do
     backend = MemoryBackend.new(80, 1)
     screen = Screen.new(backend)

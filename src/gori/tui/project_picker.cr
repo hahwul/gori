@@ -211,94 +211,84 @@ module Gori::Tui
     #   project matches (or all when no query)
     private def render_list(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
       fp = filtered_projects
-      rows = list_rows
-      has_projects = !fp.empty?
 
-      # Center the header part (title + top rows + search). Box height is capped so
-      # the overall menu doesn't grow unbounded and centering stays reasonable.
-      header_visual = 3 + 2                         # title/sub + new/temp/search + breathing
-      top = {(h - (header_visual + 8)) // 2, 1}.max # assume ~8 for box
+      # One rounded card holds the actions (New / Temp / Search), a tee divider,
+      # then the scrollable project list — the same header + divider + list shape
+      # the overlays use, so the picker matches the rest of the app.
+      actions = 3
+      res_rows = (h - 5 - 2 - actions - 1).clamp(1, 8) # 5: brand header + hints · 2: card borders
+      card_h = actions + 1 + res_rows + 2
+      top = {(h - (3 + card_h)) // 2, 0}.max
 
       centered(screen, top, "gori", Theme::TEXT_BRIGHT, w, Attribute::Bold)
       centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme::MUTED, w)
 
-      ey0 = top + 2
-      search_y = nil
-      rows.each_with_index do |(label, meta), i|
-        if i > 2
-          break
-        end
-        # Spacing: consecutive New/Temp, +1 blank before Search
-        y = ey0 + i + (i >= 2 ? 1 : 0)
-        next if y >= h - 1
-        selected = i == @selected
-        bg = selected ? Theme::ACCENT_BG : Theme::BG
+      box = Rect.new(cx, top + 3, cw, card_h)
+      Frame.card(screen, box)
 
-        if i == 2
-          search_y = y
-          # Search row - the "area" under New/Temp. Typing only works when this
-          # row is selected (we have entered the search).
-          if selected
-            screen.fill(Rect.new(cx, y, cw, 1), bg)
-            screen.cell(cx, y, '▎', Theme::ACCENT, bg)
-          end
-          screen.text(cx + 2, y, "›", selected ? Theme::ACCENT : Theme::MUTED, bg)
-          qx = cx + 4
-          if @query.empty?
-            screen.text(qx, y, "search projects...", Theme::MUTED, bg)
-          else
-            screen.text(qx, y, @query, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: cw - 6)
-            if selected
-              screen.cell(qx + @query.size, y, '_', Theme::ACCENT, bg)
-            end
-          end
-        else
-          # New or Temp
-          if selected
-            screen.fill(Rect.new(cx, y, cw, 1), bg)
-            screen.cell(cx, y, '▎', Theme::ACCENT, bg)
-          end
-          screen.text(cx + 2, y, label, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg)
-          screen.text(cx + cw - meta.size - 2, y, meta, Theme::MUTED, bg) unless meta.empty?
-        end
-      end
+      # action rows — selection indices 0=New, 1=Temp, 2=Search
+      picker_row(screen, box, 0, "+ New project", "")
+      picker_row(screen, box, 1, "~ Temp project", "ephemeral · not saved")
+      render_search_row(screen, box)
 
-      # Now draw the results as a bordered scrollable box below the search row.
-      # Skip it entirely on a short terminal — clamp(4, available) would otherwise
-      # return 4 even when `available` is smaller (clamp with min > max yields min),
-      # drawing a box with no room.
-      box_h = search_y ? {h - (search_y + 2) - 3, 8}.min : 0
-      if search_y && box_h >= 4
-        box_y = search_y + 2
-        box = Rect.new(cx, box_y, cw, box_h)
-        title = @query.empty? ? "Projects (#{fp.size})" : "Matches (#{fp.size})"
-        Frame.card(screen, box, title)
+      # divider with the result count embedded (mirrors how a card title rides the
+      # top border)
+      div_y = box.y + 1 + actions
+      Frame.tee_divider(screen, box, div_y, bg: Theme::PANEL)
+      count = @query.empty? ? "Projects (#{fp.size})" : "Matches (#{fp.size})"
+      screen.text(box.x + 2, div_y, " #{count} ", Theme::MUTED, Theme::PANEL)
+      list_top = div_y + 1
 
-        list_top = box.y + 1
-        list_h = box.h - 2
-        ensure_results_visible(list_h)
-
-        if fp.empty?
-          msg = @query.empty? ? "no projects yet" : "no matches"
-          screen.text(box.x + 2, list_top, msg, Theme::MUTED, Theme::PANEL)
-        else
-          (0...list_h).each do |vi|
-            ri = @results_scroll + vi
-            break if ri >= fp.size
-            proj = fp[ri]
-            py = list_top + vi
-            is_selected = (ri + 3 == @selected)
-            bg = is_selected ? Theme::ACCENT_BG : Theme::PANEL
-            screen.fill(Rect.new(box.x + 1, py, cw - 2, 1), bg) if is_selected
-            screen.cell(box.x + 1, py, is_selected ? '▎' : ' ', Theme::ACCENT, bg)
-            screen.text(box.x + 3, py, proj.name, is_selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: cw - 8)
-            meta = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
-            screen.text(box.right - meta.size - 2, py, meta, Theme::MUTED, bg) unless meta.empty?
-          end
+      ensure_results_visible(res_rows)
+      if fp.empty?
+        msg = @query.empty? ? "no projects yet" : "no matches"
+        screen.text(box.x + 3, list_top, msg, Theme::MUTED, Theme::PANEL)
+      else
+        (0...res_rows).each do |vi|
+          ri = @results_scroll + vi
+          break if ri >= fp.size
+          proj = fp[ri]
+          py = list_top + vi
+          is_selected = (ri + 3 == @selected)
+          bg = is_selected ? Theme::ACCENT_BG : Theme::PANEL
+          screen.fill(Rect.new(box.x + 1, py, cw - 2, 1), bg) if is_selected
+          screen.cell(box.x + 1, py, is_selected ? '▎' : ' ', Theme::ACCENT, bg)
+          screen.text(box.x + 3, py, proj.name, is_selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: cw - 8)
+          meta = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
+          screen.text(box.right - meta.size - 2, py, meta, Theme::MUTED, bg) unless meta.empty?
         end
       end
 
       centered(screen, h - 2, "↑/↓ select   ↵ open   arrow to Search row then type   ctrl-n new   ctrl-t temp   ctrl-d delete   esc clear   ctrl-c quit", Theme::MUTED, w)
+    end
+
+    # One action/result row inside the picker card: selection band + ▎ bar, label
+    # left, meta right. Row `idx` 0/1 are New/Temp (Search is its own renderer).
+    private def picker_row(screen : Screen, box : Rect, idx : Int32, label : String, meta : String) : Nil
+      y = box.y + 1 + idx
+      selected = idx == @selected
+      bg = selected ? Theme::ACCENT_BG : Theme::PANEL
+      screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if selected
+      screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme::ACCENT, bg)
+      screen.text(box.x + 3, y, label, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg)
+      screen.text(box.right - meta.size - 2, y, meta, Theme::MUTED, bg) unless meta.empty?
+    end
+
+    # The search row (index 2): typing filters only when this row is selected.
+    private def render_search_row(screen : Screen, box : Rect) : Nil
+      y = box.y + 1 + 2
+      selected = @selected == 2
+      bg = selected ? Theme::ACCENT_BG : Theme::PANEL
+      screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if selected
+      screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme::ACCENT, bg)
+      screen.text(box.x + 3, y, "›", selected ? Theme::ACCENT : Theme::MUTED, bg)
+      qx = box.x + 5
+      if @query.empty?
+        screen.text(qx, y, "search projects...", Theme::MUTED, bg)
+      else
+        screen.text(qx, y, @query, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: box.w - 7)
+        screen.cell(qx + @query.size, y, '_', Theme::ACCENT, bg) if selected
+      end
     end
 
     private def render_new(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
@@ -317,21 +307,11 @@ module Gori::Tui
       screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme::BG, attr: attr)
     end
 
-    private def list_rows : Array({String, String})
-      list = [
-        {"+ New project", ""},
-        {"~ Temp project", "ephemeral · not saved"},
-        {"🔍 Search", @query.empty? ? "type to filter" : @query},
-      ]
-      filtered_projects.each do |project|
-        meta = project.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
-        list << {project.name, meta}
-      end
-      list
-    end
-
     private def ensure_results_visible(list_h : Int32) : Nil
-      return if @selected < 3
+      if @selected < 3
+        @results_scroll = 0 # focus is on New/Temp/Search → show the list from the top
+        return
+      end
       pi = @selected - 3
       total = filtered_projects.size
       if pi < @results_scroll

@@ -113,7 +113,7 @@ module Gori::Tui
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
       screen.text(rect.x + 1, rect.y, "SEVERITY", Theme::MUTED)
       screen.text(rect.x + 11, rect.y, "TITLE", Theme::MUTED)
-      screen.hline(rect.x, rect.y + 1, rect.w)
+      Frame.inner_divider(screen, rect, rect.y + 1)
       top = rect.y + 2
       list_h = {rect.bottom - top, 0}.max
 
@@ -150,7 +150,7 @@ module Gori::Tui
       if flow = @detail_flow
         screen.text(rect.x + 1, rect.y + 2, "flow: #{flow.method} #{flow.host}#{flow.target} → #{flow.status || "-"}", Theme::MUTED)
       end
-      screen.hline(rect.x, rect.y + 3, rect.w)
+      Frame.inner_divider(screen, rect, rect.y + 3)
       screen.text(rect.x + 1, rect.y + 4, "NOTES", Theme::ACCENT, attr: Attribute::Bold)
       notes_rect = Rect.new(rect.x + 1, rect.y + 5, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 5), 0}.max)
       if @editing_notes

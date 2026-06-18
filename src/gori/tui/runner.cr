@@ -107,6 +107,8 @@ module Gori::Tui
       while event = nonblocking_event
         @history.on_event(event, @session.store)
       end
+      # Coalesce a filtered-view reload to once per drain (on_event only flagged it).
+      @history.flush_filter(@session.store)
     end
 
     private def nonblocking_event : Store::FlowEvent?
@@ -292,8 +294,10 @@ module Gori::Tui
     end
 
     # The Intercept queue. Not editing: navigate + decide. Editing: typing edits
-    # the held bytes (Replay-style); `f` still forwards, `esc` leaves editing.
-    # While editing, `d` is a literal char (must NOT drop) — esc first, then `d`.
+    # the held bytes (Replay-style): type to edit, `^R` forwards the edited bytes,
+    # `esc` leaves editing. While editing, EVERY letter is literal (incl. f/d) —
+    # the queue's f/F/d shortcuts only apply when not editing, exactly like the
+    # Replay editor reserves actions for modifier chords.
     private def handle_intercept_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if ev.ctrl? && key.lower_p?
@@ -303,7 +307,7 @@ module Gori::Tui
       elsif @intercept.editing?
         if key.escape?
           @intercept.stop_edit
-        elsif key.lower_f? && !ev.ctrl? && !ev.alt?
+        elsif ev.ctrl? && key.lower_r?
           intercept_forward
         elsif key.enter?
           @intercept.edit_newline
@@ -362,6 +366,8 @@ module Gori::Tui
         end
       elsif ev.ctrl? && key.lower_r?
         replay_send
+      elsif ev.ctrl? && key.lower_w?
+        close_replay_tab
       elsif key.escape?
         focus_pane(:menu)
       else
@@ -556,9 +562,9 @@ module Gori::Tui
         @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
                            : "↑/↓ move · ↵ open · ^R replay · F finding · y copy · / filter · i intercept · esc tabs"
       when :intercept
-        @intercept.editing? ? "type to edit · f forward · ⇧↹ queue · esc tabs" \
+        @intercept.editing? ? "type to edit · ^R forward · ⇧↹ queue · esc tabs" \
                             : "↑/↓ move · ↵/e edit · f forward · d drop · F all · ↹ detail · esc tabs"
-      when :replay   then "↹/⇧↹ pane · type to edit · ^R send · ^1-9 session · esc tabs"
+      when :replay   then "↹ pane · type to edit · ^R send · ^1-9 switch · ^W close · esc tabs"
       when :notes    then "type to edit · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
@@ -886,6 +892,16 @@ module Gori::Tui
       end
     end
 
+    # Close the current replay sub-tab so they don't accumulate without bound
+    # (each holds an editor + last result). Clamps the active index; when the last
+    # one closes the Replay tab shows its empty hint.
+    def close_replay_tab : Nil
+      return if @current_replay_idx < 0 || @current_replay_idx >= @replays.size
+      @replays.delete_at(@current_replay_idx)
+      @current_replay_idx = @replays.empty? ? -1 : @current_replay_idx.clamp(0, @replays.size - 1)
+      @toast = @replays.empty? ? "closed replay — none open (^R from History)" : "closed replay (#{@replays.size} open)"
+    end
+
     private def current_replay_tab : ReplayTab?
       return nil if @current_replay_idx < 0 || @current_replay_idx >= @replays.size
       @replays[@current_replay_idx]
@@ -916,7 +932,13 @@ module Gori::Tui
                  else
                    Replay::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
                  end
-        results.send({view, result})
+        # Non-blocking hand-off: if the user already left the project the channel
+        # is orphaned (un-drained, never closed), so drop the late result instead
+        # of blocking this fiber forever once its small buffer fills.
+        select
+        when results.send({view, result})
+        else
+        end
       end
     end
 

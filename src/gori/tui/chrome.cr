@@ -49,23 +49,37 @@ module Gori::Tui
                          replay_count : Int32 = 0) : Nil
       return if rect.empty?
       screen.fill(rect, Theme::PANEL)
-      x = rect.x + 1
-      TABS.each do |(sym, label)|
-        badge = menu_badge(sym, findings_count, intercept_count, replay_count)
-        text = "#{label}#{badge}"
-        active = sym == active_tab
-        seg_w = text.size + 2 # one space of padding each side of the segment
-        break if x + seg_w > rect.right + 1
 
-        if active
+      labels = TABS.map { |(sym, label)| "#{label}#{menu_badge(sym, findings_count, intercept_count, replay_count)}" }
+      widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
+      active_idx = TABS.index { |(sym, _)| sym == active_tab } || 0
+
+      # Window the strip so the active segment is ALWAYS visible: on a narrow row
+      # advance the start until segments [start..active] fit, so the menu scrolls
+      # instead of breaking and hiding every tab from the overflow point on.
+      avail = rect.w - 2
+      start = 0
+      while start < active_idx
+        used = (start..active_idx).sum { |i| widths[i] + (i > start ? 1 : 0) }
+        break if used <= avail
+        start += 1
+      end
+
+      x = rect.x + 1
+      screen.cell(rect.x, rect.y, '‹', Theme::MUTED, Theme::PANEL) if start > 0 # earlier tabs hidden
+      TABS.each_with_index do |(sym, _), i|
+        next if i < start
+        seg_w = widths[i]
+        break if x + seg_w > rect.right + 1
+        if sym == active_tab
           # focus brightens the active segment (ACCENT) so the user sees the menu
           # is live; when the body holds focus it stays bold but settles to TEXT.
           bg = focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM
           fg = focused ? Theme::ACCENT : Theme::TEXT
           screen.fill(Rect.new(x, rect.y, seg_w, 1), bg)
-          screen.text(x + 1, rect.y, text, fg, bg, Attribute::Bold)
+          screen.text(x + 1, rect.y, labels[i], fg, bg, Attribute::Bold)
         else
-          screen.text(x + 1, rect.y, text, Theme::MUTED, Theme::PANEL)
+          screen.text(x + 1, rect.y, labels[i], Theme::MUTED, Theme::PANEL)
         end
         x += seg_w + 1 # a column of breathing room between segments
       end

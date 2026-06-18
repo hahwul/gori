@@ -56,5 +56,24 @@ module Gori::Tui
       screen.hline(rect.x + 1, y, rect.w - 2, fg: Theme::BORDER, bg: bg)
       screen.cell(rect.right - 1, y, TEE_R, Theme::BORDER, bg)
     end
+
+    # A tee-connected section divider for content rendered INSIDE a frame, where
+    # `inner` is the framed interior and the frame sits exactly one column outside
+    # it (as produced by the Runner's `rect.inset(1, 1)`). Lands ├ / ┤ on the
+    # frame's side borders so a header/section seam joins the card cleanly instead
+    # of butting `─` straight into `│`. When the view is rendered un-framed (specs
+    # pass the full rect) the tees fall off-grid and are harmlessly clipped.
+    def self.inner_divider(screen : Screen, inner : Rect, y : Int32, bg : Color = Theme::BG) : Nil
+      return if inner.w <= 0
+      screen.cell(inner.x - 1, y, TEE_L, Theme::BORDER, bg) # left frame border
+      screen.hline(inner.x, y, inner.w, fg: Theme::BORDER, bg: bg)
+      screen.cell(inner.right, y, TEE_R, Theme::BORDER, bg) # right frame border
+    end
+
+    # The outline colour for a body pane: subtle gold when focused, hairline grey
+    # at rest. The one place this mapping lives.
+    def self.pane_border(focused : Bool) : Color
+      focused ? Theme::FOCUS_GOLD : Theme::BORDER
+    end
   end
 end

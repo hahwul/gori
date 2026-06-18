@@ -132,7 +132,7 @@ module Gori::Tui
     end
 
     private def pane_border(focused : Bool) : Color
-      focused ? Theme::FOCUS_GOLD : Theme::BORDER
+      Frame.pane_border(focused)
     end
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil

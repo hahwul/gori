@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./frame"
 require "./text_area"
 require "../store"
 
@@ -56,7 +57,7 @@ module Gori::Tui
       screen.text(rect.x + 1, rect.y, "NOTES", Theme::ACCENT, attr: Attribute::Bold)
       hint = focused ? "type to edit · esc back to tabs" : "↵/→ to edit"
       screen.text(rect.x + 8, rect.y, hint, Theme::MUTED)
-      screen.hline(rect.x, rect.y + 1, rect.w)
+      Frame.inner_divider(screen, rect, rect.y + 1)
       area = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
       @area.render(screen, area, cursor: focused)
     end
