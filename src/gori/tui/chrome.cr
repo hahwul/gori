@@ -42,12 +42,13 @@ module Gori::Tui
     # has focus the band brightens and a ▸ marker appears, so the user sees where
     # keys land. Hot counts (intercept held / findings) ride inline as badges.
     def self.render_menu(screen : Screen, rect : Rect, *, active_tab : Symbol, focused : Bool,
-                         findings_count : Int32 = 0, intercept_count : Int32 = 0) : Nil
+                         findings_count : Int32 = 0, intercept_count : Int32 = 0,
+                         replay_count : Int32 = 0) : Nil
       return if rect.empty?
       screen.fill(rect, Theme::PANEL)
       x = rect.x + 1
       TABS.each do |(sym, label)|
-        badge = menu_badge(sym, findings_count, intercept_count)
+        badge = menu_badge(sym, findings_count, intercept_count, replay_count)
         cell = "#{label}#{badge}"
         active = sym == active_tab
         marker = active ? (focused ? '▸' : '·') : ' '
@@ -64,7 +65,9 @@ module Gori::Tui
     end
 
     # Inline badge for the hot counts (held messages, confirmed findings).
-    private def self.menu_badge(sym : Symbol, findings_count : Int32, intercept_count : Int32) : String
+    private def self.menu_badge(sym : Symbol, findings_count : Int32, intercept_count : Int32,
+                                replay_count : Int32 = 0) : String
+      return "(#{replay_count})" if sym == :replay && replay_count > 1
       return "(#{intercept_count})" if sym == :intercept && intercept_count > 0
       return "(#{findings_count})" if sym == :findings && findings_count > 0
       ""

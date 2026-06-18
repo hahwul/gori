@@ -23,6 +23,10 @@ require "../replay/engine"
 require "../replay/diff"
 
 module Gori::Tui
+
+  # One open replay session (a "sub-tab" under the top-level Replay tab).
+  # Each carries its own ReplayView (editor state, last result, scroll, focus etc.).
+  private record ReplayTab, view : ReplayView, flow_id : Int64
   # The shell controller for ONE open project: owns view state, implements the
   # verb ExecContext (so verbs drive the UI), and runs the main loop —
   # poll(50ms) → drain new-flow events → render (diff). `run` returns :quit (exit
@@ -32,7 +36,11 @@ module Gori::Tui
       @backend = TermisuBackend.new(@term)
       @keymap = Verb::Keymap.build(@session.registry)
       @history = HistoryView.new
-      @replay = ReplayView.new
+      # Multiple independent replay sessions (sub-tabs) under the Replay top-level tab.
+      # Ctrl+R from History always appends a fresh one; previous sessions stay alive
+      # so the user can switch back (ctrl+1..9) and see prior edits/results.
+      @replays = [] of ReplayTab
+      @current_replay_idx = -1
       @sitemap = SitemapView.new
       @findings = FindingsView.new
       @notes = NotesView.new
@@ -297,67 +305,79 @@ module Gori::Tui
 
     # The Replay tab drives input directly (the request pane is a live editor;
     # no edit mode). A few keys are actions; the rest type into the request.
+    # When multiple replays are open they live as sub-tabs; ctrl+1..9 switches them.
     private def handle_replay_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if ev.ctrl? && key.lower_p?
         open_palette
       elsif ev.ctrl_c?
         quit!
+      elsif ev.ctrl? && (c = key.to_char) && '1' <= c <= '9'
+        # Switch replay sub-tab (works even while editing fields because of the ctrl check).
+        idx = c.to_i - 1
+        if idx < @replays.size
+          @current_replay_idx = idx
+          @focus = :body
+        end
       elsif ev.ctrl? && key.lower_r?
         replay_send
       elsif key.escape?
         focus_pane(:menu)
       elsif key.tab?
-        @replay.focus_next
+        if v = current_replay_view
+          v.focus_next
+        end
       else
-        case @replay.focus
-        when :request  then edit_replay_request(ev)
-        when :target   then edit_replay_target(ev)
-        when :response then handle_replay_response(ev)
+        view = current_replay_view
+        return if view.nil?
+        case view.focus
+        when :request  then edit_replay_request(ev, view)
+        when :target   then edit_replay_target(ev, view)
+        when :response then handle_replay_response(ev, view)
         end
       end
     end
 
-    private def edit_replay_request(ev : Termisu::Event::Key) : Nil
+    private def edit_replay_request(ev : Termisu::Event::Key, view : ReplayView) : Nil
       key = ev.key
       case
-      when key.enter?     then @replay.edit_newline
-      when key.backspace? then @replay.edit_backspace
-      when key.up?        then @replay.edit_move(-1, 0)
-      when key.down?      then @replay.edit_move(1, 0)
-      when key.left?      then @replay.edit_move(0, -1)
-      when key.right?     then @replay.edit_move(0, 1)
+      when key.enter?     then view.edit_newline
+      when key.backspace? then view.edit_backspace
+      when key.up?        then view.edit_move(-1, 0)
+      when key.down?      then view.edit_move(1, 0)
+      when key.left?      then view.edit_move(0, -1)
+      when key.right?     then view.edit_move(0, 1)
       else
         if (c = key.to_char) && !ev.ctrl? && !ev.alt?
-          @replay.edit_insert(c)
+          view.edit_insert(c)
         end
       end
     end
 
-    private def edit_replay_target(ev : Termisu::Event::Key) : Nil
+    private def edit_replay_target(ev : Termisu::Event::Key, view : ReplayView) : Nil
       key = ev.key
       case
       when key.enter?     then replay_send
-      when key.backspace? then @replay.target_backspace
-      when key.left?      then @replay.target_move(-1)
-      when key.right?     then @replay.target_move(1)
+      when key.backspace? then view.target_backspace
+      when key.left?      then view.target_move(-1)
+      when key.right?     then view.target_move(1)
       else
         if (c = key.to_char) && !ev.ctrl? && !ev.alt?
-          @replay.target_insert(c)
+          view.target_insert(c)
         end
       end
     end
 
     # Response/Diff pane: read-only. ←/→ or d toggles response↔diff, ↑/↓ scroll,
     # Enter re-sends.
-    private def handle_replay_response(ev : Termisu::Event::Key) : Nil
+    private def handle_replay_response(ev : Termisu::Event::Key, view : ReplayView) : Nil
       key = ev.key
       case
       when key.enter?            then replay_send
-      when key.up?               then @replay.scroll(-1)
-      when key.down?             then @replay.scroll(1)
-      when key.left?, key.right? then @replay.toggle_resp_mode
-      when key.lower_d?          then @replay.toggle_resp_mode
+      when key.up?               then view.scroll(-1)
+      when key.down?             then view.scroll(1)
+      when key.left?, key.right? then view.toggle_resp_mode
+      when key.lower_d?          then view.toggle_resp_mode
       end
     end
 
@@ -437,7 +457,8 @@ module Gori::Tui
         capturing: @session.capturing?, listen: "#{@session.proxy.host}:#{@session.proxy.port}",
         identity: "user", scope: scope_label, rules: rules_label, intercept: intercept_label)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
-        findings_count: @session.store.count_findings, intercept_count: @session.interceptor.pending_count)
+        findings_count: @session.store.count_findings, intercept_count: @session.interceptor.pending_count,
+        replay_count: @replays.size)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, hints: @toast || key_hints,
         capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?)
@@ -492,11 +513,11 @@ module Gori::Tui
       case @active_tab
       when :history
         @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
-                           : "↑/↓ move · ↵ open · ^R replay · F finding · y copy · / filter · i intercept · esc menu"
+                           : "↑/↓ move · ↵ open · ^R replay (new tab) · F finding · y copy · / filter · i intercept · esc menu"
       when :intercept
         @intercept.editing? ? "type to edit · f forward · esc stop" \
                             : "j/k move · ↵/e edit · f forward · d drop · F all · esc menu"
-      when :replay   then "tab field · type to edit · ^R send · esc menu"
+      when :replay   then "tab field · type to edit · ^R send · ^1-9 switch · esc menu"
       when :notes    then "type to edit · esc menu"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc menu"
       when :findings
@@ -515,7 +536,18 @@ module Gori::Tui
           @history.render_list(screen, rect, focused: @focus == :body)
         end
       when :replay
-        @replay.render(screen, rect, focused: @focus == :body)
+        body_rect = rect
+        if @replays.size > 0
+          sub_h = 1
+          sub_rect = Rect.new(rect.x, rect.y, rect.w, sub_h)
+          body_rect = Rect.new(rect.x, rect.y + sub_h, rect.w, rect.h - sub_h) if rect.h > sub_h
+          render_replay_subtabs(screen, sub_rect)
+        end
+        if v = current_replay_view
+          v.render(screen, body_rect, focused: @focus == :body)
+        else
+          screen.text(rect.x + 1, rect.y, "no replays — use ^R from History", Theme::MUTED)
+        end
       when :sitemap
         @sitemap.render(screen, rect, focused: @focus == :body)
       when :findings
@@ -587,6 +619,26 @@ module Gori::Tui
       when :findings  then @findings.reload(@session.store)
       when :notes     then @notes.reload(@session.store)
       when :intercept then @intercept.reload(@session.interceptor)
+      end
+    end
+
+    private def render_replay_subtabs(screen : Screen, rect : Rect) : Nil
+      return if rect.empty?
+      screen.fill(rect, Theme::PANEL)
+      x = rect.x + 1
+      @replays.each_with_index do |tab, i|
+        active = i == @current_replay_idx
+        lbl = "#{i+1}:#{tab.flow_id}"
+        if x + lbl.size + 2 > rect.right
+          screen.text(x, rect.y, "…", Theme::MUTED, Theme::PANEL)
+          break
+        end
+        bg = active ? Theme::ACCENT_BG : Theme::PANEL
+        fg = active ? Theme::TEXT_BRIGHT : Theme::TEXT
+        w = lbl.size + 1
+        screen.fill(Rect.new(x, rect.y, w, 1), bg)
+        screen.text(x + 1, rect.y, lbl, fg, bg, attr: active ? Attribute::Bold : Attribute::None)
+        x += w + 1
       end
     end
 
@@ -723,27 +775,40 @@ module Gori::Tui
       id = @history.selected_id
       return unless id
       if detail = @session.store.get_flow(id)
-        @replay.load(detail)
+        view = ReplayView.new
+        view.load(detail)
+        tab = ReplayTab.new(view, id)
+        @replays << tab
+        @current_replay_idx = @replays.size - 1
         @active_tab = :replay
         @focus = :body
-        @toast = "Replay ##{id} — type to edit · Ctrl-R send · Tab pane · Esc back"
+        @toast = "Replay ##{id} — type to edit · ^R send · ^1-9 switch · esc back"
       end
     end
 
+    private def current_replay_tab : ReplayTab?
+      return nil if @current_replay_idx < 0 || @current_replay_idx >= @replays.size
+      @replays[@current_replay_idx]
+    end
+
+    private def current_replay_view : ReplayView?
+      current_replay_tab.try(&.view)
+    end
+
     def replay_send : Nil
-      return unless @replay.loaded?
-      scheme, host, port = @replay.parse_target
+      return unless (tab = current_replay_tab) && (r = tab.view).loaded?
+      scheme, host, port = r.parse_target
       if host.empty?
         @toast = "replay: invalid target"
         return
       end
       verify = !@session.config.insecure_upstream?
-      result = if @replay.http2?
-                 Replay::H2Engine.send(@replay.request_bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
+      result = if r.http2?
+                 Replay::H2Engine.send(r.request_bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
                else
-                 Replay::Engine.send(@replay.request_bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
+                 Replay::Engine.send(r.request_bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
                end
-      @replay.apply(result)
+      r.apply(result)
       @toast = if result.ok?
                   "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms"
                 else
