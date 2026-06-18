@@ -7,6 +7,11 @@ module Gori::Proxy::WS
   OP_PING  = 0x9_u8
   OP_PONG  = 0xA_u8
 
+  # Upper bound on a single frame we will buffer for byte-exact forward + capture.
+  # A larger (or hostile) advertised length aborts the direction rather than
+  # overflowing `len.to_i` (Int32) or allocating unbounded memory.
+  MAX_FRAME = 16_u64 * 1024 * 1024
+
   # A parsed WebSocket frame. `payload` is unmasked (for capture); `raw` is the
   # exact wire bytes (for byte-faithful forwarding, P7).
   struct Frame
@@ -47,6 +52,7 @@ module Gori::Proxy::WS
       len = 0_u64
       ext.each { |byte| len = (len << 8) | byte.to_u64 }
     end
+    return nil if len > MAX_FRAME # oversized / hostile frame — abort this direction
 
     mask = masked ? (read_bytes(io, 4, raw) || return nil) : nil
     payload = len > 0 ? (read_bytes(io, len.to_i, raw) || return nil).dup : Bytes.new(0)

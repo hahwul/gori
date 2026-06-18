@@ -20,6 +20,10 @@ module Gori::Proxy::H2
   # client-streaming / bidi requests therefore surface only once the client ends
   # its half — acceptable for now (the raw frames are always captured live).
   class Assembler
+    # Cap on one stream's accumulated HEADERS(+CONTINUATION) block, so a peer that
+    # never sends END_HEADERS can't grow header_buf without bound.
+    MAX_HEADER_BLOCK = 1 << 20 # 1 MiB
+
     private class Side
       getter header_buf = IO::Memory.new
       getter body = IO::Memory.new
@@ -45,8 +49,10 @@ module Gori::Proxy::H2
     def feed(direction : String, frame : Frame::Header) : Nil
       return if frame.stream_id == 0 # connection-level (SETTINGS/PING/...) — not a stream
       @mutex.synchronize { feed_locked(direction, frame) }
-    rescue Gori::Error
-      # malformed HPACK/framing: skip the decoded projection (raw log stands, P7)
+    rescue Gori::Error | IndexError | OverflowError
+      # malformed/hostile HPACK or framing (bad pad length, overflowing integer,
+      # oversized/truncated block): skip the decoded projection. The raw frame log
+      # is the truth (P7) and the live relay already forwarded the bytes.
     end
 
     private def feed_locked(direction : String, frame : Frame::Header) : Nil
@@ -57,11 +63,11 @@ module Gori::Proxy::H2
 
       case frame.frame_type
       when Frame::Type::Headers
-        side.header_buf.write(header_block(frame))
+        append_header_fragment(side, header_block(frame))
         finish_header_block(side, decoder) if frame.end_headers?
         side.ended = true if frame.end_stream?
       when Frame::Type::Continuation
-        side.header_buf.write(frame.payload)
+        append_header_fragment(side, frame.payload)
         finish_header_block(side, decoder) if frame.end_headers?
       when Frame::Type::Data
         side.body.write(data_block(frame))
@@ -74,7 +80,18 @@ module Gori::Proxy::H2
       end
 
       emit_request(frame.stream_id, stream) if request && side.ended && side.headers
-      emit_response(stream) if !request && side.ended && side.headers
+      if !request && side.ended && side.headers
+        emit_response(stream)
+        # The exchange is complete; a stream id is never reused on a connection
+        # (RFC 7540 §5.1.1), so drop its buffers to bound per-connection memory.
+        @streams.delete(frame.stream_id)
+      end
+    end
+
+    # Append a HEADERS/CONTINUATION fragment, enforcing the per-stream block cap.
+    private def append_header_fragment(side : Side, chunk : Bytes) : Nil
+      raise Gori::Error.new("h2 header block exceeds #{MAX_HEADER_BLOCK} bytes") if side.header_buf.size + chunk.size > MAX_HEADER_BLOCK
+      side.header_buf.write(chunk)
     end
 
     # Decode one completed header block and merge it into the side's header list,
@@ -116,6 +133,7 @@ module Gori::Proxy::H2
       offset = 0
       pad = 0
       if frame.padded?
+        return {0_u32, Bytes.empty} if payload.empty?
         pad = payload[0].to_i
         offset = 1
       end
@@ -135,6 +153,7 @@ module Gori::Proxy::H2
       offset = 0
       pad = 0
       if frame.padded?
+        return Bytes.empty if payload.empty?
         pad = payload[0].to_i
         offset = 1
       end
@@ -147,6 +166,7 @@ module Gori::Proxy::H2
     # Strip optional PADDED prefix/suffix from a DATA payload (RFC 7540 §6.1).
     private def data_block(frame : Frame::Header) : Bytes
       return frame.payload unless frame.padded?
+      return Bytes.empty if frame.payload.empty?
       pad = frame.payload[0].to_i
       finish = frame.payload.size - pad
       return Bytes.empty if finish <= 1

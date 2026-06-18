@@ -100,8 +100,8 @@ module Gori::Tui
         name = @query.strip
         if name.empty?
           start_new
-        else
-          return @registry.create(name)
+        elsif proj = safe_create(name)
+          return proj
         end
       elsif ev.ctrl? && key.lower_t?
         return open_temp
@@ -139,6 +139,14 @@ module Gori::Tui
       @registry.temp(Random::Secure.hex(4))
     end
 
+    # Create a project, swallowing an invalid-name error (e.g. a symbol-only name
+    # that slugifies to empty) so the picker stays up instead of crashing the TUI.
+    private def safe_create(name : String) : Project?
+      @registry.create(name)
+    rescue Gori::Error
+      nil
+    end
+
     private def delete_selected : Nil
       return if @selected < 3
       if project = filtered_projects[@selected - 3]?
@@ -154,7 +162,10 @@ module Gori::Tui
         @mode = :list
       elsif key.enter?
         name = @name.strip
-        return @registry.create(name) unless name.empty?
+        if !name.empty? && (proj = safe_create(name))
+          return proj
+        end
+        # invalid (e.g. symbol-only) name → stay in the new-project input
       elsif key.backspace?
         @name = @name[0, {@name.size - 1, 0}.max]
       elsif (c = key.to_char) && !ev.ctrl? && !ev.alt?
@@ -253,10 +264,12 @@ module Gori::Tui
       end
 
       # Now draw the results as a bordered scrollable box below the search row.
-      if search_y
+      # Skip it entirely on a short terminal — clamp(4, available) would otherwise
+      # return 4 even when `available` is smaller (clamp with min > max yields min),
+      # drawing a box with no room.
+      box_h = search_y ? {h - (search_y + 2) - 3, 8}.min : 0
+      if search_y && box_h >= 4
         box_y = search_y + 2
-        available = h - box_y - 3 # room for bottom hint
-        box_h = [available, 8].min.clamp(4, available)
         box = Rect.new(cx, box_y, cw, box_h)
         title = @query.empty? ? "Projects (#{fp.size})" : "Matches (#{fp.size})"
         Frame.card(screen, box, title)

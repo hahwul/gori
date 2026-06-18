@@ -111,11 +111,12 @@ module Gori::Proxy
       begin
         upstream.write(sent_head)
         req_capture = IO::Memory.new
-        Codec::Body.stream(@io, upstream, req_framing, req_len, req_capture)
+        req_complete = Codec::Body.stream(@io, upstream, req_framing, req_len, req_capture)
         upstream.flush
         req_body = req_framing.none? ? nil : req_capture.to_slice.dup
         flow_id = @sink.on_request(FlowMapper.request(sent_req,
           scheme: scheme, host: host, port: port, created_at: created_at, body: req_body))
+        return false unless req_complete # client cut the request body short — don't reuse the connection
         handle_response(upstream, req, flow_id, started, host, port, scheme)
       ensure
         upstream.close rescue nil
@@ -178,7 +179,7 @@ module Gori::Proxy
       @io.write(sent_resp_head)
       @io.flush
       resp_capture = IO::Memory.new
-      Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture)
+      resp_complete = Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture)
       duration = (Time.instant - started).total_microseconds.to_i64
       resp_body = resp_framing.none? ? nil : resp_capture.to_slice.dup
       @sink.on_response(FlowMapper.response(sent_resp,
@@ -189,6 +190,10 @@ module Gori::Proxy
         return false
       end
 
+      # A truncated body (upstream EOF'd before the promised length) was forwarded
+      # short; close so the client sees end-of-response instead of waiting for the
+      # missing bytes while we read its next keep-alive request.
+      return false unless resp_complete
       keep_alive?(req, resp, resp_framing)
     end
 

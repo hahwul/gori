@@ -6,11 +6,22 @@ module Gori::Proxy::WS
   # (P7) while capturing reassembled text/binary messages to the sink. Control
   # frames (ping/pong/close) are forwarded; close ends the tunnel.
   module Relay
+    # Cap on a reassembled (possibly fragmented) message we buffer for capture.
+    # The raw forward is always byte-exact (P7); only the captured projection is
+    # bounded, so a giant streamed message can't exhaust memory.
+    MAX_MESSAGE = 16 * 1024 * 1024
+
     def self.run(client : IO, upstream : IO, flow_id : Int64, sink : FlowSink) : Nil
       done = Channel(Nil).new(2)
       spawn { pump(client, upstream, "out", flow_id, sink); done.send(nil) }
       spawn { pump(upstream, client, "in", flow_id, sink); done.send(nil) }
-      2.times { done.receive }
+      # When EITHER direction ends (EOF / close / reset), close both sockets so the
+      # other pump's blocked read unblocks (raises → rescued → sends done). Without
+      # this a half-open peer pins the surviving pump fiber + socket forever.
+      done.receive
+      client.close rescue nil
+      upstream.close rescue nil
+      done.receive
     end
 
     # One direction: read frame → forward raw bytes → capture message on FIN.
@@ -24,7 +35,12 @@ module Gori::Proxy::WS
 
         if frame.data?
           message_opcode = frame.opcode if frame.opcode != OP_CONT
-          assembling.write(frame.payload)
+          # Append only up to the cap; raw bytes were already forwarded above.
+          remaining = MAX_MESSAGE - assembling.size
+          if remaining > 0 && !frame.payload.empty?
+            take = {frame.payload.size, remaining}.min
+            assembling.write(frame.payload[0, take])
+          end
           if frame.fin?
             sink.on_ws_message(flow_id, direction, message_opcode.to_i, assembling.to_slice.dup)
             assembling.clear

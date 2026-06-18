@@ -9,6 +9,11 @@ module Gori::Proxy::Tls
     CA_CERT_FILE = "root.crt.pem"
     CA_KEY_FILE  = "root.key.pem"
     DEFAULT_CN   = "gori Root CA"
+    # Bound the per-SNI leaf cache so a client (or a hostile SNI flood) can't grow
+    # it without limit. Eviction is safe: SSL_CTX up-refs the cert/key, and a live
+    # OpenSSL::SSL::Socket holds its Context, so an in-use context stays valid even
+    # after its Leaf leaves the cache (a later request just rebuilds it).
+    MAX_LEAVES = 256
 
     getter ca_cert_path : String
 
@@ -45,7 +50,20 @@ module Gori::Proxy::Tls
     # connection flows through the interceptable path (used while intercept is on).
     def context_for(host : String, advertise_h2 : Bool = true) : OpenSSL::SSL::Context::Server
       @mutex.synchronize do
-        (@cache[{host, advertise_h2}] ||= build_leaf(host, advertise_h2)).context
+        key = {host, advertise_h2}
+        if leaf = @cache[key]?
+          # LRU bump: re-insert so the hot host survives eviction.
+          @cache.delete(key)
+          @cache[key] = leaf
+          leaf.context
+        else
+          leaf = build_leaf(host, advertise_h2)
+          @cache[key] = leaf
+          if @cache.size > MAX_LEAVES && (oldest = @cache.first_key?)
+            @cache.delete(oldest)
+          end
+          leaf.context
+        end
       end
     end
 

@@ -108,7 +108,11 @@ TEXT
       parser = OptionParser.new do |p|
         p.banner = "Usage: gori tui [options]"
         p.on("-lHOST", "--listen=HOST", "Listen address (default 127.0.0.1)") { |v| listen = v }
-        p.on("-pPORT", "--port=PORT", "Listen port (default 8070)") { |v| port = v.to_i }
+        p.on("-pPORT", "--port=PORT", "Listen port (default 8070)") do |v|
+          parsed = v.to_i?
+          abort "gori: invalid --port '#{v}' (expected 0-65535)" unless parsed && 0 <= parsed <= 65535
+          port = parsed
+        end
         p.on("--db=PATH", "SQLite database path") { |v| db_path = v }
         p.on("--ca-dir=PATH", "Directory for the root CA") { |v| ca_dir = v }
         p.on("--headless", "Run without the TUI (capture to STDOUT)") { headless = true }

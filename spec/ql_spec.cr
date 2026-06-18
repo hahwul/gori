@@ -28,7 +28,7 @@ end
 describe Gori::QL do
   it "compiles AND-ed terms with parameterised values" do
     f = Gori::QL.parse("host:acme status:>=500")
-    f.sql.should eq("(lower(host) LIKE ? AND status >= ?)")
+    f.sql.should eq("(lower(host) LIKE ? ESCAPE '\\' AND status >= ?)")
     f.args.should eq(["%acme%", 500])
   end
 
@@ -38,9 +38,23 @@ describe Gori::QL do
     f.args.should eq([400, 500])
   end
 
+  it "honours a comparison operator against a status class" do
+    Gori::QL.parse("status:>=5xx").sql.should eq("(status >= ?)")
+    Gori::QL.parse("status:>=5xx").args.should eq([500])
+    Gori::QL.parse("status:<4xx").args.should eq([400])  # below the class floor
+    Gori::QL.parse("status:>4xx").args.should eq([500])  # strictly above the 4xx class
+    Gori::QL.parse("status:<=4xx").args.should eq([500]) # at or below the class (status < 500)
+  end
+
+  it "escapes LIKE metacharacters so % and _ match literally" do
+    f = Gori::QL.parse("host:ac%e_")
+    f.sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
+    f.args.should eq(["%ac\\%e\\_%"]) # the user's % and _ are backslash-escaped
+  end
+
   it "compiles OR groups and negation" do
     f = Gori::QL.parse("method:get OR -host:cdn")
-    f.sql.should eq("(upper(method) = ?) OR (NOT (lower(host) LIKE ?))")
+    f.sql.should eq("(upper(method) = ?) OR (NOT (lower(host) LIKE ? ESCAPE '\\'))")
     f.args.should eq(["GET", "%cdn%"])
   end
 
@@ -55,8 +69,8 @@ describe Gori::QL do
 
   it "compiles a body: term to a NULL-safe request/response blob scan" do
     f = Gori::QL.parse("body:token")
-    f.sql.should eq("(((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ?) " \
-                    "OR (response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ?)))")
+    f.sql.should eq("(((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') " \
+                    "OR (response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ? ESCAPE '\\')))")
     f.args.should eq(["%token%", "%token%"])
   end
 end

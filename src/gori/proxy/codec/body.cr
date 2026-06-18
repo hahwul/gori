@@ -44,20 +44,21 @@ module Gori::Proxy::Codec
       end
     end
 
-    # Stream the body src->dst, teeing wire bytes to `tee`. Tolerant of
-    # premature EOF (captures what arrived rather than raising) per P7.
-    def self.stream(src : IO, dst : IO, framing : BodyFraming, length : Int64, tee : IO) : Nil
-      case framing
-      in BodyFraming::None
-        # nothing to do
-      in BodyFraming::Length
-        copy_n(src, dst, tee, length)
-      in BodyFraming::CloseDelimited
-        copy_until_eof(src, dst, tee)
-      in BodyFraming::Chunked
-        copy_chunked(src, dst, tee)
-      end
+    # Stream the body src->dst, teeing wire bytes to `tee`. Tolerant of premature
+    # EOF (captures what arrived rather than raising, per P7) but RETURNS whether
+    # the body completed: false means a Content-Length/chunked body was cut short,
+    # so the caller must close the connection (a half-delivered body can't be
+    # followed by a keep-alive request without desyncing the peer).
+    def self.stream(src : IO, dst : IO, framing : BodyFraming, length : Int64, tee : IO) : Bool
+      complete =
+        case framing
+        in BodyFraming::None           then true
+        in BodyFraming::Length         then copy_n(src, dst, tee, length)
+        in BodyFraming::CloseDelimited then (copy_until_eof(src, dst, tee); true) # EOF is the framing
+        in BodyFraming::Chunked        then copy_chunked(src, dst, tee)
+        end
       dst.flush
+      complete
     end
 
     # Reads a message body (by framing) into a single buffer — used by the Replay
@@ -77,7 +78,9 @@ module Gori::Proxy::Codec
       headers.get?("Content-Length").try(&.strip.to_i64?)
     end
 
-    private def self.copy_n(src : IO, dst : IO, tee : IO, n : Int64) : Nil
+    # Copies exactly `n` bytes; returns false if the source EOF'd early (a
+    # truncated Content-Length body), true once all `n` were transferred.
+    private def self.copy_n(src : IO, dst : IO, tee : IO, n : Int64) : Bool
       buf = Bytes.new(BUFSIZE)
       remaining = n
       while remaining > 0
@@ -89,6 +92,7 @@ module Gori::Proxy::Codec
         tee.write(slice)
         remaining -= read
       end
+      remaining == 0
     end
 
     private def self.copy_until_eof(src : IO, dst : IO, tee : IO) : Nil
@@ -100,10 +104,12 @@ module Gori::Proxy::Codec
       end
     end
 
-    private def self.copy_chunked(src : IO, dst : IO, tee : IO) : Nil
+    # Returns true once the terminating 0-length chunk is seen; false if the
+    # source EOF'd mid-stream (a truncated chunked body).
+    private def self.copy_chunked(src : IO, dst : IO, tee : IO) : Bool
       loop do
         size_line = read_crlf_line(src)
-        break if size_line.nil? # EOF mid-stream
+        return false if size_line.nil? # EOF mid-stream — truncated
         emit(dst, tee, size_line)
         size = parse_chunk_size(size_line)
         if size == 0
@@ -114,10 +120,10 @@ module Gori::Proxy::Codec
             emit(dst, tee, trailer)
             break if blank_line?(trailer)
           end
-          break
+          return true # terminating chunk reached
         end
-        copy_n(src, dst, tee, size)
-        if crlf = read_exact(src, 2) # the CRLF terminating the chunk data
+        return false unless copy_n(src, dst, tee, size) # truncated mid-chunk
+        if crlf = read_exact(src, 2)                    # the CRLF terminating the chunk data
           emit(dst, tee, crlf)
         end
       end

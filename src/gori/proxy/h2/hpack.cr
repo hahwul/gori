@@ -280,12 +280,15 @@ module Gori::Proxy::H2
         shift = 0
         loop do
           raise Gori::Error.new("hpack: truncated integer") if pos >= block.size
+          # Bound BEFORE accumulating: at shift > 21 the `<< shift` could overflow
+          # Int32 and yield a negative length/index (→ IndexError downstream). No
+          # real header length needs more than this (we also cap the block at 1MiB).
+          raise Gori::Error.new("hpack: integer too long") if shift > 21
           byte = block[pos]
           pos += 1
           value += (byte & 0x7f).to_i << shift
           shift += 7
           break if byte & 0x80 == 0
-          raise Gori::Error.new("hpack: integer too long") if shift > 28
         end
         {value, pos}
       end

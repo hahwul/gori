@@ -16,10 +16,14 @@ module Gori::Proxy::Codec::Http1
   CRLF_CRLF = "\r\n\r\n".to_slice
 
   # Reads one message head from `io`, returning the exact bytes including the
-  # terminating CRLFCRLF. Returns nil on clean EOF before any byte arrives.
-  # Raises nothing on a truncated head — returns whatever was read so the
-  # caller can still capture it (P7).
-  def self.read_head(io : IO, max_bytes : Int32 = 1024 * 64) : Bytes?
+  # terminating CRLFCRLF. Returns nil on clean EOF before any byte arrives, OR
+  # when the head exceeds `max_bytes` without ever reaching CRLFCRLF. Returning a
+  # size-capped, un-terminated buffer as if it were a complete head would misframe
+  # the body — the rest of the header block (and the real CRLFCRLF) would still be
+  # in the socket and get consumed as the body, desyncing keep-alive — so we treat
+  # an oversized head as an unusable connection (caller drops it). A head cut short
+  # by EOF still returns its bytes (the connection is closing; P7 keeps the octets).
+  def self.read_head(io : IO, max_bytes : Int32 = 1024 * 256) : Bytes?
     buf = IO::Memory.new
     while buf.bytesize < max_bytes
       byte = io.read_byte
@@ -28,6 +32,8 @@ module Gori::Proxy::Codec::Http1
       break if buf.bytesize >= 4 && ends_with_crlf_crlf?(buf)
     end
     return nil if buf.bytesize == 0
+    # Hit the cap without a terminator → oversized/hostile head; don't misframe.
+    return nil if buf.bytesize >= max_bytes && !ends_with_crlf_crlf?(buf)
     buf.to_slice.dup
   end
 

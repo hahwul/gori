@@ -80,14 +80,14 @@ module Gori
     # Inserts a Pending flow (request captured) and returns its new id.
     # Blocks the caller until the row is committed.
     def insert_flow(req : CapturedRequest) : Int64
-      reply = Channel(Int64).new
+      reply = Channel(Int64).new(1) # buffered: the writer must never block sending a reply
       @writes.send(InsertFlow.new(req, reply))
       reply.receive
     end
 
     # Fills in the response side of an existing flow. Blocks until committed.
     def update_response(resp : CapturedResponse) : Nil
-      reply = Channel(Nil).new
+      reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
       @writes.send(UpdateResp.new(resp, reply))
       reply.receive
     end
@@ -95,7 +95,7 @@ module Gori
     # Records one captured WebSocket message for a flow. Blocks until committed
     # (the forward already happened, so the peer is not delayed).
     def insert_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes) : Nil
-      reply = Channel(Nil).new
+      reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
       @writes.send(InsertWs.new(flow_id, now_us, direction, opcode, payload, reply))
       reply.receive
     end
@@ -374,37 +374,60 @@ module Gori
 
           # Batch the burst into one transaction (amortize fsync, P6), then fire
           # replies + events only AFTER commit so nothing observes uncommitted
-          # rows (P5).
+          # rows (P5). A failed batch must NOT kill the writer fiber — otherwise
+          # every blocked caller (and close()) deadlocks. On failure we roll back
+          # and unblock each caller with a fallback so the app degrades, not hangs.
           deferred = [] of -> Nil
-          conn.transaction do |tx|
-            c = tx.connection
-            ops.each do |op|
-              case op
-              when InsertFlow
-                ins_reply = op.reply
-                id = insert_one(c, op.req)
-                deferred << -> { ins_reply.send(id); publish(FlowEvent.new(id, :inserted)) }
-              when UpdateResp
-                upd_reply = op.reply
-                fid = op.resp.flow_id
-                update_one(c, op.resp)
-                deferred << -> { upd_reply.send(nil); publish(FlowEvent.new(fid, :updated)) }
-              when InsertWs
-                ws_reply = op.reply
-                ws_fid = op.flow_id
-                insert_ws_one(c, op)
-                deferred << -> { ws_reply.send(nil); publish(FlowEvent.new(ws_fid, :updated)) }
-              when ExecTask
-                task_reply = op.reply
-                op.run.call(c)
-                rowid = c.scalar("SELECT last_insert_rowid()").as(Int64)
-                deferred << -> { task_reply.send(rowid) }
+          committed = false
+          begin
+            conn.transaction do |tx|
+              c = tx.connection
+              ops.each do |op|
+                case op
+                when InsertFlow
+                  ins_reply = op.reply
+                  id = insert_one(c, op.req)
+                  deferred << -> { ins_reply.send(id); publish(FlowEvent.new(id, :inserted)) }
+                when UpdateResp
+                  upd_reply = op.reply
+                  fid = op.resp.flow_id
+                  update_one(c, op.resp)
+                  deferred << -> { upd_reply.send(nil); publish(FlowEvent.new(fid, :updated)) }
+                when InsertWs
+                  ws_reply = op.reply
+                  ws_fid = op.flow_id
+                  insert_ws_one(c, op)
+                  deferred << -> { ws_reply.send(nil); publish(FlowEvent.new(ws_fid, :updated)) }
+                when ExecTask
+                  task_reply = op.reply
+                  op.run.call(c)
+                  rowid = c.scalar("SELECT last_insert_rowid()").as(Int64)
+                  deferred << -> { task_reply.send(rowid) }
+                end
               end
             end
+            committed = true
+          rescue ex
+            STDERR.puts "gori: store write batch failed (#{ops.size} op(s), rolled back): #{ex.message}"
           end
-          deferred.each(&.call)
+          # publish never raises (see #publish); replies are buffered — so neither
+          # branch can block or throw back into the loop.
+          committed ? deferred.each(&.call) : ops.each { |op| fail_reply(op) }
         end
       end
+    end
+
+    # Unblock a caller whose batch was rolled back, with a no-op fallback (no row
+    # id, no event). The reply channels are buffered(1) so this never blocks.
+    private def fail_reply(op : WriteOp) : Nil
+      case op
+      when InsertFlow then op.reply.send(0_i64)
+      when UpdateResp then op.reply.send(nil)
+      when InsertWs   then op.reply.send(nil)
+      when ExecTask   then op.reply.send(0_i64)
+      end
+    rescue
+      # caller gone / channel closed — nothing to unblock
     end
 
     # Non-blocking receive for batching a burst (no `try_receive?` in stdlib).
@@ -463,7 +486,7 @@ module Gori
 
     # Runs a write closure on the writer connection; returns last_insert_rowid.
     private def exec_task(run : DB::Connection -> Nil) : Int64
-      reply = Channel(Int64).new
+      reply = Channel(Int64).new(1) # buffered: the writer must never block sending a reply
       @writes.send(ExecTask.new(run, reply))
       reply.receive
     end
@@ -500,6 +523,8 @@ module Gori
       else
         # dropped; authoritative state still in SQLite
       end
+    rescue Channel::ClosedError
+      # consumer (TUI) closed during shutdown — the writer must not die over it
     end
   end
 end

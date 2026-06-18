@@ -25,9 +25,12 @@ module Gori::Proxy::H2
         len = (body[pos + 1].to_u32 << 24) | (body[pos + 2].to_u32 << 16) |
               (body[pos + 3].to_u32 << 8) | body[pos + 4].to_u32
         msg_start = pos + 5
-        break if msg_start + len > body.size # truncated / mid-stream
-        msgs << Message.new(compressed, body[msg_start, len])
-        pos = msg_start + len
+        # Widen to Int64 for the bounds test: `Int32 + UInt32` overflows (and
+        # raises) when len is near UInt32::MAX on a truncated/hostile frame.
+        break if msg_start.to_i64 + len.to_i64 > body.size # truncated / mid-stream
+        count = len.to_i
+        msgs << Message.new(compressed, body[msg_start, count])
+        pos = msg_start + count
       end
       msgs
     end

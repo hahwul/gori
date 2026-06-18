@@ -47,8 +47,12 @@ module Gori
       FileUtils.rm_rf(project.dir) if Dir.exists?(project.dir)
     end
 
+    # Slugify a display name into a safe directory name. gsub removes path
+    # separators; stripping leading/trailing '-' AND '.' means a dot-only name
+    # ("." / ".." / "...") collapses to "" and is rejected by create() — otherwise
+    # File.join(@root, slug) would resolve to @root or its parent (traversal).
     private def slugify(name : String) : String
-      name.downcase.gsub(/[^a-z0-9._-]+/, "-").strip('-')
+      name.downcase.gsub(/[^a-z0-9._-]+/, "-").strip("-.")
     end
   end
 end

@@ -57,12 +57,17 @@ module Gori::Tui
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
       @outcome = :running             # :running | :quit | :back
       @resized = false                # set on a Resize event → next frame full-repaints
+      # Replay round-trips run off the UI fiber and deliver their Result here; the
+      # run loop applies it to the originating view on a later tick (buffered so a
+      # finished replay never blocks its background fiber).
+      @replay_results = Channel({ReplayView, Replay::Result}).new(8)
     end
 
     def run : Symbol
       @history.reload(@session.store)
       loop do
         drain_events
+        drain_replay_results
         render
         if ev = @term.poll_event(50)
           handle(ev)
@@ -70,6 +75,30 @@ module Gori::Tui
         break unless @outcome == :running
       end
       @outcome
+    end
+
+    # Apply any replay results that finished since the last tick (the network
+    # round-trip ran on a background fiber; view state is mutated here, on the UI
+    # fiber that owns it).
+    private def drain_replay_results : Nil
+      while pair = nonblocking_replay_result
+        view, result = pair
+        view.apply(result)
+        @toast = if result.ok?
+                   "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms"
+                 else
+                   "replay error: #{result.error}"
+                 end
+      end
+    end
+
+    private def nonblocking_replay_result : {ReplayView, Replay::Result}?
+      select
+      when p = @replay_results.receive
+        p
+      else
+        nil
+      end
     end
 
     # --- main loop helpers ---------------------------------------------------
@@ -867,24 +896,28 @@ module Gori::Tui
     end
 
     def replay_send : Nil
-      return unless (tab = current_replay_tab) && (r = tab.view).loaded?
-      scheme, host, port = r.parse_target
+      return unless (tab = current_replay_tab) && (view = tab.view).loaded?
+      scheme, host, port = view.parse_target
       if host.empty?
         @toast = "replay: invalid target"
         return
       end
       verify = !@session.config.insecure_upstream?
-      result = if r.http2?
-                 Replay::H2Engine.send(r.request_bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
-               else
-                 Replay::Engine.send(r.request_bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
-               end
-      r.apply(result)
-      @toast = if result.ok?
-                  "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms"
-                else
-                  "replay error: #{result.error}"
-                end
+      bytes = view.request_bytes
+      http2 = view.http2?
+      results = @replay_results
+      @toast = "replaying → #{host}:#{port}…"
+      # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only
+      # these captured locals — never the view — and hands the Result back through
+      # the channel; the run loop applies it (see #drain_replay_results).
+      spawn(name: "gori-replay") do
+        result = if http2
+                   Replay::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
+                 else
+                   Replay::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
+                 end
+        results.send({view, result})
+      end
     end
 
     def toggle_capture : Nil

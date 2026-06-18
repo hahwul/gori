@@ -57,8 +57,12 @@ module Gori
     def close : Nil
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
-      @flow_events.close
+      # Drain + stop the store BEFORE closing the events channel: the writer
+      # publishes post-commit events while draining, and a closed channel would
+      # otherwise make it raise mid-drain. (publish() also tolerates a closed
+      # channel as defense-in-depth.)
       @store.close
+      @flow_events.close
       @project.cleanup
     end
   end

@@ -17,9 +17,15 @@ module Gori::Proxy::Tls
         raise Gori::Error.new("EC_KEY_generate_key failed")
       end
       pkey = LibCrypto.evp_pkey_new
-      # EVP_PKEY takes ownership of eckey on success.
-      if pkey.null? || LibCrypto.evp_pkey_assign(pkey, EVP_PKEY_EC, eckey.as(Void*)) != 1
+      if pkey.null?
         LibCrypto.ec_key_free(eckey)
+        raise Gori::Error.new("EVP_PKEY_new failed")
+      end
+      # EVP_PKEY takes ownership of eckey only on success; on failure free BOTH the
+      # eckey and the freshly allocated pkey (else the pkey leaks).
+      if LibCrypto.evp_pkey_assign(pkey, EVP_PKEY_EC, eckey.as(Void*)) != 1
+        LibCrypto.ec_key_free(eckey)
+        LibCrypto.evp_pkey_free(pkey)
         raise Gori::Error.new("EVP_PKEY_assign failed")
       end
       new(pkey)

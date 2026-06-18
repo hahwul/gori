@@ -47,7 +47,13 @@ module Gori
       private def self.open(scheme : String, host : String, port : Int32, verify : Bool) : IO?
         if scheme == "https"
           ssl = Proxy::Upstream.dial_tls(host, port, verify: verify, alpn: "h2")
-          return nil unless ssl && ssl.alpn_protocol == "h2"
+          return nil unless ssl
+          # Origin completed the handshake but won't speak h2 — close the live
+          # socket before bailing, else it leaks (it's never returned to `ensure`).
+          unless ssl.alpn_protocol == "h2"
+            ssl.close rescue nil
+            return nil
+          end
           ssl
         else
           Proxy::Upstream.dial(host, port) # h2c prior-knowledge
@@ -182,6 +188,7 @@ module Gori
         offset = 0
         pad = 0
         if frame.padded?
+          return Bytes.empty if payload.empty?
           pad = payload[0].to_i
           offset = 1
         end
@@ -192,6 +199,7 @@ module Gori
 
       private def self.data_block(frame : Frame::Header) : Bytes
         return frame.payload unless frame.padded?
+        return Bytes.empty if frame.payload.empty?
         pad = frame.payload[0].to_i
         finish = frame.payload.size - pad
         finish <= 1 ? Bytes.empty : frame.payload[1...finish]

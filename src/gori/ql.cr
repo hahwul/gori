@@ -71,8 +71,8 @@ module Gori
     private def self.field_cond(field : String, value : String) : {String, Array(DB::Any)}?
       return nil if value.empty?
       case field
-      when "host"   then {"lower(host) LIKE ?", [like(value)] of DB::Any}
-      when "path"   then {"lower(target) LIKE ?", [like(value)] of DB::Any}
+      when "host"   then {"lower(host) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+      when "path"   then {"lower(target) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
       when "method" then {"upper(method) = ?", [value.upcase] of DB::Any}
       when "scheme" then {"scheme = ?", [value.downcase] of DB::Any}
       when "status" then status_cond(value)
@@ -90,8 +90,8 @@ module Gori
     # every one of them to NULL-logic.
     private def self.body_cond(value : String) : {String, Array(DB::Any)}
       p = like(value)
-      {"((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ?) OR " \
-       "(response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ?))",
+      {"((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') OR " \
+       "(response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ? ESCAPE '\\'))",
        [p, p] of DB::Any}
     end
 
@@ -106,10 +106,17 @@ module Gori
         end
       end
 
-      # status class: 2xx / 4xx / 5xx → range
+      # status class: 2xx / 4xx / 5xx — honour any comparison operator against the
+      # class bounds (e.g. status:>=5xx → status >= 500; bare status:4xx → 400-499).
       if rest.size == 3 && rest[1] == 'x' && rest[2] == 'x' && rest[0].ascii_number?
         base = rest[0].to_i * 100
-        return {"(status >= ? AND status < ?)", [base, base + 100] of DB::Any}
+        case op
+        when ">=" then return {"status >= ?", [base] of DB::Any}
+        when ">"  then return {"status >= ?", [base + 100] of DB::Any}
+        when "<=" then return {"status < ?", [base + 100] of DB::Any}
+        when "<"  then return {"status < ?", [base] of DB::Any}
+        else           return {"(status >= ? AND status < ?)", [base, base + 100] of DB::Any}
+        end
       end
 
       n = rest.to_i?
@@ -123,8 +130,12 @@ module Gori
        [pattern, pattern, pattern] of DB::Any}
     end
 
+    # Build a LIKE pattern, neutralising the LIKE metacharacters % and _ (and the
+    # escape char itself) so a user's literal % / _ matches literally. Pair every
+    # use with `ESCAPE '\'` in the SQL. Backslash MUST be escaped first.
     private def self.like(value : String) : DB::Any
-      "%#{value.downcase}%"
+      escaped = value.downcase.gsub('\\', "\\\\").gsub('%', "\\%").gsub('_', "\\_")
+      "%#{escaped}%"
     end
   end
 end
