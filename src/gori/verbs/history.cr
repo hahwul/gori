@@ -39,7 +39,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "history.replay", "Replay flow", "Open the selected flow in the Replay tab",
-        Verb::Scope::Body, [Verb::Chord.new("r")],
+        Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
         available: history_selected) { |ctx| ctx.replay_selected; nil }
 
       # --- replay workbench (request editing is inline; these power the palette

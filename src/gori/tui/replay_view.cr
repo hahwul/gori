@@ -126,7 +126,7 @@ module Gori::Tui
       return if rect.empty?
       unless @loaded
         screen.text(rect.x + 1, rect.y, "no flow loaded", Theme::MUTED)
-        screen.text(rect.x + 1, rect.y + 2, "select a flow in History and press r to replay it", Theme::MUTED)
+        screen.text(rect.x + 1, rect.y + 2, "select a flow in History and press ^R to replay it", Theme::MUTED)
         return
       end
 

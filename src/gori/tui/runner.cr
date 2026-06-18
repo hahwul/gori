@@ -492,7 +492,7 @@ module Gori::Tui
       case @active_tab
       when :history
         @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
-                           : "↑/↓ move · ↵ open · r replay · F finding · y copy · / filter · i intercept · esc menu"
+                           : "↑/↓ move · ↵ open · ^R replay · F finding · y copy · / filter · i intercept · esc menu"
       when :intercept
         @intercept.editing? ? "type to edit · f forward · esc stop" \
                             : "j/k move · ↵/e edit · f forward · d drop · F all · esc menu"
