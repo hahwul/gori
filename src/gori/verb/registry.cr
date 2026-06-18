@@ -1,3 +1,5 @@
+require "../fuzzy"
+
 module Gori
   module Verb
     # Holds all verb definitions; the single source the keymap and palette both
@@ -40,37 +42,13 @@ module Gori
         return candidates if query.empty?
 
         scored = candidates.compact_map do |v|
-          if score = fuzzy_score(query.downcase, "#{v.title} #{v.id}".downcase)
+          if score = Gori::Fuzzy.score(query.downcase, "#{v.title} #{v.id}".downcase)
             {v, score}
           end
         end
         scored.sort_by! { |(_, score)| -score }.map { |(v, _)| v }
       end
 
-      # Subsequence match: every query char appears in order. Score rewards
-      # contiguous runs and earlier matches. Returns nil if not a subsequence.
-      private def fuzzy_score(query : String, text : String) : Int32?
-        score = 0
-        ti = 0
-        run = 0
-        query.each_char do |qc|
-          found = false
-          while ti < text.size
-            tc = text[ti]
-            ti += 1
-            if tc == qc
-              run += 1
-              score += 10 + run * 5 - ti # contiguity bonus, earlier-is-better
-              found = true
-              break
-            else
-              run = 0
-            end
-          end
-          return nil unless found
-        end
-        score
-      end
     end
   end
 end

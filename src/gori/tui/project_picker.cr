@@ -1,18 +1,23 @@
 require "termisu"
 require "../project"
 require "../project_registry"
+require "../fuzzy"
 require "./geometry"
 require "./screen"
 require "./theme"
 
 module Gori::Tui
-  # The startup screen: choose a project to open. Entries are New, Temp, then the
-  # existing projects. Returns the chosen Project from `run`, or nil to quit gori.
-  # Monochrome, keyboard-first (Grok Build feel).
+  # The startup screen: choose a project to open. New + Temp are always shown;
+  # saved projects are live fuzzy-filtered (fzf-like subsequence via Gori::Fuzzy,
+  # best score first) as you type. Letters always feed the filter (search focus wins;
+  # no plain-letter shortcuts while the bar is active). Use arrows + ↵ on the
+  # New/Temp rows, or ctrl-n/ctrl-t/ctrl-d. Returns the chosen Project from `run`,
+  # or nil to quit gori. Monochrome, keyboard-first (Grok Build feel).
   class ProjectPicker
     def initialize(@term : Termisu, @registry : ProjectRegistry)
       @backend = TermisuBackend.new(@term)
       @projects = @registry.list
+      @query = "" # drives live fuzzy filter over @projects (New/Temp unaffected)
       @selected = 0
       @mode = :list # :list | :new
       @name = ""
@@ -39,25 +44,62 @@ module Gori::Tui
     # --- input ---------------------------------------------------------------
 
     private def entry_count : Int32
-      2 + @projects.size # New, Temp, then projects
+      2 + filtered_projects.size # New, Temp, then (filtered) projects
+    end
+
+    # Saved projects filtered by @query using Gori::Fuzzy (only the variable part
+    # of the list; New and Temp are always offered at indices 0/1).
+    private def filtered_projects : Array(Project)
+      return @projects if @query.empty?
+      q = @query.downcase
+      scored = @projects.compact_map do |p|
+        if score = Gori::Fuzzy.score(q, p.name.downcase)
+          {p, score}
+        end
+      end
+      scored.sort_by! { |(_, score)| -score }.map { |(p, _)| p }
     end
 
     private def handle_list(ev : Termisu::Event::Key) : Project | Symbol | Nil
       key = ev.key
-      if key.up? || key.lower_k?
+      # Navigation is arrows only (like the command palette). Letter keys are
+      # reserved for the live fuzzy filter so that searches like "test" don't
+      # accidentally trigger 't' for temp etc.
+      if key.up?
         @selected = (@selected - 1) % entry_count
-      elsif key.down? || key.lower_j?
+      elsif key.down?
         @selected = (@selected + 1) % entry_count
-      elsif key.enter? || key.right? || key.lower_l?
+      elsif key.enter? || key.right?
         return activate
-      elsif key.lower_n?
-        start_new
-      elsif key.lower_t?
-        return open_temp
-      elsif key.lower_d?
-        delete_selected
-      elsif key.lower_q? || key.escape? || ev.ctrl_c?
+      elsif key.backspace?
+        return if @query.empty?
+        @query = @query[0, @query.size - 1]
+        @selected = 0
+      elsif key.escape?
+        if @query.empty?
+          return :quit
+        else
+          @query = ""
+          @selected = 0
+        end
+      elsif ev.ctrl_c?
         return :quit
+      elsif (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        # Printable chars always feed the query (search has priority).
+        @query += c
+        @selected = 0
+      elsif ev.ctrl? && key.lower_n?
+        # ctrl-n: quick new. If query has text, prefill (or direct-create).
+        name = @query.strip
+        if name.empty?
+          start_new
+        else
+          return @registry.create(name)
+        end
+      elsif ev.ctrl? && key.lower_t?
+        return open_temp
+      elsif ev.ctrl? && key.lower_d?
+        delete_selected
       end
       nil
     end
@@ -70,13 +112,13 @@ module Gori::Tui
       when 1
         open_temp
       else
-        @projects[@selected - 2]?
+        filtered_projects[@selected - 2]?
       end
     end
 
     private def start_new : Nil
       @mode = :new
-      @name = ""
+      @name = @query.strip
     end
 
     private def open_temp : Project
@@ -85,10 +127,10 @@ module Gori::Tui
 
     private def delete_selected : Nil
       return if @selected < 2
-      if project = @projects[@selected - 2]?
+      if project = filtered_projects[@selected - 2]?
         @registry.delete(project)
         @projects = @registry.list
-        @selected = @selected.clamp(0, entry_count - 1)
+        @selected = 0
       end
     end
 
@@ -134,17 +176,27 @@ module Gori::Tui
 
     # Centered like a game main menu: title + menu block vertically centered,
     # the column itself horizontally centered, hints pinned to the bottom edge.
+    # Filter bar (› query_) is always shown for live fuzzy filtering of projects.
     private def render_list(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
-      rows = entries
-      visual = rows.size + (@projects.empty? ? 0 : 1) # gap before saved projects
-      top = {(h - (3 + visual)) // 2, 1}.max
+      fp = filtered_projects
+      rows = list_rows
+      has_saved = !fp.empty?
+      visual = rows.size + (has_saved ? 1 : 0) # gap before saved projects
+      header_lines = 3 # title, subtitle, filter bar
+      top = {(h - (header_lines + visual)) // 2, 1}.max
 
       centered(screen, top, "gori", Theme::TEXT_BRIGHT, w, Attribute::Bold)
       centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme::MUTED, w)
 
+      # live fuzzy filter bar (fzf style)
+      fy = top + 2
+      screen.text(cx + 1, fy, "›", Theme::ACCENT, Theme::BG)
+      screen.text(cx + 3, fy, @query, Theme::TEXT_BRIGHT, Theme::BG, width: cw - 5)
+      screen.cell(cx + 3 + @query.size, fy, '_', Theme::ACCENT, Theme::BG)
+
       ey0 = top + 3
       rows.each_with_index do |(label, meta), i|
-        y = ey0 + i + (i >= 2 ? 1 : 0)
+        y = ey0 + i + ((i >= 2 && has_saved) ? 1 : 0)
         next if y >= h - 1
         selected = i == @selected
         bg = selected ? Theme::ACCENT_BG : Theme::BG
@@ -154,7 +206,7 @@ module Gori::Tui
         screen.text(cx + cw - meta.size - 2, y, meta, Theme::MUTED, bg) unless meta.empty?
       end
 
-      centered(screen, h - 2, "↑/↓ select   ↵ open   n new   t temp   d delete   q quit", Theme::MUTED, w)
+      centered(screen, h - 2, "↑/↓ select   ↵ open   ctrl-n new   ctrl-t temp   ctrl-d delete   type to filter   esc/ctrl-c quit", Theme::MUTED, w)
     end
 
     private def render_new(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
@@ -173,9 +225,9 @@ module Gori::Tui
       screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme::BG, attr: attr)
     end
 
-    private def entries : Array({String, String})
+    private def list_rows : Array({String, String})
       list = [{"+ New project", ""}, {"~ Temp project", "ephemeral · not saved"}]
-      @projects.each do |project|
+      filtered_projects.each do |project|
         meta = project.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
         list << {project.name, meta}
       end
