@@ -48,11 +48,11 @@ module Gori::Tui
     # counts (intercept held / findings) ride inline as `(N)` badges.
     def self.render_menu(screen : Screen, rect : Rect, *, active_tab : Symbol, focused : Bool,
                          findings_count : Int32 = 0, intercept_count : Int32 = 0,
-                         replay_count : Int32 = 0) : Nil
+                         replay_count : Int32 = 0, notes_count : Int32 = 0) : Nil
       return if rect.empty?
       screen.fill(rect, Theme::PANEL)
 
-      labels = TABS.map { |(sym, label)| "#{label}#{menu_badge(sym, findings_count, intercept_count, replay_count)}" }
+      labels = TABS.map { |(sym, label)| "#{label}#{menu_badge(sym, findings_count, intercept_count, replay_count, notes_count)}" }
       widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
       active_idx = TABS.index { |(sym, _)| sym == active_tab } || 0
 
@@ -117,8 +117,9 @@ module Gori::Tui
 
     # Inline badge for the hot counts (held messages, confirmed findings).
     private def self.menu_badge(sym : Symbol, findings_count : Int32, intercept_count : Int32,
-                                replay_count : Int32 = 0) : String
+                                replay_count : Int32 = 0, notes_count : Int32 = 0) : String
       return "(#{replay_count})" if sym == :replay && replay_count > 1
+      return "(#{notes_count})" if sym == :notes && notes_count > 1
       return "(#{intercept_count})" if sym == :intercept && intercept_count > 0
       return "(#{findings_count})" if sym == :findings && findings_count > 0
       ""

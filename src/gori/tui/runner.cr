@@ -246,6 +246,13 @@ module Gori::Tui
         return
       end
 
+      # ^N opens a new note from the Notes tab (body OR tab-bar focus), mirroring
+      # Replay's new-request shortcut so it's never a dead key.
+      if @active_tab == :notes && @overlay == :none && ev.ctrl? && ev.key.lower_n?
+        notes_new
+        return
+      end
+
       return handle_replay_key(ev) if @active_tab == :replay && @overlay == :none && @focus == :body
       return handle_notes_key(ev) if @active_tab == :notes && @overlay == :none && @focus == :body
       return handle_intercept_key(ev) if @active_tab == :intercept && @overlay == :none && @focus == :body
@@ -379,6 +386,11 @@ module Gori::Tui
 
         save_notes
         open_palette
+      elsif ev.ctrl? && key.lower_w?
+        notes_close
+      elsif ev.ctrl? && c && '1' <= c <= '9'
+        # Switch note sub-tab (the ctrl check keeps digits literal while editing).
+        @notes.switch_note(c.to_i - 1)
       elsif key.escape?
         save_notes
         focus_pane(:menu)
@@ -450,6 +462,21 @@ module Gori::Tui
     private def save_notes : Nil
 
       @notes.save(@session.store)
+    end
+
+    # Open a fresh note sub-tab and drop into it (reachable from the Notes tab bar
+    # or while editing, via ^N), mirroring Replay's ^N.
+    private def notes_new : Nil
+      @notes.new_note
+      @active_tab = :notes
+      @focus = :body
+      @toast = "new note (#{@notes.count}) — ^1-9 switch · ^W close · esc tabs"
+    end
+
+    # Close the current note sub-tab (^W). NotesView keeps at least one open.
+    private def notes_close : Nil
+      @notes.close_note
+      @toast = "closed note (#{@notes.count} open)"
     end
 
     private def save_project_desc : Nil
@@ -693,7 +720,7 @@ module Gori::Tui
         identity: "user", scope: scope_label, rules: rules_label, intercept: intercept_label)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
         findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
-        replay_count: @replays.size)
+        replay_count: @replays.size, notes_count: @notes.count)
       Chrome.render_rule(screen, layout.rule)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: @toast || key_hints,
@@ -788,7 +815,7 @@ module Gori::Tui
         @intercept.editing? ? "type to edit · ^R forward · ⇧↹ queue · esc tabs" \
                             : "↑/↓ move · ↵/e edit · f forward · d drop · F all · ↹ detail · esc tabs"
       when :replay   then "↹ pane · type to edit · ^R send · ^L auto-len · ^N new · ^1-9 switch · ^W close · esc tabs"
-      when :notes    then "type to edit · ↹/esc tabs"
+      when :notes    then "type to edit · ^N new · ^W close · ^1-9 switch · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
         @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \

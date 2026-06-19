@@ -51,6 +51,13 @@ module Gori::Tui
       @lines.join("\n")
     end
 
+    # First line with non-whitespace content — used to derive a label/preview
+    # (e.g. a Notes sub-tab title) without joining the whole buffer. nil when the
+    # document is entirely blank.
+    def first_nonblank_line : String?
+      @lines.find { |l| !l.blank? }
+    end
+
     def insert(ch : Char) : Nil
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
