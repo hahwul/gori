@@ -323,6 +323,7 @@ module Gori::Tui
         screen.text(qx, y, @query, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: box.w - 7)
         cursor = qx + Screen.display_width(@query)
         screen.cell(cursor, y, '_', Theme::ACCENT, bg) if selected
+        screen.cursor(cursor, y) if selected
 
       end
     end
@@ -340,6 +341,7 @@ module Gori::Tui
       if name_active
         cursor = cx + 2 + Screen.display_width("name › #{@name}")
         screen.cell(cursor, iy, '_', Theme::ACCENT, Theme::PANEL)
+        screen.cursor(cursor, iy)
       end
 
 
@@ -350,6 +352,7 @@ module Gori::Tui
       if desc_active
         cursor = cx + 2 + Screen.display_width("description › #{@desc}")
         screen.cell(cursor, iy + 1, '_', Theme::ACCENT, Theme::PANEL)
+        screen.cursor(cursor, iy + 1)
       end
 
 

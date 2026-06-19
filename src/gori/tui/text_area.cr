@@ -142,6 +142,7 @@ module Gori::Tui
         prefix_w = Screen.display_width(line[0, @cx])
         preedit_w = Screen.display_width(@preedit)
         cxs = rect.x + prefix_w + preedit_w
+        screen.cursor(cxs, rect.y + i) if cxs < rect.x + rect.w
         if cxs < rect.x + rect.w
           ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
           gw = [Screen.display_width(ch.to_s), 1].max

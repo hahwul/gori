@@ -72,6 +72,7 @@ module Gori::Tui
       screen.text(box.x + 4, box.y + 1, @query, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - 6)
       cursor = box.x + 4 + Screen.display_width(@query)
       screen.cell(cursor, box.y + 1, '_', Theme::ACCENT, Theme::PANEL)
+      screen.cursor(cursor, box.y + 1)
 
       Frame.tee_divider(screen, box, box.y + 2)
 

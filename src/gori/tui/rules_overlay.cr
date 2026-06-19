@@ -112,6 +112,7 @@ module Gori::Tui
       ch = @icx < @input.size ? @input[@icx] : ' '
       cursor_x = base + Screen.display_width(@input[0, @icx])
       screen.cell(cursor_x, box.y + 1, ch, Theme::BG, Theme::ACCENT)
+      screen.cursor(cursor_x, box.y + 1)
 
       Frame.tee_divider(screen, box, box.y + 2)
 

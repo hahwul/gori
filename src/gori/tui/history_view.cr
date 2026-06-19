@@ -323,6 +323,7 @@ module Gori::Tui
         ch = @qcx < @query.size ? @query[@qcx] : ' '
         cursor_x = base + Screen.display_width(@query[0, @qcx])
         screen.cell(cursor_x, rect.y, ch, Theme::BG, Theme::ACCENT)
+        screen.cursor(cursor_x, rect.y) if @querying
 
       elsif filtering?
         screen.text(rect.x + 1, rect.y, ": #{@query}", Theme::TEXT, width: rect.w - 10)

@@ -246,6 +246,7 @@ module Gori::Tui
       ch = @cx < @title.size ? @title[@cx] : ' '
       cursor_x = base + Screen.display_width(@title[0, @cx])
       screen.cell(cursor_x, box.y + 2, ch, Theme::BG, Theme::ACCENT)
+      screen.cursor(cursor_x, box.y + 2)
 
     end
   end

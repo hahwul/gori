@@ -633,6 +633,17 @@ module Gori::Tui
       @scope_overlay.render(screen, layout.body) if @overlay == :scope
       @rules_overlay.render(screen, layout.body) if @overlay == :rules
       @finding_form.render(screen, layout.body) if @overlay == :finding_new
+
+      # Sync terminal hardware cursor to the focused input caret (if any view
+      # called screen.cursor). This is critical for terminal IME preedit
+      # positioning (jamo composition UI / candidate popup) in Ghostty, WezTerm,
+      # Kitty etc. The views paint their own visual (preedit underline or '_'
+      # cell); we also position the real cursor so the *terminal* knows where
+      # to draw its composition feedback for Hangul/CJK.
+      if pos = screen.desired_cursor
+        @term.set_cursor(pos[0], pos[1], visible: true)
+      end
+
       flush_screen
     end
 

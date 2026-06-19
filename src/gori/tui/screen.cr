@@ -116,6 +116,18 @@ module Gori::Tui
 
       res + "…"
     end
+
+    # IME / terminal cursor positioning support.
+    # Views call this (when drawing a focused editable caret) to indicate where
+    # the terminal's hardware cursor should be placed. This lets the terminal
+    # emulator position its own IME preedit/composition UI (jamo, candidates)
+    # at the right cell for custom input fields.
+    # Runner syncs this to @term.set_cursor(...) after building the frame.
+    property desired_cursor : {Int32, Int32}? = nil
+
+    def cursor(x : Int32, y : Int32) : Nil
+      @desired_cursor = {x, y}
+    end
   end
 end
 
