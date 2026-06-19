@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 6
+      VERSION = 7
 
       V1 = [
         <<-SQL,
@@ -123,7 +123,15 @@ module Gori
         "ALTER TABLE flows ADD COLUMN h2_stream_id INTEGER",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6]
+      # Capture cap (P-stability): the stored body BLOB may be truncated to a
+      # size ceiling so a huge transfer can't OOM the proxy or bloat one row;
+      # request_size/response_size keep the TRUE wire size, these flag the cut.
+      V7 = [
+        "ALTER TABLE flows ADD COLUMN request_body_truncated INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE flows ADD COLUMN response_body_truncated INTEGER NOT NULL DEFAULT 0",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

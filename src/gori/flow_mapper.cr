@@ -11,7 +11,8 @@ module Gori
     def self.request(req : Proxy::Codec::RawRequest, *,
                      scheme : String, host : String, port : Int32, created_at : Int64,
                      body : Bytes? = nil, sni : String? = nil,
-                     alpn : String? = nil, tls_version : String? = nil) : Store::CapturedRequest
+                     alpn : String? = nil, tls_version : String? = nil,
+                     body_truncated : Bool = false, body_size : Int64? = nil) : Store::CapturedRequest
       Store::CapturedRequest.new(
         created_at: created_at,
         scheme: scheme,
@@ -25,13 +26,16 @@ module Gori
         sni: sni,
         alpn: alpn,
         tls_version: tls_version,
+        body_truncated: body_truncated,
+        body_size: body_size,
       )
     end
 
     def self.response(resp : Proxy::Codec::RawResponse, *, flow_id : Int64,
                       body : Bytes? = nil, ttfb_us : Int64? = nil,
                       duration_us : Int64? = nil,
-                      state : Store::FlowState = Store::FlowState::Complete) : Store::CapturedResponse
+                      state : Store::FlowState = Store::FlowState::Complete,
+                      body_truncated : Bool = false, body_size : Int64? = nil) : Store::CapturedResponse
       Store::CapturedResponse.new(
         flow_id: flow_id,
         status: resp.status,
@@ -42,6 +46,8 @@ module Gori
         ttfb_us: ttfb_us,
         duration_us: duration_us,
         state: state,
+        body_truncated: body_truncated,
+        body_size: body_size,
       )
     end
 

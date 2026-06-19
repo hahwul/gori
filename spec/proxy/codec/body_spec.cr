@@ -2,6 +2,39 @@ require "../../spec_helper"
 
 include Gori::Proxy::Codec
 
+describe Gori::Proxy::Codec::CaptureBuffer do
+  it "stores everything and stays untruncated under the cap" do
+    cap = CaptureBuffer.new(16)
+    cap.write("hello".to_slice)
+    cap.write(" world".to_slice)
+    cap.truncated?.should be_false
+    cap.total.should eq(11)
+    String.new(cap.to_slice).should eq("hello world")
+  end
+
+  it "stores at most `limit` bytes, flags truncation, and counts the TRUE total" do
+    cap = CaptureBuffer.new(8)
+    cap.write("abcdef".to_slice) # 6 stored
+    cap.write("ghijkl".to_slice) # only "gh" fits; the rest is dropped
+    cap.write("mno".to_slice)    # all dropped
+    cap.truncated?.should be_true
+    cap.total.should eq(15)                        # true wire size preserved
+    String.new(cap.to_slice).should eq("abcdefgh") # stored bytes capped at 8
+  end
+
+  it "tees through Body.stream while bounding the capture (forward stays complete)" do
+    body = "X" * 5000
+    src = IO::Memory.new(body)
+    dst = IO::Memory.new
+    cap = CaptureBuffer.new(1000)
+    Body.stream(src, dst, BodyFraming::Length, body.bytesize.to_i64, cap).should be_true
+    dst.to_slice.size.should eq(5000) # forwarded byte-exact, not capped
+    cap.to_slice.size.should eq(1000) # capture bounded
+    cap.truncated?.should be_true
+    cap.total.should eq(5000)
+  end
+end
+
 describe Gori::Proxy::Codec::Body do
   describe "framing detection" do
     it "detects Content-Length on a request" do

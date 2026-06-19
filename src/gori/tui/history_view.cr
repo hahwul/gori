@@ -7,6 +7,7 @@ require "../ql"
 require "../scope"
 require "../proxy/h2/frame"
 require "../proxy/h2/grpc"
+require "../proxy/codec/body"
 
 module Gori::Tui
   # The History tab — gori's home. A plain, append-only log of captured flows
@@ -371,14 +372,23 @@ module Gori::Tui
       if @detail_pane == :response && (msgs = @detail_ws)
         return wrap(ws_lines(msgs))
       end
-      head, body = @detail_pane == :request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
-      if (body && !body.empty?) && grpc_body?(head)
-        lines = Highlight.message(head, nil, @detail_pane == :request)
+      request = @detail_pane == :request
+      head, body = request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
+      truncated = request ? detail.request_body_truncated? : detail.response_body_truncated?
+      lines =
+        if (body && !body.empty?) && grpc_body?(head)
+          ls = Highlight.message(head, nil, request)
+          ls << Highlight::Line.new
+          ls.concat(wrap(grpc_lines(body)))
+          ls
+        else
+          Highlight.message(head, body, request)
+        end
+      if truncated
         lines << Highlight::Line.new
-        lines.concat(wrap(grpc_lines(body)))
-        return lines
+        lines << [Highlight::Span.new("— body truncated at capture limit (#{Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)} MiB); full size in the list —", Theme::YELLOW)]
       end
-      Highlight.message(head, body, @detail_pane == :request)
+      lines
     end
 
     # Wrap pre-formatted plain strings (frames / ws / gRPC hex) as single-span

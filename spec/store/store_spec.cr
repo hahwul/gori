@@ -67,6 +67,31 @@ describe Gori::Store do
       detail.response_body.should eq(resp_body)
       detail.row.status.should eq(201)
       detail.row.state.should eq(Gori::Store::FlowState::Complete)
+      detail.request_body_truncated?.should be_false
+      detail.response_body_truncated?.should be_false
+    end
+  end
+
+  it "records a truncated body flag while keeping the TRUE wire size" do
+    with_store do |store|
+      stored = Bytes.new(8) { |i| (65 + i).to_u8 } # the capped 8-byte capture
+      req = Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/up", http_version: "HTTP/1.1",
+        head: "POST /up HTTP/1.1\r\n\r\n".to_slice, body: stored,
+        body_truncated: true, body_size: 5_000_000_i64)
+      id = store.insert_flow(req)
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
+        body: stored, body_truncated: true, body_size: 9_000_000_i64))
+
+      detail = store.get_flow(id).not_nil!
+      detail.request_body_truncated?.should be_true
+      detail.response_body_truncated?.should be_true
+      detail.request_body.should eq(stored) # only the capped bytes are stored
+      # the list size column reflects the TRUE wire size, not the truncated BLOB
+      detail.row.size.should eq(("POST /up HTTP/1.1\r\n\r\n".bytesize + 5_000_000) +
+                                ("HTTP/1.1 200 OK\r\n\r\n".bytesize + 9_000_000))
     end
   end
 

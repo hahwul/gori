@@ -110,12 +110,13 @@ module Gori::Proxy
       end
       begin
         upstream.write(sent_head)
-        req_capture = IO::Memory.new
+        req_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
         req_complete = Codec::Body.stream(@io, upstream, req_framing, req_len, req_capture)
         upstream.flush
-        req_body = req_framing.none? ? nil : req_capture.to_slice.dup
+        req_body = req_framing.none? ? nil : req_capture.to_slice
         flow_id = @sink.on_request(FlowMapper.request(sent_req,
-          scheme: scheme, host: host, port: port, created_at: created_at, body: req_body))
+          scheme: scheme, host: host, port: port, created_at: created_at, body: req_body,
+          body_truncated: req_capture.truncated?, body_size: req_capture.total))
         return false unless req_complete # client cut the request body short — don't reuse the connection
         handle_response(upstream, req, flow_id, started, host, port, scheme)
       ensure
@@ -178,12 +179,13 @@ module Gori::Proxy
       # Non-hold path: stream the response body byte-for-byte (P6), unchanged.
       @io.write(sent_resp_head)
       @io.flush
-      resp_capture = IO::Memory.new
+      resp_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
       resp_complete = Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture)
       duration = (Time.instant - started).total_microseconds.to_i64
-      resp_body = resp_framing.none? ? nil : resp_capture.to_slice.dup
+      resp_body = resp_framing.none? ? nil : resp_capture.to_slice
       @sink.on_response(FlowMapper.response(sent_resp,
-        flow_id: flow_id, body: resp_body, ttfb_us: ttfb, duration_us: duration))
+        flow_id: flow_id, body: resp_body, ttfb_us: ttfb, duration_us: duration,
+        body_truncated: resp_capture.truncated?, body_size: resp_capture.total))
 
       if websocket_upgrade?(resp)
         WS::Relay.run(@io, upstream, flow_id, @sink) # frames until close (P6/P7)

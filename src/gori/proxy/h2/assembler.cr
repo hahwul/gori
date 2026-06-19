@@ -1,5 +1,6 @@
 require "./frame"
 require "./hpack"
+require "../codec/body"
 require "../sink"
 require "../../flow_mapper"
 require "../../store/models"
@@ -26,7 +27,9 @@ module Gori::Proxy::H2
 
     private class Side
       getter header_buf = IO::Memory.new
-      getter body = IO::Memory.new
+      # DATA frames accumulate here, capped (like h1) so a huge streamed body
+      # can't grow per-connection memory without bound. Raw frames stay the truth.
+      getter body = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
       property headers : Array({String, String})? = nil
       property ended = false
     end
@@ -181,12 +184,14 @@ module Gori::Proxy::H2
       scheme = pseudo(headers, ":scheme") || "https"
       authority = pseudo(headers, ":authority") || @host
       host, port = split_authority(authority)
-      body = buffer_or_nil(stream.req.body)
+      cap = stream.req.body
+      body = cap.total == 0 ? nil : cap.to_slice
 
       head = synth_request_head(method, path, headers)
       captured = Store::CapturedRequest.new(
         created_at: @created_at, scheme: scheme, host: host, port: port,
         method: method, target: path, http_version: "HTTP/2", head: head, body: body,
+        body_truncated: cap.truncated?, body_size: cap.total,
         h2_conn_id: @conn_id, h2_stream_id: stream_id.to_i64)
       stream.flow_id = @sink.on_request(captured)
     end
@@ -196,11 +201,13 @@ module Gori::Proxy::H2
       return unless flow_id # request not yet projected (rare interleaving) — drop
       headers = stream.resp.headers.not_nil!
       status = (pseudo(headers, ":status") || "0").to_i? || 0
-      body = buffer_or_nil(stream.resp.body)
+      cap = stream.resp.body
+      body = cap.total == 0 ? nil : cap.to_slice
       content_type = header_value(headers, "content-type")
       head = synth_response_head(status, headers)
       @sink.on_response(Store::CapturedResponse.new(
         flow_id: flow_id, status: status, head: head, body: body,
+        body_truncated: cap.truncated?, body_size: cap.total,
         content_type: content_type, state: Store::FlowState::Complete))
     end
 
@@ -218,10 +225,6 @@ module Gori::Proxy::H2
       host = authority[0...idx]
       return {authority, @port} if host.includes?(':') # unbracketed IPv6
       {host, authority[(idx + 1)..].to_i? || @port}
-    end
-
-    private def buffer_or_nil(io : IO::Memory) : Bytes?
-      io.size == 0 ? nil : io.to_slice.dup
     end
 
     # A readable HTTP/2 request head (the bytes shown in the detail view). The

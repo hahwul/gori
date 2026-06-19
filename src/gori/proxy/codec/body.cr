@@ -14,8 +14,53 @@ module Gori::Proxy::Codec
     CloseDelimited # body runs until the connection closes (responses only)
   end
 
+  # A write-only capture sink for body bytes that stores at most `limit` octets
+  # so one huge transfer can't OOM the proxy, while still counting the TRUE wire
+  # size. The forwarded copy (the `dst` of `Body.stream`) is always complete and
+  # byte-exact (P6/P7); only this captured copy — what lands in the DB as a BLOB
+  # — is bounded. `truncated?` flips once more than `limit` bytes arrive.
+  class CaptureBuffer < IO
+    getter total : Int64 = 0_i64
+    getter? truncated : Bool = false
+
+    def initialize(@limit : Int32)
+      @mem = IO::Memory.new
+    end
+
+    def write(slice : Bytes) : Nil
+      @total += slice.size
+      stored = @mem.bytesize
+      if stored < @limit
+        room = @limit - stored
+        if slice.size <= room
+          @mem.write(slice)
+        else
+          @mem.write(slice[0, room])
+          @truncated = true
+        end
+      elsif !slice.empty?
+        @truncated = true
+      end
+    end
+
+    # Write-only: the body codec only ever tees into this.
+    def read(slice : Bytes) : Int32
+      raise NotImplementedError.new("CaptureBuffer is write-only")
+    end
+
+    # The captured (possibly truncated) bytes — a fresh copy safe to persist.
+    def to_slice : Bytes
+      @mem.to_slice.dup
+    end
+  end
+
   module Body
     BUFSIZE = 64 * 1024
+
+    # Ceiling on a single captured request/response body. Forwarding is never
+    # capped (it streams byte-exact); this only bounds what we buffer for the DB,
+    # so a multi-GB download can't OOM the proxy or bloat one row. Tune as needed.
+    CAPTURE_MAX = 8 * 1024 * 1024 # 8 MiB
 
     # RFC 7230 §3.3.3 framing for a request body.
     def self.request_framing(req : RawRequest) : {BodyFraming, Int64}

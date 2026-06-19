@@ -23,7 +23,9 @@ module Gori
       getter alpn : String?
       getter tls_version : String?
       getter head : Bytes
-      getter body : Bytes?
+      getter body : Bytes? # captured body, possibly truncated to the capture cap
+      getter? body_truncated : Bool
+      getter body_size : Int64? # TRUE wire body size (nil → derive from `body`); ≥ body.size when truncated
       # When this flow is a decoded HTTP/2 stream, links back to its raw frame log.
       getter h2_conn_id : Int64?
       getter h2_stream_id : Int64?
@@ -31,6 +33,7 @@ module Gori
       def initialize(@created_at, @scheme, @host, @port, @method, @target,
                      @http_version, @head, @body = nil,
                      @sni = nil, @alpn = nil, @tls_version = nil,
+                     @body_truncated = false, @body_size = nil,
                      @h2_conn_id = nil, @h2_stream_id = nil)
       end
     end
@@ -42,7 +45,9 @@ module Gori
       getter reason : String?
       getter content_type : String?
       getter head : Bytes
-      getter body : Bytes?
+      getter body : Bytes? # captured body, possibly truncated to the capture cap
+      getter? body_truncated : Bool
+      getter body_size : Int64? # TRUE wire body size (nil → derive from `body`)
       getter ttfb_us : Int64?
       getter duration_us : Int64?
       getter state : FlowState
@@ -50,7 +55,8 @@ module Gori
 
       def initialize(@flow_id, @status, @head, @body = nil, @reason = nil,
                      @content_type = nil, @ttfb_us = nil, @duration_us = nil,
-                     @state = FlowState::Complete, @error = nil)
+                     @state = FlowState::Complete, @error = nil,
+                     @body_truncated = false, @body_size = nil)
       end
     end
 
@@ -81,11 +87,14 @@ module Gori
       getter request_body : Bytes?
       getter response_head : Bytes?
       getter response_body : Bytes?
+      getter? request_body_truncated : Bool
+      getter? response_body_truncated : Bool
       getter h2_conn_id : Int64?
       getter h2_stream_id : Int64?
 
       def initialize(@row, @http_version, @request_head, @request_body,
-                     @response_head, @response_body, @h2_conn_id = nil, @h2_stream_id = nil)
+                     @response_head, @response_body, @h2_conn_id = nil, @h2_stream_id = nil,
+                     @request_body_truncated = false, @response_body_truncated = false)
       end
     end
 

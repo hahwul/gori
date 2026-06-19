@@ -313,7 +313,7 @@ module Gori
         SELECT id, created_at, scheme, method, host, port, target, status,
                request_size, response_size, state,
                http_version, request_head, request_body, response_head, response_body,
-               h2_conn_id, h2_stream_id
+               h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated
         FROM flows WHERE id = ?
         SQL
         return nil unless rs.move_next
@@ -325,7 +325,10 @@ module Gori
         resp_body = rs.read(Bytes?)
         h2_conn = rs.read(Int64?)
         h2_stream = rs.read(Int64?)
-        return FlowDetail.new(row, http_version, req_head, req_body, resp_head, resp_body, h2_conn, h2_stream)
+        req_trunc = rs.read(Int64) != 0
+        resp_trunc = rs.read(Int64) != 0
+        return FlowDetail.new(row, http_version, req_head, req_body, resp_head, resp_body,
+          h2_conn, h2_stream, req_trunc, resp_trunc)
       end
       nil
     end
@@ -444,34 +447,40 @@ module Gori
     end
 
     private def insert_one(conn : DB::Connection, req : CapturedRequest) : Int64
+      # request_size is the TRUE wire size (body_size when the BLOB was truncated),
+      # so the History size column stays honest even for a capped body.
+      body_size = req.body_size || req.body.try(&.size.to_i64) || 0_i64
       conn.exec(
         <<-SQL,
         INSERT INTO flows
           (created_at, scheme, host, port, method, target, http_version,
            sni, alpn, tls_version, request_head, request_body, request_size, state,
-           h2_conn_id, h2_stream_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           h2_conn_id, h2_stream_id, request_body_truncated)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         SQL
         req.created_at, req.scheme, req.host, req.port, req.method, req.target,
         req.http_version, req.sni, req.alpn, req.tls_version,
         req.head, req.body,
-        req.head.size.to_i64 + (req.body.try(&.size.to_i64) || 0_i64),
-        FlowState::Pending.value, req.h2_conn_id, req.h2_stream_id)
+        req.head.size.to_i64 + body_size,
+        FlowState::Pending.value, req.h2_conn_id, req.h2_stream_id,
+        req.body_truncated? ? 1 : 0)
       conn.scalar("SELECT last_insert_rowid()").as(Int64)
     end
 
     private def update_one(conn : DB::Connection, resp : CapturedResponse) : Nil
+      body_size = resp.body_size || resp.body.try(&.size.to_i64) || 0_i64
       conn.exec(
         <<-SQL,
         UPDATE flows SET
           response_head = ?, response_body = ?, status = ?, reason = ?,
           content_type = ?, response_size = ?, state = ?,
-          ttfb_us = ?, duration_us = ?, error = ?
+          ttfb_us = ?, duration_us = ?, error = ?, response_body_truncated = ?
         WHERE id = ?
         SQL
         resp.head, resp.body, resp.status, resp.reason, resp.content_type,
-        resp.head.size.to_i64 + (resp.body.try(&.size.to_i64) || 0_i64),
-        resp.state.value, resp.ttfb_us, resp.duration_us, resp.error, resp.flow_id)
+        resp.head.size.to_i64 + body_size,
+        resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
+        resp.body_truncated? ? 1 : 0, resp.flow_id)
     end
 
     private def insert_ws_one(conn : DB::Connection, op : InsertWs) : Nil
