@@ -38,7 +38,9 @@ module Gori
       setup_logging(File.open(File.join(Paths.data_dir, "gori.log"), "a"))
       projects = ProjectRegistry.new(Paths.projects_dir)
       term = Termisu.new
+      term.enable_enhanced_keyboard  # for better international input (Kitty protocol + report_text for IME composed text like Hangul)
       begin
+
         loop do
           project = Tui::ProjectPicker.new(term, projects).run
           break unless project # nil => quit gori
