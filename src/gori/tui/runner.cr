@@ -360,7 +360,12 @@ module Gori::Tui
       elsif key.backspace?
         @notes.backspace
       elsif key.up?
-        @notes.move(-1, 0)
+        if @notes.at_top? # ↑ on the first line pops to the tab bar (save first, like esc)
+          save_notes
+          focus_pane(:menu)
+        else
+          @notes.move(-1, 0)
+        end
       elsif key.down?
         @notes.move(1, 0)
       elsif key.left?
@@ -393,7 +398,12 @@ module Gori::Tui
       elsif key.backspace?
         @project_view.backspace
       elsif key.up?
-        @project_view.move(-1, 0)
+        if @project_view.at_top? # ↑ on the first line pops to the tab bar (save first, like esc)
+          save_project_desc
+          focus_pane(:menu)
+        else
+          @project_view.move(-1, 0)
+        end
       elsif key.down?
         @project_view.move(1, 0)
       elsif key.left?
@@ -519,7 +529,7 @@ module Gori::Tui
       case
       when key.enter?     then view.edit_newline
       when key.backspace? then view.edit_backspace
-      when key.up?        then view.edit_move(-1, 0)
+      when key.up?        then view.at_top? ? focus_pane(:menu) : view.edit_move(-1, 0)
       when key.down?      then view.edit_move(1, 0)
       when key.left?      then view.edit_move(0, -1)
       when key.right?     then view.edit_move(0, 1)
@@ -539,6 +549,7 @@ module Gori::Tui
       case
 
       when key.enter?     then replay_send
+      when key.up?        then focus_pane(:menu) # target is the top pane → ↑ pops to the tab bar
       when key.backspace? then view.target_backspace
       when key.left?      then view.target_move(-1)
       when key.right?     then view.target_move(1)
@@ -558,7 +569,7 @@ module Gori::Tui
       key = ev.key
       case
       when key.enter?            then replay_send
-      when key.up?               then view.scroll(-1)
+      when key.up?               then view.at_top? ? focus_pane(:menu) : view.scroll(-1)
       when key.down?             then view.scroll(1)
       when key.left?, key.right? then view.toggle_resp_mode
       when key.lower_d?          then view.toggle_resp_mode

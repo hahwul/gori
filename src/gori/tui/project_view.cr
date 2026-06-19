@@ -34,7 +34,6 @@ module Gori::Tui
       @desc_dirty = false
     end
 
-
     # Snapshot stats from the live session (called on tab enter and initial run).
     # Re-loading is cheap and keeps numbers fresh when user switches away and back
     # after more capture.
@@ -57,7 +56,6 @@ module Gori::Tui
     def set_preedit(text : String) : Nil
       @desc_area.set_preedit(text)
     end
-
 
     # Persist description iff edited (called on tab exit paths, like NotesView).
     def save(store : Store) : Nil
@@ -84,6 +82,11 @@ module Gori::Tui
 
     def move(dr : Int32, dc : Int32) : Nil
       @desc_area.move(dr, dc)
+    end
+
+    # Cursor on the first description line → ↑ pops focus to the tab bar (after saving).
+    def at_top? : Bool
+      @desc_area.at_top?
     end
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
@@ -138,8 +141,6 @@ module Gori::Tui
       desc_rect = Rect.new(rect.x + 2, y, {rect.w - 4, 0}.max, desc_h)
       @desc_area.render(screen, desc_rect, cursor: focused)
     end
-
-
 
     private def format_time(t : Time?) : String
       return "—" if t.nil?

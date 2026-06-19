@@ -16,7 +16,6 @@ module Gori::Tui
       set_text(text)
     end
 
-
     def set_text(text : String) : Nil
       @lines = text.split('\n').map(&.rstrip('\r'))
       @lines = [""] if @lines.empty?
@@ -25,7 +24,6 @@ module Gori::Tui
       @scroll = 0
       @preedit = ""
     end
-
 
     # Preedit/composing text from IME (e.g. current Hangul syllable while typing jamo).
     # Rendered after the current line's text at cursor, with composing style (underline).
@@ -37,7 +35,6 @@ module Gori::Tui
     def preedit : String
       @preedit
     end
-
 
     def to_bytes : Bytes
       @lines.join("\r\n").to_slice
@@ -103,6 +100,12 @@ module Gori::Tui
       end
     end
 
+    # Cursor is on the first line — the Runner pops focus to the tab bar when ↑
+    # is pressed here (natural upward flow, matching the body lists).
+    def at_top? : Bool
+      @cy == 0
+    end
+
     # `highlight` overlays request/response syntax colours on the buffer while
     # keeping it fully editable: pass `:request` or `:response` for the held
     # HTTP message editors (Replay, Intercept), nil for plain prose (Notes,
@@ -151,8 +154,6 @@ module Gori::Tui
             screen.cell(cxs + off, rect.y + i, cch, Theme::BG, Theme::ACCENT)
           end
         end
-
-
       end
     end
 

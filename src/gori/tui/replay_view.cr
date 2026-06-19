@@ -147,6 +147,18 @@ module Gori::Tui
       true
     end
 
+    # Top boundary of the focused pane — the Runner pops focus to the tab bar when
+    # ↑ is pressed here (natural upward flow): the single-line target always, the
+    # request editor at its first line, the response when scrolled to the top.
+    def at_top? : Bool
+      case @focus
+      when :target   then true
+      when :request  then @editor.at_top?
+      when :response then @scroll == 0
+      else                false
+      end
+    end
+
     def apply(result : Replay::Result) : Nil
       # The prior send becomes the diff baseline (diff vs the *previous* request,
       # not always the original captured flow). For the first send we still fall

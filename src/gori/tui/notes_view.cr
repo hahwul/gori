@@ -30,7 +30,6 @@ module Gori::Tui
       @area.set_preedit(text)
     end
 
-
     def insert(ch : Char) : Nil
       @area.insert(ch)
       @dirty = true
@@ -48,6 +47,11 @@ module Gori::Tui
 
     def move(dr : Int32, dc : Int32) : Nil
       @area.move(dr, dc)
+    end
+
+    # Cursor on the first line → ↑ pops focus to the tab bar (after saving).
+    def at_top? : Bool
+      @area.at_top?
     end
 
     # Persist iff edited (no-op otherwise — cheap to call on every exit path).
