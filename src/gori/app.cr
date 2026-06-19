@@ -38,10 +38,9 @@ module Gori
       setup_logging(File.open(File.join(Paths.data_dir, "gori.log"), "a"))
       projects = ProjectRegistry.new(Paths.projects_dir)
       term = Termisu.new
-      term.enable_enhanced_keyboard  # Kitty 17u (disambig + report_text) for better IME/Unicode; avoids report_all_keys(31u) which can split Hangul jamo. Committed text via raw UTF-8 bytes (IME composed syllables) + CSI for specials; Preedit via 0-code CSI if terminal provides.
+      term.enable_enhanced_keyboard # Kitty 17u (disambig + report_text) for better IME/Unicode; avoids report_all_keys(31u) which can split Hangul jamo. Committed text via raw UTF-8 bytes (IME composed syllables) + CSI for specials; Preedit via 0-code CSI if terminal provides.
 
       begin
-
         loop do
           project = Tui::ProjectPicker.new(term, projects).run
           break unless project # nil => quit gori
@@ -65,7 +64,16 @@ module Gori
     end
 
     private def open_and_run(project : Project, term : Termisu) : Symbol
-      session = Session.open(@config, @ca, @registry, project)
+      session =
+        begin
+          Session.open(@config, @ca, @registry, project)
+        rescue ex
+          # A failed open (e.g. the proxy port is already in use) must not crash the
+          # TUI with a backtrace into the alt-screen — log it and fall back to the
+          # picker. Session.open already cleaned up any partially-opened resources.
+          Log.error(exception: ex) { "failed to open session for project '#{project.name}'" }
+          return :back
+        end
       begin
         Tui::Runner.new(session, term).run
       ensure

@@ -30,16 +30,25 @@ module Gori
                   registry : Verb::Registry, project : Project) : Session
       events = Channel(Store::FlowEvent).new(1024)
       store = Store.open(project.db_path, events)
-      sink = Proxy::StoreSink.new(store)
-      rules = Rules.load(store)            # shared: proxy reads, TUI edits (Mutex-guarded)
-      scope = Scope.load(store)            # shared by the TUI lens AND intercept gating
-      interceptor = Interceptor.new(scope) # shared: proxy fibers hold, TUI decides
-      tunnel = Proxy::Tls::Tunnel.new(ca, verify_upstream: !config.insecure_upstream?,
-        rewriter: rules, interceptor: interceptor)
-      proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
-        rewriter: rules, interceptor: interceptor)
-      proxy.start
-      new(config, ca, registry, project, store, proxy, events, rules, scope, interceptor)
+      begin
+        sink = Proxy::StoreSink.new(store)
+        rules = Rules.load(store)            # shared: proxy reads, TUI edits (Mutex-guarded)
+        scope = Scope.load(store)            # shared by the TUI lens AND intercept gating
+        interceptor = Interceptor.new(scope) # shared: proxy fibers hold, TUI decides
+        tunnel = Proxy::Tls::Tunnel.new(ca, verify_upstream: !config.insecure_upstream?,
+          rewriter: rules, interceptor: interceptor)
+        proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
+          rewriter: rules, interceptor: interceptor)
+        proxy.start
+        new(config, ca, registry, project, store, proxy, events, rules, scope, interceptor)
+      rescue ex
+        # proxy.start (e.g. port already in use) or any setup step failing after
+        # the store is open would otherwise leak the store's writer fiber + db fd
+        # and the events channel. Tear them down, then re-raise for the caller.
+        store.close rescue nil
+        events.close rescue nil
+        raise ex
+      end
     end
 
     def initialize(@config, @ca, @registry, @project, @store, @proxy, @flow_events,
