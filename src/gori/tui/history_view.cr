@@ -14,7 +14,14 @@ module Gori::Tui
   # (no queue/ranking, P8). A QL bar (`/`) filters the list; analysis is by query
   # (pull), with field/value suggestions while typing. Also owns the detail view.
   class HistoryView
-    PAGE       = 1000
+    PAGE = 1000
+    # Hard cap on rows held in memory. The initial load is PAGE; live capture
+    # then appends, but never past MAX_ROWS — the oldest are dropped from the
+    # window (in TRIM_SLACK batches so the id index is rebuilt amortized, not per
+    # flow). This keeps a long high-traffic session's footprint bounded; the
+    # authoritative history still lives in SQLite (reload/QL re-query it).
+    MAX_ROWS   = 5000
+    TRIM_SLACK =  512
     QL_FIELDS  = %w(host method status path scheme body flag)
     METHOD_VAL = %w(GET POST PUT DELETE PATCH HEAD OPTIONS)
 
@@ -23,7 +30,7 @@ module Gori::Tui
     getter? querying : Bool
     getter query : String
 
-    def initialize
+    def initialize(@max_rows : Int32 = MAX_ROWS, @trim_slack : Int32 = TRIM_SLACK)
       @rows = [] of Store::FlowRow
       @index = {} of Int64 => Int32 # flow id -> position in @rows
       @selected = 0
@@ -56,8 +63,7 @@ module Gori::Tui
       prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
       combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(@query))
       @rows = store.search(combined, PAGE).reverse!
-      @index = {} of Int64 => Int32
-      @rows.each_with_index { |r, i| @index[r.id] = i }
+      reindex
       @filter_dirty = false
       @selected =
         if @follow
@@ -87,6 +93,7 @@ module Gori::Tui
           @index[row.id] = @rows.size
           @rows << row
           @selected = @rows.size - 1 if @follow
+          trim_window if @rows.size > @max_rows + @trim_slack
         end
       when :updated
         if (idx = @index[event.id]?) && (row = store.flow_row(event.id))
@@ -357,6 +364,24 @@ module Gori::Tui
       @scroll = @selected if @selected < @scroll
       @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
       @scroll = 0 if @scroll < 0
+    end
+
+    # Rebuild the id→position index from @rows (after a reload or a window trim).
+    private def reindex : Nil
+      @index = {} of Int64 => Int32
+      @rows.each_with_index { |r, i| @index[r.id] = i }
+    end
+
+    # Drop the oldest rows so the window stays at MAX_ROWS, shifting the selection
+    # and scroll to follow. Done in batches (see TRIM_SLACK) so the O(n) reindex
+    # amortizes instead of running on every appended flow.
+    private def trim_window : Nil
+      drop = @rows.size - @max_rows
+      return if drop <= 0
+      @rows.shift(drop)
+      reindex
+      @selected = {@selected - drop, 0}.max
+      @scroll = {@scroll - drop, 0}.max
     end
 
     # The detail body as styled lines (request/response head + body with HTTP

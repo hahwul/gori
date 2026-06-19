@@ -192,6 +192,24 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "bounds the in-memory window during long live capture (drops oldest, keeps newest)" do
+    tmp_store do |store|
+      view = HistoryView.new(max_rows: 10, trim_slack: 4)
+      view.reload(store)
+      last_id = 0_i64
+      # append well past the window via live :inserted events
+      20.times do
+        last_id = add_flow(store, "GET", "/x", 200)
+        view.on_event(Gori::Store::FlowEvent.new(last_id, :inserted), store)
+      end
+      view.rows.size.should be <= 10 + 4 # never grows without bound
+      view.follow?.should be_true
+      view.selected_id.should eq(last_id) # following stays pinned to the newest flow
+      # the oldest rows have left the window; the newest are present
+      view.rows.last.id.should eq(last_id)
+    end
+  end
+
   it "syntax-highlights the request line and headers in the detail view" do
     tmp_store do |store|
       add_flow(store, "GET", "/secret", 200)
