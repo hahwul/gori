@@ -52,6 +52,12 @@ module Gori::Tui
       @selected = (@selected + delta).clamp(0, @items.size - 1)
     end
 
+    # At the first (top) queue item (and not editing) — lets the Runner pop focus
+    # to the tab bar on ↑.
+    def at_top? : Bool
+      !@editing && @selected == 0
+    end
+
     def toggle_edit : Nil
       if @editing
         @editing = false

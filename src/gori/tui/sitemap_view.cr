@@ -59,6 +59,11 @@ module Gori::Tui
       @selected = (@selected + delta).clamp(0, rows.size - 1)
     end
 
+    # At the first (top) node — lets the Runner pop focus to the tab bar on ↑.
+    def at_top? : Bool
+      @selected == 0
+    end
+
     def toggle : Nil
       node = selected_node
       node.expanded = !node.expanded if node && !node.leaf?

@@ -56,6 +56,19 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "reports at_top? (drives the ↑-at-top → tab-bar focus flow)" do
+    tmp_store do |store|
+      3.times { |i| add_flow(store, "GET", "/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.at_top?.should be_true # newest is selected at the top (follow)
+      view.move(1)
+      view.at_top?.should be_false
+      view.move(-1)
+      view.at_top?.should be_true
+    end
+  end
+
   it "moves the selection and disengages follow" do
     tmp_store do |store|
       3.times { |i| add_flow(store, "GET", "/#{i}", 200) }

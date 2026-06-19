@@ -456,7 +456,7 @@ module Gori::Tui
         case
         when key.escape?               then focus_pane(:menu)
         when key.lower_j?, key.down?   then @intercept.move(1)
-        when key.lower_k?, key.up?     then @intercept.move(-1)
+        when key.lower_k?, key.up?     then @intercept.at_top? ? focus_pane(:menu) : @intercept.move(-1)
         when key.enter?, key.lower_e?  then @intercept.toggle_edit
         when key.lower_f? && ev.shift? then intercept_forward_all
         when key.lower_f?              then intercept_forward
@@ -970,6 +970,9 @@ module Gori::Tui
     end
 
     def findings_move(delta : Int32) : Nil
+      if delta < 0 && @findings.at_top?
+        return focus_pane(:menu) # ↑ at the top finding pops up to the tab bar
+      end
       @findings.move(delta)
     end
 
@@ -1015,7 +1018,11 @@ module Gori::Tui
     end
 
     def sitemap_move(delta : Int32) : Nil
-      @sitemap.move(delta)
+      if delta < 0 && @sitemap.at_top?
+        focus_pane(:menu) # ↑ at the top node pops up to the tab bar
+      else
+        @sitemap.move(delta)
+      end
     end
 
     def sitemap_toggle : Nil
@@ -1031,7 +1038,13 @@ module Gori::Tui
     end
 
     def move_selection(delta : Int32) : Nil
-      @history.move(delta)
+      # ↑ at the top row pops focus up to the tab bar (natural upward keyboard flow);
+      # otherwise move within the list.
+      if delta < 0 && @history.at_top?
+        focus_pane(:menu)
+      else
+        @history.move(delta)
+      end
     end
 
     def open_detail : Nil

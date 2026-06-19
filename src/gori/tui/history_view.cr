@@ -119,6 +119,12 @@ module Gori::Tui
       @follow = (@selected == 0)
     end
 
+    # At the first (top) row — used by the Runner to pop focus up to the tab bar
+    # when ↑ is pressed at the top (natural upward keyboard flow).
+    def at_top? : Bool
+      @selected == 0
+    end
+
     def toggle_follow : Nil
       @follow = !@follow
       @selected = 0 if @follow && !@rows.empty?

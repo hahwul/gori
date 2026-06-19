@@ -32,6 +32,11 @@ module Gori::Tui
       @selected = (@selected + delta).clamp(0, @findings.size - 1)
     end
 
+    # At the first (top) finding — lets the Runner pop focus to the tab bar on ↑.
+    def at_top? : Bool
+      @selected == 0
+    end
+
     def detail_open? : Bool
       !@detail.nil?
     end
