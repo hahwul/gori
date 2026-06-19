@@ -360,11 +360,17 @@ module Gori
     end
 
     # Distinct (host, method, target) endpoints for building the Sitemap tree,
-    # honouring an optional filter (the Scope lens).
-    def sitemap_entries(filter : QL::Filter = QL::EMPTY) : Array({String, String, String})
+    # honouring an optional filter (the Scope lens). Bounded by `limit` so a huge
+    # history can't materialize an unbounded DISTINCT set into memory (a sitemap
+    # with thousands of endpoints is already past human-scannable).
+    SITEMAP_MAX = 10_000
+
+    def sitemap_entries(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX) : Array({String, String, String})
       rows = [] of {String, String, String}
-      @db.query("SELECT DISTINCT host, method, target FROM flows WHERE #{filter.sql} ORDER BY host, target",
-        args: filter.args) do |rs|
+      args = filter.args.dup
+      args << limit
+      @db.query("SELECT DISTINCT host, method, target FROM flows WHERE #{filter.sql} ORDER BY host, target LIMIT ?",
+        args: args) do |rs|
         rs.each { rows << {rs.read(String), rs.read(String), rs.read(String)} }
       end
       rows

@@ -93,6 +93,29 @@ describe Gori::Proxy::Server do
     String.new(resp.body.not_nil!).should eq("Hello!")
   end
 
+  it "releases its connection slot after each connection (bounded concurrency)" do
+    # cap of 1: each sequential request must release its slot or the next would
+    # block forever. Three back-to-back requests all completing proves release.
+    seen = Channel(String).new(4)
+    done = Channel(Nil).new(4)
+    origin_port = start_origin("ok", seen)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, max_connections: 1)
+    proxy.start
+
+    3.times do
+      client = TCPSocket.new("127.0.0.1", proxy.port)
+      client << "GET /hello HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+      client.flush
+      client.gets_to_end.should contain("ok")
+      client.close
+      done.receive # this flow's response was captured before we move on
+    end
+    proxy.stop
+    sink.responses.size.should eq(3)
+  end
+
   it "rewrites an absolute-form (forward-proxy) target to origin-form upstream" do
     seen = Channel(String).new(1)
     done = Channel(Nil).new(1)

@@ -165,6 +165,14 @@ describe Gori::Store do
     end
   end
 
+  it "bounds sitemap_entries by the limit so a huge history can't materialize unbounded" do
+    with_store do |store|
+      5.times { |i| store.insert_flow(sample_request(host: "h#{i}.test", target: "/p#{i}")) }
+      store.sitemap_entries(limit: 2).size.should eq(2)
+      store.sitemap_entries.size.should eq(5) # default limit is generous
+    end
+  end
+
   it "pages older rows via the before_id cursor" do
     with_store do |store|
       ids = (1..5).map { |i| store.insert_flow(sample_request(target: "/#{i}")) }

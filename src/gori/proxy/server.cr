@@ -13,10 +13,19 @@ module Gori::Proxy
     getter host : String
     getter port : Int32
 
+    # Ceiling on simultaneously-handled client connections. A connection flood or
+    # many slow/keep-alive clients otherwise spawns unbounded fibers (each with a
+    # stack + capture buffers + possibly blocked on the store writer), which can
+    # exhaust memory. Past the cap, accept() simply pauses — the kernel's TCP
+    # backlog applies natural backpressure instead.
+    MAX_CONNECTIONS = 2048
+
     def initialize(@host : String, @port : Int32, @sink : FlowSink, @tls : TlsMitm? = nil,
-                   @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil)
+                   @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
+                   max_connections : Int32 = MAX_CONNECTIONS)
       @server = nil.as(TCPServer?)
       @running = false
+      @slots = Channel(Nil).new(max_connections) # counting semaphore: send=acquire, receive=release
     end
 
     # Binds and starts the accept loop in its own fiber. Returns once listening.
@@ -41,9 +50,14 @@ module Gori::Proxy
     private def accept_loop(server : TCPServer) : Nil
       while @running
         client = server.accept? || break
+        @slots.send(nil)   # acquire a slot — blocks (pausing accept) when MAX_CONNECTIONS are in flight
         client.sync = true # immediate writes (P6)
         client.tcp_nodelay = true
-        spawn { ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor).run }
+        spawn do
+          ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor).run
+        ensure
+          @slots.receive # release the slot (even on error) so a new connection can be accepted
+        end
       end
     end
   end
