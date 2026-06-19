@@ -17,17 +17,20 @@ module Gori::Tui
       @query = ""
       @results = [] of Verb::Definition
       @selected = 0
+      @preedit = ""
     end
 
     def reset(ctx : Verb::ExecContext) : Nil
       @query = ""
       @selected = 0
+      @preedit = ""
       refresh(ctx)
     end
 
     def append(ch : Char, ctx : Verb::ExecContext) : Nil
       @query += ch
       @selected = 0
+      @preedit = ""
       refresh(ctx)
     end
 
@@ -38,10 +41,11 @@ module Gori::Tui
       refresh(ctx)
     end
 
+    # IME composing text, drawn (underlined) at the caret without touching the
+    # committed query — same model as TextArea. Cleared when a char commits.
     def set_preedit(text : String) : Nil
-      # For palette, preedit (if sent as char by terminal) will append to @query via normal path.
+      @preedit = text
     end
-
 
     def move(delta : Int32) : Nil
       return if @results.empty?
@@ -67,12 +71,9 @@ module Gori::Tui
       box = Rect.new(x, y, w, h)
       Frame.card(screen, box, "COMMANDS", border: Theme::BORDER_FOCUS)
 
-      # query line
+      # query line (caret always at end; preedit shown underlined there)
       screen.text(box.x + 2, box.y + 1, "›", Theme::ACCENT, Theme::PANEL)
-      screen.text(box.x + 4, box.y + 1, @query, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - 6)
-      cursor = box.x + 4 + Screen.display_width(@query)
-      screen.cell(cursor, box.y + 1, '_', Theme::ACCENT, Theme::PANEL)
-      screen.cursor(cursor, box.y + 1)
+      screen.input_line(box.x + 4, box.y + 1, @query, @query.size, @preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - 6)
 
       Frame.tee_divider(screen, box, box.y + 2)
 

@@ -39,6 +39,7 @@ module Gori::Tui
       @filter_dirty = false # a filtered view needs a coalesced reload after draining
       @query = ""
       @qcx = 0
+      @preedit = ""
       @querying = false
       @scope = nil.as(Scope?)
       @detail = nil.as(Store::FlowDetail?)
@@ -132,6 +133,7 @@ module Gori::Tui
       @querying = false
       @query = ""
       @qcx = 0
+      @preedit = ""
     end
 
     def query_insert(ch : Char) : Nil
@@ -149,11 +151,11 @@ module Gori::Tui
       @qcx = (@qcx + d).clamp(0, @query.size)
     end
 
+    # IME composing text, drawn (underlined) at the caret without touching the
+    # committed query — same model as TextArea. Cleared when a char commits.
     def set_preedit(text : String) : Nil
-      @query = text
-      @qcx = text.size
+      @preedit = text
     end
-
 
     # Tab-complete the current token to the first suggestion.
     def query_complete : Bool
@@ -319,12 +321,7 @@ module Gori::Tui
         prefix = "query › "
         screen.text(rect.x + 1, rect.y, prefix, Theme::ACCENT)
         base = rect.x + 1 + prefix.size
-        screen.text(base, rect.y, @query, Theme::TEXT_BRIGHT, width: rect.w - prefix.size - 2)
-        ch = @qcx < @query.size ? @query[@qcx] : ' '
-        cursor_x = base + Screen.display_width(@query[0, @qcx])
-        screen.cell(cursor_x, rect.y, ch, Theme::BG, Theme::ACCENT)
-        screen.cursor(cursor_x, rect.y) if @querying
-
+        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme::TEXT_BRIGHT, width: rect.w - prefix.size - 2)
       elsif filtering?
         screen.text(rect.x + 1, rect.y, ": #{@query}", Theme::TEXT, width: rect.w - 10)
         count = @rows.size.to_s

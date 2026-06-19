@@ -11,7 +11,6 @@ module Gori::Tui
     abstract def size : {Int32, Int32}
   end
 
-
   class TermisuBackend < Backend
     def initialize(@term : Termisu)
     end
@@ -25,7 +24,6 @@ module Gori::Tui
       @term.size
     end
   end
-
 
   # Minimal immediate-mode drawing surface over a Backend: enough primitives to
   # build gori's chrome and views, nothing more (P0 — DESIGN.md §5 "minimal,
@@ -48,7 +46,6 @@ module Gori::Tui
       end
       w
     end
-
 
     def cell(x : Int32, y : Int32, grapheme : Char | String, fg : Color, bg : Color = Theme::BG,
              attr : Attribute = Attribute::None) : Nil
@@ -74,12 +71,10 @@ module Gori::Tui
         break if cur_x + gw > @width
         cell(cur_x, y, g.to_s, fg, bg, attr)
         cur_x += gw
-
       end
 
       cur_x
     end
-
 
     def fill(rect : Rect, bg : Color) : Nil
       (rect.y...rect.bottom).each do |yy|
@@ -128,6 +123,31 @@ module Gori::Tui
     def cursor(x : Int32, y : Int32) : Nil
       @desired_cursor = {x, y}
     end
+
+    # Draws a single-line editable field at (x, y): the committed `value` with an
+    # optional IME `preedit` (underlined composing text) inserted at column `cx`,
+    # then a block caret and the synced hardware cursor. This is the shared
+    # rendering used by every single-line input (Scope/Rules/Palette/History
+    # query) so they all show live composition identically to the multi-line
+    # TextArea. `bg` is the field background; the caret always inverts onto ACCENT.
+    def input_line(x : Int32, y : Int32, value : String, cx : Int32, preedit : String,
+                   fg : Color, bg : Color = Theme::BG, width : Int32? = nil) : Nil
+      cx = cx.clamp(0, value.size)
+      right = x + (width || (@width - x))
+      prefix = value[0, cx]
+      suffix = value[cx..]
+      px = x
+      px = text(px, y, prefix, fg, bg, width: {right - px, 0}.max) unless prefix.empty?
+      px = text(px, y, preedit, fg, bg, attr: Attribute::Underline, width: {right - px, 0}.max) unless preedit.empty?
+      text(px, y, suffix, fg, bg, width: {right - px, 0}.max) unless suffix.empty?
+      # Block caret sits just after prefix+preedit, over the suffix's first cell
+      # (or a space). The terminal's own IME UI anchors at the hardware cursor.
+      caret_x = x + Screen.display_width(prefix) + Screen.display_width(preedit)
+      caret_ch = preedit.empty? ? (cx < value.size ? value[cx] : ' ') : ' '
+      if caret_x < right
+        cell(caret_x, y, caret_ch, Theme::BG, Theme::ACCENT)
+        cursor(caret_x, y)
+      end
+    end
   end
 end
-

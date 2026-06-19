@@ -96,6 +96,11 @@ module Gori::Tui
       @notes.move(dr, dc) if @editing_notes
     end
 
+    # Live IME composing text for the notes editor (delegates to the TextArea).
+    def set_preedit(text : String) : Nil
+      @notes.set_preedit(text) if @editing_notes
+    end
+
     def save_notes(store : Store) : Nil
       return unless finding = @detail
       store.update_finding(finding.id, notes: String.new(@notes.to_bytes))
@@ -208,11 +213,13 @@ module Gori::Tui
 
     def initialize(@title : String = "", @host : String? = nil, @flow_id : Int64? = nil)
       @cx = @title.size
+      @preedit = ""
     end
 
     def insert(ch : Char) : Nil
       @title = "#{@title[0, @cx]}#{ch}#{@title[@cx..]}"
       @cx += 1
+      @preedit = ""
     end
 
     def backspace : Nil
@@ -225,11 +232,11 @@ module Gori::Tui
       @cx = (@cx + d).clamp(0, @title.size)
     end
 
+    # IME composing text, drawn (underlined) at the caret without touching the
+    # committed title — same model as TextArea. Cleared when a char commits.
     def set_preedit(text : String) : Nil
-      @title = text
-      @cx = text.size
+      @preedit = text
     end
-
 
     def render(screen : Screen, area : Rect) : Nil
       w = {area.w - 4, 56}.min
@@ -242,12 +249,7 @@ module Gori::Tui
       prefix = "title › "
       screen.text(box.x + 2, box.y + 2, prefix, Theme::ACCENT, Theme::PANEL)
       base = box.x + 2 + prefix.size
-      screen.text(base, box.y + 2, @title, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
-      ch = @cx < @title.size ? @title[@cx] : ' '
-      cursor_x = base + Screen.display_width(@title[0, @cx])
-      screen.cell(cursor_x, box.y + 2, ch, Theme::BG, Theme::ACCENT)
-      screen.cursor(cursor_x, box.y + 2)
-
+      screen.input_line(base, box.y + 2, @title, @cx, @preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
     end
   end
 end

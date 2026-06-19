@@ -12,12 +12,14 @@ module Gori::Tui
       @selected = 0
       @input = ""
       @icx = 0
+      @preedit = ""
     end
 
     def reset : Nil
       @selected = 0
       @input = ""
       @icx = 0
+      @preedit = ""
     end
 
     def insert(ch : Char) : Nil
@@ -38,11 +40,11 @@ module Gori::Tui
       @icx = (@icx + d).clamp(0, @input.size)
     end
 
+    # IME composing text, rendered (underlined) at the caret without touching the
+    # committed input — same model as TextArea. Cleared when a char commits.
     def set_preedit(text : String) : Nil
-      @input = text
-      @icx = text.size
+      @preedit = text
     end
-
 
     def select_move(d : Int32) : Nil
       @selected = (@selected + d).clamp(0, {@scope.patterns.size - 1, 0}.max)
@@ -54,6 +56,7 @@ module Gori::Tui
       @scope.add(pattern)
       @input = ""
       @icx = 0
+      @preedit = ""
       true
     end
 
@@ -87,11 +90,7 @@ module Gori::Tui
       prefix = "add › "
       screen.text(box.x + 2, box.y + 1, prefix, Theme::ACCENT, Theme::PANEL)
       base = box.x + 2 + prefix.size
-      screen.text(base, box.y + 1, @input, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
-      ch = @icx < @input.size ? @input[@icx] : ' '
-      cursor_x = base + Screen.display_width(@input[0, @icx])
-      screen.cell(cursor_x, box.y + 1, ch, Theme::BG, Theme::ACCENT)
-      screen.cursor(cursor_x, box.y + 1)
+      screen.input_line(base, box.y + 1, @input, @icx, @preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
 
       Frame.tee_divider(screen, box, box.y + 2)
 

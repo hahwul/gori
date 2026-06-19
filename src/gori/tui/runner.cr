@@ -144,19 +144,35 @@ module Gori::Tui
     end
 
     private def apply_preedit(text : String) : Nil
-      # Route preedit to the active text editor so composing text (e.g. Hangul
-      # jamo building into syllable) can be shown live with underline in the
-      # input field, until composition commits (then normal char insert + clear preedit).
-      case @active_tab
-      when :notes
-        @notes.set_preedit(text) if @focus == :body
-      when :project
-        @project_view.set_preedit(text) if @focus == :body
-      when :replay
-        if @focus == :body
-          current_replay_view.try(&.set_preedit(text))
+      # Route preedit to whichever input is active so composing text (e.g. Hangul
+      # jamo building into a syllable) shows live with an underline, until it
+      # commits (a normal char insert then clears the preedit). The dispatch
+      # priority mirrors handle_key: overlays first, then text-entry sub-modes,
+      # then the focused tab body — so EVERY text field gets the same live
+      # composition preview, not just the Notes/Project/Replay editors.
+      case @overlay
+      when :palette     then @palette.set_preedit(text)
+      when :scope       then @scope_overlay.set_preedit(text)
+      when :rules       then @rules_overlay.set_preedit(text)
+      when :finding_new then @finding_form.set_preedit(text)
+      when :none        then apply_preedit_body(text)
+      end
+    end
+
+    # Preedit routing for the focused tab body (no overlay open). Split out so the
+    # tab/sub-mode fan-out doesn't inflate apply_preedit's complexity.
+    private def apply_preedit_body(text : String) : Nil
+      return unless @focus == :body
+      if @active_tab == :history && @history.querying?
+        @history.set_preedit(text)
+      elsif @active_tab == :findings && @findings.editing_notes?
+        @findings.set_preedit(text)
+      else
+        case @active_tab
+        when :notes   then @notes.set_preedit(text)
+        when :project then @project_view.set_preedit(text)
+        when :replay  then current_replay_view.try(&.set_preedit(text))
         end
-      # intercept edit etc can be added similarly if they expose set_preedit on their TextArea
       end
     end
 
@@ -233,6 +249,7 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @scope_overlay.insert(c)
+          @scope_overlay.set_preedit("") # commit any preedit
         end
 
       end
@@ -263,6 +280,7 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @rules_overlay.insert(c)
+          @rules_overlay.set_preedit("") # commit any preedit
         end
 
       end
@@ -282,6 +300,7 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @finding_form.insert(c)
+          @finding_form.set_preedit("") # commit any preedit
         end
 
       end
@@ -303,6 +322,7 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @findings.notes_insert(c)
+          @findings.set_preedit("") # commit any preedit
         end
 
       end
