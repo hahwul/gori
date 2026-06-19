@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./highlight"
 require "../store"
 require "../ql"
 require "../scope"
@@ -181,7 +182,7 @@ module Gori::Tui
     end
 
     def scroll_detail(delta : Int32) : Nil
-      @detail_scroll = (@detail_scroll + delta).clamp(0, {detail_lines.size - 1, 0}.max)
+      @detail_scroll = (@detail_scroll + delta).clamp(0, {detail_styled.size - 1, 0}.max)
     end
 
     def toggle_pane : Nil
@@ -289,13 +290,13 @@ module Gori::Tui
       screen.text(rect.x + 12, rect.y, "tab: switch · esc: back", Theme::MUTED)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
-      lines = detail_lines
+      lines = detail_styled
       top = rect.y + 2
       vis = {rect.bottom - top, 0}.max
       (0...vis).each do |i|
         li = @detail_scroll + i
         break if li >= lines.size
-        screen.text(rect.x + 1, top + i, lines[li], Theme::TEXT, width: rect.w - 2)
+        Highlight.draw(screen, rect.x + 1, top + i, lines[li], width: rect.w - 2)
       end
     end
 
@@ -357,22 +358,33 @@ module Gori::Tui
       @scroll = 0 if @scroll < 0
     end
 
-    private def detail_lines : Array(String)
+    # The detail body as styled lines (request/response head + body with HTTP
+    # syntax highlighting). The non-HTTP panes — raw h2 frames, WebSocket
+    # messages, opaque gRPC hex — carry no code to colour, so they wrap as plain
+    # body text; only their HTTP head (gRPC) gets highlighted.
+    private def detail_styled : Array(Highlight::Line)
       detail = @detail
-      return [] of String unless detail
+      return [] of Highlight::Line unless detail
       if @detail_pane == :frames && (frames = @detail_frames)
-        return frame_lines(frames, detail.h2_stream_id)
+        return wrap(frame_lines(frames, detail.h2_stream_id))
       end
       if @detail_pane == :response && (msgs = @detail_ws)
-        return ws_lines(msgs)
+        return wrap(ws_lines(msgs))
       end
       head, body = @detail_pane == :request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
-      lines = bytes_to_lines(head)
-      if body && !body.empty?
-        lines << ""
-        lines.concat(grpc_body?(head) ? grpc_lines(body) : bytes_to_lines(body))
+      if (body && !body.empty?) && grpc_body?(head)
+        lines = Highlight.message(head, nil, @detail_pane == :request)
+        lines << Highlight::Line.new
+        lines.concat(wrap(grpc_lines(body)))
+        return lines
       end
-      lines
+      Highlight.message(head, body, @detail_pane == :request)
+    end
+
+    # Wrap pre-formatted plain strings (frames / ws / gRPC hex) as single-span
+    # body-text lines so they share the styled rendering path.
+    private def wrap(strs : Array(String)) : Array(Highlight::Line)
+      strs.map { |s| [Highlight::Span.new(s, Theme::TEXT)] of Highlight::Span }
     end
 
     private def grpc_body?(head : Bytes?) : Bool
@@ -423,11 +435,6 @@ module Gori::Tui
         arrow = m.direction == "out" ? "→" : "←"
         m.text? ? "#{arrow} #{String.new(m.payload)}" : "#{arrow} «binary #{m.payload.size}b»"
       end
-    end
-
-    private def bytes_to_lines(bytes : Bytes?) : Array(String)
-      return [] of String unless bytes
-      String.new(bytes).split('\n').map(&.rstrip('\r'))
     end
   end
 end

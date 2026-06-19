@@ -191,6 +191,25 @@ describe Gori::Tui::HistoryView do
       backend.contains?("GET /secret HTTP/1.1").should be_true
     end
   end
+
+  it "syntax-highlights the request line and headers in the detail view" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/secret", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      backend = MemoryBackend.new(80, 12)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 12))
+      # the request line: GET coloured by verb, host header name accented
+      ry = (0...12).find { |y| backend.row(y).includes?("GET /secret HTTP") }.not_nil!
+      gx = backend.row(ry).index("GET /secret HTTP").not_nil!
+      backend.fg_at(gx, ry).should eq(Theme.method_color("GET")) # GET → green
+      hy = (0...12).find { |y| backend.row(y).includes?("Host") }.not_nil!
+      hx = backend.row(hy).index("Host").not_nil!
+      backend.fg_at(hx, hy).should eq(Theme::SYN_HEADER)
+    end
+  end
 end
 
 describe Gori::Tui::Keybind do

@@ -37,6 +37,20 @@ describe Gori::Tui::InterceptView do
     end
   end
 
+  it "syntax-highlights the held request bytes in the detail pane" do
+    tmp_interceptor do |ic|
+      hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(100, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      # detail pane (right) shows the raw request with the verb coloured
+      ry = (0...12).find { |y| backend.row(y).includes?("GET /login HTTP") }.not_nil!
+      gx = backend.row(ry).index("GET /login HTTP").not_nil!
+      backend.fg_at(gx, ry).should eq(Theme.method_color("GET"))
+    end
+  end
+
   it "shows the empty state when nothing is held" do
     tmp_interceptor do |ic|
       view = InterceptView.new

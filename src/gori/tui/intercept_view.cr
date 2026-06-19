@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./highlight"
 require "./text_area"
 require "../interceptor"
 
@@ -168,12 +169,14 @@ module Gori::Tui
         screen.text(inner.x, inner.y, "—", Theme::MUTED)
         return
       end
+      mode = it.kind.request? ? :request : :response
       if @editing && @loaded_id == it.id
-        @editor.render(screen, inner, cursor: focused)
+        @editor.render(screen, inner, cursor: focused, highlight: mode)
       else
-        String.new(it.raw).split('\n').map(&.rstrip('\r')).each_with_index do |line, i|
+        styled = Highlight.from_lines(String.new(it.raw).split('\n').map(&.rstrip('\r')), it.kind.request?)
+        styled.each_with_index do |line, i|
           break if i >= inner.h
-          screen.text(inner.x, inner.y + i, line, Theme::TEXT, width: inner.w)
+          Highlight.draw(screen, inner.x, inner.y + i, line, width: inner.w)
         end
       end
     end

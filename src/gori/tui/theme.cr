@@ -20,6 +20,14 @@ module Gori::Tui
     RED           = Color.from_hex("#e5534b") # 5xx / error
     ORANGE        = Color.from_hex("#d9813f")
 
+    # Syntax accents for highlighted request/response bodies + header structure
+    # (see Highlight). Low-saturation so they sit calmly on the near-black canvas
+    # next to the functional status colours rather than fighting them.
+    SYN_HEADER  = Color.from_hex("#82a8c4") # header/field names, JSON keys, tag names
+    SYN_STRING  = Color.from_hex("#8fb87a") # quoted strings
+    SYN_NUMBER  = Color.from_hex("#ca9b6a") # numbers, tag attribute names
+    SYN_LITERAL = Color.from_hex("#b08ec2") # true / false / null
+
     def self.method_color(method : String) : Color
       case method.upcase
       when "GET", "HEAD"                    then GREEN

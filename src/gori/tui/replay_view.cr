@@ -2,6 +2,7 @@ require "uri"
 require "./screen"
 require "./theme"
 require "./frame"
+require "./highlight"
 require "./text_area"
 require "../store"
 require "../replay/engine"
@@ -180,7 +181,7 @@ module Gori::Tui
       return if rect.w < 2 || rect.h < 2
       label = @http2 ? "REQUEST (h2)" : "REQUEST"
       Frame.card(screen, rect, label, bg: Theme::BG, border: pane_border(focused))
-      @editor.render(screen, rect.inset(1, 1), cursor: focused)
+      @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
     end
 
     private def render_response(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -194,14 +195,15 @@ module Gori::Tui
         @resp_mode == :diff ? Theme::ACCENT_BG : Theme::BG)
 
       body = rect.inset(1, 1)
-      @resp_mode == :diff ? render_diff(screen, body) : render_text(screen, body, response_lines)
+      @resp_mode == :diff ? render_diff(screen, body) : render_response_body(screen, body)
     end
 
-    private def render_text(screen : Screen, rect : Rect, lines : Array(String)) : Nil
+    private def render_response_body(screen : Screen, rect : Rect) : Nil
+      lines = response_styled
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= lines.size
-        screen.text(rect.x, rect.y + i, lines[li], Theme::TEXT, width: rect.w)
+        Highlight.draw(screen, rect.x, rect.y + i, lines[li], width: rect.w)
       end
     end
 
@@ -231,6 +233,16 @@ module Gori::Tui
       return ["— not sent — press ^R to replay —"] unless result
       return ["replay error: #{result.error}"] unless result.ok?
       message_lines(result.head, result.body)
+    end
+
+    # The response as styled lines — 1:1 in count with `response_lines` (which
+    # still backs the scroll bound), so the placeholder/error/ok branches stay
+    # in lockstep.
+    private def response_styled : Array(Highlight::Line)
+      result = @result
+      return [[Highlight::Span.new("— not sent — press ^R to replay —", Theme::MUTED)]] unless result
+      return [[Highlight::Span.new("replay error: #{result.error}", Theme::RED)]] unless result.ok?
+      Highlight.message(result.head, result.body, request: false)
     end
 
     private def diff_lines : Array(Replay::DiffLine)

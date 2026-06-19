@@ -1,0 +1,350 @@
+require "./screen"
+require "./theme"
+
+module Gori::Tui
+  # Syntax highlighting for the request/response panes (History detail, Replay,
+  # Intercept). Turns raw HTTP message text into styled spans so every view
+  # colours the request line, status line, header names, and structured bodies
+  # (JSON / form-encoded / markup) the same way instead of re-implementing it.
+  #
+  # The cardinal rule: the styled output is always 1:1 in line count with the
+  # plain `split('\n')` the views used before, and the concatenation of a line's
+  # span texts equals the original line. That keeps scroll bounds and the editor
+  # cursor aligned and guarantees no character is ever dropped or duplicated —
+  # highlighting is purely a colour overlay on top of the exact same glyphs.
+  module Highlight
+    # A run of same-styled text within one rendered line.
+    record Span, text : String, fg : Color, attr : Attribute = Attribute::None
+
+    # One rendered line: an ordered partition of the source line into spans.
+    alias Line = Array(Span)
+
+    # --- public entry points -------------------------------------------------
+
+    # Highlight a full HTTP message held as separate head/body byte slices (the
+    # History detail and Replay response shapes). Mirrors the old
+    # `bytes_to_lines(head) + ["", *bytes_to_lines(body)]` layout exactly.
+    def self.message(head : Bytes?, body : Bytes?, request : Bool) : Array(Line)
+      head_lines = to_lines(head)
+      has_body = !(body.nil? || body.empty?)
+      body_lines = has_body ? to_lines(body) : [] of String
+      kind = body_kind(content_type_in(head_lines))
+
+      out = [] of Line
+      in_headers = true
+      head_lines.each_with_index do |raw, i|
+        if i == 0
+          out << start_line(raw, request)
+        elsif raw.empty?
+          in_headers = false
+          out << blank
+        elsif in_headers
+          out << header_line(raw)
+        else
+          out << plain(raw)
+        end
+      end
+      if has_body
+        out << blank
+        body_lines.each { |bl| out << body_line(bl, kind) }
+      end
+      out
+    end
+
+    # Highlight a message held as one combined text blob (Intercept's byte-exact
+    # `raw`, and the Replay/Intercept editors). Splits head from body at the
+    # first blank line and stays strictly 1:1 with `text.split('\n')`, so it can
+    # back an editable buffer where each styled line must line up with the
+    # cursor's line.
+    def self.from_lines(all : Array(String), request : Bool) : Array(Line)
+      sep = all.index("")
+      kind = body_kind(content_type_in(all))
+      all.map_with_index do |raw, i|
+        if i == 0
+          start_line(raw, request)
+        elsif sep.nil?
+          header_line(raw) # no blank line yet → everything after the start line is a header
+        elsif i < sep
+          header_line(raw)
+        elsif i == sep
+          blank # the head/body separator
+        else
+          body_line(raw, kind)
+        end
+      end
+    end
+
+    # Draw a styled line at (x, y), clipped to `width` columns (default: to the
+    # right edge). Truncation matches `Screen#fit` glyph-for-glyph and in the
+    # returned x, so toggling highlighting never shifts a cell: wider-than-1
+    # overflow keeps `limit - 1` glyphs plus a trailing ellipsis, while a 1-wide
+    # slot shows the first glyph alone (an ellipsis there would hide all real
+    # content — exactly Screen#fit's `w == 1` special case). Returns the x just
+    # past the drawn text.
+    def self.draw(screen : Screen, x : Int32, y : Int32, line : Line,
+                  bg : Color = Theme::BG, width : Int32? = nil) : Int32
+      limit = width || (screen.width - x)
+      return x if limit <= 0
+      total = line.sum(&.text.size)
+      overflow = total > limit
+      ellipsis = overflow && limit > 1
+      cut = overflow ? {limit - 1, 1}.max : limit
+      col = 0
+      line.each do |span|
+        span.text.each_char do |ch|
+          break if col >= cut
+          screen.cell(x + col, y, ch, span.fg, bg, span.attr)
+          col += 1
+        end
+        break if col >= cut
+      end
+      if ellipsis
+        screen.cell(x + cut, y, '…', Theme::MUTED, bg)
+        col = cut + 1
+      end
+      x + col
+    end
+
+    # --- line builders -------------------------------------------------------
+
+    private def self.start_line(raw : String, request : Bool) : Line
+      request ? request_line(raw) : status_line(raw)
+    end
+
+    # `METHOD target HTTP/x.x` — method coloured by verb, the target bright, the
+    # version muted. Spaces are preserved verbatim as their own muted spans so
+    # the partition is exact regardless of odd spacing.
+    private def self.request_line(raw : String) : Line
+      first = raw.index(' ')
+      return [Span.new(raw, Theme.method_color(raw), Attribute::Bold)] unless first
+      method = raw[0...first]
+      spans = [Span.new(method, Theme.method_color(method), Attribute::Bold)]
+      last = raw.rindex(' ')
+      if last && last > first
+        spans << Span.new(raw[first...first + 1], Theme::MUTED)      # space
+        spans << Span.new(raw[first + 1...last], Theme::TEXT_BRIGHT) # target
+        spans << Span.new(raw[last...last + 1], Theme::MUTED)        # space
+        spans << Span.new(raw[last + 1..], Theme::MUTED)             # version
+      else
+        spans << Span.new(raw[first..], Theme::TEXT_BRIGHT)
+      end
+      spans
+    end
+
+    # `HTTP/x.x CODE reason` — version muted, code coloured by status class,
+    # reason in body text.
+    private def self.status_line(raw : String) : Line
+      first = raw.index(' ')
+      return [Span.new(raw, Theme::MUTED)] unless first
+      spans = [Span.new(raw[0...first], Theme::MUTED)]
+      spans << Span.new(raw[first...first + 1], Theme::MUTED) # space
+      second = raw.index(' ', first + 1)
+      if second
+        code = raw[first + 1...second]
+        spans << Span.new(code, Theme.status_color(code.to_i?), Attribute::Bold)
+        spans << Span.new(raw[second...second + 1], Theme::MUTED) # space
+        spans << Span.new(raw[second + 1..], Theme::TEXT)         # reason
+      else
+        code = raw[first + 1..]
+        spans << Span.new(code, Theme.status_color(code.to_i?), Attribute::Bold)
+      end
+      spans
+    end
+
+    # `Name: value` — field name accented, the colon muted, the value in body
+    # text. The first colon is the separator (values may themselves contain ':').
+    private def self.header_line(raw : String) : Line
+      colon = raw.index(':')
+      return plain(raw) unless colon
+      spans = [Span.new(raw[0...colon], Theme::SYN_HEADER)]
+      spans << Span.new(raw[colon...colon + 1], Theme::MUTED) # ":"
+      rest = raw[colon + 1..]
+      spans << Span.new(rest, Theme::TEXT) unless rest.empty?
+      spans
+    end
+
+    # --- body dispatch -------------------------------------------------------
+
+    private def self.body_line(raw : String, kind : Symbol) : Line
+      return blank if raw.empty?
+      case kind
+      when :json       then json_line(raw)
+      when :form       then form_line(raw)
+      when :xml, :html then markup_line(raw)
+      else                  plain(raw)
+      end
+    end
+
+    # JSON, tokenised per line (valid JSON never splits a string across a raw
+    # newline, so a line-local pass is sufficient for both pretty and minified
+    # bodies). Object keys (a string immediately followed by ':') are accented
+    # distinctly from string values.
+    private def self.json_line(raw : String) : Line
+      spans = [] of Span
+      chars = raw.chars
+      n = chars.size
+      i = 0
+      while i < n
+        c = chars[i]
+        if c == '"'
+          start = i
+          i += 1
+          while i < n
+            if chars[i] == '\\'
+              i += 2
+            elsif chars[i] == '"'
+              i += 1
+              break
+            else
+              i += 1
+            end
+          end
+          str = chars[start...i].join
+          k = i
+          while k < n && chars[k].ascii_whitespace?
+            k += 1
+          end
+          key = k < n && chars[k] == ':'
+          spans << Span.new(str, key ? Theme::SYN_HEADER : Theme::SYN_STRING)
+        elsif c.ascii_number? || (c == '-' && i + 1 < n && chars[i + 1].ascii_number?)
+          start = i
+          i += 1
+          while i < n && (chars[i].ascii_number? || "+-.eE".includes?(chars[i]))
+            i += 1
+          end
+          spans << Span.new(chars[start...i].join, Theme::SYN_NUMBER)
+        elsif c.ascii_letter?
+          start = i
+          i += 1
+          while i < n && chars[i].ascii_letter?
+            i += 1
+          end
+          word = chars[start...i].join
+          spans << Span.new(word, %w(true false null).includes?(word) ? Theme::SYN_LITERAL : Theme::TEXT)
+        elsif "{}[]:,".includes?(c)
+          spans << Span.new(c.to_s, Theme::MUTED)
+          i += 1
+        else
+          start = i
+          i += 1
+          while i < n
+            d = chars[i]
+            break if d == '"' || d.ascii_letter? || d.ascii_number? || "{}[]:,".includes?(d) ||
+                     (d == '-' && i + 1 < n && chars[i + 1].ascii_number?)
+            i += 1
+          end
+          spans << Span.new(chars[start...i].join, Theme::TEXT)
+        end
+      end
+      spans
+    end
+
+    # `application/x-www-form-urlencoded` — keys accented, `=`/`&` muted, values
+    # in body text.
+    private def self.form_line(raw : String) : Line
+      spans = [] of Span
+      chars = raw.chars
+      n = chars.size
+      i = 0
+      expect_key = true
+      while i < n
+        c = chars[i]
+        if c == '&'
+          spans << Span.new("&", Theme::MUTED)
+          i += 1
+          expect_key = true
+        elsif c == '='
+          spans << Span.new("=", Theme::MUTED)
+          i += 1
+          expect_key = false
+        else
+          start = i
+          while i < n && chars[i] != '&' && chars[i] != '='
+            i += 1
+          end
+          spans << Span.new(chars[start...i].join, expect_key ? Theme::SYN_HEADER : Theme::TEXT)
+        end
+      end
+      spans
+    end
+
+    # HTML/XML — tag delimiters muted, tag names accented, attributes/text in
+    # body text. Line-local: a tag split across lines simply isn't recognised on
+    # the continuation line (cosmetic only; text is never altered).
+    private def self.markup_line(raw : String) : Line
+      spans = [] of Span
+      chars = raw.chars
+      n = chars.size
+      i = 0
+      while i < n
+        if chars[i] == '<'
+          gt = i + 1
+          while gt < n && chars[gt] != '>'
+            gt += 1
+          end
+          closed = gt < n # found a '>'
+          j = i + 1
+          j += 1 if j < n && chars[j] == '/'                 # closing tag
+          spans << Span.new(chars[i...j].join, Theme::MUTED) # '<' or '</'
+          name = j
+          while name < gt && (chars[name].ascii_letter? || chars[name].ascii_number? ||
+                chars[name] == '-' || chars[name] == '_' || chars[name] == ':')
+            name += 1
+          end
+          spans << Span.new(chars[j...name].join, Theme::SYN_HEADER) if name > j
+          spans << Span.new(chars[name...gt].join, Theme::TEXT) if name < gt
+          spans << Span.new(">", Theme::MUTED) if closed
+          i = closed ? gt + 1 : gt
+        else
+          start = i
+          i += 1
+          while i < n && chars[i] != '<'
+            i += 1
+          end
+          spans << Span.new(chars[start...i].join, Theme::TEXT)
+        end
+      end
+      spans
+    end
+
+    # --- helpers -------------------------------------------------------------
+
+    private def self.plain(raw : String) : Line
+      [Span.new(raw, Theme::TEXT)]
+    end
+
+    private def self.blank : Line
+      Array(Span).new
+    end
+
+    private def self.to_lines(bytes : Bytes?) : Array(String)
+      return [] of String unless bytes
+      String.new(bytes).split('\n').map(&.rstrip('\r'))
+    end
+
+    # The media type from the first `Content-Type` header, lowercased and
+    # stripped of parameters. Scans only the header block (stops at the first
+    # blank line) so a body that happens to contain the word never matches.
+    private def self.content_type_in(lines : Array(String)) : String?
+      lines.each do |line|
+        break if line.empty?
+        colon = line.index(':')
+        next unless colon
+        next unless line[0...colon].downcase == "content-type"
+        value = line[colon + 1..].strip.downcase
+        semi = value.index(';')
+        return semi ? value[0...semi].strip : value
+      end
+      nil
+    end
+
+    private def self.body_kind(content_type : String?) : Symbol
+      return :text unless ct = content_type
+      return :json if ct.includes?("json")
+      return :form if ct.includes?("x-www-form-urlencoded")
+      return :xml if ct.includes?("xml")
+      return :html if ct.includes?("html")
+      :text
+    end
+  end
+end

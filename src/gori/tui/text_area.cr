@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./highlight"
 
 module Gori::Tui
   # A minimal multi-line text editor for inline editing (e.g. the Replay
@@ -86,14 +87,24 @@ module Gori::Tui
       end
     end
 
-    def render(screen : Screen, rect : Rect, cursor : Bool) : Nil
+    # `highlight` overlays request/response syntax colours on the buffer while
+    # keeping it fully editable: pass `:request` or `:response` for the held
+    # HTTP message editors (Replay, Intercept), nil for plain prose (Notes,
+    # Finding notes). The styled lines are 1:1 with `@lines`, so the cursor —
+    # drawn last, on top — still lands on the right column.
+    def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil) : Nil
       return if rect.empty?
       ensure_visible(rect.h)
+      styled = highlight ? Highlight.from_lines(@lines, highlight == :request) : nil
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= @lines.size
         line = @lines[li]
-        screen.text(rect.x, rect.y + i, line, Theme::TEXT, width: rect.w)
+        if styled && (sl = styled[li]?)
+          Highlight.draw(screen, rect.x, rect.y + i, sl, width: rect.w)
+        else
+          screen.text(rect.x, rect.y + i, line, Theme::TEXT, width: rect.w)
+        end
         next unless cursor && li == @cy
         cxs = rect.x + @cx
         if cxs < rect.x + rect.w
