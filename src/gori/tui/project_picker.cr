@@ -222,9 +222,12 @@ module Gori::Tui
       end
       # Sync the terminal hardware cursor to the focused caret so the terminal's
       # own IME composition UI (jamo/candidate popup) anchors at the right cell —
-      # same as the Runner does for the in-app fields.
+      # same as the Runner does for the in-app fields. When no field is focused
+      # (e.g. New/Temp rows) hide the cursor so it doesn't linger at a stale spot.
       if pos = screen.desired_cursor
         @term.set_cursor(pos[0], pos[1], visible: true)
+      else
+        @term.hide_cursor
       end
       # Full repaint right after a resize (the diff renderer would leave stale
       # cells, especially for the centered layout); a cheap diff otherwise.
@@ -323,11 +326,14 @@ module Gori::Tui
       screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme::ACCENT, bg)
       screen.text(box.x + 3, y, "›", selected ? Theme::ACCENT : Theme::MUTED, bg)
       qx = box.x + 5
-      pe = selected ? @preedit : ""
-      if @query.empty? && pe.empty?
+      # When focused, always render via input_line — even when empty — so the
+      # caret (and the terminal hardware cursor it sets) is anchored at the field.
+      # Otherwise the terminal draws IME composition at a stale position (top-left).
+      # The placeholder hint only shows when the row is not focused.
+      if selected
+        screen.input_line(qx, y, @query, @query.size, @preedit, Theme::TEXT_BRIGHT, bg, width: box.w - 7)
+      elsif @query.empty?
         screen.text(qx, y, "search projects...", Theme::MUTED, bg)
-      elsif selected
-        screen.input_line(qx, y, @query, @query.size, pe, Theme::TEXT_BRIGHT, bg, width: box.w - 7)
       else
         screen.text(qx, y, @query, Theme::TEXT, bg, width: box.w - 7)
       end
