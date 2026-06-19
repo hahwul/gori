@@ -26,9 +26,9 @@ module Gori::Tui
       @name = ""
       @desc = ""
       @new_field = :name # :name | :desc (only in :new mode)
-      @resized = false # set on a Resize event → next frame full-repaints
+      @resized = false   # set on a Resize event → next frame full-repaints
+      @preedit = ""      # live IME composing text for the active field (search/name/desc)
     end
-
 
     def run : Project?
       loop do
@@ -43,6 +43,10 @@ module Gori::Tui
           when Project then return result
           when :quit   then return nil
           end
+        when Termisu::Event::Preedit
+          # Live IME composition for whichever field is active; the committed
+          # syllable arrives afterwards as a normal Key and clears this.
+          @preedit = ev.text
         end
       end
     end
@@ -68,6 +72,7 @@ module Gori::Tui
 
     private def handle_list(ev : Termisu::Event::Key) : Project | Symbol | Nil
       key = ev.key
+      @preedit = "" # any committed key ends an in-progress IME composition
       # Navigation is arrows only. Search is *deliberate*: arrow down past New/Temp
       # to the Search row (index 2) to "enter" the search area. Only then does
       # typing perform fuzzy filtering on the projects listed below it.
@@ -98,7 +103,6 @@ module Gori::Tui
         @query += c
         @selected = 2
         @results_scroll = 0
-
       elsif ev.ctrl? && key.lower_n?
         # ctrl-n: quick new. If query has text, prefill (or direct-create).
         name = @query.strip
@@ -107,7 +111,6 @@ module Gori::Tui
         elsif proj = safe_create(name)
           return proj
         end
-
       elsif ev.ctrl? && key.lower_t?
         return open_temp
       elsif ev.ctrl? && key.lower_d?
@@ -142,7 +145,6 @@ module Gori::Tui
       @new_field = :name
     end
 
-
     private def open_temp : Project
       @registry.temp(Random::Secure.hex(4))
     end
@@ -156,7 +158,6 @@ module Gori::Tui
       nil
     end
 
-
     private def delete_selected : Nil
       return if @selected < 3
       if project = filtered_projects[@selected - 3]?
@@ -168,6 +169,7 @@ module Gori::Tui
 
     private def handle_new(ev : Termisu::Event::Key) : Project | Symbol | Nil
       key = ev.key
+      @preedit = "" # any committed key ends an in-progress IME composition
       if key.escape?
         @mode = :list
       elsif key.enter?
@@ -203,7 +205,6 @@ module Gori::Tui
       nil
     end
 
-
     # --- rendering -----------------------------------------------------------
 
     MENU_WIDTH = 50
@@ -218,6 +219,12 @@ module Gori::Tui
         render_new(screen, cx, cw, w, h)
       else
         render_list(screen, cx, cw, w, h)
+      end
+      # Sync the terminal hardware cursor to the focused caret so the terminal's
+      # own IME composition UI (jamo/candidate popup) anchors at the right cell —
+      # same as the Runner does for the in-app fields.
+      if pos = screen.desired_cursor
+        @term.set_cursor(pos[0], pos[1], visible: true)
       end
       # Full repaint right after a resize (the diff renderer would leave stale
       # cells, especially for the centered layout); a cheap diff otherwise.
@@ -289,7 +296,6 @@ module Gori::Tui
           screen.text(box.x + 3, py, proj.name, is_selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: [name_w, 1].max)
           meta_x = box.right - mdw - 2
           screen.text(meta_x, py, meta, Theme::MUTED, bg) unless meta.empty?
-
         end
       end
 
@@ -317,14 +323,13 @@ module Gori::Tui
       screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme::ACCENT, bg)
       screen.text(box.x + 3, y, "›", selected ? Theme::ACCENT : Theme::MUTED, bg)
       qx = box.x + 5
-      if @query.empty?
+      pe = selected ? @preedit : ""
+      if @query.empty? && pe.empty?
         screen.text(qx, y, "search projects...", Theme::MUTED, bg)
+      elsif selected
+        screen.input_line(qx, y, @query, @query.size, pe, Theme::TEXT_BRIGHT, bg, width: box.w - 7)
       else
-        screen.text(qx, y, @query, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: box.w - 7)
-        cursor = qx + Screen.display_width(@query)
-        screen.cell(cursor, y, '_', Theme::ACCENT, bg) if selected
-        screen.cursor(cursor, y) if selected
-
+        screen.text(qx, y, @query, Theme::TEXT, bg, width: box.w - 7)
       end
     end
 
@@ -337,29 +342,35 @@ module Gori::Tui
       screen.fill(Rect.new(cx, iy, cw, 3), Theme::PANEL)
       name_active = @new_field == :name
       name_fg = name_active ? Theme::TEXT_BRIGHT : Theme::TEXT
-      screen.text(cx + 2, iy, "name › #{@name}", name_fg, Theme::PANEL)
+      name_prefix = "name › "
+      screen.text(cx + 2, iy, name_prefix, name_fg, Theme::PANEL)
+      nbase = cx + 2 + Screen.display_width(name_prefix)
+      nwidth = {cw - Screen.display_width(name_prefix) - 2, 1}.max
       if name_active
-        cursor = cx + 2 + Screen.display_width("name › #{@name}")
-        screen.cell(cursor, iy, '_', Theme::ACCENT, Theme::PANEL)
-        screen.cursor(cursor, iy)
+        screen.input_line(nbase, iy, @name, @name.size, @preedit, name_fg, Theme::PANEL, width: nwidth)
+      else
+        screen.text(nbase, iy, @name, name_fg, Theme::PANEL, width: nwidth)
       end
-
 
       desc_active = @new_field == :desc
       desc_fg = desc_active ? Theme::TEXT_BRIGHT : Theme::TEXT
-      desc_label = @desc.empty? && !desc_active ? "description (optional) › " : "description › #{@desc}"
-      screen.text(cx + 2, iy + 1, desc_label, desc_fg, Theme::PANEL)
-      if desc_active
-        cursor = cx + 2 + Screen.display_width("description › #{@desc}")
-        screen.cell(cursor, iy + 1, '_', Theme::ACCENT, Theme::PANEL)
-        screen.cursor(cursor, iy + 1)
+      if @desc.empty? && !desc_active
+        screen.text(cx + 2, iy + 1, "description (optional) › ", desc_fg, Theme::PANEL)
+      else
+        desc_prefix = "description › "
+        screen.text(cx + 2, iy + 1, desc_prefix, desc_fg, Theme::PANEL)
+        dbase = cx + 2 + Screen.display_width(desc_prefix)
+        dwidth = {cw - Screen.display_width(desc_prefix) - 2, 1}.max
+        if desc_active
+          screen.input_line(dbase, iy + 1, @desc, @desc.size, @preedit, desc_fg, Theme::PANEL, width: dwidth)
+        else
+          screen.text(dbase, iy + 1, @desc, desc_fg, Theme::PANEL, width: dwidth)
+        end
       end
-
 
       hint = "↵ next/create   ↑/↓ fields   esc cancel"
       centered(screen, h - 2, hint, Theme::MUTED, w)
     end
-
 
     private def centered(screen : Screen, y : Int32, text : String, fg : Color, w : Int32,
                          attr : Attribute = Attribute::None) : Nil
