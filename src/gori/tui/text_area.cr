@@ -13,6 +13,11 @@ module Gori::Tui
       @cx = 0
       @scroll = 0
       @preedit = ""
+      # Cached syntax-highlight overlay (1:1 with @lines), rebuilt only when the
+      # buffer content changes — not on every render frame. @styled_kind tracks
+      # which highlight symbol it was built for.
+      @styled = nil.as(Array(Highlight::Line)?)
+      @styled_kind = nil.as(Symbol?)
       set_text(text)
     end
 
@@ -23,6 +28,7 @@ module Gori::Tui
       @cx = 0
       @scroll = 0
       @preedit = ""
+      @styled = nil
     end
 
     # Preedit/composing text from IME (e.g. current Hangul syllable while typing jamo).
@@ -50,6 +56,7 @@ module Gori::Tui
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = "#{line[0, cx]}#{ch}#{line[cx..]}"
       @cx = cx + 1
+      @styled = nil
     end
 
     def insert_newline : Nil
@@ -59,6 +66,7 @@ module Gori::Tui
       @lines.insert(@cy + 1, line[cx..])
       @cy += 1
       @cx = 0
+      @styled = nil
     end
 
     def backspace : Nil
@@ -74,6 +82,7 @@ module Gori::Tui
         @lines.delete_at(@cy)
         @cy -= 1
       end
+      @styled = nil
     end
 
     def move(dr : Int32, dc : Int32) : Nil
@@ -114,7 +123,7 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil) : Nil
       return if rect.empty?
       ensure_visible(rect.h)
-      styled = highlight ? Highlight.from_lines(@lines, highlight == :request) : nil
+      styled = highlight ? highlighted(highlight) : nil
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= @lines.size
@@ -155,6 +164,15 @@ module Gori::Tui
           end
         end
       end
+    end
+
+    # The highlight overlay for `kind` (:request/:response), cached until the
+    # buffer content changes — so a held editor isn't re-tokenised 20×/sec.
+    private def highlighted(kind : Symbol) : Array(Highlight::Line)
+      cached = @styled
+      return cached if cached && @styled_kind == kind
+      @styled_kind = kind
+      @styled = Highlight.from_lines(@lines, kind == :request)
     end
 
     private def ensure_visible(h : Int32) : Nil

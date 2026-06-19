@@ -61,6 +61,7 @@ module Gori::Tui
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
       @outcome = :running             # :running | :quit | :back
       @quit_armed = false             # first ^D/^C arms quit; second confirms (avoids accidental exit)
+      @findings_count = 0             # cached findings badge (count_findings is too costly to re-query per frame)
       @resized = false                # set on a Resize event → next frame full-repaints
       # Replay round-trips run off the UI fiber and deliver their Result here; the
       # run loop applies it to the originating view on a later tick (buffered so a
@@ -71,6 +72,7 @@ module Gori::Tui
     def run : Symbol
       @history.reload(@session.store)
       @project_view.reload(@session.project, @session.store)
+      refresh_findings_count
       loop do
         drain_events
         drain_replay_results
@@ -483,6 +485,7 @@ module Gori::Tui
       @active_tab = :findings
       @focus = :body
       @findings.reload(@session.store)
+      refresh_findings_count
       @toast = "finding created"
     end
 
@@ -664,7 +667,7 @@ module Gori::Tui
         capturing: @session.capturing?, listen: "#{@session.proxy.host}:#{@session.proxy.port}",
         identity: "user", scope: scope_label, rules: rules_label, intercept: intercept_label)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
-        findings_count: @session.store.count_findings, intercept_count: @session.interceptor.pending_count,
+        findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
         replay_count: @replays.size)
       Chrome.render_rule(screen, layout.rule)
       render_body(screen, layout.body)
@@ -997,6 +1000,13 @@ module Gori::Tui
 
     def findings_delete : Nil
       @findings.delete(@session.store)
+      refresh_findings_count
+    end
+
+    # Cached findings badge for the tab bar — refreshed only when findings change
+    # (create/delete), not re-queried from SQLite on every render frame.
+    private def refresh_findings_count : Nil
+      @findings_count = @session.store.count_findings
     end
 
     def finding_severity(delta : Int32) : Nil

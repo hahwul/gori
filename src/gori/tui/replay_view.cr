@@ -27,6 +27,12 @@ module Gori::Tui
       @original_lines = [] of String
       @result = nil.as(Replay::Result?)
       @prev_result = nil.as(Replay::Result?) # the previous send's result — the diff baseline
+      # Per-result render caches (rebuilt only when @result/@prev_result change, not
+      # every frame): styled response lines, plain response lines (scroll bound),
+      # and the LCS diff lines.
+      @resp_styled_cache = nil.as(Array(Highlight::Line)?)
+      @resp_lines_cache = nil.as(Array(String)?)
+      @diff_lines_cache = nil.as(Array(Replay::DiffLine)?)
       @focus = :request
       @resp_mode = :response # :response | :diff
       @scroll = 0
@@ -51,6 +57,7 @@ module Gori::Tui
 
       @result = nil
       @prev_result = nil
+      reset_result_caches
       @focus = :request
       @resp_mode = :response
       @scroll = 0
@@ -72,6 +79,7 @@ module Gori::Tui
       @original_lines = [] of String
       @result = nil
       @prev_result = nil
+      reset_result_caches
       @focus = :target
       @resp_mode = :response
       @scroll = 0
@@ -165,6 +173,7 @@ module Gori::Tui
       # back to the captured original (when loaded from History).
       @prev_result = @result
       @result = result
+      reset_result_caches # new response → drop the styled/lines/diff caches
       # Auto-land on the diff when there's something to compare against; otherwise
       # show the response plainly. Focus is intentionally NOT changed here — keep
       # the user where they were (target/request/response).
@@ -314,33 +323,55 @@ module Gori::Tui
       @resp_mode == :diff ? diff_lines.map(&.text) : response_lines
     end
 
+    # Pure functions of @result/@prev_result — memoized and dropped only when a
+    # new result is applied (reset_result_caches), so a held Replay tab isn't
+    # re-parsed / re-highlighted / re-diffed 20×/sec.
+    private def reset_result_caches : Nil
+      @resp_styled_cache = nil
+      @resp_lines_cache = nil
+      @diff_lines_cache = nil
+    end
+
     private def response_lines : Array(String)
-      result = @result
-      return ["— not sent — press ^R to replay —"] unless result
-      return ["replay error: #{result.error}"] unless result.ok?
-      message_lines(result.head, result.body)
+      @resp_lines_cache ||= begin
+        result = @result
+        if !result
+          ["— not sent — press ^R to replay —"]
+        elsif !result.ok?
+          ["replay error: #{result.error}"]
+        else
+          message_lines(result.head, result.body)
+        end
+      end
     end
 
     # The response as styled lines — 1:1 in count with `response_lines` (which
     # still backs the scroll bound), so the placeholder/error/ok branches stay
     # in lockstep.
     private def response_styled : Array(Highlight::Line)
-      result = @result
-      return [[Highlight::Span.new("— not sent — press ^R to replay —", Theme::MUTED)]] unless result
-      return [[Highlight::Span.new("replay error: #{result.error}", Theme::RED)]] unless result.ok?
-      Highlight.message(result.head, result.body, request: false)
+      @resp_styled_cache ||= begin
+        result = @result
+        if !result
+          [[Highlight::Span.new("— not sent — press ^R to replay —", Theme::MUTED)]]
+        elsif !result.ok?
+          [[Highlight::Span.new("replay error: #{result.error}", Theme::RED)]]
+        else
+          Highlight.message(result.head, result.body, request: false)
+        end
+      end
     end
 
     private def diff_lines : Array(Replay::DiffLine)
-      result = @result
-      unless result && result.ok?
-        return [Replay::DiffLine.new(Replay::DiffKind::Same, "send the request (^R) to see a diff")]
+      @diff_lines_cache ||= begin
+        result = @result
+        if !(result && result.ok?)
+          [Replay::DiffLine.new(Replay::DiffKind::Same, "send the request (^R) to see a diff")]
+        elsif !(baseline = diff_baseline_lines)
+          [Replay::DiffLine.new(Replay::DiffKind::Same, "— first send: resend (^R) to diff against the previous response —")]
+        else
+          Replay::Diff.lines(baseline, message_lines(result.head, result.body))
+        end
       end
-      baseline = diff_baseline_lines
-      unless baseline
-        return [Replay::DiffLine.new(Replay::DiffKind::Same, "— first send: resend (^R) to diff against the previous response —")]
-      end
-      Replay::Diff.lines(baseline, message_lines(result.head, result.body))
     end
 
     # The lines the current response is diffed against: the IMMEDIATELY PREVIOUS

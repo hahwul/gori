@@ -41,6 +41,9 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @loaded = false
+      # Flattened (node, depth) rows, rebuilt only when the tree or its expand
+      # state changes — not re-walked on every render frame.
+      @visible_cache = nil.as(Array({Node, Int32})?)
     end
 
     def reload(store : Store, filter : QL::Filter = QL::EMPTY) : Nil
@@ -50,6 +53,7 @@ module Gori::Tui
       end
       @selected = 0
       @scroll = 0
+      @visible_cache = nil
       @loaded = true
     end
 
@@ -66,12 +70,16 @@ module Gori::Tui
 
     def toggle : Nil
       node = selected_node
-      node.expanded = !node.expanded if node && !node.leaf?
+      return unless node && !node.leaf?
+      node.expanded = !node.expanded
+      @visible_cache = nil # expand state changed → re-flatten next render
     end
 
     def expand : Nil
       node = selected_node
-      node.expanded = true if node && !node.leaf?
+      return unless node && !node.leaf?
+      node.expanded = true
+      @visible_cache = nil
     end
 
     # Collapses the selected node; returns false if there was nothing to collapse
@@ -80,6 +88,7 @@ module Gori::Tui
       node = selected_node
       if node && !node.leaf? && node.expanded
         node.expanded = false
+        @visible_cache = nil
         true
       else
         false
@@ -126,9 +135,11 @@ module Gori::Tui
     end
 
     private def visible_rows : Array({Node, Int32})
-      rows = [] of {Node, Int32}
-      @hosts.each { |host| collect(host, 0, rows) }
-      rows
+      @visible_cache ||= begin
+        rows = [] of {Node, Int32}
+        @hosts.each { |host| collect(host, 0, rows) }
+        rows
+      end
     end
 
     private def collect(node : Node, depth : Int32, rows : Array({Node, Int32})) : Nil

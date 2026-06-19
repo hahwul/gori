@@ -47,6 +47,9 @@ module Gori::Tui
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_scroll = 0
       @detail_pane = :request
+      # Styled detail body, rebuilt only when the detail/pane changes (NOT on scroll
+      # or every frame) — a multi-MiB body was being re-tokenised ~20×/sec.
+      @detail_styled_cache = nil.as(Array(Highlight::Line)?)
     end
 
     def set_scope(scope : Scope) : Nil
@@ -206,11 +209,13 @@ module Gori::Tui
       @detail_frames = (cid = @detail.try(&.h2_conn_id)) ? store.h2_frames(cid) : nil
       @detail_scroll = 0
       @detail_pane = :request
+      @detail_styled_cache = nil
       !@detail.nil?
     end
 
     def close_detail : Nil
       @detail = nil
+      @detail_styled_cache = nil
     end
 
     def scroll_detail(delta : Int32) : Nil
@@ -224,6 +229,7 @@ module Gori::Tui
                      else                :request
                      end
       @detail_scroll = 0
+      @detail_styled_cache = nil # pane switch changes the styled content
     end
 
     # --- rendering -----------------------------------------------------------
@@ -411,6 +417,12 @@ module Gori::Tui
     # messages, opaque gRPC hex — carry no code to colour, so they wrap as plain
     # body text; only their HTTP head (gRPC) gets highlighted.
     private def detail_styled : Array(Highlight::Line)
+      cached = @detail_styled_cache
+      return cached if cached
+      @detail_styled_cache = build_detail_styled
+    end
+
+    private def build_detail_styled : Array(Highlight::Line)
       detail = @detail
       return [] of Highlight::Line unless detail
       if @detail_pane == :frames && (frames = @detail_frames)
