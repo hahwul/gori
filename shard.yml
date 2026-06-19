@@ -17,6 +17,7 @@ dependencies:
     github: hahwul/termisu
     branch: main
     # Using fork main for active development of input/preedit fixes (see recent commits on hahwul/termisu)
+    # Current: fixed double-English + jamo-separation by using 17u flags + parser text extraction + protocol_active guard + Preedit for key=0 text events.
 
   db:
     github: crystal-lang/crystal-db
