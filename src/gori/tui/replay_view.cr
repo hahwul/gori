@@ -199,10 +199,11 @@ module Gori::Tui
       base = rect.x + 4
       screen.text(base, row, @target, Theme::TEXT_BRIGHT, width: {rect.w - 6, 1}.max)
       if focused
-        cx = base + @tcx
         ch = @tcx < @target.size ? @target[@tcx] : ' '
-        screen.cell(cx, row, ch, Theme::BG, Theme::ACCENT)
+        cursor_x = base + Screen.display_width(@target[0, @tcx])
+        screen.cell(cursor_x, row, ch, Theme::BG, Theme::ACCENT)
       end
+
     end
 
     private def render_request(screen : Screen, rect : Rect, focused : Bool) : Nil

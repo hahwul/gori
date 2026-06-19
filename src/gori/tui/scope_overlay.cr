@@ -83,7 +83,9 @@ module Gori::Tui
       base = box.x + 2 + prefix.size
       screen.text(base, box.y + 1, @input, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
       ch = @icx < @input.size ? @input[@icx] : ' '
-      screen.cell(base + @icx, box.y + 1, ch, Theme::BG, Theme::ACCENT)
+      cursor_x = base + Screen.display_width(@input[0, @icx])
+      screen.cell(cursor_x, box.y + 1, ch, Theme::BG, Theme::ACCENT)
+
       Frame.tee_divider(screen, box, box.y + 2)
 
       list_top = box.y + 3

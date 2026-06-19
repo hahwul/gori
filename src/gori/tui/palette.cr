@@ -65,7 +65,9 @@ module Gori::Tui
       # query line
       screen.text(box.x + 2, box.y + 1, "›", Theme::ACCENT, Theme::PANEL)
       screen.text(box.x + 4, box.y + 1, @query, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - 6)
-      screen.cell(box.x + 4 + @query.size, box.y + 1, '_', Theme::ACCENT, Theme::PANEL)
+      cursor = box.x + 4 + Screen.display_width(@query)
+      screen.cell(cursor, box.y + 1, '_', Theme::ACCENT, Theme::PANEL)
+
       Frame.tee_divider(screen, box, box.y + 2)
 
       list_top = box.y + 3

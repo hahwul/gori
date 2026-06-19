@@ -314,9 +314,10 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y, prefix, Theme::ACCENT)
         base = rect.x + 1 + prefix.size
         screen.text(base, rect.y, @query, Theme::TEXT_BRIGHT, width: rect.w - prefix.size - 2)
-        cx = base + @qcx
         ch = @qcx < @query.size ? @query[@qcx] : ' '
-        screen.cell(cx, rect.y, ch, Theme::BG, Theme::ACCENT)
+        cursor_x = base + Screen.display_width(@query[0, @qcx])
+        screen.cell(cursor_x, rect.y, ch, Theme::BG, Theme::ACCENT)
+
       elsif filtering?
         screen.text(rect.x + 1, rect.y, ": #{@query}", Theme::TEXT, width: rect.w - 10)
         count = @rows.size.to_s
