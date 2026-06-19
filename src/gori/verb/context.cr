@@ -38,6 +38,7 @@ module Gori
 
       # replay workbench (editing + focus/pane toggles are handled inline, not via verbs)
       abstract def replay_selected : Nil # load History's selection into Replay
+      abstract def replay_new : Nil      # open a blank, hand-authored replay request
       abstract def replay_send : Nil     # resend the (edited) request to the target
 
       # sitemap tree

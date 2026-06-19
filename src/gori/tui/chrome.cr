@@ -92,13 +92,20 @@ module Gori::Tui
     end
 
     # Renders a right-aligned run of colored chips with dim `·` separators.
+    # `min_x` is a left floor the chips never cross (so a left-side badge stays
+    # intact at narrow widths); each draw is clipped to `rect.right` so an
+    # over-wide chip row truncates with an ellipsis instead of bleeding past it.
     private def self.render_chips(screen : Screen, rect : Rect,
-                                  chips : Array({String, Color}), bg : Color = Theme::PANEL) : Nil
+                                  chips : Array({String, Color}), bg : Color = Theme::PANEL,
+                                  min_x : Int32? = nil) : Nil
       return if chips.empty?
-      x = {rect.right - chips_width(chips) - 1, rect.x}.max
+      x = {rect.right - chips_width(chips) - 1, min_x || rect.x}.max
       chips.each_with_index do |(label, color), i|
-        x = screen.text(x, rect.y, label, color, bg)
-        x = screen.text(x, rect.y, " · ", Theme::MUTED, bg) if i < chips.size - 1
+        break if x >= rect.right
+        x = screen.text(x, rect.y, label, color, bg, width: {rect.right - x, 1}.max)
+        if i < chips.size - 1 && x < rect.right
+          x = screen.text(x, rect.y, " · ", Theme::MUTED, bg, width: {rect.right - x, 1}.max)
+        end
       end
     end
 
@@ -115,18 +122,25 @@ module Gori::Tui
       ""
     end
 
-    # Bottom row: contextual key hints (left) + capture/upstream state chips (right).
-    def self.render_status(screen : Screen, rect : Rect, *, hints : String,
+    # Bottom row: a focus-area badge (far left) + contextual key hints + capture/
+    # upstream state chips (right). The badge — TABS / BODY / an overlay name —
+    # is a lifted chip so the user always knows which region the keys drive.
+    def self.render_status(screen : Screen, rect : Rect, *, focus : String, hints : String,
                            capturing : Bool, insecure_upstream : Bool) : Nil
       screen.fill(rect, Theme::PANEL)
+      badge = " #{focus} "
+      screen.text(rect.x, rect.y, badge, Theme::TEXT_BRIGHT, Theme::ELEVATED, Attribute::Bold)
+      hint_x = rect.x + badge.size + 1
+
       chips = [
         {capturing ? "capture:on" : "capture:off", capturing ? Theme::TEXT : Theme::MUTED},
         # an insecure upstream is a security warning — the one allowed non-status colour.
         insecure_upstream ? {"upstream:insecure", Theme::YELLOW} : {"upstream:verify", Theme::MUTED},
       ]
-      hint_w = {rect.w - chips_width(chips) - 4, 1}.max
-      screen.text(rect.x + 1, rect.y, hints, Theme::MUTED, Theme::PANEL, width: hint_w)
-      render_chips(screen, rect, chips)
+      hint_w = {rect.right - hint_x - chips_width(chips) - 2, 1}.max
+      screen.text(hint_x, rect.y, hints, Theme::MUTED, Theme::PANEL, width: hint_w)
+      # Floor the chips at the hint start so they can never overwrite the badge.
+      render_chips(screen, rect, chips, min_x: hint_x)
     end
   end
 end

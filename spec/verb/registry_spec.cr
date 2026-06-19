@@ -84,6 +84,10 @@ private class FakeContext < ExecContext
     @calls << :replay_selected
   end
 
+  def replay_new : Nil
+    @calls << :replay_new
+  end
+
   def replay_send : Nil
     @calls << :replay_send
   end
@@ -217,6 +221,16 @@ describe Gori::Verb do
       keymap = Keymap.build(reg)
       keymap.lookup(Chord.new("j"), Scope::Body).should eq("body.down")
       keymap.lookup(Chord.new("down"), Scope::Body).should eq("body.down")
+    end
+
+    it "binds ctrl-n to a new blank replay in the Replay scope" do
+      reg = Gori::Verbs.registry
+      keymap = Keymap.build(reg)
+      keymap.lookup(Chord.new("n", ctrl: true), Scope::Replay).should eq("replay.new")
+
+      ctx = FakeContext.new
+      reg["replay.new"].call(ctx)
+      ctx.calls.should contain(:replay_new)
     end
   end
 

@@ -51,6 +51,11 @@ module Gori
         Verb::Scope::Replay, [Verb::Chord.new("r", ctrl: true)],
         available: in_replay) { |ctx| ctx.replay_send; nil }
 
+      r.register Verb::Definition.new(
+        "replay.new", "New replay request", "Open a blank request in Replay to author and send",
+        Verb::Scope::Replay, [Verb::Chord.new("n", ctrl: true)],
+        available: in_replay) { |ctx| ctx.replay_new; nil }
+
       # --- detail view ---
       r.register Verb::Definition.new(
         "detail.close", "Close detail", "Return to the History list", Verb::Scope::HistoryDetail,

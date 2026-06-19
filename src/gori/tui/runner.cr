@@ -26,7 +26,9 @@ module Gori::Tui
 
   # One open replay session (a "sub-tab" under the top-level Replay tab).
   # Each carries its own ReplayView (editor state, last result, scroll, focus etc.).
-  private record ReplayTab, view : ReplayView, flow_id : Int64
+  # `flow_id` is the source flow when opened from History (^R), or nil for a
+  # hand-authored blank request (^N).
+  private record ReplayTab, view : ReplayView, flow_id : Int64?
   # The shell controller for ONE open project: owns view state, implements the
   # verb ExecContext (so verbs drive the UI), and runs the main loop —
   # poll(50ms) → drain new-flow events → render (diff). `run` returns :quit (exit
@@ -83,6 +85,9 @@ module Gori::Tui
     private def drain_replay_results : Nil
       while pair = nonblocking_replay_result
         view, result = pair
+        # Drop a result whose sub-tab was closed (^W) mid-flight — applying it
+        # would mutate an orphaned view and flash a toast for a gone session.
+        next unless @replays.any? { |t| t.view.same?(view) }
         view.apply(result)
         @toast = if result.ok?
                    "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms"
@@ -150,6 +155,13 @@ module Gori::Tui
       # termisu decodes Shift-Tab as the distinct BackTab key (not Tab+shift).
       if @overlay == :none && (ev.key.tab? || ev.key.back_tab?)
         focus_advance(ev.key.back_tab? || ev.shift? ? -1 : 1)
+        return
+      end
+
+      # ^N opens a new blank replay whenever the Replay tab is active — body OR
+      # tab-bar focus — so the advertised empty-state shortcut is never a dead key.
+      if @active_tab == :replay && @overlay == :none && ev.ctrl? && ev.key.lower_n?
+        replay_new
         return
       end
 
@@ -504,7 +516,7 @@ module Gori::Tui
         replay_count: @replays.size)
       Chrome.render_rule(screen, layout.rule)
       render_body(screen, layout.body)
-      Chrome.render_status(screen, layout.status, hints: @toast || key_hints,
+      Chrome.render_status(screen, layout.status, focus: focus_label, hints: @toast || key_hints,
         capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?)
       @palette.render(screen, layout.body) if @overlay == :palette
       @scope_overlay.render(screen, layout.body) if @overlay == :scope
@@ -537,6 +549,21 @@ module Gori::Tui
       ic.enabled? ? "intercept:on(#{ic.pending_count})" : ""
     end
 
+    # The focus-area label shown at the far left of the status bar, so the user
+    # always knows which region the keys drive: an open overlay wins, else the
+    # tab bar (TABS) vs the content pane (BODY).
+    private def focus_label : String
+      case @overlay
+      when :palette     then "PALETTE"
+      when :scope       then "SCOPE"
+      when :rules       then "RULES"
+      when :finding_new then "FINDING"
+      when :detail      then "DETAIL"
+      else
+        @focus == :menu ? "TABS" : "BODY"
+      end
+    end
+
     # Contextual key hints for the bottom row — change with the focused region,
     # the active tab, and any open overlay (so the user always sees what the keys
     # under their fingers do right now).
@@ -564,7 +591,7 @@ module Gori::Tui
       when :intercept
         @intercept.editing? ? "type to edit · ^R forward · ⇧↹ queue · esc tabs" \
                             : "↑/↓ move · ↵/e edit · f forward · d drop · F all · ↹ detail · esc tabs"
-      when :replay   then "↹ pane · type to edit · ^R send · ^1-9 switch · ^W close · esc tabs"
+      when :replay   then "↹ pane · type to edit · ^R send · ^N new · ^1-9 switch · ^W close · esc tabs"
       when :notes    then "type to edit · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
@@ -597,7 +624,7 @@ module Gori::Tui
           v.render(screen, body_rect, focused: body_focused)
         else
           render_framed(screen, body_rect, body_focused) do |inner|
-            screen.text(inner.x + 1, inner.y, "no replays — use ^R from History", Theme::MUTED)
+            screen.text(inner.x + 1, inner.y, "no replays — ^N new request · ^R from History", Theme::MUTED)
           end
         end
       when :sitemap
@@ -734,7 +761,7 @@ module Gori::Tui
       x = rect.x + 1
       @replays.each_with_index do |tab, i|
         active = i == @current_replay_idx
-        lbl = "#{i+1}:#{tab.flow_id}"
+        lbl = "#{i + 1}:#{tab.flow_id || "new"}"
         if x + lbl.size + 2 > rect.right
           screen.text(x, rect.y, "…", Theme::MUTED, Theme::PANEL)
           break
@@ -888,8 +915,21 @@ module Gori::Tui
         @current_replay_idx = @replays.size - 1
         @active_tab = :replay
         @focus = :body
-        @toast = "Replay ##{id} — type to edit · ^R send · ^1-9 switch · esc back"
+        @toast = "Replay ##{id} — type to edit · ^R send · ^N new · ^1-9 switch · esc back"
       end
+    end
+
+    # Open a fresh, hand-authored replay session (Replay `^N`) — a blank request
+    # the user fills in and sends, with no source flow. Reachable even when no
+    # replays are open yet (the empty Replay tab).
+    def replay_new : Nil
+      view = ReplayView.new
+      view.load_blank
+      @replays << ReplayTab.new(view, nil)
+      @current_replay_idx = @replays.size - 1
+      @active_tab = :replay
+      @focus = :body
+      @toast = "new replay — edit the request & target · ^R send · ^1-9 switch · esc back"
     end
 
     # Close the current replay sub-tab so they don't accumulate without bound
@@ -899,7 +939,7 @@ module Gori::Tui
       return if @current_replay_idx < 0 || @current_replay_idx >= @replays.size
       @replays.delete_at(@current_replay_idx)
       @current_replay_idx = @replays.empty? ? -1 : @current_replay_idx.clamp(0, @replays.size - 1)
-      @toast = @replays.empty? ? "closed replay — none open (^R from History)" : "closed replay (#{@replays.size} open)"
+      @toast = @replays.empty? ? "closed replay — none open (^N new · ^R from History)" : "closed replay (#{@replays.size} open)"
     end
 
     private def current_replay_tab : ReplayTab?

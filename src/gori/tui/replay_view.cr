@@ -31,7 +31,13 @@ module Gori::Tui
       @scroll = 0
       @loaded = false
       @http2 = false
+      @diffable = false # true only when loaded from a captured flow (has an original to diff)
     end
+
+    # The starting scaffold for a hand-authored request (Replay `^N`): a minimal
+    # but immediately sendable HTTP/1.1 message the user edits in place.
+    BLANK_TARGET  = "https://example.com"
+    BLANK_REQUEST = "GET / HTTP/1.1\nHost: example.com\nUser-Agent: gori\nAccept: */*\n\n"
 
     def load(detail : Store::FlowDetail) : Nil
       @flow = detail
@@ -44,6 +50,26 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
+      @diffable = true
+      @loaded = true
+    end
+
+    # Open a hand-authored request not tied to any captured flow (Replay `^N`).
+    # Seeds the editable scaffold so the user can immediately tweak and send;
+    # there is no original response, so the result stays in plain response mode
+    # rather than diffing against nothing.
+    def load_blank : Nil
+      @flow = nil
+      @http2 = false
+      @target = BLANK_TARGET
+      @tcx = @target.size
+      @editor.set_text(BLANK_REQUEST)
+      @original_lines = [] of String
+      @result = nil
+      @focus = :request
+      @resp_mode = :response
+      @scroll = 0
+      @diffable = false
       @loaded = true
     end
 
@@ -88,7 +114,9 @@ module Gori::Tui
 
     def apply(result : Replay::Result) : Nil
       @result = result
-      @resp_mode = result.ok? ? :diff : :response
+      # Land on the diff only when there's an original to compare against; a
+      # hand-authored (blank) request has none, so show the response plainly.
+      @resp_mode = (@diffable && result.ok?) ? :diff : :response
       @focus = :response
       @scroll = 0
     end
@@ -246,6 +274,9 @@ module Gori::Tui
     end
 
     private def diff_lines : Array(Replay::DiffLine)
+      unless @diffable
+        return [Replay::DiffLine.new(Replay::DiffKind::Same, "— new request: no original response to diff against —")]
+      end
       result = @result
       unless result && result.ok?
         return [Replay::DiffLine.new(Replay::DiffKind::Same, "send the request (^R) to see a diff")]

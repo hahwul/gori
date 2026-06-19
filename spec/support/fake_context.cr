@@ -46,6 +46,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_selected : Nil; end
 
+  def replay_new : Nil; end
+
   def replay_send : Nil; end
 
   def sitemap_move(delta : Int32) : Nil; end

@@ -86,9 +86,30 @@ describe Gori::Tui::Chrome do
   it "windows the tab strip so the active tab stays visible when the row is too narrow" do
     backend = MemoryBackend.new(30, 2)
     Chrome.render_menu(Screen.new(backend), Rect.new(0, 1, 30, 1),
-      active_tab: :agent, focused: true) # last tab — can't all fit in 30 cols
+      active_tab: :agent, focused: true)      # last tab — can't all fit in 30 cols
     backend.contains?("Agent").should be_true # scrolled into view, not dropped
     backend.row(1).should contain("‹")        # indicator that earlier tabs are hidden
+  end
+
+  it "renders the focus-area badge at the far left of the status bar" do
+    backend = MemoryBackend.new(90, 1)
+    Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
+      focus: "BODY", hints: "↹ pane · esc tabs", capturing: true, insecure_upstream: false)
+    backend.contains?("BODY").should be_true
+    backend.fg_at(1, 0).should eq(Theme::TEXT_BRIGHT) # badge text is bright (col 0 is the leading pad)
+    backend.contains?("↹ pane").should be_true        # hints still render to the right of the badge
+    backend.contains?("capture:on").should be_true    # chips still on the right
+  end
+
+  it "keeps the focus badge intact when chips would otherwise overflow a narrow bar" do
+    # 36-col status rect ≈ a 40-col terminal (the minimum supported size). The
+    # widest chip pair must not clobber the persistent focus badge.
+    backend = MemoryBackend.new(36, 1)
+    Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 36, 1),
+      focus: "FINDING", hints: "type title · esc cancel", capturing: false, insecure_upstream: true)
+    backend.row(0)[0, 9].should eq(" FINDING ") # badge survives, no chip bled into it
+    backend.fg_at(1, 0).should eq(Theme::TEXT_BRIGHT)
+    backend.contains?("capture:off").should be_true # chips still present (truncated at the right edge)
   end
 
   it "renders the top bar with capture indicator" do
