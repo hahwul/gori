@@ -23,6 +23,18 @@ module Gori
       File.exists?(@db_path) ? File.info(@db_path).modification_time : nil
     end
 
+    # On-disk size of the SQLite DB (for Project tab "용량").
+    def db_size : Int64
+      File.exists?(@db_path) ? File.info(@db_path).size : 0_i64
+    end
+
+    # Best-effort project creation time (project dir mtime from mkdir in registry;
+    # falls back to earliest flow activity inside the Project tab view).
+    def created : Time?
+      d = dir
+      Dir.exists?(d) ? File.info(d).modification_time : nil
+    end
+
     # Remove the workspace from disk (temp projects only).
     def cleanup : Nil
       FileUtils.rm_rf(dir) if @ephemeral && Dir.exists?(dir)

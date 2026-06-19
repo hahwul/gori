@@ -2,8 +2,10 @@ module Gori::Tui
   # The persistent shell: top bar, left sidebar (tabs), and bottom status line.
   # Stateless renderers — they take the current state and draw it (immediate mode).
   module Chrome
-    # Tab identity + sidebar label, in display order. History is home.
+    # Tab identity + sidebar label, in display order. Project is now the default
+    # home tab (leftmost) shown on project entry; History is the raw log (next).
     TABS = [
+      {:project, "Project"},
       {:history, "History"},
       {:intercept, "Intercept"},
       {:sitemap, "Sitemap"},

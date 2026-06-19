@@ -24,8 +24,11 @@ module Gori::Tui
       @results_scroll = 0
       @mode = :list # :list | :new
       @name = ""
+      @desc = ""
+      @new_field = :name # :name | :desc (only in :new mode)
       @resized = false # set on a Resize event → next frame full-repaints
     end
+
 
     def run : Project?
       loop do
@@ -103,6 +106,7 @@ module Gori::Tui
         elsif proj = safe_create(name)
           return proj
         end
+
       elsif ev.ctrl? && key.lower_t?
         return open_temp
       elsif ev.ctrl? && key.lower_d?
@@ -133,7 +137,10 @@ module Gori::Tui
     private def start_new : Nil
       @mode = :new
       @name = @query.strip
+      @desc = ""
+      @new_field = :name
     end
+
 
     private def open_temp : Project
       @registry.temp(Random::Secure.hex(4))
@@ -141,11 +148,13 @@ module Gori::Tui
 
     # Create a project, swallowing an invalid-name error (e.g. a symbol-only name
     # that slugifies to empty) so the picker stays up instead of crashing the TUI.
-    private def safe_create(name : String) : Project?
-      @registry.create(name)
+    # Description is optional and passed through to init the project metadata.
+    private def safe_create(name : String, description : String = "") : Project?
+      @registry.create(name, description)
     rescue Gori::Error
       nil
     end
+
 
     private def delete_selected : Nil
       return if @selected < 3
@@ -161,18 +170,37 @@ module Gori::Tui
       if key.escape?
         @mode = :list
       elsif key.enter?
-        name = @name.strip
-        if !name.empty? && (proj = safe_create(name))
-          return proj
+        if @new_field == :name
+          if !@name.strip.empty?
+            @new_field = :desc
+          end
+        else
+          # On desc field: create (description is optional/empty ok)
+          name = @name.strip
+          desc = @desc.strip
+          if !name.empty? && (proj = safe_create(name, desc))
+            return proj
+          end
+          # invalid → stay
         end
-        # invalid (e.g. symbol-only) name → stay in the new-project input
       elsif key.backspace?
-        @name = @name[0, {@name.size - 1, 0}.max]
+        if @new_field == :name
+          @name = @name[0, {@name.size - 1, 0}.max]
+        else
+          @desc = @desc[0, {@desc.size - 1, 0}.max]
+        end
+      elsif key.up? || key.down?
+        @new_field = @new_field == :name ? :desc : :name
       elsif (c = key.to_char) && !ev.ctrl? && !ev.alt?
-        @name += c
+        if @new_field == :name
+          @name += c
+        else
+          @desc += c
+        end
       end
       nil
     end
+
 
     # --- rendering -----------------------------------------------------------
 
@@ -296,11 +324,29 @@ module Gori::Tui
       centered(screen, top, "gori", Theme::TEXT_BRIGHT, w, Attribute::Bold)
       centered(screen, top + 2, "new project", Theme::MUTED, w)
       iy = top + 3
-      screen.fill(Rect.new(cx, iy, cw, 1), Theme::PANEL)
-      cursor = screen.text(cx + 2, iy, "name › #{@name}", Theme::TEXT_BRIGHT, Theme::PANEL)
-      screen.cell(cursor, iy, '_', Theme::ACCENT, Theme::PANEL)
-      centered(screen, h - 2, "↵ create    esc cancel", Theme::MUTED, w)
+      # Two-row input area: name (required) + description (optional)
+      screen.fill(Rect.new(cx, iy, cw, 3), Theme::PANEL)
+      name_active = @new_field == :name
+      name_fg = name_active ? Theme::TEXT_BRIGHT : Theme::TEXT
+      screen.text(cx + 2, iy, "name › #{@name}", name_fg, Theme::PANEL)
+      if name_active
+        cursor = cx + 2 + "name › #{@name}".size
+        screen.cell(cursor, iy, '_', Theme::ACCENT, Theme::PANEL)
+      end
+
+      desc_active = @new_field == :desc
+      desc_fg = desc_active ? Theme::TEXT_BRIGHT : Theme::TEXT
+      desc_label = @desc.empty? && !desc_active ? "description (optional) › " : "description › #{@desc}"
+      screen.text(cx + 2, iy + 1, desc_label, desc_fg, Theme::PANEL)
+      if desc_active
+        cursor = cx + 2 + "description › #{@desc}".size
+        screen.cell(cursor, iy + 1, '_', Theme::ACCENT, Theme::PANEL)
+      end
+
+      hint = "↵ next/create   ↑/↓ fields   esc cancel"
+      centered(screen, h - 2, hint, Theme::MUTED, w)
     end
+
 
     private def centered(screen : Screen, y : Int32, text : String, fg : Color, w : Int32,
                          attr : Attribute = Attribute::None) : Nil

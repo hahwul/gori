@@ -90,9 +90,9 @@ describe "Intercept verbs (P1)" do
     reg["intercept.forward-all"].scope.should eq(Gori::Verb::Scope::Intercept)
   end
 
-  it "maps `2` to the Intercept tab after the renumber" do
+  it "maps `3` to the Intercept tab after the Project (leftmost) renumber" do
     reg = Gori::Verbs.registry
     keymap = Gori::Verb::Keymap.build(reg)
-    keymap.lookup(Gori::Verb::Chord.new("2"), Gori::Verb::Scope::Body).should eq("tab.intercept")
+    keymap.lookup(Gori::Verb::Chord.new("3"), Gori::Verb::Scope::Body).should eq("tab.intercept")
   end
 end

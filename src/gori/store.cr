@@ -359,6 +359,19 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
     end
 
+    # Earliest flow timestamp (unix seconds) for "project creation" fallback in
+    # the Project tab (min(created_at) of captured traffic; nil for brand new).
+    def earliest_created_at : Int64?
+      @db.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?)
+    end
+
+    # Sum of all captured wire sizes (request + response) across flows. Used for
+    # Project tab overview of total data volume (distinct from on-disk DB size).
+    def total_size : Int64
+      sql = "SELECT COALESCE(SUM(request_size + COALESCE(response_size, 0)), 0) FROM flows"
+      @db.scalar(sql).as(Int64)
+    end
+
     # Distinct (host, method, target) endpoints for building the Sitemap tree,
     # honouring an optional filter (the Scope lens). Bounded by `limit` so a huge
     # history can't materialize an unbounded DISTINCT set into memory (a sitemap

@@ -64,21 +64,22 @@ describe Gori::Tui::Chrome do
     backend = MemoryBackend.new(90, 2)
     screen = Screen.new(backend)
     Chrome.render_menu(screen, Rect.new(0, 1, 90, 1),
-      active_tab: :history, focused: true, findings_count: 2, intercept_count: 3)
+      active_tab: :project, focused: true, findings_count: 2, intercept_count: 3)
 
+    backend.contains?("Project").should be_true
     backend.contains?("History").should be_true
     backend.contains?("Intercept").should be_true
     backend.contains?("Sitemap").should be_true
     backend.contains?("(3)").should be_true # held-message badge on Intercept
-    # active segment ` History ` starts at col 2 (rect.x+1 fill, +1 pad); bright accent.
+    # active segment ` Project ` (now first tab) starts at col 2 (rect.x+1 fill, +1 pad); bright accent.
     backend.fg_at(2, 1).should eq(Theme::ACCENT)
-    backend.fg_at(12, 1).should eq(Theme::MUTED) # an inactive label is muted
+    backend.fg_at(12, 1).should eq(Theme::MUTED) # an inactive label (History) is muted
   end
 
   it "settles the active segment to bold TEXT (no accent) when the menu is unfocused" do
     backend = MemoryBackend.new(90, 2)
     Chrome.render_menu(Screen.new(backend), Rect.new(0, 1, 90, 1),
-      active_tab: :history, focused: false)
+      active_tab: :project, focused: false)
     backend.fg_at(2, 1).should eq(Theme::TEXT) # active but body-focused: present, not lit
     backend.fg_at(2, 1).should_not eq(Theme::ACCENT)
   end

@@ -106,11 +106,17 @@ module Gori::Tui
           screen.text(rect.x, rect.y + i, line, Theme::TEXT, width: rect.w)
         end
         next unless cursor && li == @cy
-        cxs = rect.x + @cx
+        prefix_w = Screen.display_width(line[0, @cx])
+        cxs = rect.x + prefix_w
         if cxs < rect.x + rect.w
           ch = @cx < line.size ? line[@cx] : ' '
-          screen.cell(cxs, rect.y + i, ch, Theme::BG, Theme::ACCENT) # inverse-video cursor
+          gw = [Screen.display_width(ch.to_s), 1].max
+          (0...gw).each do |off|
+            cch = (off == 0 ? ch : ' ')
+            screen.cell(cxs + off, rect.y + i, cch, Theme::BG, Theme::ACCENT)
+          end
         end
+
       end
     end
 

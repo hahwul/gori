@@ -11,6 +11,7 @@ require "./replay_view"
 require "./sitemap_view"
 require "./findings_view"
 require "./notes_view"
+require "./project_view"
 require "./intercept_view"
 require "./scope_overlay"
 require "./rules_overlay"
@@ -46,6 +47,7 @@ module Gori::Tui
       @sitemap = SitemapView.new
       @findings = FindingsView.new
       @notes = NotesView.new
+      @project_view = ProjectView.new
       @intercept = InterceptView.new
       @scope = @session.scope
       @scope_overlay = ScopeOverlay.new(@scope)
@@ -53,9 +55,9 @@ module Gori::Tui
       @finding_form = FindingForm.new
       @palette = PaletteState.new(@session.registry)
       @history.set_scope(@scope)
-      @active_tab = :history
+      @active_tab = :project
       @overlay = :none # :none | :palette | :detail | :scope | :rules | :finding_new
-      @focus = :body                  # :menu | :body — which pane the keys drive
+      @focus = :menu                  # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
       @outcome = :running             # :running | :quit | :back
       @resized = false                # set on a Resize event → next frame full-repaints
@@ -67,6 +69,7 @@ module Gori::Tui
 
     def run : Symbol
       @history.reload(@session.store)
+      @project_view.reload(@session.project, @session.store)
       loop do
         drain_events
         drain_replay_results
@@ -168,6 +171,10 @@ module Gori::Tui
       return handle_replay_key(ev) if @active_tab == :replay && @overlay == :none && @focus == :body
       return handle_notes_key(ev) if @active_tab == :notes && @overlay == :none && @focus == :body
       return handle_intercept_key(ev) if @active_tab == :intercept && @overlay == :none && @focus == :body
+      # Project description editor (live TextArea for the DESCRIPTION section when body focused).
+      # Tab is handled by the focus ring above (so ring always works); other keys (letters,
+      # arrows, enter, esc, etc.) are consumed here for desc editing (consistent with Notes).
+      return handle_project_key(ev) if @active_tab == :project && @overlay == :none && @focus == :body
 
       chord = Keybind.from_event(ev)
       return unless chord
@@ -301,9 +308,47 @@ module Gori::Tui
       end
     end
 
+    # Project tab body editor for the description field (live like Notes, but
+    # coexists with the static metadata above it in the same tab).
+    private def handle_project_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        save_project_desc
+        open_palette
+      elsif ev.ctrl_c?
+        save_project_desc
+        quit!
+      elsif key.escape?
+        save_project_desc
+        focus_pane(:menu)
+      elsif key.enter?
+        @project_view.newline
+      elsif key.backspace?
+        @project_view.backspace
+      elsif key.up?
+        @project_view.move(-1, 0)
+      elsif key.down?
+        @project_view.move(1, 0)
+      elsif key.left?
+        @project_view.move(0, -1)
+      elsif key.right?
+        @project_view.move(0, 1)
+      else
+        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+          @project_view.insert(c)
+        end
+      end
+    end
+
     private def save_notes : Nil
+
       @notes.save(@session.store)
     end
+
+    private def save_project_desc : Nil
+      @project_view.save(@session.store)
+    end
+
 
     # The Intercept queue. Not editing: navigate + decide. Editing: typing edits
     # the held bytes (Replay-style): type to edit, `^R` forwards the edited bytes,
@@ -577,7 +622,7 @@ module Gori::Tui
       when :detail      then "↹ switch pane · ↑/↓ scroll · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
-        return "←/→ switch tab · ↹/↵ enter · 1-7 jump · ^P cmds · q projects · Q quit" if @focus == :menu
+        return "←/→ switch tab · ↹/↵ enter · 1-8 jump · ^P cmds · q projects · Q quit" if @focus == :menu
         body_hints
       end
     end
@@ -598,6 +643,7 @@ module Gori::Tui
       when :findings
         @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
                                : "↑/↓ move · ↵ open · n new · d delete · esc tabs"
+      when :project  then "type to edit description · ↑/↓/↔ move · ↵ nl · esc tabs"
       else "↹/esc tabs · ^P cmds · q projects · Q quit"
       end
     end
@@ -634,13 +680,14 @@ module Gori::Tui
         render_framed(screen, rect, body_focused) { |inner| @findings.render(screen, inner, focused: body_focused) }
       when :notes
         render_framed(screen, rect, body_focused) { |inner| @notes.render(screen, inner, focused: body_focused) }
+      when :project
+        render_framed(screen, rect, body_focused) { |inner| @project_view.render(screen, inner, focused: body_focused) }
       when :intercept
         @intercept.reload(@session.interceptor) # live refresh (50ms loop)
         @intercept.render(screen, rect, focused: body_focused) # view frames its own panes
       else
         render_framed(screen, rect, body_focused) do |inner|
           screen.text(inner.x + 1, inner.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme::MUTED)
-          screen.text(inner.x + 1, inner.y + 2, "History is the home for v1.", Theme::MUTED)
         end
       end
     end
@@ -658,13 +705,16 @@ module Gori::Tui
 
     def quit! : Nil
       save_notes
+      save_project_desc
       @outcome = :quit
     end
 
     def leave_project : Nil
       save_notes
+      save_project_desc
       @outcome = :back
     end
+
 
     def status(message : String) : Nil
       @toast = message
@@ -690,14 +740,21 @@ module Gori::Tui
     end
 
     def focus_tab(tab : Symbol) : Nil
+      if @active_tab == :project
+        @project_view.save(@session.store)
+      end
       @active_tab = tab
-      @focus = :body # jumping to a tab drills straight into its content
+      @focus = :body # explicit "jump to tab" (e.g. number keys) drills into content; startup defaults to :menu (tab bar)
       @overlay = :none
       on_enter_tab
       view_focus_first
     end
 
+
     def cycle_tab(delta : Int32) : Nil
+      if @active_tab == :project
+        @project_view.save(@session.store)
+      end
       idx = Chrome.tab_index(@active_tab)
       @active_tab = Chrome.tab_at((idx + delta) % Chrome::TABS.size)
       @overlay = :none
@@ -706,6 +763,7 @@ module Gori::Tui
       # while in the body drops into the new tab's first pane.
       view_focus_first if @focus == :body
     end
+
 
     # --- unified focus ring (tab-bar ◂▸ body panes) --------------------------
 
@@ -746,12 +804,13 @@ module Gori::Tui
     end
 
     # Refresh a tab's data when it becomes active (the Sitemap is derived from
-    # whatever has been captured so far).
+    # whatever has been captured so far). Project tab refreshes its stats snapshot.
     private def on_enter_tab : Nil
       case @active_tab
       when :sitemap   then @sitemap.reload(@session.store, @scope.filter)
       when :findings  then @findings.reload(@session.store)
       when :notes     then @notes.reload(@session.store)
+      when :project   then @project_view.reload(@session.project, @session.store)
       when :intercept then @intercept.reload(@session.interceptor)
       end
     end

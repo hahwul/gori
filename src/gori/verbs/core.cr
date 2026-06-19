@@ -65,10 +65,10 @@ module Gori
         "nav.prev-tab", "Previous tab", "Focus the previous tab", Verb::Scope::Global,
         [Verb::Chord.new("[")]) { |ctx| ctx.cycle_tab(-1); nil }
 
-      # Direct tab focus (mirrors the sidebar).
+      # Direct tab focus (mirrors the sidebar). Project is 1 (new leftmost default).
       {
-        "1" => :history, "2" => :intercept, "3" => :sitemap, "4" => :replay,
-        "5" => :findings, "6" => :notes, "7" => :agent,
+        "1" => :project, "2" => :history, "3" => :intercept, "4" => :sitemap,
+        "5" => :replay, "6" => :findings, "7" => :notes, "8" => :agent,
       }.each do |key, tab|
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{tab.to_s.capitalize}", "Focus the #{tab} tab", Verb::Scope::Global,

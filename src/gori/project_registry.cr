@@ -1,5 +1,6 @@
 require "file_utils"
 require "./project"
+require "./store"
 
 module Gori
   # Discovers and creates project workspaces under a root directory. Named
@@ -27,13 +28,23 @@ module Gori
 
     # Create (or reopen) a named project. The display name is slugified for the
     # directory; the original name is kept for display.
-    def create(name : String) : Project
+    # `description` is optional and persisted immediately into the project's
+    # settings (so it is available on first open in the Project tab).
+    def create(name : String, description : String = "") : Project
       display = name.strip
       slug = slugify(display)
       raise Gori::Error.new("invalid project name") if slug.empty?
       dir = File.join(@root, slug)
       FileUtils.mkdir_p(dir)
-      Project.new(display, File.join(dir, Project::DB_FILE))
+      proj = Project.new(display, File.join(dir, Project::DB_FILE))
+      desc = description.strip
+      unless desc.empty?
+        # First open creates the DB + runs migrations (including settings table).
+        s = Store.open(proj.db_path)
+        s.set_setting("description", desc)
+        s.close
+      end
+      proj
     end
 
     # A throwaway workspace, deleted when its session closes.

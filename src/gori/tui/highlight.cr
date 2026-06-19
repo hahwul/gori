@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "termisu"
 
 module Gori::Tui
   # Syntax highlighting for the request/response panes (History detail, Replay,
@@ -85,25 +86,46 @@ module Gori::Tui
                   bg : Color = Theme::BG, width : Int32? = nil) : Int32
       limit = width || (screen.width - x)
       return x if limit <= 0
-      total = line.sum(&.text.size)
-      overflow = total > limit
-      ellipsis = overflow && limit > 1
-      cut = overflow ? {limit - 1, 1}.max : limit
-      col = 0
-      line.each do |span|
-        span.text.each_char do |ch|
-          break if col >= cut
-          screen.cell(x + col, y, ch, span.fg, bg, span.attr)
-          col += 1
+
+      # Special case for width=1: always show the first glyph (even if it is
+      # wide, e.g. Hangul), never ellipsis. Matches Screen#fit policy.
+      if limit == 1
+        if line.any? && !line[0].text.empty?
+          first = line[0].text.each_grapheme.first.to_s
+          screen.cell(x, y, first, line[0].fg, bg, line[0].attr)
+          return x + Screen.display_width(first)
         end
-        break if col >= cut
+        return x
       end
-      if ellipsis
-        screen.cell(x + cut, y, '…', Theme::MUTED, bg)
-        col = cut + 1
+
+      full_dw = line.sum { |sp| Screen.display_width(sp.text) }
+      overflow = full_dw > limit
+      ellipsis = overflow && limit > 1
+
+      visual_col = 0
+      line.each do |span|
+        break if visual_col >= limit
+        span.text.each_grapheme do |g|
+          gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
+          room = limit - (ellipsis ? 1 : 0)
+          if visual_col + gw > room
+            break
+          end
+          screen.cell(x + visual_col, y, g.to_s, span.fg, bg, span.attr)
+          visual_col += gw
+        end
+        break if visual_col >= limit
       end
-      x + col
+
+      if ellipsis && visual_col < limit
+        screen.cell(x + visual_col, y, '…', Theme::MUTED, bg)
+        visual_col += 1
+      end
+      x + visual_col
     end
+
+
+
 
     # --- line builders -------------------------------------------------------
 
