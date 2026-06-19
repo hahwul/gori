@@ -29,30 +29,30 @@ private def add_flow(store, method, target, status = nil)
 end
 
 describe Gori::Tui::HistoryView do
-  it "loads flows oldest-first with the newest selected (follow)" do
+  it "loads flows newest-first with the newest selected (follow)" do
     tmp_store do |store|
       add_flow(store, "GET", "/a", 200)
       last = add_flow(store, "POST", "/b", 500)
       view = HistoryView.new
       view.reload(store)
-      view.rows.map(&.target).should eq(["/a", "/b"])
-      view.selected_id.should eq(last)
+      view.rows.map(&.target).should eq(["/b", "/a"]) # newest first (Burp/Caido style)
+      view.selected_id.should eq(last)                # newest selected, at the top
     end
   end
 
-  it "appends on :inserted and fills status on :updated" do
+  it "prepends on :inserted (newest on top) and fills status on :updated" do
     tmp_store do |store|
       view = HistoryView.new
       view.reload(store)
       id = add_flow(store, "GET", "/live") # pending
       view.on_event(Gori::Store::FlowEvent.new(id, :inserted), store)
-      view.rows.last.target.should eq("/live")
-      view.rows.last.status.should be_nil
+      view.rows.first.target.should eq("/live")
+      view.rows.first.status.should be_nil
 
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 204, head: "HTTP/1.1 204 No Content\r\n\r\n".to_slice))
       view.on_event(Gori::Store::FlowEvent.new(id, :updated), store)
-      view.rows.last.status.should eq(204)
+      view.rows.first.status.should eq(204)
     end
   end
 
@@ -62,7 +62,7 @@ describe Gori::Tui::HistoryView do
       view = HistoryView.new
       view.reload(store)
       view.follow?.should be_true
-      view.move(-1)
+      view.move(1) # down toward older — newest-first, so this disengages follow
       view.follow?.should be_false
       view.selected_id.should_not be_nil
     end
@@ -205,8 +205,8 @@ describe Gori::Tui::HistoryView do
       view.rows.size.should be <= 10 + 4 # never grows without bound
       view.follow?.should be_true
       view.selected_id.should eq(last_id) # following stays pinned to the newest flow
-      # the oldest rows have left the window; the newest are present
-      view.rows.last.id.should eq(last_id)
+      # the oldest rows have left the window; the newest sits at the top (newest-first)
+      view.rows.first.id.should eq(last_id)
     end
   end
 

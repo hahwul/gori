@@ -58,17 +58,18 @@ module Gori::Tui
       !@query.blank? || (@scope.try(&.active?) == true)
     end
 
-    # Load flows (oldest-first so newest sit at the bottom), applying the Scope
-    # lens AND the QL query.
+    # Load flows (newest-first so the latest sit at the top, like Burp/Caido),
+    # applying the Scope lens AND the QL query. store.search already returns
+    # newest-first (ORDER BY id DESC), so no reverse.
     def reload(store : Store) : Nil
       prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
       combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(@query))
-      @rows = store.search(combined, PAGE).reverse!
+      @rows = store.search(combined, PAGE)
       reindex
       @filter_dirty = false
       @selected =
         if @follow
-          {@rows.size - 1, 0}.max
+          0
         elsif prev_id && (idx = @index[prev_id]?)
           idx # keep the highlight on the same flow across a reload
         else
@@ -91,9 +92,17 @@ module Gori::Tui
       when :inserted
         return if @index.has_key?(event.id)
         if row = store.flow_row(event.id)
-          @index[row.id] = @rows.size
-          @rows << row
-          @selected = @rows.size - 1 if @follow
+          # Newest-first: prepend so the latest sits at the top. Positions of all
+          # existing rows shift by one, so reindex (bounded by MAX_ROWS).
+          @rows.unshift(row)
+          reindex
+          if @follow
+            @selected = 0
+          else
+            # Keep the highlight + viewport on the same flows the user is looking at.
+            @selected += 1
+            @scroll += 1
+          end
           trim_window if @rows.size > @max_rows + @trim_slack
         end
       when :updated
@@ -106,12 +115,13 @@ module Gori::Tui
     def move(delta : Int32) : Nil
       return if @rows.empty?
       @selected = (@selected + delta).clamp(0, @rows.size - 1)
-      @follow = (@selected == @rows.size - 1)
+      # Newest-first: "following" the live tail means sitting on the top row (0).
+      @follow = (@selected == 0)
     end
 
     def toggle_follow : Nil
       @follow = !@follow
-      @selected = @rows.size - 1 if @follow && !@rows.empty?
+      @selected = 0 if @follow && !@rows.empty?
     end
 
     def selected_id : Int64?
@@ -377,16 +387,17 @@ module Gori::Tui
       @rows.each_with_index { |r, i| @index[r.id] = i }
     end
 
-    # Drop the oldest rows so the window stays at MAX_ROWS, shifting the selection
-    # and scroll to follow. Done in batches (see TRIM_SLACK) so the O(n) reindex
-    # amortizes instead of running on every appended flow.
+    # Drop the oldest rows so the window stays at MAX_ROWS. Newest-first, so the
+    # oldest are at the END — pop them. Selection/scroll live near the top (newest)
+    # and are unaffected, but clamp in case the user had scrolled into the tail.
+    # Batched (see TRIM_SLACK) so the O(n) reindex amortizes, not per flow.
     private def trim_window : Nil
       drop = @rows.size - @max_rows
       return if drop <= 0
-      @rows.shift(drop)
+      @rows.pop(drop)
       reindex
-      @selected = {@selected - drop, 0}.max
-      @scroll = {@scroll - drop, 0}.max
+      @selected = @selected.clamp(0, {@rows.size - 1, 0}.max)
+      @scroll = @scroll.clamp(0, {@rows.size - 1, 0}.max)
     end
 
     # The detail body as styled lines (request/response head + body with HTTP
