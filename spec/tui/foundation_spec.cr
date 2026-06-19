@@ -112,6 +112,16 @@ describe Gori::Tui::Chrome do
     backend.contains?("capture:off").should be_true # chips still present (truncated at the right edge)
   end
 
+  it "shows a loud red capture-failing chip when writes are dropping" do
+    backend = MemoryBackend.new(90, 1)
+    Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
+      focus: "BODY", hints: "x", capturing: true, insecure_upstream: false, write_failures: 4)
+    backend.contains?("capture:FAILING(4)").should be_true
+    fx = backend.row(0).index("capture:FAILING").not_nil!
+    backend.fg_at(fx, 0).should eq(Theme::RED)
+    backend.contains?("capture:on").should be_false # replaced, not appended
+  end
+
   it "renders the top bar with capture indicator" do
     backend = MemoryBackend.new(80, 1)
     screen = Screen.new(backend)

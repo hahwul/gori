@@ -517,7 +517,8 @@ module Gori::Tui
       Chrome.render_rule(screen, layout.rule)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: @toast || key_hints,
-        capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?)
+        capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,
+        write_failures: @session.store.write_failures)
       @palette.render(screen, layout.body) if @overlay == :palette
       @scope_overlay.render(screen, layout.body) if @overlay == :scope
       @rules_overlay.render(screen, layout.body) if @overlay == :rules

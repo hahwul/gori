@@ -36,10 +36,12 @@ module Gori::Proxy
     end
 
     def on_response(resp : Store::CapturedResponse) : Nil
+      return if resp.flow_id <= 0 # the request insert failed (e.g. disk full) — no row to update
       @store.update_response(resp)
     end
 
     def on_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes) : Nil
+      return if flow_id <= 0
       @store.insert_ws_message(flow_id, direction, opcode, payload)
     end
 

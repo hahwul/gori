@@ -54,21 +54,40 @@ module Gori
 
     BATCH_MAX = 128
 
+    # Keep at most this many newest flows; older ones (and their ws/h2 rows) are
+    # pruned so the DB plateaus instead of growing forever (freed pages are
+    # reused by later inserts). 0 disables retention. Tunable per Store.open.
+    RETENTION_DEFAULT = 100_000
+    # Inserts between retention sweeps — amortizes the prune cost.
+    PRUNE_INTERVAL = 2_000
+
     @events : Channel(FlowEvent)?
 
     # Opens (and migrates) the database. `events`, when given, receives
     # best-effort post-commit notifications for the live TUI; pass nil in
-    # headless mode (no consumer => nothing to publish).
-    def self.open(path : String, events : Channel(FlowEvent)? = nil) : Store
+    # headless mode (no consumer => nothing to publish). `retention_flows` caps
+    # the kept history (0 = unlimited).
+    def self.open(path : String, events : Channel(FlowEvent)? = nil,
+                  retention_flows : Int32 = RETENTION_DEFAULT) : Store
       url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000"
       db = DB.open(url)
       Schema.migrate!(db)
-      new(db, events)
+      new(db, events, retention_flows)
     end
 
-    def initialize(@db : DB::Database, @events : Channel(FlowEvent)? = nil)
+    # Count of write batches that failed (e.g. disk full) — surfaced in the TUI
+    # so the operator knows capture stopped persisting.
+    def write_failures : Int32
+      @write_failures.get
+    end
+
+    def initialize(@db : DB::Database, @events : Channel(FlowEvent)? = nil,
+                   @retention_flows : Int32 = RETENTION_DEFAULT,
+                   @prune_interval : Int32 = PRUNE_INTERVAL)
       @writes = Channel(WriteOp).new(256)
       @done = Channel(Nil).new
+      @write_failures = Atomic(Int32).new(0)
+      @inserts_since_prune = 0
       spawn(name: "gori-store-writer") do
         writer_loop
         @done.send(nil)
@@ -366,6 +385,9 @@ module Gori
 
     private def writer_loop : Nil
       @db.using_connection do |conn|
+        # Bound the WAL file so it doesn't grow without limit under sustained
+        # writes (the default is 1000 pages; set it explicitly on the writer).
+        conn.exec("PRAGMA wal_autocheckpoint=1000") rescue nil
         loop do
           first = @writes.receive?
           break if first.nil? # channel closed: drained, exit
@@ -412,12 +434,46 @@ module Gori
             committed = true
           rescue ex
             STDERR.puts "gori: store write batch failed (#{ops.size} op(s), rolled back): #{ex.message}"
+            @write_failures.add(ops.size) # surfaced in the TUI so the operator knows capture stopped
           end
           # publish never raises (see #publish); replies are buffered — so neither
           # branch can block or throw back into the loop.
-          committed ? deferred.each(&.call) : ops.each { |op| fail_reply(op) }
+          if committed
+            deferred.each(&.call)
+            @inserts_since_prune += ops.count(&.is_a?(InsertFlow))
+            if @inserts_since_prune >= @prune_interval
+              prune(conn)
+              @inserts_since_prune = 0
+            end
+          else
+            ops.each { |op| fail_reply(op) }
+          end
         end
       end
+    end
+
+    # Retention sweep: keep only the newest `@retention_flows` flows (by id, which
+    # is monotonic), cascading to their ws messages and orphaned h2 frames/conns.
+    # A failure here must not kill the writer or lose the just-committed batch, so
+    # it runs in its own transaction and swallows errors (retried next interval).
+    private def prune(conn : DB::Connection) : Nil
+      return if @retention_flows <= 0
+      max_id = conn.query_one?("SELECT MAX(id) FROM flows", as: Int64?)
+      return unless max_id
+      cutoff = max_id - @retention_flows
+      return if cutoff <= 0
+      conn.transaction do |tx|
+        c = tx.connection
+        c.exec("DELETE FROM ws_messages WHERE flow_id <= ?", cutoff)
+        c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
+        # h2 frames/connections key off conn_id, not flow id — drop any no longer
+        # referenced by a surviving flow. The subqueries exclude NULLs so the
+        # NOT IN logic is well-defined.
+        c.exec("DELETE FROM h2_frames WHERE conn_id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)")
+        c.exec("DELETE FROM h2_connections WHERE id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)")
+      end
+    rescue ex
+      STDERR.puts "gori: retention prune failed (will retry): #{ex.message}"
     end
 
     # Unblock a caller whose batch was rolled back, with a no-op fallback (no row

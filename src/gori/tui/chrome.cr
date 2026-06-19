@@ -126,14 +126,21 @@ module Gori::Tui
     # upstream state chips (right). The badge — TABS / BODY / an overlay name —
     # is a lifted chip so the user always knows which region the keys drive.
     def self.render_status(screen : Screen, rect : Rect, *, focus : String, hints : String,
-                           capturing : Bool, insecure_upstream : Bool) : Nil
+                           capturing : Bool, insecure_upstream : Bool, write_failures : Int32 = 0) : Nil
       screen.fill(rect, Theme::PANEL)
       badge = " #{focus} "
       screen.text(rect.x, rect.y, badge, Theme::TEXT_BRIGHT, Theme::ELEVATED, Attribute::Bold)
       hint_x = rect.x + badge.size + 1
 
+      # A persistent capture-write failure (e.g. disk full) is louder than the
+      # normal on/off chip — the operator must know rows are being dropped.
+      capture_chip = if write_failures > 0
+                       {"capture:FAILING(#{write_failures})", Theme::RED}
+                     else
+                       {capturing ? "capture:on" : "capture:off", capturing ? Theme::TEXT : Theme::MUTED}
+                     end
       chips = [
-        {capturing ? "capture:on" : "capture:off", capturing ? Theme::TEXT : Theme::MUTED},
+        capture_chip,
         # an insecure upstream is a security warning — the one allowed non-status colour.
         insecure_upstream ? {"upstream:insecure", Theme::YELLOW} : {"upstream:verify", Theme::MUTED},
       ]

@@ -111,6 +111,31 @@ describe Gori::Store do
     end
   end
 
+  it "prunes the oldest flows (and their ws messages) once retention is exceeded" do
+    path = File.tempname("gori-ret", ".db")
+    db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+    Gori::Store::Schema.migrate!(db)
+    store = Gori::Store.new(db, nil, retention_flows: 5, prune_interval: 10)
+    begin
+      ids = [] of Int64
+      ids << store.insert_flow(sample_request(target: "/1"))
+      store.insert_ws_message(ids[0], "out", 1, "x".to_slice) # belongs to a soon-pruned flow
+      (2..12).each { |i| ids << store.insert_flow(sample_request(target: "/#{i}")) }
+      # the prune fired after the 10th insert (cutoff = 10 - 5): kept ids 6-10,
+      # then ids 11-12 were inserted → ~7 rows; the oldest are gone.
+      store.count.should eq(7_i64)
+      store.flow_row(ids[0]).should be_nil      # flow 1 pruned
+      store.ws_messages(ids[0]).should be_empty # cascade removed its ws message
+      store.flow_row(ids[11]).should_not be_nil # flow 12 kept
+      store.write_failures.should eq(0)
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
   it "pages older rows via the before_id cursor" do
     with_store do |store|
       ids = (1..5).map { |i| store.insert_flow(sample_request(target: "/#{i}")) }
