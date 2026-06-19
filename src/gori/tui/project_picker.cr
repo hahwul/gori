@@ -283,9 +283,13 @@ module Gori::Tui
           bg = is_selected ? Theme::ACCENT_BG : Theme::PANEL
           screen.fill(Rect.new(box.x + 1, py, cw - 2, 1), bg) if is_selected
           screen.cell(box.x + 1, py, is_selected ? '▎' : ' ', Theme::ACCENT, bg)
-          screen.text(box.x + 3, py, proj.name, is_selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: cw - 8)
           meta = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
-          screen.text(box.right - meta.size - 2, py, meta, Theme::MUTED, bg) unless meta.empty?
+          mdw = Screen.display_width(meta)
+          name_w = cw - 3 - (mdw + 2)
+          screen.text(box.x + 3, py, proj.name, is_selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: [name_w, 1].max)
+          meta_x = box.right - mdw - 2
+          screen.text(meta_x, py, meta, Theme::MUTED, bg) unless meta.empty?
+
         end
       end
 
@@ -317,7 +321,9 @@ module Gori::Tui
         screen.text(qx, y, "search projects...", Theme::MUTED, bg)
       else
         screen.text(qx, y, @query, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: box.w - 7)
-        screen.cell(qx + @query.size, y, '_', Theme::ACCENT, bg) if selected
+        cursor = qx + Screen.display_width(@query)
+        screen.cell(cursor, y, '_', Theme::ACCENT, bg) if selected
+
       end
     end
 
@@ -332,18 +338,20 @@ module Gori::Tui
       name_fg = name_active ? Theme::TEXT_BRIGHT : Theme::TEXT
       screen.text(cx + 2, iy, "name › #{@name}", name_fg, Theme::PANEL)
       if name_active
-        cursor = cx + 2 + "name › #{@name}".size
+        cursor = cx + 2 + Screen.display_width("name › #{@name}")
         screen.cell(cursor, iy, '_', Theme::ACCENT, Theme::PANEL)
       end
+
 
       desc_active = @new_field == :desc
       desc_fg = desc_active ? Theme::TEXT_BRIGHT : Theme::TEXT
       desc_label = @desc.empty? && !desc_active ? "description (optional) › " : "description › #{@desc}"
       screen.text(cx + 2, iy + 1, desc_label, desc_fg, Theme::PANEL)
       if desc_active
-        cursor = cx + 2 + "description › #{@desc}".size
+        cursor = cx + 2 + Screen.display_width("description › #{@desc}")
         screen.cell(cursor, iy + 1, '_', Theme::ACCENT, Theme::PANEL)
       end
+
 
       hint = "↵ next/create   ↑/↓ fields   esc cancel"
       centered(screen, h - 2, hint, Theme::MUTED, w)
