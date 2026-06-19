@@ -22,6 +22,12 @@ module Gori::Tui
       @editor = TextArea.new
       @editing = false
       @loaded_id = nil.as(Int64?) # which item the editor currently holds
+      # Cached highlight of the selected held item's raw bytes (read-only detail
+      # pane). Held bytes are immutable and item ids are monotonic, so the id is a
+      # perfect cache key — recomputed only when the selection changes, not on
+      # every render (a held body was re-tokenised on each repaint).
+      @detail_styled = nil.as(Array(Highlight::Line)?)
+      @detail_styled_id = nil.as(Int64?)
     end
 
     # Fresh snapshot (cheap; called on enter AND every frame via the 50ms loop).
@@ -179,12 +185,21 @@ module Gori::Tui
       if @editing && @loaded_id == it.id
         @editor.render(screen, inner, cursor: focused, highlight: mode)
       else
-        styled = Highlight.from_lines(String.new(it.raw).split('\n').map(&.rstrip('\r')), it.kind.request?)
+        styled = detail_styled_for(it)
         styled.each_with_index do |line, i|
           break if i >= inner.h
           Highlight.draw(screen, inner.x, inner.y + i, line, width: inner.w)
         end
       end
+    end
+
+    # Highlight the held item's raw bytes, cached by item id (held bytes never
+    # change; ids never repeat) so the detail pane isn't re-tokenised every frame.
+    private def detail_styled_for(it : Interceptor::Item) : Array(Highlight::Line)
+      cached = @detail_styled
+      return cached if cached && @detail_styled_id == it.id
+      @detail_styled_id = it.id
+      @detail_styled = Highlight.from_lines(String.new(it.raw).split('\n').map(&.rstrip('\r')), it.kind.request?)
     end
 
     private def ensure_visible(h : Int32) : Nil
