@@ -5,7 +5,7 @@ require "./text_area"
 require "../store"
 
 module Gori::Tui
-  # The Notes tab (DESIGN.md: 메모/리포트 — the running scratchpad/report). One
+  # The Notes tab (DESIGN.md: notes/report — the running scratchpad/report). One
   # free-form, per-project document edited inline (no edit mode — typing edits
   # directly, like Replay). Persisted in the project's settings KV (key "notes")
   # and saved when you leave the editor, so it survives reopening the project.

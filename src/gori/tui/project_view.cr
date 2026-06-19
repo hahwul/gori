@@ -102,7 +102,7 @@ module Gori::Tui
         {"Name", p.name},
         {"Created", format_time(@created)},
         {"DB Path", p.dir},
-        {"DB Size (용량)", human_size(@db_size)},
+        {"DB Size", human_size(@db_size)},
         {"Flows", @flow_count.to_s},
         {"Captured", human_size(@total_captured)},
         {"Findings", @findings_count.to_s},

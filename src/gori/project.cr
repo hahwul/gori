@@ -23,7 +23,7 @@ module Gori
       File.exists?(@db_path) ? File.info(@db_path).modification_time : nil
     end
 
-    # On-disk size of the SQLite DB (for Project tab "용량").
+    # On-disk size of the SQLite DB (shown as "DB Size" in the Project tab).
     def db_size : Int64
       File.exists?(@db_path) ? File.info(@db_path).size : 0_i64
     end
