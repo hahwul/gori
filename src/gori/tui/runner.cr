@@ -73,13 +73,32 @@ module Gori::Tui
       @history.reload(@session.store)
       @project_view.reload(@session.project, @session.store)
       refresh_findings_count
+      render # initial paint (the loop below only re-renders when something changed)
+      # The render loop polls input on a 50ms cadence (so async channels are still
+      # checked ≤50ms), but RENDER only runs when the frame would actually change —
+      # input handled, flow events / replay results drained, the interceptor queue
+      # changed (async holds bump a revision), or a write failure was recorded.
+      # Idle (no traffic, no keys) burns ~no CPU instead of rebuilding 20 frames/s.
+      last_rev = @session.interceptor.revision
+      last_wf = @session.store.write_failures
       loop do
-        drain_events
-        drain_replay_results
-        render
-        if ev = @term.poll_event(50)
+        ev = @term.poll_event(50)
+        dirty = false
+        if ev
           handle(ev)
+          dirty = true
         end
+        dirty = true if drain_events          # always drains; true if anything arrived
+        dirty = true if drain_replay_results
+        if (rev = @session.interceptor.revision) != last_rev
+          last_rev = rev
+          dirty = true
+        end
+        if (wf = @session.store.write_failures) != last_wf
+          last_wf = wf
+          dirty = true
+        end
+        render if dirty
         break unless @outcome == :running
       end
       @outcome
@@ -88,7 +107,8 @@ module Gori::Tui
     # Apply any replay results that finished since the last tick (the network
     # round-trip ran on a background fiber; view state is mutated here, on the UI
     # fiber that owns it).
-    private def drain_replay_results : Nil
+    private def drain_replay_results : Bool
+      applied = false
       while pair = nonblocking_replay_result
         view, result = pair
         # Drop a result whose sub-tab was closed (^W) mid-flight — applying it
@@ -100,7 +120,9 @@ module Gori::Tui
                  else
                    "replay error: #{result.error}"
                  end
+        applied = true
       end
+      applied
     end
 
     private def nonblocking_replay_result : {ReplayView, Replay::Result}?
@@ -114,12 +136,15 @@ module Gori::Tui
 
     # --- main loop helpers ---------------------------------------------------
 
-    private def drain_events : Nil
+    private def drain_events : Bool
+      drained = false
       while event = nonblocking_event
         @history.on_event(event, @session.store)
+        drained = true
       end
       # Coalesce a filtered-view reload to once per drain (on_event only flagged it).
       @history.flush_filter(@session.store)
+      drained
     end
 
     private def nonblocking_event : Store::FlowEvent?

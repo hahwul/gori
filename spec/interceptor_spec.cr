@@ -50,6 +50,26 @@ describe Gori::Interceptor do
     end
   end
 
+  it "bumps revision on enable / async hold / forward (drives the TUI redraw gate)" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      r0 = ic.revision
+      ic.toggle # enable
+      (ic.revision > r0).should be_true # enable bumped
+
+      r1 = ic.revision
+      result = Channel(Gori::Interceptor::Decision).new
+      spawn { result.send(req(ic, "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n")) }
+      Fiber.yield
+      (ic.revision > r1).should be_true # async hold (proxy-fiber path) bumped
+
+      r2 = ic.revision
+      ic.forward(ic.pending.first.id)
+      result.receive
+      (ic.revision > r2).should be_true # forward bumped
+    end
+  end
+
   it "drops a held request" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))

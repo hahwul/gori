@@ -52,6 +52,15 @@ module Gori
       @items = {} of Int64 => Item
       @next_id = 0_i64
       @shutting_down = false
+      # Monotonic counter bumped on every queue/enabled change (incl. async holds
+      # from proxy fibers). The TUI compares it to know when to re-render, since
+      # the queue mutates without any flow event. Atomic → lock-free read.
+      @revision = Atomic(Int32).new(0)
+    end
+
+    # Lock-free snapshot of the change counter (see @revision).
+    def revision : Int32
+      @revision.get
     end
 
     def enabled? : Bool
@@ -70,6 +79,7 @@ module Gori
         end
         @enabled
       end
+      @revision.add(1) # enabled flipped (and possibly the queue cleared)
       released.each { |it| it.reply.send(Decision.new(Action::Forward, it.raw)) }
       now_on
     end
@@ -104,6 +114,7 @@ module Gori
         @items[id] = it
         it
       end
+      @revision.add(1) # a request/response was held (async, from a proxy fiber)
       item.reply.receive
     end
 
@@ -120,17 +131,20 @@ module Gori
     def forward(id : Int64, bytes : Bytes? = nil) : Nil
       item = @mutex.synchronize { @items.delete(id) }
       return unless item
+      @revision.add(1)
       item.reply.send(Decision.new(Action::Forward, bytes || item.raw))
     end
 
     def drop(id : Int64) : Nil
       item = @mutex.synchronize { @items.delete(id) }
       return unless item
+      @revision.add(1)
       item.reply.send(Decision.new(Action::Drop, Bytes.empty))
     end
 
     def forward_all : Nil
       items = @mutex.synchronize { vals = @items.values; @items.clear; vals }
+      @revision.add(1) unless items.empty?
       items.each { |it| it.reply.send(Decision.new(Action::Forward, it.raw)) }
     end
 
