@@ -45,7 +45,10 @@ module Gori::Tui
       @db_size = project.db_size
       @total_captured = store.total_size
       earliest = store.earliest_created_at
-      @created = earliest ? Time.unix(earliest) : project.created
+      # earliest_created_at is unix MICROSECONDS (the flows.created_at unit) — convert
+      # to seconds for Time.unix, like History's fmt_time does. (Passing micros makes
+      # Time.unix raise "seconds out of range".)
+      @created = earliest ? Time.unix(earliest // 1_000_000) : project.created
 
       @desc_area.set_text(store.setting(DESC_KEY) || "")
       @desc_dirty = false

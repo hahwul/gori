@@ -359,8 +359,10 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
     end
 
-    # Earliest flow timestamp (unix seconds) for "project creation" fallback in
-    # the Project tab (min(created_at) of captured traffic; nil for brand new).
+    # Earliest flow timestamp (unix MICROSECONDS — the flows.created_at unit) for
+    # the "project creation" fallback in the Project tab (min(created_at) of
+    # captured traffic; nil for brand new). Callers must divide by 1_000_000 for
+    # Time.unix (which expects seconds).
     def earliest_created_at : Int64?
       @db.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?)
     end
