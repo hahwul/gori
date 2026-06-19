@@ -26,12 +26,14 @@ module Gori::Tui
       @editor = TextArea.new
       @original_lines = [] of String
       @result = nil.as(Replay::Result?)
+      @prev_result = nil.as(Replay::Result?) # the previous send's result — the diff baseline
       @focus = :request
       @resp_mode = :response # :response | :diff
       @scroll = 0
       @loaded = false
       @http2 = false
-      @diffable = false # true only when loaded from a captured flow (has an original to diff)
+      @diffable = false           # true only when loaded from a captured flow (has an original to diff)
+      @auto_content_length = true # recompute Content-Length from the edited body on send
     end
 
     # The starting scaffold for a hand-authored request (Replay `^N`): a minimal
@@ -48,6 +50,7 @@ module Gori::Tui
       @original_lines = message_lines(detail.response_head, detail.response_body)
 
       @result = nil
+      @prev_result = nil
       @focus = :request
       @resp_mode = :response
       @scroll = 0
@@ -58,7 +61,8 @@ module Gori::Tui
     # Open a hand-authored request not tied to any captured flow (Replay `^N`).
     # Seeds the editable scaffold so the user can immediately tweak and send;
     # there is no original response, so the result stays in plain response mode
-    # rather than diffing against nothing.
+    # rather than diffing against nothing. Focus starts on the target field — the
+    # scaffold URL is a placeholder you almost always change first.
     def load_blank : Nil
       @flow = nil
       @http2 = false
@@ -67,7 +71,8 @@ module Gori::Tui
       @editor.set_text(BLANK_REQUEST)
       @original_lines = [] of String
       @result = nil
-      @focus = :request
+      @prev_result = nil
+      @focus = :target
       @resp_mode = :response
       @scroll = 0
       @diffable = false
@@ -75,7 +80,32 @@ module Gori::Tui
     end
 
     def request_bytes : Bytes
-      @editor.to_bytes
+      raw = @editor.to_bytes
+      @auto_content_length ? sync_content_length(raw) : raw
+    end
+
+    getter? auto_content_length : Bool
+
+    def toggle_auto_content_length : Bool
+      @auto_content_length = !@auto_content_length
+    end
+
+    # When enabled, rewrite an existing `Content-Length` header so it matches the
+    # actual edited body length (the part after the blank line). Common when
+    # tampering with a captured body — you change the JSON and the length should
+    # follow. Only an EXISTING header is updated (never added, so GETs stay clean);
+    # chunked/h2 bodies have no Content-Length and are left untouched.
+    private def sync_content_length(raw : Bytes) : Bytes
+      text = String.new(raw)
+      sep = text.index("\r\n\r\n")
+      return raw unless sep
+      head = text[0, sep]
+      body = text[(sep + 4)..]
+      lines = head.split("\r\n")
+      idx = lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
+      return raw unless idx
+      lines[idx] = "Content-Length: #{body.bytesize}"
+      "#{lines.join("\r\n")}\r\n\r\n#{body}".to_slice
     end
 
     # {scheme, host, port} parsed from the target field.
@@ -110,7 +140,6 @@ module Gori::Tui
     end
 
     def pane_advance(dir : Int32) : Bool
-
       i = PANE_ORDER.index(@focus) || 0
       ni = i + dir
       return false if ni < 0 || ni >= PANE_ORDER.size
@@ -119,11 +148,15 @@ module Gori::Tui
     end
 
     def apply(result : Replay::Result) : Nil
+      # The prior send becomes the diff baseline (diff vs the *previous* request,
+      # not always the original captured flow). For the first send we still fall
+      # back to the captured original (when loaded from History).
+      @prev_result = @result
       @result = result
-      # Land on the diff only when there's an original to compare against; a
-      # hand-authored (blank) request has none, so show the response plainly.
-      @resp_mode = (@diffable && result.ok?) ? :diff : :response
-      @focus = :response
+      # Auto-land on the diff when there's something to compare against; otherwise
+      # show the response plainly. Focus is intentionally NOT changed here — keep
+      # the user where they were (target/request/response).
+      @resp_mode = (result.ok? && diff_baseline_lines) ? :diff : :response
       @scroll = 0
     end
 
@@ -210,13 +243,18 @@ module Gori::Tui
         screen.cell(cursor_x, row, ch, Theme::BG, Theme::ACCENT)
         screen.cursor(cursor_x, row)
       end
-
     end
 
     private def render_request(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       label = @http2 ? "REQUEST (h2)" : "REQUEST"
       Frame.card(screen, rect, label, bg: Theme::BG, border: pane_border(focused))
+      # Content-Length auto-update state rides the top border, right of the title
+      # (^L toggles). Bright/accent when on, muted when off.
+      cl = @auto_content_length ? " CL:auto " : " CL:off "
+      cl_x = {rect.right - cl.size - 1, rect.x + label.size + 4}.max
+      screen.text(cl_x, rect.y, cl, @auto_content_length ? Theme::TEXT_BRIGHT : Theme::MUTED,
+        @auto_content_length ? Theme::ACCENT_BG : Theme::BG)
       @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
     end
 
@@ -282,14 +320,26 @@ module Gori::Tui
     end
 
     private def diff_lines : Array(Replay::DiffLine)
-      unless @diffable
-        return [Replay::DiffLine.new(Replay::DiffKind::Same, "— new request: no original response to diff against —")]
-      end
       result = @result
       unless result && result.ok?
         return [Replay::DiffLine.new(Replay::DiffKind::Same, "send the request (^R) to see a diff")]
       end
-      Replay::Diff.lines(@original_lines, message_lines(result.head, result.body))
+      baseline = diff_baseline_lines
+      unless baseline
+        return [Replay::DiffLine.new(Replay::DiffKind::Same, "— first send: resend (^R) to diff against the previous response —")]
+      end
+      Replay::Diff.lines(baseline, message_lines(result.head, result.body))
+    end
+
+    # The lines the current response is diffed against: the IMMEDIATELY PREVIOUS
+    # send's response, falling back to the original captured response on the first
+    # resend of a History-loaded flow. nil → nothing to diff against yet.
+    private def diff_baseline_lines : Array(String)?
+      if (prev = @prev_result) && prev.ok?
+        message_lines(prev.head, prev.body)
+      elsif @diffable
+        @original_lines
+      end
     end
 
     private def build_target(scheme : String, host : String, port : Int32) : String

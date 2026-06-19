@@ -60,6 +60,7 @@ module Gori::Tui
       @focus = :menu                  # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
       @outcome = :running             # :running | :quit | :back
+      @quit_armed = false             # first ^D/^C arms quit; second confirms (avoids accidental exit)
       @resized = false                # set on a Resize event → next frame full-repaints
       # Replay round-trips run off the UI fiber and deliver their Result here; the
       # run loop applies it to the originating view on a later tick (buffered so a
@@ -177,6 +178,20 @@ module Gori::Tui
     end
 
     private def handle_key(ev : Termisu::Event::Key) : Nil
+      # Deliberate quit: ^D (or ^C) must be pressed twice in a row — the first press
+      # arms and hints in the status bar; any other key disarms. (Q no longer quits;
+      # `q` still returns to the project picker.) Handled before everything else so
+      # it works uniformly across tabs, editors and overlays.
+      if ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)
+        if @quit_armed
+          quit!
+        else
+          @quit_armed = true
+          @toast = "press ^D (or ^C) again to quit · q: back to projects"
+        end
+        return
+      end
+      @quit_armed = false
 
       @toast = nil # clear last action's feedback; a new action may set it again
       return handle_palette_key(ev) if @overlay == :palette
@@ -337,9 +352,6 @@ module Gori::Tui
 
         save_notes
         open_palette
-      elsif ev.ctrl_c?
-        save_notes
-        quit!
       elsif key.escape?
         save_notes
         focus_pane(:menu)
@@ -373,9 +385,6 @@ module Gori::Tui
       if ev.ctrl? && key.lower_p?
         save_project_desc
         open_palette
-      elsif ev.ctrl_c?
-        save_project_desc
-        quit!
       elsif key.escape?
         save_project_desc
         focus_pane(:menu)
@@ -422,8 +431,6 @@ module Gori::Tui
       if ev.ctrl? && key.lower_p?
 
         open_palette
-      elsif ev.ctrl_c?
-        quit!
       elsif @intercept.editing?
         if key.escape?
           @intercept.stop_edit
@@ -476,8 +483,6 @@ module Gori::Tui
       key = ev.key
       if ev.ctrl? && key.lower_p?
         open_palette
-      elsif ev.ctrl_c?
-        quit!
       elsif ev.ctrl? && (c = ev.char || key.to_char) && '1' <= c <= '9'
         # Switch replay sub-tab (works even while editing fields because of the ctrl check).
         idx = c.to_i - 1
@@ -489,6 +494,12 @@ module Gori::Tui
         replay_send
       elsif ev.ctrl? && key.lower_w?
         close_replay_tab
+      elsif ev.ctrl? && key.lower_l?
+        # Toggle auto Content-Length (recompute from the body on send).
+        if view = current_replay_view
+          on = view.toggle_auto_content_length
+          @toast = on ? "auto Content-Length: on" : "auto Content-Length: off"
+        end
       elsif key.escape?
         focus_pane(:menu)
       else
@@ -662,6 +673,10 @@ module Gori::Tui
       # to draw its composition feedback for Hangul/CJK.
       if pos = screen.desired_cursor
         @term.set_cursor(pos[0], pos[1], visible: true)
+      else
+        # No focused input this frame — hide the caret so it doesn't linger at a
+        # stale spot (e.g. after leaving an editor or switching tabs).
+        @term.hide_cursor
       end
 
       flush_screen
@@ -718,7 +733,7 @@ module Gori::Tui
       when :detail      then "↹ switch pane · ↑/↓ scroll · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
-        return "←/→ switch tab · ↹/↵ enter · 1-8 jump · ^P cmds · q projects · Q quit" if @focus == :menu
+        return "←/→ switch tab · ↹/↵ enter · 1-8 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
         body_hints
       end
     end
@@ -733,14 +748,14 @@ module Gori::Tui
       when :intercept
         @intercept.editing? ? "type to edit · ^R forward · ⇧↹ queue · esc tabs" \
                             : "↑/↓ move · ↵/e edit · f forward · d drop · F all · ↹ detail · esc tabs"
-      when :replay   then "↹ pane · type to edit · ^R send · ^N new · ^1-9 switch · ^W close · esc tabs"
+      when :replay   then "↹ pane · type to edit · ^R send · ^L auto-len · ^N new · ^1-9 switch · ^W close · esc tabs"
       when :notes    then "type to edit · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
         @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
                                : "↑/↓ move · ↵ open · n new · d delete · esc tabs"
       when :project  then "type to edit description · ↑/↓/↔ move · ↵ nl · esc tabs"
-      else "↹/esc tabs · ^P cmds · q projects · Q quit"
+      else "↹/esc tabs · ^P cmds · q projects · ^D quit"
       end
     end
 
@@ -800,15 +815,22 @@ module Gori::Tui
     # --- ExecContext (verbs drive the UI through these) ----------------------
 
     def quit! : Nil
-      save_notes
-      save_project_desc
+      commit_pending_edits
       @outcome = :quit
     end
 
     def leave_project : Nil
+      commit_pending_edits
+      @outcome = :back
+    end
+
+    # Flush any in-progress editor before leaving/quitting (quit is now centralized,
+    # so the per-handler ctrl-c saves moved here). save_notes/save_project_desc are
+    # dirty-guarded; findings notes only persist when actively being edited.
+    private def commit_pending_edits : Nil
       save_notes
       save_project_desc
-      @outcome = :back
+      @findings.save_notes(@session.store) if @findings.editing_notes?
     end
 
 

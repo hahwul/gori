@@ -9,9 +9,11 @@ module Gori
         "app.back", "Back to projects", "Close this project and return to the picker", Verb::Scope::Global,
         [Verb::Chord.new("q")]) { |ctx| ctx.leave_project; nil }
 
+      # Quit is palette-only here; the keyboard path is a deliberate double ^D/^C
+      # handled in the Runner (single Q quitting was too easy to hit by accident).
       r.register Verb::Definition.new(
         "app.quit", "Quit gori", "Exit gori entirely", Verb::Scope::Global,
-        [Verb::Chord.new("c", ctrl: true), Verb::Chord.new("q", shift: true)]) { |ctx| ctx.quit!; nil }
+        [] of Verb::Chord) { |ctx| ctx.quit!; nil }
 
       r.register Verb::Definition.new(
         "app.palette", "Command palette", "Open the command palette", Verb::Scope::Global,
