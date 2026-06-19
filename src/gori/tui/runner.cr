@@ -138,10 +138,30 @@ module Gori::Tui
         # termisu already resized its cell buffer (prepare_event); flag the next
         # frame to full-repaint, since the diff renderer would leave stale cells.
         @resized = true
+      when Termisu::Event::Preedit
+        apply_preedit(ev.text)
+      end
+    end
+
+    private def apply_preedit(text : String) : Nil
+      # Route preedit to the active text editor so composing text (e.g. Hangul
+      # jamo building into syllable) can be shown live with underline in the
+      # input field, until composition commits (then normal char insert + clear preedit).
+      case @active_tab
+      when :notes
+        @notes.set_preedit(text) if @focus == :body
+      when :project
+        @project_view.set_preedit(text) if @focus == :body
+      when :replay
+        if @focus == :body
+          current_replay_view.try(&.set_preedit(text))
+        end
+      # intercept edit etc can be added similarly if they expose set_preedit on their TextArea
       end
     end
 
     private def handle_key(ev : Termisu::Event::Key) : Nil
+
       @toast = nil # clear last action's feedback; a new action may set it again
       return handle_palette_key(ev) if @overlay == :palette
       return handle_scope_key(ev) if @overlay == :scope
@@ -318,7 +338,9 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @notes.insert(c)
+          @notes.set_preedit("")  # commit any preedit
         end
+
 
       end
     end
@@ -352,7 +374,9 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @project_view.insert(c)
+          @project_view.set_preedit("")  # commit any preedit
         end
+
       end
     end
 
@@ -471,7 +495,9 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           view.edit_insert(c)
+          current_replay_view.try(&.set_preedit("")) if @focus == :body  # commit preedit
         end
+
       end
 
     end
@@ -488,7 +514,9 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           view.target_insert(c)
+          current_replay_view.try(&.set_preedit("")) if @focus == :body
         end
+
 
       end
     end
@@ -524,7 +552,11 @@ module Gori::Tui
         if c && !ev.ctrl? && !ev.alt?
           @history.query_insert(c)
           @history.reload(store)
+          @history.set_preedit("")  # clear preedit on committed char
         end
+
+
+
 
       end
     end
@@ -547,7 +579,9 @@ module Gori::Tui
         @palette.backspace(self)
       elsif c && !ev.ctrl? && !ev.alt?
         @palette.append(c, self)
+        @palette.set_preedit("") if @palette.responds_to?(:set_preedit)
       end
+
 
     end
 

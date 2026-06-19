@@ -38,6 +38,11 @@ module Gori::Tui
       refresh(ctx)
     end
 
+    def set_preedit(text : String) : Nil
+      # For palette, preedit (if sent as char by terminal) will append to @query via normal path.
+    end
+
+
     def move(delta : Int32) : Nil
       return if @results.empty?
       @selected = (@selected + delta).clamp(0, @results.size - 1)

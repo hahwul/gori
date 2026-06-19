@@ -225,6 +225,12 @@ module Gori::Tui
       @cx = (@cx + d).clamp(0, @title.size)
     end
 
+    def set_preedit(text : String) : Nil
+      @title = text
+      @cx = text.size
+    end
+
+
     def render(screen : Screen, area : Rect) : Nil
       w = {area.w - 4, 56}.min
       h = 5

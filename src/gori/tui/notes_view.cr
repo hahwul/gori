@@ -26,6 +26,11 @@ module Gori::Tui
       @loaded = true
     end
 
+    def set_preedit(text : String) : Nil
+      @area.set_preedit(text)
+    end
+
+
     def insert(ch : Char) : Nil
       @area.insert(ch)
       @dirty = true

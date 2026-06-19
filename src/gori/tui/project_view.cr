@@ -51,6 +51,11 @@ module Gori::Tui
       @desc_dirty = false
     end
 
+    def set_preedit(text : String) : Nil
+      @desc_area.set_preedit(text)
+    end
+
+
     # Persist description iff edited (called on tab exit paths, like NotesView).
     def save(store : Store) : Nil
       return unless @desc_dirty

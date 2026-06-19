@@ -42,6 +42,12 @@ module Gori::Tui
       @icx = (@icx + d).clamp(0, @input.size)
     end
 
+    def set_preedit(text : String) : Nil
+      @input = text
+      @icx = text.size
+    end
+
+
     def select_move(d : Int32) : Nil
       @selected = (@selected + d).clamp(0, {@rules.rules.size - 1, 0}.max)
     end

@@ -46,6 +46,7 @@ module Gori::Tui
       @tcx = @target.size
       @editor.set_text(origin_form_text(detail))
       @original_lines = message_lines(detail.response_head, detail.response_body)
+
       @result = nil
       @focus = :request
       @resp_mode = :response
@@ -104,7 +105,12 @@ module Gori::Tui
       @focus = :response
     end
 
+    def set_preedit(text : String) : Nil
+      @editor.set_preedit(text)
+    end
+
     def pane_advance(dir : Int32) : Bool
+
       i = PANE_ORDER.index(@focus) || 0
       ni = i + dir
       return false if ni < 0 || ni >= PANE_ORDER.size

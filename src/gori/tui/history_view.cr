@@ -149,6 +149,12 @@ module Gori::Tui
       @qcx = (@qcx + d).clamp(0, @query.size)
     end
 
+    def set_preedit(text : String) : Nil
+      @query = text
+      @qcx = text.size
+    end
+
+
     # Tab-complete the current token to the first suggestion.
     def query_complete : Bool
       sugg = query_suggestions

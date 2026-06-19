@@ -12,8 +12,10 @@ module Gori::Tui
       @cy = 0
       @cx = 0
       @scroll = 0
+      @preedit = ""
       set_text(text)
     end
+
 
     def set_text(text : String) : Nil
       @lines = text.split('\n').map(&.rstrip('\r'))
@@ -21,7 +23,21 @@ module Gori::Tui
       @cy = 0
       @cx = 0
       @scroll = 0
+      @preedit = ""
     end
+
+
+    # Preedit/composing text from IME (e.g. current Hangul syllable while typing jamo).
+    # Rendered after the current line's text at cursor, with composing style (underline).
+    # Cleared by the input handler when composition commits (final char arrives as normal insert).
+    def set_preedit(text : String) : Nil
+      @preedit = text
+    end
+
+    def preedit : String
+      @preedit
+    end
+
 
     def to_bytes : Bytes
       @lines.join("\r\n").to_slice
@@ -103,19 +119,38 @@ module Gori::Tui
         if styled && (sl = styled[li]?)
           Highlight.draw(screen, rect.x, rect.y + i, sl, width: rect.w)
         else
-          screen.text(rect.x, rect.y + i, line, Theme::TEXT, width: rect.w)
+          if li == @cy && !@preedit.empty?
+            prefix = line[0, @cx]
+            suffix = line[@cx..]
+            px = rect.x
+            if !prefix.empty?
+              screen.text(px, rect.y + i, prefix, Theme::TEXT, width: rect.w)
+              px += Screen.display_width(prefix)
+            end
+            if !@preedit.empty?
+              screen.text(px, rect.y + i, @preedit, Theme::TEXT, attr: Attribute::Underline, width: rect.w - (px - rect.x))
+              px += Screen.display_width(@preedit)
+            end
+            if !suffix.empty?
+              screen.text(px, rect.y + i, suffix, Theme::TEXT, width: rect.w - (px - rect.x))
+            end
+          else
+            screen.text(rect.x, rect.y + i, line, Theme::TEXT, width: rect.w)
+          end
         end
         next unless cursor && li == @cy
         prefix_w = Screen.display_width(line[0, @cx])
-        cxs = rect.x + prefix_w
+        preedit_w = Screen.display_width(@preedit)
+        cxs = rect.x + prefix_w + preedit_w
         if cxs < rect.x + rect.w
-          ch = @cx < line.size ? line[@cx] : ' '
+          ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
           gw = [Screen.display_width(ch.to_s), 1].max
           (0...gw).each do |off|
             cch = (off == 0 ? ch : ' ')
             screen.cell(cxs + off, rect.y + i, cch, Theme::BG, Theme::ACCENT)
           end
         end
+
 
       end
     end
