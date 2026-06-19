@@ -219,7 +219,7 @@ module Gori::Tui
       screen.text(host_x, hdr_y, "HOST", Theme::MUTED)
       screen.text(path_x, hdr_y, "PATH", Theme::MUTED)
       screen.text(status_x, hdr_y, "STATUS", Theme::MUTED)
-      Frame.inner_divider(screen, rect, hdr_y + 1)
+      Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
 
       list_top = hdr_y + 2
       list_h = {rect.bottom - list_top, 0}.max
@@ -271,7 +271,7 @@ module Gori::Tui
       slash ? target[slash..] : "/"
     end
 
-    def render_detail(screen : Screen, rect : Rect) : Nil
+    def render_detail(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       detail = @detail
       unless detail
@@ -287,7 +287,7 @@ module Gori::Tui
               end
       screen.text(rect.x + 1, rect.y, title, Theme::ACCENT, attr: Attribute::Bold)
       screen.text(rect.x + 12, rect.y, "tab: switch · esc: back", Theme::MUTED)
-      Frame.inner_divider(screen, rect, rect.y + 1)
+      Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       lines = detail_lines
       top = rect.y + 2

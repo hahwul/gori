@@ -580,7 +580,7 @@ module Gori::Tui
       when :history
         # Single body pane; the detail view is a drill-in within the same frame.
         if @overlay == :detail
-          render_framed(screen, rect, body_focused) { |inner| @history.render_detail(screen, inner) }
+          render_framed(screen, rect, body_focused) { |inner| @history.render_detail(screen, inner, focused: body_focused) }
         else
           render_framed(screen, rect, body_focused) { |inner| @history.render_list(screen, inner, focused: body_focused) }
         end

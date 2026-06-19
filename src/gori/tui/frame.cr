@@ -63,11 +63,16 @@ module Gori::Tui
     # frame's side borders so a header/section seam joins the card cleanly instead
     # of butting `─` straight into `│`. When the view is rendered un-framed (specs
     # pass the full rect) the tees fall off-grid and are harmlessly clipped.
-    def self.inner_divider(screen : Screen, inner : Rect, y : Int32, bg : Color = Theme::BG) : Nil
+    #
+    # `border` should match the enclosing card's outline so the seam stays one
+    # colour — pass `pane_border(focused)` so a focused pane's divider lights gold
+    # with its frame instead of staying a stray grey hairline.
+    def self.inner_divider(screen : Screen, inner : Rect, y : Int32, bg : Color = Theme::BG,
+                           border : Color = Theme::BORDER) : Nil
       return if inner.w <= 0
-      screen.cell(inner.x - 1, y, TEE_L, Theme::BORDER, bg) # left frame border
-      screen.hline(inner.x, y, inner.w, fg: Theme::BORDER, bg: bg)
-      screen.cell(inner.right, y, TEE_R, Theme::BORDER, bg) # right frame border
+      screen.cell(inner.x - 1, y, TEE_L, border, bg) # left frame border
+      screen.hline(inner.x, y, inner.w, fg: border, bg: bg)
+      screen.cell(inner.right, y, TEE_R, border, bg) # right frame border
     end
 
     # The outline colour for a body pane: subtle gold when focused, hairline grey

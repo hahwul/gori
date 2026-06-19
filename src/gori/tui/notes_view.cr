@@ -57,7 +57,7 @@ module Gori::Tui
       screen.text(rect.x + 1, rect.y, "NOTES", Theme::ACCENT, attr: Attribute::Bold)
       hint = focused ? "type to edit · esc back to tabs" : "↵/→ to edit"
       screen.text(rect.x + 8, rect.y, hint, Theme::MUTED)
-      Frame.inner_divider(screen, rect, rect.y + 1)
+      Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
       area = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
       @area.render(screen, area, cursor: focused)
     end
