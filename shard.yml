@@ -15,8 +15,9 @@ license: Apache-2.0
 dependencies:
   termisu:
     github: hahwul/termisu
-    # Using fork for active development of UTF-8/Hangul input fixes (see hahwul/termisu PR)
-    # version or branch can be adjusted after merge.
+    branch: main
+    # Using fork main for active development of input/preedit fixes (see recent commits on hahwul/termisu)
+
   db:
     github: crystal-lang/crystal-db
     version: ~> 0.14
