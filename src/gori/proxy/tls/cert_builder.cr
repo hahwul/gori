@@ -40,7 +40,7 @@ module Gori::Proxy::Tls
         LibCrypto.x509_set_pubkey(x, pubkey.handle)
 
         add_ext(x, NID_BASIC_CONSTR, is_ca ? "critical,CA:TRUE" : "critical,CA:FALSE")
-        add_ext(x, NID_SUBJECT_ALT, "DNS:#{san_dns}") if san_dns
+        add_ext(x, NID_SUBJECT_ALT, "DNS:#{san_dns}") if san_dns && safe_san?(san_dns)
 
         raise Gori::Error.new("X509_sign failed") if LibCrypto.x509_sign(x, signing_key.handle, LibCrypto.evp_sha256) == 0
         Cert.new(x)
@@ -48,6 +48,16 @@ module Gori::Proxy::Tls
         LibCrypto.x509_free(x)
         raise ex
       end
+    end
+
+    # The SAN value is spliced into the X509v3 config grammar, where ',' and ':'
+    # begin new entries/types — so a hostile CONNECT/SNI host like
+    # "a.com,DNS:victim.com" or "a.com,IP:1.2.3.4" would inject extra SAN entries.
+    # Only emit the SAN for a plain hostname / IPv4 (+ wildcard) label set; for
+    # anything else skip it (the cert then lacks a SAN and fails verification for
+    # that bogus host — the safe outcome) rather than minting an injected cert.
+    private def self.safe_san?(host : String) : Bool
+      !host.empty? && host.bytesize <= 253 && (host =~ /\A[A-Za-z0-9.\-*]+\z/) != nil
     end
 
     private def self.add_ext(x : LibCrypto::X509, nid : Int32, value : String) : Nil

@@ -65,6 +65,12 @@ module Gori::Proxy::H2
       decoder = request ? @req_decoder : @resp_decoder
 
       case frame.frame_type
+      when Frame::Type::RstStream
+        # Stream cancelled (RFC 7540 §6.4): the exchange will never complete, so it
+        # would otherwise sit in @streams forever. Drop its buffers — a connection
+        # that cancels many streams (common) must not leak memory unboundedly.
+        @streams.delete(frame.stream_id)
+        return
       when Frame::Type::Headers
         append_header_fragment(side, header_block(frame))
         finish_header_block(side, decoder) if frame.end_headers?
@@ -108,6 +114,10 @@ module Gori::Proxy::H2
       else
         side.headers = decoded
       end
+    ensure
+      # Always reset, even if decode raised (feed rescues HPACK/framing errors and
+      # keeps processing the connection) — otherwise the next HEADERS/CONTINUATION
+      # fragment would append to a stale block and decode garbage.
       side.header_buf.clear
     end
 

@@ -64,9 +64,30 @@ describe Gori::Proxy::Codec::Body do
       resp = Http1.parse_response_head("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice)
       Body.response_framing(resp, "GET").should eq({BodyFraming::CloseDelimited, 0_i64})
     end
+
+    it "rejects conflicting Content-Length values (request smuggling)" do
+      req = Http1.parse_request_head("POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
+    it "collapses repeated identical Content-Length" do
+      req = Http1.parse_request_head("POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\n".to_slice)
+      Body.request_framing(req).should eq({BodyFraming::Length, 5_i64})
+    end
+
+    it "rejects a negative Content-Length" do
+      req = Http1.parse_request_head("POST / HTTP/1.1\r\nContent-Length: -5\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
   end
 
   describe ".stream" do
+    it "aborts a chunked body on a malformed chunk size (no fabricated terminator → desync)" do
+      src = IO::Memory.new("zz\r\ndata") # "zz" is not valid hex
+      dst = IO::Memory.new
+      Body.stream(src, dst, BodyFraming::Chunked, 0_i64, IO::Memory.new).should be_false
+    end
+
     it "copies a Content-Length body byte-exact to both dst and tee" do
       src = IO::Memory.new("hello world!!") # 13 bytes, but only 5 are the body
       dst = IO::Memory.new

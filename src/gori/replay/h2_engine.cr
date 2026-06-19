@@ -90,6 +90,7 @@ module Gori
         headers = [] of {String, String}
         status = 0
         done = false
+        end_stream_pending = false # END_STREAM seen on a HEADERS frame whose block isn't closed yet
 
         until done
           frame = Frame.read(io)
@@ -106,12 +107,22 @@ module Gori
           when Frame::Type::Headers
             next unless frame.stream_id == 1
             header_buf.write(header_block(frame))
-            status = absorb(header_buf, decoder, headers, status) if frame.end_headers?
-            done = true if frame.end_stream?
+            # END_STREAM only completes the stream once the header block is fully
+            # absorbed — a HEADERS with END_STREAM but not END_HEADERS is continued
+            # by CONTINUATION frames; finishing early would drop them (and decode no
+            # status). Defer completion until END_HEADERS.
+            end_stream_pending = frame.end_stream?
+            if frame.end_headers?
+              status = absorb(header_buf, decoder, headers, status)
+              done = true if end_stream_pending
+            end
           when Frame::Type::Continuation
             next unless frame.stream_id == 1
             header_buf.write(frame.payload)
-            status = absorb(header_buf, decoder, headers, status) if frame.end_headers?
+            if frame.end_headers?
+              status = absorb(header_buf, decoder, headers, status)
+              done = true if end_stream_pending
+            end
           when Frame::Type::Data
             next unless frame.stream_id == 1
             body.write(data_block(frame))

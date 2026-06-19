@@ -120,7 +120,21 @@ module Gori::Proxy::Codec
     end
 
     private def self.content_length(headers : HeaderList) : Int64?
-      headers.get?("Content-Length").try(&.strip.to_i64?)
+      values = headers.get_all("Content-Length")
+      return nil if values.empty?
+      # A header line may itself be a comma list ("5, 5"); split + parse each token.
+      # RFC 7230 §3.3.3: any non-numeric token, a negative value, or two DIFFERENT
+      # values is a framing error a proxy MUST reject (a request-smuggling vector) —
+      # raise so the connection is closed rather than guessing a length. Repeated
+      # identical values collapse to one. No header at all → nil (no body / close-
+      # delimited, as before).
+      tokens = values.flat_map(&.split(',')).map(&.strip).reject(&.empty?)
+      return nil if tokens.empty?
+      nums = tokens.map { |t| t.to_i64? || raise Gori::Error.new("invalid Content-Length #{t.inspect}") }
+      raise Gori::Error.new("conflicting Content-Length values") if nums.uniq.size > 1
+      n = nums.first
+      raise Gori::Error.new("negative Content-Length #{n}") if n < 0
+      n
     end
 
     # Copies exactly `n` bytes; returns false if the source EOF'd early (a
@@ -157,6 +171,11 @@ module Gori::Proxy::Codec
         return false if size_line.nil? # EOF mid-stream — truncated
         emit(dst, tee, size_line)
         size = parse_chunk_size(size_line)
+        # A malformed / out-of-range chunk size is NOT a terminating chunk: bailing
+        # out (false → caller closes) avoids reading a fabricated 0 as the end of
+        # the body and leaving the rest on the wire for the next keep-alive message
+        # to misframe (request-smuggling / response-desync).
+        return false if size.nil?
         if size == 0
           # consume trailers (header lines) up to and including the blank line
           loop do
@@ -195,12 +214,15 @@ module Gori::Proxy::Codec
       read ? buf : nil
     end
 
-    # Parse a chunk-size line: hex digits before any ';' chunk-extension.
-    private def self.parse_chunk_size(line : Bytes) : Int64
+    # Parse a chunk-size line: hex digits before any ';' chunk-extension. Returns
+    # nil for a malformed, signed, or out-of-range size so the caller can abort
+    # (a fabricated 0 would be read as the terminating chunk and desync the body).
+    private def self.parse_chunk_size(line : Bytes) : Int64?
       s = String.new(line).strip
       semi = s.index(';')
       hex = semi ? s[0...semi] : s
-      hex.to_i64?(base: 16) || 0_i64
+      n = hex.to_i64?(base: 16)
+      n && n >= 0 ? n : nil
     end
 
     private def self.blank_line?(line : Bytes) : Bool

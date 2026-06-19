@@ -34,6 +34,18 @@ describe Gori::Scope do
     end
   end
 
+  it "tolerates a malformed glob in matches? instead of raising (would drop proxy connections)" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.add("*.acme[.test") # unterminated character set — File.match? would raise
+      scope.add("good.test")
+      scope.enable
+      # must not raise on the hot path; the bad pattern simply doesn't match
+      scope.matches?("x.acme.test").should be_false
+      scope.matches?("good.test").should be_true
+    end
+  end
+
   it "builds an OR filter (exact + subdomain + glob)" do
     with_store do |store|
       scope = Gori::Scope.load(store)

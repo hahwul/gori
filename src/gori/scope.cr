@@ -56,7 +56,15 @@ module Gori
       h = host.downcase
       @patterns.any? do |pattern|
         if pattern.includes?('*')
-          File.match?(pattern.downcase, h)
+          # File.match? raises on a malformed glob (e.g. "*.acme[.test"); treat it
+          # as non-matching rather than letting it unwind onto the proxy hot path
+          # and drop the connection. (SQLite's GLOB — used by `filter` — tolerates
+          # the same patterns, so this keeps live gating and history consistent.)
+          begin
+            File.match?(pattern.downcase, h)
+          rescue File::BadPatternError
+            false
+          end
         else
           d = pattern.downcase
           h == d || h.ends_with?(".#{d}")

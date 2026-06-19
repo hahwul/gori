@@ -58,6 +58,12 @@ module Gori::Proxy
           client.sync = true # immediate writes (P6)
           client.tcp_nodelay = true
           ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor).run
+        rescue
+          # Setup (setsockopt) can raise if the peer RST'd between accept and here;
+          # ClientConn never took ownership, so close the accepted fd ourselves or
+          # it leaks. (ClientConn#run closes its own @io and doesn't raise out, so
+          # this only fires for pre-run setup failures.)
+          client.close rescue nil
         ensure
           @slots.receive # release the slot (even on error) so a new connection can be accepted
         end

@@ -37,6 +37,12 @@ module Gori::Proxy
       ssl.sync = true
       ssl
     rescue
+      # A handshake failure inside Socket::Client.new (cert mismatch under verify,
+      # expired/self-signed cert, plaintext-on-443, peer reset mid-handshake) does
+      # NOT close the underlying socket — sync_close only transfers ownership once
+      # the SSL object is constructed. Close `tcp` ourselves or the fd leaks (one
+      # per failed origin → fd exhaustion).
+      tcp.try(&.close) rescue nil
       nil
     end
 
