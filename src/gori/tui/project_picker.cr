@@ -93,11 +93,12 @@ module Gori::Tui
         end
       elsif ev.ctrl_c?
         return :quit
-      elsif (c = key.to_char) && !ev.ctrl? && !ev.alt? && @selected == 2
+      elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && @selected == 2
         # Only when the Search row is selected (we have "entered" it).
         @query += c
         @selected = 2
         @results_scroll = 0
+
       elsif ev.ctrl? && key.lower_n?
         # ctrl-n: quick new. If query has text, prefill (or direct-create).
         name = @query.strip
@@ -191,13 +192,14 @@ module Gori::Tui
         end
       elsif key.up? || key.down?
         @new_field = @new_field == :name ? :desc : :name
-      elsif (c = key.to_char) && !ev.ctrl? && !ev.alt?
+      elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt?
         if @new_field == :name
           @name += c
         else
           @desc += c
         end
       end
+
       nil
     end
 

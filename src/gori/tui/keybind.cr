@@ -27,7 +27,11 @@ module Gori::Tui
           "backspace"
         elsif key.space?
           "space"
-        elsif c = key.to_char
+        elsif c = (ev.char || key.to_char)
+          # Only ASCII for chord names (Unicode text input is handled by editors directly).
+          unless c.ascii?
+            return nil
+          end
           # Terminals deliver a typed uppercase letter as the char itself with no
           # shift modifier; normalise to shift + lowercase so "shift-f" binds.
           shift ||= c.ascii_uppercase?
@@ -35,6 +39,8 @@ module Gori::Tui
         else
           return nil
         end
+
+
       Verb::Chord.new(name, ctrl: ev.ctrl?, alt: ev.alt?, shift: shift)
     end
   end

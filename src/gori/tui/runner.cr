@@ -189,7 +189,9 @@ module Gori::Tui
     # tab on/off, esc close (re-applying the lens to the views).
     private def handle_scope_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       case
+
       when key.escape?
         @overlay = :none
         refresh_lens
@@ -209,9 +211,10 @@ module Gori::Tui
           refresh_lens
         end
       else
-        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        if c && !ev.ctrl? && !ev.alt?
           @scope_overlay.insert(c)
         end
+
       end
     end
 
@@ -225,7 +228,9 @@ module Gori::Tui
     # rules act on the live proxy, not on already-captured flows.
     private def handle_rules_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       case
+
       when key.escape? then @overlay = :none
       when key.enter?  then @rules_overlay.submit
       when key.tab?    then @rules_overlay.toggle_selected
@@ -236,32 +241,38 @@ module Gori::Tui
       when key.backspace?
         @rules_overlay.remove_selected unless @rules_overlay.backspace
       else
-        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        if c && !ev.ctrl? && !ev.alt?
           @rules_overlay.insert(c)
         end
+
       end
     end
 
     # New-finding form: type a title; ↵ create, esc cancel.
     private def handle_finding_new_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       case
+
       when key.escape?    then @overlay = :none
       when key.enter?     then create_finding_from_form
       when key.left?      then @finding_form.move(-1)
       when key.right?     then @finding_form.move(1)
       when key.backspace? then @finding_form.backspace
       else
-        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        if c && !ev.ctrl? && !ev.alt?
           @finding_form.insert(c)
         end
+
       end
     end
 
     # Findings notes inline editor.
     private def handle_findings_notes_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       case
+
       when key.escape?    then @findings.save_notes(@session.store)
       when key.enter?     then @findings.notes_newline
       when key.backspace? then @findings.notes_backspace
@@ -270,9 +281,10 @@ module Gori::Tui
       when key.left?      then @findings.notes_move(0, -1)
       when key.right?     then @findings.notes_move(0, 1)
       else
-        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        if c && !ev.ctrl? && !ev.alt?
           @findings.notes_insert(c)
         end
+
       end
     end
 
@@ -280,7 +292,9 @@ module Gori::Tui
     # directly. Esc / Ctrl-P / Ctrl-C leave editing and persist first.
     private def handle_notes_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
+
         save_notes
         open_palette
       elsif ev.ctrl_c?
@@ -302,9 +316,10 @@ module Gori::Tui
       elsif key.right?
         @notes.move(0, 1)
       else
-        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        if c && !ev.ctrl? && !ev.alt?
           @notes.insert(c)
         end
+
       end
     end
 
@@ -312,6 +327,7 @@ module Gori::Tui
     # coexists with the static metadata above it in the same tab).
     private def handle_project_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
         save_project_desc
         open_palette
@@ -334,11 +350,12 @@ module Gori::Tui
       elsif key.right?
         @project_view.move(0, 1)
       else
-        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        if c && !ev.ctrl? && !ev.alt?
           @project_view.insert(c)
         end
       end
     end
+
 
     private def save_notes : Nil
 
@@ -357,7 +374,9 @@ module Gori::Tui
     # Replay editor reserves actions for modifier chords.
     private def handle_intercept_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
+
         open_palette
       elsif ev.ctrl_c?
         quit!
@@ -378,9 +397,10 @@ module Gori::Tui
           @intercept.edit_move(0, -1)
         elsif key.right?
           @intercept.edit_move(0, 1)
-        elsif (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        elsif c && !ev.ctrl? && !ev.alt?
           @intercept.edit_insert(c)
         end
+
       else
         case
         when key.escape?               then focus_pane(:menu)
@@ -414,7 +434,7 @@ module Gori::Tui
         open_palette
       elsif ev.ctrl_c?
         quit!
-      elsif ev.ctrl? && (c = key.to_char) && '1' <= c <= '9'
+      elsif ev.ctrl? && (c = ev.char || key.to_char) && '1' <= c <= '9'
         # Switch replay sub-tab (works even while editing fields because of the ctrl check).
         idx = c.to_i - 1
         if idx < @replays.size
@@ -440,6 +460,7 @@ module Gori::Tui
 
     private def edit_replay_request(ev : Termisu::Event::Key, view : ReplayView) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       case
       when key.enter?     then view.edit_newline
       when key.backspace? then view.edit_backspace
@@ -448,23 +469,27 @@ module Gori::Tui
       when key.left?      then view.edit_move(0, -1)
       when key.right?     then view.edit_move(0, 1)
       else
-        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        if c && !ev.ctrl? && !ev.alt?
           view.edit_insert(c)
         end
       end
+
     end
 
     private def edit_replay_target(ev : Termisu::Event::Key, view : ReplayView) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       case
+
       when key.enter?     then replay_send
       when key.backspace? then view.target_backspace
       when key.left?      then view.target_move(-1)
       when key.right?     then view.target_move(1)
       else
-        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        if c && !ev.ctrl? && !ev.alt?
           view.target_insert(c)
         end
+
       end
     end
 
@@ -485,8 +510,10 @@ module Gori::Tui
     # keeps the filter, Esc clears it).
     private def handle_query_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       store = @session.store
       case
+
       when key.enter?     then @history.stop_query
       when key.escape?    then @history.cancel_query; @history.reload(store)
       when key.tab?       then (@history.query_complete; @history.reload(store))
@@ -494,15 +521,17 @@ module Gori::Tui
       when key.left?      then @history.query_move(-1)
       when key.right?     then @history.query_move(1)
       else
-        if (c = key.to_char) && !ev.ctrl? && !ev.alt?
+        if c && !ev.ctrl? && !ev.alt?
           @history.query_insert(c)
           @history.reload(store)
         end
+
       end
     end
 
     private def handle_palette_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
+      c = ev.char || key.to_char
       if key.escape?
         close_overlay
       elsif key.enter?
@@ -516,10 +545,12 @@ module Gori::Tui
         @palette.move(1)
       elsif key.backspace?
         @palette.backspace(self)
-      elsif (c = key.to_char) && !ev.ctrl? && !ev.alt?
+      elsif c && !ev.ctrl? && !ev.alt?
         @palette.append(c, self)
       end
+
     end
+
 
     private def current_scope : Verb::Scope
       case @overlay
