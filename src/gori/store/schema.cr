@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 7
+      VERSION = 8
 
       V1 = [
         <<-SQL,
@@ -131,7 +131,25 @@ module Gori
         "ALTER TABLE flows ADD COLUMN response_body_truncated INTEGER NOT NULL DEFAULT 0",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7]
+      # Query scalability: a status index (the one projection filter with useful
+      # cardinality + range queries) and a compact full-text index over body text
+      # so `body:` doesn't CAST+scan every BLOB. The FTS rowid is flows.id; the
+      # indexed text per side is capped (Store::FTS_INDEX_MAX) so a big body can't
+      # bloat the index. Existing rows are backfilled. host/path stay substring
+      # LIKE (unindexable) but are now bounded by retention.
+      V8 = [
+        "CREATE INDEX idx_flows_status ON flows (status)",
+        "CREATE VIRTUAL TABLE flows_fts USING fts5(req, resp)",
+        <<-SQL,
+        INSERT INTO flows_fts(rowid, req, resp)
+        SELECT id,
+               substr(CAST(request_body AS TEXT), 1, 65536),
+               substr(CAST(response_body AS TEXT), 1, 65536)
+        FROM flows
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

@@ -136,6 +136,35 @@ describe Gori::Store do
     end
   end
 
+  it "backfills the body FTS index for rows that predate the V8 migration" do
+    path = File.tempname("gori-bf", ".db")
+    db = DB.open("sqlite3:#{path}?journal_mode=wal")
+    begin
+      # bring the schema only up to V7, then plant a pre-existing flow with a body
+      Gori::Store::Schema::MIGRATIONS[0..6].each_with_index do |stmts, i|
+        db.transaction do |tx|
+          stmts.each { |s| tx.connection.exec(s) }
+          tx.connection.exec("PRAGMA user_version = #{i + 1}")
+        end
+      end
+      db.exec(<<-SQL, "GET /x HTTP/1.1\r\n\r\n".to_slice, "secret=backfilltoken".to_slice)
+        INSERT INTO flows (created_at, scheme, host, port, method, target, http_version,
+                           request_head, request_body, request_size, state)
+        VALUES (1, 'http', 'h.test', 80, 'GET', '/x', 'HTTP/1.1', ?, ?, 30, 0)
+        SQL
+
+      Gori::Store::Schema.migrate!(db) # runs V8 (index + FTS + backfill)
+      db.scalar("PRAGMA user_version").as(Int64).should eq(8)
+      hits = db.scalar("SELECT count(*) FROM flows_fts WHERE flows_fts MATCH 'backfilltoken*'").as(Int64)
+      hits.should eq(1)
+    ensure
+      db.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
   it "pages older rows via the before_id cursor" do
     with_store do |store|
       ids = (1..5).map { |i| store.insert_flow(sample_request(target: "/#{i}")) }

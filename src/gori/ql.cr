@@ -82,17 +82,24 @@ module Gori
       end
     end
 
-    # Body search scans the raw request/response BLOBs (the truth, P7) as text.
-    # A simple LIKE scan (no FTS index) — adequate for a single-user proxy's flow
-    # counts and avoids a migration/backfill (P0). CAST(blob AS TEXT) reinterprets
-    # the octets. The `IS NOT NULL` guards make a bodyless flow evaluate to FALSE
-    # (not NULL), so `-body:x` correctly KEEPS bodyless flows instead of dropping
-    # every one of them to NULL-logic.
+    # Body search uses the FTS index over request/response body text (token +
+    # prefix, case-insensitive) so it doesn't CAST+scan every BLOB as the table
+    # grows. The value is split into alphanumeric tokens, each matched as a prefix
+    # (`tok*`) — so `body:secret` finds "secrettoken". Building the MATCH string
+    # from `[A-Za-z0-9]` tokens only keeps it free of FTS5 operator syntax (no
+    # injection / parse errors). A bodyless flow has an empty FTS row, so it never
+    # matches and `-body:x` correctly KEEPS it. When the value has no indexable
+    # token (e.g. `body:===`) we fall back to the NULL-safe BLOB LIKE scan.
     private def self.body_cond(value : String) : {String, Array(DB::Any)}
-      p = like(value)
-      {"((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') OR " \
-       "(response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ? ESCAPE '\\'))",
-       [p, p] of DB::Any}
+      tokens = value.scan(/[A-Za-z0-9]+/).map(&.[0])
+      if tokens.empty?
+        p = like(value)
+        return {"((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') OR " \
+                "(response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ? ESCAPE '\\'))",
+                [p, p] of DB::Any}
+      end
+      match = tokens.map { |t| "#{t}*" }.join(' ')
+      {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [match] of DB::Any}
     end
 
     private def self.status_cond(value : String) : {String, Array(DB::Any)}?

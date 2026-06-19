@@ -60,6 +60,9 @@ module Gori
     RETENTION_DEFAULT = 100_000
     # Inserts between retention sweeps — amortizes the prune cost.
     PRUNE_INTERVAL = 2_000
+    # Per-side ceiling on body text fed to the FTS index (keeps the index small;
+    # must match the substr() length in Schema V8's backfill).
+    FTS_INDEX_MAX = 64 * 1024
 
     @events : Channel(FlowEvent)?
 
@@ -465,6 +468,7 @@ module Gori
       conn.transaction do |tx|
         c = tx.connection
         c.exec("DELETE FROM ws_messages WHERE flow_id <= ?", cutoff)
+        c.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
         # h2 frames/connections key off conn_id, not flow id — drop any no longer
         # referenced by a surviving flow. The subqueries exclude NULLs so the
@@ -520,7 +524,11 @@ module Gori
         req.head.size.to_i64 + body_size,
         FlowState::Pending.value, req.h2_conn_id, req.h2_stream_id,
         req.body_truncated? ? 1 : 0)
-      conn.scalar("SELECT last_insert_rowid()").as(Int64)
+      id = conn.scalar("SELECT last_insert_rowid()").as(Int64)
+      # Index the request body text now; the response side is filled in by
+      # update_one. Same transaction, so FTS and the row commit together.
+      conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, '')", id, fts_text(req.body))
+      id
     end
 
     private def update_one(conn : DB::Connection, resp : CapturedResponse) : Nil
@@ -537,6 +545,14 @@ module Gori
         resp.head.size.to_i64 + body_size,
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
         resp.body_truncated? ? 1 : 0, resp.flow_id)
+      conn.exec("UPDATE flows_fts SET resp = ? WHERE rowid = ?", fts_text(resp.body), resp.flow_id)
+    end
+
+    # Body text fed to the FTS index, capped per side so a large body can't bloat
+    # the index. Binary bodies index as best-effort text (good enough for tokens).
+    private def fts_text(bytes : Bytes?) : String
+      return "" unless bytes
+      String.new(bytes[0, {bytes.size, FTS_INDEX_MAX}.min])
     end
 
     private def insert_ws_one(conn : DB::Connection, op : InsertWs) : Nil
