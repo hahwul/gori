@@ -155,7 +155,7 @@ describe Gori::Store do
 
       Gori::Store::Schema.migrate!(db) # runs V8 (index + FTS + backfill)
       db.scalar("PRAGMA user_version").as(Int64).should eq(8)
-      hits = db.scalar("SELECT count(*) FROM flows_fts WHERE flows_fts MATCH 'backfilltoken*'").as(Int64)
+      hits = db.scalar(%(SELECT count(*) FROM flows_fts WHERE flows_fts MATCH '"backfilltoken"')).as(Int64)
       hits.should eq(1)
     ensure
       db.close

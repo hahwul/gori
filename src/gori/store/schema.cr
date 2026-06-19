@@ -139,7 +139,13 @@ module Gori
       # LIKE (unindexable) but are now bounded by retention.
       V8 = [
         "CREATE INDEX idx_flows_status ON flows (status)",
-        "CREATE VIRTUAL TABLE flows_fts USING fts5(req, resp)",
+        # Index h2_conn_id so the retention sweep's orphan-h2 cleanup doesn't
+        # full-scan flows.
+        "CREATE INDEX idx_flows_h2_conn ON flows (h2_conn_id)",
+        # trigram tokenizer => case-insensitive SUBSTRING matching (like the old
+        # body: LIKE), just indexed. Query terms must be >=3 chars (QL falls back
+        # to a BLOB LIKE scan below that).
+        "CREATE VIRTUAL TABLE flows_fts USING fts5(req, resp, tokenize='trigram')",
         <<-SQL,
         INSERT INTO flows_fts(rowid, req, resp)
         SELECT id,

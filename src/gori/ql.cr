@@ -82,24 +82,23 @@ module Gori
       end
     end
 
-    # Body search uses the FTS index over request/response body text (token +
-    # prefix, case-insensitive) so it doesn't CAST+scan every BLOB as the table
-    # grows. The value is split into alphanumeric tokens, each matched as a prefix
-    # (`tok*`) — so `body:secret` finds "secrettoken". Building the MATCH string
-    # from `[A-Za-z0-9]` tokens only keeps it free of FTS5 operator syntax (no
-    # injection / parse errors). A bodyless flow has an empty FTS row, so it never
-    # matches and `-body:x` correctly KEEPS it. When the value has no indexable
-    # token (e.g. `body:===`) we fall back to the NULL-safe BLOB LIKE scan.
+    # Body search uses the trigram FTS index over request/response body text —
+    # case-insensitive SUBSTRING matching (same semantics as the old `body:` LIKE,
+    # so `body:token` still finds "mytokenvalue"), just indexed instead of
+    # scanning every BLOB. The value is passed as a quoted FTS phrase (embedded
+    # quotes doubled) so arbitrary characters can't form FTS operator syntax. A
+    # bodyless flow has an empty FTS row, so it never matches and `-body:x`
+    # correctly KEEPS it. The trigram index needs >=3 characters, so shorter
+    # values fall back to the NULL-safe BLOB LIKE scan.
     private def self.body_cond(value : String) : {String, Array(DB::Any)}
-      tokens = value.scan(/[A-Za-z0-9]+/).map(&.[0])
-      if tokens.empty?
+      if value.size < 3
         p = like(value)
         return {"((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') OR " \
                 "(response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ? ESCAPE '\\'))",
                 [p, p] of DB::Any}
       end
-      match = tokens.map { |t| "#{t}*" }.join(' ')
-      {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [match] of DB::Any}
+      phrase = %("#{value.gsub('"', "\"\"")}") # quoted phrase → contiguous substring match
+      {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [phrase] of DB::Any}
     end
 
     private def self.status_cond(value : String) : {String, Array(DB::Any)}?

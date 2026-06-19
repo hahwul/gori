@@ -464,7 +464,8 @@ module Gori
     # Retention sweep: keep only the newest `@retention_flows` flows (by id, which
     # is monotonic), cascading to their ws messages and orphaned h2 frames/conns.
     # A failure here must not kill the writer or lose the just-committed batch, so
-    # it runs in its own transaction and swallows errors (retried next interval).
+    # it runs in its own transaction and swallows errors (the next sweep, after
+    # another PRUNE_INTERVAL inserts, simply tries again).
     private def prune(conn : DB::Connection) : Nil
       return if @retention_flows <= 0
       max_id = conn.query_one?("SELECT MAX(id) FROM flows", as: Int64?)
@@ -476,11 +477,15 @@ module Gori
         c.exec("DELETE FROM ws_messages WHERE flow_id <= ?", cutoff)
         c.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
-        # h2 frames/connections key off conn_id, not flow id — drop any no longer
-        # referenced by a surviving flow. The subqueries exclude NULLs so the
-        # NOT IN logic is well-defined.
-        c.exec("DELETE FROM h2_frames WHERE conn_id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)")
-        c.exec("DELETE FROM h2_connections WHERE id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)")
+        # h2 frames/connections key off conn_id, not flow id — drop those no longer
+        # referenced by a surviving flow. Guard with `created_at < oldest-kept` so
+        # an IN-FLIGHT connection (frames logged but its flow not yet projected)
+        # isn't wiped: its raw log only goes once it's older than everything kept.
+        # The subquery excludes NULLs so the NOT IN logic is well-defined.
+        oldest = c.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?) || Int64::MAX
+        stale = "id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL) AND created_at < ?"
+        c.exec("DELETE FROM h2_frames WHERE conn_id IN (SELECT id FROM h2_connections WHERE #{stale})", oldest)
+        c.exec("DELETE FROM h2_connections WHERE #{stale}", oldest)
       end
     rescue ex
       STDERR.puts "gori: retention prune failed (will retry): #{ex.message}"

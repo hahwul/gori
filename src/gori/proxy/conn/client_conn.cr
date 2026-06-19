@@ -93,8 +93,10 @@ module Gori::Proxy
           upstream.write(sent_head)
           upstream.write(edited_body) if edited_body
           upstream.flush
+          stored, trunc, size = capped(edited_body)
           flow_id = @sink.on_request(FlowMapper.request(sent_req,
-            scheme: scheme, host: host, port: port, created_at: created_at, body: edited_body))
+            scheme: scheme, host: host, port: port, created_at: created_at,
+            body: stored, body_truncated: trunc, body_size: size))
           return handle_response(upstream, req, flow_id, started, host, port, scheme)
         ensure
           upstream.close rescue nil
@@ -171,8 +173,10 @@ module Gori::Proxy
         @io.write(out_head)
         @io.write(out_body) if out_body
         @io.flush
+        stored, trunc, size = capped(out_body)
         @sink.on_response(FlowMapper.response(sent_resp,
-          flow_id: flow_id, body: out_body, ttfb_us: ttfb, duration_us: duration))
+          flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
+          body_truncated: trunc, body_size: size))
         return keep_alive?(req, sent_resp, Codec::Body.response_framing(sent_resp, req.method)[0])
       end
 
@@ -296,6 +300,15 @@ module Gori::Proxy
       io.to_slice
     end
 
+    # Held bodies are buffered whole (the human may edit them) and forwarded in
+    # full, but — like the streaming path — only the capture cap is STORED so an
+    # in-scope giant body can't bloat its row. Returns {stored, truncated, size}.
+    private def capped(body : Bytes?) : {Bytes?, Bool, Int64?}
+      return {nil, false, nil} unless body
+      return {body, false, nil} if body.size <= Codec::Body::CAPTURE_MAX
+      {body[0, Codec::Body::CAPTURE_MAX].dup, true, body.size.to_i64}
+    end
+
     private def record_error(req, scheme, host, port, created_at, message) : Nil
       flow_id = @sink.on_request(FlowMapper.request(req,
         scheme: scheme, host: host, port: port, created_at: created_at, body: nil))
@@ -305,8 +318,10 @@ module Gori::Proxy
     # A dropped request never reaches upstream; record it as an Aborted flow so
     # the human sees the attempt + decision (P4/P7).
     private def record_dropped_request(req, scheme, host, port, created_at, body) : Nil
+      stored, trunc, size = capped(body)
       flow_id = @sink.on_request(FlowMapper.request(req,
-        scheme: scheme, host: host, port: port, created_at: created_at, body: body))
+        scheme: scheme, host: host, port: port, created_at: created_at,
+        body: stored, body_truncated: trunc, body_size: size))
       @sink.on_response(FlowMapper.aborted_response(flow_id, "dropped by intercept (request)"))
     end
 

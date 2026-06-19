@@ -67,17 +67,17 @@ describe Gori::QL do
     Gori::QL.parse("   ").sql.should eq("1")
   end
 
-  it "compiles a body: term to an FTS prefix match" do
+  it "compiles a body: term to an FTS substring (quoted-phrase) match" do
     f = Gori::QL.parse("body:token")
     f.sql.should eq("(id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?))")
-    f.args.should eq(["token*"])
+    f.args.should eq([%("token")])
   end
 
-  it "falls back to a NULL-safe blob scan when body: has no indexable token" do
-    f = Gori::QL.parse("body:===")
+  it "falls back to a NULL-safe blob scan for a body: value below the 3-char trigram floor" do
+    f = Gori::QL.parse("body:ab")
     f.sql.should eq("(((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') " \
                     "OR (response_body IS NOT NULL AND lower(CAST(response_body AS TEXT)) LIKE ? ESCAPE '\\')))")
-    f.args.should eq(["%===%", "%===%"])
+    f.args.should eq(["%ab%", "%ab%"])
   end
 end
 
@@ -128,7 +128,9 @@ describe "Gori::Store#search (QL)" do
       hits = store.search(Gori::QL.parse("body:secrettoken"), 50).map(&.id).sort
       hits.should eq([req_match, resp_match].sort) # case-insensitive, req + resp
 
-      # prefix match: body:secret finds the "secrettoken" token in both
+      # substring match (not just prefix): body:token finds it INSIDE "secrettoken"
+      store.search(Gori::QL.parse("body:token"), 50).map(&.id).sort.should eq([req_match, resp_match].sort)
+      # and a leading fragment still works too
       store.search(Gori::QL.parse("body:secret"), 50).map(&.id).sort.should eq([req_match, resp_match].sort)
 
       # negation must KEEP bodyless flows (NULL-safe), not drop them

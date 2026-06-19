@@ -50,10 +50,13 @@ module Gori::Proxy
     private def accept_loop(server : TCPServer) : Nil
       while @running
         client = server.accept? || break
-        @slots.send(nil)   # acquire a slot — blocks (pausing accept) when MAX_CONNECTIONS are in flight
-        client.sync = true # immediate writes (P6)
-        client.tcp_nodelay = true
+        @slots.send(nil) # acquire a slot — blocks (pausing accept) when MAX_CONNECTIONS are in flight
+        # Socket setup + handling run INSIDE the fiber so a hostile peer that RSTs
+        # between accept and setsockopt can't raise on the accept loop itself
+        # (which would silently stop the whole proxy); the `ensure` frees the slot.
         spawn do
+          client.sync = true # immediate writes (P6)
+          client.tcp_nodelay = true
           ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor).run
         ensure
           @slots.receive # release the slot (even on error) so a new connection can be accepted
