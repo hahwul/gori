@@ -450,7 +450,7 @@ module Gori::Tui
       elsif key.escape?
         @overlay = :none
       elsif key.enter?
-        @toast = @settings_view.save
+        @toast = apply_settings(@settings_view.save)
       elsif key.up?
         @settings_view.move_field(-1)
       elsif key.down?
@@ -1452,6 +1452,21 @@ module Gori::Tui
     end
 
     # --- settings (config control) ---
+
+    # After a settings save: the upstream proxy is already live (Upstream reads it
+    # per dial); rebind the running proxy immediately if the listen address changed
+    # (existing connections are kept — only the accept socket moves). A failed
+    # rebind (port in use / bad address) keeps the current bind.
+    private def apply_settings(save_msg : String) : String
+      proxy = @session.proxy
+      return save_msg if Settings.bind_host == proxy.host && Settings.bind_port == proxy.port
+      begin
+        proxy.rebind(Settings.bind_host, Settings.bind_port)
+        "settings saved — now listening on #{proxy.host}:#{proxy.port} (repoint your client)"
+      rescue ex
+        "settings saved, but rebind failed: #{ex.message} (kept #{proxy.host}:#{proxy.port})"
+      end
+    end
 
     # Open the settings editor for `section` (palette → settings:network/theme/
     # hotkeys). Only :network is implemented; the rest toast a TODO.

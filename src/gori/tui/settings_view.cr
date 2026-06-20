@@ -10,8 +10,9 @@ module Gori::Tui
   # the ProjectPicker (a settings mode). Theme/hotkeys sections are TODO.
   #
   # Apply semantics: the upstream proxy takes effect immediately (Upstream.dial
-  # reads it live); the bind address is persisted and applied on the next project
-  # open (the running proxy keeps its current bind).
+  # reads it live). The bind address is persisted here; in-project the Runner
+  # rebinds the running proxy to it immediately, and the picker (no live proxy)
+  # has it take effect on the next project open.
   class SettingsView
     record Field, label : String, hint : String
 
@@ -82,7 +83,6 @@ module Gori::Tui
         @status = "invalid port"
         return "settings: invalid bind port #{@values[1].inspect}"
       end
-      bind_changed = @values[0].strip != Settings.bind_host || port != Settings.bind_port
       Settings.bind_host = @values[0].strip
       Settings.bind_port = port
       Settings.upstream_proxy = @values[2].strip
@@ -90,13 +90,7 @@ module Gori::Tui
       ok = Settings.save
       @saved = ok
       @status = ok ? "saved" : "save failed"
-      if !ok
-        "settings: save failed (could not write #{Settings.path})"
-      elsif bind_changed
-        "settings saved — bind applies on next project open"
-      else
-        "settings saved"
-      end
+      ok ? "settings saved" : "settings: save failed (could not write #{Settings.path})"
     end
 
     def render(screen : Screen, area : Rect) : Nil

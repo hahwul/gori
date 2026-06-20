@@ -93,6 +93,41 @@ describe Gori::Proxy::Server do
     String.new(resp.body.not_nil!).should eq("Hello!")
   end
 
+  it "rebind moves the listener to a new port, keeping the proxy functional" do
+    seen = Channel(String).new(2)
+    done = Channel(Nil).new(2)
+    origin_port = start_origin("Rebound!", seen)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    old_port = proxy.port
+
+    c1 = TCPSocket.new("127.0.0.1", old_port)
+    c1 << "GET /a HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    c1.flush
+    c1.gets_to_end
+    c1.close
+    done.receive
+    seen.receive
+
+    proxy.rebind("127.0.0.1", 0)
+    new_port = proxy.port
+
+    c2 = TCPSocket.new("127.0.0.1", new_port) # new listener serves
+    c2 << "GET /b HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    c2.flush
+    response = c2.gets_to_end
+    c2.close
+    done.receive
+    seen.receive
+    proxy.stop
+
+    response.should contain("Rebound!")
+    # old port is no longer listening (skip the rare OS ephemeral-port reuse case)
+    expect_raises(Exception) { TCPSocket.new("127.0.0.1", old_port) } if new_port != old_port
+  end
+
   it "releases its connection slot after each connection (bounded concurrency)" do
     # cap of 1: each sequential request must release its slot or the next would
     # block forever. Three back-to-back requests all completing proves release.

@@ -43,6 +43,26 @@ module Gori::Proxy
       @server = nil
     end
 
+    # Move the listener to a new host:port WITHOUT dropping in-flight connections
+    # (only the accept socket is swapped; existing ClientConn fibers run on their
+    # own accepted sockets). The new socket is bound FIRST, so a failure (port in
+    # use / bad address) raises and leaves the current listener intact. When the
+    # proxy isn't currently listening (capture off) it just records the new bind so
+    # the next `start` uses it.
+    def rebind(host : String, port : Int32) : Nil
+      unless @running
+        @host = host
+        @port = port
+        return
+      end
+      new_server = TCPServer.new(host, port) # raises before we touch the old listener
+      @server.try(&.close) rescue nil        # old accept loop's accept? returns nil → it exits
+      @host = host
+      @port = new_server.local_address.port
+      @server = new_server
+      spawn(name: "gori-proxy-accept") { accept_loop(new_server) }
+    end
+
     def listening? : Bool
       @running
     end
