@@ -35,9 +35,9 @@ describe Gori::Settings do
   it "persists and reloads the network settings as JSON" do
     dir = File.tempname("gori-settings")
     Dir.mkdir_p(dir)
-    prev = ENV["XDG_CONFIG_HOME"]?
+    prev = ENV["GORI_HOME"]?
     begin
-      ENV["XDG_CONFIG_HOME"] = dir
+      ENV["GORI_HOME"] = dir
       Gori::Settings.bind_host = "0.0.0.0"
       Gori::Settings.bind_port = 9999
       Gori::Settings.upstream_proxy = "up:1234"
@@ -51,7 +51,7 @@ describe Gori::Settings do
       Gori::Settings.bind_port.should eq(9999)
       Gori::Settings.upstream_proxy.should eq("up:1234")
     ensure
-      prev ? (ENV["XDG_CONFIG_HOME"] = prev) : ENV.delete("XDG_CONFIG_HOME")
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.bind_host = "127.0.0.1"
       Gori::Settings.bind_port = 8070
@@ -62,14 +62,14 @@ describe Gori::Settings do
   it "keeps defaults on a missing/garbled settings file" do
     dir = File.tempname("gori-settings-empty")
     Dir.mkdir_p(dir)
-    prev = ENV["XDG_CONFIG_HOME"]?
+    prev = ENV["GORI_HOME"]?
     begin
-      ENV["XDG_CONFIG_HOME"] = dir
+      ENV["GORI_HOME"] = dir
       Gori::Settings.bind_port = 7000
       Gori::Settings.load # no file → unchanged
       Gori::Settings.bind_port.should eq(7000)
     ensure
-      prev ? (ENV["XDG_CONFIG_HOME"] = prev) : ENV.delete("XDG_CONFIG_HOME")
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.bind_port = 8070
     end
@@ -103,9 +103,9 @@ describe Gori::Settings do
   it "round-trips the editor command + loads it even with no network block" do
     dir = File.tempname("gori-settings-ed")
     Dir.mkdir_p(dir)
-    prev = ENV["XDG_CONFIG_HOME"]?
+    prev = ENV["GORI_HOME"]?
     begin
-      ENV["XDG_CONFIG_HOME"] = dir
+      ENV["GORI_HOME"] = dir
       Gori::Settings.editor = "vim -u NONE"
       Gori::Settings.save.should be_true
       Gori::Settings.editor = "" # clear, then reload from disk
@@ -118,7 +118,7 @@ describe Gori::Settings do
       Gori::Settings.load
       Gori::Settings.editor.should eq("emacs -nw")
     ensure
-      prev ? (ENV["XDG_CONFIG_HOME"] = prev) : ENV.delete("XDG_CONFIG_HOME")
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.editor = ""
     end

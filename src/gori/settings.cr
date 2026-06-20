@@ -19,7 +19,7 @@ module Gori
     class_property editor : String = ""         # external editor for ^E; "" = $VISUAL/$EDITOR/vi
 
     def self.path : String
-      File.join(Paths.config_dir, "settings.json")
+      File.join(Paths.home_dir, "settings.json")
     end
 
     # Load persisted values into the class properties. Tolerant: a missing or
