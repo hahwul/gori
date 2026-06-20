@@ -34,7 +34,7 @@ module Gori
         Verb::Scope::Global) { |ctx| ctx.open_browser_picker; nil }
 
       # Settings (config control) — palette-only. network/editor are implemented;
-      # theme/hotkeys/cli/wizard are registered for discoverability and toast a TODO.
+      # theme/hotkeys are registered for discoverability (shown "soon") and toast a TODO.
       r.register Verb::Definition.new(
         "settings.network", "settings:network", "Edit the proxy bind address + upstream proxy",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:network); nil }
@@ -47,12 +47,6 @@ module Gori
       r.register Verb::Definition.new(
         "settings.hotkeys", "settings:hotkeys", "Hotkey settings (coming soon)",
         Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:hotkeys); nil }
-      r.register Verb::Definition.new(
-        "settings.cli", "settings:cli", "CLI options (coming soon)",
-        Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:cli); nil }
-      r.register Verb::Definition.new(
-        "settings.wizard", "settings:wizard", "Setup wizard (coming soon)",
-        Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:wizard); nil }
 
       r.register Verb::Definition.new(
         "scope.edit", "Scope lens", "Edit the in-scope host patterns", Verb::Scope::Global,

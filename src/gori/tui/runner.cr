@@ -1796,8 +1796,7 @@ module Gori::Tui
     end
 
     # Open the settings editor for `section` (palette → settings:network/editor/
-    # theme/hotkeys/cli/wizard). :network and :editor are implemented; the rest
-    # toast a TODO.
+    # theme/hotkeys). :network and :editor are implemented; the rest toast a TODO.
     def open_settings(section : Symbol) : Nil
       case section
       when :network, :editor

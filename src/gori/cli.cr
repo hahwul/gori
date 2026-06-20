@@ -11,6 +11,7 @@ module Gori
   # - `gori` or `gori tui [flags]`  → interactive TUI (or --headless for compat)
   # - `gori config`                 → print (and lazily init) persistent config path
   # - `gori export ca-cert`         → print CA cert path (refactors old --export-ca)
+  # - `gori cli` / `gori wizard`    → placeholders (CLI-level commands / setup wizard)
   # - `gori mcp` / `gori update`    → placeholders for future work
   #
   # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
@@ -41,6 +42,10 @@ module Gori
         run_config(subargs)
       when "export"
         run_export(subargs)
+      when "cli"
+        run_cli(subargs)
+      when "wizard"
+        run_wizard(subargs)
       when "mcp"
         run_mcp(subargs)
       when "update"
@@ -61,6 +66,8 @@ module Gori
       puts "  tui       Start the interactive TUI (default when no command)"
       puts "  config    Print path to the (persistent) configuration file"
       puts "  export    Export things (currently only ca-cert)"
+      puts "  cli       [placeholder] Run gori at the CLI level (non-interactive)"
+      puts "  wizard    [placeholder] Interactive setup/config wizard"
       puts "  mcp       [placeholder] MCP server"
       puts "  update    [placeholder] Self-update"
       puts ""
@@ -186,6 +193,26 @@ TEXT
       else
         abort "unknown export subcommand: #{args[0]}"
       end
+    end
+
+    private def self.run_cli(args : Array(String)) : Nil
+      if args.any? { |a| ["-h", "--help"].includes?(a) }
+        puts "Usage: gori cli <command>"
+        puts "  (placeholder) Will run gori operations at the CLI level — scripting the"
+        puts "  proxy/history/replay non-interactively, without the TUI."
+        return
+      end
+      puts "gori cli: CLI-level commands are not yet implemented."
+    end
+
+    private def self.run_wizard(args : Array(String)) : Nil
+      if args.any? { |a| ["-h", "--help"].includes?(a) }
+        puts "Usage: gori wizard"
+        puts "  (placeholder) Will guide first-time setup + configuration interactively"
+        puts "  (bind address, CA trust, upstream proxy, editor, …)."
+        return
+      end
+      puts "gori wizard: the setup wizard is not yet implemented."
     end
 
     private def self.run_mcp(args : Array(String)) : Nil
