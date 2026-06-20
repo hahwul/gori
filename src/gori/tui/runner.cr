@@ -104,6 +104,8 @@ module Gori::Tui
       # Idle (no traffic, no keys) burns ~no CPU instead of rebuilding 20 frames/s.
       last_rev = @session.interceptor.revision
       last_wf = @session.store.write_failures
+      last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
+      last_dv_poll = Time.instant
       loop do
         ev = @term.poll_event(50)
         dirty = false
@@ -133,6 +135,19 @@ module Gori::Tui
         if (wf = @session.store.write_failures) != last_wf
           last_wf = wf
           dirty = true
+        end
+        # Cross-process live refresh: a SECOND gori instance capturing into the same
+        # project DB commits rows we never see via our in-process flow_events. Poll
+        # SQLite's data_version (cheap) — throttled, not every 50ms tick — and reload
+        # the active view when another connection committed.
+        now = Time.instant
+        if now - last_dv_poll >= DV_POLL_INTERVAL
+          last_dv_poll = now
+          if (dv = @session.store.data_version) != last_dv
+            last_dv = dv
+            apply_external_change
+            dirty = true
+          end
         end
         render if dirty
         break unless @outcome == :running
@@ -172,6 +187,11 @@ module Gori::Tui
 
     # --- main loop helpers ---------------------------------------------------
 
+    # How often to poll SQLite's data_version for cross-process changes (another
+    # gori instance capturing into the same project DB). Cheap, but no need every
+    # 50ms tick — ~sub-second freshness is plenty.
+    DV_POLL_INTERVAL = 750.milliseconds
+
     private def drain_events : Bool
       drained = false
       while event = nonblocking_event
@@ -181,6 +201,16 @@ module Gori::Tui
       # Coalesce a filtered-view reload to once per drain (on_event only flagged it).
       @history.flush_filter(@session.store)
       drained
+    end
+
+    # Another instance committed to this project's DB — re-query the store-backed
+    # views so its captures show up here too. Selection is preserved (History's
+    # reload re-anchors to the same flow); only the active derived views reload.
+    private def apply_external_change : Nil
+      @history.reload(@session.store)
+      @sitemap.reload(@session.store, @scope.filter) if @active_tab == :sitemap
+      @findings.reload(@session.store) if @active_tab == :findings
+      refresh_findings_count
     end
 
     private def nonblocking_event : Store::FlowEvent?

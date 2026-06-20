@@ -416,6 +416,16 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
     end
 
+    # SQLite's per-connection change counter (PRAGMA data_version): it bumps when
+    # ANOTHER connection — including a second gori instance on the SAME project DB
+    # file — commits, but NOT for our own writes through this pool. The TUI polls
+    # it to live-refresh when another instance captures into the same project.
+    def data_version : Int64
+      @db.scalar("PRAGMA data_version").as(Int64)
+    rescue
+      0_i64 # never crash the run loop over a poll
+    end
+
     # Earliest flow timestamp (unix MICROSECONDS — the flows.created_at unit) for
     # the "project creation" fallback in the Project tab (min(created_at) of
     # captured traffic; nil for brand new). Callers must divide by 1_000_000 for
