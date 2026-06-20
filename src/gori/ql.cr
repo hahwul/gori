@@ -91,6 +91,7 @@ module Gori
     # correctly KEEPS it. The trigram index needs >=3 characters, so shorter
     # values fall back to the NULL-safe BLOB LIKE scan.
     private def self.body_cond(value : String) : {String, Array(DB::Any)}
+      value = value.chars.reject(&.control?).join # strip NUL/control chars (FTS/LIKE safety)
       if value.size < 3
         p = like(value)
         return {"((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') OR " \

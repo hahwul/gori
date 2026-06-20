@@ -1322,6 +1322,10 @@ module Gori::Tui
 
     def replay_send : Nil
       return unless (tab = current_replay_tab) && (view = tab.view).loaded?
+      if view.inflight? # one outstanding round-trip per view — don't pile up fibers/sockets on ^R mashing
+        @toast = "replay already in flight…"
+        return
+      end
       scheme, host, port = view.parse_target
       if host.empty?
         @toast = "replay: invalid target"
@@ -1331,10 +1335,11 @@ module Gori::Tui
       bytes = view.request_bytes
       http2 = view.http2?
       results = @replay_results
+      view.inflight = true
       @toast = "replaying → #{host}:#{port}…"
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only
-      # these captured locals — never the view — and hands the Result back through
-      # the channel; the run loop applies it (see #drain_replay_results).
+      # these captured locals + the inflight flag — and hands the Result back
+      # through the channel; the run loop applies it (see #drain_replay_results).
       spawn(name: "gori-replay") do
         result = if http2
                    Replay::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
@@ -1348,6 +1353,10 @@ module Gori::Tui
         when results.send({view, result})
         else
         end
+      ensure
+        # Clear HERE (not in the drain) — a dropped late send never reaches the
+        # drain, which would otherwise leave the flag stuck and wedge re-send.
+        view.inflight = false
       end
     end
 

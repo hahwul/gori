@@ -11,6 +11,12 @@ module Gori::Proxy::WS
     # bounded, so a giant streamed message can't exhaust memory.
     MAX_MESSAGE = 16 * 1024 * 1024
 
+    # After a message larger than this, drop the reassembly buffer instead of
+    # IO::Memory#clear (which keeps the peak-sized backing buffer allocated for the
+    # connection's whole life) so one big frame early on doesn't pin memory on an
+    # otherwise-idle long-lived connection.
+    RESET_THRESHOLD = 256 * 1024
+
     def self.run(client : IO, upstream : IO, flow_id : Int64, sink : FlowSink) : Nil
       done = Channel(Nil).new(2)
       spawn { pump(client, upstream, "out", flow_id, sink); done.send(nil) }
@@ -43,7 +49,8 @@ module Gori::Proxy::WS
           end
           if frame.fin?
             sink.on_ws_message(flow_id, direction, message_opcode.to_i, assembling.to_slice.dup)
-            assembling.clear
+            # Reclaim the backing buffer after a large message; clear() alone keeps it.
+            assembling = assembling.size > RESET_THRESHOLD ? IO::Memory.new : assembling.tap(&.clear)
           end
         end
         break if frame.close?

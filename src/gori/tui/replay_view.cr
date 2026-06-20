@@ -38,6 +38,7 @@ module Gori::Tui
       @scroll = 0
       @loaded = false
       @http2 = false
+      @inflight = false           # a replay round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
     end
@@ -90,6 +91,16 @@ module Gori::Tui
     def request_bytes : Bytes
       raw = @editor.to_bytes
       @auto_content_length ? sync_content_length(raw) : raw
+    end
+
+    # A replay round-trip is outstanding (set/cleared by the Runner around the
+    # background send fiber) — used to refuse a second concurrent send.
+    def inflight? : Bool
+      @inflight
+    end
+
+    def inflight=(value : Bool) : Nil
+      @inflight = value
     end
 
     getter? auto_content_length : Bool

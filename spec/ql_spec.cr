@@ -73,6 +73,11 @@ describe Gori::QL do
     f.args.should eq([%("token")])
   end
 
+  it "strips control/NUL chars from a body: value (FTS phrase safety)" do
+    f = Gori::QL.parse("body:to\u0000ke\u001fn")
+    f.args.should eq([%("token")]) # control bytes removed before the phrase is built
+  end
+
   it "falls back to a NULL-safe blob scan for a body: value below the 3-char trigram floor" do
     f = Gori::QL.parse("body:ab")
     f.sql.should eq("(((request_body IS NOT NULL AND lower(CAST(request_body AS TEXT)) LIKE ? ESCAPE '\\') " \

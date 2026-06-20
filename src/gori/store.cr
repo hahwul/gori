@@ -369,6 +369,12 @@ module Gori
         rs.each { rows << read_row(rs) }
       end
       rows
+    rescue ex
+      # A malformed FTS phrase (FTS5 operator syntax, stray characters) raises a
+      # SQLite error; a live filter must never crash the TUI run loop — degrade to
+      # no matches and let the user fix the query.
+      STDERR.puts "gori: search failed (#{ex.message})"
+      [] of FlowRow
     end
 
     # Single-row projection, e.g. to refresh a row after an :inserted/:updated

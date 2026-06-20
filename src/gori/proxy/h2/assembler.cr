@@ -142,7 +142,10 @@ module Gori::Proxy::H2
       return unless direction == "in" # push is server-initiated only
       return unless frame.end_headers?
       promised_id, block = parse_push_promise(frame)
-      return if promised_id == 0
+      # Server-pushed streams are server-initiated → MUST be even (RFC 7540
+      # §5.1.1); reject 0 / odd ids so a forged PUSH_PROMISE can't fabricate or
+      # collide with a real (odd, client) request stream.
+      return if promised_id == 0 || promised_id.odd?
       promised = @streams[promised_id]?
       if promised.nil?
         return if @streams.size >= MAX_LIVE_STREAMS # at cap — don't track new streams
