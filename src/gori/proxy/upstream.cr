@@ -1,16 +1,29 @@
 require "socket"
 require "openssl"
+require "../settings"
 
 module Gori::Proxy
-  # Dials origin servers and parses authorities. Plaintext only this step; the
-  # TLS-upstream variant is added with the MITM layer (Step 6). We open one
-  # upstream per flow and close it after the response (no pooling — correctness
-  # first; pooling is a deferred optimization).
+  # Dials origin servers and parses authorities. We open one upstream per flow and
+  # close it after the response (no pooling — correctness first; pooling is a
+  # deferred optimization). When an upstream proxy is configured (Settings), every
+  # dial is tunnelled through it via CONNECT (so both TLS-wrapping and plaintext
+  # forwarding run unchanged over the tunnel).
   module Upstream
     CONNECT_TIMEOUT = 30.seconds
     IO_TIMEOUT      = 30.seconds
 
+    # Dial the origin (directly, or via the configured upstream proxy's CONNECT
+    # tunnel). The returned socket is positioned at the start of the origin stream
+    # either way, so callers (dial_tls / the request forwarder) are unaffected.
     def self.dial(host : String, port : Int32) : TCPSocket?
+      if proxy = Settings.upstream_proxy_addr
+        dial_via_proxy(proxy[0], proxy[1], host, port)
+      else
+        direct_dial(host, port)
+      end
+    end
+
+    private def self.direct_dial(host : String, port : Int32) : TCPSocket?
       sock = TCPSocket.new(host, port, connect_timeout: CONNECT_TIMEOUT)
       sock.sync = true # flush writes immediately (P6)
       sock.tcp_nodelay = true
@@ -19,6 +32,36 @@ module Gori::Proxy
       sock
     rescue
       nil
+    end
+
+    # Connect to the upstream HTTP proxy and CONNECT-tunnel to the origin. Used for
+    # BOTH https and plaintext targets (the tunnel is a raw pipe to the origin, so
+    # gori's existing TLS-wrap/forwarding works over it). The proxy must permit
+    # CONNECT to the target port.
+    private def self.dial_via_proxy(proxy_host : String, proxy_port : Int32,
+                                    host : String, port : Int32) : TCPSocket?
+      sock = direct_dial(proxy_host, proxy_port)
+      return nil unless sock
+      sock << "CONNECT #{host}:#{port} HTTP/1.1\r\nHost: #{host}:#{port}\r\n\r\n"
+      sock.flush
+      return sock if connect_established?(sock)
+      sock.close rescue nil
+      nil
+    rescue
+      sock.try(&.close) rescue nil
+      nil
+    end
+
+    # Read the proxy's CONNECT reply: a 2xx status line, then drain headers to the
+    # blank line so the socket sits at the tunnel start. true on success.
+    private def self.connect_established?(sock : TCPSocket) : Bool
+      status = sock.gets("\r\n", chomp: true)
+      return false unless status
+      parts = status.split(' ', 3)
+      ok = parts.size >= 2 && ((parts[1].to_i? || 0) // 100) == 2
+      while (line = sock.gets("\r\n", chomp: true)) && !line.empty?
+      end
+      ok
     end
 
     # Dials and wraps an origin in TLS (post-CONNECT MITM upstream). `host` is

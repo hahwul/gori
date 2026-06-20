@@ -1,6 +1,7 @@
 require "option_parser"
 require "./config"
 require "./paths"
+require "./settings"
 require "./app"
 require "./proxy/tls/cert_authority"
 
@@ -97,8 +98,9 @@ TEXT
     # Runs the TUI (or headless for compat with old --headless flag).
     # All legacy flat flags continue to be accepted here.
     private def self.run_tui(args : Array(String)) : Nil
-      listen = "127.0.0.1"
-      port = 8070
+      Settings.load # persisted bind/upstream are the defaults; CLI flags override below
+      listen = Settings.bind_host
+      port = Settings.bind_port
       db_path = Paths.default_db
       ca_dir = Paths.default_ca_dir
       headless = false
@@ -131,6 +133,10 @@ TEXT
       end
 
       Paths.ensure_dirs
+      # Reflect the active bind (after any CLI override) in the settings UI; the
+      # upstream proxy was already loaded by Settings.load.
+      Settings.bind_host = listen
+      Settings.bind_port = port
       config = Config.new(listen, port, db_path, ca_dir, headless, insecure)
       app = App.new(config)
 

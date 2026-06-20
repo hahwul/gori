@@ -1,6 +1,7 @@
 require "log"
 require "./config"
 require "./paths"
+require "./settings"
 require "./project"
 require "./project_registry"
 require "./session"
@@ -64,6 +65,10 @@ module Gori
     end
 
     private def open_and_run(project : Project, term : Termisu) : Symbol
+      # Pick up any bind address changed via Settings since startup (the previous
+      # session kept its bind; this one opens on the new one).
+      @config.listen = Settings.bind_host
+      @config.port = Settings.bind_port
       session =
         begin
           Session.open(@config, @ca, @registry, project)
