@@ -27,13 +27,27 @@ module Gori::Proxy
     # `alpn` offers an ALPN protocol (e.g. "h2"); nil leaves it unset so the
     # origin answers HTTP/1.1. The caller checks `ssl.alpn_protocol` for what was
     # actually negotiated.
+    # Shared client SSL contexts keyed by {verify, alpn}. SNI + hostname
+    # verification are applied per-CONNECTION on the SSL socket (the `hostname:`
+    # arg below), so the context — which only carries verify_mode + ALPN — is safe
+    # to share. This avoids a fresh SSL_CTX alloc + set_default_verify_paths (system
+    # CA load) + GC finalizer on EVERY flow. Single-threaded fibers → the lazy ||=
+    # is race-free.
+    @@tls_contexts = {} of {Bool, String?} => OpenSSL::SSL::Context::Client
+
+    private def self.client_context(verify : Bool, alpn : String?) : OpenSSL::SSL::Context::Client
+      @@tls_contexts[{verify, alpn}] ||= begin
+        ctx = OpenSSL::SSL::Context::Client.new
+        ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE unless verify
+        ctx.alpn_protocol = alpn if alpn
+        ctx
+      end
+    end
+
     def self.dial_tls(host : String, port : Int32, verify : Bool, alpn : String? = nil) : OpenSSL::SSL::Socket::Client?
       tcp = dial(host, port)
       return nil unless tcp
-      ctx = OpenSSL::SSL::Context::Client.new
-      ctx.verify_mode = OpenSSL::SSL::VerifyMode::NONE unless verify
-      ctx.alpn_protocol = alpn if alpn
-      ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: ctx, sync_close: true, hostname: host)
+      ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn), sync_close: true, hostname: host)
       ssl.sync = true
       ssl
     rescue

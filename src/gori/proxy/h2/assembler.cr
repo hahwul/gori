@@ -25,6 +25,13 @@ module Gori::Proxy::H2
     # never sends END_HEADERS can't grow header_buf without bound.
     MAX_HEADER_BLOCK = 1 << 20 # 1 MiB
 
+    # Ceiling on concurrently-tracked streams per connection. Streams are dropped on
+    # RST or completion, but a never-END_STREAM (SSE/long-poll/bidi or a hostile
+    # flood of fresh stream ids) would otherwise grow @streams unboundedly, each
+    # holding up to two capped bodies. At the cap we refuse to track NEW streams
+    # (the raw frame log stays the truth, P7) rather than evict in-flight ones.
+    MAX_LIVE_STREAMS = 1024
+
     private class Side
       getter header_buf = IO::Memory.new
       # DATA frames accumulate here, capped (like h1) so a huge streamed body
@@ -59,7 +66,11 @@ module Gori::Proxy::H2
     end
 
     private def feed_locked(direction : String, frame : Frame::Header) : Nil
-      stream = @streams[frame.stream_id] ||= Stream.new
+      stream = @streams[frame.stream_id]?
+      if stream.nil?
+        return if @streams.size >= MAX_LIVE_STREAMS # at cap — don't track new streams
+        stream = @streams[frame.stream_id] = Stream.new
+      end
       request = direction == "out"
       side = request ? stream.req : stream.resp
       decoder = request ? @req_decoder : @resp_decoder
@@ -132,7 +143,11 @@ module Gori::Proxy::H2
       return unless frame.end_headers?
       promised_id, block = parse_push_promise(frame)
       return if promised_id == 0
-      promised = @streams[promised_id] ||= Stream.new
+      promised = @streams[promised_id]?
+      if promised.nil?
+        return if @streams.size >= MAX_LIVE_STREAMS # at cap — don't track new streams
+        promised = @streams[promised_id] = Stream.new
+      end
       return if promised.req.headers # already promised
       promised.req.headers = decoder.decode(block)
       promised.req.ended = true

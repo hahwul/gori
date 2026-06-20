@@ -127,10 +127,16 @@ module Gori
 
     # Inserts a Pending flow (request captured) and returns its new id.
     # Blocks the caller until the row is committed.
+    # The blocking writers tolerate a shutdown race: a proxy fiber may still be
+    # capturing when Store#close closes @writes, and a send/receive on a closed
+    # channel would otherwise raise into (and tear down) that fiber. Dropping the
+    # late row on shutdown is the right degradation (mirrors insert_h2_frame).
     def insert_flow(req : CapturedRequest) : Int64
       reply = Channel(Int64).new(1) # buffered: the writer must never block sending a reply
       @writes.send(InsertFlow.new(req, reply))
       reply.receive
+    rescue Channel::ClosedError
+      0_i64 # store closing — drop the late row instead of raising into the proxy fiber
     end
 
     # Fills in the response side of an existing flow. Blocks until committed.
@@ -138,6 +144,8 @@ module Gori
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
       @writes.send(UpdateResp.new(resp, reply))
       reply.receive
+    rescue Channel::ClosedError
+      nil
     end
 
     # Records one captured WebSocket message for a flow. Blocks until committed
@@ -146,6 +154,8 @@ module Gori
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
       @writes.send(InsertWs.new(flow_id, now_us, direction, opcode, payload, reply))
       reply.receive
+    rescue Channel::ClosedError
+      nil
     end
 
     # Blocks until every write enqueued before this call has committed. The single
@@ -647,6 +657,8 @@ module Gori
       reply = Channel(Int64).new(1) # buffered: the writer must never block sending a reply
       @writes.send(ExecTask.new(run, reply))
       reply.receive
+    rescue Channel::ClosedError
+      0_i64 # store closing — caller (settings/findings/flush) degrades, doesn't raise
     end
 
     private def read_finding(rs : DB::ResultSet) : Finding
