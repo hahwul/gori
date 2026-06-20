@@ -40,7 +40,6 @@ module Gori::Tui
           return nil
         end
 
-
       Verb::Chord.new(name, ctrl: ev.ctrl?, alt: ev.alt?, shift: shift)
     end
   end

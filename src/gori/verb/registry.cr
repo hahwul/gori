@@ -48,7 +48,6 @@ module Gori
         end
         scored.sort_by! { |(_, score)| -score }.map { |(v, _)| v }
       end
-
     end
   end
 end
