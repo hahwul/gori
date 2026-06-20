@@ -57,10 +57,22 @@ module Gori
         available: in_replay) { |ctx| ctx.replay_new; nil }
 
       # --- detail view ---
+      # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and only
+      # returns to the list once past REQUEST; → walks forward (REQ→RES→FRAMES).
       r.register Verb::Definition.new(
         "detail.close", "Close detail", "Return to the History list", Verb::Scope::HistoryDetail,
-        [Verb::Chord.new("escape"), Verb::Chord.new("q"), Verb::Chord.new("left"), Verb::Chord.new("h")],
+        [Verb::Chord.new("escape"), Verb::Chord.new("q")],
         hidden: true) { |ctx| ctx.close_detail; nil }
+
+      r.register Verb::Definition.new(
+        "detail.next-pane", "Next pane →", "Move to the next detail pane (REQ → RES → FRAMES)",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("right"), Verb::Chord.new("l")],
+        hidden: true) { |ctx| ctx.move_detail_pane(1); nil }
+
+      r.register Verb::Definition.new(
+        "detail.prev-pane", "Previous pane ←", "Move to the previous detail pane (FRAMES → RES → REQ; past REQ returns to the list)",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("left"), Verb::Chord.new("h")],
+        hidden: true) { |ctx| ctx.move_detail_pane(-1); nil }
 
       r.register Verb::Definition.new(
         "detail.down", "Scroll detail down", "Scroll the detail view down", Verb::Scope::HistoryDetail,
@@ -71,7 +83,7 @@ module Gori
         [Verb::Chord.new("k"), Verb::Chord.new("up")], hidden: true) { |ctx| ctx.scroll_detail(-1); nil }
 
       r.register Verb::Definition.new(
-        "detail.toggle-pane", "Switch request/response", "Toggle between request and response",
+        "detail.toggle-pane", "Switch pane (cycle)", "Cycle REQ → RES → FRAMES",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("tab")], hidden: true) { |ctx| ctx.toggle_detail_pane; nil }
     end
 

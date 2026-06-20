@@ -220,14 +220,34 @@ module Gori::Tui
       @detail_scroll = (@detail_scroll + delta).clamp(0, {detail_styled.size - 1, 0}.max)
     end
 
-    def toggle_pane : Nil
-      @detail_pane = case @detail_pane
-                     when :request  then :response
-                     when :response then (@detail_frames ? :frames : :request)
-                     else                :request
-                     end
+    # The detail sub-panes, in order: REQUEST → RESPONSE → FRAMES (the frames pane
+    # exists only for an intercepted h2 flow). ←/→ walk this chain; Tab cycles it.
+    private def detail_panes : Array(Symbol)
+      @detail_frames ? [:request, :response, :frames] : [:request, :response]
+    end
+
+    private def set_detail_pane(pane : Symbol) : Nil
+      @detail_pane = pane
       @detail_scroll = 0
       @detail_styled_cache = nil # pane switch changes the styled content
+    end
+
+    # Tab: cycle forward through the panes, wrapping back to REQUEST.
+    def toggle_pane : Nil
+      panes = detail_panes
+      i = panes.index(@detail_pane) || 0
+      set_detail_pane(panes[(i + 1) % panes.size])
+    end
+
+    # ←/→ navigation: step one pane in `dir` (+1 forward REQ→RES→FRAMES, −1 back).
+    # Returns false when it would step off an end — the Runner closes the detail on a
+    # left-past-REQUEST (back to the list) and no-ops a right-past-FRAMES.
+    def detail_pane_advance(dir : Int32) : Bool
+      panes = detail_panes
+      i = (panes.index(@detail_pane) || 0) + dir
+      return false if i < 0 || i >= panes.size
+      set_detail_pane(panes[i])
+      true
     end
 
     # --- rendering -----------------------------------------------------------
@@ -323,7 +343,7 @@ module Gori::Tui
                 @detail_pane.to_s.upcase
               end
       screen.text(rect.x + 1, rect.y, title, Theme::ACCENT, attr: Attribute::Bold)
-      screen.text(rect.x + 12, rect.y, "tab: switch · esc: back", Theme::MUTED)
+      screen.text(rect.x + 12, rect.y, "←/→ panes · ↑/↓ scroll · esc back", Theme::MUTED)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       lines = detail_styled

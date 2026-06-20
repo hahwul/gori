@@ -166,6 +166,50 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "walks detail panes REQ→RES→FRAMES with ←/→, stopping at the ends" do
+    tmp_store do |store|
+      conn = store.insert_h2_connection("h.test", 443, "h2")
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/", http_version: "HTTP/2",
+        head: "GET / HTTP/2\r\n\r\n".to_slice, body: nil,
+        h2_conn_id: conn, h2_stream_id: 1_i64))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/2 200\r\n\r\n".to_slice))
+      store.insert_h2_frame(conn, "out", 0x1_u8, 0x5_u8, 1_u32, "hdr".to_slice)
+      store.flush
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true # starts on REQUEST
+
+      view.detail_pane_advance(-1).should be_false # ← at REQUEST steps off (Runner closes)
+      view.detail_pane_advance(1).should be_true   # REQ → RES
+      view.detail_pane_advance(1).should be_true   # RES → FRAMES
+      view.detail_pane_advance(1).should be_false  # → at FRAMES steps off (no-op)
+
+      backend = MemoryBackend.new(100, 12)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      backend.contains?("FRAMES (h2)").should be_true # right walked all the way to FRAMES
+
+      view.detail_pane_advance(-1).should be_true  # FRAMES → RES
+      view.detail_pane_advance(-1).should be_true  # RES → REQ
+      view.detail_pane_advance(-1).should be_false # ← past REQUEST steps off again
+    end
+  end
+
+  it "has only REQ↔RES panes when there are no h2 frames" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/x", status: 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true      # REQUEST
+      view.detail_pane_advance(1).should be_true  # REQ → RES
+      view.detail_pane_advance(1).should be_false # no FRAMES pane → stop at RES
+      view.detail_pane_advance(-1).should be_true # RES → REQ
+    end
+  end
+
   it "renders a gRPC response body as framed messages" do
     tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(

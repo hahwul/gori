@@ -80,6 +80,10 @@ private class FakeContext < ExecContext
     @calls << :toggle_detail_pane
   end
 
+  def move_detail_pane(dir : Int32) : Nil
+    @calls << :move_detail_pane
+  end
+
   def replay_selected : Nil
     @calls << :replay_selected
   end
@@ -214,6 +218,9 @@ describe Gori::Verb do
       keymap.lookup(Chord.new("escape"), Scope::PaletteOpen).should eq("palette.close")
       # escape in HistoryDetail -> detail.close (different verb, same chord)
       keymap.lookup(Chord.new("escape"), Scope::HistoryDetail).should eq("detail.close")
+      # ←/→ in HistoryDetail walk the panes (left no longer just closes)
+      keymap.lookup(Chord.new("right"), Scope::HistoryDetail).should eq("detail.next-pane")
+      keymap.lookup(Chord.new("left"), Scope::HistoryDetail).should eq("detail.prev-pane")
       # "q" is Global (back to projects) -> resolves from any scope
       keymap.lookup(Chord.new("q"), Scope::Body).should eq("app.back")
       # an unbound chord

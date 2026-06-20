@@ -35,6 +35,9 @@ module Gori
       # detail view
       abstract def scroll_detail(delta : Int32) : Nil
       abstract def toggle_detail_pane : Nil
+      # Walk the detail panes (REQ→RES→FRAMES) by `dir` (+1 right, −1 left); left
+      # past REQUEST returns to the History list.
+      abstract def move_detail_pane(dir : Int32) : Nil
 
       # replay workbench (editing + focus/pane toggles are handled inline, not via verbs)
       abstract def replay_selected : Nil # load History's selection into Replay

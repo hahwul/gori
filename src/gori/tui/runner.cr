@@ -1038,7 +1038,7 @@ module Gori::Tui
       when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser     then "↑/↓ select · ↵ open · esc cancel"
       when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
-      when :detail      then "↹ switch pane · ↑/↓ scroll · esc back"
+      when :detail      then "←/→ panes (REQ·RES·FRAMES) · ↑/↓ scroll · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-8 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
@@ -1414,6 +1414,13 @@ module Gori::Tui
 
     def toggle_detail_pane : Nil
       @history.toggle_pane
+    end
+
+    # ← / → in the detail view walk REQ → RES → FRAMES. Right past the last pane is a
+    # no-op; left past the first (REQUEST) returns to the History list.
+    def move_detail_pane(dir : Int32) : Nil
+      moved = @history.detail_pane_advance(dir)
+      close_detail if !moved && dir < 0
     end
 
     def replay_selected : Nil
