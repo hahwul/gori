@@ -98,6 +98,19 @@ module Gori::Tui
         if ev
           handle(ev)
           dirty = true
+          # Drain any input already queued behind `ev` in the SAME tick, then
+          # render once. A fast scroll arrives as a burst — held ↑/↓/j/k key
+          # repeat, or (under the terminal's alternate-scroll mode) a mouse wheel
+          # fed as a run of ↑/↓ keys. Handling one event per rendered frame let the
+          # burst back up: the view crept one step per frame and kept moving after
+          # the user stopped. Draining applies the whole burst before the frame, so
+          # scrolling tracks the input. Bounded so an infinitely-held key can't
+          # starve the render / async-channel drains below.
+          drained = 0
+          while drained < 256 && (more = @term.poll_event(0))
+            handle(more)
+            drained += 1
+          end
         end
         dirty = true if drain_events          # always drains; true if anything arrived
         dirty = true if drain_replay_results
