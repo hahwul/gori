@@ -31,7 +31,8 @@ module Gori
     getter bind_error : String?
 
     def self.open(config : Config, ca : Proxy::Tls::CertAuthority,
-                  registry : Verb::Registry, project : Project) : Session
+                  registry : Verb::Registry, project : Project,
+                  bind_fallback : Bool = false) : Session
       events = Channel(Store::FlowEvent).new(1024)
       store = Store.open(project.db_path, events)
       begin
@@ -50,7 +51,7 @@ module Gori
         # capture to start it later.
         bind_error =
           begin
-            proxy.start
+            proxy.start(fallback: bind_fallback)
             nil
           rescue ex
             ex.message || "could not bind #{config.listen}:#{config.port}"

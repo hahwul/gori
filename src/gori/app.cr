@@ -79,7 +79,9 @@ module Gori
       @config.port = Settings.bind_port
       session =
         begin
-          Session.open(@config, @ca, @registry, project)
+          # Interactive: auto-fall-back to a free port if the configured one is
+          # taken (a 2nd gori instance), so capture just works on a new port.
+          Session.open(@config, @ca, @registry, project, bind_fallback: true)
         rescue ex
           # A failed open (e.g. the proxy port is already in use) must not crash the
           # TUI with a backtrace into the alt-screen — log it and fall back to the

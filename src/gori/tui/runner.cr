@@ -87,11 +87,14 @@ module Gori::Tui
       @history.reload(@session.store)
       @project_view.reload(@session.project, @session.store)
       refresh_findings_count
-      # If the proxy couldn't bind (port in use), say so on entry — capture is off
-      # but History/Replay/Sitemap all work; the user can free a port in settings
-      # (^P → settings:network) and press `c` to start capturing.
+      # Surface the bind outcome on entry: capture-off if nothing could bind, or a
+      # port-fallback note if the configured port was taken and we picked another.
+      requested = @session.config.port
       if err = @session.bind_error
         @toast = "capture OFF — #{err}. History/Replay work; set a free port in settings (^P) then press c"
+      elsif requested > 0 && @session.proxy.port != requested
+        Settings.bind_port = @session.proxy.port # keep the settings UI showing the live port
+        @toast = "port #{requested} in use — capturing on #{@session.proxy.port} instead (point your client there)"
       end
       render # initial paint (the loop below only re-renders when something changed)
       # The render loop polls input on a 50ms cadence (so async channels are still

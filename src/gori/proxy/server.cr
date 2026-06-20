@@ -28,13 +28,33 @@ module Gori::Proxy
       @slots = Channel(Nil).new(max_connections) # counting semaphore: send=acquire, receive=release
     end
 
+    # How many ports past the requested one to probe before giving up to ephemeral.
+    FALLBACK_TRIES = 16
+
     # Binds and starts the accept loop in its own fiber. Returns once listening.
-    def start : Nil
-      server = TCPServer.new(@host, @port)
+    # With `fallback`, a taken port falls back to the next few ports then an
+    # ephemeral one, so a second gori instance binds its own port instead of
+    # failing (the caller reports the resolved `port`).
+    def start(fallback : Bool = false) : Nil
+      server = bind_listener(fallback)
       @port = server.local_address.port # resolve ephemeral (port 0) to the real one
       @server = server
       @running = true
       spawn(name: "gori-proxy-accept") { accept_loop(server) }
+    end
+
+    private def bind_listener(fallback : Bool) : TCPServer
+      return TCPServer.new(@host, @port) unless fallback && @port > 0
+      candidates = [@port]
+      (1..FALLBACK_TRIES).each { |i| candidates << @port + i if @port + i <= 65535 }
+      candidates << 0 # ephemeral last resort (the OS picks any free port)
+      last_err = nil.as(Exception?)
+      candidates.each do |p|
+        return TCPServer.new(@host, p)
+      rescue ex : Socket::BindError
+        last_err = ex # port taken — try the next candidate
+      end
+      raise last_err || Gori::Error.new("could not bind #{@host}")
     end
 
     def stop : Nil

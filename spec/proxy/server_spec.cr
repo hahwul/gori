@@ -93,6 +93,19 @@ describe Gori::Proxy::Server do
     String.new(resp.body.not_nil!).should eq("Hello!")
   end
 
+  it "start(fallback: true) binds a different port when the requested one is taken" do
+    blocker = TCPServer.new("127.0.0.1", 0)
+    taken = blocker.local_address.port
+    sink = RecordingSink.new(Channel(Nil).new(1))
+
+    proxy = Gori::Proxy::Server.new("127.0.0.1", taken, sink)
+    proxy.start(fallback: true)
+    proxy.listening?.should be_true
+    proxy.port.should_not eq(taken) # fell back to a free port
+    proxy.stop
+    blocker.close
+  end
+
   it "rebind moves the listener to a new port, keeping the proxy functional" do
     seen = Channel(String).new(2)
     done = Channel(Nil).new(2)
