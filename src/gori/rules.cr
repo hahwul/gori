@@ -12,6 +12,14 @@ module Gori
   class Rules < Proxy::HeadRewriter
     def initialize(@store : Store, @rules : Array(Store::MatchRule))
       @mutex = Mutex.new
+      # Lock-free fast-path flag: rewrite_request/response run on EVERY head, but
+      # the common case is no rules. This lets apply() skip the mutex + select-array
+      # allocation entirely when nothing would match.
+      @active_count = Atomic(Int32).new(active_rule_count(@rules))
+    end
+
+    private def active_rule_count(rules : Array(Store::MatchRule)) : Int32
+      rules.count { |r| r.enabled? && !r.pattern.empty? }
     end
 
     def self.load(store : Store) : Rules
@@ -63,6 +71,7 @@ module Gori
     end
 
     private def apply(head : Bytes, target : Store::RuleTarget) : Bytes
+      return head if @active_count.get == 0 # lock-free fast path: no rules to apply
       # An empty pattern is excluded here too (not just at add-time): String#gsub
       # with "" would splice the replacement between every byte and wreck the head.
       active = @mutex.synchronize do
@@ -77,6 +86,7 @@ module Gori
     private def refresh : Nil
       fresh = @store.match_rules
       @mutex.synchronize { @rules = fresh }
+      @active_count.set(active_rule_count(fresh))
     end
   end
 end

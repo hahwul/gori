@@ -124,9 +124,6 @@ module Gori::Tui
       x + visual_col
     end
 
-
-
-
     # --- line builders -------------------------------------------------------
 
     private def self.start_line(raw : String, request : Bool) : Line
@@ -187,8 +184,17 @@ module Gori::Tui
 
     # --- body dispatch -------------------------------------------------------
 
+    # Per-line ceiling for structured highlighting. The json/form/markup
+    # tokenizers do `raw.chars` (materializing the whole line as an Array(Char)),
+    # so a single very long line — e.g. a minified multi-MB JSON/HTML body that
+    # decodes to ONE line — would freeze the UI fiber for seconds and spike memory.
+    # Above this, fall back to a single plain span (line count is unchanged, so the
+    # styled/plain 1:1 invariant the views rely on still holds).
+    MAX_HL_LINE = 64 * 1024
+
     private def self.body_line(raw : String, kind : Symbol) : Line
       return blank if raw.empty?
+      return plain(raw) if raw.bytesize > MAX_HL_LINE
       case kind
       when :json       then json_line(raw)
       when :form       then form_line(raw)
