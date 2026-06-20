@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 8
+      VERSION = 9
 
       V1 = [
         <<-SQL,
@@ -155,7 +155,29 @@ module Gori
         SQL
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8]
+      # Replay workbench tabs, persisted so they survive a reopen AND sync across
+      # sessions sharing the project (the TUI reconciles by `id` on the
+      # data_version poll). Only the editable request is stored — the response,
+      # scroll, and focus are transient. `flow_id` is the source History flow for a
+      # `^R`-opened tab (NULL for a hand-authored `^N` tab).
+      V9 = [
+        <<-SQL,
+        CREATE TABLE replays (
+          id                  INTEGER PRIMARY KEY,
+          created_at          INTEGER NOT NULL,
+          updated_at          INTEGER NOT NULL,
+          target              TEXT    NOT NULL,
+          request             TEXT    NOT NULL,
+          http2               INTEGER NOT NULL DEFAULT 0,
+          auto_content_length INTEGER NOT NULL DEFAULT 1,
+          flow_id             INTEGER,
+          position            INTEGER NOT NULL DEFAULT 0
+        )
+        SQL
+        "CREATE INDEX idx_replays_position ON replays (position, id)",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

@@ -42,6 +42,11 @@ module Gori::Tui
       end
     end
 
+    # Unsaved local edits — the Runner consults this so a cross-session reload never
+    # clobbers in-progress typing (focus alone is insufficient: Tab / tab-switch /
+    # sub-tab-switch leave the buffer dirty without saving).
+    getter? dirty : Bool
+
     def initialize
       @notes = [Note.new] of Note # never empty — always at least one note to type into
       @current = 0

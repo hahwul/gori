@@ -278,6 +278,48 @@ module Gori
       exec_task ->(c : DB::Connection) { c.exec("DELETE FROM match_rules WHERE id = ?", id); nil }
     end
 
+    # --- Replay workbench tabs (persisted + cross-session synced) -------------
+    # All writes route through exec_task (the single writer connection): this keeps
+    # them INVISIBLE to our own PRAGMA data_version poll (which only sees other
+    # connections), so a session never reconciles its own replay saves — only a
+    # peer's. A separate connection would break that and cause self-clobber.
+
+    def replays : Array(ReplayRecord)
+      list = [] of ReplayRecord
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position FROM replays ORDER BY position, id") do |rs|
+        rs.each do
+          list << ReplayRecord.new(
+            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32))
+        end
+      end
+      list
+    end
+
+    # Returns the new row id (or 0 if the store is closing — the caller normalizes
+    # 0 → nil so a later update never targets a bogus row).
+    def insert_replay(target : String, request : String, http2 : Bool,
+                      auto_cl : Bool, flow_id : Int64?, position : Int32) : Int64
+      ts = now_us
+      exec_task ->(c : DB::Connection) {
+        c.exec("INSERT INTO replays (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position) VALUES (?,?,?,?,?,?,?,?)",
+          ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position)
+        nil
+      }
+    end
+
+    def update_replay(id : Int64, target : String, request : String, http2 : Bool, auto_cl : Bool) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE replays SET target = ?, request = ?, http2 = ?, auto_content_length = ?, updated_at = ? WHERE id = ?",
+          target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, now_us, id)
+        nil
+      }
+    end
+
+    def delete_replay(id : Int64) : Nil
+      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM replays WHERE id = ?", id); nil }
+    end
+
     # --- HTTP/2 raw-frame log ------------------------------------------------
 
     def insert_h2_connection(host : String, port : Int32, alpn : String) : Int64

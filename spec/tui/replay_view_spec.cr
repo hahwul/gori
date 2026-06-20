@@ -104,4 +104,37 @@ describe Gori::Tui::ReplayView do
       String.new(view.request_bytes).includes?("Content-Length: 99").should be_true
     end
   end
+
+  it "restore re-opens a persisted tab and starts clean (not dirty)" do
+    view = ReplayView.new
+    view.restore("https://api.test", "POST /x HTTP/1.1\nHost: api.test\n\nbody", true, false)
+    view.loaded?.should be_true
+    view.target.should eq("https://api.test")
+    view.request_text.should eq("POST /x HTTP/1.1\nHost: api.test\n\nbody")
+    view.http2?.should be_true
+    view.auto_content_length?.should be_false
+    view.dirty?.should be_false # synced/restored text must never be re-saved by us
+  end
+
+  it "marks dirty on edits + flag toggles, and clears on restore" do
+    view = ReplayView.new
+    view.load_blank
+    view.dirty?.should be_false # a freshly opened tab is clean (persisted on creation)
+
+    view.focus_first # :target
+    view.target_insert('x')
+    view.dirty?.should be_true
+    view.clear_dirty
+
+    view.pane_advance(1) # :target → :request
+    view.edit_insert('y')
+    view.dirty?.should be_true
+    view.clear_dirty
+
+    view.toggle_auto_content_length
+    view.dirty?.should be_true
+
+    view.restore("https://z.test", "GET / HTTP/1.1\n\n", false, true)
+    view.dirty?.should be_false
+  end
 end

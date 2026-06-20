@@ -17,7 +17,9 @@ module Gori::Tui
   class ReplayView
     getter? loaded : Bool
     getter? http2 : Bool
-    getter focus : Symbol # :request | :response | :target
+    getter focus : Symbol  # :request | :response | :target
+    getter target : String # the raw target URL (persistence + cross-session sync)
+    getter? dirty : Bool   # unsaved local edits — gates persistence + protects the tab from sync clobber
 
     def initialize
       @flow = nil.as(Store::FlowDetail?)
@@ -41,6 +43,25 @@ module Gori::Tui
       @inflight = false           # a replay round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
+      @dirty = false              # set by every editor/target/flag mutator, cleared on save/restore
+    end
+
+    # --- persistence accessors (the Runner saves these + reconciles by them) ---
+    def request_text : String
+      @editor.text
+    end
+
+    # The source History flow id for a ^R-opened tab (nil for a hand-authored ^N).
+    def source_flow_id : Int64?
+      @flow.try(&.row.id)
+    end
+
+    def mark_dirty : Nil
+      @dirty = true
+    end
+
+    def clear_dirty : Nil
+      @dirty = false
     end
 
     # The starting scaffold for a hand-authored request (Replay `^N`): a minimal
@@ -64,6 +85,31 @@ module Gori::Tui
       @scroll = 0
       @diffable = true
       @loaded = true
+      @dirty = false
+    end
+
+    # Re-open a persisted tab (from the `replays` table) without a live FlowDetail.
+    # Seeds the editable request + target + flags; the response is transient so it
+    # starts empty, and there's no captured original, so it's non-diffable until the
+    # first resend (like a blank tab). Clears @dirty so a synced/restored tab is
+    # never re-saved by us — that would echo the write back to the peer.
+    def restore(target : String, request : String, http2 : Bool, auto_cl : Bool) : Nil
+      @flow = nil
+      @http2 = http2
+      @target = target
+      @tcx = @target.size
+      @editor.set_text(request)
+      @original_lines = [] of String
+      @result = nil
+      @prev_result = nil
+      reset_result_caches
+      @focus = :target
+      @resp_mode = :response
+      @scroll = 0
+      @diffable = false
+      @auto_content_length = auto_cl
+      @loaded = true
+      @dirty = false
     end
 
     # Open a hand-authored request not tied to any captured flow (Replay `^N`).
@@ -86,6 +132,7 @@ module Gori::Tui
       @scroll = 0
       @diffable = false
       @loaded = true
+      @dirty = false
     end
 
     def request_bytes : Bytes
@@ -106,6 +153,7 @@ module Gori::Tui
     getter? auto_content_length : Bool
 
     def toggle_auto_content_length : Bool
+      @dirty = true
       @auto_content_length = !@auto_content_length
     end
 
@@ -194,35 +242,46 @@ module Gori::Tui
 
     # --- request editor (focus == :request) ---
     def edit_insert(ch : Char) : Nil
-      @editor.insert(ch) if @focus == :request
+      return unless @focus == :request
+      @editor.insert(ch)
+      @dirty = true
     end
 
     def edit_newline : Nil
-      @editor.insert_newline if @focus == :request
+      return unless @focus == :request
+      @editor.insert_newline
+      @dirty = true
     end
 
     def edit_backspace : Nil
-      @editor.backspace if @focus == :request
+      return unless @focus == :request
+      @editor.backspace
+      @dirty = true
     end
 
     def edit_move(dr : Int32, dc : Int32) : Nil
-      @editor.move(dr, dc) if @focus == :request
+      return unless @focus == :request
+      @editor.move(dr, dc)
+      @dirty = true
     end
 
     # --- target field (focus == :target) ---
     def target_insert(ch : Char) : Nil
       @target = "#{@target[0, @tcx]}#{ch}#{@target[@tcx..]}"
       @tcx += 1
+      @dirty = true
     end
 
     def target_backspace : Nil
       return if @tcx == 0
       @target = "#{@target[0, @tcx - 1]}#{@target[@tcx..]}"
       @tcx -= 1
+      @dirty = true
     end
 
     def target_move(d : Int32) : Nil
       @tcx = (@tcx + d).clamp(0, @target.size)
+      @dirty = true
     end
 
     # --- response pane (focus == :response) ---

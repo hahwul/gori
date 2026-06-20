@@ -174,6 +174,22 @@ module Gori
       end
     end
 
+    # A persisted Replay workbench tab (the editable request only; the response is
+    # transient). Shared across sessions on the same project — the TUI reconciles
+    # local tabs against these rows by `id` on the data_version poll.
+    struct ReplayRecord
+      getter id : Int64
+      getter target : String
+      getter request : String
+      getter? http2 : Bool
+      getter? auto_content_length : Bool
+      getter flow_id : Int64?
+      getter position : Int32
+
+      def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position)
+      end
+    end
+
     # An intercepted HTTP/2 connection (one per CONNECT→TLS h2 session). Its raw
     # frames are the truth (P7); decoded streams project into `flows` separately.
     struct H2Connection

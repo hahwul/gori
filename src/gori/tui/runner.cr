@@ -34,7 +34,10 @@ module Gori::Tui
   # Each carries its own ReplayView (editor state, last result, scroll, focus etc.).
   # `flow_id` is the source flow when opened from History (^R), or nil for a
   # hand-authored blank request (^N).
-  private record ReplayTab, view : ReplayView, flow_id : Int64?
+  # `db_id` is the persisted `replays` row id (nil only transiently if the store
+  # was closing when the tab was created) — the key the cross-session reconcile
+  # matches local tabs against.
+  private record ReplayTab, view : ReplayView, flow_id : Int64?, db_id : Int64?
   # The shell controller for ONE open project: owns view state, implements the
   # verb ExecContext (so verbs drive the UI), and runs the main loop —
   # poll(50ms) → drain new-flow events → render (diff). `run` returns :quit (exit
@@ -47,8 +50,16 @@ module Gori::Tui
       # Multiple independent replay sessions (sub-tabs) under the Replay top-level tab.
       # Ctrl+R from History always appends a fresh one; previous sessions stay alive
       # so the user can switch back (ctrl+1..9) and see prior edits/results.
+      # Re-open replay tabs persisted for this project — they survive a reopen AND
+      # sync across sessions on the same project DB. Each ReplayView is restored
+      # from its row; the response is transient so it starts empty (resend to fill).
       @replays = [] of ReplayTab
-      @current_replay_idx = -1
+      @session.store.replays.each do |r|
+        view = ReplayView.new
+        view.restore(r.target, r.request, r.http2?, r.auto_content_length?)
+        @replays << ReplayTab.new(view, r.flow_id, r.id)
+      end
+      @current_replay_idx = @replays.empty? ? -1 : 0
       @sitemap = SitemapView.new
       @findings = FindingsView.new
       @notes = NotesView.new
@@ -211,13 +222,64 @@ module Gori::Tui
     end
 
     # Another instance committed to this project's DB — re-query the store-backed
-    # views so its captures show up here too. Selection is preserved (History's
-    # reload re-anchors to the same flow); only the active derived views reload.
+    # views so its work shows up here too. Read-only views (History/Sitemap/Findings)
+    # reload freely; the editable ones (Replay/Notes) reconcile WITHOUT clobbering
+    # in-progress local edits (guarded by dirty/active/inflight).
     private def apply_external_change : Nil
       @history.reload(@session.store)
       @sitemap.reload(@session.store, @scope.filter) if @active_tab == :sitemap
       @findings.reload(@session.store) if @active_tab == :findings
+      reconcile_replays
+      @notes.reload(@session.store) unless notes_locked?
       refresh_findings_count
+    end
+
+    # Converge local replay tabs with the project's `replays` rows after a peer
+    # committed. Keyed by db_id: update changed tabs in place (keeping the
+    # ReplayView object so an inflight result still matches by identity), append
+    # peer-created tabs, drop peer-deleted ones — but NEVER touch a locked tab
+    # (actively edited / inflight / locally dirty); those stay local-only and win on
+    # the next save. The user's OWN saves don't reach here (data_version ignores our
+    # own pool writes), so this only ever applies a peer's changes.
+    private def reconcile_replays : Nil
+      rows = @session.store.replays # ORDER BY position, id
+      by_id = rows.index_by(&.id)
+      cur_db = current_replay_tab.try(&.db_id)
+
+      @replays.each do |tab|
+        next unless (id = tab.db_id) && (row = by_id[id]?)
+        next if replay_tab_locked?(tab)
+        tab.view.restore(row.target, row.request, row.http2?, row.auto_content_length?)
+      end
+
+      local_ids = @replays.compact_map(&.db_id).to_set
+      rows.each do |row|
+        next if local_ids.includes?(row.id)
+        view = ReplayView.new
+        view.restore(row.target, row.request, row.http2?, row.auto_content_length?)
+        @replays << ReplayTab.new(view, row.flow_id, row.id)
+      end
+
+      @replays.reject! do |tab|
+        (id = tab.db_id) && !by_id.has_key?(id) && !replay_tab_locked?(tab)
+      end
+
+      @replays.sort_by! do |tab|
+        if (id = tab.db_id) && (row = by_id[id]?)
+          {row.position, id}
+        else
+          {Int32::MAX, Int64::MAX} # local-only / unsaved tabs sort last, stable
+        end
+      end
+
+      @current_replay_idx =
+        if cur_db && (idx = @replays.index { |t| t.db_id == cur_db })
+          idx
+        elsif @replays.empty?
+          -1
+        else
+          @current_replay_idx.clamp(0, @replays.size - 1)
+        end
     end
 
     private def nonblocking_event : Store::FlowEvent?
@@ -716,11 +778,13 @@ module Gori::Tui
     private def handle_replay_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if ev.ctrl? && key.lower_p?
+        save_current_replay # persist the tab before the palette takes over
         open_palette
       elsif ev.ctrl? && (c = ev.char || key.to_char) && '1' <= c <= '9'
         # Switch replay sub-tab (works even while editing fields because of the ctrl check).
         idx = c.to_i - 1
         if idx < @replays.size
+          save_current_replay # persist the tab we're leaving before switching
           @current_replay_idx = idx
           @focus = :body
         end
@@ -1074,6 +1138,7 @@ module Gori::Tui
     private def commit_pending_edits : Nil
       save_notes
       save_project_desc
+      save_current_replay
       @findings.save_notes(@session.store) if @findings.editing_notes?
     end
 
@@ -1096,6 +1161,9 @@ module Gori::Tui
     end
 
     def focus_pane(pane : Symbol) : Nil
+      # Leaving the Replay editor for the tab bar (esc / ↑-to-bar) — persist edits,
+      # mirroring how Notes saves on leave. Cheap no-op when the tab is clean.
+      save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
       @focus = pane
       @overlay = :none
       view_focus_first if pane == :body
@@ -1105,6 +1173,7 @@ module Gori::Tui
       if @active_tab == :project
         @project_view.save(@session.store)
       end
+      save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       @active_tab = tab
       @focus = :body # explicit "jump to tab" (e.g. number keys) drills into content; startup defaults to :menu (tab bar)
       @overlay = :none
@@ -1117,6 +1186,7 @@ module Gori::Tui
       if @active_tab == :project
         @project_view.save(@session.store)
       end
+      save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       idx = Chrome.tab_index(@active_tab)
       @active_tab = Chrome.tab_at((idx + delta) % Chrome::TABS.size)
       @overlay = :none
@@ -1352,13 +1422,21 @@ module Gori::Tui
       if detail = @session.store.get_flow(id)
         view = ReplayView.new
         view.load(detail)
-        tab = ReplayTab.new(view, id)
-        @replays << tab
+        @replays << ReplayTab.new(view, id, persist_new_replay(view, id))
         @current_replay_idx = @replays.size - 1
         @active_tab = :replay
         @focus = :body
         @toast = "Replay ##{id} — type to edit · ^R send · ^N new · ^1-9 switch · esc back"
       end
+    end
+
+    # Insert a freshly-opened replay tab into the store so it has a stable row id
+    # (the reconcile key) + persists immediately. A closing store returns 0 → nil,
+    # leaving the tab unsaved (treated as local-only; never UPSERTs a bogus row).
+    private def persist_new_replay(view : ReplayView, flow_id : Int64?) : Int64?
+      id = @session.store.insert_replay(view.target, view.request_text, view.http2?,
+        view.auto_content_length?, flow_id, @replays.size)
+      id == 0 ? nil : id
     end
 
     # Open a fresh, hand-authored replay session (Replay `^N`) — a blank request
@@ -1367,7 +1445,7 @@ module Gori::Tui
     def replay_new : Nil
       view = ReplayView.new
       view.load_blank
-      @replays << ReplayTab.new(view, nil)
+      @replays << ReplayTab.new(view, nil, persist_new_replay(view, nil))
       @current_replay_idx = @replays.size - 1
       @active_tab = :replay
       @focus = :body
@@ -1388,6 +1466,9 @@ module Gori::Tui
     # one closes the Replay tab shows its empty hint.
     def close_replay_tab : Nil
       return if @current_replay_idx < 0 || @current_replay_idx >= @replays.size
+      if id = @replays[@current_replay_idx].db_id
+        @session.store.delete_replay(id) # also propagates the close to peer sessions
+      end
       @replays.delete_at(@current_replay_idx)
       @current_replay_idx = @replays.empty? ? -1 : @current_replay_idx.clamp(0, @replays.size - 1)
       @toast = @replays.empty? ? "closed replay — none open (^N new · ^R from History)" : "closed replay (#{@replays.size} open)"
@@ -1402,6 +1483,35 @@ module Gori::Tui
       current_replay_tab.try(&.view)
     end
 
+    # Persist the current replay tab's edits (cheap no-op when clean). Sprinkled on
+    # every path that leaves the editor — like the Notes save-on-leave — so a tab's
+    # edits reach the DB (and peer sessions) without a per-keystroke write.
+    private def save_current_replay : Nil
+      return unless tab = current_replay_tab
+      return unless (id = tab.db_id) && tab.view.dirty?
+      v = tab.view
+      @session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?)
+      v.clear_dirty
+    end
+
+    # The tab the user is actively typing into (identity match on the ReplayView).
+    private def replay_tab_editing?(tab : ReplayTab) : Bool
+      @active_tab == :replay && @focus == :body && current_replay_view.try(&.same?(tab.view)) == true
+    end
+
+    # A tab a cross-session reload must NOT overwrite/remove: actively edited, mid
+    # round-trip, or holding unsaved local edits.
+    private def replay_tab_locked?(tab : ReplayTab) : Bool
+      replay_tab_editing?(tab) || tab.view.inflight? || tab.view.dirty?
+    end
+
+    # Notes must not be reloaded out from under in-progress typing. Focus alone is
+    # insufficient (Tab / tab-switch / sub-tab-switch leave the buffer dirty without
+    # saving), so consult the dirty flag too.
+    private def notes_locked? : Bool
+      (@active_tab == :notes && @focus == :body) || @notes.dirty?
+    end
+
     def replay_send : Nil
       return unless (tab = current_replay_tab) && (view = tab.view).loaded?
       if view.inflight? # one outstanding round-trip per view — don't pile up fibers/sockets on ^R mashing
@@ -1413,6 +1523,7 @@ module Gori::Tui
         @toast = "replay: invalid target"
         return
       end
+      save_current_replay # persist the request we're about to send (before it goes inflight)
       verify = !@session.config.insecure_upstream?
       bytes = view.request_bytes
       http2 = view.http2?

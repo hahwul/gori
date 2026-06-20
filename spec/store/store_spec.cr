@@ -153,8 +153,8 @@ describe Gori::Store do
         VALUES (1, 'http', 'h.test', 80, 'GET', '/x', 'HTTP/1.1', ?, ?, 30, 0)
         SQL
 
-      Gori::Store::Schema.migrate!(db) # runs V8 (index + FTS + backfill)
-      db.scalar("PRAGMA user_version").as(Int64).should eq(8)
+      Gori::Store::Schema.migrate!(db) # runs V8 (index + FTS + backfill), then any later migrations
+      db.scalar("PRAGMA user_version").as(Int64).should eq(Gori::Store::Schema::VERSION)
       hits = db.scalar(%(SELECT count(*) FROM flows_fts WHERE flows_fts MATCH '"backfilltoken"')).as(Int64)
       hits.should eq(1)
     ensure
