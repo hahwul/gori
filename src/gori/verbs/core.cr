@@ -43,16 +43,16 @@ module Gori
         Verb::Scope::Global) { |ctx| ctx.open_settings(:editor); nil }
       r.register Verb::Definition.new(
         "settings.theme", "settings:theme", "Theme settings (coming soon)",
-        Verb::Scope::Global) { |ctx| ctx.open_settings(:theme); nil }
+        Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:theme); nil }
       r.register Verb::Definition.new(
         "settings.hotkeys", "settings:hotkeys", "Hotkey settings (coming soon)",
-        Verb::Scope::Global) { |ctx| ctx.open_settings(:hotkeys); nil }
+        Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:hotkeys); nil }
       r.register Verb::Definition.new(
         "settings.cli", "settings:cli", "CLI options (coming soon)",
-        Verb::Scope::Global) { |ctx| ctx.open_settings(:cli); nil }
+        Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:cli); nil }
       r.register Verb::Definition.new(
         "settings.wizard", "settings:wizard", "Setup wizard (coming soon)",
-        Verb::Scope::Global) { |ctx| ctx.open_settings(:wizard); nil }
+        Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:wizard); nil }
 
       r.register Verb::Definition.new(
         "scope.edit", "Scope lens", "Edit the in-scope host patterns", Verb::Scope::Global,

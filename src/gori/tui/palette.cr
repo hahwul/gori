@@ -88,10 +88,17 @@ module Gori::Tui
         ry = list_top + i
         active = idx == @selected
         bg = active ? Theme::ACCENT_BG : Theme::PANEL
+        soon = verb.coming_soon?
         screen.fill(Rect.new(box.x + 1, ry, w - 2, 1), bg)
         screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme::ACCENT, bg)
-        screen.text(box.x + 3, ry, verb.title, active ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: w - 19)
-        if chord = verb.chords.first?
+        # Coming-soon verbs are dimmed at rest (still readable when selected) so the
+        # list signals what's not functional yet without hiding it.
+        title_fg = active ? Theme::TEXT_BRIGHT : (soon ? Theme::MUTED : Theme::TEXT)
+        screen.text(box.x + 3, ry, verb.title, title_fg, bg, width: w - 19)
+        if soon
+          badge = "soon"
+          screen.text(box.right - badge.size - 2, ry, badge, Theme::YELLOW, bg)
+        elsif chord = verb.chords.first?
           hint = chord.label
           screen.text(box.right - hint.size - 2, ry, hint, Theme::MUTED, bg)
         end

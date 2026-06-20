@@ -45,10 +45,14 @@ module Gori
       getter scope : Scope
       getter chords : Array(Chord)
       getter? hidden : Bool
+      # Exposed for discoverability but not yet functional — the palette shows it
+      # dimmed with a "soon" badge so users aren't surprised when it only toasts.
+      getter? coming_soon : Bool
 
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
                      @available : ExecContext -> Bool = ->(_ctx : ExecContext) { true },
+                     @coming_soon : Bool = false,
                      &@handler : ExecContext -> String?)
       end
 
