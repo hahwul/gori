@@ -43,7 +43,7 @@ describe "Gori::Store h2 raw frame log (v5)" do
       conn = store.insert_h2_connection("acme.test", 443, "h2")
       store.insert_h2_frame(conn, "out", 0x1_u8, 0x4_u8, 1_u32, "hdrblock".to_slice) # HEADERS
       store.insert_h2_frame(conn, "in", 0x0_u8, 0x1_u8, 1_u32, "body".to_slice)      # DATA END_STREAM
-      store.flush # h2 frames are fire-and-forget — barrier before reading them back
+      store.flush                                                                    # h2 frames are fire-and-forget — barrier before reading them back
 
       store.count_h2_frames(conn).should eq(2)
       frames = store.h2_frames(conn)

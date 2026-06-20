@@ -91,7 +91,14 @@ module Gori::Tui
       # port-fallback note if the configured port was taken and we picked another.
       requested = @session.config.port
       if err = @session.bind_error
-        @toast = "capture OFF — #{err}. History/Replay work; set a free port in settings (^P) then press c"
+        @toast =
+          if @session.capturing_lock_held?
+            # We own this project's capture but the bind failed (port taken).
+            "capture OFF — #{err}. History/Replay work; set a free port in settings (^P) then press c"
+          else
+            # View-only: another live instance owns this project's capture.
+            "view-only — #{err}. History/Replay work; press c to take over if it closed"
+          end
       elsif requested > 0 && @session.proxy.port != requested
         Settings.bind_port = @session.proxy.port # keep the settings UI showing the live port
         @toast = "port #{requested} in use — capturing on #{@session.proxy.port} instead (point your client there)"
@@ -1436,8 +1443,15 @@ module Gori::Tui
     end
 
     def toggle_capture : Nil
-      @session.toggle_capture
-      @toast = @session.capturing? ? "capture on" : "capture off"
+      if @session.capturing?
+        @session.toggle_capture # => false (now off); keeps the project lock
+        @toast = "capture off"
+      elsif @session.toggle_capture
+        @toast = "capture on"
+      else
+        # Refused: another live instance holds this project's capture lock.
+        @toast = "another gori instance is capturing this project — can't capture here"
+      end
     rescue ex
       # Starting capture re-binds the listener, which can fail (port in use / bad
       # address). Report it instead of crashing the TUI; capture stays off.

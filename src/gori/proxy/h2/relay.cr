@@ -38,7 +38,7 @@ module Gori::Proxy::H2
     private def pump(src : IO, dst : IO, conn_id : Int64, direction : String, assembler : Assembler) : Nil
       loop do
         frame = Frame.read(src)
-        break if frame.nil? # clean EOF at a frame boundary
+        break if frame.nil?         # clean EOF at a frame boundary
         dst.write(frame.wire_bytes) # original wire bytes — no re-serialize/copy
         dst.flush
         @sink.on_h2_frame(conn_id, direction, frame.type, frame.flags, frame.stream_id, frame.payload)

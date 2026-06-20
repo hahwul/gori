@@ -60,8 +60,8 @@ module Gori
       # Headless exists to capture, so a bind failure is fatal HERE (unlike the
       # TUI, which opens capture-off) — exit cleanly instead of running uselessly.
       if err = session.bind_error
-        STDERR.puts "gori: cannot bind #{@config.listen}:#{@config.port} — #{err}"
-        STDERR.puts "  another gori instance may be using this port; pass --port to choose another."
+        STDERR.puts "gori: not capturing — #{err}"
+        STDERR.puts "  another gori instance may hold this project or the port; close it or pass --port."
         session.close
         exit 1
       end

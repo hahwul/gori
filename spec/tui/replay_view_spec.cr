@@ -97,7 +97,7 @@ describe Gori::Tui::ReplayView do
       view.load(detail)
       view.auto_content_length?.should be_true # default on
       sent = String.new(view.request_bytes)
-      sent.includes?("Content-Length: 5").should be_true  # recomputed to the body size
+      sent.includes?("Content-Length: 5").should be_true   # recomputed to the body size
       sent.includes?("Content-Length: 99").should be_false # stale value replaced
 
       view.toggle_auto_content_length # off → send byte-exact

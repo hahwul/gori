@@ -25,7 +25,7 @@ describe Gori::Browser do
     end
 
     it "suppresses the bad-flags infobar and keeps traffic on the TCP proxy" do
-      args.should contain("--test-type")  # suppress Chrome's spki-list infobar
+      args.should contain("--test-type")    # suppress Chrome's spki-list infobar
       args.should contain("--disable-quic") # QUIC/UDP would bypass the CONNECT proxy
     end
   end

@@ -18,7 +18,6 @@ class MemoryBackend < Gori::Tui::Backend
     @fg_grid[y][x] = fg
   end
 
-
   def size : {Int32, Int32}
     {@w, @h}
   end

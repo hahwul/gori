@@ -98,4 +98,87 @@ describe Gori::Session do
       second.close
     end
   end
+
+  it "opens VIEW-ONLY when another instance already holds the project capture lock" do
+    with_root do |root|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      registry = Gori::Verbs.registry
+      project = Gori::ProjectRegistry.new(root).temp("shared")
+
+      # Simulate another LIVE instance holding the lock (a separate open fd → a
+      # distinct OFD, which flock treats independently and so denies us).
+      held = File.open(Gori::CaptureLock.path(project.dir), "w")
+      held.flock_exclusive(blocking: false)
+
+      s = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, project, bind_fallback: true)
+      s.capturing?.should be_false # did NOT bind a 2nd listener
+      s.bind_error.should_not be_nil
+      s.capturing_lock_held?.should be_false # view-only: we do not own the lock
+      s.store.count.should eq(0)             # the store is fully usable
+      s.close
+
+      held.flock_unlock
+      held.close
+    end
+  end
+
+  it "captures when the lock is free, releasing it on close so a later open can take over" do
+    with_root do |root|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      registry = Gori::Verbs.registry
+      project = Gori::ProjectRegistry.new(root).create("free") # persistent: dir survives close
+
+      a = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, project)
+      a.capturing?.should be_true
+      a.capturing_lock_held?.should be_true
+      a.close # releases the lock (dir kept — not ephemeral)
+
+      b = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, project)
+      b.capturing?.should be_true # the lock was freed on a.close
+      b.capturing_lock_held?.should be_true
+      b.close
+    end
+  end
+
+  it "auto-falls-back to a free port for a DIFFERENT project when the configured port is taken" do
+    with_root do |root|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      registry = Gori::Verbs.registry
+      reg = Gori::ProjectRegistry.new(root)
+
+      first = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, reg.temp("a"))
+      first.capturing?.should be_true
+      taken = first.proxy.port
+
+      # Different project (own dir → own lock), same port, WITH fallback → its own port.
+      second = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: taken), ca, registry, reg.temp("b"), bind_fallback: true)
+      second.capturing?.should be_true       # acquired its own lock + bound
+      second.proxy.port.should_not eq(taken) # fell back to a free port
+
+      first.close
+      second.close
+    end
+  end
+
+  it "toggle_capture takes over the project lock once the prior holder releases" do
+    with_root do |root|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      registry = Gori::Verbs.registry
+      project = Gori::ProjectRegistry.new(root).temp("toggle")
+
+      held = File.open(Gori::CaptureLock.path(project.dir), "w")
+      held.flock_exclusive(blocking: false)
+
+      s = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, project, bind_fallback: true)
+      s.capturing?.should be_false
+      s.toggle_capture.should be_false # lock still held by `held` → refused, no bind
+
+      held.flock_unlock
+      held.close
+
+      s.toggle_capture.should be_true # now acquires the freed lock and starts
+      s.capturing?.should be_true
+      s.close
+    end
+  end
 end

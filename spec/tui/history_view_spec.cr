@@ -149,7 +149,7 @@ describe Gori::Tui::HistoryView do
         flow_id: id, status: 200, head: "HTTP/2 200\r\n\r\n".to_slice))
       store.insert_h2_frame(conn, "out", 0x4_u8, 0_u8, 0_u32, Bytes.new(18))    # SETTINGS stream 0
       store.insert_h2_frame(conn, "out", 0x1_u8, 0x5_u8, 1_u32, "hdr".to_slice) # HEADERS stream 1
-      store.flush # h2 frames are fire-and-forget — barrier before the view reads them
+      store.flush                                                               # h2 frames are fire-and-forget — barrier before the view reads them
 
       view = HistoryView.new
       view.reload(store)

@@ -54,7 +54,7 @@ describe Gori::Interceptor do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
       r0 = ic.revision
-      ic.toggle # enable
+      ic.toggle                         # enable
       (ic.revision > r0).should be_true # enable bumped
 
       r1 = ic.revision
