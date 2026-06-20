@@ -17,6 +17,7 @@ require "./scope_overlay"
 require "./rules_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
+require "./settings_view"
 require "./palette"
 require "../paths"
 require "../browser"
@@ -68,6 +69,8 @@ module Gori::Tui
       # The "open browser" picker (palette → browser.open); @overlay is :browser
       # while it's up.
       @browser_picker = nil.as(BrowserPicker?)
+      # The settings editor (palette → settings:network); @overlay is :settings.
+      @settings_view = SettingsView.new
       @focus = :menu                  # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
       @outcome = :running             # :running | :quit | :back
@@ -207,6 +210,7 @@ module Gori::Tui
       when :scope       then @scope_overlay.set_preedit(text)
       when :rules       then @rules_overlay.set_preedit(text)
       when :finding_new then @finding_form.set_preedit(text)
+      when :settings    then @settings_view.set_preedit(text)
       when :none        then apply_preedit_body(text)
       end
     end
@@ -251,6 +255,7 @@ module Gori::Tui
       return handle_finding_new_key(ev) if @overlay == :finding_new
       return handle_confirm_key(ev) if @overlay == :confirm
       return handle_browser_key(ev) if @overlay == :browser
+      return handle_settings_key(ev) if @overlay == :settings
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       return handle_query_key(ev) if @active_tab == :history && @overlay == :none && @focus == :body && @history.querying?
@@ -432,6 +437,34 @@ module Gori::Tui
     private def close_browser_picker : Nil
       @overlay = :none
       @browser_picker = nil
+    end
+
+    # Settings editor (palette → settings:network): ↑/↓ pick a field, type to edit,
+    # ↵ save (persist + apply), esc close, ^P jump to the palette.
+    private def handle_settings_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if ev.ctrl? && key.lower_p?
+        @overlay = :none
+        open_palette
+      elsif key.escape?
+        @overlay = :none
+      elsif key.enter?
+        @toast = @settings_view.save
+      elsif key.up?
+        @settings_view.move_field(-1)
+      elsif key.down?
+        @settings_view.move_field(1)
+      elsif key.left?
+        @settings_view.move_cursor(-1)
+      elsif key.right?
+        @settings_view.move_cursor(1)
+      elsif key.backspace?
+        @settings_view.backspace
+      elsif c && !ev.ctrl? && !ev.alt?
+        @settings_view.insert(c)
+        @settings_view.set_preedit("")
+      end
     end
 
     # Findings notes inline editor.
@@ -822,6 +855,7 @@ module Gori::Tui
       @finding_form.render(screen, layout.body) if @overlay == :finding_new
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
       @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
+      @settings_view.render(screen, layout.body) if @overlay == :settings
 
       # Sync terminal hardware cursor to the focused input caret (if any view
       # called screen.cursor). This is critical for terminal IME preedit
@@ -876,6 +910,7 @@ module Gori::Tui
       when :detail      then "DETAIL"
       when :confirm     then "CONFIRM"
       when :browser     then "BROWSER"
+      when :settings    then "SETTINGS"
       else
         @focus == :menu ? "TABS" : "BODY"
       end
@@ -892,6 +927,7 @@ module Gori::Tui
       when :finding_new then "type title · ↵ create · esc cancel"
       when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser     then "↑/↓ select · ↵ open · esc cancel"
+      when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
       when :detail      then "↹ switch pane · ↑/↓ scroll · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
@@ -1413,6 +1449,19 @@ module Gori::Tui
       end
       @browser_picker = BrowserPicker.new(found)
       @overlay = :browser
+    end
+
+    # --- settings (config control) ---
+
+    # Open the settings editor for `section` (palette → settings:network/theme/
+    # hotkeys). Only :network is implemented; the rest toast a TODO.
+    def open_settings(section : Symbol) : Nil
+      if section == :network
+        @settings_view.reload
+        @overlay = :settings
+      else
+        @toast = "#{section} settings — coming soon (TODO)"
+      end
     end
 
     # Launch the highlighted browser pre-trusting gori's CA + routed through the

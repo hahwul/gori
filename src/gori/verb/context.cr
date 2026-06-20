@@ -79,6 +79,9 @@ module Gori
 
       # browser: open a system browser pre-trusting gori's CA + routed via the proxy
       abstract def open_browser_picker : Nil
+
+      # settings: open the config editor for a section (:network | :theme | :hotkeys)
+      abstract def open_settings(section : Symbol) : Nil
     end
   end
 end

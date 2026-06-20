@@ -183,6 +183,10 @@ private class FakeContext < ExecContext
   def open_browser_picker : Nil
     @calls << :open_browser_picker
   end
+
+  def open_settings(section : Symbol) : Nil
+    @calls << :open_settings
+  end
 end
 
 describe Gori::Verb do

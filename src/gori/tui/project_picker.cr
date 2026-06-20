@@ -7,6 +7,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./confirm_dialog"
+require "./settings_view"
 
 module Gori::Tui
   # The startup screen: choose a project to open. New + Temp are always shown at
@@ -32,6 +33,7 @@ module Gori::Tui
       # Delete confirmation (project deletion is irreversible — wipes its dir).
       @confirm = nil.as(ConfirmDialog?)
       @pending_delete = nil.as(Project?)
+      @settings = SettingsView.new # the config editor (ctrl-, → :settings mode)
     end
 
     def run : Project?
@@ -43,9 +45,10 @@ module Gori::Tui
           @resized = true
         when Termisu::Event::Key
           result = case @mode
-                   when :new     then handle_new(ev)
-                   when :confirm then handle_confirm(ev)
-                   else               handle_list(ev)
+                   when :new      then handle_new(ev)
+                   when :confirm  then handle_confirm(ev)
+                   when :settings then handle_settings(ev)
+                   else                handle_list(ev)
                    end
           case result
           when Project then return result
@@ -54,7 +57,11 @@ module Gori::Tui
         when Termisu::Event::Preedit
           # Live IME composition for whichever field is active; the committed
           # syllable arrives afterwards as a normal Key and clears this.
-          @preedit = ev.text
+          if @mode == :settings
+            @settings.set_preedit(ev.text)
+          else
+            @preedit = ev.text
+          end
         end
       end
     end
@@ -123,6 +130,37 @@ module Gori::Tui
         return open_temp
       elsif ev.ctrl? && key.lower_d?
         request_delete
+      elsif ev.ctrl? && key.comma?
+        @settings.reload
+        @mode = :settings
+      end
+      nil
+    end
+
+    # Settings (config) editor: ↑/↓ pick a field, type to edit, ↵ save, esc back.
+    private def handle_settings(ev : Termisu::Event::Key) : Project | Symbol | Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      @preedit = ""
+      if key.escape?
+        @mode = :list
+      elsif key.enter?
+        @settings.save # the view shows its own saved/invalid status
+      elsif key.up?
+        @settings.move_field(-1)
+      elsif key.down?
+        @settings.move_field(1)
+      elsif key.left?
+        @settings.move_cursor(-1)
+      elsif key.right?
+        @settings.move_cursor(1)
+      elsif key.backspace?
+        @settings.backspace
+      elsif ev.ctrl_c?
+        return :quit
+      elsif c && !ev.ctrl? && !ev.alt?
+        @settings.insert(c)
+        @settings.set_preedit("")
       end
       nil
     end
@@ -263,6 +301,7 @@ module Gori::Tui
       else
         render_list(screen, cx, cw, w, h)
         @confirm.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :confirm
+        @settings.render(screen, Rect.new(0, 0, w, h)) if @mode == :settings
       end
       # Sync the terminal hardware cursor to the focused caret so the terminal's
       # own IME composition UI (jamo/candidate popup) anchors at the right cell —
@@ -346,7 +385,7 @@ module Gori::Tui
         end
       end
 
-      centered(screen, h - 2, "↑/↓ select   ↵ open   arrow to Search row then type   ctrl-n new   ctrl-t temp   ctrl-d delete   esc clear   ctrl-c quit", Theme::MUTED, w)
+      centered(screen, h - 2, "↑/↓ select   ↵ open   type to search   ctrl-n new   ctrl-t temp   ctrl-d delete   ctrl-, settings   ctrl-c quit", Theme::MUTED, w)
     end
 
     # One action/result row inside the picker card: selection band + ▎ bar, label

@@ -33,6 +33,18 @@ module Gori
         "browser.open", "Open browser", "Launch a browser pre-trusting gori's CA, routed via the proxy",
         Verb::Scope::Global) { |ctx| ctx.open_browser_picker; nil }
 
+      # Settings (config control) — palette-only. network is implemented; theme/
+      # hotkeys are registered for discoverability and toast a TODO.
+      r.register Verb::Definition.new(
+        "settings.network", "settings:network", "Edit the proxy bind address + upstream proxy",
+        Verb::Scope::Global) { |ctx| ctx.open_settings(:network); nil }
+      r.register Verb::Definition.new(
+        "settings.theme", "settings:theme", "Theme settings (coming soon)",
+        Verb::Scope::Global) { |ctx| ctx.open_settings(:theme); nil }
+      r.register Verb::Definition.new(
+        "settings.hotkeys", "settings:hotkeys", "Hotkey settings (coming soon)",
+        Verb::Scope::Global) { |ctx| ctx.open_settings(:hotkeys); nil }
+
       r.register Verb::Definition.new(
         "scope.edit", "Scope lens", "Edit the in-scope host patterns", Verb::Scope::Global,
         [Verb::Chord.new("s")]) { |ctx| ctx.scope_open; nil }
