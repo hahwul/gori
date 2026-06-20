@@ -9,6 +9,11 @@ module Gori::Tui
   # Caveat: tmux only forwards OSC 52 when `set-clipboard on`; we additionally
   # wrap the sequence in tmux's DCS passthrough when running inside tmux.
   module Clipboard
+    # Ceiling on the copied payload: OSC 52 writes base64 of `data` straight to the
+    # tty, so an unbounded copy (e.g. a multi-MB request/body) would flood the
+    # terminal (and many terminals cap/refuse oversized OSC 52 anyway).
+    MAX_CLIP = 64 * 1024
+
     # Builds the OSC 52 "set clipboard" sequence for `data` (base64-encoded).
     # When `tmux` is true, wraps it in the DCS passthrough so the outer terminal
     # receives it through tmux.
@@ -23,6 +28,7 @@ module Gori::Tui
     # tty (same device termisu draws to); OSC 52 is state-neutral, so it does not
     # disturb the cell grid — the next diff render repaints normally.
     def self.copy(data : String, io : IO = STDOUT) : Nil
+      data = data[0, MAX_CLIP] if data.size > MAX_CLIP # bound the tty write
       io.print(osc52(data, tmux: !ENV["TMUX"]?.nil?))
       io.flush
     end

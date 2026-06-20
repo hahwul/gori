@@ -31,8 +31,7 @@ module Gori::Tui
     getter query : String
 
     def initialize(@max_rows : Int32 = MAX_ROWS, @trim_slack : Int32 = TRIM_SLACK)
-      @rows = [] of Store::FlowRow
-      @index = {} of Int64 => Int32 # flow id -> position in @rows
+      @rows = [] of Store::FlowRow # always kept id-DESCENDING (newest first)
       @selected = 0
       @scroll = 0
       @follow = true
@@ -68,12 +67,11 @@ module Gori::Tui
       prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
       combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(@query))
       @rows = store.search(combined, PAGE)
-      reindex
       @filter_dirty = false
       @selected =
         if @follow
           0
-        elsif prev_id && (idx = @index[prev_id]?)
+        elsif prev_id && (idx = index_of(prev_id))
           idx # keep the highlight on the same flow across a reload
         else
           @selected.clamp(0, {@rows.size - 1, 0}.max)
@@ -93,12 +91,12 @@ module Gori::Tui
       end
       case event.kind
       when :inserted
-        return if @index.has_key?(event.id)
+        return if index_of(event.id)
         if row = store.flow_row(event.id)
-          # Newest-first: prepend so the latest sits at the top. Positions of all
-          # existing rows shift by one, so reindex (bounded by MAX_ROWS).
+          # Newest-first: prepend so the latest sits at the top. Inserts arrive in
+          # increasing id order (committed FIFO), so @rows stays id-descending and
+          # no index rebuild is needed — lookups binary-search it.
           @rows.unshift(row)
-          reindex
           if @follow
             @selected = 0
           else
@@ -109,7 +107,7 @@ module Gori::Tui
           trim_window if @rows.size > @max_rows + @trim_slack
         end
       when :updated
-        if (idx = @index[event.id]?) && (row = store.flow_row(event.id))
+        if (idx = index_of(event.id)) && (row = store.flow_row(event.id))
           @rows[idx] = row
         end
       end
@@ -393,21 +391,33 @@ module Gori::Tui
       @scroll = 0 if @scroll < 0
     end
 
-    # Rebuild the id→position index from @rows (after a reload or a window trim).
-    private def reindex : Nil
-      @index = {} of Int64 => Int32
-      @rows.each_with_index { |r, i| @index[r.id] = i }
+    # Position of `id` in @rows, which is kept sorted by id DESCENDING (newest
+    # first) — so an O(log n) binary search replaces the per-insert O(n) hash
+    # rebuild that used to run on the UI fiber for every captured flow.
+    private def index_of(id : Int64) : Int32?
+      lo = 0
+      hi = @rows.size - 1
+      while lo <= hi
+        mid = (lo + hi) // 2
+        mid_id = @rows[mid].id
+        return mid if mid_id == id
+        if mid_id > id
+          lo = mid + 1 # descending: smaller ids are to the right
+        else
+          hi = mid - 1
+        end
+      end
+      nil
     end
 
     # Drop the oldest rows so the window stays at MAX_ROWS. Newest-first, so the
-    # oldest are at the END — pop them. Selection/scroll live near the top (newest)
-    # and are unaffected, but clamp in case the user had scrolled into the tail.
-    # Batched (see TRIM_SLACK) so the O(n) reindex amortizes, not per flow.
+    # oldest are at the END — pop them (keeps @rows id-descending; no reindex).
+    # Selection/scroll live near the top (newest) and are unaffected, but clamp in
+    # case the user had scrolled into the tail.
     private def trim_window : Nil
       drop = @rows.size - @max_rows
       return if drop <= 0
       @rows.pop(drop)
-      reindex
       @selected = @selected.clamp(0, {@rows.size - 1, 0}.max)
       @scroll = @scroll.clamp(0, {@rows.size - 1, 0}.max)
     end
