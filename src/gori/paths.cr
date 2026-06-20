@@ -32,8 +32,16 @@ module Gori
     end
 
     def self.ensure_dirs : Nil
-      Dir.mkdir_p(data_dir)
-      Dir.mkdir_p(config_dir)
+      ensure_dir(data_dir)
+      ensure_dir(config_dir)
+    end
+
+    # Race-tolerant `mkdir -p`: two gori instances can start simultaneously and
+    # both create a fresh dir — one wins the mkdir, the other must not crash.
+    def self.ensure_dir(path : String) : Nil
+      Dir.mkdir_p(path)
+    rescue File::AlreadyExistsError
+      # created concurrently by another instance — it exists now, fine
     end
   end
 end

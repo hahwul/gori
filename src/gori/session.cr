@@ -25,6 +25,10 @@ module Gori
     getter rules : Rules
     getter scope : Scope
     getter interceptor : Interceptor
+    # Why the live proxy isn't listening (e.g. "port in use"), or nil when capture
+    # is up. The project still opens for History/Replay/Sitemap/etc. — only live
+    # capture needs the bind — so a bind failure is non-fatal.
+    getter bind_error : String?
 
     def self.open(config : Config, ca : Proxy::Tls::CertAuthority,
                   registry : Verb::Registry, project : Project) : Session
@@ -39,12 +43,23 @@ module Gori
           rewriter: rules, interceptor: interceptor)
         proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
           rewriter: rules, interceptor: interceptor)
-        proxy.start
-        new(config, ca, registry, project, store, proxy, events, rules, scope, interceptor)
+        # The bind is NON-FATAL: if the port is taken (e.g. another gori instance),
+        # open in capture-off mode rather than failing the whole project — History/
+        # Replay/Sitemap/Findings all read the store / dial upstream directly and
+        # don't need the listener. The user can change the port (settings) + toggle
+        # capture to start it later.
+        bind_error =
+          begin
+            proxy.start
+            nil
+          rescue ex
+            ex.message || "could not bind #{config.listen}:#{config.port}"
+          end
+        new(config, ca, registry, project, store, proxy, events, rules, scope, interceptor, bind_error)
       rescue ex
-        # proxy.start (e.g. port already in use) or any setup step failing after
-        # the store is open would otherwise leak the store's writer fiber + db fd
-        # and the events channel. Tear them down, then re-raise for the caller.
+        # A store/rules/scope failure (NOT the bind, which is handled above) would
+        # otherwise leak the store's writer fiber + db fd and the events channel.
+        # Tear them down, then re-raise for the caller.
         store.close rescue nil
         events.close rescue nil
         raise ex
@@ -52,7 +67,7 @@ module Gori
     end
 
     def initialize(@config, @ca, @registry, @project, @store, @proxy, @flow_events,
-                   @rules, @scope, @interceptor)
+                   @rules, @scope, @interceptor, @bind_error : String? = nil)
     end
 
     def capturing? : Bool

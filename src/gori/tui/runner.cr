@@ -87,6 +87,12 @@ module Gori::Tui
       @history.reload(@session.store)
       @project_view.reload(@session.project, @session.store)
       refresh_findings_count
+      # If the proxy couldn't bind (port in use), say so on entry — capture is off
+      # but History/Replay/Sitemap all work; the user can free a port in settings
+      # (^P → settings:network) and press `c` to start capturing.
+      if err = @session.bind_error
+        @toast = "capture OFF — #{err}. History/Replay work; set a free port in settings (^P) then press c"
+      end
       render # initial paint (the loop below only re-renders when something changed)
       # The render loop polls input on a 50ms cadence (so async channels are still
       # checked ≤50ms), but RENDER only runs when the frame would actually change —
@@ -1399,6 +1405,10 @@ module Gori::Tui
     def toggle_capture : Nil
       @session.toggle_capture
       @toast = @session.capturing? ? "capture on" : "capture off"
+    rescue ex
+      # Starting capture re-binds the listener, which can fail (port in use / bad
+      # address). Report it instead of crashing the TUI; capture stays off.
+      @toast = "can't start capture: #{ex.message} — free the port in settings (^P)"
     end
 
     # --- intercept (hold-and-decide) ExecContext ---
@@ -1462,7 +1472,12 @@ module Gori::Tui
       return save_msg if Settings.bind_host == proxy.host && Settings.bind_port == proxy.port
       begin
         proxy.rebind(Settings.bind_host, Settings.bind_port)
-        "settings saved — now listening on #{proxy.host}:#{proxy.port} (repoint your client)"
+        if @session.capturing?
+          "settings saved — now listening on #{proxy.host}:#{proxy.port} (repoint your client)"
+        else
+          # capture is off: rebind only records the new address; the user starts it.
+          "settings saved — bind set to #{proxy.host}:#{proxy.port}; press c to start capture"
+        end
       rescue ex
         "settings saved, but rebind failed: #{ex.message} (kept #{proxy.host}:#{proxy.port})"
       end

@@ -57,6 +57,14 @@ module Gori
       setup_logging(STDERR)
       project = Project.new("default", @config.db_path)
       session = Session.open(@config, @ca, @registry, project)
+      # Headless exists to capture, so a bind failure is fatal HERE (unlike the
+      # TUI, which opens capture-off) — exit cleanly instead of running uselessly.
+      if err = session.bind_error
+        STDERR.puts "gori: cannot bind #{@config.listen}:#{@config.port} — #{err}"
+        STDERR.puts "  another gori instance may be using this port; pass --port to choose another."
+        session.close
+        exit 1
+      end
       print_banner(session)
       spawn { headless_printer(session) }
       install_signal_traps

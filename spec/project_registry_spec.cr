@@ -76,4 +76,26 @@ describe Gori::Session do
       Dir.exists?(dir).should be_false
     end
   end
+
+  it "opens in capture-off mode (non-fatal) when the bind port is already taken" do
+    with_root do |root|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      registry = Gori::Verbs.registry
+      reg = Gori::ProjectRegistry.new(root)
+
+      first = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, reg.temp("a"))
+      first.capturing?.should be_true
+      taken = first.proxy.port
+
+      # second session on the SAME port: the bind fails, but the project still
+      # opens (capture off) — History/Replay read the store / dial directly.
+      second = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: taken), ca, registry, reg.temp("b"))
+      second.bind_error.should_not be_nil
+      second.capturing?.should be_false
+      second.store.count.should eq(0) # the store is fully usable
+
+      first.close
+      second.close
+    end
+  end
 end

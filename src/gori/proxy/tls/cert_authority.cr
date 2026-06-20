@@ -1,5 +1,6 @@
 require "base64"
 require "digest/sha256"
+require "../../paths"
 require "./cert_builder"
 require "./context_factory"
 
@@ -32,7 +33,7 @@ module Gori::Proxy::Tls
     end
 
     def self.load_or_create(dir : String, common_name : String = DEFAULT_CN) : CertAuthority
-      Dir.mkdir_p(dir)
+      Gori::Paths.ensure_dir(dir) # race-tolerant (two instances may start at once)
       cert_path = File.join(dir, CA_CERT_FILE)
       key_path = File.join(dir, CA_KEY_FILE)
 
