@@ -15,6 +15,7 @@ end
 require "./gori/proxy/codec/message"
 require "./gori/proxy/codec/http1"
 require "./gori/proxy/codec/body"
+require "./gori/proxy/codec/content_decode"
 require "./gori/proxy/h2/frame"
 require "./gori/proxy/h2/hpack"
 require "./gori/proxy/h2/grpc"

@@ -1,0 +1,144 @@
+require "compress/gzip"
+require "compress/deflate"
+require "compress/zlib"
+require "./brotli"
+require "./zstd"
+
+module Gori::Proxy::Codec
+  # Decodes a captured body for DISPLAY: de-chunks the h1 wire form (the stored
+  # bytes preserve chunk framing) and inflates the Content-Encoding (gzip/deflate/
+  # br/zstd) so compressed responses stop rendering as garbage. This is a DERIVED
+  # view only — the stored/forwarded/resent bytes stay byte-faithful (P7). All
+  # decoding is tolerant (truncated capture-capped bodies yield partial output, never
+  # raise) and output is capped to guard against decompression bombs.
+  module ContentDecode
+    MAX_OUT = 32 * 1024 * 1024 # decompression-bomb ceiling for the decoded view
+
+    # Returns {decoded | nil, note | nil}. nil decoded => the caller should show the
+    # raw body unchanged (no transfer/content coding, or nothing to do). A note
+    # describes what was applied ("decoded: gzip") or why it couldn't be ("compressed:
+    # br — decode unsupported").
+    def self.decode(head : Bytes?, body : Bytes?) : {Bytes?, String?}
+      return {nil, nil} if body.nil? || body.empty? || head.nil?
+      te_chunked = header_values(head, "transfer-encoding").any?(&.downcase.includes?("chunked"))
+      encodings = header_values(head, "content-encoding")
+        .flat_map(&.split(','))
+        .map(&.strip.downcase)
+        .reject { |e| e.empty? || e == "identity" }
+      return {nil, nil} if !te_chunked && encodings.empty?
+
+      entity = te_chunked ? dechunk(body) : body
+      notes = [] of String
+      notes << "de-chunked" if te_chunked
+      # Content-Encoding lists are applied in order; decode from the outermost
+      # (last-listed) inward.
+      encodings.reverse_each do |enc|
+        decoded, note = inflate(entity, enc)
+        notes << note if note
+        return {entity, notes.join(" · ")} if decoded.nil? # unsupported/failed — stop
+        entity = decoded
+      end
+      {entity, notes.empty? ? nil : notes.join(" · ")}
+    end
+
+    # {decoded | nil, note | nil}. nil => stop (unsupported or hard error).
+    private def self.inflate(data : Bytes, enc : String) : {Bytes?, String?}
+      case enc
+      when "gzip", "x-gzip" then {gunzip(data), "decoded: gzip"}
+      when "deflate"        then {inflate_deflate(data), "decoded: deflate"}
+      when "br"
+        return {nil, "compressed: br — decoder not built in"} unless Brotli::AVAILABLE
+        {Brotli.decode(data, MAX_OUT), "decoded: br"}
+      when "zstd"
+        return {nil, "compressed: zstd — decoder not built in"} unless Zstd::AVAILABLE
+        {Zstd.decode(data, MAX_OUT), "decoded: zstd"}
+      else
+        {nil, "compressed: #{enc} — decode unsupported"}
+      end
+    rescue ex
+      {nil, "decode error (#{enc}): #{ex.message}"}
+    end
+
+    private def self.gunzip(data : Bytes) : Bytes
+      read_all(Compress::Gzip::Reader.new(IO::Memory.new(data)))
+    end
+
+    # HTTP "deflate" is ambiguous: usually zlib-wrapped (RFC 1950), sometimes raw
+    # (RFC 1951). Try zlib first; if it produced nothing, retry as raw deflate.
+    private def self.inflate_deflate(data : Bytes) : Bytes
+      zlib = begin
+        read_all(Compress::Zlib::Reader.new(IO::Memory.new(data)))
+      rescue
+        Bytes.empty
+      end
+      return zlib unless zlib.empty?
+      read_all(Compress::Deflate::Reader.new(IO::Memory.new(data)))
+    end
+
+    # Drain a decompressing reader into a buffer, tolerant of a truncated/corrupt
+    # stream (returns what decoded so far) and capped at MAX_OUT.
+    private def self.read_all(reader : IO) : Bytes
+      out = IO::Memory.new
+      buf = Bytes.new(64 * 1024)
+      begin
+        while (n = reader.read(buf)) > 0
+          out.write(buf[0, n])
+          break if out.bytesize >= MAX_OUT
+        end
+      rescue
+        # truncated/corrupt stream — return the partial we managed to decode
+      end
+      out.to_slice
+    end
+
+    # Recover the entity body from a stored h1 chunked wire form
+    # ("<hex>[;ext]\r\n<data>\r\n...0\r\n"). Tolerant: stops at the terminating
+    # 0-chunk, EOF, or a malformed size line, returning bytes recovered so far.
+    private def self.dechunk(body : Bytes) : Bytes
+      out = IO::Memory.new
+      pos = 0
+      while pos < body.size
+        eol = index_of(body, 0x0a_u8, pos)
+        break unless eol
+        line = String.new(body[pos, eol - pos]).strip
+        pos = eol + 1
+        semi = line.index(';')
+        hex = semi ? line[0...semi] : line
+        size = hex.to_i?(base: 16)
+        break if size.nil? || size <= 0 # 0 = terminating chunk; nil/negative = malformed
+        avail = {size, body.size - pos}.min
+        out.write(body[pos, avail])
+        break if avail < size # truncated mid-chunk
+        pos += size
+        pos += 2 if pos + 2 <= body.size # skip the CRLF after the chunk data
+      end
+      out.to_slice
+    end
+
+    private def self.index_of(body : Bytes, byte : UInt8, from : Int32) : Int32?
+      i = from
+      while i < body.size
+        return i if body[i] == byte
+        i += 1
+      end
+      nil
+    end
+
+    # Header values for `name` (case-insensitive) from raw head bytes. The first
+    # line (request/status line) never matches a header name, so it's skipped; we
+    # stop at the blank line that ends the head.
+    private def self.header_values(head : Bytes, name : String) : Array(String)
+      target = name.downcase
+      values = [] of String
+      String.new(head).each_line do |raw|
+        line = raw.chomp
+        break if line.empty?
+        idx = line.index(':')
+        next unless idx
+        next unless line[0...idx].strip.downcase == target
+        values << line[(idx + 1)..].strip
+      end
+      values
+    end
+  end
+end

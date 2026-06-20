@@ -53,7 +53,7 @@ module Gori::Tui
       @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
       @tcx = @target.size
       @editor.set_text(origin_form_text(detail))
-      @original_lines = message_lines(detail.response_head, detail.response_body)
+      @original_lines = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
 
       @result = nil
       @prev_result = nil
@@ -340,7 +340,7 @@ module Gori::Tui
         elsif !result.ok?
           ["replay error: #{result.error}"]
         else
-          message_lines(result.head, result.body)
+          message_lines(result.head, display_body(result.head, result.body))
         end
       end
     end
@@ -356,7 +356,7 @@ module Gori::Tui
         elsif !result.ok?
           [[Highlight::Span.new("replay error: #{result.error}", Theme::RED)]]
         else
-          Highlight.message(result.head, result.body, request: false)
+          Highlight.message(result.head, display_body(result.head, result.body), request: false)
         end
       end
     end
@@ -369,7 +369,7 @@ module Gori::Tui
         elsif !(baseline = diff_baseline_lines)
           [Replay::DiffLine.new(Replay::DiffKind::Same, "— first send: resend (^R) to diff against the previous response —")]
         else
-          Replay::Diff.lines(baseline, message_lines(result.head, result.body))
+          Replay::Diff.lines(baseline, message_lines(result.head, display_body(result.head, result.body)))
         end
       end
     end
@@ -379,7 +379,7 @@ module Gori::Tui
     # resend of a History-loaded flow. nil → nothing to diff against yet.
     private def diff_baseline_lines : Array(String)?
       if (prev = @prev_result) && prev.ok?
-        message_lines(prev.head, prev.body)
+        message_lines(prev.head, display_body(prev.head, prev.body))
       elsif @diffable
         @original_lines
       end
@@ -426,6 +426,16 @@ module Gori::Tui
         lines.concat(bytes_to_lines(body))
       end
       lines
+    end
+
+    # A RESPONSE body decoded for display (gzip/deflate/br/zstd + de-chunk), or the
+    # raw body when there's nothing to decode. Used only for the read-only response
+    # view + diff baseline — NEVER for the request editor / resend bytes, which must
+    # stay byte-exact. Decoding the same (head, body) identically keeps the styled
+    # and plain response views 1:1 in line count.
+    private def display_body(head : Bytes?, body : Bytes?) : Bytes?
+      decoded, _ = Proxy::Codec::ContentDecode.decode(head, body)
+      decoded || body
     end
 
     private def bytes_to_lines(bytes : Bytes?) : Array(String)

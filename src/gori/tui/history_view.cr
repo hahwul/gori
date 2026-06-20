@@ -441,7 +441,16 @@ module Gori::Tui
           ls.concat(wrap(grpc_lines(body)))
           ls
         else
-          Highlight.message(head, body, request)
+          # Decode compressed/chunked bodies for display (gzip/deflate/br/zstd +
+          # de-chunk). Storage stays the raw wire bytes; this is a derived view.
+          display, decode_note = Proxy::Codec::ContentDecode.decode(head, body)
+          ls = Highlight.message(head, display || body, request)
+          if decode_note
+            ls << Highlight::Line.new
+            color = (decode_note.includes?("unsupported") || decode_note.includes?("error")) ? Theme::YELLOW : Theme::GREEN
+            ls << [Highlight::Span.new("— #{decode_note} —", color)]
+          end
+          ls
         end
       if truncated
         lines << Highlight::Line.new

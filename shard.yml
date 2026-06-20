@@ -12,6 +12,12 @@ crystal: '>= 1.20.2'
 
 license: Apache-2.0
 
+# System libraries linked by default (via pkg-config) for HTTP body decode in the
+# detail view: libbrotlidec (Content-Encoding: br) and libzstd (zstd). Install on
+# macOS: `brew install brotli zstd`; Debian/Ubuntu: `apt install libbrotli-dev
+# libzstd-dev`. To build WITHOUT them (gzip/deflate still work via stdlib), pass
+# `-Dwithout_native_codecs` to `crystal build`.
+
 dependencies:
   termisu:
     github: hahwul/termisu
