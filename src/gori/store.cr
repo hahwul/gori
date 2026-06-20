@@ -606,7 +606,7 @@ module Gori
       id = conn.scalar("SELECT last_insert_rowid()").as(Int64)
       # Index the request body text now; the response side is filled in by
       # update_one. Same transaction, so FTS and the row commit together.
-      conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, '')", id, fts_text(req.body))
+      conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, '')", id, request_fts(req))
       id
     end
 
@@ -624,14 +624,47 @@ module Gori
         resp.head.size.to_i64 + body_size,
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
         resp.body_truncated? ? 1 : 0, resp.flow_id)
-      conn.exec("UPDATE flows_fts SET resp = ? WHERE rowid = ?", fts_text(resp.body), resp.flow_id)
+      resp_fts = binary_content?(resp.content_type) ? "" : fts_text(resp.body)
+      conn.exec("UPDATE flows_fts SET resp = ? WHERE rowid = ?", resp_fts, resp.flow_id)
     end
 
     # Body text fed to the FTS index, capped per side so a large body can't bloat
-    # the index. Binary bodies index as best-effort text (good enough for tokens).
+    # the index.
     private def fts_text(bytes : Bytes?) : String
       return "" unless bytes
       String.new(bytes[0, {bytes.size, FTS_INDEX_MAX}.min])
+    end
+
+    # The request body's FTS text, skipping the (synchronous, on-commit) trigram
+    # tokenization for a clearly-binary body. The head is scanned for Content-Type
+    # only when a body actually exists (bodyless GETs cost nothing).
+    private def request_fts(req : CapturedRequest) : String
+      body = req.body
+      return "" if body.nil? || body.empty?
+      binary_content?(head_content_type(req.head)) ? "" : fts_text(body)
+    end
+
+    # Skip body FTS for clearly-binary content types (images/media/archives/
+    # octet-stream/protobuf) — never usefully body-searched and the dominant byte
+    # volume. Text AND unknown types are still indexed so search isn't quietly lost.
+    private def binary_content?(ct : String?) : Bool
+      return false unless ct
+      c = ct.downcase
+      c.starts_with?("image/") || c.starts_with?("video/") || c.starts_with?("audio/") ||
+        c.starts_with?("font/") || c.includes?("octet-stream") || c.includes?("pdf") ||
+        c.includes?("zip") || c.includes?("protobuf") || c.includes?("grpc") ||
+        c.starts_with?("application/wasm")
+    end
+
+    private def head_content_type(head : Bytes) : String?
+      String.new(head).each_line do |raw|
+        line = raw.chomp
+        break if line.empty?
+        idx = line.index(':')
+        next unless idx
+        return line[(idx + 1)..].strip if line[0...idx].strip.downcase == "content-type"
+      end
+      nil
     end
 
     private def insert_ws_one(conn : DB::Connection, op : InsertWs) : Nil

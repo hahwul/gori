@@ -39,7 +39,7 @@ module Gori::Proxy::H2
       loop do
         frame = Frame.read(src)
         break if frame.nil? # clean EOF at a frame boundary
-        dst.write(frame.to_bytes)
+        dst.write(frame.wire_bytes) # original wire bytes — no re-serialize/copy
         dst.flush
         @sink.on_h2_frame(conn_id, direction, frame.type, frame.flags, frame.stream_id, frame.payload)
         assembler.feed(direction, frame)

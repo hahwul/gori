@@ -46,8 +46,20 @@ module Gori::Proxy::H2
       getter flags : UInt8
       getter stream_id : UInt32
       getter payload : Bytes
+      # The full wire octets (header + payload) for frames READ off the wire —
+      # `payload` is a non-copying view into it. Lets the relay forward the frame
+      # without a second allocation + memcpy (to_bytes). nil for SYNTHETIC frames
+      # (the replay engine builds Headers with no wire buffer).
+      getter raw : Bytes?
 
-      def initialize(@type : UInt8, @flags : UInt8, @stream_id : UInt32, @payload : Bytes)
+      def initialize(@type : UInt8, @flags : UInt8, @stream_id : UInt32, @payload : Bytes, @raw : Bytes? = nil)
+      end
+
+      # Wire octets to forward: the original bytes when read off the wire (no
+      # re-serialization, byte-exact incl. the reserved stream-id bit), else
+      # to_bytes for a synthetic frame.
+      def wire_bytes : Bytes
+        @raw || to_bytes
       end
 
       # The known frame type, or nil for an extension/unknown type octet.
@@ -110,9 +122,14 @@ module Gori::Proxy::H2
       stream_id = ((header[5].to_u32 & 0x7f) << 24) | (header[6].to_u32 << 16) |
                   (header[7].to_u32 << 8) | header[8].to_u32
 
-      payload = Bytes.new(len)
+      # One contiguous buffer holds header + payload so the relay can forward the
+      # frame verbatim (wire_bytes) without a second alloc + payload memcpy.
+      # `payload` is a view into it (read directly into buf[9..]).
+      buf = Bytes.new(HEADER_SIZE + len)
+      header.copy_to(buf)
+      payload = buf[HEADER_SIZE, len]
       read_exact(io, payload) if len > 0
-      Header.new(type, flags, stream_id, payload)
+      Header.new(type, flags, stream_id, payload, buf)
     end
 
     # Reads the 24-octet client preface from `io`, returning the exact bytes.
