@@ -369,6 +369,11 @@ module Gori::Tui
       return handle_query_key(ev) if @active_tab == :history && @overlay == :none && @focus == :body && @history.querying?
       return handle_findings_notes_key(ev) if @active_tab == :findings && @overlay == :none && @focus == :body && @findings.editing_notes?
 
+      # Focusable sub-tab strip (Replay/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
+      # the editor, ↑/esc pop to the tab bar. Claimed BEFORE the Tab ring + ^N so the
+      # strip owns Tab and its own ^N. @focus is only ever :subtabs for Replay/Notes.
+      return handle_subtabs_key(ev) if @overlay == :none && @focus == :subtabs
+
       # Unified focus ring: Tab / Shift-Tab move focus across the tab bar and the
       # current tab's panes (tab-bar ▸ pane1 ▸ pane2 ▸ tab-bar). Claimed here so it
       # wins over the per-tab body editors below (Replay used to hijack Tab).
@@ -599,6 +604,88 @@ module Gori::Tui
 
     # The Notes tab is a live editor (like Replay): typing edits the document
     # directly. Esc / Ctrl-P / Ctrl-C leave editing and persist first.
+    # A navigable sub-tab strip exists (≥2 chips) — gates entry into :subtabs. Replay
+    # draws its strip at size>0 but a lone chip has nowhere to switch to.
+    private def subtabs_shown? : Bool
+      (@active_tab == :replay && @replays.size >= 2) ||
+        (@active_tab == :notes && @notes.count >= 2)
+    end
+
+    # The focusable sub-tab strip for Replay/Notes (@focus == :subtabs). Mirrors the
+    # tab bar's idiom one level down: ←/→ switch sub-tabs, ↓/↵/Tab enter the editor,
+    # ↑/esc pop to the tab bar. ^1-9 jumps and stays on the strip; ^N/^W create/close.
+    private def handle_subtabs_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      case
+      when ev.ctrl? && key.lower_n?
+        @active_tab == :replay ? replay_new : notes_new # creates + drops to :body
+      when ev.ctrl? && key.lower_w?
+        @active_tab == :replay ? request_close_replay : notes_close
+        resolve_subtab_focus_after_close
+      when ev.ctrl? && key.lower_p?
+        @active_tab == :replay ? save_current_replay : save_notes
+        open_palette
+      when ev.ctrl? && c && '1' <= c <= '9'
+        jump_subtab(c.to_i - 1) # switch + stay on the strip
+      when key.left?, key.lower_h?
+        move_subtab(-1)
+      when key.right?, key.lower_l?
+        move_subtab(1)
+      when key.down?, key.lower_j?, key.enter?, key.tab?
+        focus_pane(:body) # drop into the editor
+      when key.up?, key.lower_k?, key.escape?
+        focus_pane(:menu) # pop to the tab bar
+      else
+        # swallow everything else — no type-through on the strip
+      end
+    end
+
+    # Move the active sub-tab by ±1 (clamped, no wrap — matches the chips), saving
+    # the outgoing tab first so a cross-session reconcile can't clobber its edits.
+    private def move_subtab(dir : Int32) : Nil
+      case @active_tab
+      when :replay
+        return unless @replays.size >= 2
+        nidx = (@current_replay_idx + dir).clamp(0, @replays.size - 1)
+        return if nidx == @current_replay_idx
+        save_current_replay
+        @current_replay_idx = nidx
+      when :notes
+        return unless @notes.count >= 2
+        nidx = (@notes.current_index + dir).clamp(0, @notes.count - 1)
+        return if nidx == @notes.current_index
+        save_notes
+        @notes.switch_note(nidx)
+      end
+    end
+
+    # Jump to an absolute sub-tab index (^1-9 on the strip) and STAY on the strip.
+    private def jump_subtab(idx : Int32) : Nil
+      case @active_tab
+      when :replay
+        return unless 0 <= idx < @replays.size
+        return if idx == @current_replay_idx
+        save_current_replay
+        @current_replay_idx = idx
+      when :notes
+        return unless 0 <= idx < @notes.count
+        save_notes
+        @notes.switch_note(idx)
+      end
+    end
+
+    # After ^W on the strip the chip count may drop below 2 (strip gone) or to 0
+    # (Replay only) — re-resolve focus so we never sit on an invisible strip.
+    private def resolve_subtab_focus_after_close : Nil
+      if @active_tab == :replay
+        focus_pane(:menu) if @replays.empty?
+        focus_pane(:body) if !@replays.empty? && !subtabs_shown?
+      else
+        focus_pane(:body) unless subtabs_shown? # close_note always keeps ≥1 note
+      end
+    end
+
     private def handle_notes_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
@@ -619,9 +706,9 @@ module Gori::Tui
       elsif key.backspace?
         @notes.backspace
       elsif key.up?
-        if @notes.at_top? # ↑ on the first line pops to the tab bar (save first, like esc)
+        if @notes.at_top? # ↑ on the first line pops up (to the sub-tab strip, else the tab bar)
           save_notes
-          focus_pane(:menu)
+          focus_pane(subtabs_shown? ? :subtabs : :menu)
         else
           @notes.move(-1, 0)
         end
@@ -817,7 +904,7 @@ module Gori::Tui
       case
       when key.enter?     then view.edit_newline
       when key.backspace? then view.edit_backspace
-      when key.up?        then view.at_top? ? focus_pane(:menu) : view.edit_move(-1, 0)
+      when key.up?        then view.at_top? ? focus_pane(subtabs_shown? ? :subtabs : :menu) : view.edit_move(-1, 0)
       when key.down?      then view.edit_move(1, 0)
       when key.left?      then view.edit_move(0, -1)
       when key.right?     then view.edit_move(0, 1)
@@ -837,7 +924,7 @@ module Gori::Tui
       case
 
       when key.enter?     then replay_send
-      when key.up?        then focus_pane(:menu) # target is the top pane → ↑ pops to the tab bar
+      when key.up?        then focus_pane(subtabs_shown? ? :subtabs : :menu) # target is the top pane → ↑ pops up
       when key.backspace? then view.target_backspace
       when key.left?      then view.target_move(-1)
       when key.right?     then view.target_move(1)
@@ -857,7 +944,7 @@ module Gori::Tui
       key = ev.key
       case
       when key.enter?            then replay_send
-      when key.up?               then view.at_top? ? focus_pane(:menu) : view.scroll(-1)
+      when key.up?               then view.at_top? ? focus_pane(subtabs_shown? ? :subtabs : :menu) : view.scroll(-1)
       when key.down?             then view.scroll(1)
       when key.left?, key.right? then view.toggle_resp_mode
       when key.lower_d?          then view.toggle_resp_mode
@@ -1022,7 +1109,11 @@ module Gori::Tui
       when :browser     then "BROWSER"
       when :settings    then "SETTINGS"
       else
-        @focus == :menu ? "TABS" : "BODY"
+        case @focus
+        when :menu    then "TABS"
+        when :subtabs then "SUBTABS"
+        else               "BODY"
+        end
       end
     end
 
@@ -1042,6 +1133,7 @@ module Gori::Tui
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-8 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
+        return "←/→ switch sub-tab · ↓/↵ edit · ^1-9 jump · ^N new · ^W close · ↑/esc tabs" if @focus == :subtabs
         body_hints
       end
     end
@@ -1069,6 +1161,7 @@ module Gori::Tui
 
     private def render_body(screen : Screen, rect : Rect) : Nil
       body_focused = @focus == :body
+      subtabs_focused = @focus == :subtabs # the sub-tab strip (Replay/Notes) holds focus
       case @active_tab
       when :history
         # Single body pane; the detail view is a drill-in within the same frame.
@@ -1084,7 +1177,7 @@ module Gori::Tui
         if @replays.size > 0
           sub_rect = Rect.new(rect.x, rect.y, rect.w, 1)
           body_rect = Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1) if rect.h > 1
-          render_replay_subtabs(screen, sub_rect)
+          render_replay_subtabs(screen, sub_rect, subtabs_focused)
         end
         if v = current_replay_view
           v.render(screen, body_rect, focused: body_focused)
@@ -1098,7 +1191,7 @@ module Gori::Tui
       when :findings
         render_framed(screen, rect, body_focused) { |inner| @findings.render(screen, inner, focused: body_focused) }
       when :notes
-        render_framed(screen, rect, body_focused) { |inner| @notes.render(screen, inner, focused: body_focused) }
+        render_framed(screen, rect, body_focused) { |inner| @notes.render(screen, inner, focused: body_focused, subtabs_focused: subtabs_focused) }
       when :project
         render_framed(screen, rect, body_focused) { |inner| @project_view.render(screen, inner, focused: body_focused) }
       when :intercept
@@ -1161,6 +1254,7 @@ module Gori::Tui
     end
 
     def focus_pane(pane : Symbol) : Nil
+      pane = :menu if pane == :subtabs && !subtabs_shown? # never strand focus on an absent strip
       # Leaving the Replay editor for the tab bar (esc / ↑-to-bar) — persist edits,
       # mirroring how Notes saves on leave. Cheap no-op when the tab is clean.
       save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
@@ -1247,7 +1341,10 @@ module Gori::Tui
       end
     end
 
-    private def render_replay_subtabs(screen : Screen, rect : Rect) : Nil
+    # `focused` = the strip itself holds focus (←/→ switch); the active chip then
+    # lights ACCENT_BG, vs SELECTION_DIM when the strip is merely on-screen (focus is
+    # in the editor or the tab bar). Mirrors the Notes strip + History chip strip.
+    private def render_replay_subtabs(screen : Screen, rect : Rect, focused : Bool = false) : Nil
       return if rect.empty?
       screen.fill(rect, Theme::PANEL)
       x = rect.x + 1
@@ -1258,7 +1355,7 @@ module Gori::Tui
           screen.text(x, rect.y, "…", Theme::MUTED, Theme::PANEL)
           break
         end
-        bg = active ? Theme::ACCENT_BG : Theme::PANEL
+        bg = active ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::PANEL
         fg = active ? Theme::TEXT_BRIGHT : Theme::TEXT
         w = lbl.size + 1
         screen.fill(Rect.new(x, rect.y, w, 1), bg)

@@ -66,6 +66,11 @@ module Gori::Tui
       @notes.size
     end
 
+    # The active sub-tab index — read by the Runner's arrow-key sub-tab navigation.
+    def current_index : Int32
+      @current
+    end
+
     # The current note's sub-tab label (first non-blank line, or "note N") — used
     # by the Runner's close-confirmation message.
     def current_label : String
@@ -138,16 +143,25 @@ module Gori::Tui
       @dirty = false
     end
 
-    def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
+    # `focused` = the editor has focus (cursor + bright); `subtabs_focused` = the
+    # sub-tab strip has focus (←/→ switch). They're distinct so landing on the strip
+    # lights IT, not the editor.
+    def render(screen : Screen, rect : Rect, focused : Bool = true, subtabs_focused : Bool = false) : Nil
       return if rect.empty?
       screen.text(rect.x + 1, rect.y, "NOTES", Theme::ACCENT, attr: Attribute::Bold)
-      hint = focused ? "^N new · ^W close · ^1-9 switch · esc tabs" : "↵/→ to edit"
+      hint = if focused
+               "^N new · ^W close · ^1-9 switch · esc tabs"
+             elsif subtabs_focused
+               "←/→ switch · ↵/↓ edit · esc tabs"
+             else
+               "↵/→ to edit"
+             end
       screen.text(rect.x + 8, rect.y, hint, Theme::MUTED)
       # The sub-tab strip only appears once there's more than one note, so a lone
       # note keeps the full editor height (and looks exactly like the old Notes).
       divider_y = rect.y + 1
       if @notes.size > 1
-        render_tabs(screen, Rect.new(rect.x + 1, rect.y + 1, {rect.w - 2, 0}.max, 1), focused)
+        render_tabs(screen, Rect.new(rect.x + 1, rect.y + 1, {rect.w - 2, 0}.max, 1), subtabs_focused)
         divider_y = rect.y + 2
       end
       Frame.inner_divider(screen, rect, divider_y, border: Frame.pane_border(focused))

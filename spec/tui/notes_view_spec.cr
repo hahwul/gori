@@ -113,6 +113,18 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  it "exposes current_index for arrow-key sub-tab navigation" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      view.current_index.should eq(0)
+      view.new_note # appends + makes it current
+      view.current_index.should eq(1)
+      view.switch_note(0)
+      view.current_index.should eq(0)
+    end
+  end
+
   it "always keeps at least one note open on close" do
     tmp_store do |store|
       view = NotesView.new
