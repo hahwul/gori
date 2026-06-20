@@ -18,6 +18,7 @@ module Gori::Tui
       @results = [] of Verb::Definition
       @selected = 0
       @preedit = ""
+      @scroll = 0 # top visible row — keeps the selection on-screen past the fold
     end
 
     def reset(ctx : Verb::ExecContext) : Nil
@@ -79,11 +80,13 @@ module Gori::Tui
 
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top
+      ensure_visible(list_h)
       (0...list_h).each do |i|
-        break if i >= @results.size
-        verb = @results[i]
+        idx = @scroll + i
+        break if idx >= @results.size
+        verb = @results[idx]
         ry = list_top + i
-        active = i == @selected
+        active = idx == @selected
         bg = active ? Theme::ACCENT_BG : Theme::PANEL
         screen.fill(Rect.new(box.x + 1, ry, w - 2, 1), bg)
         screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme::ACCENT, bg)
@@ -93,6 +96,16 @@ module Gori::Tui
           screen.text(box.right - hint.size - 2, ry, hint, Theme::MUTED, bg)
         end
       end
+    end
+
+    # Scroll the visible window so the selection stays on-screen (the list can be
+    # taller than the box). Adjusted at render time because the row count is only
+    # known here. Mirrors FindingsView#ensure_visible.
+    private def ensure_visible(h : Int32) : Nil
+      return if h <= 0
+      @scroll = @selected if @selected < @scroll
+      @scroll = @selected - h + 1 if @selected >= @scroll + h
+      @scroll = 0 if @scroll < 0
     end
   end
 end

@@ -37,4 +37,24 @@ describe Gori::Tui::PaletteState do
     backend.contains?("palette").should be_true         # the typed query
     backend.contains?("Command palette").should be_true # the matched verb title
   end
+
+  it "scrolls the visible window so a selection past the fold stays on-screen" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+    palette.results.size.should be > 12 # more verbs than fit the rendered list box
+
+    last = palette.results.last.title
+
+    # At the top the last result is below the fold → not rendered.
+    top = MemoryBackend.new(80, 24)
+    palette.render(Screen.new(top), Rect.new(0, 0, 80, 24))
+    top.contains?(last).should be_false
+
+    # Jump to the last result → the window scrolls to keep the selection visible.
+    palette.move(palette.results.size) # clamps to the last index
+    bottom = MemoryBackend.new(80, 24)
+    palette.render(Screen.new(bottom), Rect.new(0, 0, 80, 24))
+    bottom.contains?(last).should be_true
+  end
 end
