@@ -1,3 +1,5 @@
+require "base64"
+require "digest/sha256"
 require "./cert_builder"
 require "./context_factory"
 
@@ -72,9 +74,24 @@ module Gori::Proxy::Tls
       File.read(@ca_cert_path)
     end
 
+    # Base64(SHA-256(DER SubjectPublicKeyInfo)) of the root CA — the value a
+    # Chromium browser wants in `--ignore-certificate-errors-spki-list` to trust
+    # exactly this CA (and nothing else) for the launched session.
+    def spki_sha256_base64 : String
+      pubkey = LibCrypto.x509_get_x509_pubkey(@cert.handle)
+      raise Gori::Error.new("X509_get_X509_PUBKEY failed") if pubkey.null?
+      len = LibCrypto.i2d_x509_pubkey(pubkey, Pointer(Pointer(UInt8)).null)
+      raise Gori::Error.new("i2d_X509_PUBKEY sizing failed") if len <= 0
+      der = Bytes.new(len)
+      ptr = der.to_unsafe
+      LibCrypto.i2d_x509_pubkey(pubkey, pointerof(ptr)) # writes into der, advances ptr
+      Base64.strict_encode(Digest::SHA256.digest(der))
+    end
+
     private def build_leaf(host : String, advertise_h2 : Bool) : Leaf
       cert, key = CertBuilder.build_leaf(host, @cert, @key)
-      Leaf.new(ContextFactory.server_context(cert, key, advertise_h2: advertise_h2), cert, key)
+      ctx = ContextFactory.server_context(cert, key, ca_cert: @cert, advertise_h2: advertise_h2)
+      Leaf.new(ctx, cert, key)
     end
   end
 end

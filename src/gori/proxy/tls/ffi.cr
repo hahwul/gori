@@ -9,6 +9,7 @@ lib LibCrypto
   type EVP_PKEY = Void*
   type ASN1_TIME = Void*
   type ASN1_INT = Void*
+  type X509_PUBKEY = Void*
 
   # key generation (EC P-256 via the high-level EVP path)
   fun ec_key_generate_key = EC_KEY_generate_key(key : EC_KEY) : Int
@@ -27,6 +28,13 @@ lib LibCrypto
   fun x509_gmtime_adj = X509_gmtime_adj(s : ASN1_TIME, adj : Long) : ASN1_TIME
   fun x509_sign = X509_sign(x : X509, pkey : EVP_PKEY, md : EVP_MD) : Int
   fun x509_store_add_cert = X509_STORE_add_cert(store : X509_STORE, x : X509) : Int
+  fun x509_up_ref = X509_up_ref(x : X509) : Int
+
+  # SubjectPublicKeyInfo (for the browser's --ignore-certificate-errors-spki-list
+  # pin): grab the SPKI structure, then DER-encode it (pp == NULL returns the
+  # length so we can size the buffer first).
+  fun x509_get_x509_pubkey = X509_get_X509_PUBKEY(x : X509) : X509_PUBKEY
+  fun i2d_x509_pubkey = i2d_X509_PUBKEY(a : X509_PUBKEY, pp : UInt8**) : Int
 
   # PEM persistence via file BIOs (root CA only; leaves stay in memory)
   fun bio_new_file = BIO_new_file(filename : Char*, mode : Char*) : Bio*
@@ -41,6 +49,8 @@ lib LibSSL
   fun ssl_ctx_use_certificate = SSL_CTX_use_certificate(ctx : SSLContext, x : LibCrypto::X509) : Int
   fun ssl_ctx_use_privatekey = SSL_CTX_use_PrivateKey(ctx : SSLContext, pkey : LibCrypto::EVP_PKEY) : Int
   fun ssl_ctx_get_cert_store = SSL_CTX_get_cert_store(ctx : SSLContext) : LibCrypto::X509_STORE
+  # SSL_CTX_add_extra_chain_cert() is a macro over SSL_CTX_ctrl, which the stdlib
+  # already binds (larg : ULong, returns ULong) — reused in ContextFactory.
 end
 
 module Gori::Proxy::Tls
@@ -49,6 +59,8 @@ module Gori::Proxy::Tls
   EVP_PKEY_EC      = 408 # NID_X9_62_id_ecPublicKey
   NID_BASIC_CONSTR =  87 # NID_basic_constraints
   NID_SUBJECT_ALT  =  85 # NID_subject_alt_name
+
+  SSL_CTRL_EXTRA_CHAIN_CERT = 14 # SSL_CTX_ctrl cmd for SSL_CTX_add_extra_chain_cert
 
   CA_VALIDITY_SECS   = 60_i64 * 60 * 24 * 3650 # ~10 years
   LEAF_VALIDITY_SECS = 60_i64 * 60 * 24 * 397  # ~13 months (browser leaf cap)

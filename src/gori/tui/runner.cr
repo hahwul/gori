@@ -16,7 +16,10 @@ require "./intercept_view"
 require "./scope_overlay"
 require "./rules_overlay"
 require "./confirm_dialog"
+require "./browser_picker"
 require "./palette"
+require "../paths"
+require "../browser"
 require "./clipboard"
 require "./keybind"
 require "../scope"
@@ -57,11 +60,14 @@ module Gori::Tui
       @palette = PaletteState.new(@session.registry)
       @history.set_scope(@scope)
       @active_tab = :project
-      @overlay = :none # :none | :palette | :detail | :scope | :rules | :finding_new | :confirm
+      @overlay = :none # :none | :palette | :detail | :scope | :rules | :finding_new | :confirm | :browser
       # A destructive-action guard (delete project / close a sub-tab). When set,
       # @overlay is :confirm; accepting runs @confirm_action.
       @confirm = nil.as(ConfirmDialog?)
       @confirm_action = nil.as(Proc(Nil)?)
+      # The "open browser" picker (palette → browser.open); @overlay is :browser
+      # while it's up.
+      @browser_picker = nil.as(BrowserPicker?)
       @focus = :menu                  # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
       @outcome = :running             # :running | :quit | :back
@@ -231,6 +237,7 @@ module Gori::Tui
       return handle_rules_key(ev) if @overlay == :rules
       return handle_finding_new_key(ev) if @overlay == :finding_new
       return handle_confirm_key(ev) if @overlay == :confirm
+      return handle_browser_key(ev) if @overlay == :browser
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       return handle_query_key(ev) if @active_tab == :history && @overlay == :none && @focus == :body && @history.querying?
@@ -396,6 +403,22 @@ module Gori::Tui
       @overlay = :none
       @confirm = nil
       @confirm_action = nil
+    end
+
+    # "Open browser" overlay: ↑/↓ pick, ↵ launch the selected browser, esc cancel.
+    private def handle_browser_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      case
+      when key.escape? then close_browser_picker
+      when key.up?     then @browser_picker.try(&.move(-1))
+      when key.down?   then @browser_picker.try(&.move(1))
+      when key.enter?  then launch_selected_browser
+      end
+    end
+
+    private def close_browser_picker : Nil
+      @overlay = :none
+      @browser_picker = nil
     end
 
     # Findings notes inline editor.
@@ -785,6 +808,7 @@ module Gori::Tui
       @rules_overlay.render(screen, layout.body) if @overlay == :rules
       @finding_form.render(screen, layout.body) if @overlay == :finding_new
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
+      @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
 
       # Sync terminal hardware cursor to the focused input caret (if any view
       # called screen.cursor). This is critical for terminal IME preedit
@@ -838,6 +862,7 @@ module Gori::Tui
       when :finding_new then "FINDING"
       when :detail      then "DETAIL"
       when :confirm     then "CONFIRM"
+      when :browser     then "BROWSER"
       else
         @focus == :menu ? "TABS" : "BODY"
       end
@@ -853,6 +878,7 @@ module Gori::Tui
       when :rules       then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
       when :finding_new then "type title · ↵ create · esc cancel"
       when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
+      when :browser     then "↑/↓ select · ↵ open · esc cancel"
       when :detail      then "↹ switch pane · ↑/↓ scroll · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
@@ -1352,6 +1378,36 @@ module Gori::Tui
 
     def export_ca : Nil
       @toast = "root CA: #{@session.ca.ca_cert_path}"
+    end
+
+    # --- browser (open a pre-trusted system browser) ---
+
+    # Detect installed browsers and open the picker; if none qualify, just toast.
+    def open_browser_picker : Nil
+      found = Browser.detect
+      if found.empty?
+        @toast = "no supported browser found (Chrome/Chromium/Brave/Edge/Vivaldi/Firefox)"
+        return
+      end
+      @browser_picker = BrowserPicker.new(found)
+      @overlay = :browser
+    end
+
+    # Launch the highlighted browser pre-trusting gori's CA + routed through the
+    # proxy. Closes the overlay first so a slow spawn never blocks the next frame.
+    private def launch_selected_browser : Nil
+      browser = @browser_picker.try(&.selected_browser)
+      close_browser_picker
+      return unless browser
+      spec = Browser::LaunchSpec.new(
+        proxy_host: @session.proxy.host,
+        proxy_port: @session.proxy.port,
+        ca_cert_path: @session.ca.ca_cert_path,
+        spki_sha256: @session.ca.spki_sha256_base64,
+        profile_root: File.join(Gori::Paths.data_dir, "browser"))
+      @toast = Browser.launch(browser, spec)
+    rescue ex
+      @toast = "browser launch failed: #{ex.message}"
     end
   end
 end

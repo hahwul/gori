@@ -179,6 +179,10 @@ private class FakeContext < ExecContext
   def export_ca : Nil
     @calls << :export_ca
   end
+
+  def open_browser_picker : Nil
+    @calls << :open_browser_picker
+  end
 end
 
 describe Gori::Verb do

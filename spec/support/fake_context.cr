@@ -95,4 +95,6 @@ class FakeExecContext < Gori::Verb::ExecContext
   end
 
   def export_ca : Nil; end
+
+  def open_browser_picker : Nil; end
 end

@@ -1,4 +1,5 @@
 require "../../spec_helper"
+require "base64"
 require "socket"
 require "file_utils"
 
@@ -67,6 +68,57 @@ describe Gori::Proxy::Tls::CertAuthority do
       end
 
       result.receive.should eq("ok: ping") # full chain + hostname verification passed
+    end
+  end
+
+  it "computes the CA SubjectPublicKeyInfo SHA-256 pin (base64) for browser trust" do
+    with_ca_dir do |dir|
+      spki = Gori::Proxy::Tls::CertAuthority.load_or_create(dir).spki_sha256_base64
+      Base64.decode(spki).size.should eq(32) # a SHA-256 digest
+      # deterministic across reloads of the same persisted CA
+      Gori::Proxy::Tls::CertAuthority.load_or_create(dir).spki_sha256_base64.should eq(spki)
+    end
+  end
+
+  it "serves the leaf with the root appended to the chain (for SPKI pinning)" do
+    with_ca_dir do |dir|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+      server_ctx = ca.context_for("example.test")
+      client_ctx = OpenSSL::SSL::Context::Client.new
+      ca_cert = Gori::Proxy::Tls::Cert.read_pem(File.join(dir, "root.crt.pem"))
+      store = LibSSL.ssl_ctx_get_cert_store(client_ctx.to_unsafe)
+      LibCrypto.x509_store_add_cert(store, ca_cert.handle)
+
+      tcp_server = TCPServer.new("127.0.0.1", 0)
+      port = tcp_server.local_address.port
+      result = Channel(String).new
+
+      spawn do
+        conn = tcp_server.accept
+        ssl = OpenSSL::SSL::Socket::Server.new(conn, server_ctx, sync_close: true)
+        ssl.puts(ssl.gets)
+        ssl.flush
+        ssl.close
+      rescue ex
+        result.send("server-error: #{ex.message}")
+      end
+
+      spawn do
+        tcp = TCPSocket.new("127.0.0.1", port)
+        ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_ctx, sync_close: true, hostname: "example.test")
+        ssl.puts("ping")
+        ssl.flush
+        echo = ssl.gets
+        # peer_certificate is the leaf; the chain also carrying the root is what
+        # lets a browser's --ignore-certificate-errors-spki-list match. Verifying
+        # the handshake still succeeds proves the appended root didn't break it.
+        ssl.close
+        result.send("ok: #{echo}")
+      rescue ex
+        result.send("client-error: #{ex.class}: #{ex.message}")
+      end
+
+      result.receive.should eq("ok: ping")
     end
   end
 

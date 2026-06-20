@@ -27,6 +27,12 @@ module Gori
         "ca.export", "Export CA certificate", "Print the path to gori's root CA for trust setup",
         Verb::Scope::Global) { |ctx| ctx.export_ca; nil }
 
+      # Palette-only (no chord — used rarely): open a system browser pre-trusting
+      # gori's CA and routed through the proxy, like Burp/Caido's embedded browser.
+      r.register Verb::Definition.new(
+        "browser.open", "Open browser", "Launch a browser pre-trusting gori's CA, routed via the proxy",
+        Verb::Scope::Global) { |ctx| ctx.open_browser_picker; nil }
+
       r.register Verb::Definition.new(
         "scope.edit", "Scope lens", "Edit the in-scope host patterns", Verb::Scope::Global,
         [Verb::Chord.new("s")]) { |ctx| ctx.scope_open; nil }
