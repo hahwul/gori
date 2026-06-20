@@ -23,6 +23,11 @@ describe Gori::Browser do
     it "routes loopback targets through the proxy too" do
       args.should contain("--proxy-bypass-list=<-loopback>")
     end
+
+    it "suppresses the bad-flags infobar and keeps traffic on the TCP proxy" do
+      args.should contain("--test-type")  # suppress Chrome's spki-list infobar
+      args.should contain("--disable-quic") # QUIC/UDP would bypass the CONNECT proxy
+    end
   end
 
   describe ".firefox_args" do

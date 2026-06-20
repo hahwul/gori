@@ -86,15 +86,27 @@ module Gori
       end
     end
 
-    # Chromium launch flags. Pinning the CA's SPKI trusts exactly gori (no warning
-    # bar, unlike --ignore-certificate-errors); "<-loopback>" un-bypasses loopback
-    # so localhost targets are proxied too.
+    # Chromium launch flags. Pinning the CA's SPKI trusts exactly gori's CA for the
+    # session — safer than --ignore-certificate-errors, which trusts EVERY bad cert.
+    # NOTE: recent Chrome added the spki-list flag to kBadFlags, so it now shows the
+    # "unsupported command-line flag" infobar; --test-type is the only non-policy way
+    # to suppress it (what Burp/Caido/Selenium use for an isolated MITM profile).
+    # --disable-quic keeps traffic on the TCP CONNECT proxy (QUIC/UDP would bypass
+    # it); the --disable-* trio + --no-pings cut Google background chatter that adds
+    # latency and floods the flow list. "<-loopback>" un-bypasses loopback so
+    # localhost targets are proxied too.
     def self.chromium_args(profile : String, spec : LaunchSpec) : Array(String)
       [
         "--user-data-dir=#{profile}",
         "--proxy-server=http://#{spec.proxy_host}:#{spec.proxy_port}",
         "--proxy-bypass-list=<-loopback>",
         "--ignore-certificate-errors-spki-list=#{spec.spki_sha256}",
+        "--test-type",
+        "--disable-quic",
+        "--disable-component-update",
+        "--disable-sync",
+        "--disable-features=OptimizationHints,MediaRouter",
+        "--no-pings",
         "--no-first-run",
         "--no-default-browser-check",
       ]
