@@ -9,7 +9,7 @@ module Gori
   # Subcommand-based CLI entrypoint.
   #
   # - `gori` or `gori tui [flags]`  → interactive TUI (or --headless for compat)
-  # - `gori config`                 → print (and lazily init) persistent config path
+  # - `gori config [--edit]`        → print (and lazily init) / edit settings.json
   # - `gori export ca-cert`         → print CA cert path (refactors old --export-ca)
   # - `gori run` / `gori wizard`    → placeholders (non-interactive CLI / setup wizard)
   # - `gori mcp` / `gori update`    → placeholders for future work
@@ -75,33 +75,6 @@ module Gori
       puts "Flags like --version and --help work at the top level too."
     end
 
-    private def self.default_config_template : String
-      <<-TEXT
-# gori user configuration (reported by `gori config`)
-# Path: #{Paths.config_file}
-#
-# This file will be used in future releases to persist settings such as:
-#   - bind_address / proxy.listen + proxy.port (currently only CLI flags)
-#   - hot-keys / custom key bindings (currently defined in verbs/core.cr etc.)
-#   - ca.dir, other paths, UX prefs
-#
-# Example (not yet loaded by the app):
-#
-# proxy:
-#   listen: 127.0.0.1
-#   port: 8070
-#
-# ca:
-#   dir: ~/.config/gori/ca
-#
-# keybindings:
-#   # future overrides...
-#
-# For now most settings are via CLI flags on `gori` / `gori tui`.
-# Later: gori config --edit will open $EDITOR on this file.
-TEXT
-    end
-
     # Runs the TUI (or headless for compat with old --headless flag).
     # All legacy flat flags continue to be accepted here.
     private def self.run_tui(args : Array(String)) : Nil
@@ -154,20 +127,33 @@ TEXT
       end
     end
 
+    # `gori config` prints the path to the REAL persisted config (settings.json —
+    # the same file the TUI's settings:* + ^E editor write); `--edit` opens it in
+    # $EDITOR. Lazily created with current defaults on first invocation.
     private def self.run_config(args : Array(String)) : Nil
-      if args.any? { |a| ["-h", "--help"].includes?(a) }
-        puts "Usage: gori config"
-        puts "  Prints the path to gori's persistent configuration file."
-        puts "  Creates a template with comments on first invocation if the file does not exist."
+      edit = false
+      parser = OptionParser.new do |p|
+        p.banner = "Usage: gori config [--edit]"
+        p.on("--edit", "Open the config file in your editor (settings:editor / $VISUAL / $EDITOR / vi)") { edit = true }
+        p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+      end
+      parser.parse(args)
+
+      Paths.ensure_dirs
+      Settings.load                                    # pick up the persisted editor pref + existing values
+      Settings.save unless File.exists?(Settings.path) # lazily materialize with current defaults
+      path = Settings.path
+
+      unless edit
+        puts path
         return
       end
 
-      Paths.ensure_dirs
-      path = Paths.config_file
-      unless File.exists?(path)
-        File.write(path, default_config_template)
-      end
-      puts path
+      cmd = Settings.editor_command
+      status = Process.run(cmd[0], cmd[1..] + [path],
+        input: Process::Redirect::Inherit, output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
+      abort "gori config: editor (#{cmd.join(' ')}) exited #{status.exit_code}" unless status.success?
     end
 
     private def self.run_export(args : Array(String)) : Nil

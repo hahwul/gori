@@ -25,12 +25,6 @@ module Gori
       File.join(config_dir, "ca")
     end
 
-    # Path to the (future) persistent user config file. `gori config` reports
-    # and lazily initializes this file with a template.
-    def self.config_file : String
-      File.join(config_dir, "config.yml")
-    end
-
     def self.ensure_dirs : Nil
       ensure_dir(data_dir)
       ensure_dir(config_dir)
