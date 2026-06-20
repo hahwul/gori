@@ -74,4 +74,53 @@ describe Gori::Settings do
       Gori::Settings.bind_port = 8070
     end
   end
+
+  describe ".editor_command" do
+    it "splits a configured command into program + args" do
+      Gori::Settings.editor = "code --wait"
+      Gori::Settings.editor_command.should eq(["code", "--wait"])
+    ensure
+      Gori::Settings.editor = ""
+    end
+
+    it "falls back to $VISUAL → $EDITOR → vi when unset" do
+      Gori::Settings.editor = ""
+      v = ENV["VISUAL"]?; e = ENV["EDITOR"]?
+      begin
+        ENV["VISUAL"] = "nvim"
+        Gori::Settings.editor_command.should eq(["nvim"])
+        ENV.delete("VISUAL"); ENV["EDITOR"] = "nano"
+        Gori::Settings.editor_command.should eq(["nano"])
+        ENV.delete("EDITOR")
+        Gori::Settings.editor_command.should eq(["vi"])
+      ensure
+        v ? (ENV["VISUAL"] = v) : ENV.delete("VISUAL")
+        e ? (ENV["EDITOR"] = e) : ENV.delete("EDITOR")
+      end
+    end
+  end
+
+  it "round-trips the editor command + loads it even with no network block" do
+    dir = File.tempname("gori-settings-ed")
+    Dir.mkdir_p(dir)
+    prev = ENV["XDG_CONFIG_HOME"]?
+    begin
+      ENV["XDG_CONFIG_HOME"] = dir
+      Gori::Settings.editor = "vim -u NONE"
+      Gori::Settings.save.should be_true
+      Gori::Settings.editor = "" # clear, then reload from disk
+      Gori::Settings.load
+      Gori::Settings.editor.should eq("vim -u NONE")
+
+      # regression: an editor-only file (no "network" block) still loads the editor
+      File.write(Gori::Settings.path, %({"editor":{"command":"emacs -nw"}}))
+      Gori::Settings.editor = ""
+      Gori::Settings.load
+      Gori::Settings.editor.should eq("emacs -nw")
+    ensure
+      prev ? (ENV["XDG_CONFIG_HOME"] = prev) : ENV.delete("XDG_CONFIG_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.editor = ""
+    end
+  end
 end

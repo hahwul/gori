@@ -51,6 +51,13 @@ module Gori::Tui
       @editor.text
     end
 
+    # Replace the request body (e.g. from the external editor); marks dirty so the
+    # tab persists + the cross-session reconcile won't clobber it.
+    def replace_request(text : String) : Nil
+      @editor.set_text(text)
+      @dirty = true
+    end
+
     # The source History flow id for a ^R-opened tab (nil for a hand-authored ^N).
     def source_flow_id : Int64?
       @flow.try(&.row.id)

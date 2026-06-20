@@ -87,6 +87,17 @@ module Gori::Tui
       current.area.set_preedit(text)
     end
 
+    def current_text : String
+      current.area.text
+    end
+
+    # Replace the current note's text (e.g. from the external editor); marks dirty
+    # so it persists + the cross-session reconcile won't clobber it.
+    def replace_current(text : String) : Nil
+      current.area.set_text(text)
+      @dirty = true
+    end
+
     def insert(ch : Char) : Nil
       current.area.insert(ch)
       @dirty = true

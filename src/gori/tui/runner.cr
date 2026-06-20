@@ -21,6 +21,7 @@ require "./settings_view"
 require "./palette"
 require "../paths"
 require "../browser"
+require "../external_editor"
 require "./clipboard"
 require "./keybind"
 require "../scope"
@@ -406,6 +407,25 @@ module Gori::Tui
         return
       end
 
+      # ^E opens the focused multi-line field in the external editor ($EDITOR /
+      # settings:editor). A Body-scope verb would be shadowed by the per-tab handlers
+      # below, so claim it inline here. Each target is gated to where it's editable.
+      if @overlay == :none && @focus == :body && ev.ctrl? && ev.key.lower_e?
+        if @active_tab == :replay && (v = current_replay_view) && v.focus == :request
+          run_external_editor(v.request_text, :request) { |t| v.replace_request(t) }
+          return
+        elsif @active_tab == :notes
+          run_external_editor(@notes.current_text, :notes) { |t| @notes.replace_current(t) }
+          return
+        elsif @active_tab == :project
+          run_external_editor(@project_view.desc_text, :desc) { |t| @project_view.replace_desc(t) }
+          return
+        elsif @active_tab == :intercept && @intercept.editing?
+          run_external_editor(@intercept.editor_text, :intercept) { |t| @intercept.replace_editor(t) }
+          return
+        end
+      end
+
       return handle_replay_key(ev) if @active_tab == :replay && @overlay == :none && @focus == :body
       return handle_notes_key(ev) if @active_tab == :notes && @overlay == :none && @focus == :body
       return handle_intercept_key(ev) if @active_tab == :intercept && @overlay == :none && @focus == :body
@@ -572,7 +592,10 @@ module Gori::Tui
       elsif key.escape?
         @overlay = :none
       elsif key.enter?
-        @toast = apply_settings(@settings_view.save)
+        # Only the network section rebinds the live proxy; the editor section just
+        # persists (apply_settings would be a no-op for it, but be explicit).
+        msg = @settings_view.save
+        @toast = @settings_view.section == :network ? apply_settings(msg) : msg
       elsif key.up?
         @settings_view.move_field(-1)
       elsif key.down?
@@ -1772,14 +1795,42 @@ module Gori::Tui
       end
     end
 
-    # Open the settings editor for `section` (palette → settings:network/theme/
-    # hotkeys). Only :network is implemented; the rest toast a TODO.
+    # Open the settings editor for `section` (palette → settings:network/editor/
+    # theme/hotkeys). :network and :editor are implemented; the rest toast a TODO.
     def open_settings(section : Symbol) : Nil
-      if section == :network
-        @settings_view.reload
+      case section
+      when :network, :editor
+        @settings_view.reload(section)
         @overlay = :settings
       else
         @toast = "#{section} settings — coming soon (TODO)"
+      end
+    end
+
+    # Hand the focused field's text to the external editor; on a clean change write
+    # it back via the block. Failure/unchanged toast and never mutate the field. The
+    # Process::Status is captured in a local inside the suspend block (don't rely on
+    # the block value propagating through with_mode's ensure chain).
+    private def run_external_editor(text : String, kind : Symbol, & : String -> _) : Nil
+      result = ExternalEditor.edit(text, kind) do |program, args|
+        status = nil.as(Process::Status?)
+        @term.suspend do
+          status = Process.run(program, args,
+            input: Process::Redirect::Inherit,
+            output: Process::Redirect::Inherit,
+            error: Process::Redirect::Inherit)
+        end
+        status
+      end
+      @resized = true # alt-screen re-entered → force a full repaint via the resize path
+      case result.outcome
+      in ExternalEditor::Outcome::Changed
+        yield result.text.not_nil!
+        @toast = "applied external edit"
+      in ExternalEditor::Outcome::Unchanged
+        @toast = "no changes"
+      in ExternalEditor::Outcome::Failed
+        @toast = result.error || "external editor failed"
       end
     end
 

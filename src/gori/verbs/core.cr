@@ -39,6 +39,9 @@ module Gori
         "settings.network", "settings:network", "Edit the proxy bind address + upstream proxy",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:network); nil }
       r.register Verb::Definition.new(
+        "settings.editor", "settings:editor", "Set the external editor opened by ^E in editable fields",
+        Verb::Scope::Global) { |ctx| ctx.open_settings(:editor); nil }
+      r.register Verb::Definition.new(
         "settings.theme", "settings:theme", "Theme settings (coming soon)",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:theme); nil }
       r.register Verb::Definition.new(

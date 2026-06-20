@@ -100,6 +100,16 @@ module Gori::Tui
       @editor.move(dr, dc) if @editing
     end
 
+    def editor_text : String
+      @editor.text
+    end
+
+    # Replace the held item's editable bytes (e.g. from the external editor); only
+    # while editing — forward_bytes then sends the edited text.
+    def replace_editor(text : String) : Nil
+      @editor.set_text(text) if @editing
+    end
+
     # --- focus ring (driven by the Runner's Tab/Shift-Tab) ---
     # Two panes: queue (editing off) ▸ detail editor (editing on). Entering the
     # detail pane starts editing the selected item; pane_advance returns false at

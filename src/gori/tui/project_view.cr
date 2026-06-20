@@ -57,6 +57,17 @@ module Gori::Tui
       @desc_area.set_preedit(text)
     end
 
+    def desc_text : String
+      @desc_area.text
+    end
+
+    # Replace the description (e.g. from the external editor); marks dirty so save
+    # persists it on the next tab-exit.
+    def replace_desc(text : String) : Nil
+      @desc_area.set_text(text)
+      @desc_dirty = true
+    end
+
     # Persist description iff edited (called on tab exit paths, like NotesView).
     def save(store : Store) : Nil
       return unless @desc_dirty

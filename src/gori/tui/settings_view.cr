@@ -16,13 +16,18 @@ module Gori::Tui
   class SettingsView
     record Field, label : String, hint : String
 
-    FIELDS = [
+    NETWORK_FIELDS = [
       Field.new("Bind IP", "proxy listen address"),
       Field.new("Bind Port", "proxy listen port (0-65535)"),
       Field.new("Upstream proxy", "host:port — blank = connect directly"),
     ]
+    EDITOR_FIELDS = [
+      Field.new("Editor command", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
+    ]
+    SECTIONS = {:network => NETWORK_FIELDS, :editor => EDITOR_FIELDS}
 
     getter? saved : Bool = false
+    getter section : Symbol = :network
 
     def initialize
       @values = ["", "", ""]
@@ -33,9 +38,18 @@ module Gori::Tui
       reload
     end
 
-    # Pull current values from the live Settings (called when the editor opens).
-    def reload : Nil
-      @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
+    private def fields
+      SECTIONS[@section]
+    end
+
+    # Pull current values from the live Settings for `section` (called when the
+    # editor opens). Defaults to :network so the no-arg picker call keeps working.
+    def reload(section : Symbol = :network) : Nil
+      @section = section
+      @values = case section
+                when :editor then [Settings.editor]
+                else              [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
+                end
       @focused = 0
       @cursor = @values[0].size
       @preedit = ""
@@ -78,6 +92,11 @@ module Gori::Tui
     # Validate, apply, and persist. Returns a status message for the caller to
     # toast (nil decoded values are not possible here — port is the only check).
     def save : String
+      if @section == :editor
+        Settings.editor = @values[0].strip # blank is valid → clears to $VISUAL/$EDITOR/vi
+        @values = [Settings.editor]
+        return persist
+      end
       port = @values[1].strip.to_i?
       unless port && 0 <= port <= 65535
         @status = "invalid port"
@@ -87,6 +106,10 @@ module Gori::Tui
       Settings.bind_port = port
       Settings.upstream_proxy = @values[2].strip
       @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
+      persist
+    end
+
+    private def persist : String
       ok = Settings.save
       @saved = ok
       @status = ok ? "saved" : "save failed"
@@ -94,16 +117,17 @@ module Gori::Tui
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      label_w = FIELDS.max_of(&.label.size)
+      flds = fields
+      label_w = flds.max_of(&.label.size)
       w = {area.w - 4, 64}.min
-      h = FIELDS.size + 6
+      h = flds.size + 6
       return if w < 30 || area.h < h
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      Frame.card(screen, box, "SETTINGS · NETWORK", border: Theme::BORDER_FOCUS)
+      Frame.card(screen, box, "SETTINGS · #{@section.to_s.upcase}", border: Theme::BORDER_FOCUS)
 
-      FIELDS.each_with_index do |field, i|
+      flds.each_with_index do |field, i|
         ry = box.y + 2 + i
         focused = i == @focused
         bg = focused ? Theme::ACCENT_BG : Theme::PANEL
@@ -129,7 +153,7 @@ module Gori::Tui
         color = status.starts_with?("invalid") || status.starts_with?("save failed") ? Theme::YELLOW : Theme::GREEN
         screen.text(box.x + 3, note_y, "• #{status}", color, Theme::PANEL)
       else
-        screen.text(box.x + 3, note_y, FIELDS[@focused].hint, Theme::MUTED, Theme::PANEL)
+        screen.text(box.x + 3, note_y, fields[@focused].hint, Theme::MUTED, Theme::PANEL)
       end
       hint = "↑/↓ field · ↵ save · esc close"
       screen.text(box.right - hint.size - 2, note_y, hint, Theme::MUTED, Theme::PANEL)

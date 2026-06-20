@@ -16,6 +16,7 @@ module Gori
     class_property bind_host : String = "127.0.0.1"
     class_property bind_port : Int32 = 8070
     class_property upstream_proxy : String = "" # "host:port" HTTP proxy; "" = connect directly
+    class_property editor : String = ""         # external editor for ^E; "" = $VISUAL/$EDITOR/vi
 
     def self.path : String
       File.join(Paths.config_dir, "settings.json")
@@ -24,12 +25,15 @@ module Gori
     # Load persisted values into the class properties. Tolerant: a missing or
     # malformed file leaves the defaults (or CLI-provided values) in place.
     def self.load : Nil
-      raw = File.read(path)
-      net = JSON.parse(raw)["network"]?
-      return unless net
-      self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
-      self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
-      self.upstream_proxy = net["upstream_proxy"]?.try(&.as_s?) || upstream_proxy
+      root = JSON.parse(File.read(path))
+      if net = root["network"]?
+        self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
+        self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
+        self.upstream_proxy = net["upstream_proxy"]?.try(&.as_s?) || upstream_proxy
+      end
+      if ed = root["editor"]?
+        self.editor = ed["command"]?.try(&.as_s?) || editor
+      end
     rescue
       # no file yet / unreadable / bad JSON — keep current values
     end
@@ -54,8 +58,23 @@ module Gori
               j.field "upstream_proxy", upstream_proxy
             end
           end
+          j.field "editor" do
+            j.object { j.field "command", editor }
+          end
         end
       end
+    end
+
+    # Effective external-editor argv (program + args), WITHOUT the file path:
+    # Settings.editor (if set) → $VISUAL → $EDITOR → "vi". Whitespace-split so
+    # "code --wait" / "emacs -nw" keep their flags; the caller appends the path.
+    def self.editor_command : Array(String)
+      raw = editor.strip
+      raw = ENV["VISUAL"]?.to_s.strip if raw.empty?
+      raw = ENV["EDITOR"]?.to_s.strip if raw.empty?
+      raw = "vi" if raw.empty?
+      parts = raw.split # collapses whitespace runs, drops empties
+      parts.empty? ? ["vi"] : parts
     end
 
     # Parse `upstream_proxy` into {host, port}, or nil when unset/blank. Accepts
