@@ -10,7 +10,16 @@ module Gori::Proxy
       done = Channel(Nil).new(2)
       spawn { copy(a, b); done.send(nil) }
       spawn { copy(b, a); done.send(nil) }
-      2.times { done.receive }
+      # When EITHER direction ends, close BOTH sockets so the surviving copy's
+      # blocked read unblocks (raises → rescued → sends done). Without this, a
+      # half-closed peer pins the surviving fiber + both fds forever — the client
+      # socket carries no read timeout, so an origin that closes first would leak
+      # the connection permanently (a scriptable fd-exhaustion DoS). Mirrors
+      # WS::Relay.run / H2::Relay's cross-close.
+      done.receive
+      a.close rescue nil
+      b.close rescue nil
+      done.receive
     end
 
     # One-direction copy until EOF/error. Tolerant: a broken pipe just ends it.

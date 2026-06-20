@@ -65,6 +65,7 @@ module Gori::Proxy::Codec
     # RFC 7230 §3.3.3 framing for a request body.
     def self.request_framing(req : RawRequest) : {BodyFraming, Int64}
       if chunked?(req.headers.get_all("Transfer-Encoding"))
+        reject_te_with_cl(req.headers)
         {BodyFraming::Chunked, 0_i64}
       elsif cl = content_length(req.headers)
         {BodyFraming::Length, cl}
@@ -81,6 +82,7 @@ module Gori::Proxy::Codec
       return {BodyFraming::None, 0_i64} if (s >= 100 && s < 200) || s == 204 || s == 304
 
       if chunked?(resp.headers.get_all("Transfer-Encoding"))
+        reject_te_with_cl(resp.headers)
         {BodyFraming::Chunked, 0_i64}
       elsif cl = content_length(resp.headers)
         {BodyFraming::Length, cl}
@@ -115,8 +117,27 @@ module Gori::Proxy::Codec
       capture.to_slice.dup
     end
 
+    # RFC 7230 §3.3.1: `chunked` must be the FINAL transfer-coding. Accept it only
+    # when it's the last token of the (comma-joined) Transfer-Encoding; a non-final
+    # or obfuscated placement (`chunked, gzip`, a repeated `chunked`) is a framing
+    # error a proxy MUST reject — a TE-desync / request-smuggling vector — so raise
+    # to close the connection rather than guess. (A token like `xchunked` simply
+    # isn't `chunked` and yields no body framing here.)
     private def self.chunked?(transfer_encodings : Array(String)) : Bool
-      transfer_encodings.any?(&.downcase.includes?("chunked"))
+      tokens = transfer_encodings.flat_map(&.split(',')).map(&.strip.downcase).reject(&.empty?)
+      return false if tokens.empty?
+      final_chunked = tokens.last == "chunked"
+      earlier = final_chunked ? tokens[0...-1] : tokens
+      raise Gori::Error.new("chunked transfer-coding is not final") if earlier.includes?("chunked")
+      final_chunked
+    end
+
+    # RFC 7230 §3.3.3: a message with BOTH Transfer-Encoding and Content-Length is
+    # a framing ambiguity (the classic CL.TE / TE.CL smuggling primitive). gori
+    # never strips a header (P7), so reject and close instead of choosing one.
+    private def self.reject_te_with_cl(headers : HeaderList) : Nil
+      return if headers.get_all("Content-Length").empty?
+      raise Gori::Error.new("Transfer-Encoding and Content-Length both present")
     end
 
     private def self.content_length(headers : HeaderList) : Int64?

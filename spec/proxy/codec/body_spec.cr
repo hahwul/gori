@@ -79,6 +79,21 @@ describe Gori::Proxy::Codec::Body do
       req = Http1.parse_request_head("POST / HTTP/1.1\r\nContent-Length: -5\r\n\r\n".to_slice)
       expect_raises(Gori::Error) { Body.request_framing(req) }
     end
+
+    it "rejects Transfer-Encoding + Content-Length coexistence (CL.TE/TE.CL smuggling)" do
+      req = Http1.parse_request_head("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
+    it "rejects a non-final chunked transfer-coding (TE obfuscation desync)" do
+      req = Http1.parse_request_head("POST / HTTP/1.1\r\nTransfer-Encoding: chunked, gzip\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
+    it "accepts chunked as the final transfer-coding after another" do
+      req = Http1.parse_request_head("POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\n\r\n".to_slice)
+      Body.request_framing(req).should eq({BodyFraming::Chunked, 0_i64})
+    end
   end
 
   describe ".stream" do

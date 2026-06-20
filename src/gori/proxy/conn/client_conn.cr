@@ -243,10 +243,16 @@ module Gori::Proxy
           write_gateway_error
           return false
         end
-        @io.write("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)
-        @io.flush
-        Pump.blind_tunnel(@io, upstream)
-        upstream.close rescue nil
+        # begin/ensure so the dialed origin fd is freed even if the 200 reply
+        # write raises (client RST between CONNECT and our reply) or blind_tunnel
+        # itself raises — otherwise one upstream fd leaks per CONNECT-then-reset.
+        begin
+          @io.write("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)
+          @io.flush
+          Pump.blind_tunnel(@io, upstream)
+        ensure
+          upstream.close rescue nil
+        end
       end
       false # the connection has been consumed by the tunnel
     end
