@@ -9,7 +9,7 @@ module Gori
   # Subcommand-based CLI entrypoint.
   #
   # - `gori` or `gori tui [flags]`  → interactive TUI (or --headless for compat)
-  # - `gori config [--edit]`        → print (and lazily init) / edit settings.json
+  # - `gori settings [--edit]`      → print (and lazily init) / edit settings.json
   # - `gori export ca-cert`         → print CA cert path (refactors old --export-ca)
   # - `gori run` / `gori wizard`    → placeholders (non-interactive CLI / setup wizard)
   # - `gori mcp` / `gori update`    → placeholders for future work
@@ -38,8 +38,8 @@ module Gori
       case subcmd
       when "tui"
         run_tui(subargs)
-      when "config"
-        run_config(subargs)
+      when "settings"
+        run_settings(subargs)
       when "export"
         run_export(subargs)
       when "run"
@@ -64,10 +64,10 @@ module Gori
       puts ""
       puts "Commands:"
       puts "  tui       Start the interactive TUI (default when no command)"
-      puts "  config    Print path to the (persistent) configuration file"
+      puts "  settings  Print/edit the persistent settings file (settings.json)"
       puts "  export    Export things (currently only ca-cert)"
       puts "  run       [placeholder] Run gori at the CLI level (non-interactive)"
-      puts "  wizard    [placeholder] Interactive setup/config wizard"
+      puts "  wizard    [placeholder] Interactive setup wizard"
       puts "  mcp       [placeholder] MCP server"
       puts "  update    [placeholder] Self-update"
       puts ""
@@ -127,14 +127,15 @@ module Gori
       end
     end
 
-    # `gori config` prints the path to the REAL persisted config (settings.json —
-    # the same file the TUI's settings:* + ^E editor write); `--edit` opens it in
-    # $EDITOR. Lazily created with current defaults on first invocation.
-    private def self.run_config(args : Array(String)) : Nil
+    # `gori settings` prints the path to the persisted settings file (settings.json
+    # — the same file the TUI's settings:* + ^E editor write); `--edit` opens it in
+    # $EDITOR. Lazily created with current defaults on first invocation. ("config"
+    # the word is reserved for the runtime Config struct — flags/effective config.)
+    private def self.run_settings(args : Array(String)) : Nil
       edit = false
       parser = OptionParser.new do |p|
-        p.banner = "Usage: gori config [--edit]"
-        p.on("--edit", "Open the config file in your editor (settings:editor / $VISUAL / $EDITOR / vi)") { edit = true }
+        p.banner = "Usage: gori settings [--edit]"
+        p.on("--edit", "Open the settings file in your editor (settings:editor / $VISUAL / $EDITOR / vi)") { edit = true }
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
       end
@@ -153,7 +154,7 @@ module Gori
       cmd = Settings.editor_command
       status = Process.run(cmd[0], cmd[1..] + [path],
         input: Process::Redirect::Inherit, output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
-      abort "gori config: editor (#{cmd.join(' ')}) exited #{status.exit_code}" unless status.success?
+      abort "gori settings: editor (#{cmd.join(' ')}) exited #{status.exit_code}" unless status.success?
     end
 
     private def self.run_export(args : Array(String)) : Nil
