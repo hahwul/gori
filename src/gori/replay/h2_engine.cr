@@ -16,6 +16,12 @@ module Gori
     # request bodies could stall — fine for the manual workbench).
     module H2Engine
       MAX_FRAME = 16384
+      # Caps for the one-shot response read, mirroring the live assembler. Without
+      # them a hostile/large origin could OOM the workbench: HEADERS/CONTINUATION
+      # are NOT flow-controlled, so a CONTINUATION flood grows the header block
+      # unboundedly, and a streaming/over-large body has no aggregate ceiling.
+      MAX_HEADER_BLOCK = 1 << 20         # 1 MiB
+      MAX_BODY         = 8 * 1024 * 1024 # 8 MiB (matches Codec::Body::CAPTURE_MAX)
 
       private alias Frame = Proxy::H2::Frame
       private alias HPACK = Proxy::H2::HPACK
@@ -106,7 +112,9 @@ module Gori
             done = true if frame.stream_id == 1
           when Frame::Type::Headers
             next unless frame.stream_id == 1
-            header_buf.write(header_block(frame))
+            chunk = header_block(frame)
+            break if header_buf.bytesize + chunk.size > MAX_HEADER_BLOCK # flood — abort
+            header_buf.write(chunk)
             # END_STREAM only completes the stream once the header block is fully
             # absorbed — a HEADERS with END_STREAM but not END_HEADERS is continued
             # by CONTINUATION frames; finishing early would drop them (and decode no
@@ -118,6 +126,7 @@ module Gori
             end
           when Frame::Type::Continuation
             next unless frame.stream_id == 1
+            break if header_buf.bytesize + frame.payload.size > MAX_HEADER_BLOCK # flood — abort
             header_buf.write(frame.payload)
             if frame.end_headers?
               status = absorb(header_buf, decoder, headers, status)
@@ -125,8 +134,9 @@ module Gori
             end
           when Frame::Type::Data
             next unless frame.stream_id == 1
-            body.write(data_block(frame))
+            body.write(data_block(frame)) if body.bytesize < MAX_BODY
             done = true if frame.end_stream?
+            break if body.bytesize >= MAX_BODY # over-large/streaming body — truncate
           else
             # WINDOW_UPDATE / PUSH_PROMISE / PRIORITY — ignored for a one-shot
           end
