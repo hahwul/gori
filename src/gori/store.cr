@@ -42,6 +42,24 @@ module Gori
       end
     end
 
+    # Fire-and-forget raw h2 frame capture — NO reply channel. The h2 relay must
+    # never block on the DB: a per-frame commit round-trip on the forward path
+    # throttled browsing to DB-write speed. These queue to the writer (batched
+    # there) and are dropped under saturation (best-effort raw log). created_at is
+    # stamped at enqueue (caller side), preserving the old timestamp semantics.
+    struct InsertH2Frame < WriteOp
+      getter conn_id : Int64
+      getter created_at : Int64
+      getter direction : String
+      getter type_octet : Int32
+      getter flags : Int32
+      getter stream_id : Int64
+      getter payload : Bytes
+
+      def initialize(@conn_id, @created_at, @direction, @type_octet, @flags, @stream_id, @payload)
+      end
+    end
+
     # Generic write (scope rules / settings / findings) run on the writer
     # connection; reply carries last_insert_rowid (meaningful for INSERTs).
     struct ExecTask < WriteOp
@@ -84,12 +102,20 @@ module Gori
       @write_failures.get
     end
 
+    # Raw h2 frames dropped because the writer was saturated. Capture of the raw
+    # frame log is best-effort under load; the reconstructed flows stay complete
+    # (the assembler accumulates bodies in memory, independent of this log).
+    def h2_frames_dropped : Int32
+      @h2_frames_dropped.get
+    end
+
     def initialize(@db : DB::Database, @events : Channel(FlowEvent)? = nil,
                    @retention_flows : Int32 = RETENTION_DEFAULT,
                    @prune_interval : Int32 = PRUNE_INTERVAL)
-      @writes = Channel(WriteOp).new(256)
+      @writes = Channel(WriteOp).new(1024) # widened: h2 frames now queue fire-and-forget
       @done = Channel(Nil).new
       @write_failures = Atomic(Int32).new(0)
+      @h2_frames_dropped = Atomic(Int32).new(0)
       @inserts_since_prune = 0
       spawn(name: "gori-store-writer") do
         writer_loop
@@ -120,6 +146,13 @@ module Gori
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
       @writes.send(InsertWs.new(flow_id, now_us, direction, opcode, payload, reply))
       reply.receive
+    end
+
+    # Blocks until every write enqueued before this call has committed. The single
+    # writer drains its channel FIFO, so a synchronous round-trip also flushes the
+    # fire-and-forget h2-frame writes that precede it (a clean read barrier).
+    def flush : Nil
+      exec_task ->(_c : DB::Connection) { nil }
     end
 
     # --- scope rules + settings (display lens) -------------------------------
@@ -245,15 +278,23 @@ module Gori
       }
     end
 
+    # Records one raw h2 frame, FIRE-AND-FORGET — never blocks the caller (the h2
+    # relay pump). The frame queues to the writer (batched there); if the writer is
+    # saturated it is DROPPED and a counter bumped, rather than backpressuring the
+    # relay's forwarding loop. No reply is awaited (the relay never needs the id).
     def insert_h2_frame(conn_id : Int64, direction : String, type : UInt8, flags : UInt8,
                         stream_id : UInt32, payload : Bytes) : Nil
-      ts = now_us
-      exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
-               "VALUES (?,?,?,?,?,?,?,?)",
-          conn_id, ts, direction, stream_id.to_i64, type.to_i32, flags.to_i32, payload.size, payload)
-        nil
-      }
+      op = InsertH2Frame.new(conn_id, now_us, direction, type.to_i32, flags.to_i32,
+        stream_id.to_i64, payload)
+      select
+      when @writes.send(op)
+        # queued
+      else
+        @h2_frames_dropped.add(1) # writer saturated — drop the raw frame, keep the flow
+      end
+    rescue Channel::ClosedError
+      # store closing (Store#close closed @writes) — drop the late frame instead of
+      # raising on the relay fiber mid-shutdown
     end
 
     def h2_frames(conn_id : Int64) : Array(H2Frame)
@@ -447,6 +488,8 @@ module Gori
                   ws_fid = op.flow_id
                   insert_ws_one(c, op)
                   deferred << -> { ws_reply.send(nil); publish(FlowEvent.new(ws_fid, :updated)) }
+                when InsertH2Frame
+                  insert_h2_frame_one(c, op) # fire-and-forget: no reply, no event
                 when ExecTask
                   task_reply = op.reply
                   op.run.call(c)
@@ -589,6 +632,14 @@ module Gori
 
     private def now_us : Int64
       (Time.utc - Time::UNIX_EPOCH).total_microseconds.to_i64
+    end
+
+    # Same columns/casts the old synchronous insert used (so h2_frames readback /
+    # to_bytes round-trips are unchanged).
+    private def insert_h2_frame_one(conn : DB::Connection, op : InsertH2Frame) : Nil
+      conn.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
+                "VALUES (?,?,?,?,?,?,?,?)",
+        op.conn_id, op.created_at, op.direction, op.stream_id, op.type_octet, op.flags, op.payload.size, op.payload)
     end
 
     # Runs a write closure on the writer connection; returns last_insert_rowid.
