@@ -210,6 +210,20 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "shows ALL pane chips in the detail header (not just the active one)" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/x", status: 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true # active = REQUEST
+
+      backend = MemoryBackend.new(100, 12)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      backend.contains?("REQUEST").should be_true  # active chip
+      backend.contains?("RESPONSE").should be_true # inactive chip still shown — "there's more behind"
+    end
+  end
+
   it "renders a gRPC response body as framed messages" do
     tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(

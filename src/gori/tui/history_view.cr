@@ -226,6 +226,16 @@ module Gori::Tui
       @detail_frames ? [:request, :response, :frames] : [:request, :response]
     end
 
+    # The chip label for a detail pane (the response pane shows WS messages for a
+    # 101-Switching flow; frames only exist for an intercepted h2 connection).
+    private def detail_pane_label(pane : Symbol) : String
+      case pane
+      when :frames   then "FRAMES (h2)"
+      when :response then @detail_ws ? "MESSAGES" : "RESPONSE"
+      else                "REQUEST"
+      end
+    end
+
     private def set_detail_pane(pane : Symbol) : Nil
       @detail_pane = pane
       @detail_scroll = 0
@@ -335,15 +345,17 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y, "no flow selected", Theme::MUTED)
         return
       end
-      title = if @detail_pane == :frames
-                "FRAMES (h2)"
-              elsif @detail_pane == :response && @detail_ws
-                "MESSAGES"
-              else
-                @detail_pane.to_s.upcase
-              end
-      screen.text(rect.x + 1, rect.y, title, Theme::ACCENT, attr: Attribute::Bold)
-      screen.text(rect.x + 12, rect.y, "←/→ panes · ↑/↓ scroll · esc back", Theme::MUTED)
+      # Pane strip: show ALL panes as chips with the active one highlighted, so it's
+      # obvious there's more behind (←/→ walk REQUEST → RESPONSE → FRAMES).
+      x = rect.x + 1
+      detail_panes.each do |pane|
+        active = pane == @detail_pane
+        x = screen.text(x, rect.y, " #{detail_pane_label(pane)} ",
+          active ? Theme::TEXT_BRIGHT : Theme::MUTED,
+          active ? Theme::ACCENT_BG : Theme::BG,
+          attr: active ? Attribute::Bold : Attribute::None) + 1
+      end
+      screen.text(x + 1, rect.y, "↑/↓ scroll · esc back", Theme::MUTED)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       lines = detail_styled
