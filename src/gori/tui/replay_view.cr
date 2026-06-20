@@ -30,10 +30,10 @@ module Gori::Tui
       @result = nil.as(Replay::Result?)
       @prev_result = nil.as(Replay::Result?) # the previous send's result — the diff baseline
       # Per-result render caches (rebuilt only when @result/@prev_result change, not
-      # every frame): styled response lines, plain response lines (scroll bound),
+      # every frame): the windowed response view (head styled + body kept RAW and
+      # styled per visible line, so a multi-MiB replayed response doesn't freeze),
       # and the LCS diff lines.
-      @resp_styled_cache = nil.as(Array(Highlight::Line)?)
-      @resp_lines_cache = nil.as(Array(String)?)
+      @resp_view_cache = nil.as(RespView?)
       @diff_lines_cache = nil.as(Array(Replay::DiffLine)?)
       @focus = :request
       @resp_mode = :response # :response | :diff
@@ -291,7 +291,7 @@ module Gori::Tui
     end
 
     def scroll(delta : Int32) : Nil
-      @scroll = (@scroll + delta).clamp(0, {resp_content.size - 1, 0}.max)
+      @scroll = (@scroll + delta).clamp(0, {resp_line_count - 1, 0}.max)
     end
 
     # --- rendering -----------------------------------------------------------
@@ -364,11 +364,12 @@ module Gori::Tui
     end
 
     private def render_response_body(screen : Screen, rect : Rect) : Nil
-      lines = response_styled
+      rv = resp_view
+      total = rv.total
       (0...rect.h).each do |i|
         li = @scroll + i
-        break if li >= lines.size
-        Highlight.draw(screen, rect.x, rect.y + i, lines[li], width: rect.w)
+        break if li >= total
+        Highlight.draw(screen, rect.x, rect.y + i, rv.line_at(li), width: rect.w) # styles only this visible line
       end
     end
 
@@ -389,44 +390,47 @@ module Gori::Tui
 
     # --- content ------------------------------------------------------------
 
-    private def resp_content : Array(String)
-      @resp_mode == :diff ? diff_lines.map(&.text) : response_lines
+    # The visible line count of the active response view (drives the scroll bound).
+    private def resp_line_count : Int32
+      @resp_mode == :diff ? diff_lines.size : resp_view.total
     end
 
-    # Pure functions of @result/@prev_result — memoized and dropped only when a
-    # new result is applied (reset_result_caches), so a held Replay tab isn't
-    # re-parsed / re-highlighted / re-diffed 20×/sec.
-    private def reset_result_caches : Nil
-      @resp_styled_cache = nil
-      @resp_lines_cache = nil
-      @diff_lines_cache = nil
-    end
+    # Windowed response: the head is styled eagerly; the body stays RAW and is styled
+    # ONE VISIBLE LINE AT A TIME at render, so a multi-MiB replayed response opens
+    # instantly instead of tokenising every off-screen line. (For the not-sent /
+    # error placeholders the whole content is the bounded `head`.) Mirrors the
+    # History detail windowing.
+    private record RespView,
+      head : Array(Highlight::Line),
+      body : Array(String),
+      kind : Symbol do
+      def total : Int32
+        head.size + body.size
+      end
 
-    private def response_lines : Array(String)
-      @resp_lines_cache ||= begin
-        result = @result
-        if !result
-          ["— not sent — press ^R to replay —"]
-        elsif !result.ok?
-          ["replay error: #{result.error}"]
-        else
-          message_lines(result.head, display_body(result.head, result.body))
-        end
+      def line_at(i : Int32) : Highlight::Line
+        return head[i] if i < head.size
+        Highlight.body_styled(body[i - head.size], kind)
       end
     end
 
-    # The response as styled lines — 1:1 in count with `response_lines` (which
-    # still backs the scroll bound), so the placeholder/error/ok branches stay
-    # in lockstep.
-    private def response_styled : Array(Highlight::Line)
-      @resp_styled_cache ||= begin
+    # Memoized + dropped only when a new result is applied (reset_result_caches), so
+    # a held Replay tab isn't re-parsed / re-highlighted / re-diffed 20×/sec.
+    private def reset_result_caches : Nil
+      @resp_view_cache = nil
+      @diff_lines_cache = nil
+    end
+
+    private def resp_view : RespView
+      @resp_view_cache ||= begin
         result = @result
         if !result
-          [[Highlight::Span.new("— not sent — press ^R to replay —", Theme::MUTED)]]
+          RespView.new([[Highlight::Span.new("— not sent — press ^R to replay —", Theme::MUTED)]], [] of String, :text)
         elsif !result.ok?
-          [[Highlight::Span.new("replay error: #{result.error}", Theme::RED)]]
+          RespView.new([[Highlight::Span.new("replay error: #{result.error}", Theme::RED)]], [] of String, :text)
         else
-          Highlight.message(result.head, display_body(result.head, result.body), request: false)
+          win = Highlight.message_windowed(result.head, display_body(result.head, result.body), request: false)
+          RespView.new(win.head, win.body, win.kind)
         end
       end
     end
