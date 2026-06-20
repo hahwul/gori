@@ -88,6 +88,10 @@ module Gori::Tui
       @quit_armed = false             # first ^D/^C arms quit; second confirms (avoids accidental exit)
       @findings_count = 0             # cached findings badge (count_findings is too costly to re-query per frame)
       @resized = false                # set on a Resize event → next frame full-repaints
+      # Live QL filter is debounced: typing updates the query text immediately but
+      # the (potentially O(rows)) search reload is deferred until typing pauses, so a
+      # big project doesn't lag a keystroke. nil = nothing pending.
+      @query_reload_at = nil.as(Time::Instant?)
       # Replay round-trips run off the UI fiber and deliver their Result here; the
       # run loop applies it to the originating view on a later tick (buffered so a
       # finished replay never blocks its background fiber).
@@ -166,6 +170,11 @@ module Gori::Tui
             apply_external_change
             dirty = true
           end
+        end
+        # Debounced QL filter: fire the deferred search once typing has paused.
+        if (deadline = @query_reload_at) && now >= deadline
+          flush_query_reload
+          dirty = true
         end
         render if dirty
         break unless @outcome == :running
@@ -953,22 +962,40 @@ module Gori::Tui
 
     # History QL bar: type to filter live (Tab completes a suggestion, Enter
     # keeps the filter, Esc clears it).
+    # How long to wait after the last QL keystroke before re-running the filter
+    # search. The query text shows instantly; only the result reload is deferred.
+    QUERY_DEBOUNCE = 110.milliseconds
+
+    # Defer the filter reload until typing pauses (coalesces a burst into one search).
+    private def schedule_query_reload : Nil
+      @query_reload_at = Time.instant + QUERY_DEBOUNCE
+    end
+
+    # Run a pending filter reload NOW (on leaving the bar, or when the debounce
+    # deadline passes). reload() always uses the latest @query, so this is never
+    # stale — only the timing is deferred.
+    private def flush_query_reload : Nil
+      return unless @query_reload_at
+      @query_reload_at = nil
+      @history.reload(@session.store)
+    end
+
     private def handle_query_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
       store = @session.store
       case
 
-      when key.enter?     then @history.stop_query
-      when key.escape?    then @history.cancel_query; @history.reload(store)
-      when key.tab?       then (@history.query_complete; @history.reload(store))
-      when key.backspace? then @history.query_backspace; @history.reload(store)
+      when key.enter?     then flush_query_reload; @history.stop_query
+      when key.escape?    then @query_reload_at = nil; @history.cancel_query; @history.reload(store)
+      when key.tab?       then (@history.query_complete; schedule_query_reload)
+      when key.backspace? then @history.query_backspace; schedule_query_reload
       when key.left?      then @history.query_move(-1)
       when key.right?     then @history.query_move(1)
       else
         if c && !ev.ctrl? && !ev.alt?
           @history.query_insert(c)
-          @history.reload(store)
+          schedule_query_reload
           @history.set_preedit("")  # clear preedit on committed char
         end
 
