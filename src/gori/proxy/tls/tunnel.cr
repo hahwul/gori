@@ -25,7 +25,18 @@ module Gori::Proxy::Tls
       # (and intercept-off) hosts keep the fast h2 relay.
       advertise_h2 = !(@interceptor.try(&.intercepts_host?(host)))
       server_ctx = @ca.context_for(host, advertise_h2: advertise_h2)
-      client_tls = OpenSSL::SSL::Socket::Server.new(client, server_ctx, sync_close: false, accept: true)
+      # sync_close: true is REQUIRED, not cosmetic. The h2/ws relays tear down by
+      # closing the socket the *other* pump fiber is mid-read on, to unblock it.
+      # With sync_close: false, OpenSSL::SSL::Socket#close does a *bidirectional*
+      # SSL_shutdown that READS the peer's close_notify — that read races the other
+      # fiber's SSL_read on the same SSL object and corrupts OpenSSL's read buffer
+      # (SIGSEGV in tls_get_more_records, seen under a browser's many h2 conns).
+      # sync_close: true makes shutdown write-only (it stops at the first 0 return)
+      # and closes the underlying transport, which unblocks the peer with no racing
+      # read. `client` (a PrefixIO over the raw socket) is then closed here; the
+      # ClientConn/​server close paths are all `rescue`-guarded, so the double close
+      # is a safe no-op.
+      client_tls = OpenSSL::SSL::Socket::Server.new(client, server_ctx, sync_close: true, accept: true)
       client_tls.sync = true
 
       # ALPN routing: if the client negotiated h2 with us, run the h2 relay
