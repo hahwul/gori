@@ -46,9 +46,31 @@ module Gori::Tui
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_scroll = 0
       @detail_pane = :request
-      # Styled detail body, rebuilt only when the detail/pane changes (NOT on scroll
-      # or every frame) — a multi-MiB body was being re-tokenised ~20×/sec.
-      @detail_styled_cache = nil.as(Array(Highlight::Line)?)
+      # Windowed detail content, rebuilt only when the detail/pane changes (NOT on
+      # scroll or every frame). The head/notes are pre-styled; the body is kept RAW
+      # and styled per VISIBLE line, so opening a multi-MiB response is instant
+      # instead of tokenising 100k+ off-screen lines up front.
+      @detail_cache = nil.as(DetailView?)
+    end
+
+    # head (styled, bounded) ++ body (raw, styled lazily per visible line) ++
+    # trailer (styled notes). For the WS/frames/grpc panes the whole content is in
+    # `head` (bounded); only a plain request/response body uses the windowed `body`.
+    private record DetailView,
+      head : Array(Highlight::Line),
+      body : Array(String),
+      kind : Symbol,
+      trailer : Array(Highlight::Line) do
+      def total : Int32
+        head.size + body.size + trailer.size
+      end
+
+      def line_at(i : Int32) : Highlight::Line
+        return head[i] if i < head.size
+        j = i - head.size
+        return Highlight.body_styled(body[j], kind) if j < body.size
+        trailer[j - body.size]
+      end
     end
 
     def set_scope(scope : Scope) : Nil
@@ -207,17 +229,17 @@ module Gori::Tui
       @detail_frames = (cid = @detail.try(&.h2_conn_id)) ? store.h2_frames(cid) : nil
       @detail_scroll = 0
       @detail_pane = :request
-      @detail_styled_cache = nil
+      @detail_cache = nil
       !@detail.nil?
     end
 
     def close_detail : Nil
       @detail = nil
-      @detail_styled_cache = nil
+      @detail_cache = nil
     end
 
     def scroll_detail(delta : Int32) : Nil
-      @detail_scroll = (@detail_scroll + delta).clamp(0, {detail_styled.size - 1, 0}.max)
+      @detail_scroll = (@detail_scroll + delta).clamp(0, {detail_view.total - 1, 0}.max)
     end
 
     # The detail sub-panes, in order: REQUEST → RESPONSE → FRAMES (the frames pane
@@ -239,7 +261,7 @@ module Gori::Tui
     private def set_detail_pane(pane : Symbol) : Nil
       @detail_pane = pane
       @detail_scroll = 0
-      @detail_styled_cache = nil # pane switch changes the styled content
+      @detail_cache = nil # pane switch changes the content
     end
 
     # Tab: cycle forward through the panes, wrapping back to REQUEST.
@@ -358,13 +380,14 @@ module Gori::Tui
       screen.text(x + 1, rect.y, "↑/↓ scroll · esc back", Theme::MUTED)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
-      lines = detail_styled
+      dv = detail_view
       top = rect.y + 2
       vis = {rect.bottom - top, 0}.max
+      total = dv.total
       (0...vis).each do |i|
         li = @detail_scroll + i
-        break if li >= lines.size
-        Highlight.draw(screen, rect.x + 1, top + i, lines[li], width: rect.w - 2)
+        break if li >= total
+        Highlight.draw(screen, rect.x + 1, top + i, dv.line_at(li), width: rect.w - 2) # styles only this visible line
       end
     end
 
@@ -454,51 +477,57 @@ module Gori::Tui
       @scroll = @scroll.clamp(0, {@rows.size - 1, 0}.max)
     end
 
-    # The detail body as styled lines (request/response head + body with HTTP
-    # syntax highlighting). The non-HTTP panes — raw h2 frames, WebSocket
-    # messages, opaque gRPC hex — carry no code to colour, so they wrap as plain
-    # body text; only their HTTP head (gRPC) gets highlighted.
-    private def detail_styled : Array(Highlight::Line)
-      cached = @detail_styled_cache
-      return cached if cached
-      @detail_styled_cache = build_detail_styled
+    # The detail content as a windowed view (request/response head + body with HTTP
+    # syntax highlighting). The non-HTTP panes — raw h2 frames, WebSocket messages,
+    # opaque gRPC hex — are bounded, so they go in `head` (eager, wrapped plain);
+    # only a plain request/response body is windowed (styled per visible line).
+    private def detail_view : DetailView
+      @detail_cache ||= build_detail_view
     end
 
-    private def build_detail_styled : Array(Highlight::Line)
+    EMPTY_LINES = [] of Highlight::Line
+
+    private def build_detail_view : DetailView
       detail = @detail
-      return [] of Highlight::Line unless detail
+      return DetailView.new(EMPTY_LINES, [] of String, :text, EMPTY_LINES) unless detail
       if @detail_pane == :frames && (frames = @detail_frames)
-        return wrap(frame_lines(frames, detail.h2_stream_id))
+        return DetailView.new(wrap(frame_lines(frames, detail.h2_stream_id)), [] of String, :text, EMPTY_LINES)
       end
       if @detail_pane == :response && (msgs = @detail_ws)
-        return wrap(ws_lines(msgs))
+        return DetailView.new(wrap(ws_lines(msgs)), [] of String, :text, EMPTY_LINES)
       end
       request = @detail_pane == :request
       head, body = request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
       truncated = request ? detail.request_body_truncated? : detail.response_body_truncated?
-      lines =
-        if (body && !body.empty?) && grpc_body?(head)
-          ls = Highlight.message(head, nil, request)
-          ls << Highlight::Line.new
-          ls.concat(wrap(grpc_lines(body)))
-          ls
-        else
-          # Decode compressed/chunked bodies for display (gzip/deflate/br/zstd +
-          # de-chunk). Storage stays the raw wire bytes; this is a derived view.
-          display, decode_note = Proxy::Codec::ContentDecode.decode(head, body)
-          ls = Highlight.message(head, display || body, request)
-          if decode_note
-            ls << Highlight::Line.new
-            color = (decode_note.includes?("unsupported") || decode_note.includes?("error")) ? Theme::YELLOW : Theme::GREEN
-            ls << [Highlight::Span.new("— #{decode_note} —", color)]
-          end
-          ls
-        end
+
+      trailer = [] of Highlight::Line
       if truncated
-        lines << Highlight::Line.new
-        lines << [Highlight::Span.new("— body truncated at capture limit (#{Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)} MiB); full size in the list —", Theme::YELLOW)]
+        trailer << Highlight::Line.new
+        trailer << [Highlight::Span.new("— body truncated at capture limit (#{Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)} MiB); full size in the list —", Theme::YELLOW)]
       end
-      lines
+
+      # gRPC: bounded framed hex view — style eagerly into `head`.
+      if (body && !body.empty?) && grpc_body?(head)
+        ls = Highlight.message(head, nil, request)
+        ls << Highlight::Line.new
+        ls.concat(wrap(grpc_lines(body)))
+        return DetailView.new(ls, [] of String, :text, trailer)
+      end
+
+      # Plain body → WINDOWED. Decode compressed/chunked bodies for display
+      # (gzip/deflate/br/zstd + de-chunk); storage stays the raw wire bytes. The head
+      # is styled eagerly; the (possibly multi-MiB) body stays RAW and is styled per
+      # visible line at render — so opening a huge response doesn't freeze the UI.
+      display, decode_note = Proxy::Codec::ContentDecode.decode(head, body)
+      win = Highlight.message_windowed(head, display || body, request)
+      if decode_note
+        note = [] of Highlight::Line
+        note << Highlight::Line.new
+        color = (decode_note.includes?("unsupported") || decode_note.includes?("error")) ? Theme::YELLOW : Theme::GREEN
+        note << [Highlight::Span.new("— #{decode_note} —", color)]
+        trailer = note + trailer # decode note before the truncation note
+      end
+      DetailView.new(win.head, win.body, win.kind, trailer)
     end
 
     # Wrap pre-formatted plain strings (frames / ws / gRPC hex) as single-span

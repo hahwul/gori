@@ -52,6 +52,41 @@ module Gori::Tui
       out
     end
 
+    # A message split for WINDOWED rendering: the head is small and pre-styled, but
+    # the body can be up to the 8 MiB capture cap (100k+ lines), so it's returned as
+    # RAW lines + the body `kind`. The caller styles only the visible window via
+    # `body_styled` — opening a huge response then never freezes the UI highlighting
+    # off-screen lines. `head` includes the blank head/body separator, so the styled
+    # output is `head ++ body.map { body_styled }` — identical to `message`.
+    record Windowed, head : Array(Line), body : Array(String), kind : Symbol
+
+    def self.message_windowed(head : Bytes?, body : Bytes?, request : Bool) : Windowed
+      head_lines = to_lines(head)
+      has_body = !(body.nil? || body.empty?)
+      kind = body_kind(content_type_in(head_lines))
+      styled = [] of Line
+      in_headers = true
+      head_lines.each_with_index do |raw, i|
+        if i == 0
+          styled << start_line(raw, request)
+        elsif raw.empty?
+          in_headers = false
+          styled << blank
+        elsif in_headers
+          styled << header_line(raw)
+        else
+          styled << plain(raw)
+        end
+      end
+      styled << blank if has_body # the head/body separator
+      Windowed.new(styled, has_body ? to_lines(body) : [] of String, kind)
+    end
+
+    # Style a single body line (the public seam for windowed rendering).
+    def self.body_styled(raw : String, kind : Symbol) : Line
+      body_line(raw, kind)
+    end
+
     # Highlight a message held as one combined text blob (Intercept's byte-exact
     # `raw`, and the Replay/Intercept editors). Splits head from body at the
     # first blank line and stays strictly 1:1 with `text.split('\n')`, so it can
