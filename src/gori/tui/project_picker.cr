@@ -6,6 +6,7 @@ require "./geometry"
 require "./screen"
 require "./theme"
 require "./frame"
+require "./confirm_dialog"
 
 module Gori::Tui
   # The startup screen: choose a project to open. New + Temp are always shown at
@@ -22,12 +23,15 @@ module Gori::Tui
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
       @results_scroll = 0
-      @mode = :list # :list | :new
+      @mode = :list # :list | :new | :confirm
       @name = ""
       @desc = ""
       @new_field = :name # :name | :desc (only in :new mode)
       @resized = false   # set on a Resize event → next frame full-repaints
       @preedit = ""      # live IME composing text for the active field (search/name/desc)
+      # Delete confirmation (project deletion is irreversible — wipes its dir).
+      @confirm = nil.as(ConfirmDialog?)
+      @pending_delete = nil.as(Project?)
     end
 
     def run : Project?
@@ -38,7 +42,11 @@ module Gori::Tui
           # termisu already resized its buffer; force a full repaint next frame.
           @resized = true
         when Termisu::Event::Key
-          result = @mode == :new ? handle_new(ev) : handle_list(ev)
+          result = case @mode
+                   when :new     then handle_new(ev)
+                   when :confirm then handle_confirm(ev)
+                   else               handle_list(ev)
+                   end
           case result
           when Project then return result
           when :quit   then return nil
@@ -114,7 +122,23 @@ module Gori::Tui
       elsif ev.ctrl? && key.lower_t?
         return open_temp
       elsif ev.ctrl? && key.lower_d?
-        delete_selected
+        request_delete
+      end
+      nil
+    end
+
+    # Delete confirmation: ←/→ or Tab choose, `y` delete, `n`/esc cancel, ↵ acts
+    # on the selection (which defaults to cancel). Other keys are swallowed.
+    private def handle_confirm(ev : Termisu::Event::Key) : Project | Symbol | Nil
+      @preedit = ""
+      dlg = @confirm
+      key = ev.key
+      case
+      when key.escape?, key.n?, ev.ctrl_c?                then cancel_confirm
+      when key.y?                                         then commit_delete
+      when key.left?, key.right?, key.tab?, key.back_tab? then dlg.try(&.move)
+      when key.enter?
+        (dlg.try(&.confirm_selected?)) ? commit_delete : cancel_confirm
       end
       nil
     end
@@ -158,13 +182,32 @@ module Gori::Tui
       nil
     end
 
-    private def delete_selected : Nil
+    # Open the delete-confirmation modal for the selected project (project
+    # deletion wipes its directory — irreversible, so it's always confirmed).
+    private def request_delete : Nil
       return if @selected < 3
       if project = filtered_projects[@selected - 3]?
+        @confirm = ConfirmDialog.new("DELETE PROJECT",
+          %(Delete "#{project.name}"?\nThis permanently removes all of its captured data.),
+          confirm_label: "delete", cancel_label: "cancel", danger: true)
+        @pending_delete = project
+        @mode = :confirm
+      end
+    end
+
+    private def commit_delete : Nil
+      if project = @pending_delete
         @registry.delete(project)
         @projects = @registry.list
         @selected = 2
       end
+      cancel_confirm
+    end
+
+    private def cancel_confirm : Nil
+      @mode = :list
+      @confirm = nil
+      @pending_delete = nil
     end
 
     private def handle_new(ev : Termisu::Event::Key) : Project | Symbol | Nil
@@ -219,6 +262,7 @@ module Gori::Tui
         render_new(screen, cx, cw, w, h)
       else
         render_list(screen, cx, cw, w, h)
+        @confirm.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :confirm
       end
       # Sync the terminal hardware cursor to the focused caret so the terminal's
       # own IME composition UI (jamo/candidate popup) anchors at the right cell —

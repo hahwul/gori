@@ -15,6 +15,7 @@ require "./project_view"
 require "./intercept_view"
 require "./scope_overlay"
 require "./rules_overlay"
+require "./confirm_dialog"
 require "./palette"
 require "./clipboard"
 require "./keybind"
@@ -56,7 +57,11 @@ module Gori::Tui
       @palette = PaletteState.new(@session.registry)
       @history.set_scope(@scope)
       @active_tab = :project
-      @overlay = :none # :none | :palette | :detail | :scope | :rules | :finding_new
+      @overlay = :none # :none | :palette | :detail | :scope | :rules | :finding_new | :confirm
+      # A destructive-action guard (delete project / close a sub-tab). When set,
+      # @overlay is :confirm; accepting runs @confirm_action.
+      @confirm = nil.as(ConfirmDialog?)
+      @confirm_action = nil.as(Proc(Nil)?)
       @focus = :menu                  # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
       @outcome = :running             # :running | :quit | :back
@@ -225,6 +230,7 @@ module Gori::Tui
       return handle_scope_key(ev) if @overlay == :scope
       return handle_rules_key(ev) if @overlay == :rules
       return handle_finding_new_key(ev) if @overlay == :finding_new
+      return handle_confirm_key(ev) if @overlay == :confirm
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       return handle_query_key(ev) if @active_tab == :history && @overlay == :none && @focus == :body && @history.querying?
@@ -355,6 +361,43 @@ module Gori::Tui
       end
     end
 
+    # Destructive-action confirmation modal: ←/→ or Tab move between [confirm]
+    # and [cancel]; `y` confirms, `n`/esc cancels, ↵ acts on the selection
+    # (which defaults to cancel). Other keys are swallowed so nothing leaks to the
+    # view behind it.
+    private def handle_confirm_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      case
+      when key.escape?, key.n?                          then close_confirm
+      when key.y?                                       then run_confirm
+      when key.left?, key.right?, key.tab?, key.back_tab? then @confirm.try(&.move)
+      when key.enter?
+        (@confirm.try(&.confirm_selected?)) ? run_confirm : close_confirm
+      end
+    end
+
+    # Open the confirmation modal for a destructive action; `action` runs only if
+    # the user accepts. Defaults to a red "danger" confirm button.
+    private def confirm(title : String, message : String, *, confirm_label : String = "delete",
+                        danger : Bool = true, &action : -> Nil) : Nil
+      @confirm = ConfirmDialog.new(title, message, confirm_label: confirm_label,
+        cancel_label: "cancel", danger: danger)
+      @confirm_action = action
+      @overlay = :confirm
+    end
+
+    private def run_confirm : Nil
+      action = @confirm_action
+      close_confirm
+      action.try(&.call)
+    end
+
+    private def close_confirm : Nil
+      @overlay = :none
+      @confirm = nil
+      @confirm_action = nil
+    end
+
     # Findings notes inline editor.
     private def handle_findings_notes_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
@@ -473,8 +516,19 @@ module Gori::Tui
       @toast = "new note (#{@notes.count}) — ^1-9 switch · ^W close · esc tabs"
     end
 
-    # Close the current note sub-tab (^W). NotesView keeps at least one open.
+    # Close the current note sub-tab (^W) — after a confirm, since the note's text
+    # is discarded. A blank note has nothing to lose, so it closes immediately.
+    # NotesView keeps at least one note open.
     private def notes_close : Nil
+      if @notes.current_blank?
+        do_notes_close
+        return
+      end
+      confirm("CLOSE NOTE", "Close \"#{@notes.current_label}\"?\nIts text will be discarded.",
+        confirm_label: "close") { do_notes_close }
+    end
+
+    private def do_notes_close : Nil
       @notes.close_note
       @toast = "closed note (#{@notes.count} open)"
     end
@@ -558,7 +612,7 @@ module Gori::Tui
       elsif ev.ctrl? && key.lower_r?
         replay_send
       elsif ev.ctrl? && key.lower_w?
-        close_replay_tab
+        request_close_replay
       elsif ev.ctrl? && key.lower_l?
         # Toggle auto Content-Length (recompute from the body on send).
         if view = current_replay_view
@@ -730,6 +784,7 @@ module Gori::Tui
       @scope_overlay.render(screen, layout.body) if @overlay == :scope
       @rules_overlay.render(screen, layout.body) if @overlay == :rules
       @finding_form.render(screen, layout.body) if @overlay == :finding_new
+      @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
 
       # Sync terminal hardware cursor to the focused input caret (if any view
       # called screen.cursor). This is critical for terminal IME preedit
@@ -782,6 +837,7 @@ module Gori::Tui
       when :rules       then "RULES"
       when :finding_new then "FINDING"
       when :detail      then "DETAIL"
+      when :confirm     then "CONFIRM"
       else
         @focus == :menu ? "TABS" : "BODY"
       end
@@ -796,6 +852,7 @@ module Gori::Tui
       when :scope       then "type host · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
       when :rules       then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
       when :finding_new then "type title · ↵ create · esc cancel"
+      when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :detail      then "↹ switch pane · ↑/↓ scroll · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
@@ -1194,6 +1251,15 @@ module Gori::Tui
       @active_tab = :replay
       @focus = :body
       @toast = "new replay — edit the request & target · ^R send · ^1-9 switch · esc back"
+    end
+
+    # Confirm before closing a replay sub-tab (^W) — the edited request and its
+    # last response are discarded. No-op when no replay is open.
+    private def request_close_replay : Nil
+      return unless tab = current_replay_tab
+      label = tab.flow_id ? "Replay ##{tab.flow_id}" : "this new replay"
+      confirm("CLOSE REPLAY", "Close #{label}?\nThe edited request and response are discarded.",
+        confirm_label: "close") { close_replay_tab }
     end
 
     # Close the current replay sub-tab so they don't accumulate without bound

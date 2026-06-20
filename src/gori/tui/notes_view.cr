@@ -61,6 +61,18 @@ module Gori::Tui
       @notes.size
     end
 
+    # The current note's sub-tab label (first non-blank line, or "note N") — used
+    # by the Runner's close-confirmation message.
+    def current_label : String
+      current.label(@current.clamp(0, @notes.size - 1))
+    end
+
+    # True when the current note has no content worth confirming the loss of (so
+    # closing it can skip the confirmation modal).
+    def current_blank? : Bool
+      current.area.first_nonblank_line.nil?
+    end
+
     def set_preedit(text : String) : Nil
       current.area.set_preedit(text)
     end
