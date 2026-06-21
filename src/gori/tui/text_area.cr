@@ -154,9 +154,9 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil) : Nil
       return if rect.empty?
       ensure_visible(rect.h)
-      gw = @gutter ? Gutter.width(@lines.size) : 0
-      cx0 = rect.x + gw         # content start x (after the optional gutter)
-      cw = {rect.w - gw, 0}.max # content width
+      gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0 # never exceed the pane
+      cx0 = rect.x + gw                                          # content start x (after the optional gutter)
+      cw = {rect.w - gw, 0}.max                                  # content width
       styled = highlight ? highlighted(highlight) : nil
       (0...rect.h).each do |i|
         li = @scroll + i

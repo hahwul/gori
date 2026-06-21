@@ -292,7 +292,9 @@ module Gori::Tui
     # insensitive). Empty in hex mode (the hex view has no text lines).
     def detail_search_lines(query : String) : Array(Int32)
       hits = [] of Int32
-      return hits if query.empty? || @detail_hex
+      # FRAMES has no hex view, so it renders as text even when @detail_hex is set —
+      # match the render/goto predicate so search agrees (not a bare @detail_hex).
+      return hits if query.empty? || (@detail_hex && @detail_pane != :frames)
       q = query.downcase
       dv = detail_view
       (0...dv.total).each { |i| hits << i if dv.line_text(i).downcase.includes?(q) }
@@ -563,7 +565,7 @@ module Gori::Tui
 
       dv = detail_view
       total = dv.total
-      gw = Gutter.width(total)
+      gw = {Gutter.width(total), body.w}.min
       cw = {body.w - gw, 0}.max
       (0...body.h).each do |i|
         li = @detail_scroll + i

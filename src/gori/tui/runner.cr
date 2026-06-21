@@ -350,6 +350,7 @@ module Gori::Tui
 
     private def apply_preedit(text : String) : Nil
       return @command.set_preedit(text) if @command_open # the ":" line wins (it's modal)
+      return if @goto_open                                # ^G is digits-only; swallow IME (don't leak to the editor)
       if @search_open                                     # ^F find — IME composing text
         @search_preedit = text
         return
@@ -1253,7 +1254,7 @@ module Gori::Tui
         @search_buffer = @search_buffer[0, {@search_buffer.size - 1, 0}.max]
         @search_preedit = ""
         search_refresh
-      elsif c && !ev.ctrl? && !ev.alt?
+      elsif c && !c.control? && !ev.ctrl? && !ev.alt? # control? drops Tab/\n etc. (Space stays)
         @search_buffer += c
         @search_preedit = ""
         search_refresh
@@ -1267,6 +1268,7 @@ module Gori::Tui
     end
 
     private def search_step(dir : Int32) : Nil
+      @search_hits = search_lines_for(@search_target, @search_buffer) # re-find: the content may have changed
       return if @search_hits.empty?
       @search_idx = (@search_idx + dir) % @search_hits.size
       jump_to_match

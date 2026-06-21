@@ -353,10 +353,10 @@ module Gori::Tui
     end
 
     # ^G go-to-line in the request editor (no-op in hex mode — the TextArea is stale).
+    # Pure navigation → does NOT dirty the tab (no content change to persist/lock).
     def goto_request_line(n : Int32) : Nil
       return unless @focus == :request && !request_hex?
       @editor.goto_line(n)
-      @dirty = true
     end
 
     # ^F search in the request editor: 0-based line indices containing `query`.
@@ -521,7 +521,7 @@ module Gori::Tui
     private def render_response_body(screen : Screen, rect : Rect) : Nil
       rv = resp_view
       total = rv.total
-      gw = Gutter.width(total)
+      gw = {Gutter.width(total), rect.w}.min
       cw = {rect.w - gw, 0}.max
       (0...rect.h).each do |i|
         li = @scroll + i
@@ -533,7 +533,7 @@ module Gori::Tui
 
     private def render_diff(screen : Screen, rect : Rect) : Nil
       data = diff_lines
-      gw = Gutter.width(data.size)
+      gw = {Gutter.width(data.size), rect.w}.min
       cw = {rect.w - gw, 0}.max
       (0...rect.h).each do |i|
         di = @scroll + i
