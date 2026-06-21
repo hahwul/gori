@@ -20,6 +20,7 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @editor = TextArea.new
+      @editor.gutter = true # line numbers in the held-message editor (pairs with ^G)
       @editing = false
       @loaded_id = nil.as(Int64?) # which item the editor currently holds
       # Cached highlight of the selected held item's raw bytes (read-only detail
@@ -98,6 +99,19 @@ module Gori::Tui
 
     def edit_move(dr : Int32, dc : Int32) : Nil
       @editor.move(dr, dc) if @editing
+    end
+
+    # ^G go-to-line / ^F search in the held-message editor (only while editing).
+    def edit_goto_line(n : Int32) : Nil
+      @editor.goto_line(n) if @editing
+    end
+
+    def edit_search_lines(query : String) : Array(Int32)
+      @editing ? @editor.search_lines(query) : [] of Int32
+    end
+
+    def search_hl=(q : String) : Nil
+      @editor.search_hl = q
     end
 
     def editor_text : String

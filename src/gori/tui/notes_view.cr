@@ -125,6 +125,10 @@ module Gori::Tui
       current.area.search_lines(query)
     end
 
+    def search_hl=(q : String) : Nil
+      current.area.search_hl = q
+    end
+
     # Cursor on the first line → ↑ pops focus to the tab bar (after saving).
     def at_top? : Bool
       current.area.at_top?

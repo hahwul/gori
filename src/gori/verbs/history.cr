@@ -88,6 +88,13 @@ module Gori
       r.register Verb::Definition.new(
         "detail.toggle-hex", "Hex view", "Toggle a raw hex dump of the request/response bytes",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("x")], hidden: true) { |ctx| ctx.toggle_detail_hex; nil }
+
+      # ^R replays the open flow (mirrors history.replay from the list) — close the
+      # detail first so it doesn't float over the Replay tab.
+      r.register Verb::Definition.new(
+        "detail.replay", "Replay flow", "Open this flow in the Replay tab",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("r", ctrl: true)],
+        hidden: true) { |ctx| ctx.close_detail; ctx.replay_selected; nil }
     end
 
     # Builds a registry with every built-in verb registered.

@@ -1188,9 +1188,10 @@ module Gori::Tui
         return nil unless v
         return :replay_request if v.focus == :request && !v.request_hex?
         :replay_response if v.focus == :response
-      when :notes   then :notes
-      when :project then :project
-      else               nil
+      when :notes     then :notes
+      when :project   then :project
+      when :intercept then @intercept.editing? ? :intercept : nil # only the held-message editor
+      else                 nil
       end
     end
 
@@ -1225,6 +1226,7 @@ module Gori::Tui
       when :notes           then @notes.goto_line(n)
       when :project         then @project_view.goto_line(n)
       when :detail          then @history.goto_detail_line(n)
+      when :intercept       then @intercept.edit_goto_line(n)
       end
     end
 
@@ -1235,7 +1237,20 @@ module Gori::Tui
       when :notes           then @notes.search_lines(query)
       when :project         then @project_view.search_lines(query)
       when :detail          then @history.detail_search_lines(query)
+      when :intercept       then @intercept.edit_search_lines(query)
       else                       [] of Int32
+      end
+    end
+
+    # Push the active ^F query to the target view so it highlights matches (cleared
+    # with "" on close). Routes like jump_line; replay covers both panes.
+    private def set_search_hl(q : String) : Nil
+      case @search_target
+      when :replay_request, :replay_response then current_replay_view.try { |v| v.search_hl = q }
+      when :notes                            then @notes.search_hl = q
+      when :project                          then @project_view.search_hl = q
+      when :detail                           then @history.search_hl = q
+      when :intercept                        then @intercept.search_hl = q
       end
     end
 
@@ -1264,6 +1279,7 @@ module Gori::Tui
     private def search_refresh : Nil
       @search_hits = search_lines_for(@search_target, @search_buffer)
       @search_idx = 0
+      set_search_hl(@search_buffer) # highlight matches in the target view
       jump_to_match
     end
 
@@ -1289,6 +1305,7 @@ module Gori::Tui
     end
 
     private def close_search : Nil
+      set_search_hl("") # clear the match highlight on the target view
       @search_open = false
       @search_preedit = ""
     end

@@ -7,6 +7,7 @@ require "./hex_view"
 require "./hex_edit"
 require "./text_area"
 require "./gutter"
+require "./search_hi"
 require "../store"
 require "../replay/engine"
 require "../replay/h2_engine"
@@ -30,6 +31,7 @@ module Gori::Tui
       @tcx = 0 # target cursor
       @editor = TextArea.new
       @editor.gutter = true # line numbers in the request body (pairs with ^G)
+      @search_hl = ""       # active ^F query → highlight in the response pane (request is via @editor)
       @original_lines = [] of String
       @result = nil.as(Replay::Result?)
       @prev_result = nil.as(Replay::Result?) # the previous send's result — the diff baseline
@@ -365,6 +367,12 @@ module Gori::Tui
       @editor.search_lines(query)
     end
 
+    # ^F highlight: route to the request editor + the response pane (same query).
+    def search_hl=(q : String) : Nil
+      @editor.search_hl = q
+      @search_hl = q
+    end
+
     # --- target field (focus == :target) ---
     def target_insert(ch : Char) : Nil
       @target = "#{@target[0, @tcx]}#{ch}#{@target[@tcx..]}"
@@ -528,6 +536,7 @@ module Gori::Tui
         break if li >= total
         Gutter.draw(screen, rect.x, rect.y + i, li, gw)
         Highlight.draw(screen, rect.x + gw, rect.y + i, rv.line_at(li), width: cw) # styles only this visible line
+        SearchHi.mark(screen, rect.x + gw, rect.y + i, rv.line_text(li), @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
     end
 
@@ -545,7 +554,9 @@ module Gori::Tui
                         else            {' ', Theme::MUTED}
                         end
         Gutter.draw(screen, rect.x, rect.y + i, di, gw)
-        screen.text(rect.x + gw, rect.y + i, "#{prefix} #{d.text}", color, width: cw)
+        dtext = "#{prefix} #{d.text}"
+        screen.text(rect.x + gw, rect.y + i, dtext, color, width: cw)
+        SearchHi.mark(screen, rect.x + gw, rect.y + i, dtext, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
     end
 

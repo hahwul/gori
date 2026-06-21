@@ -4,6 +4,7 @@ require "./frame"
 require "./highlight"
 require "./hex_view"
 require "./gutter"
+require "./search_hi"
 require "../store"
 require "../ql"
 require "../scope"
@@ -48,6 +49,7 @@ module Gori::Tui
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_scroll = 0
       @detail_pane = :request
+      @search_hl = ""                    # active ^F query → highlight in the detail body
       @detail_hex = false                # 'x' toggles a raw hex dump of the current pane (req/resp)
       @detail_hex_bytes = nil.as(Bytes?) # cached combined head+body for the current pane (hex source)
       # Windowed detail content, rebuilt only when the detail/pane changes (NOT on
@@ -290,6 +292,8 @@ module Gori::Tui
 
     # ^F search: 0-based indices of the detail text lines containing `query` (case-
     # insensitive). Empty in hex mode (the hex view has no text lines).
+    setter search_hl : String
+
     def detail_search_lines(query : String) : Array(Int32)
       hits = [] of Int32
       # FRAMES has no hex view, so it renders as text even when @detail_hex is set —
@@ -572,6 +576,7 @@ module Gori::Tui
         break if li >= total
         Gutter.draw(screen, body.x, body.y + i, li, gw)
         Highlight.draw(screen, body.x + gw, body.y + i, dv.line_at(li), width: cw) # styles only this visible line
+        SearchHi.mark(screen, body.x + gw, body.y + i, dv.line_text(li), @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
     end
 
