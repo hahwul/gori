@@ -363,12 +363,18 @@ module Gori::Tui
       end
 
       time_x = rect.x + 1
-      method_x = rect.x + 16 # time column widened to fit MM-DD HH:MM:SS …
+      method_x = rect.x + 16 # time column widened to fit MM-DD HH:MM:SS
       proto_x = rect.x + 24
-      host_x = rect.x + 31 # … absorbed by HOST so PATH/STATUS keep their columns
-      path_x = rect.x + 56
-      status_x = {rect.right - 7, path_x + 4}.max
-      host_w = {path_x - host_x - 1, 1}.max
+      host_x = rect.x + 31
+      # Right cluster anchored to the edge: STATUS · SIZE · DUR (response size +
+      # latency — frequently-scanned). HOST+PATH share the middle responsively so
+      # both stay readable from ~80 cols up to wide terminals.
+      status_x = {rect.right - 21, host_x + 10}.max
+      size_x = status_x + 7
+      dur_x = status_x + 14
+      mid = status_x - host_x
+      host_w = (mid * 2 // 5).clamp(8, 40)
+      path_x = host_x + host_w + 1
       path_w = {status_x - path_x - 1, 1}.max
 
       screen.text(time_x, hdr_y, "TIME", Theme::MUTED)
@@ -377,6 +383,8 @@ module Gori::Tui
       screen.text(host_x, hdr_y, "HOST", Theme::MUTED)
       screen.text(path_x, hdr_y, "PATH", Theme::MUTED)
       screen.text(status_x, hdr_y, "STATUS", Theme::MUTED)
+      screen.text(size_x, hdr_y, "SIZE", Theme::MUTED)
+      screen.text(dur_x, hdr_y, "DUR", Theme::MUTED)
       Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
 
       list_top = hdr_y + 2
@@ -409,6 +417,8 @@ module Gori::Tui
         screen.text(path_x, y, origin_path(row.target), fg, bg, width: path_w)
         status = row.status.try(&.to_s) || "···"
         screen.text(status_x, y, status, Theme.status_color(row.status), bg)
+        screen.text(size_x, y, fmt_size(row.response_size), Theme::MUTED, bg, width: 6)
+        screen.text(dur_x, y, fmt_dur(row.duration_us), Theme::MUTED, bg, width: {rect.right - dur_x, 1}.max)
       end
     end
 
@@ -416,6 +426,26 @@ module Gori::Tui
     # The brief date makes flows captured across days/sessions legible at a glance.
     private def fmt_time(created_at : Int64) : String
       Time.unix(created_at // 1_000_000).to_local.to_s("%m-%d %H:%M:%S")
+    end
+
+    # Compact response size (B/KB/MB), bounded to ≤6 cols. "—" until the response lands.
+    private def fmt_size(bytes : Int64?) : String
+      return "—" unless bytes
+      return "#{bytes}B" if bytes < 1024
+      if bytes < 1024 * 1024
+        kb = bytes / 1024.0
+        return kb < 10 ? "#{kb.round(1)}KB" : "#{kb.round.to_i}KB"
+      end
+      mb = bytes / (1024.0 * 1024.0)
+      mb < 10 ? "#{mb.round(1)}MB" : "#{mb.round.to_i}MB"
+    end
+
+    # Compact request→response latency (ms/s), bounded. "—" until the response lands.
+    private def fmt_dur(us : Int64?) : String
+      return "—" unless us
+      ms = us // 1000
+      return "#{ms}ms" if ms < 1000
+      "#{(ms / 1000.0).round(1)}s"
     end
 
     # Display the request target in origin-form. Plaintext forward-proxy requests

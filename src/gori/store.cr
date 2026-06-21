@@ -386,7 +386,7 @@ module Gori
 
     SELECT_ROW = <<-SQL
       SELECT id, created_at, scheme, method, host, port, target, status,
-             request_size, response_size, state
+             request_size, response_size, state, duration_us
       FROM flows
       SQL
 
@@ -432,7 +432,7 @@ module Gori
     def get_flow(id : Int64) : FlowDetail?
       @db.query(<<-SQL, id) do |rs|
         SELECT id, created_at, scheme, method, host, port, target, status,
-               request_size, response_size, state,
+               request_size, response_size, state, duration_us,
                http_version, request_head, request_body, response_head, response_body,
                h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated
         FROM flows WHERE id = ?
@@ -770,8 +770,9 @@ module Gori
       req_size = rs.read(Int64)
       resp_size = rs.read(Int64?)
       state = FlowState.new(rs.read(Int32))
+      duration_us = rs.read(Int64?)
       FlowRow.new(id, created_at, scheme, method, host, port, target,
-        status, req_size + (resp_size || 0_i64), state)
+        status, req_size + (resp_size || 0_i64), state, resp_size, duration_us)
     end
 
     # Non-blocking best-effort publish: if the TUI is behind and the channel is
