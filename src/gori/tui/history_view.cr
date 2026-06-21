@@ -75,6 +75,15 @@ module Gori::Tui
         return Highlight.body_styled(body[j], kind) if j < body.size
         trailer[j - body.size]
       end
+
+      # Plain text of line `i` for searching — joins head/trailer spans and returns
+      # body lines raw, so it never re-styles (keeps ^F cheap on a huge body).
+      def line_text(i : Int32) : String
+        return head[i].map(&.text).join if i < head.size
+        j = i - head.size
+        return body[j] if j < body.size
+        trailer[j - body.size].map(&.text).join
+      end
     end
 
     def set_scope(scope : Scope) : Nil
@@ -277,6 +286,17 @@ module Gori::Tui
     # (interpreted in the active pane/mode — request/response/frames/hex row).
     def goto_detail_line(n : Int32) : Nil
       @detail_scroll = (n - 1).clamp(0, detail_scroll_max)
+    end
+
+    # ^F search: 0-based indices of the detail text lines containing `query` (case-
+    # insensitive). Empty in hex mode (the hex view has no text lines).
+    def detail_search_lines(query : String) : Array(Int32)
+      hits = [] of Int32
+      return hits if query.empty? || @detail_hex
+      q = query.downcase
+      dv = detail_view
+      (0...dv.total).each { |i| hits << i if dv.line_text(i).downcase.includes?(q) }
+      hits
     end
 
     private def detail_scroll_max : Int32

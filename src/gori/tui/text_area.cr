@@ -137,6 +137,15 @@ module Gori::Tui
       @lines.size
     end
 
+    # ^F search: 0-based indices of lines containing `query` (case-insensitive).
+    def search_lines(query : String) : Array(Int32)
+      hits = [] of Int32
+      return hits if query.empty?
+      q = query.downcase
+      @lines.each_with_index { |l, i| hits << i if l.downcase.includes?(q) }
+      hits
+    end
+
     # `highlight` overlays request/response syntax colours on the buffer while
     # keeping it fully editable: pass `:request` or `:response` for the held
     # HTTP message editors (Replay, Intercept), nil for plain prose (Notes,

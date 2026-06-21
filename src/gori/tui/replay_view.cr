@@ -359,6 +359,12 @@ module Gori::Tui
       @dirty = true
     end
 
+    # ^F search in the request editor: 0-based line indices containing `query`.
+    def request_search_lines(query : String) : Array(Int32)
+      return [] of Int32 if request_hex?
+      @editor.search_lines(query)
+    end
+
     # --- target field (focus == :target) ---
     def target_insert(ch : Char) : Nil
       @target = "#{@target[0, @tcx]}#{ch}#{@target[@tcx..]}"
@@ -409,6 +415,21 @@ module Gori::Tui
     # (interpreted in the currently-shown mode — response/diff/hex row).
     def goto_response_line(n : Int32) : Nil
       @scroll = (n - 1).clamp(0, {resp_line_count - 1, 0}.max)
+    end
+
+    # ^F search in the response pane: 0-based line indices containing `query` in the
+    # CURRENTLY-shown mode (response text or diff). Empty in hex mode.
+    def response_search_lines(query : String) : Array(Int32)
+      hits = [] of Int32
+      return hits if query.empty? || @resp_hex
+      q = query.downcase
+      if @resp_mode == :diff
+        diff_lines.each_with_index { |d, i| hits << i if d.text.downcase.includes?(q) }
+      else
+        rv = resp_view
+        (0...rv.total).each { |i| hits << i if rv.line_text(i).downcase.includes?(q) }
+      end
+      hits
     end
 
     # --- rendering -----------------------------------------------------------
@@ -557,6 +578,11 @@ module Gori::Tui
       def line_at(i : Int32) : Highlight::Line
         return head[i] if i < head.size
         Highlight.body_styled(body[i - head.size], kind)
+      end
+
+      # Plain text of line `i` for searching — body lines raw (no re-styling).
+      def line_text(i : Int32) : String
+        i < head.size ? head[i].map(&.text).join : body[i - head.size]
       end
     end
 

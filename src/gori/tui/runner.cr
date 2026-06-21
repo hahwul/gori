@@ -85,6 +85,14 @@ module Gori::Tui
       @goto_open = false
       @goto_buffer = ""
       @goto_target = :none
+      # The ^F incremental search prompt — sibling of ^G; finds matching lines in the
+      # focused view and steps through them (↑/↓/↵). @search_preedit carries IME text.
+      @search_open = false
+      @search_buffer = ""
+      @search_preedit = ""
+      @search_target = :none
+      @search_hits = [] of Int32
+      @search_idx = 0
       # A destructive-action guard (delete project / close a sub-tab). When set,
       # @overlay is :confirm; accepting runs @confirm_action.
       @confirm = nil.as(ConfirmDialog?)
@@ -342,6 +350,10 @@ module Gori::Tui
 
     private def apply_preedit(text : String) : Nil
       return @command.set_preedit(text) if @command_open # the ":" line wins (it's modal)
+      if @search_open                                     # ^F find — IME composing text
+        @search_preedit = text
+        return
+      end
       # Route preedit to whichever input is active so composing text (e.g. Hangul
       # jamo building into a syllable) shows live with an underline, until it
       # commits (a normal char insert then clears the preedit). The dispatch
@@ -394,11 +406,16 @@ module Gori::Tui
       @toast = nil # clear last action's feedback; a new action may set it again
       return handle_command_key(ev) if @command_open # the ":" line is modal while up
       return handle_goto_key(ev) if @goto_open       # the ^G line prompt is modal while up
-      # ^G opens a "go to line" prompt for the focused multi-line view — editors move
-      # the cursor, the read-only response/detail panes scroll. A modifier key, so it
-      # works inside text editors without conflicting with typing (no vim modes).
+      return handle_search_key(ev) if @search_open   # the ^F find prompt is modal while up
+      # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
+      # multi-line view (editors move the cursor, read-only panes scroll). Modifier
+      # keys, so they work inside text editors without conflicting with typing.
       if ev.ctrl? && ev.key.lower_g? && (tgt = goto_target)
         open_goto(tgt)
+        return
+      end
+      if ev.ctrl? && ev.key.lower_f? && (tgt = goto_target)
+        open_search(tgt)
         return
       end
       return handle_palette_key(ev) if @overlay == :palette
@@ -1195,13 +1212,83 @@ module Gori::Tui
     end
 
     private def apply_goto(n : Int32) : Nil
-      case @goto_target
+      jump_line(@goto_target, n)
+    end
+
+    # Jump a target view to 1-based line `n` (cursor for editors, scroll for the
+    # read-only panes). Shared by ^G go-to-line and ^F search.
+    private def jump_line(target : Symbol, n : Int32) : Nil
+      case target
       when :replay_request  then current_replay_view.try(&.goto_request_line(n))
       when :replay_response then current_replay_view.try(&.goto_response_line(n))
       when :notes           then @notes.goto_line(n)
       when :project         then @project_view.goto_line(n)
       when :detail          then @history.goto_detail_line(n)
       end
+    end
+
+    private def search_lines_for(target : Symbol, query : String) : Array(Int32)
+      case target
+      when :replay_request  then current_replay_view.try(&.request_search_lines(query)) || [] of Int32
+      when :replay_response then current_replay_view.try(&.response_search_lines(query)) || [] of Int32
+      when :notes           then @notes.search_lines(query)
+      when :project         then @project_view.search_lines(query)
+      when :detail          then @history.detail_search_lines(query)
+      else                       [] of Int32
+      end
+    end
+
+    # ^F incremental search: text input (IME via @search_preedit); ↑/↓/↵ step through
+    # matching lines (wraps); esc closes. Recomputes + jumps on each edit.
+    private def handle_search_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        close_search
+      elsif key.enter? || key.down?
+        search_step(1)
+      elsif key.up?
+        search_step(-1)
+      elsif key.backspace?
+        @search_buffer = @search_buffer[0, {@search_buffer.size - 1, 0}.max]
+        @search_preedit = ""
+        search_refresh
+      elsif c && !ev.ctrl? && !ev.alt?
+        @search_buffer += c
+        @search_preedit = ""
+        search_refresh
+      end
+    end
+
+    private def search_refresh : Nil
+      @search_hits = search_lines_for(@search_target, @search_buffer)
+      @search_idx = 0
+      jump_to_match
+    end
+
+    private def search_step(dir : Int32) : Nil
+      return if @search_hits.empty?
+      @search_idx = (@search_idx + dir) % @search_hits.size
+      jump_to_match
+    end
+
+    private def jump_to_match : Nil
+      return if @search_hits.empty?
+      jump_line(@search_target, @search_hits[@search_idx] + 1) # hits are 0-based; jump is 1-based
+    end
+
+    private def open_search(target : Symbol) : Nil
+      @search_target = target
+      @search_buffer = ""
+      @search_preedit = ""
+      @search_hits = [] of Int32
+      @search_idx = 0
+      @search_open = true
+    end
+
+    private def close_search : Nil
+      @search_open = false
+      @search_preedit = ""
     end
 
     private def current_scope : Verb::Scope
@@ -1258,6 +1345,7 @@ module Gori::Tui
       # the bottom: the input on the status row, the suggestion list stacked above.
       @command.render(screen, layout.status, layout.body) if @command_open
       render_goto_prompt(screen, layout.status) if @goto_open
+      render_search_prompt(screen, layout.status) if @search_open
 
       # Sync terminal hardware cursor to the focused input caret (if any view
       # called screen.cursor). This is critical for terminal IME preedit
@@ -1334,7 +1422,7 @@ module Gori::Tui
       when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser     then "↑/↓ select · ↵ open · esc cancel"
       when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
-      when :detail      then "←/→ panes (REQ·RES·FRAMES) · ↑/↓ scroll · ^G goto · esc back"
+      when :detail      then "←/→ panes (REQ·RES·FRAMES) · ↑/↓ scroll · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-8 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
@@ -1357,14 +1445,14 @@ module Gori::Tui
         if current_replay_view.try(&.request_hex?)
           "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit"
         else
-          "↹ pane · type to edit · ^R send · ^L auto-len · ^G goto · ^X hex (req) · x hex (resp) · ^N new · ^W close · esc tabs"
+          "↹ pane · type to edit · ^R send · ^L auto-len · ^G goto · ^F find · ^X hex (req) · x hex (resp) · ^N new · ^W close · esc tabs"
         end
-      when :notes    then "type to edit · ^N new · ^W close · ^G goto · ^1-9 switch · ↹/esc tabs"
+      when :notes    then "type to edit · ^N new · ^W close · ^G goto · ^F find · ^1-9 switch · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
         @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
                                : "↑/↓ move · ↵ open · n new · d delete · : cmds · esc tabs"
-      when :project  then "type to edit description · ↑/↓/↔ move · ^G goto · ↵ nl · esc tabs"
+      when :project  then "type to edit description · ↑/↓/↔ move · ^G goto · ^F find · ↵ nl · esc tabs"
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"
       end
     end
@@ -1497,6 +1585,27 @@ module Gori::Tui
       screen.text(rect.x, rect.y, prefix, Theme::ACCENT, Theme::PANEL)
       x = rect.x + prefix.size
       screen.input_line(x, rect.y, @goto_buffer, @goto_buffer.size, "", Theme::TEXT_BRIGHT, Theme::PANEL, width: {rect.right - x, 0}.max)
+    end
+
+    private def render_search_prompt(screen : Screen, rect : Rect) : Nil
+      return if rect.w < 8
+      screen.fill(rect, Theme::PANEL)
+      prefix = "find: "
+      screen.text(rect.x, rect.y, prefix, Theme::ACCENT, Theme::PANEL)
+      x = rect.x + prefix.size
+      # match count (or "no matches") right-aligned; dim "esc done · ↑↓ next" hint after the input
+      count = if @search_buffer.empty? && @search_preedit.empty?
+                ""
+              elsif @search_hits.empty?
+                "no matches"
+              else
+                "#{@search_idx + 1}/#{@search_hits.size}"
+              end
+      suffix = count.empty? ? "↵/↑↓ step · esc done" : "#{count}  ↵/↑↓ step · esc done"
+      sx = {rect.right - suffix.size, x}.max
+      iw = {sx - x - 1, 0}.max
+      screen.input_line(x, rect.y, @search_buffer, @search_buffer.size, @search_preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: iw)
+      screen.text(sx, rect.y, suffix, @search_hits.empty? && !@search_buffer.empty? ? Theme::YELLOW : Theme::MUTED, Theme::PANEL)
     end
 
     def current_tab : Symbol

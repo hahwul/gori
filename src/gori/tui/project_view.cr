@@ -99,6 +99,10 @@ module Gori::Tui
       @desc_area.goto_line(n)
     end
 
+    def search_lines(query : String) : Array(Int32)
+      @desc_area.search_lines(query)
+    end
+
     # Cursor on the first description line → ↑ pops focus to the tab bar (after saving).
     def at_top? : Bool
       @desc_area.at_top?
