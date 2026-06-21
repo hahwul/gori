@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./highlight"
+require "./hex_view"
 require "../store"
 require "../ql"
 require "../scope"
@@ -46,6 +47,8 @@ module Gori::Tui
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_scroll = 0
       @detail_pane = :request
+      @detail_hex = false                # 'x' toggles a raw hex dump of the current pane (req/resp)
+      @detail_hex_bytes = nil.as(Bytes?) # cached combined head+body for the current pane (hex source)
       # Windowed detail content, rebuilt only when the detail/pane changes (NOT on
       # scroll or every frame). The head/notes are pre-styled; the body is kept RAW
       # and styled per VISIBLE line, so opening a multi-MiB response is instant
@@ -230,6 +233,7 @@ module Gori::Tui
       @detail_scroll = 0
       @detail_pane = :request
       @detail_cache = nil
+      @detail_hex_bytes = nil
       !@detail.nil?
     end
 
@@ -238,6 +242,13 @@ module Gori::Tui
       @detail_cache = nil
       @detail_frames = nil # release the h2-frame / ws-message payload arrays (can be MiB)
       @detail_ws = nil
+      @detail_hex_bytes = nil
+    end
+
+    # 'x' toggles a raw hex dump of the current pane (request/response bytes).
+    def toggle_detail_hex : Nil
+      @detail_hex = !@detail_hex
+      @detail_scroll = 0 # row-based offset differs from the line-based one
     end
 
     # Re-fetch the currently-open detail from the store (e.g. a peer instance filled
@@ -251,11 +262,50 @@ module Gori::Tui
       @detail_ws = fresh.row.status == 101 ? store.ws_messages(id) : nil
       @detail_frames = (cid = fresh.h2_conn_id) ? store.h2_frames(cid) : nil
       @detail_cache = nil # content changed → rebuild (windowed) on next render
+      @detail_hex_bytes = nil
       true
     end
 
     def scroll_detail(delta : Int32) : Nil
-      @detail_scroll = (@detail_scroll + delta).clamp(0, {detail_view.total - 1, 0}.max)
+      @detail_scroll = (@detail_scroll + delta).clamp(0, detail_scroll_max)
+    end
+
+    private def detail_scroll_max : Int32
+      if @detail_hex && (bytes = detail_pane_bytes)
+        {HexView.rows(bytes.size) - 1, 0}.max
+      else
+        {detail_view.total - 1, 0}.max
+      end
+    end
+
+    # Whether the current pane supports the hex view (raw request/response bytes;
+    # the FRAMES pane is a synthetic log, not raw bytes).
+    private def detail_hex?(detail : Store::FlowDetail) : Bool
+      @detail_hex && @detail_pane != :frames
+    end
+
+    # Combined head+body bytes for the current pane (the hex source), cached — built
+    # only while hex is shown, invalidated on detail/pane change.
+    private def detail_pane_bytes : Bytes?
+      return @detail_hex_bytes if @detail_hex_bytes
+      detail = @detail
+      return nil unless detail
+      head, body = case @detail_pane
+                   when :response then {detail.response_head, detail.response_body}
+                   when :request  then {detail.request_head, detail.request_body}
+                   else                {nil, nil} # frames: no raw-bytes hex
+                   end
+      @detail_hex_bytes = combine_bytes(head, body)
+    end
+
+    private def combine_bytes(head : Bytes?, body : Bytes?) : Bytes?
+      return nil if head.nil? && (body.nil? || body.empty?)
+      return head || Bytes.empty if body.nil? || body.empty?
+      return body if head.nil?
+      io = IO::Memory.new(head.size + body.size)
+      io.write(head)
+      io.write(body)
+      io.to_slice
     end
 
     # The detail sub-panes, in order: REQUEST → RESPONSE → FRAMES (the frames pane
@@ -277,7 +327,8 @@ module Gori::Tui
     private def set_detail_pane(pane : Symbol) : Nil
       @detail_pane = pane
       @detail_scroll = 0
-      @detail_cache = nil # pane switch changes the content
+      @detail_cache = nil     # pane switch changes the content
+      @detail_hex_bytes = nil # …and the hex source bytes
     end
 
     # Tab: cycle forward through the panes, wrapping back to REQUEST.
@@ -393,17 +444,22 @@ module Gori::Tui
           active ? Theme::ACCENT_BG : Theme::BG,
           attr: active ? Attribute::Bold : Attribute::None) + 1
       end
-      screen.text(x + 1, rect.y, "↑/↓ scroll · esc back", Theme::MUTED)
+      hex = detail_hex?(detail)
+      screen.text(x + 1, rect.y, "↑/↓ scroll · #{hex ? "x:text" : "x:hex"} · esc back", Theme::MUTED)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
+      body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
+      if hex && (bytes = detail_pane_bytes)
+        HexView.render(screen, body, bytes, @detail_scroll)
+        return
+      end
+
       dv = detail_view
-      top = rect.y + 2
-      vis = {rect.bottom - top, 0}.max
       total = dv.total
-      (0...vis).each do |i|
+      (0...body.h).each do |i|
         li = @detail_scroll + i
         break if li >= total
-        Highlight.draw(screen, rect.x + 1, top + i, dv.line_at(li), width: rect.w - 2) # styles only this visible line
+        Highlight.draw(screen, body.x, body.y + i, dv.line_at(li), width: body.w) # styles only this visible line
       end
     end
 

@@ -46,6 +46,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def move_detail_pane(dir : Int32) : Nil; end
 
+  def toggle_detail_hex : Nil; end
+
   def replay_selected : Nil; end
 
   def replay_new : Nil; end

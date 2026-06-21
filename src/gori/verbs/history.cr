@@ -85,6 +85,10 @@ module Gori
       r.register Verb::Definition.new(
         "detail.toggle-pane", "Switch pane (cycle)", "Cycle REQ → RES → FRAMES",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("tab")], hidden: true) { |ctx| ctx.toggle_detail_pane; nil }
+
+      r.register Verb::Definition.new(
+        "detail.toggle-hex", "Hex view", "Toggle a raw hex dump of the request/response bytes",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("x")], hidden: true) { |ctx| ctx.toggle_detail_hex; nil }
     end
 
     # Builds a registry with every built-in verb registered.

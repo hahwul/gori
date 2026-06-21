@@ -3,6 +3,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./highlight"
+require "./hex_view"
 require "./text_area"
 require "../store"
 require "../replay/engine"
@@ -35,6 +36,8 @@ module Gori::Tui
       # and the LCS diff lines.
       @resp_view_cache = nil.as(RespView?)
       @diff_lines_cache = nil.as(Array(Replay::DiffLine)?)
+      @resp_hex = false                # 'x' toggles a raw hex dump of the response bytes
+      @resp_hex_bytes = nil.as(Bytes?) # cached combined head+body of the last result (hex source)
       @focus = :request
       @resp_mode = :response # :response | :diff
       @scroll = 0
@@ -297,6 +300,23 @@ module Gori::Tui
       @scroll = 0
     end
 
+    # 'x' toggles a raw hex dump of the response bytes (overrides response/diff).
+    def toggle_resp_hex : Nil
+      @resp_hex = !@resp_hex
+      @scroll = 0 # row-based offset differs from the line-based one
+    end
+
+    getter? resp_hex : Bool
+
+    # Combined head+body of the last result (hex source), cached; nil when not sent
+    # or errored. Invalidated when a new result is applied (reset_result_caches).
+    private def resp_hex_bytes : Bytes?
+      return @resp_hex_bytes if @resp_hex_bytes
+      result = @result
+      return nil unless result && result.ok?
+      @resp_hex_bytes = combine(result.head, result.body)
+    end
+
     def scroll(delta : Int32) : Nil
       @scroll = (@scroll + delta).clamp(0, {resp_line_count - 1, 0}.max)
     end
@@ -359,15 +379,24 @@ module Gori::Tui
     private def render_response(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "RESPONSE", bg: Theme::BG, border: pane_border(focused))
-      # response | diff toggle rides the top border, right of the title
+      # response | diff | hex toggle rides the top border, right of the title. When
+      # hex is on it lights instead of response/diff (x toggles it).
       tx = rect.x + 12
-      tx = screen.text(tx, rect.y, " response ", @resp_mode == :response ? Theme::TEXT_BRIGHT : Theme::MUTED,
-        @resp_mode == :response ? Theme::ACCENT_BG : Theme::BG) + 1
-      screen.text(tx, rect.y, " diff ", @resp_mode == :diff ? Theme::TEXT_BRIGHT : Theme::MUTED,
-        @resp_mode == :diff ? Theme::ACCENT_BG : Theme::BG)
+      tx = screen.text(tx, rect.y, " response ", !@resp_hex && @resp_mode == :response ? Theme::TEXT_BRIGHT : Theme::MUTED,
+        !@resp_hex && @resp_mode == :response ? Theme::ACCENT_BG : Theme::BG) + 1
+      tx = screen.text(tx, rect.y, " diff ", !@resp_hex && @resp_mode == :diff ? Theme::TEXT_BRIGHT : Theme::MUTED,
+        !@resp_hex && @resp_mode == :diff ? Theme::ACCENT_BG : Theme::BG) + 1
+      screen.text(tx, rect.y, " hex ", @resp_hex ? Theme::TEXT_BRIGHT : Theme::MUTED,
+        @resp_hex ? Theme::ACCENT_BG : Theme::BG)
 
       body = rect.inset(1, 1)
-      @resp_mode == :diff ? render_diff(screen, body) : render_response_body(screen, body)
+      if @resp_hex
+        (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to replay —", Theme::MUTED)
+      elsif @resp_mode == :diff
+        render_diff(screen, body)
+      else
+        render_response_body(screen, body)
+      end
     end
 
     private def render_response_body(screen : Screen, rect : Rect) : Nil
@@ -399,7 +428,13 @@ module Gori::Tui
 
     # The visible line count of the active response view (drives the scroll bound).
     private def resp_line_count : Int32
-      @resp_mode == :diff ? diff_lines.size : resp_view.total
+      if @resp_hex
+        (bytes = resp_hex_bytes) ? HexView.rows(bytes.size) : 1
+      elsif @resp_mode == :diff
+        diff_lines.size
+      else
+        resp_view.total
+      end
     end
 
     # Windowed response: the head is styled eagerly; the body stays RAW and is styled
@@ -426,6 +461,7 @@ module Gori::Tui
     private def reset_result_caches : Nil
       @resp_view_cache = nil
       @diff_lines_cache = nil
+      @resp_hex_bytes = nil
     end
 
     private def resp_view : RespView

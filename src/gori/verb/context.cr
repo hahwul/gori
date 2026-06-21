@@ -38,6 +38,8 @@ module Gori
       # Walk the detail panes (REQ→RES→FRAMES) by `dir` (+1 right, −1 left); left
       # past REQUEST returns to the History list.
       abstract def move_detail_pane(dir : Int32) : Nil
+      # Toggle a raw hex dump of the current detail pane (request/response bytes).
+      abstract def toggle_detail_hex : Nil
 
       # replay workbench (editing + focus/pane toggles are handled inline, not via verbs)
       abstract def replay_selected : Nil # load History's selection into Replay

@@ -993,6 +993,7 @@ module Gori::Tui
       when key.down?             then view.scroll(1)
       when key.left?, key.right? then view.toggle_resp_mode
       when key.lower_d?          then view.toggle_resp_mode
+      when key.lower_x?          then view.toggle_resp_hex
       end
     end
 
@@ -1211,7 +1212,7 @@ module Gori::Tui
       when :intercept
         @intercept.editing? ? "type to edit · ^R forward · ⇧↹ queue · esc tabs" \
                             : "↑/↓ move · ↵/e edit · f forward · d drop · F all · ↹ detail · esc tabs"
-      when :replay   then "↹ pane · type to edit · ^R send · ^L auto-len · ^N new · ^1-9 switch · ^W close · esc tabs"
+      when :replay   then "↹ pane · type to edit · ^R send · ^L auto-len · x hex (resp) · ^N new · ^1-9 switch · ^W close · esc tabs"
       when :notes    then "type to edit · ^N new · ^W close · ^1-9 switch · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
@@ -1582,6 +1583,10 @@ module Gori::Tui
     def move_detail_pane(dir : Int32) : Nil
       moved = @history.detail_pane_advance(dir)
       close_detail if !moved && dir < 0
+    end
+
+    def toggle_detail_hex : Nil
+      @history.toggle_detail_hex
     end
 
     def replay_selected : Nil
