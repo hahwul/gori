@@ -20,7 +20,7 @@ module Gori
         [Verb::Chord.new("right"), Verb::Chord.new("l")], hidden: true) { |ctx| ctx.sitemap_expand; nil }
 
       r.register Verb::Definition.new(
-        "sitemap.collapse", "Collapse node", "Collapse the node (or back to the menu)", Verb::Scope::Sitemap,
+        "sitemap.collapse", "Collapse node", "Collapse the selected node (esc goes back to the menu)", Verb::Scope::Sitemap,
         [Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.sitemap_collapse; nil }
 
       r.register Verb::Definition.new(

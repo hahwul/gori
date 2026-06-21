@@ -1558,7 +1558,7 @@ module Gori::Tui
     end
 
     def sitemap_collapse : Nil
-      focus_pane(:menu) unless @sitemap.collapse
+      @sitemap.collapse # ← collapses the node; at the root it's a no-op (esc goes up, not ←)
     end
 
     def move_selection(delta : Int32) : Nil

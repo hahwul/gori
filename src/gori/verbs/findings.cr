@@ -32,7 +32,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "findings.leave", "Back to menu", "Return focus to the tab menu", Verb::Scope::Findings,
-        [Verb::Chord.new("left"), Verb::Chord.new("h"), Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:menu); nil }
+        [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:menu); nil } # esc only; ← was a tab-bar overshoot
 
       # finding detail
       r.register Verb::Definition.new(

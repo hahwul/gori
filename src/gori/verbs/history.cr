@@ -15,9 +15,8 @@ module Gori
         "body.up", "Select previous flow", "Move selection up", Verb::Scope::Body,
         [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.move_selection(-1); nil }
 
-      r.register Verb::Definition.new(
-        "body.leave", "Back to tab bar", "Return focus to the tab bar", Verb::Scope::Body,
-        [Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.focus_pane(:menu); nil }
+      # (No left/h → tab bar here: ← was an easy overshoot when walking back out of
+      #  the detail's REQ/RES panes. esc (body.to-menu) / ↑-at-top go up instead.)
 
       r.register Verb::Definition.new(
         "body.open", "Open flow detail", "View the selected request/response", Verb::Scope::Body,
