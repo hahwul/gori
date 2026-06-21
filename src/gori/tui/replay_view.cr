@@ -6,6 +6,7 @@ require "./highlight"
 require "./hex_view"
 require "./hex_edit"
 require "./text_area"
+require "./gutter"
 require "../store"
 require "../replay/engine"
 require "../replay/h2_engine"
@@ -28,6 +29,7 @@ module Gori::Tui
       @target = ""
       @tcx = 0 # target cursor
       @editor = TextArea.new
+      @editor.gutter = true # line numbers in the request body (pairs with ^G)
       @original_lines = [] of String
       @result = nil.as(Replay::Result?)
       @prev_result = nil.as(Replay::Result?) # the previous send's result — the diff baseline
@@ -498,15 +500,20 @@ module Gori::Tui
     private def render_response_body(screen : Screen, rect : Rect) : Nil
       rv = resp_view
       total = rv.total
+      gw = Gutter.width(total)
+      cw = {rect.w - gw, 0}.max
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= total
-        Highlight.draw(screen, rect.x, rect.y + i, rv.line_at(li), width: rect.w) # styles only this visible line
+        Gutter.draw(screen, rect.x, rect.y + i, li, gw)
+        Highlight.draw(screen, rect.x + gw, rect.y + i, rv.line_at(li), width: cw) # styles only this visible line
       end
     end
 
     private def render_diff(screen : Screen, rect : Rect) : Nil
       data = diff_lines
+      gw = Gutter.width(data.size)
+      cw = {rect.w - gw, 0}.max
       (0...rect.h).each do |i|
         di = @scroll + i
         break if di >= data.size
@@ -516,7 +523,8 @@ module Gori::Tui
                         when .del? then {'-', Theme::RED}
                         else            {' ', Theme::MUTED}
                         end
-        screen.text(rect.x, rect.y + i, "#{prefix} #{d.text}", color, width: rect.w)
+        Gutter.draw(screen, rect.x, rect.y + i, di, gw)
+        screen.text(rect.x + gw, rect.y + i, "#{prefix} #{d.text}", color, width: cw)
       end
     end
 

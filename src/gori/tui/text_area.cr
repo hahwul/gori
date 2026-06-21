@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./highlight"
+require "./gutter"
 
 module Gori::Tui
   # A minimal multi-line text editor for inline editing (e.g. the Replay
@@ -18,8 +19,11 @@ module Gori::Tui
       # which highlight symbol it was built for.
       @styled = nil.as(Array(Highlight::Line)?)
       @styled_kind = nil.as(Symbol?)
+      @gutter = false # left line-number gutter (on for the Replay request body)
       set_text(text)
     end
+
+    setter gutter : Bool
 
     def set_text(text : String) : Nil
       @lines = text.split('\n').map(&.rstrip('\r'))
@@ -141,42 +145,46 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil) : Nil
       return if rect.empty?
       ensure_visible(rect.h)
+      gw = @gutter ? Gutter.width(@lines.size) : 0
+      cx0 = rect.x + gw         # content start x (after the optional gutter)
+      cw = {rect.w - gw, 0}.max # content width
       styled = highlight ? highlighted(highlight) : nil
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= @lines.size
+        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: li == @cy) if @gutter
         line = @lines[li]
         if styled && (sl = styled[li]?)
-          Highlight.draw(screen, rect.x, rect.y + i, sl, width: rect.w)
+          Highlight.draw(screen, cx0, rect.y + i, sl, width: cw)
         else
           if li == @cy && !@preedit.empty?
             prefix = line[0, @cx]
             suffix = line[@cx..]
-            px = rect.x
+            px = cx0
             if !prefix.empty?
-              screen.text(px, rect.y + i, prefix, Theme::TEXT, width: rect.w)
+              screen.text(px, rect.y + i, prefix, Theme::TEXT, width: cw)
               px += Screen.display_width(prefix)
             end
             if !@preedit.empty?
-              screen.text(px, rect.y + i, @preedit, Theme::TEXT, attr: Attribute::Underline, width: rect.w - (px - rect.x))
+              screen.text(px, rect.y + i, @preedit, Theme::TEXT, attr: Attribute::Underline, width: cw - (px - cx0))
               px += Screen.display_width(@preedit)
             end
             if !suffix.empty?
-              screen.text(px, rect.y + i, suffix, Theme::TEXT, width: rect.w - (px - rect.x))
+              screen.text(px, rect.y + i, suffix, Theme::TEXT, width: cw - (px - cx0))
             end
           else
-            screen.text(rect.x, rect.y + i, line, Theme::TEXT, width: rect.w)
+            screen.text(cx0, rect.y + i, line, Theme::TEXT, width: cw)
           end
         end
         next unless cursor && li == @cy
         prefix_w = Screen.display_width(line[0, @cx])
         preedit_w = Screen.display_width(@preedit)
-        cxs = rect.x + prefix_w + preedit_w
-        screen.cursor(cxs, rect.y + i) if cxs < rect.x + rect.w
-        if cxs < rect.x + rect.w
+        cxs = cx0 + prefix_w + preedit_w
+        screen.cursor(cxs, rect.y + i) if cxs < cx0 + cw
+        if cxs < cx0 + cw
+          cgw = [Screen.display_width((@preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]).to_s), 1].max
           ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
-          gw = [Screen.display_width(ch.to_s), 1].max
-          (0...gw).each do |off|
+          (0...cgw).each do |off|
             cch = (off == 0 ? ch : ' ')
             screen.cell(cxs + off, rect.y + i, cch, Theme::BG, Theme::ACCENT)
           end

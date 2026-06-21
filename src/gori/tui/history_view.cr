@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./highlight"
 require "./hex_view"
+require "./gutter"
 require "../store"
 require "../ql"
 require "../scope"
@@ -542,10 +543,13 @@ module Gori::Tui
 
       dv = detail_view
       total = dv.total
+      gw = Gutter.width(total)
+      cw = {body.w - gw, 0}.max
       (0...body.h).each do |i|
         li = @detail_scroll + i
         break if li >= total
-        Highlight.draw(screen, body.x, body.y + i, dv.line_at(li), width: body.w) # styles only this visible line
+        Gutter.draw(screen, body.x, body.y + i, li, gw)
+        Highlight.draw(screen, body.x + gw, body.y + i, dv.line_at(li), width: cw) # styles only this visible line
       end
     end
 
