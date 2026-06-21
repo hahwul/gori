@@ -16,14 +16,15 @@ private def tmp_store(&)
   end
 end
 
-private def add_flow(store, method, target, status = nil)
+private def add_flow(store, method, target, status = nil, content_type = nil)
   id = store.insert_flow(Gori::Store::CapturedRequest.new(
     created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
     method: method, target: target, http_version: "HTTP/1.1",
     head: "#{method} #{target} HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
   if status
     store.update_response(Gori::Store::CapturedResponse.new(
-      flow_id: id, status: status, head: "HTTP/1.1 #{status} X\r\n\r\nbody".to_slice, body: "body".to_slice))
+      flow_id: id, status: status, head: "HTTP/1.1 #{status} X\r\n\r\nbody".to_slice,
+      body: "body".to_slice, content_type: content_type))
   end
   id
 end
@@ -83,7 +84,7 @@ describe Gori::Tui::HistoryView do
 
   it "renders the traffic list with method/path/status columns" do
     tmp_store do |store|
-      add_flow(store, "GET", "/search", 200)
+      add_flow(store, "GET", "/search", 200, "application/json; charset=utf-8")
       add_flow(store, "POST", "/orders", 500)
       view = HistoryView.new
       view.reload(store)
@@ -91,7 +92,9 @@ describe Gori::Tui::HistoryView do
       backend = MemoryBackend.new(80, 12)
       view.render_list(Screen.new(backend), Rect.new(0, 0, 80, 12))
       backend.contains?("METHOD").should be_true
-      backend.contains?("STA").should be_true # status column header (3-wide, sized to the code)
+      backend.contains?("STA").should be_true  # status column header (3-wide, sized to the code)
+      backend.contains?("TYPE").should be_true # MIME column header
+      backend.contains?("json").should be_true # application/json → compact "json" (params dropped)
       backend.contains?("GET").should be_true
       backend.contains?("/search").should be_true
       backend.contains?("500").should be_true

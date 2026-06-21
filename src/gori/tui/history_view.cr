@@ -366,13 +366,14 @@ module Gori::Tui
       method_x = rect.x + 16 # time column widened to fit MM-DD HH:MM:SS
       proto_x = rect.x + 24
       host_x = rect.x + 31
-      # Right cluster anchored to the edge: STA · SIZE · DUR (status code, response
-      # size, latency — frequently-scanned). STA is sized to the 3-digit code, not a
-      # wide header. HOST+PATH share the middle responsively so both stay readable
-      # from ~80 cols up to wide terminals.
-      status_x = {rect.right - 17, host_x + 10}.max
-      size_x = status_x + 4
-      dur_x = status_x + 11
+      # Right cluster anchored to the edge: STA · TYPE · SIZE · DUR (status code,
+      # response MIME, size, latency — frequently-scanned). STA is sized to the
+      # 3-digit code; TYPE shows a compact MIME (json/html/png…). HOST+PATH share the
+      # middle responsively so both stay readable from ~80 cols up to wide terminals.
+      status_x = {rect.right - 24, host_x + 10}.max
+      type_x = status_x + 4
+      size_x = status_x + 11
+      dur_x = status_x + 18
       mid = status_x - host_x
       host_w = (mid * 2 // 5).clamp(8, 40)
       path_x = host_x + host_w + 1
@@ -384,6 +385,7 @@ module Gori::Tui
       screen.text(host_x, hdr_y, "HOST", Theme::MUTED)
       screen.text(path_x, hdr_y, "PATH", Theme::MUTED)
       screen.text(status_x, hdr_y, "STA", Theme::MUTED)
+      screen.text(type_x, hdr_y, "TYPE", Theme::MUTED)
       screen.text(size_x, hdr_y, "SIZE", Theme::MUTED)
       screen.text(dur_x, hdr_y, "DUR", Theme::MUTED)
       Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
@@ -418,6 +420,7 @@ module Gori::Tui
         screen.text(path_x, y, origin_path(row.target), fg, bg, width: path_w)
         status = row.status.try(&.to_s) || "···"
         screen.text(status_x, y, status, Theme.status_color(row.status), bg)
+        screen.text(type_x, y, fmt_mime(row.content_type), Theme::MUTED, bg, width: 6)
         screen.text(size_x, y, fmt_size(row.response_size), Theme::MUTED, bg, width: 6)
         screen.text(dur_x, y, fmt_dur(row.duration_us), Theme::MUTED, bg, width: {rect.right - dur_x, 1}.max)
       end
@@ -447,6 +450,24 @@ module Gori::Tui
       ms = us // 1000
       return "#{ms}ms" if ms < 1000
       "#{(ms / 1000.0).round(1)}s"
+    end
+
+    # Compact response MIME — the useful subtype (json/html/png/js…), params dropped.
+    # "—" until the response lands. Clipped to the column width by the caller.
+    private def fmt_mime(ct : String?) : String
+      return "—" unless ct
+      main = ct.split(';', 2)[0].strip.downcase
+      return "—" if main.empty?
+      sub = main.includes?('/') ? main.split('/', 2)[1] : main
+      case
+      when sub.in?("javascript", "x-javascript", "ecmascript") then "js"
+      when sub == "x-www-form-urlencoded"                      then "form"
+      when sub == "octet-stream"                               then "bin"
+      when sub == "plain"                                      then "text"
+      when sub.ends_with?("+json")                             then "json"
+      when sub.ends_with?("+xml")                              then sub == "svg+xml" ? "svg" : "xml"
+      else                                                          sub.lchop("vnd.").lchop("x-")
+      end
     end
 
     # Display the request target in origin-form. Plaintext forward-proxy requests

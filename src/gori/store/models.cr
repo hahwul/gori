@@ -75,9 +75,11 @@ module Gori
       getter state : FlowState
       getter response_size : Int64? # response bytes alone (nil until the response lands)
       getter duration_us : Int64?   # request→response latency in µs (nil until complete)
+      getter content_type : String? # response Content-Type header (nil until the response lands)
 
       def initialize(@id, @created_at, @scheme, @method, @host, @port, @target,
-                     @status, @size, @state, @response_size = nil, @duration_us = nil)
+                     @status, @size, @state, @response_size = nil, @duration_us = nil,
+                     @content_type = nil)
       end
     end
 
