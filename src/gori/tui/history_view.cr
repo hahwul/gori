@@ -577,7 +577,7 @@ module Gori::Tui
       end
       hex = detail_hex?(detail)
       ws = @reveal && !hex
-      mode_hint = hex ? "x:text" : (ws ? "w:raw" : "x:hex · w:ws")
+      mode_hint = hex ? "x:text" : (ws ? "b:raw" : "x:hex · b:ws")
       screen.text(x + 1, rect.y, "↑/↓ scroll · #{mode_hint} · esc back", Theme::MUTED)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 

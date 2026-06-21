@@ -1094,7 +1094,7 @@ module Gori::Tui
       when key.left?, key.right? then view.toggle_resp_mode
       when key.lower_d?          then view.toggle_resp_mode
       when key.lower_x?          then view.toggle_resp_hex
-      when key.lower_w?          then toggle_reveal
+      when key.lower_b?          then toggle_reveal
       end
     end
 

@@ -91,7 +91,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "detail.toggle-ws", "Reveal whitespace", "Show whitespace/CR/LF as glyphs (·→␍␊)",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("w")], hidden: true) { |ctx| ctx.toggle_reveal; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("b")], hidden: true) { |ctx| ctx.toggle_reveal; nil }
 
       # ^R replays the open flow (mirrors history.replay from the list) — close the
       # detail first so it doesn't float over the Replay tab.
