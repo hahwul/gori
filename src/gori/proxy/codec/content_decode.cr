@@ -103,9 +103,9 @@ module Gori::Proxy::Codec
         line = String.new(body[pos, eol - pos]).strip
         pos = eol + 1
         semi = line.index(';')
-        hex = semi ? line[0...semi] : line
-        size = hex.to_i?(base: 16)
-        break if size.nil? || size <= 0 # 0 = terminating chunk; nil/negative = malformed
+        hex = (semi ? line[0...semi] : line).strip
+        size = hex.each_char.all?(&.to_i?(16)) ? hex.to_i?(base: 16) : nil # pure hex only (reject +/garbage)
+        break if size.nil? || size <= 0                                    # 0 = terminating chunk; nil/negative = malformed
         avail = {size, body.size - pos}.min
         out.write(body[pos, avail])
         break if avail < size # truncated mid-chunk

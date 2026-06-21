@@ -236,6 +236,22 @@ module Gori::Tui
     def close_detail : Nil
       @detail = nil
       @detail_cache = nil
+      @detail_frames = nil # release the h2-frame / ws-message payload arrays (can be MiB)
+      @detail_ws = nil
+    end
+
+    # Re-fetch the currently-open detail from the store (e.g. a peer instance filled
+    # in the response, or appended ws/h2 frames) WITHOUT resetting the pane/scroll.
+    # No-op when no detail is open. Returns true if it refreshed.
+    def refresh_detail(store : Store) : Bool
+      return false unless detail = @detail
+      id = detail.row.id
+      return false unless fresh = store.get_flow(id)
+      @detail = fresh
+      @detail_ws = fresh.row.status == 101 ? store.ws_messages(id) : nil
+      @detail_frames = (cid = fresh.h2_conn_id) ? store.h2_frames(cid) : nil
+      @detail_cache = nil # content changed → rebuild (windowed) on next render
+      true
     end
 
     def scroll_detail(delta : Int32) : Nil

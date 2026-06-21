@@ -241,7 +241,10 @@ module Gori::Proxy::Codec
     private def self.parse_chunk_size(line : Bytes) : Int64?
       s = String.new(line).strip
       semi = s.index(';')
-      hex = semi ? s[0...semi] : s
+      hex = (semi ? s[0...semi] : s).strip
+      # Pure hex only: to_i64?(base:16) would otherwise accept a leading '+' (and the
+      # >= 0 guard only catches '-'), a weak smuggling primitive vs a stricter peer.
+      return nil if hex.empty? || !hex.each_char.all?(&.to_i?(16))
       n = hex.to_i64?(base: 16)
       n && n >= 0 ? n : nil
     end

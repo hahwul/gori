@@ -57,7 +57,7 @@ module Gori
       # First whitespace-delimited token of the request = the method (for framing).
       private def self.request_method(request : Bytes) : String
         head = String.new(request[0, {request.size, 16}.min])
-        head.split(' ').first? || "GET"
+        head.split.first? || "GET" # no-arg split collapses leading/runs of whitespace
       end
     end
   end

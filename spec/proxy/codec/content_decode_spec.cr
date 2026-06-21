@@ -59,6 +59,12 @@ describe Gori::Proxy::Codec::ContentDecode do
     note.should eq("de-chunked")
   end
 
+  it "treats a chunk size with a leading '+' as malformed (no smuggled length)" do
+    decoded, _ = decode(head("HTTP/1.1 200 OK", "Transfer-Encoding: chunked"),
+      "+5\r\nhello\r\n0\r\n\r\n".to_slice)
+    String.new(decoded || Bytes.empty).should_not contain("hello") # "+5" must NOT parse as size 5
+  end
+
   it "reports an unsupported encoding instead of decoding to garbage" do
     _, note = decode(head("HTTP/1.1 200 OK", "Content-Encoding: compress"), "rawbytes".to_slice)
     note.not_nil!.should contain("unsupported")

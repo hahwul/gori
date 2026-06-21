@@ -26,8 +26,8 @@ module Gori::Tui
       # pane). Held bytes are immutable and item ids are monotonic, so the id is a
       # perfect cache key — recomputed only when the selection changes, not on
       # every render (a held body was re-tokenised on each repaint).
-      @detail_styled = nil.as(Array(Highlight::Line)?)
-      @detail_styled_id = nil.as(Int64?)
+      @detail_win = nil.as(Highlight::Windowed?)
+      @detail_win_id = nil.as(Int64?)
     end
 
     # Fresh snapshot (cheap; called on enter AND every frame via the 50ms loop).
@@ -195,21 +195,23 @@ module Gori::Tui
       if @editing && @loaded_id == it.id
         @editor.render(screen, inner, cursor: focused, highlight: mode)
       else
-        styled = detail_styled_for(it)
-        styled.each_with_index do |line, i|
-          break if i >= inner.h
-          Highlight.draw(screen, inner.x, inner.y + i, line, width: inner.w)
+        win = detail_window_for(it)
+        total = win.total
+        (0...inner.h).each do |i|
+          break if i >= total
+          Highlight.draw(screen, inner.x, inner.y + i, win.line_at(i), width: inner.w) # styles only the visible line
         end
       end
     end
 
-    # Highlight the held item's raw bytes, cached by item id (held bytes never
-    # change; ids never repeat) so the detail pane isn't re-tokenised every frame.
-    private def detail_styled_for(it : Interceptor::Item) : Array(Highlight::Line)
-      cached = @detail_styled
-      return cached if cached && @detail_styled_id == it.id
-      @detail_styled_id = it.id
-      @detail_styled = Highlight.from_lines(String.new(it.raw).split('\n').map(&.rstrip('\r')), it.kind.request?)
+    # Windowed view of the held item's raw bytes, cached by item id (held bytes
+    # never change; ids never repeat). The head is styled eagerly, the body kept RAW
+    # and styled per visible line — a multi-MiB held body no longer freezes the UI
+    # fiber on selection (mirrors the History/Replay windowing).
+    private def detail_window_for(it : Interceptor::Item) : Highlight::Windowed
+      return @detail_win.not_nil! if (cached = @detail_win) && @detail_win_id == it.id
+      @detail_win_id = it.id
+      @detail_win = Highlight.from_lines_windowed(String.new(it.raw).split('\n').map(&.rstrip('\r')), it.kind.request?)
     end
 
     private def ensure_visible(h : Int32) : Nil

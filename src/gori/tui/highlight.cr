@@ -58,7 +58,16 @@ module Gori::Tui
     # `body_styled` — opening a huge response then never freezes the UI highlighting
     # off-screen lines. `head` includes the blank head/body separator, so the styled
     # output is `head ++ body.map { body_styled }` — identical to `message`.
-    record Windowed, head : Array(Line), body : Array(String), kind : Symbol
+    record Windowed, head : Array(Line), body : Array(String), kind : Symbol do
+      def total : Int32
+        head.size + body.size
+      end
+
+      # The styled line at absolute index `i` (head pre-styled, body styled lazily).
+      def line_at(i : Int32) : Line
+        i < head.size ? head[i] : Highlight.body_styled(body[i - head.size], kind)
+      end
+    end
 
     def self.message_windowed(head : Bytes?, body : Bytes?, request : Bool) : Windowed
       head_lines = to_lines(head)
@@ -108,6 +117,25 @@ module Gori::Tui
           body_line(raw, kind)
         end
       end
+    end
+
+    # Windowed variant of `from_lines` for a combined-text message (Intercept's
+    # held bytes): the head (start line + headers + the blank separator) is styled
+    # eagerly, the body kept RAW + styled per visible line — so a multi-MiB held
+    # body doesn't freeze the UI on selection.
+    def self.from_lines_windowed(all : Array(String), request : Bool) : Windowed
+      sep = all.index("")
+      kind = body_kind(content_type_in(all))
+      if sep.nil?
+        head = all.map_with_index { |raw, i| i == 0 ? start_line(raw, request) : header_line(raw) }
+        return Windowed.new(head, [] of String, kind)
+      end
+      head = [] of Line
+      all.each_with_index do |raw, i|
+        break if i > sep
+        head << (i == 0 ? start_line(raw, request) : (i == sep ? blank : header_line(raw)))
+      end
+      Windowed.new(head, all[(sep + 1)..], kind)
     end
 
     # Draw a styled line at (x, y), clipped to `width` columns (default: to the

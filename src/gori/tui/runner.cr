@@ -236,7 +236,13 @@ module Gori::Tui
     # reload freely; the editable ones (Replay/Notes) reconcile WITHOUT clobbering
     # in-progress local edits (guarded by dirty/active/inflight).
     private def apply_external_change : Nil
-      @history.reload(@session.store)
+      # Reload a store-backed view only when it's the ACTIVE tab (others reload on
+      # tab entry via on_enter_tab) — avoids re-querying History's page ~1.3×/sec
+      # while the user is elsewhere. Own-session captures stay live via flow_events.
+      if @active_tab == :history
+        @history.reload(@session.store)
+        @history.refresh_detail(@session.store) if @overlay == :detail # peer filled the open flow
+      end
       @sitemap.reload(@session.store, @scope.filter) if @active_tab == :sitemap
       @findings.reload(@session.store) if @active_tab == :findings
       reconcile_replays
@@ -259,7 +265,14 @@ module Gori::Tui
       @replays.each do |tab|
         next unless (id = tab.db_id) && (row = by_id[id]?)
         next if replay_tab_locked?(tab)
-        tab.view.restore(row.target, row.request, row.http2?, row.auto_content_length?)
+        v = tab.view
+        # Only re-apply when the PERSISTED content actually changed. data_version
+        # bumps on ANY peer commit (notes/settings/another replay/h2/ws…), so most
+        # polls touch a tab whose row is identical — restoring then would needlessly
+        # wipe its on-screen response/scroll/focus. (restore() resets all of that.)
+        next if v.target == row.target && v.request_text == row.request &&
+                v.http2? == row.http2? && v.auto_content_length? == row.auto_content_length?
+        v.restore(row.target, row.request, row.http2?, row.auto_content_length?)
       end
 
       local_ids = @replays.compact_map(&.db_id).to_set
@@ -1383,6 +1396,7 @@ module Gori::Tui
     # whatever has been captured so far). Project tab refreshes its stats snapshot.
     private def on_enter_tab : Nil
       case @active_tab
+      when :history   then @history.reload(@session.store) # catch peer captures while we were elsewhere
       when :sitemap   then @sitemap.reload(@session.store, @scope.filter)
       when :findings  then @findings.reload(@session.store)
       when :notes     then @notes.reload(@session.store)
