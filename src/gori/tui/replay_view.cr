@@ -8,6 +8,7 @@ require "./hex_edit"
 require "./text_area"
 require "./gutter"
 require "./search_hi"
+require "./reveal"
 require "../store"
 require "../replay/engine"
 require "../replay/h2_engine"
@@ -32,6 +33,9 @@ module Gori::Tui
       @editor = TextArea.new
       @editor.gutter = true # line numbers in the request body (pairs with ^G)
       @search_hl = ""       # active ^F query → highlight in the response pane (request is via @editor)
+      @reveal = false       # 'w' shows whitespace/CR/LF as glyphs (response from raw bytes, request via @editor)
+      @reveal_lines = nil.as(Array(String)?)
+      @reveal_lines_src = Pointer(UInt8).null
       @original_lines = [] of String
       @result = nil.as(Replay::Result?)
       @prev_result = nil.as(Replay::Result?) # the previous send's result — the diff baseline
@@ -367,6 +371,13 @@ module Gori::Tui
       @editor.search_lines(query)
     end
 
+    # Whitespace reveal toggle — response renders from raw bytes; the request editor
+    # shows within-line whitespace too.
+    def reveal=(on : Bool) : Nil
+      @reveal = on
+      @editor.reveal = on
+    end
+
     # ^F highlight, scoped to the searched pane (the Runner picks which).
     def request_search_hl=(q : String) : Nil
       @editor.search_hl = q
@@ -524,9 +535,35 @@ module Gori::Tui
         (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to replay —", Theme::MUTED)
       elsif @resp_mode == :diff
         render_diff(screen, body)
+      elsif @reveal && (rl = reveal_lines)
+        render_reveal(screen, body, rl)
       else
         render_response_body(screen, body)
       end
+    end
+
+    # Windowed render of revealed (whitespace-visible) response lines.
+    private def render_reveal(screen : Screen, rect : Rect, lines : Array(String)) : Nil
+      total = lines.size
+      gw = {Gutter.width(total), rect.w}.min
+      cw = {rect.w - gw, 0}.max
+      (0...rect.h).each do |i|
+        li = @scroll + i
+        break if li >= total
+        Gutter.draw(screen, rect.x, rect.y + i, li, gw)
+        Highlight.draw(screen, rect.x + gw, rect.y + i, Reveal.styled(lines[li], li < total - 1, cw), width: cw)
+        SearchHi.mark(screen, rect.x + gw, rect.y + i, lines[li], @search_hl, rect.x + gw + cw) unless @search_hl.empty?
+      end
+    end
+
+    # Revealed response lines, cached + rebuilt only when the response bytes change.
+    private def reveal_lines : Array(String)?
+      bytes = resp_hex_bytes
+      return nil unless bytes
+      cached = @reveal_lines
+      return cached if cached && @reveal_lines_src == bytes.to_unsafe
+      @reveal_lines_src = bytes.to_unsafe
+      @reveal_lines = Reveal.lines(bytes)
     end
 
     private def render_response_body(screen : Screen, rect : Rect) : Nil
@@ -572,6 +609,8 @@ module Gori::Tui
         (bytes = resp_hex_bytes) ? HexView.rows(bytes.size) : 1
       elsif @resp_mode == :diff
         diff_lines.size
+      elsif @reveal && (rl = reveal_lines)
+        rl.size
       else
         resp_view.total
       end

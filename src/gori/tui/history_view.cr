@@ -5,6 +5,7 @@ require "./highlight"
 require "./hex_view"
 require "./gutter"
 require "./search_hi"
+require "./reveal"
 require "../store"
 require "../ql"
 require "../scope"
@@ -49,7 +50,10 @@ module Gori::Tui
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_scroll = 0
       @detail_pane = :request
-      @search_hl = ""                    # active ^F query → highlight in the detail body
+      @search_hl = ""                        # active ^F query → highlight in the detail body
+      @reveal = false                        # 'w' shows whitespace/CR/LF as glyphs (smuggling)
+      @reveal_lines = nil.as(Array(String)?) # cached revealed lines, keyed on the pane bytes ptr
+      @reveal_lines_src = Pointer(UInt8).null
       @detail_hex = false                # 'x' toggles a raw hex dump of the current pane (req/resp)
       @detail_hex_bytes = nil.as(Bytes?) # cached combined head+body for the current pane (hex source)
       # Windowed detail content, rebuilt only when the detail/pane changes (NOT on
@@ -293,6 +297,18 @@ module Gori::Tui
     # ^F search: 0-based indices of the detail text lines containing `query` (case-
     # insensitive). Empty in hex mode (the hex view has no text lines).
     setter search_hl : String
+    setter reveal : Bool
+
+    # Revealed (whitespace-visible) lines of the current pane, cached + rebuilt only
+    # when the pane bytes change (compared by pointer — detail_pane_bytes memoizes).
+    private def reveal_lines : Array(String)?
+      bytes = detail_pane_bytes
+      return nil unless bytes
+      cached = @reveal_lines
+      return cached if cached && @reveal_lines_src == bytes.to_unsafe
+      @reveal_lines_src = bytes.to_unsafe
+      @reveal_lines = Reveal.lines(bytes)
+    end
 
     def detail_search_lines(query : String) : Array(Int32)
       hits = [] of Int32
@@ -308,6 +324,8 @@ module Gori::Tui
     private def detail_scroll_max : Int32
       if @detail_hex && (bytes = detail_pane_bytes)
         {HexView.rows(bytes.size) - 1, 0}.max
+      elsif @reveal && (rl = reveal_lines)
+        {rl.size - 1, 0}.max
       else
         {detail_view.total - 1, 0}.max
       end
@@ -558,12 +576,18 @@ module Gori::Tui
           attr: active ? Attribute::Bold : Attribute::None) + 1
       end
       hex = detail_hex?(detail)
-      screen.text(x + 1, rect.y, "↑/↓ scroll · #{hex ? "x:text" : "x:hex"} · esc back", Theme::MUTED)
+      ws = @reveal && !hex
+      mode_hint = hex ? "x:text" : (ws ? "w:raw" : "x:hex · w:ws")
+      screen.text(x + 1, rect.y, "↑/↓ scroll · #{mode_hint} · esc back", Theme::MUTED)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
       if hex && (bytes = detail_pane_bytes)
         HexView.render(screen, body, bytes, @detail_scroll)
+        return
+      end
+      if ws && (rl = reveal_lines)
+        render_reveal(screen, body, rl)
         return
       end
 
@@ -577,6 +601,21 @@ module Gori::Tui
         Gutter.draw(screen, body.x, body.y + i, li, gw)
         Highlight.draw(screen, body.x + gw, body.y + i, dv.line_at(li), width: cw) # styles only this visible line
         SearchHi.mark(screen, body.x + gw, body.y + i, dv.line_text(li), @search_hl, body.x + gw + cw) unless @search_hl.empty?
+      end
+    end
+
+    # Windowed render of revealed (whitespace-visible) lines — mirrors the normal
+    # detail body loop but styles each visible line via Reveal.
+    private def render_reveal(screen : Screen, body : Rect, lines : Array(String)) : Nil
+      total = lines.size
+      gw = {Gutter.width(total), body.w}.min
+      cw = {body.w - gw, 0}.max
+      (0...body.h).each do |i|
+        li = @detail_scroll + i
+        break if li >= total
+        Gutter.draw(screen, body.x, body.y + i, li, gw)
+        Highlight.draw(screen, body.x + gw, body.y + i, Reveal.styled(lines[li], li < total - 1, cw), width: cw)
+        SearchHi.mark(screen, body.x + gw, body.y + i, lines[li], @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
     end
 

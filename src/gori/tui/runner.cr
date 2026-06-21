@@ -93,6 +93,9 @@ module Gori::Tui
       @search_target = :none
       @search_hits = [] of Int32
       @search_idx = 0
+      # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
+      # propagated to the focused view in render_body. Handy for smuggling tests.
+      @reveal = false
       # A destructive-action guard (delete project / close a sub-tab). When set,
       # @overlay is :confirm; accepting runs @confirm_action.
       @confirm = nil.as(ConfirmDialog?)
@@ -1085,6 +1088,7 @@ module Gori::Tui
       when key.left?, key.right? then view.toggle_resp_mode
       when key.lower_d?          then view.toggle_resp_mode
       when key.lower_x?          then view.toggle_resp_hex
+      when key.lower_w?          then toggle_reveal
       end
     end
 
@@ -1321,6 +1325,12 @@ module Gori::Tui
       @search_preedit = ""
     end
 
+    # Toggle whitespace reveal (·→␍␊) in the req/res views — for smuggling tests.
+    def toggle_reveal : Nil
+      @reveal = !@reveal
+      @toast = "whitespace: #{@reveal ? "on (·→␍␊)" : "off"}"
+    end
+
     private def current_scope : Verb::Scope
       case @overlay
       when :palette
@@ -1475,7 +1485,7 @@ module Gori::Tui
         if current_replay_view.try(&.request_hex?)
           "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit"
         else
-          "↹ pane · type to edit · ^R send · ^L auto-len · ^G goto · ^F find · ^X hex (req) · x hex (resp) · ^N new · ^W close · esc tabs"
+          "↹ pane · type to edit · ^R send · ^G goto · ^F find · ^X hex (req) · x hex · w ws · ^N new · ^W close · esc tabs"
         end
       when :notes    then "type to edit · ^N new · ^W close · ^G goto · ^F find · ^1-9 switch · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
@@ -1490,6 +1500,8 @@ module Gori::Tui
     private def render_body(screen : Screen, rect : Rect) : Nil
       body_focused = @focus == :body
       subtabs_focused = @focus == :subtabs # the sub-tab strip (Replay/Notes) holds focus
+      @history.reveal = @reveal            # propagate the global whitespace-reveal pref
+      current_replay_view.try { |v| v.reveal = @reveal }
       case @active_tab
       when :history
         # Single body pane; the detail view is a drill-in within the same frame.

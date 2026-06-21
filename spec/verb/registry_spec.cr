@@ -88,6 +88,10 @@ private class FakeContext < ExecContext
     @calls << :toggle_detail_hex
   end
 
+  def toggle_reveal : Nil
+    @calls << :toggle_reveal
+  end
+
   def replay_selected : Nil
     @calls << :replay_selected
   end

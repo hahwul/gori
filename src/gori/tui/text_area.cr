@@ -3,6 +3,7 @@ require "./theme"
 require "./highlight"
 require "./gutter"
 require "./search_hi"
+require "./reveal"
 
 module Gori::Tui
   # A minimal multi-line text editor for inline editing (e.g. the Replay
@@ -22,11 +23,13 @@ module Gori::Tui
       @styled_kind = nil.as(Symbol?)
       @gutter = false # left line-number gutter (on for the Replay request body)
       @search_hl = "" # active ^F query → matches highlighted in render
+      @reveal = false # show whitespace (space ·, tab →) instead of syntax colours
       set_text(text)
     end
 
     setter gutter : Bool
     setter search_hl : String
+    setter reveal : Bool
 
     def set_text(text : String) : Nil
       @lines = text.split('\n').map(&.rstrip('\r'))
@@ -166,7 +169,9 @@ module Gori::Tui
         break if li >= @lines.size
         Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: li == @cy) if @gutter
         line = @lines[li]
-        if styled && (sl = styled[li]?)
+        if @reveal
+          Highlight.draw(screen, cx0, rect.y + i, Reveal.styled(line, false, cw), width: cw)
+        elsif styled && (sl = styled[li]?)
           Highlight.draw(screen, cx0, rect.y + i, sl, width: cw)
         else
           if li == @cy && !@preedit.empty?

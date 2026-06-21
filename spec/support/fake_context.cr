@@ -48,6 +48,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def toggle_detail_hex : Nil; end
 
+  def toggle_reveal : Nil; end
+
   def replay_selected : Nil; end
 
   def replay_new : Nil; end

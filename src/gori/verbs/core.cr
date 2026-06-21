@@ -24,6 +24,10 @@ module Gori
         [Verb::Chord.new("c")]) { |ctx| ctx.toggle_capture; nil }
 
       r.register Verb::Definition.new(
+        "view.reveal-ws", "Reveal whitespace", "Show whitespace/CR/LF as glyphs (·→␍␊) in req/res — for smuggling tests",
+        Verb::Scope::Global) { |ctx| ctx.toggle_reveal; nil }
+
+      r.register Verb::Definition.new(
         "ca.export", "Export CA certificate", "Print the path to gori's root CA for trust setup",
         Verb::Scope::Global) { |ctx| ctx.export_ca; nil }
 
