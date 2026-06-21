@@ -272,6 +272,12 @@ module Gori::Tui
       @detail_scroll = (@detail_scroll + delta).clamp(0, detail_scroll_max)
     end
 
+    # ^G go-to-line in the detail view: scroll so 1-based line `n` is at the top
+    # (interpreted in the active pane/mode — request/response/frames/hex row).
+    def goto_detail_line(n : Int32) : Nil
+      @detail_scroll = (n - 1).clamp(0, detail_scroll_max)
+    end
+
     private def detail_scroll_max : Int32
       if @detail_hex && (bytes = detail_pane_bytes)
         {HexView.rows(bytes.size) - 1, 0}.max

@@ -95,6 +95,10 @@ module Gori::Tui
       @desc_area.move(dr, dc)
     end
 
+    def goto_line(n : Int32) : Nil
+      @desc_area.goto_line(n)
+    end
+
     # Cursor on the first description line → ↑ pops focus to the tab bar (after saving).
     def at_top? : Bool
       @desc_area.at_top?

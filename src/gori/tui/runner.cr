@@ -80,6 +80,11 @@ module Gori::Tui
       # floats over WHATEVER is underneath (the History list, an open detail, the
       # Sitemap …) without disturbing that state; the scope is captured at open time.
       @command_open = false
+      # The ^G "go to line" prompt — also orthogonal to @overlay (floats over an
+      # editor or the detail view). @goto_target is the view captured at ^G time.
+      @goto_open = false
+      @goto_buffer = ""
+      @goto_target = :none
       # A destructive-action guard (delete project / close a sub-tab). When set,
       # @overlay is :confirm; accepting runs @confirm_action.
       @confirm = nil.as(ConfirmDialog?)
@@ -388,6 +393,14 @@ module Gori::Tui
 
       @toast = nil # clear last action's feedback; a new action may set it again
       return handle_command_key(ev) if @command_open # the ":" line is modal while up
+      return handle_goto_key(ev) if @goto_open       # the ^G line prompt is modal while up
+      # ^G opens a "go to line" prompt for the focused multi-line view — editors move
+      # the cursor, the read-only response/detail panes scroll. A modifier key, so it
+      # works inside text editors without conflicting with typing (no vim modes).
+      if ev.ctrl? && ev.key.lower_g? && (tgt = goto_target)
+        open_goto(tgt)
+        return
+      end
       return handle_palette_key(ev) if @overlay == :palette
       return handle_scope_key(ev) if @overlay == :scope
       return handle_rules_key(ev) if @overlay == :rules
@@ -1147,6 +1160,50 @@ module Gori::Tui
       end
     end
 
+    # Which focused multi-line view ^G jumps, or nil if the context has none.
+    private def goto_target : Symbol?
+      return :detail if @overlay == :detail
+      return nil unless @overlay == :none && @focus == :body
+      case @active_tab
+      when :replay
+        v = current_replay_view
+        return nil unless v
+        return :replay_request if v.focus == :request && !v.request_hex?
+        :replay_response if v.focus == :response
+      when :notes   then :notes
+      when :project then :project
+      else               nil
+      end
+    end
+
+    # The ^G "go to line" prompt: digits only; Enter jumps the captured target, Esc
+    # cancels. A modal mini-input (mirrors handle_command_key) drawn over the status.
+    private def handle_goto_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        close_goto
+      elsif key.enter?
+        n = @goto_buffer.to_i?
+        close_goto
+        apply_goto(n) if n && n > 0
+      elsif key.backspace?
+        @goto_buffer = @goto_buffer[0, {@goto_buffer.size - 1, 0}.max]
+      elsif c && c.ascii_number? && @goto_buffer.size < 7
+        @goto_buffer += c
+      end
+    end
+
+    private def apply_goto(n : Int32) : Nil
+      case @goto_target
+      when :replay_request  then current_replay_view.try(&.goto_request_line(n))
+      when :replay_response then current_replay_view.try(&.goto_response_line(n))
+      when :notes           then @notes.goto_line(n)
+      when :project         then @project_view.goto_line(n)
+      when :detail          then @history.goto_detail_line(n)
+      end
+    end
+
     private def current_scope : Verb::Scope
       case @overlay
       when :palette
@@ -1200,6 +1257,7 @@ module Gori::Tui
       # The ":" command line floats over everything else (drawn last), anchored to
       # the bottom: the input on the status row, the suggestion list stacked above.
       @command.render(screen, layout.status, layout.body) if @command_open
+      render_goto_prompt(screen, layout.status) if @goto_open
 
       # Sync terminal hardware cursor to the focused input caret (if any view
       # called screen.cursor). This is critical for terminal IME preedit
@@ -1276,7 +1334,7 @@ module Gori::Tui
       when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser     then "↑/↓ select · ↵ open · esc cancel"
       when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
-      when :detail      then "←/→ panes (REQ·RES·FRAMES) · ↑/↓ scroll · esc back"
+      when :detail      then "←/→ panes (REQ·RES·FRAMES) · ↑/↓ scroll · ^G goto · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-8 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
@@ -1299,14 +1357,14 @@ module Gori::Tui
         if current_replay_view.try(&.request_hex?)
           "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit"
         else
-          "↹ pane · type to edit · ^R send · ^L auto-len · ^X hex (req) · x hex (resp) · ^N new · ^1-9 · ^W close · esc tabs"
+          "↹ pane · type to edit · ^R send · ^L auto-len · ^G goto · ^X hex (req) · x hex (resp) · ^N new · ^W close · esc tabs"
         end
-      when :notes    then "type to edit · ^N new · ^W close · ^1-9 switch · ↹/esc tabs"
+      when :notes    then "type to edit · ^N new · ^W close · ^G goto · ^1-9 switch · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
         @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
                                : "↑/↓ move · ↵ open · n new · d delete · : cmds · esc tabs"
-      when :project  then "type to edit description · ↑/↓/↔ move · ↵ nl · esc tabs"
+      when :project  then "type to edit description · ↑/↓/↔ move · ^G goto · ↵ nl · esc tabs"
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"
       end
     end
@@ -1420,6 +1478,25 @@ module Gori::Tui
     private def close_command : Nil
       @command.set_preedit("") # don't carry a half-composed IME string into the next open
       @command_open = false
+    end
+
+    private def open_goto(target : Symbol) : Nil
+      @goto_target = target
+      @goto_buffer = ""
+      @goto_open = true
+    end
+
+    private def close_goto : Nil
+      @goto_open = false
+    end
+
+    private def render_goto_prompt(screen : Screen, rect : Rect) : Nil
+      return if rect.w < 6
+      screen.fill(rect, Theme::PANEL)
+      prefix = "go to line: "
+      screen.text(rect.x, rect.y, prefix, Theme::ACCENT, Theme::PANEL)
+      x = rect.x + prefix.size
+      screen.input_line(x, rect.y, @goto_buffer, @goto_buffer.size, "", Theme::TEXT_BRIGHT, Theme::PANEL, width: {rect.right - x, 0}.max)
     end
 
     def current_tab : Symbol

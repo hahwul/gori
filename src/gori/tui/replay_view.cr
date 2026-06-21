@@ -350,6 +350,13 @@ module Gori::Tui
       @dirty = true
     end
 
+    # ^G go-to-line in the request editor (no-op in hex mode — the TextArea is stale).
+    def goto_request_line(n : Int32) : Nil
+      return unless @focus == :request && !request_hex?
+      @editor.goto_line(n)
+      @dirty = true
+    end
+
     # --- target field (focus == :target) ---
     def target_insert(ch : Char) : Nil
       @target = "#{@target[0, @tcx]}#{ch}#{@target[@tcx..]}"
@@ -394,6 +401,12 @@ module Gori::Tui
 
     def scroll(delta : Int32) : Nil
       @scroll = (@scroll + delta).clamp(0, {resp_line_count - 1, 0}.max)
+    end
+
+    # ^G go-to-line in the response pane: scroll so 1-based line `n` is at the top
+    # (interpreted in the currently-shown mode — response/diff/hex row).
+    def goto_response_line(n : Int32) : Nil
+      @scroll = (n - 1).clamp(0, {resp_line_count - 1, 0}.max)
     end
 
     # --- rendering -----------------------------------------------------------

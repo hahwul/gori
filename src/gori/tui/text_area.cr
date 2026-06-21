@@ -122,6 +122,17 @@ module Gori::Tui
       @cy == 0
     end
 
+    # Jump the cursor to 1-based line `n`, column 0 (out-of-range clamps to the
+    # first/last line). render's ensure_visible scrolls it into view next frame.
+    def goto_line(n : Int32) : Nil
+      @cy = (n - 1).clamp(0, @lines.size - 1)
+      @cx = 0
+    end
+
+    def line_count : Int32
+      @lines.size
+    end
+
     # `highlight` overlays request/response syntax colours on the buffer while
     # keeping it fully editable: pass `:request` or `:response` for the held
     # HTTP message editors (Replay, Intercept), nil for plain prose (Notes,
