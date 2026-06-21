@@ -162,7 +162,7 @@ module Gori::Tui
 
       desc_h = {max_y - y, 1}.max
       desc_rect = Rect.new(rect.x + 2, y, {rect.w - 4, 0}.max, desc_h)
-      @desc_area.render(screen, desc_rect, cursor: focused)
+      @desc_area.render(screen, desc_rect, cursor: focused, highlight: :markdown)
     end
 
     private def format_time(t : Time?) : String

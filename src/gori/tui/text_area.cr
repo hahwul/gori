@@ -216,7 +216,7 @@ module Gori::Tui
       cached = @styled
       return cached if cached && @styled_kind == kind
       @styled_kind = kind
-      @styled = Highlight.from_lines(@lines, kind == :request)
+      @styled = kind == :markdown ? Highlight.markdown(@lines) : Highlight.from_lines(@lines, kind == :request)
     end
 
     private def ensure_visible(h : Int32) : Nil

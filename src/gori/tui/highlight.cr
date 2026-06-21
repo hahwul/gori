@@ -138,6 +138,131 @@ module Gori::Tui
       Windowed.new(head, all[(sep + 1)..], kind)
     end
 
+    # --- Markdown (Notes / Project description) ------------------------------
+    # Colour-overlay highlighting for prose notes. The markdown SYNTAX stays
+    # visible (markers are coloured, not hidden/rendered) and the output is strictly
+    # 1:1 with the input lines + span texts, so the editable buffer's cursor stays
+    # aligned. Fenced code blocks (``` / ~~~) are tracked across lines.
+    def self.markdown(all : Array(String)) : Array(Line)
+      out = [] of Line
+      fence = false
+      all.each do |raw|
+        if md_fence?(raw)
+          out << (raw.empty? ? Line.new : [Span.new(raw, Theme::SYN_NUMBER)])
+          fence = !fence
+        elsif fence
+          out << (raw.empty? ? Line.new : [Span.new(raw, Theme::SYN_STRING)])
+        else
+          out << md_line(raw)
+        end
+      end
+      out
+    end
+
+    private def self.md_fence?(raw : String) : Bool
+      t = raw.lstrip
+      t.starts_with?("```") || t.starts_with?("~~~")
+    end
+
+    # One non-fence markdown line → styled spans (block-level dispatch, then inline).
+    private def self.md_line(raw : String) : Line
+      return Line.new if raw.empty?
+      t = raw.lstrip
+      indent = raw.size - t.size
+      return [Span.new(raw, Theme::TEXT_BRIGHT, Attribute::Bold)] if md_heading?(t)  # # .. ######
+      return [Span.new(raw, Theme::MUTED, Attribute::Italic)] if t.starts_with?('>') # blockquote
+      return [Span.new(raw, Theme::MUTED)] if md_hr?(t)                              # --- *** ___
+      if (m = md_list_marker(t)) > 0
+        cut = indent + m
+        return [Span.new(raw[0, cut], Theme::ACCENT)] + md_inline(raw[cut..], Theme::TEXT)
+      end
+      md_inline(raw, Theme::TEXT)
+    end
+
+    private def self.md_heading?(t : String) : Bool
+      h = 0
+      while h < t.size && t[h] == '#'
+        h += 1
+      end
+      h >= 1 && h <= 6 && (h == t.size || t[h] == ' ')
+    end
+
+    # Leading list marker length within `t` (lstripped), incl. the trailing space:
+    # "- "/"* "/"+ " → 2, "12. " → 4. 0 when the line isn't a list item.
+    private def self.md_list_marker(t : String) : Int32
+      return 2 if t.size >= 2 && (t[0] == '-' || t[0] == '*' || t[0] == '+') && t[1] == ' '
+      d = 0
+      while d < t.size && t[d].ascii_number?
+        d += 1
+      end
+      return d + 2 if d > 0 && d + 1 < t.size && t[d] == '.' && t[d + 1] == ' '
+      0
+    end
+
+    private def self.md_hr?(t : String) : Bool
+      s = t.rstrip
+      return false if s.size < 3
+      {'-', '*', '_'}.each do |ch|
+        return true if s.count(ch) >= 3 && s.each_char.all? { |c| c == ch || c == ' ' }
+      end
+      false
+    end
+
+    # Inline spans for one line's text: bold **, italic *, code `, strike ~~, links
+    # [t](u). Index-based so every char is emitted exactly once (1:1). Markers kept
+    # visible (coloured), not stripped. `_` is intentionally NOT emphasis (avoids
+    # snake_case false positives).
+    private def self.md_inline(text : String, base : Color) : Line
+      spans = Line.new
+      n = text.size
+      run = 0
+      i = 0
+      while i < n
+        c = text[i]
+        e = -1
+        col = base
+        at = Attribute::None
+        case c
+        when '`'
+          if (j = text.index('`', i + 1))
+            e = j + 1
+            col = Theme::SYN_STRING
+          end
+        when '*'
+          if i + 1 < n && text[i + 1] == '*'
+            if (k = text.index("**", i + 2))
+              e = k + 2
+              at = Attribute::Bold
+            end
+          elsif i + 1 < n && text[i + 1] != ' ' && (k = text.index('*', i + 1))
+            e = k + 1
+            at = Attribute::Italic
+          end
+        when '~'
+          if i + 1 < n && text[i + 1] == '~' && (k = text.index("~~", i + 2))
+            e = k + 2
+            col = Theme::MUTED
+            at = Attribute::Strikethrough
+          end
+        when '['
+          if (rb = text.index(']', i + 1)) && rb + 1 < n && text[rb + 1] == '(' && (rp = text.index(')', rb + 2))
+            e = rp + 1
+            col = Theme::SYN_HEADER
+            at = Attribute::Underline
+          end
+        end
+        if e > i
+          spans << Span.new(text[run, i - run], base) if i > run
+          spans << Span.new(text[i, e - i], col, at)
+          run = i = e
+        else
+          i += 1
+        end
+      end
+      spans << Span.new(text[run, n - run], base) if n > run
+      spans
+    end
+
     # Draw a styled line at (x, y), clipped to `width` columns (default: to the
     # right edge). Truncation matches `Screen#fit` glyph-for-glyph and in the
     # returned x, so toggling highlighting never shifts a cell: wider-than-1

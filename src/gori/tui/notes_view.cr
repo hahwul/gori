@@ -190,7 +190,7 @@ module Gori::Tui
       Frame.inner_divider(screen, rect, divider_y, border: Frame.pane_border(focused))
       area_y = divider_y + 1
       area = Rect.new(rect.x + 1, area_y, {rect.w - 2, 0}.max, {rect.bottom - area_y, 0}.max)
-      current.area.render(screen, area, cursor: focused)
+      current.area.render(screen, area, cursor: focused, highlight: :markdown)
     end
 
     # The note currently being edited; @current is kept in range by every mutator.
