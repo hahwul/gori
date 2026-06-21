@@ -35,45 +35,54 @@ module Gori::Proxy::WS
   # Reads one frame from `io`. Returns nil on EOF / truncated frame. Pure over an
   # IO so it can be unit-tested with IO::Memory (sans-IO spirit).
   def self.read_frame(io : IO) : Frame?
-    raw = IO::Memory.new
-    b0 = read_byte(io, raw) || return nil
-    b1 = read_byte(io, raw) || return nil
-
+    # Read the header (2..14 bytes) into a stack buffer — no heap alloc — then read
+    # the payload directly into ONE wire buffer (header+payload) used as `raw`. The
+    # old path allocated ~4× the payload (IO::Memory grow + buf + buf.dup + raw.dup).
+    hdr = uninitialized UInt8[14]
+    hs = hdr.to_slice
+    return nil unless io.read_fully?(hs[0, 2])
+    b0 = hs[0]
+    b1 = hs[1]
     fin = (b0 & 0x80_u8) != 0
     opcode = b0 & 0x0f_u8
     masked = (b1 & 0x80_u8) != 0
     len = (b1 & 0x7f_u8).to_u64
+    hlen = 2
 
     if len == 126
-      ext = read_bytes(io, 2, raw) || return nil
-      len = (ext[0].to_u64 << 8) | ext[1].to_u64
+      return nil unless io.read_fully?(hs[2, 2])
+      len = (hs[2].to_u64 << 8) | hs[3].to_u64
+      hlen = 4
     elsif len == 127
-      ext = read_bytes(io, 8, raw) || return nil
+      return nil unless io.read_fully?(hs[2, 8])
       len = 0_u64
-      ext.each { |byte| len = (len << 8) | byte.to_u64 }
+      (2...10).each { |i| len = (len << 8) | hs[i].to_u64 }
+      hlen = 10
     end
     return nil if len > MAX_FRAME # oversized / hostile frame — abort this direction
 
-    mask = masked ? (read_bytes(io, 4, raw) || return nil) : nil
-    payload = len > 0 ? (read_bytes(io, len.to_i, raw) || return nil).dup : Bytes.new(0)
-    if mask
-      payload.each_index { |i| payload[i] = payload[i] ^ mask[i & 3] }
+    mask_off = hlen
+    if masked
+      return nil unless io.read_fully?(hs[hlen, 4])
+      hlen += 4
     end
 
-    Frame.new(fin, opcode, payload, raw.to_slice.dup)
-  end
+    n = len.to_i
+    buf = Bytes.new(hlen + n) # the byte-exact wire frame (header + payload) = `raw`
+    hs[0, hlen].copy_to(buf[0, hlen])
+    if n > 0
+      return nil unless io.read_fully?(buf[hlen, n])
+    end
 
-  private def self.read_byte(io : IO, raw : IO::Memory) : UInt8?
-    byte = io.read_byte
-    return nil unless byte
-    raw.write_byte(byte)
-    byte
-  end
+    payload =
+      if masked
+        out = Bytes.new(n) # unmask into a separate buffer; keep `raw` masked for byte-exact relay
+        n.times { |i| out[i] = buf[hlen + i] ^ hs[mask_off + (i & 3)] }
+        out
+      else
+        buf[hlen, n] # zero-copy view into the wire buffer (already unmasked)
+      end
 
-  private def self.read_bytes(io : IO, n : Int32, raw : IO::Memory) : Bytes?
-    buf = Bytes.new(n)
-    return nil unless io.read_fully?(buf)
-    raw.write(buf)
-    buf
+    Frame.new(fin, opcode, payload, buf)
   end
 end

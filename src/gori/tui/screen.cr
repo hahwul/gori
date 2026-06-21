@@ -64,6 +64,26 @@ module Gori::Tui
     def text(x : Int32, y : Int32, str : String, fg : Color, bg : Color = Theme::BG,
              attr : Attribute = Attribute::None, width : Int32? = nil) : Int32
       limit = width || (@width - x)
+      return x if limit <= 0
+      # ASCII fast path — the common case (line numbers, method/host/path, headers):
+      # display width == char count, so skip fit()'s full-width pre-scan, the second
+      # grapheme walk, and the truncation String builder. Same ellipsis semantics.
+      if str.ascii_only?
+        n = str.size
+        draw = n <= limit ? n : (limit == 1 ? 1 : limit - 1)
+        i = 0
+        str.each_char do |ch|
+          break if i >= draw || x + i >= @width
+          cell(x + i, y, ch, fg, bg, attr)
+          i += 1
+        end
+        if n > limit && limit >= 2 && x + limit - 1 < @width
+          cell(x + limit - 1, y, '…', fg, bg, attr)
+          return x + limit
+        end
+        return x + i
+      end
+      # Non-ASCII (CJK/emoji/combining): grapheme-aware truncation + draw.
       s = fit(str, limit)
       cur_x = x
       s.each_grapheme do |g|
@@ -72,7 +92,6 @@ module Gori::Tui
         cell(cur_x, y, g.to_s, fg, bg, attr)
         cur_x += gw
       end
-
       cur_x
     end
 

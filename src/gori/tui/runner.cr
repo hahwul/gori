@@ -220,6 +220,7 @@ module Gori::Tui
                  end
         applied = true
       end
+      search_recompute if applied # an open ^F over the response now has fresh content
       applied
     end
 
@@ -267,6 +268,7 @@ module Gori::Tui
       reconcile_replays
       @notes.reload(@session.store) unless notes_locked?
       refresh_findings_count
+      search_recompute # a ^F prompt open over the reloaded view keeps fresh hits
     end
 
     # Converge local replay tabs with the project's `replays` rows after a peer
@@ -1285,10 +1287,18 @@ module Gori::Tui
     end
 
     private def search_step(dir : Int32) : Nil
-      @search_hits = search_lines_for(@search_target, @search_buffer) # re-find: the content may have changed
-      return if @search_hits.empty?
+      return if @search_hits.empty? # O(1) step over the cached hits (re-find only on edit / content change)
       @search_idx = (@search_idx + dir) % @search_hits.size
       jump_to_match
+    end
+
+    # Re-find without re-jumping — called when the searched view's content changes
+    # under an open prompt (a replay result lands / a peer fills the detail), so the
+    # cached hits + count stay correct without re-scanning on every ↑/↓ step.
+    private def search_recompute : Nil
+      return unless @search_open
+      @search_hits = search_lines_for(@search_target, @search_buffer)
+      @search_idx = @search_idx.clamp(0, {@search_hits.size - 1, 0}.max)
     end
 
     private def jump_to_match : Nil

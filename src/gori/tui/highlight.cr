@@ -161,8 +161,20 @@ module Gori::Tui
         return x
       end
 
-      full_dw = line.sum { |sp| Screen.display_width(sp.text) }
-      overflow = full_dw > limit
+      # Does the line exceed `limit`? Stop measuring as soon as it does — never walk a
+      # huge (e.g. minified-JSON, multi-KB header) line in full just to set a boolean.
+      overflow = false
+      acc = 0
+      line.each do |span|
+        span.text.each_grapheme do |g|
+          acc += Termisu::UnicodeWidth.grapheme_width(g.to_s)
+          if acc > limit
+            overflow = true
+            break
+          end
+        end
+        break if overflow
+      end
       ellipsis = overflow && limit > 1
 
       visual_col = 0
