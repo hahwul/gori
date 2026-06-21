@@ -19,6 +19,7 @@ require "./confirm_dialog"
 require "./browser_picker"
 require "./settings_view"
 require "./palette"
+require "./command_line"
 require "../paths"
 require "../browser"
 require "../external_editor"
@@ -71,9 +72,14 @@ module Gori::Tui
       @rules_overlay = RulesOverlay.new(@session.rules)
       @finding_form = FindingForm.new
       @palette = PaletteState.new(@session.registry)
+      @command = CommandLine.new(@session.registry)
       @history.set_scope(@scope)
       @active_tab = :project
       @overlay = :none # :none | :palette | :detail | :scope | :rules | :finding_new | :confirm | :browser
+      # The ":" context command line (vim/helix-style). Orthogonal to @overlay so it
+      # floats over WHATEVER is underneath (the History list, an open detail, the
+      # Sitemap …) without disturbing that state; the scope is captured at open time.
+      @command_open = false
       # A destructive-action guard (delete project / close a sub-tab). When set,
       # @overlay is :confirm; accepting runs @confirm_action.
       @confirm = nil.as(ConfirmDialog?)
@@ -330,6 +336,7 @@ module Gori::Tui
     end
 
     private def apply_preedit(text : String) : Nil
+      return @command.set_preedit(text) if @command_open # the ":" line wins (it's modal)
       # Route preedit to whichever input is active so composing text (e.g. Hangul
       # jamo building into a syllable) shows live with an underline, until it
       # commits (a normal char insert then clears the preedit). The dispatch
@@ -380,6 +387,7 @@ module Gori::Tui
       @quit_armed = false
 
       @toast = nil # clear last action's feedback; a new action may set it again
+      return handle_command_key(ev) if @command_open # the ":" line is modal while up
       return handle_palette_key(ev) if @overlay == :palette
       return handle_scope_key(ev) if @overlay == :scope
       return handle_rules_key(ev) if @overlay == :rules
@@ -447,6 +455,16 @@ module Gori::Tui
       # Tab is handled by the focus ring above (so ring always works); other keys (letters,
       # arrows, enter, esc, etc.) are consumed here for desc editing (consistent with Notes).
       return handle_project_key(ev) if @active_tab == :project && @overlay == :none && @focus == :body
+
+      # ":" opens the context command line for the focused area. Only reached here
+      # in NAVIGABLE contexts — text editors (Replay request/target, Notes, Project
+      # desc, the QL "/" bar, Findings notes, Intercept edit) swallow keys above, so
+      # ":" stays a literal char there. (The read-only Replay response pane returns
+      # before this point; it routes ":" from handle_replay_response.)
+      if ev.char == ':' && !ev.ctrl? && !ev.alt?
+        open_command
+        return
+      end
 
       chord = Keybind.from_event(ev)
       return unless chord
@@ -1023,6 +1041,7 @@ module Gori::Tui
     # Response/Diff pane: read-only. ←/→ or d toggles response↔diff, ↑/↓ scroll,
     # Enter re-sends.
     private def handle_replay_response(ev : Termisu::Event::Key, view : ReplayView) : Nil
+      return open_command if ev.char == ':' && !ev.ctrl? && !ev.alt? # ":" cmdline (response is navigable)
       key = ev.key
       case
       when key.enter?            then replay_send
@@ -1103,6 +1122,28 @@ module Gori::Tui
 
     end
 
+    # Keys for the ":" context command line — mirrors handle_palette_key, but Tab
+    # cycles suggestions and the chosen verb runs through the SAME call path scoped
+    # to where ":" was pressed (P1). esc cancels without running anything.
+    private def handle_command_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        close_command
+      elsif key.enter?
+        verb = @command.selected_verb
+        close_command
+        @toast = verb.call(self) || @toast if verb
+      elsif key.up? || key.back_tab?
+        @command.move(-1)
+      elsif key.down? || key.tab?
+        @command.move(1)
+      elsif key.backspace?
+        @command.backspace(self)
+      elsif c && !ev.ctrl? && !ev.alt?
+        @command.append(c, self)
+      end
+    end
 
     private def current_scope : Verb::Scope
       case @overlay
@@ -1154,6 +1195,9 @@ module Gori::Tui
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
       @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
       @settings_view.render(screen, layout.body) if @overlay == :settings
+      # The ":" command line floats over everything else (drawn last), anchored to
+      # the bottom: the input on the status row, the suggestion list stacked above.
+      @command.render(screen, layout.status, layout.body) if @command_open
 
       # Sync terminal hardware cursor to the focused input caret (if any view
       # called screen.cursor). This is critical for terminal IME preedit
@@ -1245,7 +1289,7 @@ module Gori::Tui
       case @active_tab
       when :history
         @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
-                           : "↑/↓ move · ↵ open · ^R replay · F finding · y copy · / filter · i intercept · esc tabs"
+                           : "↑/↓ move · ↵ open · ^R replay · y copy · / filter · : cmds · i intercept · esc tabs"
       when :intercept
         @intercept.editing? ? "type to edit · ^R forward · ⇧↹ queue · esc tabs" \
                             : "↑/↓ move · ↵/e edit · f forward · d drop · F all · ↹ detail · esc tabs"
@@ -1256,10 +1300,10 @@ module Gori::Tui
           "↹ pane · type to edit · ^R send · ^L auto-len · ^X hex (req) · x hex (resp) · ^N new · ^1-9 · ^W close · esc tabs"
         end
       when :notes    then "type to edit · ^N new · ^W close · ^1-9 switch · ↹/esc tabs"
-      when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
+      when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · : cmds · esc tabs"
       when :findings
-        @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
-                               : "↑/↓ move · ↵ open · n new · d delete · esc tabs"
+        @findings.detail_open? ? "[ ] severity · e notes · d delete · : cmds · ←/esc back" \
+                               : "↑/↓ move · ↵ open · n new · d delete · : cmds · esc tabs"
       when :project  then "type to edit description · ↑/↓/↔ move · ↵ nl · esc tabs"
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"
       end
@@ -1353,6 +1397,19 @@ module Gori::Tui
 
     def close_overlay : Nil
       @overlay = :none
+    end
+
+    # Open the ":" command line scoped to the CURRENT focus area. current_scope is
+    # read BEFORE flipping @command_open (which is orthogonal to @overlay) so the
+    # scope reflects where ":" was pressed — the History list → Body, an open detail
+    # → HistoryDetail, the Replay response → Replay, the tab bar → Sidebar.
+    private def open_command : Nil
+      @command.open(current_scope, self)
+      @command_open = true
+    end
+
+    private def close_command : Nil
+      @command_open = false
     end
 
     def current_tab : Symbol

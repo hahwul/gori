@@ -38,7 +38,26 @@ module Gori
       # fuzzy subsequence, ranked best-first. An empty query lists everything
       # (in registration order) so the palette is browsable.
       def search(query : String, ctx : ExecContext) : Array(Definition)
-        candidates = self.select { |v| !v.hidden? && v.available?(ctx) }
+        rank(self.select { |v| !v.hidden? && v.available?(ctx) }, query)
+      end
+
+      # Like #search, but narrowed to the verbs that can fire in `scope` — plus
+      # Global, which fires everywhere. Backs the ":" context command line so it
+      # only offers actions relevant to the focused area. (Body covers the History
+      # list etc.; the per-verb available? gates further narrow it to the active
+      # tab — e.g. history.copy only when current_tab == :history.)
+      def for_scope(scope : Scope, ctx : ExecContext, query : String = "") : Array(Definition)
+        candidates = self.select { |v| !v.hidden? && (v.scope == scope || v.scope.global?) && v.available?(ctx) }
+        return rank(candidates, query) unless query.empty?
+        # Empty query: the focus area's OWN actions first, the always-available
+        # Global commands after (partition is stable → registration order within each).
+        local, global = candidates.partition { |v| !v.scope.global? }
+        local + global
+      end
+
+      # Shared filter→rank tail: an empty query keeps registration order (browsable);
+      # otherwise fuzzy-score "title id" and sort best-first.
+      private def rank(candidates : Array(Definition), query : String) : Array(Definition)
         return candidates if query.empty?
 
         scored = candidates.compact_map do |v|

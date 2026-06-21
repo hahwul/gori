@@ -278,6 +278,23 @@ describe Gori::Verb do
       reg.search("zzxq-nope", ctx).should be_empty
     end
 
+    it "for_scope lists only the scope's verbs plus Global, gated and fuzzy-ranked" do
+      reg = Gori::Verbs.registry
+      ctx = FakeContext.new
+
+      body = reg.for_scope(Scope::Body, ctx)
+      body.each do |v|
+        v.hidden?.should be_false
+        (v.scope.body? || v.scope.global?).should be_true
+      end
+      body.map(&.id).should contain("app.quit")                      # Global is always in scope
+      body.map(&.id).any?(&.starts_with?("replay.")).should be_false # other scopes excluded
+      body.map(&.id).any?(&.starts_with?("sitemap.")).should be_false
+
+      # narrows within the scope by fuzzy query (same ranking as #search)
+      reg.for_scope(Scope::Global, ctx, "quit").first.id.should eq("app.quit")
+    end
+
     it "rejects duplicate ids" do
       reg = Registry.new
       reg.register(Definition.new("dup", "A", "", Scope::Global) { |_| nil })
