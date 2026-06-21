@@ -425,6 +425,7 @@ module Gori::Tui
       # below, so claim it inline here. Each target is gated to where it's editable.
       if @overlay == :none && @focus == :body && ev.ctrl? && ev.key.lower_e?
         if @active_tab == :replay && (v = current_replay_view) && v.focus == :request
+          v.toggle_request_hex if v.request_hex? # commit + drop the hex buffer (external editor is text)
           run_external_editor(v.request_text, :request) { |t| v.replace_request(t) }
           return
         elsif @active_tab == :notes
@@ -926,12 +927,26 @@ module Gori::Tui
         request_close_replay
       elsif ev.ctrl? && key.lower_l?
         # Toggle auto Content-Length (recompute from the body on send).
-        if view = current_replay_view
-          on = view.toggle_auto_content_length
-          @toast = on ? "auto Content-Length: on" : "auto Content-Length: off"
+        if (view = current_replay_view)
+          if view.request_hex?
+            @toast = "auto Content-Length disabled in hex edit"
+          else
+            on = view.toggle_auto_content_length
+            @toast = on ? "auto Content-Length: on" : "auto Content-Length: off"
+          end
+        end
+      elsif ev.ctrl? && key.lower_x?
+        # ^X toggles editable hex on the REQUEST pane (byte-exact; see ReplayView).
+        if (view = current_replay_view) && view.focus == :request
+          on = view.toggle_request_hex
+          @toast = on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off"
         end
       elsif key.escape?
-        focus_pane(:menu)
+        if (view = current_replay_view) && view.request_hex?
+          view.toggle_request_hex # exit hex back to the text editor (not all the way to the tab bar)
+        else
+          focus_pane(:menu)
+        end
       else
         view = current_replay_view
         return if view.nil?
@@ -944,6 +959,7 @@ module Gori::Tui
     end
 
     private def edit_replay_request(ev : Termisu::Event::Key, view : ReplayView) : Nil
+      return edit_replay_request_hex(ev, view) if view.request_hex?
       key = ev.key
       c = ev.char || key.to_char
       case
@@ -961,6 +977,26 @@ module Gori::Tui
 
       end
 
+    end
+
+    # Hex-edit keys for the REQUEST pane (overtype with 0-9a-f; Ins/Del/⌫ change
+    # length; arrows navigate; ↑-at-top pops focus like the text editor).
+    private def edit_replay_request_hex(ev : Termisu::Event::Key, view : ReplayView) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      case
+      when key.up?        then view.at_top? ? focus_pane(subtabs_shown? ? :subtabs : :menu) : view.hex_move(-1, 0)
+      when key.down?      then view.hex_move(1, 0)
+      when key.left?      then view.hex_move(0, -1)
+      when key.right?     then view.hex_move(0, 1)
+      when key.home?      then view.hex_home
+      when key.end?       then view.hex_end
+      when key.insert?    then view.hex_insert
+      when key.delete?    then view.hex_delete
+      when key.backspace? then view.hex_backspace
+      else
+        view.hex_set_nibble(c) if c && !ev.ctrl? && !ev.alt? # only 0-9a-fA-F take effect
+      end
     end
 
     private def edit_replay_target(ev : Termisu::Event::Key, view : ReplayView) : Nil
@@ -1212,7 +1248,12 @@ module Gori::Tui
       when :intercept
         @intercept.editing? ? "type to edit · ^R forward · ⇧↹ queue · esc tabs" \
                             : "↑/↓ move · ↵/e edit · f forward · d drop · F all · ↹ detail · esc tabs"
-      when :replay   then "↹ pane · type to edit · ^R send · ^L auto-len · x hex (resp) · ^N new · ^1-9 switch · ^W close · esc tabs"
+      when :replay
+        if current_replay_view.try(&.request_hex?)
+          "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit"
+        else
+          "↹ pane · type to edit · ^R send · ^L auto-len · ^X hex (req) · x hex (resp) · ^N new · ^1-9 · ^W close · esc tabs"
+        end
       when :notes    then "type to edit · ^N new · ^W close · ^1-9 switch · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings

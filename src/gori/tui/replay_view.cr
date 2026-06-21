@@ -4,6 +4,7 @@ require "./theme"
 require "./frame"
 require "./highlight"
 require "./hex_view"
+require "./hex_edit"
 require "./text_area"
 require "../store"
 require "../replay/engine"
@@ -38,6 +39,8 @@ module Gori::Tui
       @diff_lines_cache = nil.as(Array(Replay::DiffLine)?)
       @resp_hex = false                # 'x' toggles a raw hex dump of the response bytes
       @resp_hex_bytes = nil.as(Bytes?) # cached combined head+body of the last result (hex source)
+      @req_hex_edit = nil.as(HexEdit?) # ^X: editable byte buffer for the REQUEST (authoritative while set)
+      @scroll_req = 0                  # scroll offset for the hex request editor
       @focus = :request
       @resp_mode = :response # :response | :diff
       @scroll = 0
@@ -49,9 +52,73 @@ module Gori::Tui
       @dirty = false              # set by every editor/target/flag mutator, cleared on save/restore
     end
 
+    # --- hex edit (^X on the REQUEST pane) ---
+    # While @req_hex_edit is set, the byte buffer is AUTHORITATIVE (the TextArea is
+    # frozen/stale) — every request consumer reads it. Lossiness lives only at the
+    # text boundary (enter snapshot, exit write-back, persist), documented in-UI.
+    def request_hex? : Bool
+      !@req_hex_edit.nil?
+    end
+
+    def toggle_request_hex : Bool
+      @req_hex_edit ? exit_request_hex : enter_request_hex
+      request_hex?
+    end
+
+    private def enter_request_hex : Nil
+      @req_hex_edit = HexEdit.new(@editor.to_bytes) # snapshot the current wire bytes
+      @scroll_req = 0                               # entering the same bytes isn't an edit — no @dirty
+    end
+
+    private def exit_request_hex : Nil
+      if h = @req_hex_edit
+        @editor.set_text(String.new(h.to_bytes)) # LOSSY: U+FFFD for non-UTF8 + \r rstrip (accepted)
+        @dirty = true                            # the round-trip back is a content change
+      end
+      @req_hex_edit = nil
+    end
+
+    # Mutators delegated from the Runner's hex key handler (each marks @dirty only on
+    # a real change, so save persists + the cross-session reconcile won't clobber).
+    def hex_set_nibble(c : Char) : Nil
+      return unless (h = @req_hex_edit) && (v = c.to_i?(16))
+      @dirty = true if h.set_nibble(v)
+    end
+
+    def hex_move(dr : Int32, dc : Int32) : Nil # navigation does NOT dirty
+      return unless h = @req_hex_edit
+      if dr != 0
+        h.move_rows(dr)
+      elsif dc < 0
+        h.move_left
+      elsif dc > 0
+        h.move_right
+      end
+    end
+
+    def hex_home : Nil
+      @req_hex_edit.try(&.home)
+    end
+
+    def hex_end : Nil
+      @req_hex_edit.try(&.end_of_row)
+    end
+
+    def hex_insert : Nil
+      @dirty = true if @req_hex_edit.try(&.insert_byte)
+    end
+
+    def hex_backspace : Nil
+      @dirty = true if @req_hex_edit.try(&.backspace)
+    end
+
+    def hex_delete : Nil
+      @dirty = true if @req_hex_edit.try(&.delete)
+    end
+
     # --- persistence accessors (the Runner saves these + reconciles by them) ---
     def request_text : String
-      @editor.text
+      (h = @req_hex_edit) ? String.new(h.to_bytes) : @editor.text # lossy snapshot in hex mode
     end
 
     # Replace the request body (e.g. from the external editor); marks dirty so the
@@ -96,6 +163,8 @@ module Gori::Tui
       @diffable = true
       @loaded = true
       @dirty = false
+      @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
+      @scroll_req = 0
     end
 
     # Re-open a persisted tab (from the `replays` table) without a live FlowDetail.
@@ -120,6 +189,8 @@ module Gori::Tui
       @auto_content_length = auto_cl
       @loaded = true
       @dirty = false
+      @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
+      @scroll_req = 0
     end
 
     # Open a hand-authored request not tied to any captured flow (Replay `^N`).
@@ -143,9 +214,12 @@ module Gori::Tui
       @diffable = false
       @loaded = true
       @dirty = false
+      @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
+      @scroll_req = 0
     end
 
     def request_bytes : Bytes
+      return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit # byte-exact; NO auto-CL in hex mode
       raw = @editor.to_bytes
       @auto_content_length ? sync_content_length(raw) : raw
     end
@@ -163,6 +237,7 @@ module Gori::Tui
     getter? auto_content_length : Bool
 
     def toggle_auto_content_length : Bool
+      return @auto_content_length if @req_hex_edit # meaningless on raw bytes — refuse in hex mode
       @dirty = true
       @auto_content_length = !@auto_content_length
     end
@@ -230,7 +305,7 @@ module Gori::Tui
     def at_top? : Bool
       case @focus
       when :target   then true
-      when :request  then @editor.at_top?
+      when :request  then (h = @req_hex_edit) ? h.at_top? : @editor.at_top?
       when :response then @scroll == 0
       else                false
       end
@@ -367,6 +442,14 @@ module Gori::Tui
       return if rect.w < 2 || rect.h < 2
       label = @http2 ? "REQUEST (h2)" : "REQUEST"
       Frame.card(screen, rect, label, bg: Theme::BG, border: pane_border(focused))
+      if h = @req_hex_edit
+        # HEX badge replaces the CL indicator (auto-CL is meaningless on raw bytes).
+        badge = " HEX · CL:off "
+        bx = {rect.right - badge.size - 1, rect.x + label.size + 4}.max
+        screen.text(bx, rect.y, badge, Theme::TEXT_BRIGHT, Theme::ACCENT_BG)
+        @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
+        return
+      end
       # Content-Length auto-update state rides the top border, right of the title
       # (^L toggles). Bright/accent when on, muted when off.
       cl = @auto_content_length ? " CL:auto " : " CL:off "
