@@ -1124,8 +1124,8 @@ module Gori::Tui
 
     end
 
-    # Keys for the ":" context command line — mirrors handle_palette_key, but Tab
-    # cycles suggestions and the chosen verb runs through the SAME call path scoped
+    # Keys for the ":" context command line — mirrors handle_palette_key; Tab/↓ move
+    # down the suggestions (clamped, like the palette) and the chosen verb runs scoped
     # to where ":" was pressed (P1). esc cancels without running anything.
     private def handle_command_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
@@ -1294,7 +1294,7 @@ module Gori::Tui
                            : "↑/↓ move · ↵ open · ^R replay · y copy · / filter · : cmds · i intercept · esc tabs"
       when :intercept
         @intercept.editing? ? "type to edit · ^R forward · ⇧↹ queue · esc tabs" \
-                            : "↑/↓ move · ↵/e edit · f forward · d drop · F all · ↹ detail · esc tabs"
+                            : "↑/↓ move · ↵/e edit · f forward · d drop · F all · : cmds · ↹ detail · esc tabs"
       when :replay
         if current_replay_view.try(&.request_hex?)
           "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit"
@@ -1406,11 +1406,19 @@ module Gori::Tui
     # scope reflects where ":" was pressed — the History list → Body, an open detail
     # → HistoryDetail, the Replay response → Replay, the tab bar → Sidebar.
     private def open_command : Nil
-      @command.open(current_scope, self)
+      @command.open(current_scope, self) # captures the scope + populates results
+      # Don't open an empty modal: some focus areas (the tab bar, Sitemap, an open
+      # detail) have only hidden nav verbs, so for_scope is empty. Opening there would
+      # trap input behind an empty list — keep ":" a no-op (with a hint) instead.
+      if @command.results.empty?
+        @toast = "no commands for this area"
+        return
+      end
       @command_open = true
     end
 
     private def close_command : Nil
+      @command.set_preedit("") # don't carry a half-composed IME string into the next open
       @command_open = false
     end
 
