@@ -424,6 +424,12 @@ module Gori::Tui
         open_search(tgt)
         return
       end
+      # ^B toggles whitespace reveal everywhere (editors too, where bare `w` is a
+      # literal char). A global view pref — harmless to flip from any context.
+      if ev.ctrl? && ev.key.lower_b?
+        toggle_reveal
+        return
+      end
       return handle_palette_key(ev) if @overlay == :palette
       return handle_scope_key(ev) if @overlay == :scope
       return handle_rules_key(ev) if @overlay == :rules
@@ -1485,14 +1491,14 @@ module Gori::Tui
         if current_replay_view.try(&.request_hex?)
           "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit"
         else
-          "↹ pane · type to edit · ^R send · ^G goto · ^F find · ^X hex (req) · x hex · w ws · ^N new · ^W close · esc tabs"
+          "↹ pane · type to edit · ^R send · ^G goto · ^F find · ^X hex (req) · x hex · ^B ws · ^N new · ^W close · esc tabs"
         end
-      when :notes    then "type to edit · ^N new · ^W close · ^G goto · ^F find · ^1-9 switch · ↹/esc tabs"
+      when :notes    then "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
         @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
                                : "↑/↓ move · ↵ open · n new · d delete · : cmds · esc tabs"
-      when :project  then "type to edit description · ↑/↓/↔ move · ^G goto · ^F find · ↵ nl · esc tabs"
+      when :project  then "type to edit description · ↑/↓/↔ move · ^G goto · ^F find · ^B ws · ↵ nl · esc tabs"
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"
       end
     end
