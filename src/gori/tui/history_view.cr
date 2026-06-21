@@ -366,12 +366,13 @@ module Gori::Tui
       method_x = rect.x + 16 # time column widened to fit MM-DD HH:MM:SS
       proto_x = rect.x + 24
       host_x = rect.x + 31
-      # Right cluster anchored to the edge: STATUS · SIZE · DUR (response size +
-      # latency — frequently-scanned). HOST+PATH share the middle responsively so
-      # both stay readable from ~80 cols up to wide terminals.
-      status_x = {rect.right - 21, host_x + 10}.max
-      size_x = status_x + 7
-      dur_x = status_x + 14
+      # Right cluster anchored to the edge: STA · SIZE · DUR (status code, response
+      # size, latency — frequently-scanned). STA is sized to the 3-digit code, not a
+      # wide header. HOST+PATH share the middle responsively so both stay readable
+      # from ~80 cols up to wide terminals.
+      status_x = {rect.right - 17, host_x + 10}.max
+      size_x = status_x + 4
+      dur_x = status_x + 11
       mid = status_x - host_x
       host_w = (mid * 2 // 5).clamp(8, 40)
       path_x = host_x + host_w + 1
@@ -382,7 +383,7 @@ module Gori::Tui
       screen.text(proto_x, hdr_y, "PROTO", Theme::MUTED)
       screen.text(host_x, hdr_y, "HOST", Theme::MUTED)
       screen.text(path_x, hdr_y, "PATH", Theme::MUTED)
-      screen.text(status_x, hdr_y, "STATUS", Theme::MUTED)
+      screen.text(status_x, hdr_y, "STA", Theme::MUTED)
       screen.text(size_x, hdr_y, "SIZE", Theme::MUTED)
       screen.text(dur_x, hdr_y, "DUR", Theme::MUTED)
       Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))

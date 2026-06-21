@@ -91,7 +91,7 @@ describe Gori::Tui::HistoryView do
       backend = MemoryBackend.new(80, 12)
       view.render_list(Screen.new(backend), Rect.new(0, 0, 80, 12))
       backend.contains?("METHOD").should be_true
-      backend.contains?("STATUS").should be_true
+      backend.contains?("STA").should be_true # status column header (3-wide, sized to the code)
       backend.contains?("GET").should be_true
       backend.contains?("/search").should be_true
       backend.contains?("500").should be_true
