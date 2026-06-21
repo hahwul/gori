@@ -965,7 +965,7 @@ module Gori::Tui
       case
       when key.enter?     then view.edit_newline
       when key.backspace? then view.edit_backspace
-      when key.up?        then view.at_top? ? focus_pane(subtabs_shown? ? :subtabs : :menu) : view.edit_move(-1, 0)
+      when key.up?        then view.at_top? ? view.focus_first : view.edit_move(-1, 0) # ↑-at-top → target field above
       when key.down?      then view.edit_move(1, 0)
       when key.left?      then view.edit_move(0, -1)
       when key.right?     then view.edit_move(0, 1)
@@ -985,7 +985,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
-      when key.up?        then view.at_top? ? focus_pane(subtabs_shown? ? :subtabs : :menu) : view.hex_move(-1, 0)
+      when key.up?        then view.at_top? ? view.focus_first : view.hex_move(-1, 0) # ↑-at-top → target field above
       when key.down?      then view.hex_move(1, 0)
       when key.left?      then view.hex_move(0, -1)
       when key.right?     then view.hex_move(0, 1)
@@ -1006,6 +1006,7 @@ module Gori::Tui
 
       when key.enter?     then replay_send
       when key.up?        then focus_pane(subtabs_shown? ? :subtabs : :menu) # target is the top pane → ↑ pops up
+      when key.down?      then view.pane_advance(1)                          # ↓ → drop into the Request pane below
       when key.backspace? then view.target_backspace
       when key.left?      then view.target_move(-1)
       when key.right?     then view.target_move(1)
@@ -1025,7 +1026,7 @@ module Gori::Tui
       key = ev.key
       case
       when key.enter?            then replay_send
-      when key.up?               then view.at_top? ? focus_pane(subtabs_shown? ? :subtabs : :menu) : view.scroll(-1)
+      when key.up?               then view.at_top? ? view.focus_first : view.scroll(-1) # ↑-at-top → target field above
       when key.down?             then view.scroll(1)
       when key.left?, key.right? then view.toggle_resp_mode
       when key.lower_d?          then view.toggle_resp_mode
