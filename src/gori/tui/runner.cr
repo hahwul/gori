@@ -1246,7 +1246,8 @@ module Gori::Tui
     # with "" on close). Routes like jump_line; replay covers both panes.
     private def set_search_hl(q : String) : Nil
       case @search_target
-      when :replay_request, :replay_response then current_replay_view.try { |v| v.search_hl = q }
+      when :replay_request  then current_replay_view.try { |v| v.request_search_hl = q }
+      when :replay_response then current_replay_view.try { |v| v.response_search_hl = q }
       when :notes                            then @notes.search_hl = q
       when :project                          then @project_view.search_hl = q
       when :detail                           then @history.search_hl = q

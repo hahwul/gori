@@ -12,10 +12,14 @@ module Gori::Tui
       return if query.empty? || text.empty?
       q = query.downcase
       dt = text.downcase
+      # Match in the downcased copy, then slice the ORIGINAL text to preserve case —
+      # valid only while downcase is 1:1. For the rare char that changes length under
+      # downcase (e.g. U+0130 'İ'), fall back to slicing dt so the column stays right.
+      src = dt.size == text.size ? text : dt
       pos = 0
       while (i = dt.index(q, pos))
-        col = x + Screen.display_width(text[0, i])
-        seg = text[i, q.size]
+        col = x + Screen.display_width(src[0, i])
+        seg = src[i, q.size]
         screen.text(col, y, seg, Theme::BG, Theme::YELLOW, width: {max_x - col, 0}.max) if col < max_x
         pos = i + q.size
       end

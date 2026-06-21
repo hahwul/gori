@@ -367,9 +367,12 @@ module Gori::Tui
       @editor.search_lines(query)
     end
 
-    # ^F highlight: route to the request editor + the response pane (same query).
-    def search_hl=(q : String) : Nil
+    # ^F highlight, scoped to the searched pane (the Runner picks which).
+    def request_search_hl=(q : String) : Nil
       @editor.search_hl = q
+    end
+
+    def response_search_hl=(q : String) : Nil
       @search_hl = q
     end
 
@@ -554,9 +557,10 @@ module Gori::Tui
                         else            {' ', Theme::MUTED}
                         end
         Gutter.draw(screen, rect.x, rect.y + i, di, gw)
-        dtext = "#{prefix} #{d.text}"
-        screen.text(rect.x + gw, rect.y + i, dtext, color, width: cw)
-        SearchHi.mark(screen, rect.x + gw, rect.y + i, dtext, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
+        screen.text(rect.x + gw, rect.y + i, "#{prefix} #{d.text}", color, width: cw)
+        # Highlight only the line text (past the 2-col "+ "/"- " prefix), so the marks
+        # match what response_search_lines counts (d.text), not the diff decoration.
+        SearchHi.mark(screen, rect.x + gw + 2, rect.y + i, d.text, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
     end
 
