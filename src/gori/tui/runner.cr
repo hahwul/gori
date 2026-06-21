@@ -358,7 +358,7 @@ module Gori::Tui
         case @active_tab
         when :notes   then @notes.set_preedit(text)
         when :project then @project_view.set_preedit(text)
-        when :replay  then current_replay_view.try(&.set_preedit(text))
+        when :replay  then current_replay_view.try { |v| v.set_preedit(text) unless v.request_hex? }
         end
       end
     end
@@ -942,8 +942,8 @@ module Gori::Tui
           @toast = on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off"
         end
       elsif key.escape?
-        if (view = current_replay_view) && view.request_hex?
-          view.toggle_request_hex # exit hex back to the text editor (not all the way to the tab bar)
+        if (view = current_replay_view) && view.focus == :request && view.request_hex?
+          view.toggle_request_hex # exit hex back to the text editor (only when on the request pane)
         else
           focus_pane(:menu)
         end
@@ -1716,7 +1716,11 @@ module Gori::Tui
     # A tab a cross-session reload must NOT overwrite/remove: actively edited, mid
     # round-trip, or holding unsaved local edits.
     private def replay_tab_locked?(tab : ReplayTab) : Bool
-      replay_tab_editing?(tab) || tab.view.inflight? || tab.view.dirty?
+      # request_hex? too: a hex-edit session isn't necessarily dirty (a pure peek),
+      # and request_text reads CRLF in hex mode vs the LF-persisted row, so the
+      # reconcile compare would wrongly see a change and restore() — wiping the hex
+      # buffer + response. Lock it so the live hex session is never clobbered.
+      replay_tab_editing?(tab) || tab.view.inflight? || tab.view.dirty? || tab.view.request_hex?
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is

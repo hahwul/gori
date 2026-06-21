@@ -247,6 +247,7 @@ module Gori::Tui
 
     # 'x' toggles a raw hex dump of the current pane (request/response bytes).
     def toggle_detail_hex : Nil
+      return if @detail_pane == :frames # frames has no raw-bytes hex; don't strand a hidden flag
       @detail_hex = !@detail_hex
       @detail_scroll = 0 # row-based offset differs from the line-based one
     end
@@ -263,6 +264,7 @@ module Gori::Tui
       @detail_frames = (cid = fresh.h2_conn_id) ? store.h2_frames(cid) : nil
       @detail_cache = nil # content changed → rebuild (windowed) on next render
       @detail_hex_bytes = nil
+      @detail_scroll = @detail_scroll.clamp(0, detail_scroll_max) # content may have shrunk
       true
     end
 

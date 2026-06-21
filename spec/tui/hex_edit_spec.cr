@@ -76,4 +76,26 @@ describe Gori::Tui::HexEdit do
     backend.contains?("00000000").should be_true
     backend.contains?("GET /").should be_true # ascii gutter
   end
+
+  it "tracks mutated? (a pure peek stays clean, an edit flips it)" do
+    h = hx("GET")
+    h.mutated?.should be_false
+    h.move_right # navigation is not a mutation
+    h.mutated?.should be_false
+    h.set_nibble(4)
+    h.mutated?.should be_true
+  end
+
+  it "clips drawing to the rect width (no bleed into an adjacent pane)" do
+    backend = MemoryBackend.new(120, 2)
+    # a full 16-byte row would span ~78 cols; constrain to a 40-wide pane at x=0
+    HexEdit.new(Bytes.new(16) { |i| 0x41_u8 + i.to_u8 }).render(Screen.new(backend), Rect.new(0, 0, 40, 2), true, 0)
+    backend.row(0)[40, 80].strip.should eq("") # nothing drawn past the pane edge
+  end
+
+  it "draws both ascii bars on an empty buffer (no lone |)" do
+    backend = MemoryBackend.new(100, 2)
+    HexEdit.new(Bytes.empty).render(Screen.new(backend), Rect.new(0, 0, 100, 2), true, 0)
+    backend.contains?("||").should be_true # opening + closing bar adjacent
+  end
 end

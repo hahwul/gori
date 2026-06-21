@@ -71,7 +71,7 @@ module Gori::Tui
     end
 
     private def exit_request_hex : Nil
-      if h = @req_hex_edit
+      if (h = @req_hex_edit) && h.mutated?       # a pure peek (no edits) leaves @editor + @dirty untouched
         @editor.set_text(String.new(h.to_bytes)) # LOSSY: U+FFFD for non-UTF8 + \r rstrip (accepted)
         @dirty = true                            # the round-trip back is a content change
       end
