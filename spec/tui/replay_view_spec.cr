@@ -163,6 +163,35 @@ describe Gori::Tui::ReplayView do
     view.dirty?.should be_false # synced/restored text must never be re-saved by us
   end
 
+  it "restore with no persisted response starts the pane empty" do
+    view = ReplayView.new
+    view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true)
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("— not sent — press ^R to replay —").should be_true
+  end
+
+  it "restore re-populates a persisted last response (survives a reopen)" do
+    view = ReplayView.new
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
+    view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true,
+      head, "RESTORED".to_slice, nil, 1234_i64)
+    view.dirty?.should be_false # a restored tab must never be re-saved
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("RESTORED").should be_true
+    backend.contains?("— not sent —").should be_false
+  end
+
+  it "restore shows a persisted errored send" do
+    view = ReplayView.new
+    view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true,
+      Bytes.empty, nil, "connect failed: api.test:443", 0_i64)
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("replay error: connect failed: api.test:443").should be_true
+  end
+
   it "marks dirty on edits + flag toggles, and clears on restore" do
     view = ReplayView.new
     view.load_blank

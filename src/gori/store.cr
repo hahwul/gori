@@ -286,11 +286,12 @@ module Gori
 
     def replays : Array(ReplayRecord)
       list = [] of ReplayRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position FROM replays ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us FROM replays ORDER BY position, id") do |rs|
         rs.each do
           list << ReplayRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
-            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32))
+            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
+            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?))
         end
       end
       list
@@ -312,6 +313,19 @@ module Gori
       exec_task ->(c : DB::Connection) {
         c.exec("UPDATE replays SET target = ?, request = ?, http2 = ?, auto_content_length = ?, updated_at = ? WHERE id = ?",
           target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, now_us, id)
+        nil
+      }
+    end
+
+    # Persist a replay tab's LAST send result (V11) so it survives a reopen. Kept
+    # separate from update_replay (the request side) — called once each send
+    # completes. `head` is the response head bytes (empty on error), `error` is set
+    # only when the send failed. Routes through exec_task like the other replay
+    # writes, so it stays invisible to our own data_version poll.
+    def update_replay_response(id : Int64, head : Bytes, body : Bytes?, error : String?, duration_us : Int64) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE replays SET response_head = ?, response_body = ?, response_error = ?, response_duration_us = ?, updated_at = ? WHERE id = ?",
+          head, body, error, duration_us, now_us, id)
         nil
       }
     end

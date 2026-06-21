@@ -53,12 +53,15 @@ module Gori::Tui
       # Ctrl+R from History always appends a fresh one; previous sessions stay alive
       # so the user can switch back (ctrl+1..9) and see prior edits/results.
       # Re-open replay tabs persisted for this project — they survive a reopen AND
-      # sync across sessions on the same project DB. Each ReplayView is restored
-      # from its row; the response is transient so it starts empty (resend to fill).
+      # the request side syncs across sessions on the same project DB. This is the
+      # ONE place a tab's last send response (V11) is restored: a fresh project
+      # open. (Live cross-session reconcile carries only the request — see
+      # reconcile_replays — so a peer's resend never clobbers the local response.)
       @replays = [] of ReplayTab
       @session.store.replays.each do |r|
         view = ReplayView.new
-        view.restore(r.target, r.request, r.http2?, r.auto_content_length?)
+        view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
+          r.response_head, r.response_body, r.response_error, r.response_duration_us)
         @replays << ReplayTab.new(view, r.flow_id, r.id)
       end
       @current_replay_idx = @replays.empty? ? -1 : 0
@@ -214,8 +217,15 @@ module Gori::Tui
         view, result = pair
         # Drop a result whose sub-tab was closed (^W) mid-flight — applying it
         # would mutate an orphaned view and flash a toast for a gone session.
-        next unless @replays.any? { |t| t.view.same?(view) }
+        next unless tab = @replays.find { |t| t.view.same?(view) }
         view.apply(result)
+        # Persist a SUCCESSFUL send as the tab's last response (V11) so it survives
+        # a reopen. Only on success: a later failed resend (connection refused, …)
+        # must not wipe a good response the user wants to keep. Skips a tab with no
+        # db row yet (store was closing on creation).
+        if (id = tab.db_id) && result.ok?
+          @session.store.update_replay_response(id, result.head, result.body, result.error, result.duration_us)
+        end
         @toast = if result.ok?
                    "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms"
                  else
@@ -296,6 +306,12 @@ module Gori::Tui
         # wipe its on-screen response/scroll/focus. (restore() resets all of that.)
         next if v.target == row.target && v.request_text == row.request &&
                 v.http2? == row.http2? && v.auto_content_length? == row.auto_content_length?
+        # Live cross-session sync carries only the REQUEST. A replay response is
+        # personal to each session's view (persisted only so it survives that
+        # session's OWN reopen — restored at project-open, not here): pulling a
+        # peer's response would clobber the local response/scroll/focus on every
+        # peer resend. So restore() is called response-less, blanking the pane only
+        # when the peer actually changed the request (which the compare above gates).
         v.restore(row.target, row.request, row.http2?, row.auto_content_length?)
       end
 
@@ -303,6 +319,8 @@ module Gori::Tui
       rows.each do |row|
         next if local_ids.includes?(row.id)
         view = ReplayView.new
+        # Peer-created tab: request only (its response shows on this session's next
+        # project-open, per the personal-response rule above).
         view.restore(row.target, row.request, row.http2?, row.auto_content_length?)
         @replays << ReplayTab.new(view, row.flow_id, row.id)
       end

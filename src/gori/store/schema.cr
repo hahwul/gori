@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 10
+      VERSION = 11
 
       V1 = [
         <<-SQL,
@@ -157,9 +157,9 @@ module Gori
 
       # Replay workbench tabs, persisted so they survive a reopen AND sync across
       # sessions sharing the project (the TUI reconciles by `id` on the
-      # data_version poll). Only the editable request is stored — the response,
-      # scroll, and focus are transient. `flow_id` is the source History flow for a
-      # `^R`-opened tab (NULL for a hand-authored `^N` tab).
+      # data_version poll). The editable request is stored here; the last send
+      # response is added in V11 (scroll + focus stay transient). `flow_id` is the
+      # source History flow for a `^R`-opened tab (NULL for a hand-authored `^N`).
       V9 = [
         <<-SQL,
         CREATE TABLE replays (
@@ -186,7 +186,19 @@ module Gori
         "CREATE INDEX idx_flows_sitemap ON flows (host, target, method)",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10]
+      # Persist a replay tab's LAST send result so it survives a reopen (and shows
+      # on a fresh open) instead of starting empty. Full bytes (head + body, like
+      # the captured-flow BLOBs); `response_error` + `response_duration_us` let
+      # restore() rebuild the Replay::Result faithfully — including an errored send.
+      # All NULL until the first send. Scroll/focus/diff-baseline stay transient.
+      V11 = [
+        "ALTER TABLE replays ADD COLUMN response_head BLOB",
+        "ALTER TABLE replays ADD COLUMN response_body BLOB",
+        "ALTER TABLE replays ADD COLUMN response_error TEXT",
+        "ALTER TABLE replays ADD COLUMN response_duration_us INTEGER",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

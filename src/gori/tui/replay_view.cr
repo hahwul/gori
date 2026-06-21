@@ -176,18 +176,27 @@ module Gori::Tui
     end
 
     # Re-open a persisted tab (from the `replays` table) without a live FlowDetail.
-    # Seeds the editable request + target + flags; the response is transient so it
-    # starts empty, and there's no captured original, so it's non-diffable until the
-    # first resend (like a blank tab). Clears @dirty so a synced/restored tab is
-    # never re-saved by us — that would echo the write back to the peer.
-    def restore(target : String, request : String, http2 : Bool, auto_cl : Bool) : Nil
+    # Seeds the editable request + target + flags, and (V11) the LAST send response
+    # when one was persisted — so a reopened tab shows it instead of "— not sent —".
+    # There's no captured original, so it's non-diffable until the next resend (the
+    # restored response then becomes that diff's baseline). Clears @dirty so a
+    # synced/restored tab is never re-saved by us — that would echo back to the peer.
+    def restore(target : String, request : String, http2 : Bool, auto_cl : Bool,
+                response_head : Bytes? = nil, response_body : Bytes? = nil,
+                response_error : String? = nil, response_duration_us : Int64? = nil) : Nil
       @flow = nil
       @http2 = http2
       @target = target
       @tcx = @target.size
       @editor.set_text(request)
       @original_lines = [] of String
-      @result = nil
+      # Rebuild the persisted result: a head (success) or an error (failed send)
+      # marks a real stored response; both nil → never sent → empty pane.
+      @result =
+        if response_head || response_error
+          Replay::Result.new(response_head || Bytes.empty, response_body, nil,
+            response_duration_us || 0_i64, response_error)
+        end
       @prev_result = nil
       reset_result_caches
       @focus = :target

@@ -178,9 +178,10 @@ module Gori
       end
     end
 
-    # A persisted Replay workbench tab (the editable request only; the response is
-    # transient). Shared across sessions on the same project — the TUI reconciles
-    # local tabs against these rows by `id` on the data_version poll.
+    # A persisted Replay workbench tab: the editable request plus the LAST send
+    # response (V11 — head/body/error/duration; all nil until the first send).
+    # Shared across sessions on the same project — the TUI reconciles local tabs
+    # against these rows by `id` on the data_version poll.
     struct ReplayRecord
       getter id : Int64
       getter target : String
@@ -189,8 +190,14 @@ module Gori
       getter? auto_content_length : Bool
       getter flow_id : Int64?
       getter position : Int32
+      getter response_head : Bytes?
+      getter response_body : Bytes?
+      getter response_error : String?
+      getter response_duration_us : Int64?
 
-      def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position)
+      def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position,
+                     @response_head = nil, @response_body = nil, @response_error = nil,
+                     @response_duration_us = nil)
       end
     end
 

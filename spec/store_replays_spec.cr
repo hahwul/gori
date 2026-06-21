@@ -71,4 +71,41 @@ describe "Gori::Store replay tabs (v9)" do
       store.replays.map(&.id).should eq([b, c, a])
     end
   end
+
+  it "starts a fresh tab with no persisted response (V11 columns NULL)" do
+    with_store do |store|
+      id = store.insert_replay("https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 0)
+      r = store.replays.find!(&.id.==(id))
+      r.response_head.should be_nil
+      r.response_body.should be_nil
+      r.response_error.should be_nil
+      r.response_duration_us.should be_nil
+    end
+  end
+
+  it "round-trips a persisted last response (head + body + duration)" do
+    with_store do |store|
+      id = store.insert_replay("https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 0)
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
+      body = "PONG".to_slice
+      store.update_replay_response(id, head, body, nil, 4200_i64)
+      r = store.replays.find!(&.id.==(id))
+      String.new(r.response_head.not_nil!).should eq("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n")
+      String.new(r.response_body.not_nil!).should eq("PONG")
+      r.response_error.should be_nil
+      r.response_duration_us.should eq(4200_i64)
+      # the request side is untouched by a response write
+      r.request.should eq("GET / HTTP/1.1\r\n\r\n")
+    end
+  end
+
+  it "persists an errored send (empty head, nil body, error text)" do
+    with_store do |store|
+      id = store.insert_replay("https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 0)
+      store.update_replay_response(id, Bytes.empty, nil, "connect failed: a.test:443", 0_i64)
+      r = store.replays.find!(&.id.==(id))
+      r.response_body.should be_nil
+      r.response_error.should eq("connect failed: a.test:443")
+    end
+  end
 end
