@@ -34,25 +34,24 @@ module Gori
         @order.size
       end
 
-      # Palette search: non-hidden, context-available verbs matching `query` by
-      # fuzzy subsequence, ranked best-first. An empty query lists everything
-      # (in registration order) so the palette is browsable.
+      # Find across ALL scopes: non-hidden, context-available verbs matching `query`
+      # by fuzzy subsequence, ranked best-first. The general primitive (used in tests
+      # and future surfaces); the two TUI surfaces use the scoped #for_scope below.
       def search(query : String, ctx : ExecContext) : Array(Definition)
         rank(self.select { |v| !v.hidden? && v.available?(ctx) }, query)
       end
 
-      # Like #search, but narrowed to the verbs that can fire in `scope` — plus
-      # Global, which fires everywhere. Backs the ":" context command line so it
-      # only offers actions relevant to the focused area. (Body covers the History
-      # list etc.; the per-verb available? gates further narrow it to the active
-      # tab — e.g. history.copy only when current_tab == :history.)
+      # Verbs that fire in EXACTLY `scope` (no Global fallback). This backs the two
+      # deliberately-distinct command surfaces:
+      #   • Ctrl-P palette → for_scope(Global)  — gori-wide app control (settings,
+      #     capture, scope/rules, tab nav, quit …).
+      #   • ":" command line → for_scope(current_scope) — only the FOCUSED area's
+      #     own actions (Body: replay/copy/open …, Replay: send/new, …).
+      # Keeping them disjoint is the whole point: app control never clutters ":",
+      # and area actions never clutter the palette. Per-verb available? still gates
+      # (e.g. history.copy only when current_tab == :history).
       def for_scope(scope : Scope, ctx : ExecContext, query : String = "") : Array(Definition)
-        candidates = self.select { |v| !v.hidden? && (v.scope == scope || v.scope.global?) && v.available?(ctx) }
-        return rank(candidates, query) unless query.empty?
-        # Empty query: the focus area's OWN actions first, the always-available
-        # Global commands after (partition is stable → registration order within each).
-        local, global = candidates.partition { |v| !v.scope.global? }
-        local + global
+        rank(self.select { |v| !v.hidden? && v.scope == scope && v.available?(ctx) }, query)
       end
 
       # Shared filter→rank tail: an empty query keeps registration order (browsable);

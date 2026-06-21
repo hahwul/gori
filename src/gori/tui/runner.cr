@@ -877,6 +877,8 @@ module Gori::Tui
       if ev.ctrl? && key.lower_p?
 
         open_palette
+      elsif ev.char == ':' && !ev.ctrl? && !ev.alt? && !@intercept.editing?
+        open_command # ":" cmdline in the navigable queue (editing swallows ":" as a char)
       elsif @intercept.editing?
         if key.escape?
           @intercept.stop_edit
@@ -1300,9 +1302,9 @@ module Gori::Tui
           "↹ pane · type to edit · ^R send · ^L auto-len · ^X hex (req) · x hex (resp) · ^N new · ^1-9 · ^W close · esc tabs"
         end
       when :notes    then "type to edit · ^N new · ^W close · ^1-9 switch · ↹/esc tabs"
-      when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · : cmds · esc tabs"
+      when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
-        @findings.detail_open? ? "[ ] severity · e notes · d delete · : cmds · ←/esc back" \
+        @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
                                : "↑/↓ move · ↵ open · n new · d delete · : cmds · esc tabs"
       when :project  then "type to edit description · ↑/↓/↔ move · ↵ nl · esc tabs"
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"

@@ -207,8 +207,8 @@ describe Gori::Verb do
       via_key = keymap.lookup(Chord.new("p", ctrl: true), Scope::Body)
       via_key.should eq("app.palette")
 
-      # palette path: fuzzy "palette" -> app.palette, same id
-      via_palette = reg.search("palette", FakeContext.new).map(&.id)
+      # palette path: the Ctrl-P palette is the Global (app-control) surface
+      via_palette = reg.for_scope(Scope::Global, FakeContext.new, "palette").map(&.id)
       via_palette.should contain("app.palette")
     end
   end
@@ -278,21 +278,29 @@ describe Gori::Verb do
       reg.search("zzxq-nope", ctx).should be_empty
     end
 
-    it "for_scope lists only the scope's verbs plus Global, gated and fuzzy-ranked" do
+    it "for_scope is STRICTLY scope-local — no Global fallback (the two surfaces are disjoint)" do
       reg = Gori::Verbs.registry
       ctx = FakeContext.new
+      ctx.selected = 5_i64 # so the flow-gated Body actions are available
 
       body = reg.for_scope(Scope::Body, ctx)
       body.each do |v|
         v.hidden?.should be_false
-        (v.scope.body? || v.scope.global?).should be_true
+        v.scope.should eq(Scope::Body) # strictly Body — Global app-control stays out of ":"
       end
-      body.map(&.id).should contain("app.quit")                      # Global is always in scope
-      body.map(&.id).any?(&.starts_with?("replay.")).should be_false # other scopes excluded
-      body.map(&.id).any?(&.starts_with?("sitemap.")).should be_false
+      ids = body.map(&.id)
+      ids.should contain("history.replay") # an area action surfaces
+      ids.should_not contain("app.quit")   # app-control belongs to Ctrl-P, not ":"
+      ids.should_not contain("nav.next-tab")
 
-      # narrows within the scope by fuzzy query (same ranking as #search)
-      reg.for_scope(Scope::Global, ctx, "quit").first.id.should eq("app.quit")
+      # The palette source is the Global slice (app control) — and it has NO area actions.
+      gids = reg.for_scope(Scope::Global, ctx).map(&.id)
+      gids.should contain("app.quit")
+      gids.should contain("nav.next-tab") # tab navigation lives in Ctrl-P
+      gids.any?(&.starts_with?("history.")).should be_false
+
+      # fuzzy query narrows within the scope (same ranking as #search)
+      reg.for_scope(Scope::Body, ctx, "replay").first.id.should eq("history.replay")
     end
 
     it "rejects duplicate ids" do

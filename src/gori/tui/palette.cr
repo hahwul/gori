@@ -4,10 +4,12 @@ require "./frame"
 require "../verb"
 
 module Gori::Tui
-  # The command palette overlay (Ctrl-P). Fuzzy-filters the verb registry; the
-  # chosen verb runs through the SAME Verb::Definition#call path as a keybinding
-  # (P1 — no separate code path). Pure input/state + rendering; the Runner owns
-  # opening/closing and executing the selection.
+  # The command palette overlay (Ctrl-P) — the GORI-WIDE app-control surface:
+  # settings, capture, scope/rules, tab navigation, quit … (the Global-scope verbs).
+  # Area-specific actions live in the ":" command line (CommandLine) instead, so the
+  # two surfaces stay disjoint. Fuzzy-filters the registry; the chosen verb runs
+  # through the SAME Verb::Definition#call path as a keybinding (P1 — no separate
+  # code path). Pure input/state + rendering; the Runner owns open/close + execute.
   class PaletteState
     getter query : String
     getter results : Array(Verb::Definition)
@@ -58,7 +60,7 @@ module Gori::Tui
     end
 
     def refresh(ctx : Verb::ExecContext) : Nil
-      @results = @registry.search(@query, ctx)
+      @results = @registry.for_scope(Verb::Scope::Global, ctx, @query) # app-control (Global) only
       @selected = @selected.clamp(0, {@results.size - 1, 0}.max)
     end
 
