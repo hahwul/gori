@@ -121,6 +121,23 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "drops trailing columns on a narrow pane without clobbering PATH or overflowing" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/search", 200, "application/json")
+      view = HistoryView.new
+      view.reload(store)
+
+      # production-like inset (rect.x=3) at a 65-col terminal: STA stays, TYPE/SIZE/DUR
+      # drop, and PATH must remain legible — not collapsed to "/" or overwritten ("PSTA").
+      backend = MemoryBackend.new(65, 8)
+      view.render_list(Screen.new(backend), Rect.new(3, 0, 59, 8))
+      backend.contains?("STA").should be_true
+      backend.contains?("PATH").should be_true    # header intact
+      backend.contains?("PSTA").should be_false   # STA did not overwrite the PATH header
+      backend.contains?("/search").should be_true # PATH value not squeezed to a bare "/"
+    end
+  end
+
   it "shows captured WebSocket messages in the detail view" do
     tmp_store do |store|
       id = add_flow(store, "GET", "/ws", 101)

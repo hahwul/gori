@@ -366,28 +366,42 @@ module Gori::Tui
       method_x = rect.x + 16 # time column widened to fit MM-DD HH:MM:SS
       proto_x = rect.x + 24
       host_x = rect.x + 31
-      # Right cluster anchored to the edge: STA · TYPE · SIZE · DUR (status code,
-      # response MIME, size, latency — frequently-scanned). STA is sized to the
-      # 3-digit code; TYPE shows a compact MIME (json/html/png…). HOST+PATH share the
-      # middle responsively so both stay readable from ~80 cols up to wide terminals.
-      status_x = {rect.right - 24, host_x + 10}.max
+      # Right cluster STA · TYPE · SIZE · DUR (status code, response MIME, size,
+      # latency — frequently-scanned), anchored to the right edge and sized to FIT:
+      # STA always shows; TYPE/SIZE/DUR drop right-to-left when the pane is too narrow
+      # to also keep HOST+PATH legible, so the cluster never spills past the frame.
+      # (Each span includes its trailing 1-col gap.) HOST+PATH split the rest.
+      cluster_w = 4                                # STA (3-digit code + gap)
+      spare = rect.right - host_x - 18 - cluster_w # reserve 18 for HOST+PATH first
+      if (show_type = spare >= 7)
+        cluster_w += 7
+        spare -= 7
+      end
+      if (show_size = spare >= 7)
+        cluster_w += 7
+        spare -= 7
+      end
+      show_dur = spare >= 6
+      cluster_w += 6 if show_dur
+
+      status_x = {rect.right - cluster_w, host_x}.max
       type_x = status_x + 4
       size_x = status_x + 11
       dur_x = status_x + 18
-      mid = status_x - host_x
-      host_w = (mid * 2 // 5).clamp(8, 40)
+      mid = {status_x - host_x, 0}.max
+      host_w = {(mid * 2 // 5).clamp(6, 40), mid}.min # never crosses STA even when pinned
       path_x = host_x + host_w + 1
-      path_w = {status_x - path_x - 1, 1}.max
+      path_w = {status_x - path_x - 1, 0}.max
 
       screen.text(time_x, hdr_y, "TIME", Theme::MUTED)
       screen.text(method_x, hdr_y, "METHOD", Theme::MUTED)
       screen.text(proto_x, hdr_y, "PROTO", Theme::MUTED)
-      screen.text(host_x, hdr_y, "HOST", Theme::MUTED)
-      screen.text(path_x, hdr_y, "PATH", Theme::MUTED)
-      screen.text(status_x, hdr_y, "STA", Theme::MUTED)
-      screen.text(type_x, hdr_y, "TYPE", Theme::MUTED)
-      screen.text(size_x, hdr_y, "SIZE", Theme::MUTED)
-      screen.text(dur_x, hdr_y, "DUR", Theme::MUTED)
+      screen.text(host_x, hdr_y, "HOST", Theme::MUTED, width: host_w) if host_w > 0
+      screen.text(path_x, hdr_y, "PATH", Theme::MUTED, width: path_w) if path_w > 0
+      screen.text(status_x, hdr_y, "STA", Theme::MUTED, width: 3)
+      screen.text(type_x, hdr_y, "TYPE", Theme::MUTED, width: 6) if show_type
+      screen.text(size_x, hdr_y, "SIZE", Theme::MUTED, width: 6) if show_size
+      screen.text(dur_x, hdr_y, "DUR", Theme::MUTED, width: 6) if show_dur
       Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
 
       list_top = hdr_y + 2
@@ -416,13 +430,13 @@ module Gori::Tui
         screen.text(time_x, y, fmt_time(row.created_at), Theme::MUTED, bg)
         screen.text(method_x, y, row.method, Theme.method_color(row.method), bg)
         screen.text(proto_x, y, row.scheme.upcase, Theme::MUTED, bg)
-        screen.text(host_x, y, row.host, fg, bg, width: host_w)
-        screen.text(path_x, y, origin_path(row.target), fg, bg, width: path_w)
+        screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
+        screen.text(path_x, y, origin_path(row.target), fg, bg, width: path_w) if path_w > 0
         status = row.status.try(&.to_s) || "···"
-        screen.text(status_x, y, status, Theme.status_color(row.status), bg)
-        screen.text(type_x, y, fmt_mime(row.content_type), Theme::MUTED, bg, width: 6)
-        screen.text(size_x, y, fmt_size(row.response_size), Theme::MUTED, bg, width: 6)
-        screen.text(dur_x, y, fmt_dur(row.duration_us), Theme::MUTED, bg, width: {rect.right - dur_x, 1}.max)
+        screen.text(status_x, y, status, Theme.status_color(row.status), bg, width: 3)
+        screen.text(type_x, y, fmt_mime(row.content_type), Theme::MUTED, bg, width: 6) if show_type
+        screen.text(size_x, y, fmt_size(row.response_size), Theme::MUTED, bg, width: 6) if show_size
+        screen.text(dur_x, y, fmt_dur(row.duration_us), Theme::MUTED, bg, width: 6) if show_dur
       end
     end
 
@@ -432,24 +446,34 @@ module Gori::Tui
       Time.unix(created_at // 1_000_000).to_local.to_s("%m-%d %H:%M:%S")
     end
 
-    # Compact response size (B/KB/MB), bounded to ≤6 cols. "—" until the response lands.
+    # Compact response size (B/KB/MB/GB), bounded to ≤6 cols. "—" until the response
+    # lands. The unit is picked from the ROUNDED magnitude so a value just under a
+    # boundary (e.g. 1023.6 KB) rolls up to the next unit ("1.0MB") instead of the
+    # misleading "1024KB".
     private def fmt_size(bytes : Int64?) : String
       return "—" unless bytes
       return "#{bytes}B" if bytes < 1024
-      if bytes < 1024 * 1024
-        kb = bytes / 1024.0
-        return kb < 10 ? "#{kb.round(1)}KB" : "#{kb.round.to_i}KB"
-      end
-      mb = bytes / (1024.0 * 1024.0)
-      mb < 10 ? "#{mb.round(1)}MB" : "#{mb.round.to_i}MB"
+      kb = bytes / 1024.0
+      return fmt_unit(kb, "KB") if kb.round < 1024
+      mb = bytes / 1_048_576.0
+      return fmt_unit(mb, "MB") if mb.round < 1024
+      fmt_unit(bytes / 1_073_741_824.0, "GB")
     end
 
-    # Compact request→response latency (ms/s), bounded. "—" until the response lands.
+    # One decimal under 10 (3.4KB), whole at/above (345KB) — keeps the cell ≤6 cols.
+    private def fmt_unit(v : Float64, unit : String) : String
+      v < 10 ? "#{v.round(1)}#{unit}" : "#{v.round.to_i}#{unit}"
+    end
+
+    # Compact request→response latency (ms/s/m/h), bounded to ≤6 cols. "—" until the
+    # response lands; a minute/hour tier keeps very slow flows from overflowing.
     private def fmt_dur(us : Int64?) : String
       return "—" unless us
       ms = us // 1000
       return "#{ms}ms" if ms < 1000
-      "#{(ms / 1000.0).round(1)}s"
+      return "#{(ms / 1000.0).round(1)}s" if ms < 60_000
+      return "#{(ms / 60_000.0).round(1)}m" if ms < 3_600_000
+      "#{(ms / 3_600_000.0).round(1)}h"
     end
 
     # Compact response MIME — the useful subtype (json/html/png/js…), params dropped.
@@ -461,7 +485,8 @@ module Gori::Tui
       sub = main.includes?('/') ? main.split('/', 2)[1] : main
       case
       when sub.in?("javascript", "x-javascript", "ecmascript") then "js"
-      when sub == "x-www-form-urlencoded"                      then "form"
+      when sub == "x-www-form-urlencoded", sub == "form-data"  then "form"
+      when sub == "event-stream"                               then "sse"
       when sub == "octet-stream"                               then "bin"
       when sub == "plain"                                      then "text"
       when sub.ends_with?("+json")                             then "json"

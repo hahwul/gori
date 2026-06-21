@@ -670,6 +670,10 @@ module Gori
 
     private def update_one(conn : DB::Connection, resp : CapturedResponse) : Nil
       body_size = resp.body_size || resp.body.try(&.size.to_i64) || 0_i64
+      # No response actually landed (upstream error / human drop build an empty head +
+      # nil body): keep response_size NULL so the History SIZE column reads "—", not a
+      # misleading "0B" that looks like a real zero-length response.
+      response_size = (resp.head.empty? && resp.body.nil?) ? nil : resp.head.size.to_i64 + body_size
       conn.exec(
         <<-SQL,
         UPDATE flows SET
@@ -679,7 +683,7 @@ module Gori
         WHERE id = ?
         SQL
         resp.head, resp.body, resp.status, resp.reason, resp.content_type,
-        resp.head.size.to_i64 + body_size,
+        response_size,
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
         resp.body_truncated? ? 1 : 0, resp.flow_id)
       resp_fts = binary_content?(resp.content_type) ? "" : fts_text(resp.body)
