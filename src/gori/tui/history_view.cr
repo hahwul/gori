@@ -363,9 +363,9 @@ module Gori::Tui
       end
 
       time_x = rect.x + 1
-      method_x = rect.x + 10
-      proto_x = rect.x + 18
-      host_x = rect.x + 25
+      method_x = rect.x + 16 # time column widened to fit MM-DD HH:MM:SS …
+      proto_x = rect.x + 24
+      host_x = rect.x + 31 # … absorbed by HOST so PATH/STATUS keep their columns
       path_x = rect.x + 56
       status_x = {rect.right - 7, path_x + 4}.max
       host_w = {path_x - host_x - 1, 1}.max
@@ -412,9 +412,10 @@ module Gori::Tui
       end
     end
 
-    # Local HH:MM:SS for the captured-at micros (created_at is unix microseconds).
+    # Local MM-DD HH:MM:SS for the captured-at micros (created_at is unix microseconds).
+    # The brief date makes flows captured across days/sessions legible at a glance.
     private def fmt_time(created_at : Int64) : String
-      Time.unix(created_at // 1_000_000).to_local.to_s("%H:%M:%S")
+      Time.unix(created_at // 1_000_000).to_local.to_s("%m-%d %H:%M:%S")
     end
 
     # Display the request target in origin-form. Plaintext forward-proxy requests
