@@ -326,10 +326,12 @@ module Gori::Tui
       @prev_result = @result
       @result = result
       reset_result_caches # new response → drop the styled/lines/diff caches
-      # Auto-land on the diff when there's something to compare against; otherwise
-      # show the response plainly. Focus is intentionally NOT changed here — keep
-      # the user where they were (target/request/response).
-      @resp_mode = (result.ok? && diff_baseline_lines) ? :diff : :response
+      # Stay on whichever response tab the user last had open — a send no longer
+      # force-jumps to the diff. Fall back to :response only when a diff can't be
+      # shown: an errored send (its error lives in the response view) or no
+      # baseline to compare against yet. Focus (target/request/response) is also
+      # left untouched, keeping the user where they were.
+      @resp_mode = :response unless @resp_mode == :diff && result.ok? && diff_baseline_lines
       @scroll = 0
     end
 

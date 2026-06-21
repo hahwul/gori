@@ -71,15 +71,62 @@ describe Gori::Tui::ReplayView do
       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "ONE".to_slice, nil, 1000_i64)
     view.apply(first) # first send: nothing to diff against yet → response mode
     view.focus.should eq(:target)
+    view.toggle_resp_mode # user opens the diff tab
 
     second = Gori::Replay::Result.new(
       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "TWO".to_slice, nil, 1000_i64)
-    view.apply(second) # second send: auto-lands on diff vs the first send's response
+    view.apply(second) # second send keeps the diff tab (last-open) → diffs vs the first send
 
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
     backend.contains?("- ONE").should be_true # previous response body removed
     backend.contains?("+ TWO").should be_true # current response body added
+  end
+
+  it "keeps the last-open response tab on send (does not auto-jump to diff)" do
+    replay_tmp_store do |store|
+      # A History-loaded flow is diffable from the very first send (baseline = the
+      # captured original), which used to force the diff tab open on send.
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/", http_version: "HTTP/1.1",
+        head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: Bytes.empty))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: "ORIG".to_slice))
+      view = ReplayView.new
+      view.load(store.get_flow(id).not_nil!)
+
+      ok = Gori::Replay::Result.new(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "NEW".to_slice, nil, 1000_i64)
+      view.apply(ok) # send: must stay on response (the last-open tab), not jump to diff
+
+      backend = MemoryBackend.new(120, 20)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+      backend.contains?("NEW").should be_true
+      ry = (0...20).find { |y| backend.row(y).includes?("response") }.not_nil!
+      rx = backend.row(ry).index("response").not_nil!
+      backend.fg_at(rx, ry).should eq(Theme::TEXT_BRIGHT) # response tab active
+      dx = backend.row(ry).index("diff").not_nil!
+      backend.fg_at(dx, ry).should eq(Theme::MUTED) # diff tab NOT auto-opened
+    end
+  end
+
+  it "drops back to response when an errored send can't render the held diff tab" do
+    view = ReplayView.new
+    view.load_blank
+    first = Gori::Replay::Result.new(
+      "HTTP/1.1 200 OK\r\n\r\n".to_slice, "ONE".to_slice, nil, 1000_i64)
+    view.apply(first)
+    view.toggle_resp_mode # open the diff tab
+    err = Gori::Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, "connection refused")
+    view.apply(err) # errored send: fall back so the error is visible in the response view
+
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("replay error: connection refused").should be_true
+    ry = (0...20).find { |y| backend.row(y).includes?("response") }.not_nil!
+    rx = backend.row(ry).index("response").not_nil!
+    backend.fg_at(rx, ry).should eq(Theme::TEXT_BRIGHT)
   end
 
   it "auto-updates an existing Content-Length to match the edited body on send" do
