@@ -123,4 +123,28 @@ describe Gori::Settings do
       Gori::Settings.editor = ""
     end
   end
+
+  it "round-trips the editor markdown toggle (false must survive, not default to true)" do
+    dir = File.tempname("gori-settings-md")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.editor_markdown = false
+      Gori::Settings.save.should be_true
+      Gori::Settings.editor_markdown = true # flip, then reload from disk
+      Gori::Settings.load
+      Gori::Settings.editor_markdown.should be_false
+
+      # a file without the markdown key keeps the in-memory default (true)
+      File.write(Gori::Settings.path, %({"editor":{"command":"vi"}}))
+      Gori::Settings.editor_markdown = true
+      Gori::Settings.load
+      Gori::Settings.editor_markdown.should be_true
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.editor_markdown = true
+    end
+  end
 end

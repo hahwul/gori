@@ -675,9 +675,9 @@ module Gori::Tui
       elsif key.down?
         @settings_view.move_field(1)
       elsif key.left?
-        @settings_view.move_cursor(-1)
+        @settings_view.toggle_or_move(-1)
       elsif key.right?
-        @settings_view.move_cursor(1)
+        @settings_view.toggle_or_move(1)
       elsif key.backspace?
         @settings_view.backspace
       elsif c && !ev.ctrl? && !ev.alt?

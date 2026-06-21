@@ -4,6 +4,7 @@ require "./frame"
 require "./text_area"
 require "../project"
 require "../store"
+require "../settings"
 
 module Gori::Tui
   # The Project tab (new default home on entry after create/select). Shows static
@@ -162,7 +163,8 @@ module Gori::Tui
 
       desc_h = {max_y - y, 1}.max
       desc_rect = Rect.new(rect.x + 2, y, {rect.w - 4, 0}.max, desc_h)
-      @desc_area.render(screen, desc_rect, cursor: focused, highlight: :markdown)
+      @desc_area.render(screen, desc_rect, cursor: focused,
+        highlight: Settings.editor_markdown ? :markdown : nil)
     end
 
     private def format_time(t : Time?) : String

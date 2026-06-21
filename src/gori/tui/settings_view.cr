@@ -14,7 +14,9 @@ module Gori::Tui
   # rebinds the running proxy to it immediately, and the picker (no live proxy)
   # has it take effect on the next project open.
   class SettingsView
-    record Field, label : String, hint : String
+    # `bool` fields are on/off toggles (value kept as "on"/"off"); the rest are
+    # free-text input lines.
+    record Field, label : String, hint : String, bool : Bool = false
 
     NETWORK_FIELDS = [
       Field.new("Bind IP", "proxy listen address"),
@@ -22,7 +24,8 @@ module Gori::Tui
       Field.new("Upstream proxy", "host:port — blank = connect directly"),
     ]
     EDITOR_FIELDS = [
-      Field.new("Editor command", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
+      Field.new("External editor", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
+      Field.new("Markdown highlight", "syntax-colour markdown in Notes/Project — ←/→/space toggles", bool: true),
     ]
     SECTIONS = {:network => NETWORK_FIELDS, :editor => EDITOR_FIELDS}
 
@@ -47,7 +50,7 @@ module Gori::Tui
     def reload(section : Symbol = :network) : Nil
       @section = section
       @values = case section
-                when :editor then [Settings.editor]
+                when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off"]
                 else              [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
                 end
       @focused = 0
@@ -68,6 +71,10 @@ module Gori::Tui
     end
 
     def insert(ch : Char) : Nil
+      if bool_field? # a toggle field swallows typing; space flips it
+        toggle if ch == ' '
+        return
+      end
       v = @values[@focused]
       c = @cursor.clamp(0, v.size)
       @values[@focused] = "#{v[0, c]}#{ch}#{v[c..]}"
@@ -77,7 +84,7 @@ module Gori::Tui
     end
 
     def backspace : Nil
-      return if @cursor == 0
+      return if bool_field? || @cursor == 0
       v = @values[@focused]
       c = @cursor.clamp(0, v.size)
       @values[@focused] = "#{v[0, c - 1]}#{v[c..]}"
@@ -85,8 +92,22 @@ module Gori::Tui
       @status = nil
     end
 
+    # ←/→: on a toggle field flips it; on a text field moves the caret.
+    def toggle_or_move(delta : Int32) : Nil
+      bool_field? ? toggle : move_cursor(delta)
+    end
+
     def move_cursor(delta : Int32) : Nil
       @cursor = (@cursor + delta).clamp(0, @values[@focused].size)
+    end
+
+    private def bool_field? : Bool
+      fields[@focused].bool
+    end
+
+    private def toggle : Nil
+      @values[@focused] = @values[@focused] == "on" ? "off" : "on"
+      @status = nil
     end
 
     # Validate, apply, and persist. Returns a status message for the caller to
@@ -94,7 +115,8 @@ module Gori::Tui
     def save : String
       if @section == :editor
         Settings.editor = @values[0].strip # blank is valid → clears to $VISUAL/$EDITOR/vi
-        @values = [Settings.editor]
+        Settings.editor_markdown = @values[1] == "on"
+        @values = [Settings.editor, Settings.editor_markdown ? "on" : "off"]
         return persist
       end
       port = @values[1].strip.to_i?
@@ -138,7 +160,12 @@ module Gori::Tui
         vx = box.x + 3 + label_w + 3
         vw = {box.right - vx - 1, 1}.max
         value = @values[i]
-        if focused
+        if field.bool
+          on = value == "on"
+          glyph = on ? "◉ on" : "◯ off"
+          col = focused ? Theme::TEXT_BRIGHT : (on ? Theme::GREEN : Theme::MUTED)
+          screen.text(vx, ry, glyph, col, bg, width: vw)
+        elsif focused
           screen.input_line(vx, ry, value, @cursor, @preedit, Theme::TEXT_BRIGHT, bg, width: vw)
         elsif value.empty?
           screen.text(vx, ry, field.hint, Theme::MUTED, bg, width: vw)

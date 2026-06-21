@@ -15,8 +15,9 @@ module Gori
   module Settings
     class_property bind_host : String = "127.0.0.1"
     class_property bind_port : Int32 = 8070
-    class_property upstream_proxy : String = "" # "host:port" HTTP proxy; "" = connect directly
-    class_property editor : String = ""         # external editor for ^E; "" = $VISUAL/$EDITOR/vi
+    class_property upstream_proxy : String = ""  # "host:port" HTTP proxy; "" = connect directly
+    class_property editor : String = ""          # external editor for ^E; "" = $VISUAL/$EDITOR/vi
+    class_property editor_markdown : Bool = true # syntax-highlight markdown in Notes/Project
 
     def self.path : String
       File.join(Paths.home_dir, "settings.json")
@@ -33,6 +34,11 @@ module Gori
       end
       if ed = root["editor"]?
         self.editor = ed["command"]?.try(&.as_s?) || editor
+        # `|| editor_markdown` would wrongly resurrect a stored `false` (false is falsy),
+        # so assign only when a real bool is present.
+        if (m = ed["markdown"]?) && !(mb = m.as_bool?).nil?
+          self.editor_markdown = mb
+        end
       end
     rescue
       # no file yet / unreadable / bad JSON — keep current values
@@ -59,7 +65,10 @@ module Gori
             end
           end
           j.field "editor" do
-            j.object { j.field "command", editor }
+            j.object do
+              j.field "command", editor
+              j.field "markdown", editor_markdown
+            end
           end
         end
       end

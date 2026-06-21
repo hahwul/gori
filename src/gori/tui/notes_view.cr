@@ -4,6 +4,7 @@ require "./theme"
 require "./frame"
 require "./text_area"
 require "../store"
+require "../settings"
 
 module Gori::Tui
   # The Notes tab (DESIGN.md: notes/report — the running scratchpad/report).
@@ -190,7 +191,8 @@ module Gori::Tui
       Frame.inner_divider(screen, rect, divider_y, border: Frame.pane_border(focused))
       area_y = divider_y + 1
       area = Rect.new(rect.x + 1, area_y, {rect.w - 2, 0}.max, {rect.bottom - area_y, 0}.max)
-      current.area.render(screen, area, cursor: focused, highlight: :markdown)
+      current.area.render(screen, area, cursor: focused,
+        highlight: Settings.editor_markdown ? :markdown : nil)
     end
 
     # The note currently being edited; @current is kept in range by every mutator.
