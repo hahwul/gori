@@ -25,7 +25,7 @@ module Gori::Tui
         acc += Screen.display_width(src[pos, i - pos])
         col = x + acc
         seg = src[i, q.size]
-        screen.text(col, y, seg, Theme::BG, Theme::YELLOW, width: {max_x - col, 0}.max) if col < max_x
+        screen.text(col, y, seg, Theme.bg, Theme.yellow, width: {max_x - col, 0}.max) if col < max_x
         acc += Screen.display_width(seg)
         pos = i + q.size
       end

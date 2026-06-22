@@ -172,7 +172,7 @@ module Gori::Tui
     # lights IT, not the editor.
     def render(screen : Screen, rect : Rect, focused : Bool = true, subtabs_focused : Bool = false) : Nil
       return if rect.empty?
-      screen.text(rect.x + 1, rect.y, "NOTES", Theme::ACCENT, attr: Attribute::Bold)
+      screen.text(rect.x + 1, rect.y, "NOTES", Theme.accent, attr: Attribute::Bold)
       hint = if focused
                "^N new · ^W close · ^1-9 switch · esc tabs"
              elsif subtabs_focused
@@ -180,7 +180,7 @@ module Gori::Tui
              else
                "↵/→ to edit"
              end
-      screen.text(rect.x + 8, rect.y, hint, Theme::MUTED)
+      screen.text(rect.x + 8, rect.y, hint, Theme.muted)
       # The sub-tab strip only appears once there's more than one note, so a lone
       # note keeps the full editor height (and looks exactly like the old Notes).
       divider_y = rect.y + 1
@@ -208,16 +208,16 @@ module Gori::Tui
       @notes.each_with_index do |note, i|
         seg = " #{i + 1}:#{note.label(i)} "
         if x + seg.size > rect.right
-          screen.text(x, rect.y, "…", Theme::MUTED) if x < rect.right
+          screen.text(x, rect.y, "…", Theme.muted) if x < rect.right
           break
         end
         if i == @current
-          bg = focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM
-          fg = focused ? Theme::TEXT_BRIGHT : Theme::TEXT
+          bg = focused ? Theme.accent_bg : Theme.selection_dim
+          fg = focused ? Theme.text_bright : Theme.text
           screen.fill(Rect.new(x, rect.y, seg.size, 1), bg)
           screen.text(x, rect.y, seg, fg, bg, attr: Attribute::Bold)
         else
-          screen.text(x, rect.y, seg, Theme::MUTED)
+          screen.text(x, rect.y, seg, Theme.muted)
         end
         x += seg.size + 1
       end

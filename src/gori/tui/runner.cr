@@ -702,10 +702,14 @@ module Gori::Tui
       elsif key.escape?
         @overlay = :none
       elsif key.enter?
-        # Only the network section rebinds the live proxy; the editor section just
-        # persists (apply_settings would be a no-op for it, but be explicit).
+        # :network rebinds the live proxy; :theme swaps the palette + repaints; the
+        # rest just persist (the value is read live or only matters next session).
         msg = @settings_view.save
-        @toast = @settings_view.section == :network ? apply_settings(msg) : msg
+        @toast = case @settings_view.section
+                 when :network then apply_settings(msg)
+                 when :theme   then apply_theme(msg)
+                 else               msg
+                 end
       elsif key.up?
         @settings_view.move_field(-1)
       elsif key.down?
@@ -1405,10 +1409,10 @@ module Gori::Tui
     private def render : Nil
       screen = Screen.new(@backend)
       w, h = screen.width, screen.height
-      screen.fill(Rect.new(0, 0, w, h), Theme::BG)
+      screen.fill(Rect.new(0, 0, w, h), Theme.bg)
 
       unless Layout.usable?(w, h)
-        screen.text(0, 0, "terminal too small (need ≥ 40×8)", Theme::RED)
+        screen.text(0, 0, "terminal too small (need ≥ 40×8)", Theme.red)
         flush_screen
         return
       end
@@ -1574,7 +1578,7 @@ module Gori::Tui
           v.render(screen, body_rect, focused: body_focused)
         else
           render_framed(screen, body_rect, body_focused) do |inner|
-            screen.text(inner.x + 1, inner.y, "no replays — ^N new request · ^R from History", Theme::MUTED)
+            screen.text(inner.x + 1, inner.y, "no replays — ^N new request · ^R from History", Theme.muted)
           end
         end
       when :sitemap
@@ -1590,7 +1594,7 @@ module Gori::Tui
         @intercept.render(screen, rect, focused: body_focused) # view frames its own panes
       else
         render_framed(screen, rect, body_focused) do |inner|
-          screen.text(inner.x + 1, inner.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme::MUTED)
+          screen.text(inner.x + 1, inner.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme.muted)
         end
       end
     end
@@ -1600,7 +1604,7 @@ module Gori::Tui
     private def render_framed(screen : Screen, rect : Rect, focused : Bool, & : Rect ->) : Nil
       # Body panes are outline-only on the canvas (bg = BG), distinct from the
       # lifted PANEL-filled modal overlays. Gold outline when focused.
-      Frame.card(screen, rect, bg: Theme::BG, border: focused ? Theme::FOCUS_GOLD : Theme::BORDER)
+      Frame.card(screen, rect, bg: Theme.bg, border: focused ? Theme.focus_gold : Theme.border)
       yield rect.inset(1, 1)
     end
 
@@ -1673,18 +1677,18 @@ module Gori::Tui
 
     private def render_goto_prompt(screen : Screen, rect : Rect) : Nil
       return if rect.w < 6
-      screen.fill(rect, Theme::PANEL)
+      screen.fill(rect, Theme.panel)
       prefix = "go to line: "
-      screen.text(rect.x, rect.y, prefix, Theme::ACCENT, Theme::PANEL)
+      screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
       x = rect.x + prefix.size
-      screen.input_line(x, rect.y, @goto_buffer, @goto_buffer.size, "", Theme::TEXT_BRIGHT, Theme::PANEL, width: {rect.right - x, 0}.max)
+      screen.input_line(x, rect.y, @goto_buffer, @goto_buffer.size, "", Theme.text_bright, Theme.panel, width: {rect.right - x, 0}.max)
     end
 
     private def render_search_prompt(screen : Screen, rect : Rect) : Nil
       return if rect.w < 8
-      screen.fill(rect, Theme::PANEL)
+      screen.fill(rect, Theme.panel)
       prefix = "find: "
-      screen.text(rect.x, rect.y, prefix, Theme::ACCENT, Theme::PANEL)
+      screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
       x = rect.x + prefix.size
       # match count (or "no matches") right-aligned; dim "esc done · ↑↓ next" hint after the input
       count = if @search_buffer.empty? && @search_preedit.empty?
@@ -1697,8 +1701,8 @@ module Gori::Tui
       suffix = count.empty? ? "↵/↑↓ step · esc done" : "#{count}  ↵/↑↓ step · esc done"
       sx = {rect.right - suffix.size, x}.max
       iw = {sx - x - 1, 0}.max
-      screen.input_line(x, rect.y, @search_buffer, @search_buffer.size, @search_preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: iw)
-      screen.text(sx, rect.y, suffix, @search_hits.empty? && !@search_buffer.empty? ? Theme::YELLOW : Theme::MUTED, Theme::PANEL)
+      screen.input_line(x, rect.y, @search_buffer, @search_buffer.size, @search_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.text(sx, rect.y, suffix, @search_hits.empty? && !@search_buffer.empty? ? Theme.yellow : Theme.muted, Theme.panel)
     end
 
     def current_tab : Symbol
@@ -1799,17 +1803,17 @@ module Gori::Tui
     # in the editor or the tab bar). Mirrors the Notes strip + History chip strip.
     private def render_replay_subtabs(screen : Screen, rect : Rect, focused : Bool = false) : Nil
       return if rect.empty?
-      screen.fill(rect, Theme::PANEL)
+      screen.fill(rect, Theme.panel)
       x = rect.x + 1
       @replays.each_with_index do |tab, i|
         active = i == @current_replay_idx
         lbl = "#{i + 1}:#{tab.flow_id || "new"}"
         if x + lbl.size + 2 > rect.right
-          screen.text(x, rect.y, "…", Theme::MUTED, Theme::PANEL)
+          screen.text(x, rect.y, "…", Theme.muted, Theme.panel)
           break
         end
-        bg = active ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::PANEL
-        fg = active ? Theme::TEXT_BRIGHT : Theme::TEXT
+        bg = active ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.panel
+        fg = active ? Theme.text_bright : Theme.text
         w = lbl.size + 1
         screen.fill(Rect.new(x, rect.y, w, 1), bg)
         screen.text(x + 1, rect.y, lbl, fg, bg, attr: active ? Attribute::Bold : Attribute::None)
@@ -2333,15 +2337,24 @@ module Gori::Tui
     end
 
     # Open the settings editor for `section` (palette → settings:network/editor/
-    # theme/hotkeys). :network and :editor are implemented; the rest toast a TODO.
+    # theme/hotkeys). :network/:editor/:theme are implemented; the rest toast a TODO.
     def open_settings(section : Symbol) : Nil
       case section
-      when :network, :editor
+      when :network, :editor, :theme
         @settings_view.reload(section)
         @overlay = :settings
       else
         @toast = "#{section} settings — coming soon (TODO)"
       end
+    end
+
+    # Apply the chosen theme: swap the active palette and force a full repaint (the
+    # diff renderer would otherwise leave stale-coloured cells, and colour-baking
+    # render caches rebuild via Theme.revision on their next access).
+    private def apply_theme(save_msg : String) : String
+      Theme.apply(Settings.theme)
+      @resized = true
+      save_msg
     end
 
     # Hand the focused field's text to the external editor; on a clean change write

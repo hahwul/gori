@@ -26,19 +26,19 @@ module Gori::Tui
     def self.render_top_bar(screen : Screen, rect : Rect, *, project : String,
                             capturing : Bool, listen : String, identity : String,
                             scope : String, rules : String = "", intercept : String = "") : Nil
-      screen.fill(rect, Theme::PANEL)
-      x = screen.text(rect.x + 1, rect.y, "gori", Theme::TEXT_BRIGHT, Theme::PANEL, Attribute::Bold)
-      screen.text(x + 1, rect.y, "· #{project}", Theme::MUTED, Theme::PANEL)
+      screen.fill(rect, Theme.panel)
+      x = screen.text(rect.x + 1, rect.y, "gori", Theme.text_bright, Theme.panel, Attribute::Bold)
+      screen.text(x + 1, rect.y, "· #{project}", Theme.muted, Theme.panel)
 
       # right-aligned status chips: ● rec · scope:N · rules:N · intercept:on(N) · listen · id
       # value-emphasized, dim · separators; hot states (capture, intercept) in RED.
       chips = [] of {String, Color}
-      chips << {capturing ? "● rec" : "○ idle", capturing ? Theme::RED : Theme::MUTED}
-      chips << {scope, scope.ends_with?(":off") ? Theme::MUTED : Theme::TEXT} unless scope.empty?
-      chips << {rules, Theme::TEXT} unless rules.empty?
-      chips << {intercept, Theme::RED} unless intercept.empty?
-      chips << {listen, Theme::MUTED}
-      chips << {"id:#{identity}", Theme::MUTED}
+      chips << {capturing ? "● rec" : "○ idle", capturing ? Theme.red : Theme.muted}
+      chips << {scope, scope.ends_with?(":off") ? Theme.muted : Theme.text} unless scope.empty?
+      chips << {rules, Theme.text} unless rules.empty?
+      chips << {intercept, Theme.red} unless intercept.empty?
+      chips << {listen, Theme.muted}
+      chips << {"id:#{identity}", Theme.muted}
       render_chips(screen, rect, chips)
     end
 
@@ -50,7 +50,7 @@ module Gori::Tui
                          findings_count : Int32 = 0, intercept_count : Int32 = 0,
                          replay_count : Int32 = 0, notes_count : Int32 = 0) : Nil
       return if rect.empty?
-      screen.fill(rect, Theme::PANEL)
+      screen.fill(rect, Theme.panel)
 
       labels = TABS.map { |(sym, label)| "#{label}#{menu_badge(sym, findings_count, intercept_count, replay_count, notes_count)}" }
       widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
@@ -68,7 +68,7 @@ module Gori::Tui
       end
 
       x = rect.x + 1
-      screen.cell(rect.x, rect.y, '‹', Theme::MUTED, Theme::PANEL) if start > 0 # earlier tabs hidden
+      screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.panel) if start > 0 # earlier tabs hidden
       TABS.each_with_index do |(sym, _), i|
         next if i < start
         seg_w = widths[i]
@@ -76,12 +76,12 @@ module Gori::Tui
         if sym == active_tab
           # focus brightens the active segment (ACCENT) so the user sees the menu
           # is live; when the body holds focus it stays bold but settles to TEXT.
-          bg = focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM
-          fg = focused ? Theme::ACCENT : Theme::TEXT
+          bg = focused ? Theme.accent_bg : Theme.selection_dim
+          fg = focused ? Theme.accent : Theme.text
           screen.fill(Rect.new(x, rect.y, seg_w, 1), bg)
           screen.text(x + 1, rect.y, labels[i], fg, bg, Attribute::Bold)
         else
-          screen.text(x + 1, rect.y, labels[i], Theme::MUTED, Theme::PANEL)
+          screen.text(x + 1, rect.y, labels[i], Theme.muted, Theme.panel)
         end
         x += seg_w + 1 # a column of breathing room between segments
       end
@@ -90,7 +90,7 @@ module Gori::Tui
     # The header hairline (row 2) separating the chrome from the body.
     def self.render_rule(screen : Screen, rect : Rect) : Nil
       return if rect.empty?
-      screen.hline(rect.x, rect.y, rect.w, fg: Theme::BORDER, bg: Theme::BG)
+      screen.hline(rect.x, rect.y, rect.w, fg: Theme.border, bg: Theme.bg)
     end
 
     # Renders a right-aligned run of colored chips with dim `·` separators.
@@ -98,7 +98,7 @@ module Gori::Tui
     # intact at narrow widths); each draw is clipped to `rect.right` so an
     # over-wide chip row truncates with an ellipsis instead of bleeding past it.
     private def self.render_chips(screen : Screen, rect : Rect,
-                                  chips : Array({String, Color}), bg : Color = Theme::PANEL,
+                                  chips : Array({String, Color}), bg : Color = Theme.panel,
                                   min_x : Int32? = nil) : Nil
       return if chips.empty?
       x = {rect.right - chips_width(chips) - 1, min_x || rect.x}.max
@@ -106,7 +106,7 @@ module Gori::Tui
         break if x >= rect.right
         x = screen.text(x, rect.y, label, color, bg, width: {rect.right - x, 1}.max)
         if i < chips.size - 1 && x < rect.right
-          x = screen.text(x, rect.y, " · ", Theme::MUTED, bg, width: {rect.right - x, 1}.max)
+          x = screen.text(x, rect.y, " · ", Theme.muted, bg, width: {rect.right - x, 1}.max)
         end
       end
     end
@@ -130,25 +130,25 @@ module Gori::Tui
     # is a lifted chip so the user always knows which region the keys drive.
     def self.render_status(screen : Screen, rect : Rect, *, focus : String, hints : String,
                            capturing : Bool, insecure_upstream : Bool, write_failures : Int32 = 0) : Nil
-      screen.fill(rect, Theme::PANEL)
+      screen.fill(rect, Theme.panel)
       badge = " #{focus} "
-      screen.text(rect.x, rect.y, badge, Theme::TEXT_BRIGHT, Theme::ELEVATED, Attribute::Bold)
+      screen.text(rect.x, rect.y, badge, Theme.text_bright, Theme.elevated, Attribute::Bold)
       hint_x = rect.x + badge.size + 1
 
       # A persistent capture-write failure (e.g. disk full) is louder than the
       # normal on/off chip — the operator must know rows are being dropped.
       capture_chip = if write_failures > 0
-                       {"capture:FAILING(#{write_failures})", Theme::RED}
+                       {"capture:FAILING(#{write_failures})", Theme.red}
                      else
-                       {capturing ? "capture:on" : "capture:off", capturing ? Theme::TEXT : Theme::MUTED}
+                       {capturing ? "capture:on" : "capture:off", capturing ? Theme.text : Theme.muted}
                      end
       chips = [
         capture_chip,
         # an insecure upstream is a security warning — the one allowed non-status colour.
-        insecure_upstream ? {"upstream:insecure", Theme::YELLOW} : {"upstream:verify", Theme::MUTED},
+        insecure_upstream ? {"upstream:insecure", Theme.yellow} : {"upstream:verify", Theme.muted},
       ]
       hint_w = {rect.right - hint_x - chips_width(chips) - 2, 1}.max
-      screen.text(hint_x, rect.y, hints, Theme::MUTED, Theme::PANEL, width: hint_w)
+      screen.text(hint_x, rect.y, hints, Theme.muted, Theme.panel, width: hint_w)
       # Floor the chips at the hint start so they can never overwrite the badge.
       render_chips(screen, rect, chips, min_x: hint_x)
     end

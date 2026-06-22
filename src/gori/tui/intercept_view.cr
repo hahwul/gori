@@ -29,6 +29,7 @@ module Gori::Tui
       # every render (a held body was re-tokenised on each repaint).
       @detail_win = nil.as(Highlight::Windowed?)
       @detail_win_id = nil.as(Int64?)
+      @detail_win_rev = Theme.revision # the theme the cached (colour-baked) head was built under
     end
 
     # Fresh snapshot (cheap; called on enter AND every frame via the 50ms loop).
@@ -154,10 +155,10 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       if @items.empty?
-        Frame.card(screen, rect, "INTERCEPT", bg: Theme::BG, border: pane_border(focused))
+        Frame.card(screen, rect, "INTERCEPT", bg: Theme.bg, border: pane_border(focused))
         inner = rect.inset(1, 1)
-        screen.text(inner.x + 1, inner.y, "no held messages", Theme::MUTED)
-        screen.text(inner.x + 1, inner.y + 2, "turn intercept on (i) — held requests/responses appear here", Theme::MUTED)
+        screen.text(inner.x + 1, inner.y, "no held messages", Theme.muted)
+        screen.text(inner.x + 1, inner.y + 2, "turn intercept on (i) — held requests/responses appear here", Theme.muted)
         return
       end
 
@@ -174,7 +175,7 @@ module Gori::Tui
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "QUEUE (#{@items.size})", bg: Theme::BG, border: pane_border(focused))
+      Frame.card(screen, rect, "QUEUE (#{@items.size})", bg: Theme.bg, border: pane_border(focused))
       inner = rect.inset(1, 1)
       ensure_visible(inner.h)
       (0...inner.h).each do |i|
@@ -183,15 +184,15 @@ module Gori::Tui
         it = @items[idx]
         y = inner.y + i
         selected = idx == @selected
-        bg = selected ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::BG
+        bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
         if selected
           screen.fill(Rect.new(inner.x, y, inner.w, 1), bg)
-          screen.cell(inner.x, y, '▎', Theme::ACCENT, bg)
+          screen.cell(inner.x, y, '▎', Theme.accent, bg)
         end
-        badge, bcolor = it.kind.request? ? {"REQ", Theme::YELLOW} : {"RES", Theme::ACCENT}
+        badge, bcolor = it.kind.request? ? {"REQ", Theme.yellow} : {"RES", Theme.accent}
         screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
         label = it.kind.request? ? "#{it.method} #{it.host}#{it.target}" : "#{it.host} #{it.target}"
-        screen.text(inner.x + 5, y, label, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: {inner.w - 6, 1}.max)
+        screen.text(inner.x + 5, y, label, selected ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
       end
     end
 
@@ -199,10 +200,10 @@ module Gori::Tui
       return if rect.w < 2 || rect.h < 2
       it = selected_item
       title = it.nil? ? "DETAIL" : (it.kind.request? ? "REQUEST (held)" : "RESPONSE (held)")
-      Frame.card(screen, rect, title, bg: Theme::BG, border: pane_border(focused))
+      Frame.card(screen, rect, title, bg: Theme.bg, border: pane_border(focused))
       inner = rect.inset(1, 1)
       unless it
-        screen.text(inner.x, inner.y, "—", Theme::MUTED)
+        screen.text(inner.x, inner.y, "—", Theme.muted)
         return
       end
       mode = it.kind.request? ? :request : :response
@@ -223,8 +224,10 @@ module Gori::Tui
     # and styled per visible line — a multi-MiB held body no longer freezes the UI
     # fiber on selection (mirrors the History/Replay windowing).
     private def detail_window_for(it : Interceptor::Item) : Highlight::Windowed
-      return @detail_win.not_nil! if (cached = @detail_win) && @detail_win_id == it.id
+      cached = @detail_win
+      return cached if cached && @detail_win_id == it.id && @detail_win_rev == Theme.revision
       @detail_win_id = it.id
+      @detail_win_rev = Theme.revision
       @detail_win = Highlight.from_lines_windowed(String.new(it.raw).split('\n').map(&.rstrip('\r')), it.kind.request?)
     end
 

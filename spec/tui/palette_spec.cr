@@ -62,11 +62,11 @@ describe Gori::Tui::PaletteState do
     ctx = FakeExecContext.new
     palette = PaletteState.new(Gori::Verbs.registry)
     palette.reset(ctx)
-    "settings:theme".each_char { |c| palette.append(c, ctx) } # a coming_soon verb
+    "settings:hotkeys".each_char { |c| palette.append(c, ctx) } # a coming_soon verb
 
     backend = MemoryBackend.new(80, 24)
     palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
-    backend.contains?("settings:theme").should be_true
+    backend.contains?("settings:hotkeys").should be_true
     backend.contains?("soon").should be_true # the placeholder badge
   end
 end

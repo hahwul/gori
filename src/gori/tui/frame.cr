@@ -21,7 +21,7 @@ module Gori::Tui
     # room. `border` colours the outline — pass FOCUS_GOLD for the focused pane,
     # BORDER_FOCUS for an active modal, BORDER (default) at rest.
     def self.card(screen : Screen, rect : Rect, title : String? = nil, *,
-                  bg : Color = Theme::PANEL, border : Color = Theme::BORDER) : Nil
+                  bg : Color = Theme.panel, border : Color = Theme.border) : Nil
       return if rect.w < 2 || rect.h < 2
       screen.fill(rect, bg)
 
@@ -44,17 +44,17 @@ module Gori::Tui
       end
 
       if title && !title.empty? && rect.w > 6
-        screen.text(x0 + 2, y0, " #{title} ", Theme::TEXT_BRIGHT, bg, Attribute::Bold, width: rect.w - 4)
+        screen.text(x0 + 2, y0, " #{title} ", Theme.text_bright, bg, Attribute::Bold, width: rect.w - 4)
       end
     end
 
     # A `├───┤` divider across a card's interior at absolute row `y` — the seam
     # between an input/header band and the list below it.
-    def self.tee_divider(screen : Screen, rect : Rect, y : Int32, bg : Color = Theme::PANEL) : Nil
+    def self.tee_divider(screen : Screen, rect : Rect, y : Int32, bg : Color = Theme.panel) : Nil
       return if rect.w < 2 || y <= rect.y || y >= rect.bottom - 1
-      screen.cell(rect.x, y, TEE_L, Theme::BORDER, bg)
-      screen.hline(rect.x + 1, y, rect.w - 2, fg: Theme::BORDER, bg: bg)
-      screen.cell(rect.right - 1, y, TEE_R, Theme::BORDER, bg)
+      screen.cell(rect.x, y, TEE_L, Theme.border, bg)
+      screen.hline(rect.x + 1, y, rect.w - 2, fg: Theme.border, bg: bg)
+      screen.cell(rect.right - 1, y, TEE_R, Theme.border, bg)
     end
 
     # A tee-connected section divider for content rendered INSIDE a frame, where
@@ -67,8 +67,8 @@ module Gori::Tui
     # `border` should match the enclosing card's outline so the seam stays one
     # colour — pass `pane_border(focused)` so a focused pane's divider lights gold
     # with its frame instead of staying a stray grey hairline.
-    def self.inner_divider(screen : Screen, inner : Rect, y : Int32, bg : Color = Theme::BG,
-                           border : Color = Theme::BORDER) : Nil
+    def self.inner_divider(screen : Screen, inner : Rect, y : Int32, bg : Color = Theme.bg,
+                           border : Color = Theme.border) : Nil
       return if inner.w <= 0
       screen.cell(inner.x - 1, y, TEE_L, border, bg) # left frame border
       screen.hline(inner.x, y, inner.w, fg: border, bg: bg)
@@ -78,7 +78,7 @@ module Gori::Tui
     # The outline colour for a body pane: subtle gold when focused, hairline grey
     # at rest. The one place this mapping lives.
     def self.pane_border(focused : Bool) : Color
-      focused ? Theme::FOCUS_GOLD : Theme::BORDER
+      focused ? Theme.focus_gold : Theme.border
     end
   end
 end

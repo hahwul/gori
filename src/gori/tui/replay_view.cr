@@ -44,6 +44,7 @@ module Gori::Tui
       # styled per visible line, so a multi-MiB replayed response doesn't freeze),
       # and the LCS diff lines.
       @resp_view_cache = nil.as(RespView?)
+      @resp_view_rev = Theme.revision # the theme the cached (colour-baked) response head was built under
       @diff_lines_cache = nil.as(Array(Replay::DiffLine)?)
       @resp_hex = false                # 'x' toggles a raw hex dump of the response bytes
       @resp_hex_bytes = nil.as(Bytes?) # cached combined head+body of the last result (hex source)
@@ -483,8 +484,8 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       unless @loaded
-        screen.text(rect.x + 1, rect.y, "no flow loaded", Theme::MUTED)
-        screen.text(rect.x + 1, rect.y + 2, "select a flow in History and press ^R to replay it", Theme::MUTED)
+        screen.text(rect.x + 1, rect.y, "no flow loaded", Theme.muted)
+        screen.text(rect.x + 1, rect.y + 2, "select a flow in History and press ^R to replay it", Theme.muted)
         return
       end
 
@@ -507,15 +508,15 @@ module Gori::Tui
 
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.h < 2
-      Frame.card(screen, rect, "target", bg: Theme::BG, border: pane_border(focused))
+      Frame.card(screen, rect, "target", bg: Theme.bg, border: pane_border(focused))
       row = rect.y + 1
-      screen.text(rect.x + 2, row, "›", focused ? Theme::ACCENT : Theme::MUTED)
+      screen.text(rect.x + 2, row, "›", focused ? Theme.accent : Theme.muted)
       base = rect.x + 4
-      screen.text(base, row, @target, Theme::TEXT_BRIGHT, width: {rect.w - 6, 1}.max)
+      screen.text(base, row, @target, Theme.text_bright, width: {rect.w - 6, 1}.max)
       if focused
         ch = @tcx < @target.size ? @target[@tcx] : ' '
         cursor_x = base + Screen.display_width(@target[0, @tcx])
-        screen.cell(cursor_x, row, ch, Theme::BG, Theme::ACCENT)
+        screen.cell(cursor_x, row, ch, Theme.bg, Theme.accent)
         screen.cursor(cursor_x, row)
       end
     end
@@ -523,12 +524,12 @@ module Gori::Tui
     private def render_request(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       label = @http2 ? "REQUEST (h2)" : "REQUEST"
-      Frame.card(screen, rect, label, bg: Theme::BG, border: pane_border(focused))
+      Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused))
       if h = @req_hex_edit
         # HEX badge replaces the CL indicator (auto-CL is meaningless on raw bytes).
         badge = " HEX · CL:off "
         bx = {rect.right - badge.size - 1, rect.x + label.size + 4}.max
-        screen.text(bx, rect.y, badge, Theme::TEXT_BRIGHT, Theme::ACCENT_BG)
+        screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg)
         @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
         return
       end
@@ -536,27 +537,27 @@ module Gori::Tui
       # (^L toggles). Bright/accent when on, muted when off.
       cl = @auto_content_length ? " CL:auto " : " CL:off "
       cl_x = {rect.right - cl.size - 1, rect.x + label.size + 4}.max
-      screen.text(cl_x, rect.y, cl, @auto_content_length ? Theme::TEXT_BRIGHT : Theme::MUTED,
-        @auto_content_length ? Theme::ACCENT_BG : Theme::BG)
+      screen.text(cl_x, rect.y, cl, @auto_content_length ? Theme.text_bright : Theme.muted,
+        @auto_content_length ? Theme.accent_bg : Theme.bg)
       @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
     end
 
     private def render_response(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "RESPONSE", bg: Theme::BG, border: pane_border(focused))
+      Frame.card(screen, rect, "RESPONSE", bg: Theme.bg, border: pane_border(focused))
       # response | diff | hex toggle rides the top border, right of the title. When
       # hex is on it lights instead of response/diff (x toggles it).
       tx = rect.x + 12
-      tx = screen.text(tx, rect.y, " response ", !@resp_hex && @resp_mode == :response ? Theme::TEXT_BRIGHT : Theme::MUTED,
-        !@resp_hex && @resp_mode == :response ? Theme::ACCENT_BG : Theme::BG) + 1
-      tx = screen.text(tx, rect.y, " diff ", !@resp_hex && @resp_mode == :diff ? Theme::TEXT_BRIGHT : Theme::MUTED,
-        !@resp_hex && @resp_mode == :diff ? Theme::ACCENT_BG : Theme::BG) + 1
-      screen.text(tx, rect.y, " hex ", @resp_hex ? Theme::TEXT_BRIGHT : Theme::MUTED,
-        @resp_hex ? Theme::ACCENT_BG : Theme::BG)
+      tx = screen.text(tx, rect.y, " response ", !@resp_hex && @resp_mode == :response ? Theme.text_bright : Theme.muted,
+        !@resp_hex && @resp_mode == :response ? Theme.accent_bg : Theme.bg) + 1
+      tx = screen.text(tx, rect.y, " diff ", !@resp_hex && @resp_mode == :diff ? Theme.text_bright : Theme.muted,
+        !@resp_hex && @resp_mode == :diff ? Theme.accent_bg : Theme.bg) + 1
+      screen.text(tx, rect.y, " hex ", @resp_hex ? Theme.text_bright : Theme.muted,
+        @resp_hex ? Theme.accent_bg : Theme.bg)
 
       body = rect.inset(1, 1)
       if @resp_hex
-        (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to replay —", Theme::MUTED)
+        (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to replay —", Theme.muted)
       elsif @resp_mode == :diff
         render_diff(screen, body)
       elsif @reveal && (rl = reveal_lines)
@@ -613,9 +614,9 @@ module Gori::Tui
         break if di >= data.size
         d = data[di]
         prefix, color = case d.kind
-                        when .add? then {'+', Theme::GREEN}
-                        when .del? then {'-', Theme::RED}
-                        else            {' ', Theme::MUTED}
+                        when .add? then {'+', Theme.green}
+                        when .del? then {'-', Theme.red}
+                        else            {' ', Theme.muted}
                         end
         Gutter.draw(screen, rect.x, rect.y + i, di, gw)
         screen.text(rect.x + gw, rect.y + i, "#{prefix} #{d.text}", color, width: cw)
@@ -673,12 +674,14 @@ module Gori::Tui
     end
 
     private def resp_view : RespView
+      @resp_view_cache = nil if @resp_view_rev != Theme.revision # theme switched → rebuild with new colours
+      @resp_view_rev = Theme.revision
       @resp_view_cache ||= begin
         result = @result
         if !result
-          RespView.new([[Highlight::Span.new("— not sent — press ^R to replay —", Theme::MUTED)]], [] of String, :text)
+          RespView.new([[Highlight::Span.new("— not sent — press ^R to replay —", Theme.muted)]], [] of String, :text)
         elsif !result.ok?
-          RespView.new([[Highlight::Span.new("replay error: #{result.error}", Theme::RED)]], [] of String, :text)
+          RespView.new([[Highlight::Span.new("replay error: #{result.error}", Theme.red)]], [] of String, :text)
         else
           win = Highlight.message_windowed(result.head, display_body(result.head, result.body), request: false)
           RespView.new(win.head, win.body, win.kind)

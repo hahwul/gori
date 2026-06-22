@@ -37,6 +37,7 @@ module Gori
     # `q`, exit on quit. Logs go to a file (never STDOUT — that's the screen).
     def run_tui : Nil
       setup_logging(File.open(File.join(Paths.home_dir, "gori.log"), "a"))
+      Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame (picker included)
       projects = ProjectRegistry.new(Paths.projects_dir)
       term = Termisu.new
       term.enable_enhanced_keyboard # Kitty 17u (disambig + report_text) for better IME/Unicode; avoids report_all_keys(31u) which can split Hangul jamo. Committed text via raw UTF-8 bytes (IME composed syllables) + CSI for specials; Preedit via 0-code CSI if terminal provides.

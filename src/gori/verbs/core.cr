@@ -37,8 +37,8 @@ module Gori
         "browser.open", "Open browser", "Launch a browser pre-trusting gori's CA, routed via the proxy",
         Verb::Scope::Global) { |ctx| ctx.open_browser_picker; nil }
 
-      # Settings (config control) — palette-only. network/editor are implemented;
-      # theme/hotkeys are registered for discoverability (shown "soon") and toast a TODO.
+      # Settings (config control) — palette-only. network/editor/theme are
+      # implemented; hotkeys is registered for discoverability (shown "soon") + a TODO toast.
       r.register Verb::Definition.new(
         "settings.network", "settings:network", "Edit the proxy bind address + upstream proxy",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:network); nil }
@@ -46,8 +46,8 @@ module Gori
         "settings.editor", "settings:editor", "Set the external editor opened by ^E in editable fields",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:editor); nil }
       r.register Verb::Definition.new(
-        "settings.theme", "settings:theme", "Theme settings (coming soon)",
-        Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:theme); nil }
+        "settings.theme", "settings:theme", "Switch the TUI colour theme (dark / light)",
+        Verb::Scope::Global) { |ctx| ctx.open_settings(:theme); nil }
       r.register Verb::Definition.new(
         "settings.hotkeys", "settings:hotkeys", "Hotkey settings (coming soon)",
         Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:hotkeys); nil }

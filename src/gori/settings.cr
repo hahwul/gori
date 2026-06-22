@@ -4,8 +4,8 @@ require "./paths"
 module Gori
   # Global, persisted user settings — the editable runtime CONFIG for one gori
   # process (the `settings:*` command-palette entries control this). Currently the
-  # NETWORK section: the proxy bind address + an optional upstream proxy. Theme and
-  # hotkeys are TODO. Persisted as JSON at <config_dir>/settings.json.
+  # NETWORK section (proxy bind + upstream proxy), the EDITOR (external ^E editor),
+  # and the TUI THEME. Hotkeys are TODO. Persisted as JSON at <config_dir>/settings.json.
   #
   # Loaded once at startup (CLI flags then override the bind in memory); the
   # Settings UI edits these class properties and calls `save`. `upstream_proxy` is
@@ -18,6 +18,7 @@ module Gori
     class_property upstream_proxy : String = ""  # "host:port" HTTP proxy; "" = connect directly
     class_property editor : String = ""          # external editor for ^E; "" = $VISUAL/$EDITOR/vi
     class_property editor_markdown : Bool = true # syntax-highlight markdown in Notes/Project
+    class_property theme : String = "dark"       # TUI colour theme name (settings:theme); applied by Theme.apply
 
     def self.path : String
       File.join(Paths.home_dir, "settings.json")
@@ -32,6 +33,7 @@ module Gori
         self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
         self.upstream_proxy = net["upstream_proxy"]?.try(&.as_s?) || upstream_proxy
       end
+      self.theme = root["theme"]?.try(&.as_s?) || theme # validated against the known themes by Theme.apply
       if ed = root["editor"]?
         self.editor = ed["command"]?.try(&.as_s?) || editor
         # `|| editor_markdown` would wrongly resurrect a stored `false` (false is falsy),
@@ -57,6 +59,7 @@ module Gori
     private def self.serialize : String
       JSON.build do |j|
         j.object do
+          j.field "theme", theme
           j.field "network" do
             j.object do
               j.field "bind_host", bind_host

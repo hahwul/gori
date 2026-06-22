@@ -48,10 +48,10 @@ module Gori::Tui
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      Frame.card(screen, box, @title, border: Theme::BORDER_FOCUS)
+      Frame.card(screen, box, @title, border: Theme.border_focus)
 
       lines.each_with_index do |line, i|
-        screen.text(box.x + 3, box.y + 2 + i, line, Theme::TEXT, Theme::PANEL, width: w - 6)
+        screen.text(box.x + 3, box.y + 2 + i, line, Theme.text, Theme.panel, width: w - 6)
       end
       render_buttons(screen, box)
     end
@@ -82,11 +82,11 @@ module Gori::Tui
                               selected : Bool, danger : Bool) : Int32
       text = " #{label} "
       if selected
-        bg = danger ? Theme::RED : Theme::ACCENT_BG
+        bg = danger ? Theme.red : Theme.accent_bg
         screen.fill(Rect.new(x, y, text.size, 1), bg)
-        screen.text(x, y, text, Theme::TEXT_BRIGHT, bg, attr: Attribute::Bold)
+        screen.text(x, y, text, Theme.text_bright, bg, attr: Attribute::Bold)
       else
-        screen.text(x, y, text, danger ? Theme::RED : Theme::MUTED, Theme::PANEL)
+        screen.text(x, y, text, danger ? Theme.red : Theme.muted, Theme.panel)
       end
       x + text.size
     end

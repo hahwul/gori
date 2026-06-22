@@ -47,7 +47,7 @@ module Gori::Tui
       w
     end
 
-    def cell(x : Int32, y : Int32, grapheme : Char | String, fg : Color, bg : Color = Theme::BG,
+    def cell(x : Int32, y : Int32, grapheme : Char | String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None) : Nil
       return unless x >= 0 && y >= 0 && x < @width && y < @height
       g = grapheme.is_a?(Char) ? grapheme.to_s : grapheme
@@ -61,7 +61,7 @@ module Gori::Tui
     # Draws `str` at (x, y), truncating with an ellipsis if its *display width*
     # (columns) exceeds `width` (default: to the right edge). Returns the x just
     # past the (possibly truncated) text. Properly advances for full-width chars.
-    def text(x : Int32, y : Int32, str : String, fg : Color, bg : Color = Theme::BG,
+    def text(x : Int32, y : Int32, str : String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None, width : Int32? = nil) : Int32
       limit = width || (@width - x)
       return x if limit <= 0
@@ -97,17 +97,17 @@ module Gori::Tui
 
     def fill(rect : Rect, bg : Color) : Nil
       (rect.y...rect.bottom).each do |yy|
-        (rect.x...rect.right).each { |xx| cell(xx, yy, ' ', Theme::TEXT, bg) }
+        (rect.x...rect.right).each { |xx| cell(xx, yy, ' ', Theme.text, bg) }
       end
     end
 
     def hline(x : Int32, y : Int32, w : Int32, ch : Char = '─',
-              fg : Color = Theme::BORDER, bg : Color = Theme::BG) : Nil
+              fg : Color = Theme.border, bg : Color = Theme.bg) : Nil
       w.times { |i| cell(x + i, y, ch, fg, bg) }
     end
 
     def vline(x : Int32, y : Int32, h : Int32, ch : Char = '│',
-              fg : Color = Theme::BORDER, bg : Color = Theme::BG) : Nil
+              fg : Color = Theme.border, bg : Color = Theme.bg) : Nil
       h.times { |i| cell(x, y + i, ch, fg, bg) }
     end
 
@@ -150,7 +150,7 @@ module Gori::Tui
     # query) so they all show live composition identically to the multi-line
     # TextArea. `bg` is the field background; the caret always inverts onto ACCENT.
     def input_line(x : Int32, y : Int32, value : String, cx : Int32, preedit : String,
-                   fg : Color, bg : Color = Theme::BG, width : Int32? = nil) : Nil
+                   fg : Color, bg : Color = Theme.bg, width : Int32? = nil) : Nil
       cx = cx.clamp(0, value.size)
       right = x + (width || (@width - x))
       prefix = value[0, cx]
@@ -164,7 +164,7 @@ module Gori::Tui
       caret_x = x + Screen.display_width(prefix) + Screen.display_width(preedit)
       caret_ch = preedit.empty? ? (cx < value.size ? value[cx] : ' ') : ' '
       if caret_x < right
-        cell(caret_x, y, caret_ch, Theme::BG, Theme::ACCENT)
+        cell(caret_x, y, caret_ch, Theme.bg, Theme.accent)
         cursor(caret_x, y)
       end
     end

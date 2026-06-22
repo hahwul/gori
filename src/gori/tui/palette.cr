@@ -72,11 +72,11 @@ module Gori::Tui
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      Frame.card(screen, box, "COMMANDS", border: Theme::BORDER_FOCUS)
+      Frame.card(screen, box, "COMMANDS", border: Theme.border_focus)
 
       # query line (caret always at end; preedit shown underlined there)
-      screen.text(box.x + 2, box.y + 1, "›", Theme::ACCENT, Theme::PANEL)
-      screen.input_line(box.x + 4, box.y + 1, @query, @query.size, @preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - 6)
+      screen.text(box.x + 2, box.y + 1, "›", Theme.accent, Theme.panel)
+      screen.input_line(box.x + 4, box.y + 1, @query, @query.size, @preedit, Theme.text_bright, Theme.panel, width: w - 6)
 
       Frame.tee_divider(screen, box, box.y + 2)
 
@@ -89,20 +89,20 @@ module Gori::Tui
         verb = @results[idx]
         ry = list_top + i
         active = idx == @selected
-        bg = active ? Theme::ACCENT_BG : Theme::PANEL
+        bg = active ? Theme.accent_bg : Theme.panel
         soon = verb.coming_soon?
         screen.fill(Rect.new(box.x + 1, ry, w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme::ACCENT, bg)
+        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
         # Coming-soon verbs are dimmed at rest (still readable when selected) so the
         # list signals what's not functional yet without hiding it.
-        title_fg = active ? Theme::TEXT_BRIGHT : (soon ? Theme::MUTED : Theme::TEXT)
+        title_fg = active ? Theme.text_bright : (soon ? Theme.muted : Theme.text)
         screen.text(box.x + 3, ry, verb.title, title_fg, bg, width: w - 19)
         if soon
           badge = "soon"
-          screen.text(box.right - badge.size - 2, ry, badge, Theme::YELLOW, bg)
+          screen.text(box.right - badge.size - 2, ry, badge, Theme.yellow, bg)
         elsif chord = verb.chords.first?
           hint = chord.label
-          screen.text(box.right - hint.size - 2, ry, hint, Theme::MUTED, bg)
+          screen.text(box.right - hint.size - 2, ry, hint, Theme.muted, bg)
         end
       end
     end

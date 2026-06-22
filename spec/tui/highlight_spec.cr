@@ -83,87 +83,87 @@ describe Gori::Tui::Highlight do
       line = Highlight.from_lines(["GET /path HTTP/1.1"], request: true).first
       b = render(line)
       b.fg_at(0, 0).should eq(Theme.method_color("GET")) # G
-      b.fg_at(3, 0).should eq(Theme::MUTED)              # space
-      b.fg_at(4, 0).should eq(Theme::TEXT_BRIGHT)        # /path
-      b.fg_at(10, 0).should eq(Theme::MUTED)             # HTTP/1.1
+      b.fg_at(3, 0).should eq(Theme.muted)               # space
+      b.fg_at(4, 0).should eq(Theme.text_bright)         # /path
+      b.fg_at(10, 0).should eq(Theme.muted)              # HTTP/1.1
     end
 
     it "colours the status code by class" do
-      render(Highlight.from_lines(["HTTP/1.1 200 OK"], false).first).fg_at(9, 0).should eq(Theme::GREEN)
-      render(Highlight.from_lines(["HTTP/1.1 404 NF"], false).first).fg_at(9, 0).should eq(Theme::YELLOW)
-      render(Highlight.from_lines(["HTTP/1.1 503 NA"], false).first).fg_at(9, 0).should eq(Theme::RED)
+      render(Highlight.from_lines(["HTTP/1.1 200 OK"], false).first).fg_at(9, 0).should eq(Theme.green)
+      render(Highlight.from_lines(["HTTP/1.1 404 NF"], false).first).fg_at(9, 0).should eq(Theme.yellow)
+      render(Highlight.from_lines(["HTTP/1.1 503 NA"], false).first).fg_at(9, 0).should eq(Theme.red)
       # version stays muted
-      render(Highlight.from_lines(["HTTP/1.1 200 OK"], false).first).fg_at(0, 0).should eq(Theme::MUTED)
+      render(Highlight.from_lines(["HTTP/1.1 200 OK"], false).first).fg_at(0, 0).should eq(Theme.muted)
     end
 
     it "colours header name / colon / value distinctly" do
       line = Highlight.from_lines(["GET / HTTP/1.1", "Host: h.test"], request: true)[1]
-      has_span?(line, "Host", Theme::SYN_HEADER).should be_true
-      has_span?(line, ":", Theme::MUTED).should be_true
-      has_span?(line, " h.test", Theme::TEXT).should be_true
+      has_span?(line, "Host", Theme.syn_header).should be_true
+      has_span?(line, ":", Theme.muted).should be_true
+      has_span?(line, " h.test", Theme.text).should be_true
     end
 
     it "keeps the first colon as the header separator (values may contain ':')" do
       line = Highlight.from_lines(["GET / HTTP/1.1", "Date: Mon 01:02:03"], request: true)[1]
-      has_span?(line, "Date", Theme::SYN_HEADER).should be_true
-      has_span?(line, " Mon 01:02:03", Theme::TEXT).should be_true
+      has_span?(line, "Date", Theme.syn_header).should be_true
+      has_span?(line, " Mon 01:02:03", Theme.text).should be_true
     end
   end
 
   describe "JSON bodies" do
     it "accents keys, strings, numbers, and literals separately" do
       spans = body_spans("application/json", %({"a": "x", "n": -12.5, "ok": true, "z": null}))
-      has_span?(spans, %("a"), Theme::SYN_HEADER).should be_true # key
-      has_span?(spans, %("x"), Theme::SYN_STRING).should be_true # value string
-      has_span?(spans, "-12.5", Theme::SYN_NUMBER).should be_true
-      has_span?(spans, "true", Theme::SYN_LITERAL).should be_true
-      has_span?(spans, "null", Theme::SYN_LITERAL).should be_true
-      has_span?(spans, "{", Theme::MUTED).should be_true
+      has_span?(spans, %("a"), Theme.syn_header).should be_true # key
+      has_span?(spans, %("x"), Theme.syn_string).should be_true # value string
+      has_span?(spans, "-12.5", Theme.syn_number).should be_true
+      has_span?(spans, "true", Theme.syn_literal).should be_true
+      has_span?(spans, "null", Theme.syn_literal).should be_true
+      has_span?(spans, "{", Theme.muted).should be_true
     end
 
     it "matches +json suffix content types" do
       spans = body_spans("application/vnd.api+json", %({"k": 1}))
-      has_span?(spans, %("k"), Theme::SYN_HEADER).should be_true
-      has_span?(spans, "1", Theme::SYN_NUMBER).should be_true
+      has_span?(spans, %("k"), Theme.syn_header).should be_true
+      has_span?(spans, "1", Theme.syn_number).should be_true
     end
   end
 
   describe "form-encoded bodies" do
     it "accents keys, mutes separators, leaves values as body text" do
       spans = body_spans("application/x-www-form-urlencoded", "user=admin&pw=s3cret")
-      has_span?(spans, "user", Theme::SYN_HEADER).should be_true
-      has_span?(spans, "admin", Theme::TEXT).should be_true
-      has_span?(spans, "&", Theme::MUTED).should be_true
-      has_span?(spans, "=", Theme::MUTED).should be_true
+      has_span?(spans, "user", Theme.syn_header).should be_true
+      has_span?(spans, "admin", Theme.text).should be_true
+      has_span?(spans, "&", Theme.muted).should be_true
+      has_span?(spans, "=", Theme.muted).should be_true
     end
   end
 
   describe "markup bodies" do
     it "accents tag names and mutes the delimiters" do
       spans = body_spans("text/html", %(<div class="x">hi</div>), request: false)
-      has_span?(spans, "div", Theme::SYN_HEADER).should be_true
-      has_span?(spans, "<", Theme::MUTED).should be_true
-      has_span?(spans, ">", Theme::MUTED).should be_true
+      has_span?(spans, "div", Theme.syn_header).should be_true
+      has_span?(spans, "<", Theme.muted).should be_true
+      has_span?(spans, ">", Theme.muted).should be_true
     end
   end
 
   describe ".draw" do
     it "truncates with a trailing ellipsis exactly like Screen#fit" do
       b = MemoryBackend.new(20, 1)
-      Highlight.draw(Screen.new(b), 0, 0, [Highlight::Span.new("abcdefghij", Theme::TEXT)], width: 5)
+      Highlight.draw(Screen.new(b), 0, 0, [Highlight::Span.new("abcdefghij", Theme.text)], width: 5)
       b.row(0)[0, 5].should eq("abcd…")
     end
 
     it "preserves per-span colour across a multi-span line" do
       line = [
-        Highlight::Span.new("GET", Theme::GREEN),
-        Highlight::Span.new(" ", Theme::MUTED),
-        Highlight::Span.new("/x", Theme::TEXT_BRIGHT),
+        Highlight::Span.new("GET", Theme.green),
+        Highlight::Span.new(" ", Theme.muted),
+        Highlight::Span.new("/x", Theme.text_bright),
       ]
       b = render(line)
-      b.fg_at(0, 0).should eq(Theme::GREEN)
-      b.fg_at(3, 0).should eq(Theme::MUTED)
-      b.fg_at(4, 0).should eq(Theme::TEXT_BRIGHT)
+      b.fg_at(0, 0).should eq(Theme.green)
+      b.fg_at(3, 0).should eq(Theme.muted)
+      b.fg_at(4, 0).should eq(Theme.text_bright)
       b.row(0).rstrip.should eq("GET /x")
     end
 
@@ -174,9 +174,9 @@ describe Gori::Tui::Highlight do
       {"hello", "ab", "x", "안녕하세요"}.each do |str|
         (0..7).each do |w|
           plain = MemoryBackend.new(10, 1)
-          px = Screen.new(plain).text(0, 0, str, Theme::TEXT, width: w)
+          px = Screen.new(plain).text(0, 0, str, Theme.text, width: w)
           hl = MemoryBackend.new(10, 1)
-          hx = Highlight.draw(Screen.new(hl), 0, 0, [Highlight::Span.new(str, Theme::TEXT)], width: w)
+          hx = Highlight.draw(Screen.new(hl), 0, 0, [Highlight::Span.new(str, Theme.text)], width: w)
           hl.row(0).should eq(plain.row(0)) # same glyphs (str=#{str.inspect}, w=#{w})
           hx.should eq(px)                  # same advance
         end
@@ -185,13 +185,13 @@ describe Gori::Tui::Highlight do
 
     it "shows the first glyph (not an ellipsis) in a 1-wide slot, like Screen#fit" do
       b = MemoryBackend.new(5, 1)
-      Highlight.draw(Screen.new(b), 0, 0, [Highlight::Span.new("hello", Theme::TEXT)], width: 1)
+      Highlight.draw(Screen.new(b), 0, 0, [Highlight::Span.new("hello", Theme.text)], width: 1)
       b.row(0)[0, 1].should eq("h")
     end
 
     it "draws nothing for a zero/negative width" do
       b = MemoryBackend.new(10, 1)
-      Highlight.draw(Screen.new(b), 0, 0, [Highlight::Span.new("hi", Theme::TEXT)], width: 0)
+      Highlight.draw(Screen.new(b), 0, 0, [Highlight::Span.new("hi", Theme.text)], width: 0)
       b.row(0).strip.should eq("")
     end
   end

@@ -32,8 +32,8 @@ module Gori::Tui
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      Frame.card(screen, box, "OPEN BROWSER", border: Theme::BORDER_FOCUS)
-      screen.text(box.x + 2, box.y + 1, "pre-trusted · proxy auto-set", Theme::MUTED, Theme::PANEL)
+      Frame.card(screen, box, "OPEN BROWSER", border: Theme.border_focus)
+      screen.text(box.x + 2, box.y + 1, "pre-trusted · proxy auto-set", Theme.muted, Theme.panel)
       Frame.tee_divider(screen, box, box.y + 2)
 
       list_top = box.y + 3
@@ -43,12 +43,12 @@ module Gori::Tui
         b = @browsers[i]
         ry = list_top + i
         active = i == @selected
-        bg = active ? Theme::ACCENT_BG : Theme::PANEL
+        bg = active ? Theme.accent_bg : Theme.panel
         screen.fill(Rect.new(box.x + 1, ry, w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme::ACCENT, bg)
-        screen.text(box.x + 3, ry, b.name, active ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: w - 16)
+        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+        screen.text(box.x + 3, ry, b.name, active ? Theme.text_bright : Theme.text, bg, width: w - 16)
         kind = b.kind.to_s.downcase
-        screen.text(box.right - kind.size - 2, ry, kind, Theme::MUTED, bg)
+        screen.text(box.right - kind.size - 2, ry, kind, Theme.muted, bg)
       end
     end
   end

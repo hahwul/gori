@@ -117,7 +117,7 @@ module Gori::Tui
       off = row * COLS
       cur_b = @nib // 2
       cur_hi = @nib.even?
-      screen.text(x, y, "%08x" % off, Theme::MUTED, width: {right - x, 0}.max)
+      screen.text(x, y, "%08x" % off, Theme.muted, width: {right - x, 0}.max)
       hx = x + 10
       cursor_x = nil.as(Int32?)
       (0...COLS).each do |col|
@@ -129,8 +129,8 @@ module Gori::Tui
             draw_nibble(screen, hx, y, HEXD[b >> 4], cur && cur_hi)
             draw_nibble(screen, hx + 1, y, HEXD[b & 0x0f_u8], cur && !cur_hi)
           elsif cur && idx == @bytes.size
-            screen.cell(hx, y, '_', Theme::BG, Theme::ACCENT) # append slot caret
-            screen.cell(hx + 1, y, '_', Theme::MUTED, Theme::BG)
+            screen.cell(hx, y, '_', Theme.bg, Theme.accent) # append slot caret
+            screen.cell(hx + 1, y, '_', Theme.muted, Theme.bg)
           end
           cursor_x = (cur_hi ? hx : hx + 1) if cur
         end
@@ -140,22 +140,22 @@ module Gori::Tui
       # ASCII gutter: |....|, cursor byte inverted; clipped to the pane edge.
       ax = hx + 1
       n = {len - off, 0}.max.clamp(0, COLS) # bytes shown on this row (0 on an empty/append row)
-      screen.cell(ax, y, '|', Theme::MUTED) if ax < right
+      screen.cell(ax, y, '|', Theme.muted) if ax < right
       (0...n).each do |col|
         cx = ax + 1 + col
         break if cx >= right
         b = @bytes[off + col]
         ch = (b >= 0x20_u8 && b <= 0x7e_u8) ? b.unsafe_chr : '.'
         cur = focused && (off + col) == cur_b
-        screen.cell(cx, y, ch, cur ? Theme::BG : Theme::MUTED, cur ? Theme::ACCENT : Theme::BG)
+        screen.cell(cx, y, ch, cur ? Theme.bg : Theme.muted, cur ? Theme.accent : Theme.bg)
       end
       cbar = ax + 1 + n
-      screen.cell(cbar, y, '|', Theme::MUTED) if cbar < right # closing bar always (even on empty/append rows)
+      screen.cell(cbar, y, '|', Theme.muted) if cbar < right # closing bar always (even on empty/append rows)
       screen.cursor(cursor_x, y) if cursor_x && focused
     end
 
     private def draw_nibble(screen : Screen, x : Int32, y : Int32, ch : Char, cursor : Bool) : Nil
-      screen.cell(x, y, ch, cursor ? Theme::BG : Theme::TEXT, cursor ? Theme::ACCENT : Theme::BG)
+      screen.cell(x, y, ch, cursor ? Theme.bg : Theme.text, cursor ? Theme.accent : Theme.bg)
     end
   end
 end

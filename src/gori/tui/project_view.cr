@@ -115,9 +115,9 @@ module Gori::Tui
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
-      screen.text(rect.x + 1, rect.y, "PROJECT", Theme::ACCENT, attr: Attribute::Bold)
+      screen.text(rect.x + 1, rect.y, "PROJECT", Theme.accent, attr: Attribute::Bold)
       hint = "project overview"
-      screen.text(rect.x + 9, rect.y, hint, Theme::MUTED)
+      screen.text(rect.x + 9, rect.y, hint, Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       p = @project
@@ -140,10 +140,10 @@ module Gori::Tui
 
       lines.each do |(label, value)|
         break if y > max_y
-        screen.text(rect.x + 2, y, label + ":", Theme::TEXT_BRIGHT)
+        screen.text(rect.x + 2, y, label + ":", Theme.text_bright)
         vx = rect.x + 2 + 18
         w = {rect.right - vx, 0}.max
-        screen.text(vx, y, value, Theme::TEXT, width: w) if w > 0
+        screen.text(vx, y, value, Theme.text, width: w) if w > 0
         y += 1
       end
 
@@ -152,9 +152,9 @@ module Gori::Tui
       # and accepts input (delegated from Runner#handle_project_key).
       y += 1
       return if y > max_y
-      screen.text(rect.x + 2, y, "DESCRIPTION", Theme::ACCENT, attr: Attribute::Bold)
+      screen.text(rect.x + 2, y, "DESCRIPTION", Theme.accent, attr: Attribute::Bold)
       edit_hint = focused ? "type to edit · esc tabs" : "↵/→ to edit"
-      screen.text(rect.x + 14, y, edit_hint, Theme::MUTED)
+      screen.text(rect.x + 14, y, edit_hint, Theme.muted)
       y += 1
       return if y > max_y
       Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))

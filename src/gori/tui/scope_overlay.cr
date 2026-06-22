@@ -79,34 +79,34 @@ module Gori::Tui
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      Frame.card(screen, box, "SCOPE", border: Theme::BORDER_FOCUS)
+      Frame.card(screen, box, "SCOPE", border: Theme.border_focus)
 
       # state meta, right-aligned on the title bar (title-left / meta-right header)
       state = @scope.enabled? ? "on" : "off"
       meta = "lens:#{state} · #{@scope.patterns.size} host(s)"
-      screen.text({box.right - meta.size - 2, box.x + 10}.max, box.y, meta, Theme::MUTED, Theme::PANEL)
+      screen.text({box.right - meta.size - 2, box.x + 10}.max, box.y, meta, Theme.muted, Theme.panel)
 
       # input line
       prefix = "add › "
-      screen.text(box.x + 2, box.y + 1, prefix, Theme::ACCENT, Theme::PANEL)
+      screen.text(box.x + 2, box.y + 1, prefix, Theme.accent, Theme.panel)
       base = box.x + 2 + prefix.size
-      screen.input_line(base, box.y + 1, @input, @icx, @preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
+      screen.input_line(base, box.y + 1, @input, @icx, @preedit, Theme.text_bright, Theme.panel, width: w - prefix.size - 4)
 
       Frame.tee_divider(screen, box, box.y + 2)
 
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top
       if @scope.patterns.empty?
-        screen.text(box.x + 3, list_top, "(no patterns — type a host and press ↵)", Theme::MUTED, Theme::PANEL)
+        screen.text(box.x + 3, list_top, "(no patterns — type a host and press ↵)", Theme.muted, Theme.panel)
       else
         (0...list_h).each do |i|
           break if i >= @scope.patterns.size
           py = list_top + i
           selected = i == @selected
-          bg = selected ? Theme::ACCENT_BG : Theme::PANEL
+          bg = selected ? Theme.accent_bg : Theme.panel
           screen.fill(Rect.new(box.x + 1, py, w - 2, 1), bg)
-          screen.cell(box.x + 1, py, selected ? '▎' : ' ', Theme::ACCENT, bg)
-          screen.text(box.x + 3, py, @scope.patterns[i], selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: w - 5)
+          screen.cell(box.x + 1, py, selected ? '▎' : ' ', Theme.accent, bg)
+          screen.text(box.x + 3, py, @scope.patterns[i], selected ? Theme.text_bright : Theme.text, bg, width: w - 5)
         end
       end
     end

@@ -148,10 +148,10 @@ module Gori::Tui
       fence = false
       all.each do |raw|
         if md_fence?(raw)
-          out << (raw.empty? ? Line.new : [Span.new(raw, Theme::SYN_NUMBER)])
+          out << (raw.empty? ? Line.new : [Span.new(raw, Theme.syn_number)])
           fence = !fence
         elsif fence
-          out << (raw.empty? ? Line.new : [Span.new(raw, Theme::SYN_STRING)])
+          out << (raw.empty? ? Line.new : [Span.new(raw, Theme.syn_string)])
         else
           out << md_line(raw)
         end
@@ -169,14 +169,14 @@ module Gori::Tui
       return Line.new if raw.empty?
       t = raw.lstrip
       indent = raw.size - t.size
-      return [Span.new(raw, Theme::TEXT_BRIGHT, Attribute::Bold)] if md_heading?(t)  # # .. ######
-      return [Span.new(raw, Theme::MUTED, Attribute::Italic)] if t.starts_with?('>') # blockquote
-      return [Span.new(raw, Theme::MUTED)] if md_hr?(t)                              # --- *** ___
+      return [Span.new(raw, Theme.text_bright, Attribute::Bold)] if md_heading?(t)  # # .. ######
+      return [Span.new(raw, Theme.muted, Attribute::Italic)] if t.starts_with?('>') # blockquote
+      return [Span.new(raw, Theme.muted)] if md_hr?(t)                              # --- *** ___
       if (m = md_list_marker(t)) > 0
         cut = indent + m
-        return [Span.new(raw[0, cut], Theme::ACCENT)] + md_inline(raw[cut..], Theme::TEXT)
+        return [Span.new(raw[0, cut], Theme.accent)] + md_inline(raw[cut..], Theme.text)
       end
-      md_inline(raw, Theme::TEXT)
+      md_inline(raw, Theme.text)
     end
 
     private def self.md_heading?(t : String) : Bool
@@ -226,7 +226,7 @@ module Gori::Tui
         when '`'
           if (j = text.index('`', i + 1))
             e = j + 1
-            col = Theme::SYN_STRING
+            col = Theme.syn_string
           end
         when '*'
           if i + 1 < n && text[i + 1] == '*'
@@ -241,13 +241,13 @@ module Gori::Tui
         when '~'
           if i + 1 < n && text[i + 1] == '~' && (k = text.index("~~", i + 2))
             e = k + 2
-            col = Theme::MUTED
+            col = Theme.muted
             at = Attribute::Strikethrough
           end
         when '['
           if (rb = text.index(']', i + 1)) && rb + 1 < n && text[rb + 1] == '(' && (rp = text.index(')', rb + 2))
             e = rp + 1
-            col = Theme::SYN_HEADER
+            col = Theme.syn_header
             at = Attribute::Underline
           end
         end
@@ -271,7 +271,7 @@ module Gori::Tui
     # content — exactly Screen#fit's `w == 1` special case). Returns the x just
     # past the drawn text.
     def self.draw(screen : Screen, x : Int32, y : Int32, line : Line,
-                  bg : Color = Theme::BG, width : Int32? = nil) : Int32
+                  bg : Color = Theme.bg, width : Int32? = nil) : Int32
       limit = width || (screen.width - x)
       return x if limit <= 0
 
@@ -318,7 +318,7 @@ module Gori::Tui
       end
 
       if ellipsis && visual_col < limit
-        screen.cell(x + visual_col, y, '…', Theme::MUTED, bg)
+        screen.cell(x + visual_col, y, '…', Theme.muted, bg)
         visual_col += 1
       end
       x + visual_col
@@ -340,12 +340,12 @@ module Gori::Tui
       spans = [Span.new(method, Theme.method_color(method), Attribute::Bold)]
       last = raw.rindex(' ')
       if last && last > first
-        spans << Span.new(raw[first...first + 1], Theme::MUTED)      # space
-        spans << Span.new(raw[first + 1...last], Theme::TEXT_BRIGHT) # target
-        spans << Span.new(raw[last...last + 1], Theme::MUTED)        # space
-        spans << Span.new(raw[last + 1..], Theme::MUTED)             # version
+        spans << Span.new(raw[first...first + 1], Theme.muted)      # space
+        spans << Span.new(raw[first + 1...last], Theme.text_bright) # target
+        spans << Span.new(raw[last...last + 1], Theme.muted)        # space
+        spans << Span.new(raw[last + 1..], Theme.muted)             # version
       else
-        spans << Span.new(raw[first..], Theme::TEXT_BRIGHT)
+        spans << Span.new(raw[first..], Theme.text_bright)
       end
       spans
     end
@@ -354,15 +354,15 @@ module Gori::Tui
     # reason in body text.
     private def self.status_line(raw : String) : Line
       first = raw.index(' ')
-      return [Span.new(raw, Theme::MUTED)] unless first
-      spans = [Span.new(raw[0...first], Theme::MUTED)]
-      spans << Span.new(raw[first...first + 1], Theme::MUTED) # space
+      return [Span.new(raw, Theme.muted)] unless first
+      spans = [Span.new(raw[0...first], Theme.muted)]
+      spans << Span.new(raw[first...first + 1], Theme.muted) # space
       second = raw.index(' ', first + 1)
       if second
         code = raw[first + 1...second]
         spans << Span.new(code, Theme.status_color(code.to_i?), Attribute::Bold)
-        spans << Span.new(raw[second...second + 1], Theme::MUTED) # space
-        spans << Span.new(raw[second + 1..], Theme::TEXT)         # reason
+        spans << Span.new(raw[second...second + 1], Theme.muted) # space
+        spans << Span.new(raw[second + 1..], Theme.text)         # reason
       else
         code = raw[first + 1..]
         spans << Span.new(code, Theme.status_color(code.to_i?), Attribute::Bold)
@@ -375,10 +375,10 @@ module Gori::Tui
     private def self.header_line(raw : String) : Line
       colon = raw.index(':')
       return plain(raw) unless colon
-      spans = [Span.new(raw[0...colon], Theme::SYN_HEADER)]
-      spans << Span.new(raw[colon...colon + 1], Theme::MUTED) # ":"
+      spans = [Span.new(raw[0...colon], Theme.syn_header)]
+      spans << Span.new(raw[colon...colon + 1], Theme.muted) # ":"
       rest = raw[colon + 1..]
-      spans << Span.new(rest, Theme::TEXT) unless rest.empty?
+      spans << Span.new(rest, Theme.text) unless rest.empty?
       spans
     end
 
@@ -433,14 +433,14 @@ module Gori::Tui
             k += 1
           end
           key = k < n && chars[k] == ':'
-          spans << Span.new(str, key ? Theme::SYN_HEADER : Theme::SYN_STRING)
+          spans << Span.new(str, key ? Theme.syn_header : Theme.syn_string)
         elsif c.ascii_number? || (c == '-' && i + 1 < n && chars[i + 1].ascii_number?)
           start = i
           i += 1
           while i < n && (chars[i].ascii_number? || "+-.eE".includes?(chars[i]))
             i += 1
           end
-          spans << Span.new(chars[start...i].join, Theme::SYN_NUMBER)
+          spans << Span.new(chars[start...i].join, Theme.syn_number)
         elsif c.ascii_letter?
           start = i
           i += 1
@@ -448,9 +448,9 @@ module Gori::Tui
             i += 1
           end
           word = chars[start...i].join
-          spans << Span.new(word, %w(true false null).includes?(word) ? Theme::SYN_LITERAL : Theme::TEXT)
+          spans << Span.new(word, %w(true false null).includes?(word) ? Theme.syn_literal : Theme.text)
         elsif "{}[]:,".includes?(c)
-          spans << Span.new(c.to_s, Theme::MUTED)
+          spans << Span.new(c.to_s, Theme.muted)
           i += 1
         else
           start = i
@@ -461,7 +461,7 @@ module Gori::Tui
                      (d == '-' && i + 1 < n && chars[i + 1].ascii_number?)
             i += 1
           end
-          spans << Span.new(chars[start...i].join, Theme::TEXT)
+          spans << Span.new(chars[start...i].join, Theme.text)
         end
       end
       spans
@@ -478,11 +478,11 @@ module Gori::Tui
       while i < n
         c = chars[i]
         if c == '&'
-          spans << Span.new("&", Theme::MUTED)
+          spans << Span.new("&", Theme.muted)
           i += 1
           expect_key = true
         elsif c == '='
-          spans << Span.new("=", Theme::MUTED)
+          spans << Span.new("=", Theme.muted)
           i += 1
           expect_key = false
         else
@@ -490,7 +490,7 @@ module Gori::Tui
           while i < n && chars[i] != '&' && chars[i] != '='
             i += 1
           end
-          spans << Span.new(chars[start...i].join, expect_key ? Theme::SYN_HEADER : Theme::TEXT)
+          spans << Span.new(chars[start...i].join, expect_key ? Theme.syn_header : Theme.text)
         end
       end
       spans
@@ -512,16 +512,16 @@ module Gori::Tui
           end
           closed = gt < n # found a '>'
           j = i + 1
-          j += 1 if j < n && chars[j] == '/'                 # closing tag
-          spans << Span.new(chars[i...j].join, Theme::MUTED) # '<' or '</'
+          j += 1 if j < n && chars[j] == '/'                # closing tag
+          spans << Span.new(chars[i...j].join, Theme.muted) # '<' or '</'
           name = j
           while name < gt && (chars[name].ascii_letter? || chars[name].ascii_number? ||
                 chars[name] == '-' || chars[name] == '_' || chars[name] == ':')
             name += 1
           end
-          spans << Span.new(chars[j...name].join, Theme::SYN_HEADER) if name > j
-          spans << Span.new(chars[name...gt].join, Theme::TEXT) if name < gt
-          spans << Span.new(">", Theme::MUTED) if closed
+          spans << Span.new(chars[j...name].join, Theme.syn_header) if name > j
+          spans << Span.new(chars[name...gt].join, Theme.text) if name < gt
+          spans << Span.new(">", Theme.muted) if closed
           i = closed ? gt + 1 : gt
         else
           start = i
@@ -529,7 +529,7 @@ module Gori::Tui
           while i < n && chars[i] != '<'
             i += 1
           end
-          spans << Span.new(chars[start...i].join, Theme::TEXT)
+          spans << Span.new(chars[start...i].join, Theme.text)
         end
       end
       spans
@@ -538,7 +538,7 @@ module Gori::Tui
     # --- helpers -------------------------------------------------------------
 
     private def self.plain(raw : String) : Line
-      [Span.new(raw, Theme::TEXT)]
+      [Span.new(raw, Theme.text)]
     end
 
     private def self.blank : Line

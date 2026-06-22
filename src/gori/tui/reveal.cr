@@ -23,7 +23,7 @@ module Gori::Tui
     # One revealed, styled line: content runs in `fg`, whitespace markers dimmed.
     # `lf` appends the ␊ newline marker. Stops at `max_cols` columns so a huge
     # minified line never builds spans past the pane width.
-    def self.styled(line : String, lf : Bool, max_cols : Int32, fg : Color = Theme::TEXT) : Highlight::Line
+    def self.styled(line : String, lf : Bool, max_cols : Int32, fg : Color = Theme.text) : Highlight::Line
       spans = [] of Highlight::Span
       run = [] of Char # current run of printable chars; joined once when it flushes
       cols = 0
@@ -42,14 +42,14 @@ module Gori::Tui
             spans << Highlight::Span.new(run.join, fg)
             run.clear
           end
-          spans << Highlight::Span.new(marker.to_s, Theme::MUTED)
+          spans << Highlight::Span.new(marker.to_s, Theme.muted)
         else
           run << c
         end
         cols += 1
       end
       spans << Highlight::Span.new(run.join, fg) unless run.empty?
-      spans << Highlight::Span.new(LF.to_s, Theme::MUTED) if lf
+      spans << Highlight::Span.new(LF.to_s, Theme.muted) if lf
       spans
     end
   end

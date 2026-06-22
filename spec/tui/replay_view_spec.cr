@@ -46,9 +46,9 @@ describe Gori::Tui::ReplayView do
     # the "response" toggle is the active (bright) segment — i.e. NOT the diff view
     ry = (0...20).find { |y| backend.row(y).includes?("response") }.not_nil!
     rx = backend.row(ry).index("response").not_nil!
-    backend.fg_at(rx, ry).should eq(Theme::TEXT_BRIGHT)
+    backend.fg_at(rx, ry).should eq(Theme.text_bright)
     dx = backend.row(ry).index("diff").not_nil!
-    backend.fg_at(dx, ry).should eq(Theme::MUTED) # diff segment inactive
+    backend.fg_at(dx, ry).should eq(Theme.muted) # diff segment inactive
   end
 
   it "explains there is nothing to diff when a blank's response pane is toggled to diff" do
@@ -105,9 +105,9 @@ describe Gori::Tui::ReplayView do
       backend.contains?("NEW").should be_true
       ry = (0...20).find { |y| backend.row(y).includes?("response") }.not_nil!
       rx = backend.row(ry).index("response").not_nil!
-      backend.fg_at(rx, ry).should eq(Theme::TEXT_BRIGHT) # response tab active
+      backend.fg_at(rx, ry).should eq(Theme.text_bright) # response tab active
       dx = backend.row(ry).index("diff").not_nil!
-      backend.fg_at(dx, ry).should eq(Theme::MUTED) # diff tab NOT auto-opened
+      backend.fg_at(dx, ry).should eq(Theme.muted) # diff tab NOT auto-opened
     end
   end
 
@@ -126,7 +126,7 @@ describe Gori::Tui::ReplayView do
     backend.contains?("replay error: connection refused").should be_true
     ry = (0...20).find { |y| backend.row(y).includes?("response") }.not_nil!
     rx = backend.row(ry).index("response").not_nil!
-    backend.fg_at(rx, ry).should eq(Theme::TEXT_BRIGHT)
+    backend.fg_at(rx, ry).should eq(Theme.text_bright)
   end
 
   it "auto-updates an existing Content-Length to match the edited body on send" do

@@ -17,7 +17,7 @@ module Gori::Tui
     def self.render(screen : Screen, rect : Rect, data : Bytes, scroll : Int32) : Nil
       return if rect.w < 1 || rect.h < 1
       if data.empty?
-        screen.text(rect.x, rect.y, "(no body)", Theme::MUTED)
+        screen.text(rect.x, rect.y, "(no body)", Theme.muted)
         return
       end
       total = rows(data.size)
@@ -45,11 +45,11 @@ module Gori::Tui
           s << (b >= 0x20_u8 && b <= 0x7e_u8 ? b.unsafe_chr : '.')
         end
       end
-      screen.text(x, y, "%08x" % off, Theme::MUTED, width: width) # offset column
+      screen.text(x, y, "%08x" % off, Theme.muted, width: width) # offset column
       hx = x + 10
-      screen.text(hx, y, hex, Theme::TEXT, width: {width - 10, 0}.max) if width > 10
+      screen.text(hx, y, hex, Theme.text, width: {width - 10, 0}.max) if width > 10
       ax = hx + hex.size + 1
-      screen.text(ax, y, "|#{ascii}|", Theme::MUTED, width: {x + width - ax, 0}.max) if ax < x + width
+      screen.text(ax, y, "|#{ascii}|", Theme.muted, width: {x + width - ax, 0}.max) if ax < x + width
     end
   end
 end

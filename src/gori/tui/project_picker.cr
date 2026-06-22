@@ -293,7 +293,7 @@ module Gori::Tui
     private def render : Nil
       screen = Screen.new(@backend)
       w, h = screen.width, screen.height
-      screen.fill(Rect.new(0, 0, w, h), Theme::BG)
+      screen.fill(Rect.new(0, 0, w, h), Theme.bg)
       cw = {w - 4, MENU_WIDTH}.min
       cx = {(w - cw) // 2, 0}.max
       if @mode == :new
@@ -343,8 +343,8 @@ module Gori::Tui
       card_h = actions + 1 + res_rows + 2
       top = {(h - (3 + card_h)) // 2, 0}.max
 
-      centered(screen, top, "gori", Theme::TEXT_BRIGHT, w, Attribute::Bold)
-      centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme::MUTED, w)
+      centered(screen, top, "gori", Theme.text_bright, w, Attribute::Bold)
+      centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme.muted, w)
 
       box = Rect.new(cx, top + 3, cw, card_h)
       Frame.card(screen, box)
@@ -357,15 +357,15 @@ module Gori::Tui
       # divider with the result count embedded (mirrors how a card title rides the
       # top border)
       div_y = box.y + 1 + actions
-      Frame.tee_divider(screen, box, div_y, bg: Theme::PANEL)
+      Frame.tee_divider(screen, box, div_y, bg: Theme.panel)
       count = @query.empty? ? "Projects (#{fp.size})" : "Matches (#{fp.size})"
-      screen.text(box.x + 2, div_y, " #{count} ", Theme::MUTED, Theme::PANEL)
+      screen.text(box.x + 2, div_y, " #{count} ", Theme.muted, Theme.panel)
       list_top = div_y + 1
 
       ensure_results_visible(res_rows)
       if fp.empty?
         msg = @query.empty? ? "no projects yet" : "no matches"
-        screen.text(box.x + 3, list_top, msg, Theme::MUTED, Theme::PANEL)
+        screen.text(box.x + 3, list_top, msg, Theme.muted, Theme.panel)
       else
         (0...res_rows).each do |vi|
           ri = @results_scroll + vi
@@ -373,19 +373,19 @@ module Gori::Tui
           proj = fp[ri]
           py = list_top + vi
           is_selected = (ri + 3 == @selected)
-          bg = is_selected ? Theme::ACCENT_BG : Theme::PANEL
+          bg = is_selected ? Theme.accent_bg : Theme.panel
           screen.fill(Rect.new(box.x + 1, py, cw - 2, 1), bg) if is_selected
-          screen.cell(box.x + 1, py, is_selected ? '▎' : ' ', Theme::ACCENT, bg)
+          screen.cell(box.x + 1, py, is_selected ? '▎' : ' ', Theme.accent, bg)
           meta = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
           mdw = Screen.display_width(meta)
           name_w = cw - 3 - (mdw + 2)
-          screen.text(box.x + 3, py, proj.name, is_selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg, width: [name_w, 1].max)
+          screen.text(box.x + 3, py, proj.name, is_selected ? Theme.text_bright : Theme.text, bg, width: [name_w, 1].max)
           meta_x = box.right - mdw - 2
-          screen.text(meta_x, py, meta, Theme::MUTED, bg) unless meta.empty?
+          screen.text(meta_x, py, meta, Theme.muted, bg) unless meta.empty?
         end
       end
 
-      centered(screen, h - 2, "↑/↓ select   ↵ open   type to search   ctrl-n new   ctrl-t temp   ctrl-d delete   ctrl-, settings   ctrl-c quit", Theme::MUTED, w)
+      centered(screen, h - 2, "↑/↓ select   ↵ open   type to search   ctrl-n new   ctrl-t temp   ctrl-d delete   ctrl-, settings   ctrl-c quit", Theme.muted, w)
     end
 
     # One action/result row inside the picker card: selection band + ▎ bar, label
@@ -393,77 +393,77 @@ module Gori::Tui
     private def picker_row(screen : Screen, box : Rect, idx : Int32, label : String, meta : String) : Nil
       y = box.y + 1 + idx
       selected = idx == @selected
-      bg = selected ? Theme::ACCENT_BG : Theme::PANEL
+      bg = selected ? Theme.accent_bg : Theme.panel
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if selected
-      screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme::ACCENT, bg)
-      screen.text(box.x + 3, y, label, selected ? Theme::TEXT_BRIGHT : Theme::TEXT, bg)
-      screen.text(box.right - meta.size - 2, y, meta, Theme::MUTED, bg) unless meta.empty?
+      screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme.accent, bg)
+      screen.text(box.x + 3, y, label, selected ? Theme.text_bright : Theme.text, bg)
+      screen.text(box.right - meta.size - 2, y, meta, Theme.muted, bg) unless meta.empty?
     end
 
     # The search row (index 2): typing filters only when this row is selected.
     private def render_search_row(screen : Screen, box : Rect) : Nil
       y = box.y + 1 + 2
       selected = @selected == 2
-      bg = selected ? Theme::ACCENT_BG : Theme::PANEL
+      bg = selected ? Theme.accent_bg : Theme.panel
       screen.fill(Rect.new(box.x + 1, y, box.w - 2, 1), bg) if selected
-      screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme::ACCENT, bg)
-      screen.text(box.x + 3, y, "›", selected ? Theme::ACCENT : Theme::MUTED, bg)
+      screen.cell(box.x + 1, y, selected ? '▎' : ' ', Theme.accent, bg)
+      screen.text(box.x + 3, y, "›", selected ? Theme.accent : Theme.muted, bg)
       qx = box.x + 5
       # When focused, always render via input_line — even when empty — so the
       # caret (and the terminal hardware cursor it sets) is anchored at the field.
       # Otherwise the terminal draws IME composition at a stale position (top-left).
       # The placeholder hint only shows when the row is not focused.
       if selected
-        screen.input_line(qx, y, @query, @query.size, @preedit, Theme::TEXT_BRIGHT, bg, width: box.w - 7)
+        screen.input_line(qx, y, @query, @query.size, @preedit, Theme.text_bright, bg, width: box.w - 7)
       elsif @query.empty?
-        screen.text(qx, y, "search projects...", Theme::MUTED, bg)
+        screen.text(qx, y, "search projects...", Theme.muted, bg)
       else
-        screen.text(qx, y, @query, Theme::TEXT, bg, width: box.w - 7)
+        screen.text(qx, y, @query, Theme.text, bg, width: box.w - 7)
       end
     end
 
     private def render_new(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
       top = {(h - 5) // 2, 1}.max
-      centered(screen, top, "gori", Theme::TEXT_BRIGHT, w, Attribute::Bold)
-      centered(screen, top + 2, "new project", Theme::MUTED, w)
+      centered(screen, top, "gori", Theme.text_bright, w, Attribute::Bold)
+      centered(screen, top + 2, "new project", Theme.muted, w)
       iy = top + 3
       # Two-row input area: name (required) + description (optional)
-      screen.fill(Rect.new(cx, iy, cw, 3), Theme::PANEL)
+      screen.fill(Rect.new(cx, iy, cw, 3), Theme.panel)
       name_active = @new_field == :name
-      name_fg = name_active ? Theme::TEXT_BRIGHT : Theme::TEXT
+      name_fg = name_active ? Theme.text_bright : Theme.text
       name_prefix = "name › "
-      screen.text(cx + 2, iy, name_prefix, name_fg, Theme::PANEL)
+      screen.text(cx + 2, iy, name_prefix, name_fg, Theme.panel)
       nbase = cx + 2 + Screen.display_width(name_prefix)
       nwidth = {cw - Screen.display_width(name_prefix) - 2, 1}.max
       if name_active
-        screen.input_line(nbase, iy, @name, @name.size, @preedit, name_fg, Theme::PANEL, width: nwidth)
+        screen.input_line(nbase, iy, @name, @name.size, @preedit, name_fg, Theme.panel, width: nwidth)
       else
-        screen.text(nbase, iy, @name, name_fg, Theme::PANEL, width: nwidth)
+        screen.text(nbase, iy, @name, name_fg, Theme.panel, width: nwidth)
       end
 
       desc_active = @new_field == :desc
-      desc_fg = desc_active ? Theme::TEXT_BRIGHT : Theme::TEXT
+      desc_fg = desc_active ? Theme.text_bright : Theme.text
       if @desc.empty? && !desc_active
-        screen.text(cx + 2, iy + 1, "description (optional) › ", desc_fg, Theme::PANEL)
+        screen.text(cx + 2, iy + 1, "description (optional) › ", desc_fg, Theme.panel)
       else
         desc_prefix = "description › "
-        screen.text(cx + 2, iy + 1, desc_prefix, desc_fg, Theme::PANEL)
+        screen.text(cx + 2, iy + 1, desc_prefix, desc_fg, Theme.panel)
         dbase = cx + 2 + Screen.display_width(desc_prefix)
         dwidth = {cw - Screen.display_width(desc_prefix) - 2, 1}.max
         if desc_active
-          screen.input_line(dbase, iy + 1, @desc, @desc.size, @preedit, desc_fg, Theme::PANEL, width: dwidth)
+          screen.input_line(dbase, iy + 1, @desc, @desc.size, @preedit, desc_fg, Theme.panel, width: dwidth)
         else
-          screen.text(dbase, iy + 1, @desc, desc_fg, Theme::PANEL, width: dwidth)
+          screen.text(dbase, iy + 1, @desc, desc_fg, Theme.panel, width: dwidth)
         end
       end
 
       hint = "↵ next/create   ↑/↓ fields   esc cancel"
-      centered(screen, h - 2, hint, Theme::MUTED, w)
+      centered(screen, h - 2, hint, Theme.muted, w)
     end
 
     private def centered(screen : Screen, y : Int32, text : String, fg : Color, w : Int32,
                          attr : Attribute = Attribute::None) : Nil
-      screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme::BG, attr: attr)
+      screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme.bg, attr: attr)
     end
 
     private def ensure_results_visible(list_h : Int32) : Nil

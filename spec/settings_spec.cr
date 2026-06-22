@@ -124,6 +124,30 @@ describe Gori::Settings do
     end
   end
 
+  it "round-trips the colour theme" do
+    dir = File.tempname("gori-settings-theme")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.theme = "light"
+      Gori::Settings.save.should be_true
+      Gori::Settings.theme = "dark" # flip, then reload from disk
+      Gori::Settings.load
+      Gori::Settings.theme.should eq("light")
+
+      # an older file with no "theme" key keeps the in-memory default
+      File.write(Gori::Settings.path, %({"network":{"bind_host":"127.0.0.1"}}))
+      Gori::Settings.theme = "dark"
+      Gori::Settings.load
+      Gori::Settings.theme.should eq("dark")
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = "dark"
+    end
+  end
+
   it "round-trips the editor markdown toggle (false must survive, not default to true)" do
     dir = File.tempname("gori-settings-md")
     Dir.mkdir_p(dir)

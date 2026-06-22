@@ -44,18 +44,18 @@ describe Gori::Tui::Screen do
   it "writes text and truncates with an ellipsis past the width" do
     backend = MemoryBackend.new(20, 3)
     screen = Screen.new(backend)
-    screen.text(0, 0, "hello", Theme::TEXT)
+    screen.text(0, 0, "hello", Theme.text)
     backend.row(0).rstrip.should eq("hello")
 
-    screen.text(0, 1, "abcdefghij", Theme::TEXT, width: 5)
+    screen.text(0, 1, "abcdefghij", Theme.text, width: 5)
     backend.row(1)[0, 5].should eq("abcd…")
   end
 
   it "clips text to the right edge" do
     backend = MemoryBackend.new(5, 2)
     screen = Screen.new(backend)
-    screen.text(3, 0, "overflowing", Theme::TEXT) # only 2 columns left (x=3,4)
-    backend.row(0).should eq("   o…")             # cols 0-2 blank, then fit("...",2)
+    screen.text(3, 0, "overflowing", Theme.text) # only 2 columns left (x=3,4)
+    backend.row(0).should eq("   o…")            # cols 0-2 blank, then fit("...",2)
   end
 end
 
@@ -72,16 +72,16 @@ describe Gori::Tui::Chrome do
     backend.contains?("Sitemap").should be_true
     backend.contains?("(3)").should be_true # held-message badge on Intercept
     # active segment ` Project ` (now first tab) starts at col 2 (rect.x+1 fill, +1 pad); bright accent.
-    backend.fg_at(2, 1).should eq(Theme::ACCENT)
-    backend.fg_at(12, 1).should eq(Theme::MUTED) # an inactive label (History) is muted
+    backend.fg_at(2, 1).should eq(Theme.accent)
+    backend.fg_at(12, 1).should eq(Theme.muted) # an inactive label (History) is muted
   end
 
   it "settles the active segment to bold TEXT (no accent) when the menu is unfocused" do
     backend = MemoryBackend.new(90, 2)
     Chrome.render_menu(Screen.new(backend), Rect.new(0, 1, 90, 1),
       active_tab: :project, focused: false)
-    backend.fg_at(2, 1).should eq(Theme::TEXT) # active but body-focused: present, not lit
-    backend.fg_at(2, 1).should_not eq(Theme::ACCENT)
+    backend.fg_at(2, 1).should eq(Theme.text) # active but body-focused: present, not lit
+    backend.fg_at(2, 1).should_not eq(Theme.accent)
   end
 
   it "windows the tab strip so the active tab stays visible when the row is too narrow" do
@@ -97,9 +97,9 @@ describe Gori::Tui::Chrome do
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
       focus: "BODY", hints: "↹ pane · esc tabs", capturing: true, insecure_upstream: false)
     backend.contains?("BODY").should be_true
-    backend.fg_at(1, 0).should eq(Theme::TEXT_BRIGHT) # badge text is bright (col 0 is the leading pad)
-    backend.contains?("↹ pane").should be_true        # hints still render to the right of the badge
-    backend.contains?("capture:on").should be_true    # chips still on the right
+    backend.fg_at(1, 0).should eq(Theme.text_bright) # badge text is bright (col 0 is the leading pad)
+    backend.contains?("↹ pane").should be_true       # hints still render to the right of the badge
+    backend.contains?("capture:on").should be_true   # chips still on the right
   end
 
   it "keeps the focus badge intact when chips would otherwise overflow a narrow bar" do
@@ -109,7 +109,7 @@ describe Gori::Tui::Chrome do
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 36, 1),
       focus: "FINDING", hints: "type title · esc cancel", capturing: false, insecure_upstream: true)
     backend.row(0)[0, 9].should eq(" FINDING ") # badge survives, no chip bled into it
-    backend.fg_at(1, 0).should eq(Theme::TEXT_BRIGHT)
+    backend.fg_at(1, 0).should eq(Theme.text_bright)
     backend.contains?("capture:off").should be_true # chips still present (truncated at the right edge)
   end
 
@@ -119,7 +119,7 @@ describe Gori::Tui::Chrome do
       focus: "BODY", hints: "x", capturing: true, insecure_upstream: false, write_failures: 4)
     backend.contains?("capture:FAILING(4)").should be_true
     fx = backend.row(0).index("capture:FAILING").not_nil!
-    backend.fg_at(fx, 0).should eq(Theme::RED)
+    backend.fg_at(fx, 0).should eq(Theme.red)
     backend.contains?("capture:on").should be_false # replaced, not appended
   end
 

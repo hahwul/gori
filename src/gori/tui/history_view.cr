@@ -69,6 +69,7 @@ module Gori::Tui
       # and styled per VISIBLE line, so opening a multi-MiB response is instant
       # instead of tokenising 100k+ off-screen lines up front.
       @detail_cache = nil.as(DetailView?)
+      @detail_cache_rev = Theme.revision # the theme the cached (colour-baked) head/notes were built under
     end
 
     # head (styled, bounded) ++ body (raw, styled lazily per visible line) ++
@@ -484,15 +485,15 @@ module Gori::Tui
       path_x = host_x + host_w + 1
       path_w = {status_x - path_x - 1, 0}.max
 
-      screen.text(time_x, hdr_y, "TIME", Theme::MUTED)
-      screen.text(method_x, hdr_y, "METHOD", Theme::MUTED)
-      screen.text(proto_x, hdr_y, "PROTO", Theme::MUTED)
-      screen.text(host_x, hdr_y, "HOST", Theme::MUTED, width: host_w) if host_w > 0
-      screen.text(path_x, hdr_y, "PATH", Theme::MUTED, width: path_w) if path_w > 0
-      screen.text(status_x, hdr_y, "STA", Theme::MUTED, width: 3)
-      screen.text(type_x, hdr_y, "TYPE", Theme::MUTED, width: 6) if show_type
-      screen.text(size_x, hdr_y, "SIZE", Theme::MUTED, width: 6) if show_size
-      screen.text(dur_x, hdr_y, "DUR", Theme::MUTED, width: 6) if show_dur
+      screen.text(time_x, hdr_y, "TIME", Theme.muted)
+      screen.text(method_x, hdr_y, "METHOD", Theme.muted)
+      screen.text(proto_x, hdr_y, "PROTO", Theme.muted)
+      screen.text(host_x, hdr_y, "HOST", Theme.muted, width: host_w) if host_w > 0
+      screen.text(path_x, hdr_y, "PATH", Theme.muted, width: path_w) if path_w > 0
+      screen.text(status_x, hdr_y, "STA", Theme.muted, width: 3)
+      screen.text(type_x, hdr_y, "TYPE", Theme.muted, width: 6) if show_type
+      screen.text(size_x, hdr_y, "SIZE", Theme.muted, width: 6) if show_size
+      screen.text(dur_x, hdr_y, "DUR", Theme.muted, width: 6) if show_dur
       Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
 
       list_top = hdr_y + 2
@@ -501,7 +502,7 @@ module Gori::Tui
 
       if @rows.empty?
         msg = filtering? ? "no flows match" : "waiting for traffic…"
-        screen.text(time_x, list_top, msg, Theme::MUTED)
+        screen.text(time_x, list_top, msg, Theme.muted)
         return
       end
 
@@ -511,23 +512,23 @@ module Gori::Tui
         row = @rows[ri]
         y = list_top + i
         selected = ri == @selected
-        bg = selected ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::BG
-        fg = selected ? Theme::TEXT_BRIGHT : Theme::TEXT
+        bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
+        fg = selected ? Theme.text_bright : Theme.text
 
         if selected
           screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
-          screen.cell(rect.x, y, '▎', Theme::ACCENT, bg)
+          screen.cell(rect.x, y, '▎', Theme.accent, bg)
         end
-        screen.text(time_x, y, fmt_time(row.created_at), Theme::MUTED, bg)
+        screen.text(time_x, y, fmt_time(row.created_at), Theme.muted, bg)
         screen.text(method_x, y, row.method, Theme.method_color(row.method), bg)
-        screen.text(proto_x, y, row.scheme.upcase, Theme::MUTED, bg)
+        screen.text(proto_x, y, row.scheme.upcase, Theme.muted, bg)
         screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
         screen.text(path_x, y, origin_path(row.target), fg, bg, width: path_w) if path_w > 0
         status = row.status.try(&.to_s) || "···"
         screen.text(status_x, y, status, Theme.status_color(row.status), bg, width: 3)
-        screen.text(type_x, y, fmt_mime(row.content_type), Theme::MUTED, bg, width: 6) if show_type
-        screen.text(size_x, y, fmt_size(row.response_size), Theme::MUTED, bg, width: 6) if show_size
-        screen.text(dur_x, y, fmt_dur(row.duration_us), Theme::MUTED, bg, width: 6) if show_dur
+        screen.text(type_x, y, fmt_mime(row.content_type), Theme.muted, bg, width: 6) if show_type
+        screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
+        screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6) if show_dur
       end
     end
 
@@ -602,7 +603,7 @@ module Gori::Tui
       return if rect.empty?
       detail = @detail
       unless detail
-        screen.text(rect.x + 1, rect.y, "no flow selected", Theme::MUTED)
+        screen.text(rect.x + 1, rect.y, "no flow selected", Theme.muted)
         return
       end
       # Pane strip: show ALL panes as chips with the active one highlighted, so it's
@@ -611,14 +612,14 @@ module Gori::Tui
       detail_panes.each do |pane|
         active = pane == @detail_pane
         x = screen.text(x, rect.y, " #{detail_pane_label(pane)} ",
-          active ? Theme::TEXT_BRIGHT : Theme::MUTED,
-          active ? Theme::ACCENT_BG : Theme::BG,
+          active ? Theme.text_bright : Theme.muted,
+          active ? Theme.accent_bg : Theme.bg,
           attr: active ? Attribute::Bold : Attribute::None) + 1
       end
       hex = detail_hex?(detail)
       ws = @reveal && !hex
       mode_hint = hex ? "x:text" : (ws ? "b:raw" : "x:hex · b:ws")
-      screen.text(x + 1, rect.y, "↑/↓ scroll · #{mode_hint} · esc back", Theme::MUTED)
+      screen.text(x + 1, rect.y, "↑/↓ scroll · #{mode_hint} · esc back", Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
@@ -662,22 +663,22 @@ module Gori::Tui
     private def render_ql_bar(screen : Screen, rect : Rect) : Nil
       if @querying
         prefix = "query › "
-        screen.text(rect.x + 1, rect.y, prefix, Theme::ACCENT)
+        screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
-        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme::TEXT_BRIGHT, width: rect.w - prefix.size - 2)
+        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2)
       elsif filtering?
-        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme::TEXT, width: rect.w - 10)
+        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme.text, width: rect.w - 10)
         count = @rows.size.to_s
-        screen.text({rect.right - count.size - 1, rect.x}.max, rect.y, count, Theme::MUTED)
+        screen.text({rect.right - count.size - 1, rect.x}.max, rect.y, count, Theme.muted)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  status:>=500  path:  scheme:", Theme::MUTED)
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  status:>=500  path:  scheme:", Theme.muted)
       end
     end
 
     private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
       sugg = query_suggestions
       return if sugg.empty?
-      screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme::MUTED, width: rect.w - 2)
+      screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: rect.w - 2)
     end
 
     private def suggest_values(field : String, prefix : String) : Array(String)
@@ -750,6 +751,8 @@ module Gori::Tui
     # opaque gRPC hex — are bounded, so they go in `head` (eager, wrapped plain);
     # only a plain request/response body is windowed (styled per visible line).
     private def detail_view : DetailView
+      @detail_cache = nil if @detail_cache_rev != Theme.revision # theme switched → rebuild with new colours
+      @detail_cache_rev = Theme.revision
       @detail_cache ||= build_detail_view
     end
 
@@ -773,7 +776,7 @@ module Gori::Tui
       trailer = [] of Highlight::Line
       if truncated
         trailer << Highlight::Line.new
-        trailer << [Highlight::Span.new("— body truncated at capture limit (#{Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)} MiB); full size in the list —", Theme::YELLOW)]
+        trailer << [Highlight::Span.new("— body truncated at capture limit (#{Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)} MiB); full size in the list —", Theme.yellow)]
       end
 
       # gRPC: bounded framed hex view — style eagerly into `head`.
@@ -793,7 +796,7 @@ module Gori::Tui
       if decode_note
         note = [] of Highlight::Line
         note << Highlight::Line.new
-        color = (decode_note.includes?("unsupported") || decode_note.includes?("error")) ? Theme::YELLOW : Theme::GREEN
+        color = (decode_note.includes?("unsupported") || decode_note.includes?("error")) ? Theme.yellow : Theme.green
         note << [Highlight::Span.new("— #{decode_note} —", color)]
         trailer = note + trailer # decode note before the truncation note
       end
@@ -803,7 +806,7 @@ module Gori::Tui
     # Wrap pre-formatted plain strings (frames / ws / gRPC hex) as single-span
     # body-text lines so they share the styled rendering path.
     private def wrap(strs : Array(String)) : Array(Highlight::Line)
-      strs.map { |s| [Highlight::Span.new(s, Theme::TEXT)] of Highlight::Span }
+      strs.map { |s| [Highlight::Span.new(s, Theme.text)] of Highlight::Span }
     end
 
     # Wrap a bounded log (frames/messages) and, when the window dropped older rows,
@@ -814,7 +817,7 @@ module Gori::Tui
       if total > shown
         head.unshift(Highlight::Line.new) # blank separator beneath the note
         head.unshift([Highlight::Span.new(
-          "— showing the latest #{shown} of #{total} #{what}; #{total - shown} older not loaded —", Theme::YELLOW)] of Highlight::Span)
+          "— showing the latest #{shown} of #{total} #{what}; #{total - shown} older not loaded —", Theme.yellow)] of Highlight::Span)
       end
       head
     end

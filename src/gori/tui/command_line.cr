@@ -90,14 +90,14 @@ module Gori::Tui
       ensure_visible(shown)
 
       if @results.empty?
-        screen.fill(Rect.new(x, list_top, width, 1), Theme::PANEL)
-        screen.text(x + 2, list_top, "— no commands available here —", Theme::MUTED, Theme::PANEL)
+        screen.fill(Rect.new(x, list_top, width, 1), Theme.panel)
+        screen.text(x + 2, list_top, "— no commands available here —", Theme.muted, Theme.panel)
       else
         (0...shown).each do |i|
           ry = list_top + i
           idx = @scroll + i
           if idx >= @results.size
-            screen.fill(Rect.new(x, ry, width, 1), Theme::PANEL)
+            screen.fill(Rect.new(x, ry, width, 1), Theme.panel)
             next
           end
           draw_row(screen, x, ry, width, @results[idx], idx == @selected)
@@ -105,32 +105,32 @@ module Gori::Tui
       end
 
       # ":" prompt + editable query over the status row (caret/preedit at the end).
-      screen.fill(status, Theme::PANEL)
-      screen.text(status.x, status.y, ":", Theme::ACCENT, Theme::PANEL)
+      screen.fill(status, Theme.panel)
+      screen.text(status.x, status.y, ":", Theme.accent, Theme.panel)
       screen.input_line(status.x + 1, status.y, @query, @query.size, @preedit,
-        Theme::TEXT_BRIGHT, Theme::PANEL, width: {status.w - 1, 0}.max)
+        Theme.text_bright, Theme.panel, width: {status.w - 1, 0}.max)
     end
 
     private def draw_row(screen : Screen, x : Int32, ry : Int32, width : Int32, verb : Verb::Definition, active : Bool) : Nil
-      bg = active ? Theme::ACCENT_BG : Theme::PANEL
+      bg = active ? Theme.accent_bg : Theme.panel
       soon = verb.coming_soon?
       screen.fill(Rect.new(x, ry, width, 1), bg)
-      screen.cell(x, ry, active ? '▎' : ' ', Theme::ACCENT, bg)
+      screen.cell(x, ry, active ? '▎' : ' ', Theme.accent, bg)
 
       # Right edge: the keybinding hint (so ":" doubles as a cheatsheet) or a
       # dimmed "soon" badge for not-yet-functional verbs.
       right = soon ? "soon" : (verb.chords.first?.try(&.label) || "")
       unless right.empty?
-        screen.text(x + width - right.size - 1, ry, right, soon ? Theme::YELLOW : Theme::MUTED, bg)
+        screen.text(x + width - right.size - 1, ry, right, soon ? Theme.yellow : Theme.muted, bg)
       end
 
       # title (then a dimmed description if there's room), clipped before the hint.
       text_w = {width - 2 - (right.empty? ? 0 : right.size + 2), 0}.max
-      title_fg = active ? Theme::TEXT_BRIGHT : (soon ? Theme::MUTED : Theme::TEXT)
+      title_fg = active ? Theme.text_bright : (soon ? Theme.muted : Theme.text)
       screen.text(x + 2, ry, verb.title, title_fg, bg, width: text_w)
       used = {verb.title.size + 2, text_w}.min
       dw = text_w - used
-      screen.text(x + 2 + used, ry, verb.description, active ? Theme::TEXT : Theme::MUTED, bg, width: dw) if dw > 6
+      screen.text(x + 2 + used, ry, verb.description, active ? Theme.text : Theme.muted, bg, width: dw) if dw > 6
     end
 
     # Scroll so the selection stays visible (the scoped list can exceed MAX_ROWS).

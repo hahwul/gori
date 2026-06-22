@@ -98,8 +98,8 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       unless @loaded && !@hosts.empty?
-        screen.text(rect.x + 1, rect.y, "no traffic captured yet", Theme::MUTED)
-        screen.text(rect.x + 1, rect.y + 2, "browse through the proxy, then return here", Theme::MUTED)
+        screen.text(rect.x + 1, rect.y, "no traffic captured yet", Theme.muted)
+        screen.text(rect.x + 1, rect.y + 2, "browse through the proxy, then return here", Theme.muted)
         return
       end
 
@@ -111,20 +111,20 @@ module Gori::Tui
         node, depth = rows[ri]
         y = rect.y + i
         selected = ri == @selected
-        bg = selected ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::BG
+        bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
         if selected
           screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
-          screen.cell(rect.x, y, '▎', Theme::ACCENT, bg)
+          screen.cell(rect.x, y, '▎', Theme.accent, bg)
         end
 
         marker = node.leaf? ? " " : (node.expanded ? "▾" : "▸")
         x = rect.x + 1 + depth * 2
-        screen.cell(x, y, marker[0], Theme::MUTED, bg)
-        fg = depth == 0 ? Theme::TEXT_BRIGHT : Theme::TEXT
+        screen.cell(x, y, marker[0], Theme.muted, bg)
+        fg = depth == 0 ? Theme.text_bright : Theme.text
         x = screen.text(x + 2, y, node.label, fg, bg)
         unless node.methods.empty?
           tag = node.methods.join(" ")
-          screen.text({rect.right - tag.size - 1, x + 1}.max, y, tag, Theme::MUTED, bg)
+          screen.text({rect.right - tag.size - 1, x + 1}.max, y, tag, Theme.muted, bg)
         end
       end
     end

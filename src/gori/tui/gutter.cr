@@ -15,7 +15,7 @@ module Gori::Tui
     # Draw the 1-based number for 0-based `line` right-justified in a `w`-wide gutter
     # at (x, y); the current line is brightened. Returns the content start x.
     def self.draw(screen : Screen, x : Int32, y : Int32, line : Int32, w : Int32, current : Bool = false) : Int32
-      screen.text(x, y, (line + 1).to_s.rjust(w - 1), current ? Theme::TEXT : Theme::MUTED, width: w)
+      screen.text(x, y, (line + 1).to_s.rjust(w - 1), current ? Theme.text : Theme.muted, width: w)
       x + w
     end
   end

@@ -21,9 +21,10 @@ module Gori::Tui
       # which highlight symbol it was built for.
       @styled = nil.as(Array(Highlight::Line)?)
       @styled_kind = nil.as(Symbol?)
-      @gutter = false # left line-number gutter (on for the Replay request body)
-      @search_hl = "" # active ^F query → matches highlighted in render
-      @reveal = false # show whitespace (space ·, tab →) instead of syntax colours
+      @styled_rev = Theme.revision # the theme the cached (colour-baked) overlay was built under
+      @gutter = false              # left line-number gutter (on for the Replay request body)
+      @search_hl = ""              # active ^F query → matches highlighted in render
+      @reveal = false              # show whitespace (space ·, tab →) instead of syntax colours
       set_text(text)
     end
 
@@ -179,18 +180,18 @@ module Gori::Tui
             suffix = line[@cx..]
             px = cx0
             if !prefix.empty?
-              screen.text(px, rect.y + i, prefix, Theme::TEXT, width: cw)
+              screen.text(px, rect.y + i, prefix, Theme.text, width: cw)
               px += Screen.display_width(prefix)
             end
             if !@preedit.empty?
-              screen.text(px, rect.y + i, @preedit, Theme::TEXT, attr: Attribute::Underline, width: cw - (px - cx0))
+              screen.text(px, rect.y + i, @preedit, Theme.text, attr: Attribute::Underline, width: cw - (px - cx0))
               px += Screen.display_width(@preedit)
             end
             if !suffix.empty?
-              screen.text(px, rect.y + i, suffix, Theme::TEXT, width: cw - (px - cx0))
+              screen.text(px, rect.y + i, suffix, Theme.text, width: cw - (px - cx0))
             end
           else
-            screen.text(cx0, rect.y + i, line, Theme::TEXT, width: cw)
+            screen.text(cx0, rect.y + i, line, Theme.text, width: cw)
           end
         end
         SearchHi.mark(screen, cx0, rect.y + i, line, @search_hl, cx0 + cw) unless @search_hl.empty?
@@ -204,7 +205,7 @@ module Gori::Tui
           ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
           (0...cgw).each do |off|
             cch = (off == 0 ? ch : ' ')
-            screen.cell(cxs + off, rect.y + i, cch, Theme::BG, Theme::ACCENT)
+            screen.cell(cxs + off, rect.y + i, cch, Theme.bg, Theme.accent)
           end
         end
       end
@@ -214,8 +215,9 @@ module Gori::Tui
     # buffer content changes — so a held editor isn't re-tokenised 20×/sec.
     private def highlighted(kind : Symbol) : Array(Highlight::Line)
       cached = @styled
-      return cached if cached && @styled_kind == kind
+      return cached if cached && @styled_kind == kind && @styled_rev == Theme.revision
       @styled_kind = kind
+      @styled_rev = Theme.revision
       @styled = kind == :markdown ? Highlight.markdown(@lines) : Highlight.from_lines(@lines, kind == :request)
     end
 

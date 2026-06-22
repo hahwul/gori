@@ -153,15 +153,15 @@ module Gori::Tui
     end
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
-      screen.text(rect.x + 1, rect.y, "SEV", Theme::MUTED)
-      screen.text(rect.x + 6, rect.y, "ST", Theme::MUTED)
-      screen.text(rect.x + 11, rect.y, "TITLE", Theme::MUTED)
+      screen.text(rect.x + 1, rect.y, "SEV", Theme.muted)
+      screen.text(rect.x + 6, rect.y, "ST", Theme.muted)
+      screen.text(rect.x + 11, rect.y, "TITLE", Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
       top = rect.y + 2
       list_h = {rect.bottom - top, 0}.max
 
       if @findings.empty?
-        screen.text(rect.x + 1, top, "no findings yet · Shift+F on a History flow, or n here", Theme::MUTED)
+        screen.text(rect.x + 1, top, "no findings yet · Shift+F on a History flow, or n here", Theme.muted)
         return
       end
 
@@ -173,20 +173,20 @@ module Gori::Tui
         f = @findings[idx]
         y = top + i
         selected = idx == @selected
-        bg = selected ? (focused ? Theme::ACCENT_BG : Theme::SELECTION_DIM) : Theme::BG
+        bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
         if selected
           screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
-          screen.cell(rect.x, y, '▎', Theme::ACCENT, bg)
+          screen.cell(rect.x, y, '▎', Theme.accent, bg)
         end
         screen.text(rect.x + 1, y, severity_badge(f.severity), severity_color(f.severity), bg, Attribute::Bold)
         screen.text(rect.x + 6, y, status_tag(f.status), status_color(f.status), bg)
         # Right-aligned host; the title fills the gap up to it (ellipsized).
         right = rect.right - 1
         if (host = f.host) && !host.empty?
-          screen.text(rect.right - host.size - 1, y, host, Theme::MUTED, bg)
+          screen.text(rect.right - host.size - 1, y, host, Theme.muted, bg)
           right = rect.right - host.size - 2
         end
-        title_fg = selected ? Theme::TEXT_BRIGHT : Theme::TEXT
+        title_fg = selected ? Theme.text_bright : Theme.text
         tw = {right - title_x, 0}.max
         screen.text(title_x, y, ellipsize(f.title, tw), title_fg, bg, width: tw)
       end
@@ -196,23 +196,23 @@ module Gori::Tui
       finding = @detail.not_nil!
       screen.text(rect.x + 1, rect.y, severity_badge(finding.severity), severity_color(finding.severity), attr: Attribute::Bold)
       screen.text(rect.x + 6, rect.y, status_tag(finding.status), status_color(finding.status))
-      screen.text(rect.x + 11, rect.y, finding.title, Theme::TEXT_BRIGHT, width: {rect.w - 12, 0}.max)
+      screen.text(rect.x + 11, rect.y, finding.title, Theme.text_bright, width: {rect.w - 12, 0}.max)
       hint = @editing_notes ? "esc save · ^W discard" \
                             : "[ ] sev · { } status · t title · e notes · o open · r replay · d del · esc back"
-      screen.text(rect.x + 1, rect.y + 1, hint, Theme::MUTED, width: {rect.w - 2, 0}.max)
+      screen.text(rect.x + 1, rect.y + 1, hint, Theme.muted, width: {rect.w - 2, 0}.max)
       meta = "##{finding.id} · #{finding.status.label} · #{fmt_ts(finding.created_at)}"
       meta += " · edited #{fmt_ts(finding.updated_at)}" if finding.updated_at > finding.created_at
-      screen.text(rect.x + 1, rect.y + 2, meta, Theme::MUTED, width: {rect.w - 2, 0}.max)
+      screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: {rect.w - 2, 0}.max)
       y = rect.y + 3
       if flow = @detail_flow
         line = "flow ##{flow.id}: #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
-        screen.text(rect.x + 1, y, line, Theme::MUTED, width: {rect.w - 2, 0}.max)
+        screen.text(rect.x + 1, y, line, Theme.muted, width: {rect.w - 2, 0}.max)
       elsif finding.flow_id
-        screen.text(rect.x + 1, y, "flow ##{finding.flow_id}: (no longer captured)", Theme::MUTED)
+        screen.text(rect.x + 1, y, "flow ##{finding.flow_id}: (no longer captured)", Theme.muted)
       end
       y += 1
       Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
-      screen.text(rect.x + 1, y + 1, "NOTES", Theme::ACCENT, attr: Attribute::Bold)
+      screen.text(rect.x + 1, y + 1, "NOTES", Theme.accent, attr: Attribute::Bold)
       notes_y = y + 2
       notes_rect = Rect.new(rect.x + 1, notes_y, {rect.w - 2, 0}.max, {rect.bottom - notes_y, 0}.max)
       if @editing_notes
@@ -220,7 +220,7 @@ module Gori::Tui
       else
         finding.notes.split('\n').each_with_index do |note_line, i|
           break if notes_y + i >= rect.bottom
-          screen.text(notes_rect.x, notes_rect.y + i, note_line, Theme::TEXT, width: notes_rect.w)
+          screen.text(notes_rect.x, notes_rect.y + i, note_line, Theme.text, width: notes_rect.w)
         end
       end
     end
@@ -243,10 +243,10 @@ module Gori::Tui
 
     private def status_color(s : Store::Status) : Color
       case s
-      when .confirmed?      then Theme::RED
-      when .false_positive? then Theme::MUTED
-      when .resolved?       then Theme::GREEN
-      else                       Theme::ACCENT # open
+      when .confirmed?      then Theme.red
+      when .false_positive? then Theme.muted
+      when .resolved?       then Theme.green
+      else                       Theme.accent # open
       end
     end
 
@@ -280,11 +280,11 @@ module Gori::Tui
 
     private def severity_color(s : Store::Severity) : Color
       case s
-      when .critical? then Theme::RED
-      when .high?     then Theme::ORANGE
-      when .medium?   then Theme::YELLOW
-      when .low?      then Theme::ACCENT
-      else                 Theme::MUTED
+      when .critical? then Theme.red
+      when .high?     then Theme.orange
+      when .medium?   then Theme.yellow
+      when .low?      then Theme.accent
+      else                 Theme.muted
       end
     end
 
@@ -348,23 +348,23 @@ module Gori::Tui
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      Frame.card(screen, box, @heading, border: Theme::BORDER_FOCUS)
+      Frame.card(screen, box, @heading, border: Theme.border_focus)
       prefix = "title › "
-      screen.text(box.x + 2, box.y + 1, prefix, Theme::ACCENT, Theme::PANEL)
+      screen.text(box.x + 2, box.y + 1, prefix, Theme.accent, Theme.panel)
       base = box.x + 2 + prefix.size
-      screen.input_line(base, box.y + 1, @title, @cx, @preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
-      sx = screen.text(box.x + 2, box.y + 3, "severity ‹ ", Theme::ACCENT, Theme::PANEL)
-      sx = screen.text(sx, box.y + 3, @severity.label.upcase, sev_color(@severity), Theme::PANEL, Attribute::Bold)
-      screen.text(sx, box.y + 3, " ›  (tab to change)", Theme::MUTED, Theme::PANEL)
+      screen.input_line(base, box.y + 1, @title, @cx, @preedit, Theme.text_bright, Theme.panel, width: w - prefix.size - 4)
+      sx = screen.text(box.x + 2, box.y + 3, "severity ‹ ", Theme.accent, Theme.panel)
+      sx = screen.text(sx, box.y + 3, @severity.label.upcase, sev_color(@severity), Theme.panel, Attribute::Bold)
+      screen.text(sx, box.y + 3, " ›  (tab to change)", Theme.muted, Theme.panel)
     end
 
     private def sev_color(s : Store::Severity) : Color
       case s
-      when .critical? then Theme::RED
-      when .high?     then Theme::ORANGE
-      when .medium?   then Theme::YELLOW
-      when .low?      then Theme::ACCENT
-      else                 Theme::MUTED
+      when .critical? then Theme.red
+      when .high?     then Theme.orange
+      when .medium?   then Theme.yellow
+      when .low?      then Theme.accent
+      else                 Theme.muted
       end
     end
   end

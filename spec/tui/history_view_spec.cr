@@ -317,7 +317,7 @@ describe Gori::Tui::HistoryView do
       backend.fg_at(gx, ry).should eq(Theme.method_color("GET")) # GET → green
       hy = (0...12).find { |y| backend.row(y).includes?("Host") }.not_nil!
       hx = backend.row(hy).index("Host").not_nil!
-      backend.fg_at(hx, hy).should eq(Theme::SYN_HEADER)
+      backend.fg_at(hx, hy).should eq(Theme.syn_header)
     end
   end
 end
