@@ -57,6 +57,14 @@ module Gori::Proxy::Codec
   module Body
     BUFSIZE = 64 * 1024
 
+    # Bounds on chunked framing lines so a hostile peer can't make us buffer/forward
+    # unboundedly after the terminating 0-chunk: a single size/trailer line is capped
+    # at MAX_LINE_BYTES, and the whole trailer section at MAX_TRAILER_BYTES. Both are
+    # vastly larger than any legitimate chunk-size or trailer header; overflow is a
+    # framing error (→ close), consistent with the malformed-chunk-size handling.
+    MAX_LINE_BYTES    = 64 * 1024
+    MAX_TRAILER_BYTES = 256 * 1024
+
     # Ceiling on a single captured request/response body. Forwarding is never
     # capped (it streams byte-exact); this only bounds what we buffer for the DB,
     # so a multi-GB download can't OOM the proxy or bloat one row. Tune as needed.
@@ -198,11 +206,16 @@ module Gori::Proxy::Codec
         # to misframe (request-smuggling / response-desync).
         return false if size.nil?
         if size == 0
-          # consume trailers (header lines) up to and including the blank line
+          # consume trailers (header lines) up to and including the blank line,
+          # bounded so a peer that never sends the blank line (or streams endless
+          # trailer lines) can't pin/forward unboundedly — abort (→ close) on overrun.
+          trailer_total = 0_i64
           loop do
             trailer = read_crlf_line(src)
-            break if trailer.nil?
+            break if trailer.nil? # clean EOF after the 0-chunk — tolerate (as before)
             emit(dst, tee, trailer)
+            trailer_total += trailer.size
+            return false if trailer_total > MAX_TRAILER_BYTES
             break if blank_line?(trailer)
           end
           return true # terminating chunk reached
@@ -220,11 +233,15 @@ module Gori::Proxy::Codec
     end
 
     # Reads up to and including the next LF. Returns nil on EOF before any byte.
-    private def self.read_crlf_line(io : IO) : Bytes?
+    # Stops buffering at `max_size` even without an LF, so a pathological line with
+    # no terminator can't grow memory unbounded; the partial (LF-less) line then
+    # fails the caller's framing check (bad chunk-size / never-blank trailer → close).
+    private def self.read_crlf_line(io : IO, max_size : Int32 = MAX_LINE_BYTES) : Bytes?
       buf = IO::Memory.new
       while byte = io.read_byte
         buf.write_byte(byte)
         break if byte == 0x0a_u8 # LF
+        break if buf.bytesize >= max_size
       end
       buf.bytesize == 0 ? nil : buf.to_slice.dup
     end

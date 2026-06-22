@@ -88,6 +88,17 @@ describe Gori::Proxy::H2::Assembler do
     String.new(sink.requests.first.body.not_nil!).should eq("q=1&x=2")
   end
 
+  it "skips a PADDED DATA frame whose pad length exceeds the payload (no garbage projection)" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    assembler.feed("out", headers_frame(5_u32, Frame::END_HEADERS,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff"))) # request headers, stream open
+    # PADDED DATA: payload[0]=0xff claims 255 pad bytes, but only 4 data bytes follow.
+    bad = Bytes[0xff_u8, 'd'.ord.to_u8, 'a'.ord.to_u8, 't'.ord.to_u8, 'a'.ord.to_u8]
+    assembler.feed("out", Frame::Header.new(Frame::Type::Data.value, Frame::PADDED | Frame::END_STREAM, 5_u32, bad))
+    sink.requests.size.should eq(0) # malformed pad → frame skipped, not projected as a body
+  end
+
   it "ignores connection-level frames (stream 0)" do
     sink = RecSink.new
     assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)

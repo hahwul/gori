@@ -172,6 +172,7 @@ module Gori::Proxy::H2
       promised = ((payload[offset].to_u32 & 0x7f) << 24) | (payload[offset + 1].to_u32 << 16) |
                  (payload[offset + 2].to_u32 << 8) | payload[offset + 3].to_u32
       offset += 4
+      validate_pad(pad, payload.size - offset)
       finish = payload.size - pad
       block = finish > offset ? payload[offset...finish] : Bytes.empty
       {promised, block}
@@ -189,6 +190,7 @@ module Gori::Proxy::H2
         offset = 1
       end
       offset += 5 if frame.priority? # exclusive+dep(4) + weight(1)
+      validate_pad(pad, payload.size - offset)
       finish = payload.size - pad
       return Bytes.empty if finish <= offset
       payload[offset...finish]
@@ -199,9 +201,18 @@ module Gori::Proxy::H2
       return frame.payload unless frame.padded?
       return Bytes.empty if frame.payload.empty?
       pad = frame.payload[0].to_i
+      validate_pad(pad, frame.payload.size - 1)
       finish = frame.payload.size - pad
       return Bytes.empty if finish <= 1
       frame.payload[1...finish]
+    end
+
+    # RFC 7540: a PADDED frame's pad length must be LESS than the bytes remaining
+    # for [block + padding]; pad >= that is a framing error. Raise so feed()'s rescue
+    # skips the decoded projection (rather than feeding a wrongly-truncated/empty
+    # block into the stateful HPACK decoder, which would desync later headers).
+    private def validate_pad(pad : Int32, available : Int32) : Nil
+      raise Gori::Error.new("h2 pad length exceeds frame payload") if pad > available
     end
 
     private def emit_request(stream_id : UInt32, stream : Stream) : Nil

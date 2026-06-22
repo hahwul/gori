@@ -105,6 +105,12 @@ module Gori
         end
       end
     rescue Channel::ClosedError
+      # events channel closed on shutdown — stop printing
+    rescue DB::Error | SQLite3::Exception
+      # Session#close closes the store BEFORE the events channel (writer-drain
+      # order), so a buffered event can race in and query a now-closed DB. That's
+      # a clean shutdown, not an error — stop quietly instead of crashing the fiber
+      # (which would drop the final lines).
     end
 
     private def format_row(row : Store::FlowRow) : String

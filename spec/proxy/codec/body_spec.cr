@@ -129,6 +129,22 @@ describe Gori::Proxy::Codec::Body do
       src.gets_to_end.should eq("NEXT") # next request not consumed
     end
 
+    it "forwards a real chunked trailer and stops at the blank line" do
+      wire = "0\r\nX-Checksum: abc\r\n\r\nNEXT"
+      src = IO::Memory.new(wire)
+      dst = IO::Memory.new
+      Body.stream(src, dst, BodyFraming::Chunked, 0_i64, IO::Memory.new).should be_true
+      dst.to_s.should eq("0\r\nX-Checksum: abc\r\n\r\n") # trailer preserved, blank line ends it
+      src.gets_to_end.should eq("NEXT")
+    end
+
+    it "aborts a chunked body whose trailer section overruns the cap (memory/CPU DoS guard)" do
+      # terminating 0-chunk, then an unbounded trailer that never sends the blank line
+      src = IO::Memory.new("0\r\n#{"a" * (300 * 1024)}")
+      dst = IO::Memory.new
+      Body.stream(src, dst, BodyFraming::Chunked, 0_i64, IO::Memory.new).should be_false
+    end
+
     it "copies a close-delimited body until EOF" do
       src = IO::Memory.new("streamed-to-the-end")
       dst = IO::Memory.new
