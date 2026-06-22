@@ -293,7 +293,10 @@ module Gori::Tui
     # the next save. The user's OWN saves don't reach here (data_version ignores our
     # own pool writes), so this only ever applies a peer's changes.
     private def reconcile_replays : Nil
-      rows = @session.store.replays # ORDER BY position, id
+      # Metadata only (no response BLOBs): reconcile converges the request side and
+      # restores responses only at project-open, so loading every tab's response
+      # here — on every 750ms poll — would be pure waste (and an OOM risk at scale).
+      rows = @session.store.replays_meta # ORDER BY position, id
       by_id = rows.index_by(&.id)
       cur_db = current_replay_tab.try(&.db_id)
 

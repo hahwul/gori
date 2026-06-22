@@ -288,6 +288,10 @@ module Gori
     # connections), so a session never reconciles its own replay saves — only a
     # peer's. A separate connection would break that and cause self-clobber.
 
+    # Full replay rows INCLUDING the persisted response BLOBs. Used once at project
+    # open to seed each tab's last response (V11). NOT for the recurring reconcile
+    # poll — use `replays_meta` there to avoid re-materializing every tab's
+    # (potentially multi-MB) response on each cross-session commit.
     def replays : Array(ReplayRecord)
       list = [] of ReplayRecord
       @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us FROM replays ORDER BY position, id") do |rs|
@@ -296,6 +300,21 @@ module Gori
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?))
+        end
+      end
+      list
+    end
+
+    # Request-side metadata only (no response BLOBs) — for the 750ms reconcile poll,
+    # which only converges target/request/flags/position and never reads the
+    # response (responses are personal per session). Response fields stay nil.
+    def replays_meta : Array(ReplayRecord)
+      list = [] of ReplayRecord
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position FROM replays ORDER BY position, id") do |rs|
+        rs.each do
+          list << ReplayRecord.new(
+            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32))
         end
       end
       list

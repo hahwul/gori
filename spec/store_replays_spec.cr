@@ -99,6 +99,18 @@ describe "Gori::Store replay tabs (v9)" do
     end
   end
 
+  it "replays_meta omits the response BLOBs (lighter reconcile poll)" do
+    with_store do |store|
+      id = store.insert_replay("https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 0)
+      store.update_replay_response(id, "HTTP/1.1 200 OK\r\n\r\n".to_slice, "body".to_slice, nil, 1_i64)
+      meta = store.replays_meta.find!(&.id.==(id))
+      meta.response_head.should be_nil # not loaded by the metadata query
+      meta.response_body.should be_nil
+      meta.target.should eq("https://a.test")                          # request side intact
+      store.replays.find!(&.id.==(id)).response_head.should_not be_nil # full query still carries it
+    end
+  end
+
   it "persists an errored send (empty head, nil body, error text)" do
     with_store do |store|
       id = store.insert_replay("https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 0)
