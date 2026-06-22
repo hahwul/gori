@@ -17,10 +17,16 @@ module Gori::Tui
       # downcase (e.g. U+0130 'İ'), fall back to slicing dt so the column stays right.
       src = dt.size == text.size ? text : dt
       pos = 0
+      # Carry the display-width of the consumed prefix so each match measures only
+      # the gap since the previous one — O(line) total instead of re-walking
+      # src[0, i] per match (was O(line²) on token-dense lines during a search).
+      acc = 0
       while (i = dt.index(q, pos))
-        col = x + Screen.display_width(src[0, i])
+        acc += Screen.display_width(src[pos, i - pos])
+        col = x + acc
         seg = src[i, q.size]
         screen.text(col, y, seg, Theme::BG, Theme::YELLOW, width: {max_x - col, 0}.max) if col < max_x
+        acc += Screen.display_width(seg)
         pos = i + q.size
       end
     end

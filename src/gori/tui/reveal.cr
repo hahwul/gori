@@ -25,7 +25,7 @@ module Gori::Tui
     # minified line never builds spans past the pane width.
     def self.styled(line : String, lf : Bool, max_cols : Int32, fg : Color = Theme::TEXT) : Highlight::Line
       spans = [] of Highlight::Span
-      content = "" # current run of printable chars (bounded by max_cols, so + is cheap)
+      run = [] of Char # current run of printable chars; joined once when it flushes
       cols = 0
       line.each_char do |c|
         break if cols >= max_cols
@@ -36,17 +36,19 @@ module Gori::Tui
                  else           c.control? ? CTRL : nil
                  end
         if marker
-          unless content.empty?
-            spans << Highlight::Span.new(content, fg)
-            content = ""
+          # `run.join` materializes the run in one pass; `content += c` per char was
+          # O(run²) (reallocating the growing string each time).
+          unless run.empty?
+            spans << Highlight::Span.new(run.join, fg)
+            run.clear
           end
           spans << Highlight::Span.new(marker.to_s, Theme::MUTED)
         else
-          content += c
+          run << c
         end
         cols += 1
       end
-      spans << Highlight::Span.new(content, fg) unless content.empty?
+      spans << Highlight::Span.new(run.join, fg) unless run.empty?
       spans << Highlight::Span.new(LF.to_s, Theme::MUTED) if lf
       spans
     end
