@@ -160,8 +160,28 @@ private class FakeContext < ExecContext
     @calls << :finding_severity
   end
 
+  def finding_status(delta : Int32) : Nil
+    @calls << :finding_status
+  end
+
   def finding_edit_notes : Nil
     @calls << :finding_edit_notes
+  end
+
+  def finding_edit_title : Nil
+    @calls << :finding_edit_title
+  end
+
+  def finding_open_flow : Nil
+    @calls << :finding_open_flow
+  end
+
+  def finding_replay_flow : Nil
+    @calls << :finding_replay_flow
+  end
+
+  def findings_export(format : Symbol) : Nil
+    @calls << :findings_export
   end
 
   def toggle_capture : Nil

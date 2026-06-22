@@ -621,6 +621,8 @@ module Gori::Tui
 
       when key.escape?    then @overlay = :none
       when key.enter?     then create_finding_from_form
+      when key.tab?       then @finding_form.severity_cycle(1)
+      when key.back_tab?  then @finding_form.severity_cycle(-1)
       when key.left?      then @finding_form.move(-1)
       when key.right?     then @finding_form.move(1)
       when key.backspace? then @finding_form.backspace
@@ -723,13 +725,14 @@ module Gori::Tui
       c = ev.char || key.to_char
       case
 
-      when key.escape?    then @findings.save_notes(@session.store)
-      when key.enter?     then @findings.notes_newline
-      when key.backspace? then @findings.notes_backspace
-      when key.up?        then @findings.notes_move(-1, 0)
-      when key.down?      then @findings.notes_move(1, 0)
-      when key.left?      then @findings.notes_move(0, -1)
-      when key.right?     then @findings.notes_move(0, 1)
+      when ev.ctrl? && key.lower_w? then @findings.cancel_notes_edit # discard edits
+      when key.escape?              then @findings.save_notes(@session.store)
+      when key.enter?               then @findings.notes_newline
+      when key.backspace?           then @findings.notes_backspace
+      when key.up?                  then @findings.notes_move(-1, 0)
+      when key.down?                then @findings.notes_move(1, 0)
+      when key.left?                then @findings.notes_move(0, -1)
+      when key.right?               then @findings.notes_move(0, 1)
       else
         if c && !ev.ctrl? && !ev.alt?
           @findings.notes_insert(c)
@@ -987,15 +990,23 @@ module Gori::Tui
     end
 
     private def create_finding_from_form : Nil
-      title = @finding_form.title.strip
+      form = @finding_form
+      title = form.title.strip
       title = "untitled finding" if title.empty?
-      @session.store.insert_finding(title, Store::Severity::Medium, @finding_form.host, @finding_form.flow_id)
+      if id = form.edit_id
+        # editing an existing finding's title + severity (from its detail view)
+        @session.store.update_finding(id, title: title, severity: form.severity)
+        @findings.resync(@session.store)
+        @toast = "finding updated"
+      else
+        @session.store.insert_finding(title, form.severity, form.host, form.flow_id)
+        @active_tab = :findings
+        @focus = :body
+        @findings.reload(@session.store)
+        refresh_findings_count
+        @toast = "finding created"
+      end
       @overlay = :none
-      @active_tab = :findings
-      @focus = :body
-      @findings.reload(@session.store)
-      refresh_findings_count
-      @toast = "finding created"
     end
 
     # The Replay tab drives input directly (the request pane is a live editor;
@@ -1835,8 +1846,11 @@ module Gori::Tui
     end
 
     def findings_delete : Nil
-      @findings.delete(@session.store)
-      refresh_findings_count
+      return unless f = @findings.target_finding
+      confirm("DELETE FINDING", "Delete \"#{f.title}\"?\nThis can't be undone.", confirm_label: "delete") do
+        @findings.delete(@session.store)
+        refresh_findings_count
+      end
     end
 
     # Cached findings badge for the tab bar — refreshed only when findings change
@@ -1849,8 +1863,127 @@ module Gori::Tui
       @findings.severity_delta(delta, @session.store)
     end
 
+    def finding_status(delta : Int32) : Nil
+      @findings.status_delta(delta, @session.store)
+    end
+
     def finding_edit_notes : Nil
       @findings.start_notes_edit
+    end
+
+    # Re-open the create form seeded from the open finding (title + severity), in
+    # edit mode — commit updates instead of inserting (create_finding_from_form).
+    def finding_edit_title : Nil
+      return unless f = @findings.detail_finding
+      @finding_form = FindingForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT FINDING")
+      @overlay = :finding_new
+    end
+
+    # Jump from a finding to its linked flow's request/response in History.
+    def finding_open_flow : Nil
+      return unless f = @findings.detail_finding
+      return (@toast = "this finding has no linked flow") unless fid = f.flow_id
+      if @history.open_detail_id(fid, @session.store)
+        @active_tab = :history
+        @focus = :body
+        @overlay = :detail
+      else
+        @toast = "evidence no longer captured (flow ##{fid})"
+      end
+    end
+
+    # Send a finding's linked flow to the Replay tab to re-test the evidence.
+    def finding_replay_flow : Nil
+      return unless f = @findings.detail_finding
+      return (@toast = "this finding has no linked flow") unless fid = f.flow_id
+      if @session.store.get_flow(fid)
+        replay_flow(fid)
+      else
+        @toast = "evidence no longer captured (flow ##{fid})"
+      end
+    end
+
+    # Write all findings to the project dir as Markdown (the report) or JSON.
+    def findings_export(format : Symbol) : Nil
+      findings = @session.store.findings
+      return (@toast = "no findings to export") if findings.empty?
+      ext = format == :json ? "json" : "md"
+      content = format == :json ? findings_json(findings) : findings_markdown(findings)
+      path = File.join(@session.project.dir, "findings.#{ext}")
+      File.write(path, content)
+      @toast = "exported #{findings.size} findings → #{path}"
+    rescue ex
+      @toast = "export failed: #{ex.message}"
+    end
+
+    private def findings_markdown(findings : Array(Store::Finding)) : String
+      String.build do |io|
+        io << "# Findings — " << @session.project.name << "\n\n"
+        io << "_" << findings.size << " findings · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
+        findings.each do |f|
+          flow = f.flow_id.try { |fid| @session.store.get_flow(fid) }
+          io << "\n## [" << f.severity.label << "] " << f.title << "\n\n"
+          io << "- **Severity:** " << f.severity.label << "\n"
+          io << "- **Status:** " << f.status.label << "\n"
+          io << "- **Host:** " << (f.host || "—") << "\n"
+          if fid = f.flow_id
+            io << "- **Flow:** "
+            if flow
+              loc = flow.row.target.starts_with?("http") ? flow.row.target : "#{flow.row.host}#{flow.row.target}"
+              io << flow.row.method << " " << loc << " → " << (flow.row.status || "-") << " (#" << fid << ")\n"
+            else
+              io << "#" << fid << " (no longer captured)\n"
+            end
+          end
+          io << "\n" << f.notes << "\n" unless f.notes.strip.empty?
+          if flow
+            append_evidence(io, "Request", flow.request_head, flow.request_body)
+            append_evidence(io, "Response", flow.response_head, flow.response_body)
+          end
+        end
+      end
+    end
+
+    private def append_evidence(io : String::Builder, label : String, head : Bytes?, body : Bytes?) : Nil
+      return unless head && !head.empty?
+      cap = 64 * 1024
+      io << "\n### " << label << "\n\n```http\n"
+      # HEAD: headers are text but can carry stray non-UTF-8 (obs-text) bytes — scrub
+      # them so the report stays a valid UTF-8 file; cap it like the body.
+      hslice = head.size > cap ? head[0, cap] : head
+      io << String.new(hslice).scrub
+      io << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
+      if body && !body.empty?
+        slice = body[0, {body.size, cap}.min]
+        text = String.new(slice)
+        if text.valid_encoding?
+          io << "\n\n" << text
+          io << "\n\n[… body truncated, #{body.size} bytes total …]" if body.size > cap
+        else
+          io << "\n\n[binary body omitted, #{body.size} bytes]"
+        end
+      end
+      io << "\n```\n"
+    end
+
+    private def findings_json(findings : Array(Store::Finding)) : String
+      JSON.build do |j|
+        j.array do
+          findings.each do |f|
+            j.object do
+              j.field "id", f.id
+              j.field "title", f.title
+              j.field "severity", f.severity.label
+              j.field "status", f.status.label
+              j.field "host", f.host
+              j.field "flow_id", f.flow_id
+              j.field "created_at", f.created_at
+              j.field "updated_at", f.updated_at
+              j.field "notes", f.notes
+            end
+          end
+        end
+      end
     end
 
     def scope_open : Nil
@@ -1965,16 +2098,20 @@ module Gori::Tui
 
     def replay_selected : Nil
       id = @history.selected_id
-      return unless id
-      if detail = @session.store.get_flow(id)
-        view = ReplayView.new
-        view.load(detail)
-        @replays << ReplayTab.new(view, id, persist_new_replay(view, id))
-        @current_replay_idx = @replays.size - 1
-        @active_tab = :replay
-        @focus = :body
-        @toast = "Replay ##{id} — type to edit · ^R send · ^N new · ^1-9 switch · esc back"
-      end
+      replay_flow(id) if id
+    end
+
+    # Open flow `id` as a new Replay tab. Shared by History's ^R and the Findings
+    # tab's "send evidence to Replay". No-op if the flow is gone (pruned).
+    def replay_flow(id : Int64) : Nil
+      return unless detail = @session.store.get_flow(id)
+      view = ReplayView.new
+      view.load(detail)
+      @replays << ReplayTab.new(view, id, persist_new_replay(view, id))
+      @current_replay_idx = @replays.size - 1
+      @active_tab = :replay
+      @focus = :body
+      @toast = "Replay ##{id} — type to edit · ^R send · ^N new · ^1-9 switch · esc back"
     end
 
     # Insert a freshly-opened replay tab into the store so it has a stable row id

@@ -84,7 +84,17 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def finding_severity(delta : Int32) : Nil; end
 
+  def finding_status(delta : Int32) : Nil; end
+
   def finding_edit_notes : Nil; end
+
+  def finding_edit_title : Nil; end
+
+  def finding_open_flow : Nil; end
+
+  def finding_replay_flow : Nil; end
+
+  def findings_export(format : Symbol) : Nil; end
 
   def toggle_capture : Nil; end
 

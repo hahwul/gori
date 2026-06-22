@@ -203,7 +203,8 @@ module Gori
       }
     end
 
-    def update_finding(id : Int64, *, title : String? = nil, severity : Severity? = nil, notes : String? = nil) : Nil
+    def update_finding(id : Int64, *, title : String? = nil, severity : Severity? = nil,
+                       notes : String? = nil, status : Status? = nil) : Nil
       sets = [] of String
       args = [] of DB::Any
       if t = title
@@ -214,6 +215,9 @@ module Gori
       end
       if n = notes
         sets << "notes = ?"; args << n
+      end
+      if st = status
+        sets << "status = ?"; args << st.value
       end
       return if sets.empty?
       sets << "updated_at = ?"; args << now_us
@@ -229,7 +233,7 @@ module Gori
     def findings : Array(Finding)
       list = [] of Finding
       @db.query(<<-SQL) do |rs|
-        SELECT id, created_at, updated_at, title, severity, host, flow_id, notes
+        SELECT id, created_at, updated_at, title, severity, host, flow_id, notes, status
         FROM findings ORDER BY severity DESC, created_at DESC
         SQL
         rs.each { list << read_finding(rs) }
@@ -238,7 +242,7 @@ module Gori
     end
 
     def get_finding(id : Int64) : Finding?
-      @db.query("SELECT id, created_at, updated_at, title, severity, host, flow_id, notes FROM findings WHERE id = ?", id) do |rs|
+      @db.query("SELECT id, created_at, updated_at, title, severity, host, flow_id, notes, status FROM findings WHERE id = ?", id) do |rs|
         return read_finding(rs) if rs.move_next
       end
       nil
@@ -773,7 +777,8 @@ module Gori
     private def read_finding(rs : DB::ResultSet) : Finding
       Finding.new(
         rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String),
-        Severity.new(rs.read(Int32)), rs.read(String?), rs.read(Int64?), rs.read(String))
+        Severity.new(rs.read(Int32)), rs.read(String?), rs.read(Int64?), rs.read(String),
+        Status.new(rs.read(Int32)))
     end
 
     private def read_row(rs : DB::ResultSet) : FlowRow

@@ -69,7 +69,12 @@ module Gori
       abstract def finding_close : Nil
       abstract def findings_delete : Nil
       abstract def finding_severity(delta : Int32) : Nil
+      abstract def finding_status(delta : Int32) : Nil
       abstract def finding_edit_notes : Nil
+      abstract def finding_edit_title : Nil               # rename + set severity via the form overlay
+      abstract def finding_open_flow : Nil                # open the linked flow's detail in History
+      abstract def finding_replay_flow : Nil              # send the linked flow to Replay
+      abstract def findings_export(format : Symbol) : Nil # :markdown | :json → project dir
 
       # intercept (hold-and-decide; P4)
       abstract def intercept_toggle : Nil      # toggle the hold queue on/off

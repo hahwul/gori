@@ -133,6 +133,24 @@ module Gori
       end
     end
 
+    # Triage state of a finding, independent of severity (stored as the enum
+    # value; V12). Open is the default for a freshly captured finding.
+    enum Status
+      Open
+      Confirmed
+      FalsePositive
+      Resolved
+
+      def label : String
+        case self
+        in .open?           then "open"
+        in .confirmed?      then "confirmed"
+        in .false_positive? then "false-positive"
+        in .resolved?       then "resolved"
+        end
+      end
+    end
+
     # A human-confirmed finding (DESIGN.md: the final output). Optionally linked
     # to a captured flow. One per project DB.
     struct Finding
@@ -144,8 +162,10 @@ module Gori
       getter host : String?
       getter flow_id : Int64?
       getter notes : String
+      getter status : Status
 
-      def initialize(@id, @created_at, @updated_at, @title, @severity, @host, @flow_id, @notes)
+      def initialize(@id, @created_at, @updated_at, @title, @severity, @host, @flow_id, @notes,
+                     @status = Status::Open)
       end
     end
 

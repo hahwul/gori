@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 11
+      VERSION = 12
 
       V1 = [
         <<-SQL,
@@ -198,7 +198,15 @@ module Gori
         "ALTER TABLE replays ADD COLUMN response_duration_us INTEGER",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11]
+      # Findings gain a triage STATUS axis (separate from severity): open /
+      # confirmed / false-positive / resolved. Additive, backfilled to 0 (Open) so
+      # existing findings stay valid. Lets a false positive be a reversible state
+      # instead of a delete.
+      V12 = [
+        "ALTER TABLE findings ADD COLUMN status INTEGER NOT NULL DEFAULT 0",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

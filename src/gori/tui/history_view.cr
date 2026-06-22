@@ -241,7 +241,18 @@ module Gori::Tui
     def open_detail(store : Store) : Bool
       id = selected_id
       return false unless id
+      open_detail_id(id, store)
+    end
+
+    # Open a specific flow's detail by id, regardless of the current list selection
+    # (used by the Findings tab to jump back to a finding's linked evidence). Also
+    # syncs @selected to it when the row is in the current list, so back/▲▼ behave.
+    def open_detail_id(id : Int64, store : Store) : Bool
       @detail = store.get_flow(id)
+      return false if @detail.nil?
+      if idx = @rows.index { |r| r.id == id }
+        @selected = idx
+      end
       # WebSocket flows (101) carry a captured message log.
       @detail_ws = @detail.try(&.row.status) == 101 ? store.ws_messages(id) : nil
       # HTTP/2 flows link to their connection's raw frame log.
@@ -250,7 +261,7 @@ module Gori::Tui
       @detail_pane = :request
       @detail_cache = nil
       @detail_hex_bytes = nil
-      !@detail.nil?
+      true
     end
 
     def close_detail : Nil

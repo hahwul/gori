@@ -68,6 +68,32 @@ module Gori::Tui
       refresh_detail(store)
     end
 
+    def status_delta(delta : Int32, store : Store) : Nil
+      finding = @detail
+      return unless finding
+      level = (finding.status.value + delta).clamp(0, 3)
+      store.update_finding(finding.id, status: Store::Status.new(level))
+      refresh_detail(store)
+    end
+
+    # The finding currently open in the detail view (for title-edit / evidence
+    # jumps driven from the Runner).
+    def detail_finding : Store::Finding?
+      @detail
+    end
+
+    # The finding a delete would act on — the open detail, else the list selection
+    # (matches #delete's own precedence) — so the Runner can name it in the confirm.
+    def target_finding : Store::Finding?
+      @detail || @findings[@selected]?
+    end
+
+    # Re-fetch the open detail + list after an external update (e.g. a title edit
+    # committed via the Runner's form overlay).
+    def resync(store : Store) : Nil
+      refresh_detail(store)
+    end
+
     def delete(store : Store) : Nil
       if finding = @detail
         store.delete_finding(finding.id)
@@ -113,6 +139,12 @@ module Gori::Tui
       refresh_detail(store)
     end
 
+    # Leave the notes editor WITHOUT persisting (^W) — discards the in-buffer
+    # edits; the next edit re-seeds from the stored notes (start_notes_edit).
+    def cancel_notes_edit : Nil
+      @editing_notes = false
+    end
+
     # --- rendering -----------------------------------------------------------
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
@@ -121,18 +153,20 @@ module Gori::Tui
     end
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
-      screen.text(rect.x + 1, rect.y, "SEVERITY", Theme::MUTED)
+      screen.text(rect.x + 1, rect.y, "SEV", Theme::MUTED)
+      screen.text(rect.x + 6, rect.y, "ST", Theme::MUTED)
       screen.text(rect.x + 11, rect.y, "TITLE", Theme::MUTED)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
       top = rect.y + 2
       list_h = {rect.bottom - top, 0}.max
 
       if @findings.empty?
-        screen.text(rect.x + 1, top, "no findings yet · select a flow and press F to add one", Theme::MUTED)
+        screen.text(rect.x + 1, top, "no findings yet · Shift+F on a History flow, or n here", Theme::MUTED)
         return
       end
 
       ensure_visible(list_h)
+      title_x = rect.x + 11
       (0...list_h).each do |i|
         idx = @scroll + i
         break if idx >= @findings.size
@@ -145,30 +179,48 @@ module Gori::Tui
           screen.cell(rect.x, y, '▎', Theme::ACCENT, bg)
         end
         screen.text(rect.x + 1, y, severity_badge(f.severity), severity_color(f.severity), bg, Attribute::Bold)
+        screen.text(rect.x + 6, y, status_tag(f.status), status_color(f.status), bg)
+        # Right-aligned host; the title fills the gap up to it (ellipsized).
+        right = rect.right - 1
+        if (host = f.host) && !host.empty?
+          screen.text(rect.right - host.size - 1, y, host, Theme::MUTED, bg)
+          right = rect.right - host.size - 2
+        end
         title_fg = selected ? Theme::TEXT_BRIGHT : Theme::TEXT
-        screen.text(rect.x + 11, y, f.title, title_fg, bg, width: rect.w - 24)
-        screen.text(rect.right - (f.host || "").size - 1, y, f.host || "", Theme::MUTED, bg) if f.host
+        tw = {right - title_x, 0}.max
+        screen.text(title_x, y, ellipsize(f.title, tw), title_fg, bg, width: tw)
       end
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
       finding = @detail.not_nil!
       screen.text(rect.x + 1, rect.y, severity_badge(finding.severity), severity_color(finding.severity), attr: Attribute::Bold)
-      screen.text(rect.x + 11, rect.y, finding.title, Theme::TEXT_BRIGHT, width: rect.w - 12)
-      hint = @editing_notes ? "esc: stop editing notes" : "[ ] severity · e notes · d delete · ←/esc back"
-      screen.text(rect.x + 1, rect.y + 1, hint, Theme::MUTED)
+      screen.text(rect.x + 6, rect.y, status_tag(finding.status), status_color(finding.status))
+      screen.text(rect.x + 11, rect.y, finding.title, Theme::TEXT_BRIGHT, width: {rect.w - 12, 0}.max)
+      hint = @editing_notes ? "esc save · ^W discard" \
+                            : "[ ] sev · { } status · t title · e notes · o open · r replay · d del · esc back"
+      screen.text(rect.x + 1, rect.y + 1, hint, Theme::MUTED, width: {rect.w - 2, 0}.max)
+      meta = "##{finding.id} · #{finding.status.label} · #{fmt_ts(finding.created_at)}"
+      meta += " · edited #{fmt_ts(finding.updated_at)}" if finding.updated_at > finding.created_at
+      screen.text(rect.x + 1, rect.y + 2, meta, Theme::MUTED, width: {rect.w - 2, 0}.max)
+      y = rect.y + 3
       if flow = @detail_flow
-        screen.text(rect.x + 1, rect.y + 2, "flow: #{flow.method} #{flow.host}#{flow.target} → #{flow.status || "-"}", Theme::MUTED)
+        line = "flow ##{flow.id}: #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
+        screen.text(rect.x + 1, y, line, Theme::MUTED, width: {rect.w - 2, 0}.max)
+      elsif finding.flow_id
+        screen.text(rect.x + 1, y, "flow ##{finding.flow_id}: (no longer captured)", Theme::MUTED)
       end
-      Frame.inner_divider(screen, rect, rect.y + 3, border: Frame.pane_border(focused))
-      screen.text(rect.x + 1, rect.y + 4, "NOTES", Theme::ACCENT, attr: Attribute::Bold)
-      notes_rect = Rect.new(rect.x + 1, rect.y + 5, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 5), 0}.max)
+      y += 1
+      Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
+      screen.text(rect.x + 1, y + 1, "NOTES", Theme::ACCENT, attr: Attribute::Bold)
+      notes_y = y + 2
+      notes_rect = Rect.new(rect.x + 1, notes_y, {rect.w - 2, 0}.max, {rect.bottom - notes_y, 0}.max)
       if @editing_notes
         @notes.render(screen, notes_rect, cursor: focused)
       else
-        finding.notes.split('\n').each_with_index do |line, i|
-          break if rect.y + 5 + i >= rect.bottom
-          screen.text(notes_rect.x, notes_rect.y + i, line, Theme::TEXT, width: notes_rect.w)
+        finding.notes.split('\n').each_with_index do |note_line, i|
+          break if notes_y + i >= rect.bottom
+          screen.text(notes_rect.x, notes_rect.y + i, note_line, Theme::TEXT, width: notes_rect.w)
         end
       end
     end
@@ -178,6 +230,42 @@ module Gori::Tui
         @detail = store.get_finding(finding.id)
       end
       reload(store)
+    end
+
+    private def status_tag(s : Store::Status) : String
+      case s
+      when .confirmed?      then "conf"
+      when .false_positive? then "fp"
+      when .resolved?       then "done"
+      else                       "open"
+      end
+    end
+
+    private def status_color(s : Store::Status) : Color
+      case s
+      when .confirmed?      then Theme::RED
+      when .false_positive? then Theme::MUTED
+      when .resolved?       then Theme::GREEN
+      else                       Theme::ACCENT # open
+      end
+    end
+
+    # An absolute-form target ("GET http://h/p") already carries the host, so don't
+    # prepend it again; origin-form ("/p") gets the host prefixed.
+    private def flow_location(f : Store::FlowRow) : String
+      f.target.starts_with?("http") ? f.target : "#{f.host}#{f.target}"
+    end
+
+    private def ellipsize(s : String, w : Int32) : String
+      return "" if w <= 0
+      return s if s.size <= w
+      w <= 1 ? "…" : "#{s[0, w - 1]}…"
+    end
+
+    # created_at/updated_at are unix MICROSECONDS (the findings.* unit) — to seconds
+    # for Time.unix, like Project/History formatting.
+    private def fmt_ts(us : Int64) : String
+      Time.unix(us // 1_000_000).to_s("%Y-%m-%d %H:%M")
     end
 
     private def severity_badge(s : Store::Severity) : String
@@ -208,17 +296,27 @@ module Gori::Tui
     end
   end
 
-  # A one-field overlay to create a finding (title); severity defaults to Medium
-  # and is refined in the detail. Carries the linking flow's host/id when opened
-  # from History.
+  # The create / edit-title overlay for a finding: a title input plus a severity
+  # picker (tab cycles it). Carries the linking flow's host/id when opened from
+  # History; `edit_id` is set when re-titling an existing finding instead of
+  # creating one. `heading` labels the card ("NEW FINDING" / "EDIT FINDING").
   class FindingForm
     getter title : String
     getter host : String?
     getter flow_id : Int64?
+    getter severity : Store::Severity
+    getter edit_id : Int64?
 
-    def initialize(@title : String = "", @host : String? = nil, @flow_id : Int64? = nil)
+    def initialize(@title : String = "", @host : String? = nil, @flow_id : Int64? = nil,
+                   @severity : Store::Severity = Store::Severity::Medium,
+                   @edit_id : Int64? = nil, @heading : String = "NEW FINDING")
       @cx = @title.size
       @preedit = ""
+    end
+
+    # Tab / Shift-Tab cycle severity (left/right stay title-cursor moves).
+    def severity_cycle(delta : Int32) : Nil
+      @severity = Store::Severity.new((@severity.value + delta).clamp(0, 4))
     end
 
     def insert(ch : Char) : Nil
@@ -245,16 +343,29 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       w = {area.w - 4, 56}.min
-      h = 5
+      h = 6
       return if w < 12 || area.h < h
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
       box = Rect.new(x, y, w, h)
-      Frame.card(screen, box, "NEW FINDING", border: Theme::BORDER_FOCUS)
+      Frame.card(screen, box, @heading, border: Theme::BORDER_FOCUS)
       prefix = "title › "
-      screen.text(box.x + 2, box.y + 2, prefix, Theme::ACCENT, Theme::PANEL)
+      screen.text(box.x + 2, box.y + 1, prefix, Theme::ACCENT, Theme::PANEL)
       base = box.x + 2 + prefix.size
-      screen.input_line(base, box.y + 2, @title, @cx, @preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
+      screen.input_line(base, box.y + 1, @title, @cx, @preedit, Theme::TEXT_BRIGHT, Theme::PANEL, width: w - prefix.size - 4)
+      sx = screen.text(box.x + 2, box.y + 3, "severity ‹ ", Theme::ACCENT, Theme::PANEL)
+      sx = screen.text(sx, box.y + 3, @severity.label.upcase, sev_color(@severity), Theme::PANEL, Attribute::Bold)
+      screen.text(sx, box.y + 3, " ›  (tab to change)", Theme::MUTED, Theme::PANEL)
+    end
+
+    private def sev_color(s : Store::Severity) : Color
+      case s
+      when .critical? then Theme::RED
+      when .high?     then Theme::ORANGE
+      when .medium?   then Theme::YELLOW
+      when .low?      then Theme::ACCENT
+      else                 Theme::MUTED
+      end
     end
   end
 end

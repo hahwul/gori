@@ -17,7 +17,7 @@ private def tmp_store(&)
 end
 
 describe Gori::Tui::FindingsView do
-  it "renders the severity-sorted list with badges" do
+  it "renders the severity-sorted list with badges + a status tag" do
     tmp_store do |store|
       store.insert_finding("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
       store.insert_finding("Missing header", Gori::Store::Severity::Low, "acme.test", nil)
@@ -27,12 +27,48 @@ describe Gori::Tui::FindingsView do
       backend = MemoryBackend.new(80, 10)
       view.render(Screen.new(backend), Rect.new(0, 0, 80, 10))
 
-      backend.contains?("SEVERITY").should be_true
+      backend.contains?("SEV").should be_true
       backend.contains?("CRIT").should be_true
       backend.contains?("SQL injection").should be_true
       backend.contains?("LOW").should be_true
+      backend.contains?("open").should be_true # freshly created → Open status tag
       # critical sorts first
       backend.row(2).should contain("CRIT")
+    end
+  end
+
+  it "cycles triage status independently of severity" do
+    tmp_store do |store|
+      id = store.insert_finding("IDOR", Gori::Store::Severity::High, "acme.test", nil)
+      store.get_finding(id).not_nil!.status.should eq(Gori::Store::Status::Open)
+
+      view = FindingsView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.status_delta(1, store) # open -> confirmed
+      f = store.get_finding(id).not_nil!
+      f.status.should eq(Gori::Store::Status::Confirmed)
+      f.severity.should eq(Gori::Store::Severity::High) # severity untouched
+
+      view.status_delta(-1, store) # back to open
+      store.get_finding(id).not_nil!.status.should eq(Gori::Store::Status::Open)
+      # clamps at the bottom
+      view.status_delta(-1, store)
+      store.get_finding(id).not_nil!.status.should eq(Gori::Store::Status::Open)
+    end
+  end
+
+  it "discards notes edits on cancel (^W) without persisting" do
+    tmp_store do |store|
+      id = store.insert_finding("XSS", Gori::Store::Severity::Medium, nil, nil)
+      view = FindingsView.new
+      view.reload(store)
+      view.open_detail(store)
+      view.start_notes_edit
+      "junk".each_char { |c| view.notes_insert(c) }
+      view.cancel_notes_edit
+      view.editing_notes?.should be_false
+      store.get_finding(id).not_nil!.notes.should eq("") # nothing persisted
     end
   end
 
@@ -70,12 +106,35 @@ describe Gori::Tui::FindingsView do
   end
 end
 
-describe "Findings verbs (P1)" do
-  it "registers finding.create and findings verbs in the registry" do
+describe "FindingForm" do
+  it "cycles severity (tab) and carries an edit id for re-titling" do
+    form = FindingForm.new("GET /x", "acme.test", 7_i64)
+    form.severity.should eq(Gori::Store::Severity::Medium) # default
+    form.severity_cycle(1)
+    form.severity.should eq(Gori::Store::Severity::High)
+    form.severity_cycle(-2)
+    form.severity.should eq(Gori::Store::Severity::Low)
+    form.edit_id.should be_nil
+
+    edit = FindingForm.new("old", nil, nil, Gori::Store::Severity::Critical, edit_id: 42_i64)
+    edit.edit_id.should eq(42_i64)
+    edit.severity.should eq(Gori::Store::Severity::Critical)
+  end
+end
+
+describe "Findings verbs" do
+  it "registers finding.create and the findings detail/export verbs in the registry" do
     reg = Gori::Verbs.registry
     keymap = Gori::Verb::Keymap.build(reg)
     keymap.lookup(Gori::Verb::Chord.new("f", shift: true), Gori::Verb::Scope::Body).should eq("finding.create")
     keymap.lookup(Gori::Verb::Chord.new("enter"), Gori::Verb::Scope::Findings).should eq("findings.open")
     keymap.lookup(Gori::Verb::Chord.new("]"), Gori::Verb::Scope::FindingsDetail).should eq("finding.severity-up")
+    keymap.lookup(Gori::Verb::Chord.new("}"), Gori::Verb::Scope::FindingsDetail).should eq("finding.status-up")
+    keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::FindingsDetail).should eq("finding.edit-title")
+    keymap.lookup(Gori::Verb::Chord.new("o"), Gori::Verb::Scope::FindingsDetail).should eq("finding.open-flow")
+    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::FindingsDetail).should eq("finding.replay-flow")
+    # export is a chord-less Global palette verb
+    reg["findings.export-md"]?.try(&.scope).should eq(Gori::Verb::Scope::Global)
+    reg["findings.export-json"]?.should_not be_nil
   end
 end
