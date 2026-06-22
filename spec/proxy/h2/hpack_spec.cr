@@ -63,6 +63,14 @@ describe Gori::Proxy::H2::HPACK do
     end
   end
 
+  it "rejects Huffman trailing padding that isn't the all-ones EOS prefix (RFC 7541 §5.2)" do
+    # '0' is the 5-bit Huffman code 00000. 0x07 = 00000|111 → valid EOS-prefix padding.
+    HPACK.huffman_decode(Bytes[0x07_u8]).should eq("0")
+    # 0x00 = 00000|000 → the 3 padding bits are zeros, not the EOS prefix → must error
+    # (otherwise distinct byte strings decode to the same value — a canonicality bypass).
+    expect_raises(Gori::Error, /huffman padding/) { HPACK.huffman_decode(Bytes[0x00_u8]) }
+  end
+
   it "encoder output round-trips through the decoder" do
     headers = [
       {":method", "POST"},        # exact static match → indexed

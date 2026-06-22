@@ -174,9 +174,11 @@ module Gori::Proxy::H2
       buf = IO::Memory.new
       node = @@tree
       pending = 0
+      partial_ones = true # the trailing partial path must be all 1s (the EOS prefix)
       data.each do |byte|
         7.downto(0) do |i|
           bit = (byte >> i) & 1
+          partial_ones = false if bit == 0
           node = (bit == 0 ? node.zero : node.one) ||
                  raise(Gori::Error.new("hpack: invalid huffman code"))
           pending += 1
@@ -184,16 +186,28 @@ module Gori::Proxy::H2
             buf.write_byte(sym.to_u8)
             node = @@tree
             pending = 0
+            partial_ones = true
           end
         end
       end
       raise Gori::Error.new("hpack: truncated huffman code") if pending > 7
+      # RFC 7541 §5.2: padding that doesn't correspond to the EOS prefix (i.e. any
+      # 0 bit in the trailing <8 bits) MUST be a decoding error — else distinct byte
+      # sequences decode to the same value (a non-canonical-encoding bypass).
+      raise Gori::Error.new("hpack: invalid huffman padding") if pending > 0 && !partial_ones
       String.new(buf.to_slice)
     end
 
     # Per-direction decoder holding the dynamic table (RFC 7541 §2.3.2).
     class Decoder
       ENTRY_OVERHEAD = 32 # per-entry accounting cost (§4.1)
+
+      # Ceiling on the DECODED header-list size (RFC 7541 §4.3). The encoded block
+      # is already capped (assembler MAX_HEADER_BLOCK ~1 MiB), but HPACK indexing +
+      # Huffman can amplify a tiny block into a huge list of tiny headers; bound the
+      # decoded total so a crafted block can't spike memory. Far above any real
+      # header set (cookies included); overflow → the projection is skipped.
+      MAX_HEADER_LIST = 16 * 1024 * 1024
 
       getter max_size : Int32
 
@@ -205,6 +219,7 @@ module Gori::Proxy::H2
       # Decodes one header block into an ordered list of (name, value) pairs.
       def decode(block : Bytes) : Array({String, String})
         headers = [] of {String, String}
+        list_size = 0
         pos = 0
         while pos < block.size
           b = block[pos]
@@ -223,6 +238,7 @@ module Gori::Proxy::H2
             # §6.3 Dynamic Table Size Update
             new_max, pos = read_int(block, pos, 5)
             resize(new_max)
+            next
           else
             # §6.2.2 (no indexing) / §6.2.3 (never indexed) — both 4-bit prefix
             index, pos = read_int(block, pos, 4)
@@ -230,6 +246,9 @@ module Gori::Proxy::H2
             value, pos = read_string(block, pos)
             headers << {name, value}
           end
+          n, v = headers[-1]
+          list_size += n.bytesize + v.bytesize + ENTRY_OVERHEAD
+          raise Gori::Error.new("hpack: header list too large") if list_size > MAX_HEADER_LIST
         end
         headers
       end

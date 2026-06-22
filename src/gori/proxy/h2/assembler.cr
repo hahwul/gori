@@ -89,6 +89,10 @@ module Gori::Proxy::H2
       when Frame::Type::Continuation
         append_header_fragment(side, frame.payload)
         finish_header_block(side, decoder) if frame.end_headers?
+        # END_STREAM is illegal on CONTINUATION (RFC 7540 §6.10) but a hostile peer
+        # can set it; mirror HEADERS/DATA so the request still emits and the stream
+        # closes — otherwise it's silently dropped and the stream leaks (P7).
+        side.ended = true if frame.end_stream?
       when Frame::Type::Data
         side.body.write(data_block(frame))
         side.ended = true if frame.end_stream?

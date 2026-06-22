@@ -99,6 +99,19 @@ describe Gori::Proxy::H2::Assembler do
     sink.requests.size.should eq(0) # malformed pad → frame skipped, not projected as a body
   end
 
+  it "emits the request when END_STREAM (illegally) rides on a CONTINUATION frame" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    block = hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")
+    # HEADERS without END_HEADERS (partial block), then CONTINUATION carrying the rest
+    # with END_HEADERS|END_STREAM — RFC-illegal, but must not silently drop + leak.
+    assembler.feed("out", headers_frame(7_u32, 0_u8, block[0, 4]))
+    assembler.feed("out", Frame::Header.new(Frame::Type::Continuation.value,
+      Frame::END_HEADERS | Frame::END_STREAM, 7_u32, block[4..]))
+    sink.requests.size.should eq(1) # emitted, not dropped
+    sink.requests.first.method.should eq("GET")
+  end
+
   it "ignores connection-level frames (stream 0)" do
     sink = RecSink.new
     assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
