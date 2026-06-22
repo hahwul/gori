@@ -192,6 +192,36 @@ describe Gori::Tui::ReplayView do
     backend.contains?("replay error: connect failed: api.test:443").should be_true
   end
 
+  it "seed_original re-arms the captured-original diff baseline after restore (reopened ^R tab)" do
+    view = ReplayView.new
+    # reopened, never-sent History tab: restore() alone is non-diffable …
+    view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true)
+    orig_head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
+    view.seed_original(orig_head, "ORIGINAL".to_slice) # … the Runner re-seeds it from flow_id
+
+    sent = Gori::Replay::Result.new(
+      "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "CHANGED".to_slice, nil, 1000_i64)
+    view.apply(sent)      # first resend after reopen → baseline is the seeded original
+    view.toggle_resp_mode # response → diff
+
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("- ORIGINAL").should be_true # diffs against the captured original, not nothing
+    backend.contains?("+ CHANGED").should be_true
+  end
+
+  it "seed_original is a no-op when the source flow captured no response" do
+    view = ReplayView.new
+    view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true)
+    view.seed_original(nil, nil) # flow without a response → stays non-diffable
+    ok = Gori::Replay::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "X".to_slice, nil, 1000_i64)
+    view.apply(ok)
+    view.toggle_resp_mode # → diff
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("first send").should be_true # nothing to diff against yet
+  end
+
   it "marks dirty on edits + flag toggles, and clears on restore" do
     view = ReplayView.new
     view.load_blank

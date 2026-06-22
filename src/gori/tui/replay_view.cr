@@ -178,9 +178,10 @@ module Gori::Tui
     # Re-open a persisted tab (from the `replays` table) without a live FlowDetail.
     # Seeds the editable request + target + flags, and (V11) the LAST send response
     # when one was persisted — so a reopened tab shows it instead of "— not sent —".
-    # There's no captured original, so it's non-diffable until the next resend (the
-    # restored response then becomes that diff's baseline). Clears @dirty so a
-    # synced/restored tab is never re-saved by us — that would echo back to the peer.
+    # Non-diffable on its own; a ^R-from-History tab regains its captured-original
+    # diff baseline via a follow-up seed_original (the Runner re-fetches it from the
+    # persisted flow_id). Clears @dirty so a synced/restored tab is never re-saved by
+    # us — that would echo back to the peer.
     def restore(target : String, request : String, http2 : Bool, auto_cl : Bool,
                 response_head : Bytes? = nil, response_body : Bytes? = nil,
                 response_error : String? = nil, response_duration_us : Int64? = nil) : Nil
@@ -208,6 +209,18 @@ module Gori::Tui
       @dirty = false
       @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
       @scroll_req = 0
+    end
+
+    # Re-seed the captured-original diff baseline for a ^R-from-History tab that was
+    # reopened/synced via restore() (which is non-diffable on its own). The source
+    # flow's response lives in `flows`; the Runner re-fetches it by the persisted
+    # flow_id and hands the bytes here, mirroring what load() sets. No-op when the
+    # source flow captured no response (nothing to diff against).
+    def seed_original(head : Bytes?, body : Bytes?) : Nil
+      return unless head
+      @original_lines = message_lines(head, display_body(head, body))
+      @diffable = true
+      @diff_lines_cache = nil # the baseline changed → drop any memoized diff
     end
 
     # Open a hand-authored request not tied to any captured flow (Replay `^N`).

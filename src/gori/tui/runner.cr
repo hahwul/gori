@@ -62,6 +62,7 @@ module Gori::Tui
         view = ReplayView.new
         view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us)
+        seed_replay_original(view, r.flow_id)
         @replays << ReplayTab.new(view, r.flow_id, r.id)
       end
       @current_replay_idx = @replays.empty? ? -1 : 0
@@ -313,6 +314,7 @@ module Gori::Tui
         # peer resend. So restore() is called response-less, blanking the pane only
         # when the peer actually changed the request (which the compare above gates).
         v.restore(row.target, row.request, row.http2?, row.auto_content_length?)
+        seed_replay_original(v, row.flow_id) # restore() drops the baseline; re-seed it
       end
 
       local_ids = @replays.compact_map(&.db_id).to_set
@@ -322,6 +324,7 @@ module Gori::Tui
         # Peer-created tab: request only (its response shows on this session's next
         # project-open, per the personal-response rule above).
         view.restore(row.target, row.request, row.http2?, row.auto_content_length?)
+        seed_replay_original(view, row.flow_id)
         @replays << ReplayTab.new(view, row.flow_id, row.id)
       end
 
@@ -345,6 +348,16 @@ module Gori::Tui
         else
           @current_replay_idx.clamp(0, @replays.size - 1)
         end
+    end
+
+    # Re-seed a ^R-from-History tab's captured-original diff baseline after a
+    # restore() (reopen / cross-session sync), which is non-diffable on its own.
+    # The source response lives in `flows`, re-fetched by the persisted flow_id;
+    # no-op for a hand-authored (^N) tab or a flow that's since been deleted.
+    private def seed_replay_original(view : ReplayView, flow_id : Int64?) : Nil
+      return unless flow_id
+      return unless detail = @session.store.get_flow(flow_id)
+      view.seed_original(detail.response_head, detail.response_body)
     end
 
     private def nonblocking_event : Store::FlowEvent?
