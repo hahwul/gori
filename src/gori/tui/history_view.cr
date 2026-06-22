@@ -26,8 +26,14 @@ module Gori::Tui
     # authoritative history still lives in SQLite (reload/QL re-query it).
     MAX_ROWS   = 5000
     TRIM_SLACK =  512
-    QL_FIELDS  = %w(host method status path scheme body flag)
-    METHOD_VAL = %w(GET POST PUT DELETE PATCH HEAD OPTIONS)
+    # Cap on h2 frames / WS messages loaded into a detail view. A long-lived WS
+    # (100k+ messages) or a heavily-multiplexed h2 connection would otherwise
+    # materialize the whole log (objects + payloads + built lines) on detail-open.
+    # We load the MOST RECENT this-many (so a live tail keeps updating) and show an
+    # "older not loaded" note; the raw frames remain whole in SQLite.
+    DETAIL_LOG_CAP = 10_000
+    QL_FIELDS      = %w(host method status path scheme body flag)
+    METHOD_VAL     = %w(GET POST PUT DELETE PATCH HEAD OPTIONS)
 
     getter rows : Array(Store::FlowRow)
     getter? follow : Bool
@@ -48,6 +54,8 @@ module Gori::Tui
       @detail = nil.as(Store::FlowDetail?)
       @detail_ws = nil.as(Array(Store::WsMessage)?)
       @detail_frames = nil.as(Array(Store::H2Frame)?)
+      @detail_ws_total = 0 # full message count (≥ loaded; drives the "older not loaded" note)
+      @detail_frames_total = 0
       @detail_scroll = 0
       @detail_pane = :request
       @search_hl = ""                        # active ^F query → highlight in the detail body
@@ -253,10 +261,10 @@ module Gori::Tui
       if idx = @rows.index { |r| r.id == id }
         @selected = idx
       end
-      # WebSocket flows (101) carry a captured message log.
-      @detail_ws = @detail.try(&.row.status) == 101 ? store.ws_messages(id) : nil
-      # HTTP/2 flows link to their connection's raw frame log.
-      @detail_frames = (cid = @detail.try(&.h2_conn_id)) ? store.h2_frames(cid) : nil
+      # WebSocket flows (101) carry a captured message log; h2 flows link to their
+      # connection's raw frame log. Both are loaded as a bounded most-recent window
+      # (DETAIL_LOG_CAP) with the full count kept for the "older not loaded" note.
+      load_detail_logs(store)
       @detail_scroll = 0
       @detail_pane = :request
       @detail_cache = nil
@@ -269,7 +277,29 @@ module Gori::Tui
       @detail_cache = nil
       @detail_frames = nil # release the h2-frame / ws-message payload arrays (can be MiB)
       @detail_ws = nil
+      @detail_frames_total = 0
+      @detail_ws_total = 0
       @detail_hex_bytes = nil
+    end
+
+    # Load @detail's WS/h2 logs as a bounded most-recent window + record full counts.
+    # Reads @detail (both callers set it first); a frame/message-less flow → nil.
+    private def load_detail_logs(store : Store) : Nil
+      detail = @detail
+      if detail && detail.row.status == 101
+        @detail_ws = store.ws_messages(detail.row.id, DETAIL_LOG_CAP)
+        @detail_ws_total = store.count_ws_messages(detail.row.id)
+      else
+        @detail_ws = nil
+        @detail_ws_total = 0
+      end
+      if detail && (cid = detail.h2_conn_id)
+        @detail_frames = store.h2_frames(cid, DETAIL_LOG_CAP)
+        @detail_frames_total = store.count_h2_frames(cid)
+      else
+        @detail_frames = nil
+        @detail_frames_total = 0
+      end
     end
 
     # 'x' toggles a raw hex dump of the current pane (request/response bytes).
@@ -287,8 +317,7 @@ module Gori::Tui
       id = detail.row.id
       return false unless fresh = store.get_flow(id)
       @detail = fresh
-      @detail_ws = fresh.row.status == 101 ? store.ws_messages(id) : nil
-      @detail_frames = (cid = fresh.h2_conn_id) ? store.h2_frames(cid) : nil
+      load_detail_logs(store)
       @detail_cache = nil # content changed → rebuild (windowed) on next render
       @detail_hex_bytes = nil
       @detail_scroll = @detail_scroll.clamp(0, detail_scroll_max) # content may have shrunk
@@ -730,10 +759,12 @@ module Gori::Tui
       detail = @detail
       return DetailView.new(EMPTY_LINES, [] of String, :text, EMPTY_LINES) unless detail
       if @detail_pane == :frames && (frames = @detail_frames)
-        return DetailView.new(wrap(frame_lines(frames, detail.h2_stream_id)), [] of String, :text, EMPTY_LINES)
+        head = log_head(frame_lines(frames, detail.h2_stream_id), @detail_frames_total, frames.size, "frames")
+        return DetailView.new(head, [] of String, :text, EMPTY_LINES)
       end
       if @detail_pane == :response && (msgs = @detail_ws)
-        return DetailView.new(wrap(ws_lines(msgs)), [] of String, :text, EMPTY_LINES)
+        head = log_head(ws_lines(msgs), @detail_ws_total, msgs.size, "messages")
+        return DetailView.new(head, [] of String, :text, EMPTY_LINES)
       end
       request = @detail_pane == :request
       head, body = request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
@@ -773,6 +804,19 @@ module Gori::Tui
     # body-text lines so they share the styled rendering path.
     private def wrap(strs : Array(String)) : Array(Highlight::Line)
       strs.map { |s| [Highlight::Span.new(s, Theme::TEXT)] of Highlight::Span }
+    end
+
+    # Wrap a bounded log (frames/messages) and, when the window dropped older rows,
+    # prepend a visible note so nothing is hidden silently (this is a wire-inspection
+    # tool). `shown` is the loaded window size; `total` the full count in SQLite.
+    private def log_head(lines : Array(String), total : Int32, shown : Int32, what : String) : Array(Highlight::Line)
+      head = wrap(lines)
+      if total > shown
+        head.unshift(Highlight::Line.new) # blank separator beneath the note
+        head.unshift([Highlight::Span.new(
+          "— showing the latest #{shown} of #{total} #{what}; #{total - shown} older not loaded —", Theme::YELLOW)] of Highlight::Span)
+      end
+      head
     end
 
     private def grpc_body?(head : Bytes?) : Bool

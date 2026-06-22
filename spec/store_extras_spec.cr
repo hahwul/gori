@@ -58,6 +58,29 @@ describe "Gori::Store h2 raw frame log (v5)" do
       String.new(frames[1].payload).should eq("body")
     end
   end
+
+  it "h2_frames(limit) returns the MOST RECENT n frames ascending; count is the full total" do
+    with_store do |store|
+      conn = store.insert_h2_connection("acme.test", 443, "h2")
+      10.times { |i| store.insert_h2_frame(conn, "out", 0x0_u8, 0x0_u8, 1_u32, "f#{i}".to_slice) }
+      store.flush
+      store.count_h2_frames(conn).should eq(10)                           # full count regardless of the window
+      win = store.h2_frames(conn, 3)                                      # bounded to the latest 3
+      win.map { |f| String.new(f.payload) }.should eq(["f7", "f8", "f9"]) # newest tail, ascending
+      store.h2_frames(conn).size.should eq(10)                            # nil limit = all (unchanged)
+    end
+  end
+
+  it "ws_messages(limit) returns the most recent n messages ascending; count is the full total" do
+    with_store do |store|
+      fid = 1_i64
+      8.times { |i| store.insert_ws_message(fid, "out", 1, "m#{i}".to_slice) }
+      store.flush
+      store.count_ws_messages(fid).should eq(8)
+      store.ws_messages(fid, 2).map { |m| String.new(m.payload) }.should eq(["m6", "m7"])
+      store.ws_messages(fid).size.should eq(8)
+    end
+  end
 end
 
 describe "Gori::Store match rules (v4)" do

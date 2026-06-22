@@ -386,12 +386,20 @@ module Gori
       # raising on the relay fiber mid-shutdown
     end
 
-    def h2_frames(conn_id : Int64) : Array(H2Frame)
+    # The connection's raw frame log. With `limit`, returns the MOST RECENT `limit`
+    # frames (still ascending for display) so the detail view can bound memory on a
+    # pathological connection — the caller shows a count-based "older not loaded"
+    # note (see count_h2_frames). nil limit = all (the prior behaviour).
+    def h2_frames(conn_id : Int64, limit : Int32? = nil) : Array(H2Frame)
       list = [] of H2Frame
-      @db.query(<<-SQL, conn_id) do |rs|
-        SELECT id, conn_id, created_at, direction, stream_id, type, flags, length, payload
-        FROM h2_frames WHERE conn_id = ? ORDER BY id
-        SQL
+      cols = "id, conn_id, created_at, direction, stream_id, type, flags, length, payload"
+      q, args = if lim = limit
+                  {"SELECT * FROM (SELECT #{cols} FROM h2_frames WHERE conn_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
+                   [conn_id, lim.to_i64] of DB::Any}
+                else
+                  {"SELECT #{cols} FROM h2_frames WHERE conn_id = ? ORDER BY id", [conn_id] of DB::Any}
+                end
+      @db.query(q, args: args) do |rs|
         rs.each do
           list << H2Frame.new(
             rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String),
@@ -405,18 +413,28 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM h2_frames WHERE conn_id = ?", conn_id).as(Int64).to_i
     end
 
-    def ws_messages(flow_id : Int64) : Array(WsMessage)
+    # The flow's captured WS message log. With `limit`, returns the MOST RECENT
+    # `limit` messages (ascending for display) to bound the detail view; nil = all.
+    def ws_messages(flow_id : Int64, limit : Int32? = nil) : Array(WsMessage)
       msgs = [] of WsMessage
-      @db.query(<<-SQL, flow_id) do |rs|
-        SELECT id, flow_id, created_at, direction, opcode, payload
-        FROM ws_messages WHERE flow_id = ? ORDER BY id
-        SQL
+      cols = "id, flow_id, created_at, direction, opcode, payload"
+      q, args = if lim = limit
+                  {"SELECT * FROM (SELECT #{cols} FROM ws_messages WHERE flow_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
+                   [flow_id, lim.to_i64] of DB::Any}
+                else
+                  {"SELECT #{cols} FROM ws_messages WHERE flow_id = ? ORDER BY id", [flow_id] of DB::Any}
+                end
+      @db.query(q, args: args) do |rs|
         rs.each do
           msgs << WsMessage.new(rs.read(Int64), rs.read(Int64), rs.read(Int64),
             rs.read(String), rs.read(Int32), rs.read(Bytes))
         end
       end
       msgs
+    end
+
+    def count_ws_messages(flow_id : Int64) : Int32
+      @db.scalar("SELECT COUNT(*) FROM ws_messages WHERE flow_id = ?", flow_id).as(Int64).to_i
     end
 
     # --- read API (go straight through the pool; WAL allows concurrent reads) -
