@@ -1,6 +1,7 @@
 require "json"
 require "./screen"
 require "./theme"
+require "./chrome"
 require "./frame"
 require "./text_area"
 require "../store"
@@ -200,27 +201,12 @@ module Gori::Tui
       @notes[@current.clamp(0, @notes.size - 1)]
     end
 
-    # The horizontal sub-tab strip (mirrors the Replay strip): active note is a
-    # filled segment, the rest muted; overflow ends in an ellipsis.
+    # The horizontal sub-tab strip (mirrors the Replay strip): a windowed segmented
+    # control that scrolls so the active note is always visible, with ‹ / › markers
+    # for tabs hidden off either edge.
     private def render_tabs(screen : Screen, rect : Rect, focused : Bool) : Nil
-      return if rect.empty?
-      x = rect.x
-      @notes.each_with_index do |note, i|
-        seg = " #{i + 1}:#{note.label(i)} "
-        if x + seg.size > rect.right
-          screen.text(x, rect.y, "…", Theme.muted) if x < rect.right
-          break
-        end
-        if i == @current
-          bg = focused ? Theme.accent_bg : Theme.selection_dim
-          fg = focused ? Theme.text_bright : Theme.text
-          screen.fill(Rect.new(x, rect.y, seg.size, 1), bg)
-          screen.text(x, rect.y, seg, fg, bg, attr: Attribute::Bold)
-        else
-          screen.text(x, rect.y, seg, Theme.muted)
-        end
-        x += seg.size + 1
-      end
+      labels = @notes.map_with_index { |note, i| "#{i + 1}:#{note.label(i)}" }
+      Chrome.render_tab_strip(screen, rect, labels, @current, focused)
     end
 
     # Read the persisted notes: prefer the JSON set, fall back to the legacy

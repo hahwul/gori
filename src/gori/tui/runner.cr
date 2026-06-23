@@ -1803,22 +1803,9 @@ module Gori::Tui
     # in the editor or the tab bar). Mirrors the Notes strip + History chip strip.
     private def render_replay_subtabs(screen : Screen, rect : Rect, focused : Bool = false) : Nil
       return if rect.empty?
-      screen.fill(rect, Theme.panel)
-      x = rect.x + 1
-      @replays.each_with_index do |tab, i|
-        active = i == @current_replay_idx
-        lbl = "#{i + 1}:#{tab.flow_id || "new"}"
-        if x + lbl.size + 2 > rect.right
-          screen.text(x, rect.y, "…", Theme.muted, Theme.panel)
-          break
-        end
-        bg = active ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.panel
-        fg = active ? Theme.text_bright : Theme.text
-        w = lbl.size + 1
-        screen.fill(Rect.new(x, rect.y, w, 1), bg)
-        screen.text(x + 1, rect.y, lbl, fg, bg, attr: active ? Attribute::Bold : Attribute::None)
-        x += w + 1
-      end
+      labels = @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.flow_id || "new"}" }
+      # Windowed strip so the current sub-tab is always visible (no off-right hiding).
+      Chrome.render_tab_strip(screen, rect, labels, @current_replay_idx, focused)
     end
 
     # --- findings ExecContext ---

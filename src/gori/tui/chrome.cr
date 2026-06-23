@@ -59,13 +59,7 @@ module Gori::Tui
       # Window the strip so the active segment is ALWAYS visible: on a narrow row
       # advance the start until segments [start..active] fit, so the menu scrolls
       # instead of breaking and hiding every tab from the overflow point on.
-      avail = rect.w - 2
-      start = 0
-      while start < active_idx
-        used = (start..active_idx).sum { |i| widths[i] + (i > start ? 1 : 0) }
-        break if used <= avail
-        start += 1
-      end
+      start = scroll_start(widths, active_idx, rect.w - 2)
 
       x = rect.x + 1
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.panel) if start > 0 # earlier tabs hidden
@@ -85,6 +79,58 @@ module Gori::Tui
         end
         x += seg_w + 1 # a column of breathing room between segments
       end
+    end
+
+    # Leftmost visible segment index that keeps `active_idx` on-screen, given each
+    # segment's `widths` and `avail` drawable columns (segments separated by `gap`).
+    # Shared by the top tab menu + the Replay/Notes sub-tab strips so the active tab
+    # is never scrolled off into the hidden overflow.
+    def self.scroll_start(widths : Array(Int32), active_idx : Int32, avail : Int32, gap : Int32 = 1) : Int32
+      start = 0
+      while start < active_idx
+        used = (start..active_idx).sum { |i| widths[i] + (i > start ? gap : 0) }
+        break if used <= avail
+        start += 1
+      end
+      start
+    end
+
+    # A windowed horizontal sub-tab strip (Replay / Notes). Segments scroll so the
+    # ACTIVE one is always visible — advance the window start until [start..active]
+    # fits, instead of breaking at the first overflow and hiding the active tab off
+    # the right edge. `‹` / `›` markers flag tabs hidden off either edge. Each label
+    # is drawn as a " label " segment; the active one is a filled bright/bold band
+    # (focus → ACCENT_BG, else SELECTION_DIM). Mirrors render_menu's windowing.
+    def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
+                              active : Int32, focused : Bool, *, bg : Color = Theme.panel) : Nil
+      return if rect.empty? || labels.empty?
+      screen.fill(rect, bg)
+      active = active.clamp(0, labels.size - 1)
+      widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
+
+      # Reserve a column on each edge for the ‹ / › overflow markers, then advance
+      # the start until the segments [start..active] fit in what remains.
+      start = scroll_start(widths, active, {rect.w - 2, 0}.max)
+
+      x = rect.x + 1
+      last = start - 1
+      labels.each_with_index do |label, i|
+        next if i < start
+        seg_w = widths[i]
+        break if x + seg_w > rect.right - 1 # leave the last column for the › marker
+        if i == active
+          abg = focused ? Theme.accent_bg : Theme.selection_dim
+          afg = focused ? Theme.text_bright : Theme.text
+          screen.fill(Rect.new(x, rect.y, seg_w, 1), abg)
+          screen.text(x + 1, rect.y, label, afg, abg, attr: Attribute::Bold)
+        else
+          screen.text(x + 1, rect.y, label, Theme.muted, bg)
+        end
+        x += seg_w + 1
+        last = i
+      end
+      screen.cell(rect.x, rect.y, '‹', Theme.muted, bg) if start > 0
+      screen.cell(rect.right - 1, rect.y, '›', Theme.muted, bg) if last < labels.size - 1
     end
 
     # The header hairline (row 2) separating the chrome from the body.
