@@ -31,7 +31,7 @@ describe Gori::Tui::Theme do
   end
 
   it "lists the available themes" do
-    Theme.available.should eq(["goridark", "goriday", "espresso", "tokyonight"])
+    Theme.available.should eq(["goridark", "goriday", "latte", "espresso", "tokyonight"])
   end
 
   it "swaps the active palette and bumps the revision" do

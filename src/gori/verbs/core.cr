@@ -46,7 +46,7 @@ module Gori
         "settings.editor", "settings:editor", "Set the external editor opened by ^E in editable fields",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:editor); nil }
       r.register Verb::Definition.new(
-        "settings.theme", "settings:theme", "Switch the TUI colour theme (goridark · goriday · espresso · tokyonight)",
+        "settings.theme", "settings:theme", "Switch the TUI colour theme (goridark · goriday · latte · espresso · tokyonight)",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:theme); nil }
       r.register Verb::Definition.new(
         "settings.hotkeys", "settings:hotkeys", "Hotkey settings (coming soon)",

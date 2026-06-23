@@ -1,10 +1,12 @@
 module Gori::Tui
-  # The TUI colour palette. gori ships four themes — GORIDARK (the default; a
+  # The TUI colour palette. gori ships five themes — GORIDARK (the default; a
   # monochrome palette in the spirit of Grok Build: near-black canvas, white/grey
   # text, a white highlight, hairline dividers), GORIDAY (the same relationships
-  # inverted onto an off-white canvas with dark ink), ESPRESSO (a warm, slightly
-  # muddy dark-brown palette with tan text + earthy accents), and TOKYONIGHT (the
-  # popular dark blue palette). Only HTTP status keeps functional colour.
+  # inverted onto an off-white canvas with dark ink), LATTE (a soft, cool light
+  # palette inspired by Catppuccin Latte — lavender-grey paper with pastel-but-AA
+  # accents), ESPRESSO (a warm, slightly muddy dark-brown palette with tan text +
+  # earthy accents), and TOKYONIGHT (the popular dark blue palette). Only HTTP
+  # status keeps functional colour.
   #
   # `Termisu::Color` is a value struct, so colours can't be mutated in place to
   # re-theme. Instead one Palette is active at a time (`@@active`) and every colour
@@ -74,6 +76,34 @@ module Gori::Tui
       syn_literal: Color.from_hex("#864f9e"),   # true / false / null
     )
 
+    # A soft, cool light palette inspired by Catppuccin Latte: a lavender-grey
+    # "paper" canvas with a dark blue-grey ink. The base/surfaces/text keep the
+    # recognizable Latte tones; the functional + syntax hues are the Latte accents
+    # darkened to clear WCAG AA (≥4.5:1) on the light base (the pastels are too
+    # faint as-is — same treatment as GORIDAY).
+    LATTE = Palette.new(
+      bg: Color.from_hex("#eff1f5"),            # Latte base — lavender-grey paper
+      panel: Color.from_hex("#e6e9ef"),         # top bar / status / overlays (mantle)
+      elevated: Color.from_hex("#dce0e8"),      # header band, active segment (crust)
+      border: Color.from_hex("#9498a8"),        # hairline dividers (resting) — 2.5:1, visible-but-subtle
+      border_focus: Color.from_hex("#7c7f93"),  # brighter hairline for an active modal card (~3.5:1)
+      focus_gold: Color.from_hex("#a8791f"),    # focused body pane outline (gold reads on light, 3.4:1)
+      accent: Color.from_hex("#4c4f69"),        # the highlight ink (Latte text)
+      accent_bg: Color.from_hex("#d6dbe8"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#e2e5ee"), # selection band (unfocused pane)
+      text: Color.from_hex("#4c4f69"),          # body text (Latte text)
+      text_bright: Color.from_hex("#3a3d52"),   # emphasis / active (darker ink)
+      muted: Color.from_hex("#5f6178"),         # secondary — AA on canvas (5.4:1) + on selection bands (4.4:1)
+      green: Color.from_hex("#2f7d1f"),         # 2xx (AA: 4.6:1)
+      yellow: Color.from_hex("#8f6410"),        # 4xx (4.6:1)
+      red: Color.from_hex("#c20d35"),           # 5xx / error (5.5:1)
+      orange: Color.from_hex("#aa4408"),        # (5.3:1)
+      syn_header: Color.from_hex("#2060c8"),    # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#2f7d1f"),    # quoted strings (green)
+      syn_number: Color.from_hex("#bd2f43"),    # numbers, tag attribute names (maroon)
+      syn_literal: Color.from_hex("#7a30d6"),   # true / false / null (mauve)
+    )
+
     # A warm, slightly muddy dark-brown palette: espresso-brown canvas, tan body
     # text, a warm cream highlight, and earthy/olive accents. Functional + syntax
     # colours clear AA (≥5.7:1) on the brown canvas.
@@ -127,7 +157,7 @@ module Gori::Tui
       syn_literal: Color.from_hex("#bb9af7"), # true / false / null (magenta)
     )
 
-    THEMES        = {"goridark" => GORIDARK, "goriday" => GORIDAY, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT}
+    THEMES        = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT}
     DEFAULT_THEME = "goridark"
     # Pre-rename names so a settings.json from the first theme release still resolves.
     LEGACY_ALIASES = {"dark" => "goridark", "light" => "goriday"}
