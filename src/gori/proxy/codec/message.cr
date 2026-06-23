@@ -34,17 +34,20 @@ module Gori::Proxy::Codec
       @entries.size
     end
 
-    # Last value for a header name (case-insensitive), or nil.
+    # Last value for a header name (case-insensitive), or nil. Uses an
+    # allocation-free case-insensitive compare (the proxy hot path does ~5–6 of
+    # these per request/response; `name.downcase`/`h.name.downcase` otherwise
+    # allocated a String per header per lookup — see codec_bench).
     def get?(name : String) : String?
-      target = name.downcase
-      @entries.reverse_each { |h| return h.value if h.name.downcase == target }
+      @entries.reverse_each { |h| return h.value if h.name.compare(name, case_insensitive: true) == 0 }
       nil
     end
 
     # All values for a header name (case-insensitive), in wire order.
     def get_all(name : String) : Array(String)
-      target = name.downcase
-      @entries.select { |h| h.name.downcase == target }.map(&.value)
+      result = [] of String
+      @entries.each { |h| result << h.value if h.name.compare(name, case_insensitive: true) == 0 }
+      result
     end
   end
 
