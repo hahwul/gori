@@ -91,22 +91,34 @@ module Gori::Proxy
       while @running
         client = server.accept? || break
         @slots.send(nil) # acquire a slot — blocks (pausing accept) when MAX_CONNECTIONS are in flight
-        # Socket setup + handling run INSIDE the fiber so a hostile peer that RSTs
-        # between accept and setsockopt can't raise on the accept loop itself
-        # (which would silently stop the whole proxy); the `ensure` frees the slot.
-        spawn do
-          client.sync = true # immediate writes (P6)
-          client.tcp_nodelay = true
-          ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor).run
-        rescue
-          # Setup (setsockopt) can raise if the peer RST'd between accept and here;
-          # ClientConn never took ownership, so close the accepted fd ourselves or
-          # it leaks. (ClientConn#run closes its own @io and doesn't raise out, so
-          # this only fires for pre-run setup failures.)
-          client.close rescue nil
-        ensure
-          @slots.receive # release the slot (even on error) so a new connection can be accepted
-        end
+        # Hand the socket to a per-connection method so the spawned fiber closes
+        # over that method's `client` PARAMETER (a fresh binding per call), NOT
+        # the `client` loop variable. The loop variable is reassigned by the next
+        # `accept?`; under a burst of simultaneous connections (a browser opening
+        # its parallel sockets) the next accept returns from the backlog before
+        # the spawned fiber is scheduled, so a `spawn do … client … end` block
+        # here would capture the LATER socket — multiple fibers racing one socket
+        # while the earlier connections are abandoned and reset. (P-correctness.)
+        serve_connection(client)
+      end
+    end
+
+    private def serve_connection(client : TCPSocket) : Nil
+      # Socket setup + handling run INSIDE the fiber so a hostile peer that RSTs
+      # between accept and setsockopt can't raise on the accept loop itself
+      # (which would silently stop the whole proxy); the `ensure` frees the slot.
+      spawn do
+        client.sync = true # immediate writes (P6)
+        client.tcp_nodelay = true
+        ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor).run
+      rescue
+        # Setup (setsockopt) can raise if the peer RST'd between accept and here;
+        # ClientConn never took ownership, so close the accepted fd ourselves or
+        # it leaks. (ClientConn#run closes its own @io and doesn't raise out, so
+        # this only fires for pre-run setup failures.)
+        client.close rescue nil
+      ensure
+        @slots.receive # release the slot (even on error) so a new connection can be accepted
       end
     end
   end
