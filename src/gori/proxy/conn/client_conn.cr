@@ -27,6 +27,11 @@ module Gori::Proxy
                    @fixed_host : String? = nil, @fixed_port : Int32 = 0,
                    @tls_upstream : Bool = false, @verify_upstream : Bool = true,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil)
+      # Per-connection upstream reuse (see `acquire_upstream`). One live origin
+      # connection kept across this client's keep-alive requests.
+      @upstream = nil.as(IO?)
+      @up_host = nil.as(String?)
+      @up_port = 0
     end
 
     def run : Nil
@@ -36,7 +41,40 @@ module Gori::Proxy
     rescue
       # any IO error (reset, timeout, broken pipe) ends the connection
     ensure
+      release_upstream
       @io.close rescue nil
+    end
+
+    # Per-connection upstream keep-alive reuse. Within one client connection —
+    # especially a TLS-MITM tunnel pinned to a single origin (`@fixed_host`),
+    # where EVERY request would otherwise pay a fresh TCP+TLS handshake to the
+    # same server — we keep ONE upstream connection open and reuse it across the
+    # client's keep-alive requests. Reuse is gated on the origin honouring
+    # keep-alive (decided at the end of `handle_response`: complete body, not
+    # close-delimited, no `Connection: close`); a connection that goes stale
+    # while idle (the origin's own keep-alive timeout fired) is detected as an
+    # EOF on the response head and transparently retried for body-less requests.
+    # Returns {connection, reused?} — `reused` tells the caller a stale EOF is
+    # worth one redial+resend.
+    private def acquire_upstream(host : String, port : Int32) : {IO?, Bool}
+      if (up = @upstream) && @up_host == host && @up_port == port
+        return {up, true}
+      end
+      release_upstream # different origin (forward-proxy) or none yet — dial fresh
+      up = open_upstream(host, port)
+      if up
+        @upstream = up
+        @up_host = host
+        @up_port = port
+      end
+      {up, false}
+    end
+
+    private def release_upstream : Nil
+      @upstream.try(&.close) rescue nil
+      @upstream = nil
+      @up_host = nil
+      @up_port = 0
     end
 
     # Returns true to keep the connection alive for another request.
@@ -71,69 +109,120 @@ module Gori::Proxy
       # the full body (vs streaming) so the human can see/edit it; the non-hold
       # path keeps zero-buffer streaming (P6).
       if (ic = @interceptor) && ic.intercepts_host?(host)
-        buffered = Codec::Body.read(@io, req_framing, req_len)
-        decision = ic.hold_request(build_message(sent_head, buffered),
-          method: sent_req.method, target: sent_req.target,
-          host: host, port: port, scheme: scheme)
-        if decision.action.drop?
-          record_dropped_request(sent_req, scheme, host, port, created_at, buffered)
-          write_intercept_drop
-          return false
-        end
-        # forward (edited or original): re-parse the sent head for capture (P7).
-        sent_head, edited_body = split_message(decision.bytes)
-        sent_req = Codec::Http1.parse_request_head(sent_head)
-        upstream = open_upstream(host, port)
-        unless upstream
-          record_error(sent_req, scheme, host, port, created_at, "upstream connect failed: #{host}:#{port}")
-          write_gateway_error
-          return false
-        end
-        begin
-          upstream.write(sent_head)
-          upstream.write(edited_body) if edited_body
-          upstream.flush
-          stored, trunc, size = capped(edited_body)
-          flow_id = @sink.on_request(FlowMapper.request(sent_req,
-            scheme: scheme, host: host, port: port, created_at: created_at,
-            body: stored, body_truncated: trunc, body_size: size))
-          return handle_response(upstream, req, flow_id, started, host, port, scheme)
-        ensure
-          upstream.close rescue nil
-        end
+        return handle_held_request(ic, req, sent_req, sent_head, host, port, scheme,
+          created_at, started, req_framing, req_len)
       end
 
       # Non-hold path: stream the request body byte-for-byte (P6), unchanged.
-      upstream = open_upstream(host, port)
-      unless upstream
-        record_error(req, scheme, host, port, created_at, "upstream connect failed: #{host}:#{port}")
+      retryable = retryable_request?(req, req_framing.none?)
+      req_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
+      req_complete = true
+      upstream, reused, sent = acquire_and_send(host, port, retryable) do |up|
+        up.write(sent_head)
+        req_complete = Codec::Body.stream(@io, up, req_framing, req_len, req_capture)
+        up.flush
+        true
+      end
+      unless upstream && sent
+        release_upstream
+        record_error(req, scheme, host, port, created_at, "upstream connect/write failed: #{host}:#{port}")
         write_gateway_error
         return false
       end
-      begin
-        upstream.write(sent_head)
-        req_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
-        req_complete = Codec::Body.stream(@io, upstream, req_framing, req_len, req_capture)
-        upstream.flush
-        req_body = req_framing.none? ? nil : req_capture.to_slice
-        flow_id = @sink.on_request(FlowMapper.request(sent_req,
-          scheme: scheme, host: host, port: port, created_at: created_at, body: req_body,
-          body_truncated: req_capture.truncated?, body_size: req_capture.total))
-        return false unless req_complete # client cut the request body short — don't reuse the connection
-        handle_response(upstream, req, flow_id, started, host, port, scheme)
-      ensure
-        upstream.close rescue nil
+      req_body = req_framing.none? ? nil : req_capture.to_slice
+      flow_id = @sink.on_request(FlowMapper.request(sent_req,
+        scheme: scheme, host: host, port: port, created_at: created_at, body: req_body,
+        body_truncated: req_capture.truncated?, body_size: req_capture.total))
+      unless req_complete # client cut the request body short — don't reuse the connection
+        release_upstream
+        return false
       end
+      handle_response(upstream, req, flow_id, started, host, port, scheme,
+        reused: reused, sent_head: sent_head, can_retry: retryable)
+    end
+
+    # The intercept-hold request path: buffer the body, let the human edit/drop
+    # it, then forward via the reused upstream (with the same stale-reuse retry).
+    private def handle_held_request(ic : Gori::Interceptor, req : Codec::RawRequest,
+                                    sent_req : Codec::RawRequest, sent_head : Bytes,
+                                    host : String, port : Int32, scheme : String,
+                                    created_at : Int64, started : Time::Instant,
+                                    req_framing : Codec::BodyFraming, req_len : Int64) : Bool
+      buffered = Codec::Body.read(@io, req_framing, req_len)
+      decision = ic.hold_request(build_message(sent_head, buffered),
+        method: sent_req.method, target: sent_req.target,
+        host: host, port: port, scheme: scheme)
+      if decision.action.drop?
+        record_dropped_request(sent_req, scheme, host, port, created_at, buffered)
+        write_intercept_drop
+        return false
+      end
+      # forward (edited or original): re-parse the sent head for capture (P7).
+      sent_head, edited_body = split_message(decision.bytes)
+      sent_req = Codec::Http1.parse_request_head(sent_head)
+      retryable = retryable_request?(req, edited_body.nil? || edited_body.empty?)
+      upstream, reused, sent = acquire_and_send(host, port, retryable) { |up| write_request(up, sent_head, edited_body) }
+      unless upstream && sent
+        release_upstream
+        record_error(sent_req, scheme, host, port, created_at, "upstream connect/write failed: #{host}:#{port}")
+        write_gateway_error
+        return false
+      end
+      stored, trunc, size = capped(edited_body)
+      flow_id = @sink.on_request(FlowMapper.request(sent_req,
+        scheme: scheme, host: host, port: port, created_at: created_at,
+        body: stored, body_truncated: trunc, body_size: size))
+      handle_response(upstream, req, flow_id, started, host, port, scheme,
+        reused: reused, sent_head: sent_head, can_retry: retryable)
+    end
+
+    # Acquires the (reused-or-fresh) upstream and runs `send` on it. If a REUSED
+    # connection's send fails and the request is REPLAYABLE (a safe, body-less
+    # method — nothing consumed from the client, harmless to resend), redials a
+    # fresh origin and retries once — this is what makes per-connection keep-alive
+    # reuse safe against a server that closed an idle connection. A non-replayable
+    # request (any body, or a mutating method) is never auto-resent — the caller
+    # fails it so the client decides. Returns {upstream, reused?, ok}.
+    private def acquire_and_send(host : String, port : Int32, retryable : Bool, & : IO -> Bool) : {IO?, Bool, Bool}
+      upstream, reused = acquire_upstream(host, port)
+      return {nil, false, false} unless upstream
+      ok = send_guard { yield upstream }
+      if !ok && reused && retryable
+        release_upstream
+        upstream, reused = acquire_upstream(host, port)
+        ok = upstream ? send_guard { yield upstream } : false
+      end
+      {upstream, reused, ok}
+    end
+
+    private def send_guard(& : -> Bool) : Bool
+      yield
+    rescue
+      false # write to a dead/half-closed reused socket, or client read error mid-body
+    end
+
+    # Writes a request head (+ optional body) to the upstream and flushes.
+    # Returns false on any IO error (a dead/half-closed reused connection), so
+    # the caller can decide whether a stale reuse is worth a redial+resend.
+    private def write_request(upstream : IO, head : Bytes, body : Bytes?) : Bool
+      upstream.write(head)
+      upstream.write(body) if body && !body.empty?
+      upstream.flush
+      true
+    rescue
+      false
     end
 
     # Reads, (optionally holds), forwards, and captures the response. `req` is the
     # ORIGINAL request (framing/keep-alive/method come from it). Returns true to
     # keep the connection alive.
     private def handle_response(upstream : IO, req : Codec::RawRequest, flow_id : Int64,
-                                started : Time::Instant, host : String, port : Int32, scheme : String) : Bool
-      resp_head = Codec::Http1.read_head(upstream)
+                                started : Time::Instant, host : String, port : Int32, scheme : String,
+                                *, reused : Bool, sent_head : Bytes, can_retry : Bool) : Bool
+      resp_head, upstream = read_response_head(upstream, host, port, reused, sent_head, can_retry)
       if resp_head.nil?
         @sink.on_response(FlowMapper.error_response(flow_id, "no response from upstream"))
+        release_upstream
         return false
       end
       ttfb = (Time.instant - started).total_microseconds.to_i64
@@ -141,43 +230,15 @@ module Gori::Proxy
 
       # Match&Replace (response head). Framing/keep-alive/upgrade stay on the
       # ORIGINAL response so the upstream body is read correctly.
-      sent_resp = resp
-      sent_resp_head = resp_head
-      if rw = @rewriter
-        rewritten = rw.rewrite_response(resp_head)
-        if rewritten != resp_head
-          sent_resp_head = rewritten
-          sent_resp = Codec::Http1.parse_response_head(rewritten)
-        end
-      end
-
+      sent_resp_head, sent_resp = apply_response_rewrite(resp_head, resp)
       resp_framing, resp_len = Codec::Body.response_framing(resp, req.method)
 
       # Intercept (response): hold only in-scope, non-streaming responses. SSE /
       # close-delimited / WebSocket bodies would buffer forever, so they bypass.
       if (ic = @interceptor) && ic.intercepts_host?(host) &&
          !resp_framing.close_delimited? && !sse?(resp) && !websocket_upgrade?(resp)
-        body = Codec::Body.read(upstream, resp_framing, resp_len)
-        decision = ic.hold_response(build_message(sent_resp_head, body),
-          flow_id: flow_id, method: req.method, target: "#{resp.status} #{resp.reason}",
-          host: host, port: port, scheme: scheme)
-        duration = (Time.instant - started).total_microseconds.to_i64
-        if decision.action.drop?
-          @sink.on_response(FlowMapper.aborted_response(flow_id, "dropped by intercept",
-            ttfb_us: ttfb, duration_us: duration))
-          write_intercept_drop
-          return false
-        end
-        out_head, out_body = split_message(decision.bytes)
-        sent_resp = Codec::Http1.parse_response_head(out_head)
-        @io.write(out_head)
-        @io.write(out_body) if out_body
-        @io.flush
-        stored, trunc, size = capped(out_body)
-        @sink.on_response(FlowMapper.response(sent_resp,
-          flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
-          body_truncated: trunc, body_size: size))
-        return keep_alive?(req, sent_resp, Codec::Body.response_framing(sent_resp, req.method)[0])
+        return handle_held_response(ic, upstream, req, flow_id, host, port, scheme,
+          resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
 
       # Non-hold path: stream the response body byte-for-byte (P6), unchanged.
@@ -192,6 +253,12 @@ module Gori::Proxy
         body_truncated: resp_capture.truncated?, body_size: resp_capture.total))
 
       if websocket_upgrade?(resp)
+        # Ownership of the upstream transfers to the relay (it cross-closes on
+        # teardown); detach it from the reuse slot so `run`'s ensure won't also
+        # touch it.
+        @upstream = nil
+        @up_host = nil
+        @up_port = 0
         WS::Relay.run(@io, upstream, flow_id, @sink) # frames until close (P6/P7)
         return false
       end
@@ -199,8 +266,88 @@ module Gori::Proxy
       # A truncated body (upstream EOF'd before the promised length) was forwarded
       # short; close so the client sees end-of-response instead of waiting for the
       # missing bytes while we read its next keep-alive request.
-      return false unless resp_complete
+      unless resp_complete
+        release_upstream
+        return false
+      end
+      # Reuse this upstream for the next request iff the ORIGIN keeps its side
+      # open; the return value is the CLIENT keep-alive decision (separate sides).
+      update_upstream_reuse(origin_keep_alive?(req, resp, resp_framing))
       keep_alive?(req, resp, resp_framing)
+    end
+
+    # Reads the response head, transparently redialing + resending ONCE if a
+    # REUSED idle keep-alive turned out stale (immediate EOF) and the request is
+    # replayable (body-less). Returns {head, upstream} — `upstream` may be a fresh
+    # connection after a retry, so callers must rebind their local.
+    private def read_response_head(upstream : IO, host : String, port : Int32,
+                                   reused : Bool, sent_head : Bytes, can_retry : Bool) : {Bytes?, IO}
+      resp_head = Codec::Http1.read_head(upstream)
+      if resp_head.nil? && reused && can_retry
+        release_upstream
+        fresh, _ = acquire_upstream(host, port)
+        if fresh
+          upstream = fresh
+          resp_head = Codec::Http1.read_head(fresh) if write_request(fresh, sent_head, nil)
+        end
+      end
+      {resp_head, upstream}
+    end
+
+    # Apply response-head Match&Replace; returns the (possibly rewritten) head +
+    # its parsed projection. Unchanged bytes keep the original (P7).
+    private def apply_response_rewrite(resp_head : Bytes, resp : Codec::RawResponse) : {Bytes, Codec::RawResponse}
+      rw = @rewriter
+      return {resp_head, resp} unless rw
+      rewritten = rw.rewrite_response(resp_head)
+      return {resp_head, resp} if rewritten == resp_head
+      {rewritten, Codec::Http1.parse_response_head(rewritten)}
+    end
+
+    # The intercept-hold response path: buffer the (non-streaming) body, let the
+    # human edit/drop it, forward the result, and capture. Returns the CLIENT
+    # keep-alive decision; the upstream is reused iff the ORIGIN kept its side.
+    private def handle_held_response(ic : Gori::Interceptor, upstream : IO, req : Codec::RawRequest,
+                                     flow_id : Int64, host : String, port : Int32, scheme : String,
+                                     resp : Codec::RawResponse, sent_resp_head : Bytes,
+                                     resp_framing : Codec::BodyFraming, resp_len : Int64,
+                                     ttfb : Int64, started : Time::Instant) : Bool
+      # Buffer the body, tracking completeness (Codec::Body.read drops it). A
+      # truncated/misframed body must NOT leave the upstream parked — its stray
+      # unread bytes would become the next reused request's response (desync).
+      buf = IO::Memory.new
+      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, IO::Memory.new)
+      body = resp_framing.none? ? nil : buf.to_slice.dup
+      decision = ic.hold_response(build_message(sent_resp_head, body),
+        flow_id: flow_id, method: req.method, target: "#{resp.status} #{resp.reason}",
+        host: host, port: port, scheme: scheme)
+      duration = (Time.instant - started).total_microseconds.to_i64
+      if decision.action.drop?
+        @sink.on_response(FlowMapper.aborted_response(flow_id, "dropped by intercept",
+          ttfb_us: ttfb, duration_us: duration))
+        write_intercept_drop
+        release_upstream
+        return false
+      end
+      out_head, out_body = split_message(decision.bytes)
+      sent_resp = Codec::Http1.parse_response_head(out_head)
+      @io.write(out_head)
+      @io.write(out_body) if out_body
+      @io.flush
+      stored, trunc, size = capped(out_body)
+      @sink.on_response(FlowMapper.response(sent_resp,
+        flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
+        body_truncated: trunc, body_size: size))
+      # Reuse the upstream iff we read the WHOLE body cleanly AND the origin kept
+      # its side alive. The CLIENT keep-alive (return value) uses the edited resp.
+      update_upstream_reuse(resp_complete && origin_keep_alive?(req, resp, resp_framing))
+      keep_alive?(req, sent_resp, Codec::Body.response_framing(sent_resp, req.method)[0])
+    end
+
+    # After a complete response, decide whether the live upstream can serve the
+    # next request: keep it parked in the reuse slot, or close it now.
+    private def update_upstream_reuse(origin_keep_alive : Bool) : Nil
+      release_upstream unless origin_keep_alive
     end
 
     # Cleartext HTTP/2 (h2c) tunnelled inside a CONNECT: the target is the
@@ -381,6 +528,38 @@ module Gori::Proxy
       return false if header_token(req.headers.get?("Connection")) == "close"
       return false if header_token(resp.headers.get?("Connection")) == "close"
       req.version == "HTTP/1.1" || header_token(req.headers.get?("Connection")) == "keep-alive"
+    end
+
+    # Whether the ORIGIN will keep its connection open after this response, so its
+    # upstream socket may be parked for the next request. Distinct from
+    # `keep_alive?` (the CLIENT side, keyed on the request): persistence here is
+    # the RESPONSE's — HTTP/1.1 persists unless `Connection: close`; HTTP/1.0 only
+    # with explicit `Connection: keep-alive`. A close-delimited body, or a
+    # `Connection: close` on the request we forwarded upstream OR on the response,
+    # all mean the origin closes. Parking a connection the origin will close just
+    # wastes one stale-retry on the next request, so err toward NOT reusing.
+    private def origin_keep_alive?(req : Codec::RawRequest, resp : Codec::RawResponse,
+                                   resp_framing : Codec::BodyFraming) : Bool
+      return false if resp_framing.close_delimited?
+      return false if header_token(req.headers.get?("Connection")) == "close"
+      return false if header_token(resp.headers.get?("Connection")) == "close"
+      resp.version == "HTTP/1.1" || header_token(resp.headers.get?("Connection")) == "keep-alive"
+    end
+
+    # Whether a request may be transparently REPLAYED on a fresh connection after a
+    # stale-reuse failure. Only SAFE methods (RFC 7231 §4.2.1: GET/HEAD/OPTIONS/
+    # TRACE — no side effects, idempotent) with NO body qualify: replay is then
+    # harmless even if the origin had already processed the first attempt. A
+    # mutating method (POST/PUT/PATCH/DELETE), even body-less, is never auto-resent
+    # — a wire-inspection proxy must not silently double-submit; the request fails
+    # and the client decides. A body request can't be replayed anyway (the bytes
+    # were streamed from the client and not retained).
+    private def retryable_request?(req : Codec::RawRequest, body_less : Bool) : Bool
+      return false unless body_less
+      case req.method.upcase
+      when "GET", "HEAD", "OPTIONS", "TRACE" then true
+      else                                        false
+      end
     end
 
     private def header_token(value : String?) : String?
