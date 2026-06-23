@@ -119,7 +119,7 @@ module Gori
       r.register Verb::Definition.new(
         "sidebar.enter", "Enter tab", "Move focus into the content pane", Verb::Scope::Sidebar,
         [Verb::Chord.new("down"), Verb::Chord.new("j"), Verb::Chord.new("enter")],
-        hidden: true) { |ctx| ctx.focus_pane(:body); nil }
+        hidden: true) { |ctx| ctx.enter_content; nil }
 
       # Return focus from the content pane up to the top menu.
       r.register Verb::Definition.new(

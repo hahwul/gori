@@ -22,6 +22,10 @@ module Gori
       abstract def focus_pane(pane : Symbol) : Nil
       abstract def focus_tab(tab : Symbol) : Nil
       abstract def cycle_tab(delta : Int32) : Nil
+      # Descend from the tab menu into the active tab's content. Tabs with a
+      # navigable sub-tab strip (Replay/Notes) land on the STRIP first; others go
+      # straight to the body. (The strip then descends into the editor itself.)
+      abstract def enter_content : Nil
 
       # History view
       abstract def move_selection(delta : Int32) : Nil

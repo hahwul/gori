@@ -1720,6 +1720,15 @@ module Gori::Tui
       view_focus_first if pane == :body
     end
 
+    # Descend from the tab menu (↓/↵/j on the tab bar). Tabs with a navigable
+    # sub-tab strip (Replay/Notes, ≥2 chips) land on the STRIP first so ←/→ can
+    # switch sub-tabs; ↓/↵ again drops into the editor. Other tabs go straight to
+    # the body. (`focus_pane`'s guard would otherwise route an absent strip to the
+    # menu, so the active tab is checked here.)
+    def enter_content : Nil
+      focus_pane(subtabs_shown? ? :subtabs : :body)
+    end
+
     def focus_tab(tab : Symbol) : Nil
       if @active_tab == :project
         @project_view.save(@session.store)

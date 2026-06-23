@@ -20,6 +20,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def focus_pane(pane : Symbol) : Nil; end
 
+  def enter_content : Nil; end
+
   def focus_tab(tab : Symbol) : Nil; end
 
   def cycle_tab(delta : Int32) : Nil; end

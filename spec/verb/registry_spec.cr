@@ -24,6 +24,10 @@ private class FakeContext < ExecContext
     @calls << :focus_pane
   end
 
+  def enter_content : Nil
+    @calls << :enter_content
+  end
+
   def status(message : String) : Nil
     @calls << :status
   end
@@ -275,6 +279,21 @@ describe Gori::Verb do
       ctx = FakeContext.new
       reg["replay.new"].call(ctx)
       ctx.calls.should contain(:replay_new)
+    end
+
+    it "descends from the tab menu via enter_content (so sub-tab tabs land on the strip first)" do
+      reg = Gori::Verbs.registry
+      keymap = Keymap.build(reg)
+      # ↓/↵/j on the tab bar resolve to sidebar.enter…
+      keymap.lookup(Chord.new("down"), Scope::Sidebar).should eq("sidebar.enter")
+      keymap.lookup(Chord.new("enter"), Scope::Sidebar).should eq("sidebar.enter")
+
+      # …which descends through enter_content (NOT focus_pane), letting the Runner
+      # route Replay/Notes onto their sub-tab strip before the body.
+      ctx = FakeContext.new
+      reg["sidebar.enter"].call(ctx)
+      ctx.calls.should contain(:enter_content)
+      ctx.calls.should_not contain(:focus_pane)
     end
   end
 
