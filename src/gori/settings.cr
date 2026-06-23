@@ -18,7 +18,7 @@ module Gori
     class_property upstream_proxy : String = ""  # "host:port" HTTP proxy; "" = connect directly
     class_property editor : String = ""          # external editor for ^E; "" = $VISUAL/$EDITOR/vi
     class_property editor_markdown : Bool = true # syntax-highlight markdown in Notes/Project
-    class_property theme : String = "dark"       # TUI colour theme name (settings:theme); applied by Theme.apply
+    class_property theme : String = "goridark"   # TUI colour theme name (settings:theme); applied by Theme.apply
 
     def self.path : String
       File.join(Paths.home_dir, "settings.json")

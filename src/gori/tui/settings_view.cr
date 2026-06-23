@@ -55,7 +55,7 @@ module Gori::Tui
       @section = section
       @values = case section
                 when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off"]
-                when :theme  then [Theme.available.includes?(Settings.theme) ? Settings.theme : Theme::DEFAULT_THEME]
+                when :theme  then [Theme.canonical(Settings.theme)]
                 else              [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
                 end
       @focused = 0

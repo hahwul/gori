@@ -1,8 +1,10 @@
 module Gori::Tui
-  # The TUI colour palette. gori ships two themes — DARK (the default, a monochrome
-  # palette in the spirit of Grok Build: near-black canvas, white/grey text, a white
-  # highlight, hairline dividers) and LIGHT (the same relationships inverted onto an
-  # off-white canvas with dark ink). Only HTTP status keeps functional colour.
+  # The TUI colour palette. gori ships four themes — GORIDARK (the default; a
+  # monochrome palette in the spirit of Grok Build: near-black canvas, white/grey
+  # text, a white highlight, hairline dividers), GORIDAY (the same relationships
+  # inverted onto an off-white canvas with dark ink), ESPRESSO (a warm, slightly
+  # muddy dark-brown palette with tan text + earthy accents), and TOKYONIGHT (the
+  # popular dark blue palette). Only HTTP status keeps functional colour.
   #
   # `Termisu::Color` is a value struct, so colours can't be mutated in place to
   # re-theme. Instead one Palette is active at a time (`@@active`) and every colour
@@ -21,7 +23,7 @@ module Gori::Tui
       green : Color, yellow : Color, red : Color, orange : Color,
       syn_header : Color, syn_string : Color, syn_number : Color, syn_literal : Color
 
-    DARK = Palette.new(
+    GORIDARK = Palette.new(
       bg: Color.from_hex("#0a0a0b"),            # near-black canvas
       panel: Color.from_hex("#141417"),         # top bar / status / overlays (lifted)
       elevated: Color.from_hex("#1b1b1f"),      # one notch above PANEL: header band, active segment
@@ -45,18 +47,18 @@ module Gori::Tui
       syn_literal: Color.from_hex("#b08ec2"), # true / false / null
     )
 
-    # The DARK relationships inverted onto an off-white canvas: BG lightest, panels a
-    # step toward contrast, the highlight is dark ink (mirroring the white-on-dark
-    # signature). Functional colours are darkened/desaturated for legible contrast on
-    # white (pure yellow/green are unreadable on a light background).
-    LIGHT = Palette.new(
+    # The GORIDARK relationships inverted onto an off-white canvas: BG lightest,
+    # panels a step toward contrast, the highlight is dark ink (mirroring the
+    # white-on-dark signature). Functional colours are darkened/desaturated to clear
+    # WCAG AA contrast on white (pure yellow/green are unreadable on a light canvas).
+    GORIDAY = Palette.new(
       bg: Color.from_hex("#faf9f7"),            # warm off-white canvas
       panel: Color.from_hex("#f0efea"),         # top bar / status / overlays (faint warm grey)
       elevated: Color.from_hex("#e7e5de"),      # header band, active segment (one notch more)
       border: Color.from_hex("#a89a86"),        # hairline dividers (resting) — 2.6:1, a visible-but-subtle line
       border_focus: Color.from_hex("#9c9180"),  # brighter hairline for an active modal card (~3:1)
       focus_gold: Color.from_hex("#a8791f"),    # focused body pane outline (darker gold reads on light, 3.7:1)
-      accent: Color.from_hex("#1b1b1d"),        # the highlight ink (mirrors DARK's white highlight)
+      accent: Color.from_hex("#1b1b1d"),        # the highlight ink (mirrors GORIDARK's white highlight)
       accent_bg: Color.from_hex("#e2dfd6"),     # selection band (focused pane)
       selection_dim: Color.from_hex("#eeece5"), # selection band (unfocused pane)
       text: Color.from_hex("#33322f"),          # body text (ink)
@@ -72,10 +74,65 @@ module Gori::Tui
       syn_literal: Color.from_hex("#864f9e"),   # true / false / null
     )
 
-    THEMES        = {"dark" => DARK, "light" => LIGHT}
-    DEFAULT_THEME = "dark"
+    # A warm, slightly muddy dark-brown palette: espresso-brown canvas, tan body
+    # text, a warm cream highlight, and earthy/olive accents. Functional + syntax
+    # colours clear AA (≥5.7:1) on the brown canvas.
+    ESPRESSO = Palette.new(
+      bg: Color.from_hex("#2b2018"),            # muddy dark-brown canvas
+      panel: Color.from_hex("#332a20"),         # top bar / status / overlays (lifted brown)
+      elevated: Color.from_hex("#3d3226"),      # header band, active segment
+      border: Color.from_hex("#4d4030"),        # hairline dividers (resting)
+      border_focus: Color.from_hex("#63513c"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#d2a86a"),    # focused body pane outline (warm gold, 7.2:1)
+      accent: Color.from_hex("#f2e7d5"),        # warm cream highlight
+      accent_bg: Color.from_hex("#4a3c2c"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#3a2f23"), # selection band (unfocused pane)
+      text: Color.from_hex("#d8c6a8"),          # body text (warm tan)
+      text_bright: Color.from_hex("#f5ecdb"),   # emphasis / active
+      muted: Color.from_hex("#b29d80"),         # secondary — readable on the brown canvas + selection bands
+      green: Color.from_hex("#a3b16a"),         # 2xx (olive)
+      yellow: Color.from_hex("#e0b56a"),        # 4xx (amber)
+      red: Color.from_hex("#e08368"),           # 5xx / error (warm terracotta-red)
+      orange: Color.from_hex("#d99356"),
+      syn_header: Color.from_hex("#8fb0b0"),  # header/field names, JSON keys, tag names (dusty teal)
+      syn_string: Color.from_hex("#a3b16a"),  # quoted strings (olive)
+      syn_number: Color.from_hex("#d99356"),  # numbers, tag attribute names (warm orange)
+      syn_literal: Color.from_hex("#c79bc0"), # true / false / null (dusty mauve)
+    )
 
-    @@active : Palette = DARK
+    # The popular Tokyo Night palette: deep blue-purple canvas with bright,
+    # saturated accents. Functional colours are the upstream Tokyo Night hues
+    # (already AA on the dark canvas); the comment/muted tone is lifted slightly
+    # from upstream so secondary text clears our readability guard.
+    TOKYONIGHT = Palette.new(
+      bg: Color.from_hex("#1a1b26"),            # deep blue-purple canvas
+      panel: Color.from_hex("#1f2335"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#292e42"),      # header band, active segment
+      border: Color.from_hex("#3b4261"),        # hairline dividers (resting)
+      border_focus: Color.from_hex("#545c7e"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#7aa2f7"),    # focused body pane outline (Tokyo Night blue, 6.8:1)
+      accent: Color.from_hex("#c0caf5"),        # bright lavender-white highlight
+      accent_bg: Color.from_hex("#2e3c64"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#232a45"), # selection band (unfocused pane)
+      text: Color.from_hex("#a9b1d6"),          # body text
+      text_bright: Color.from_hex("#c0caf5"),   # emphasis / active
+      muted: Color.from_hex("#7a84ad"),         # secondary (lifted comment tone, 4.7:1 on canvas)
+      green: Color.from_hex("#9ece6a"),         # 2xx
+      yellow: Color.from_hex("#e0af68"),        # 4xx
+      red: Color.from_hex("#f7768e"),           # 5xx / error
+      orange: Color.from_hex("#ff9e64"),
+      syn_header: Color.from_hex("#7aa2f7"),  # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#9ece6a"),  # quoted strings (green)
+      syn_number: Color.from_hex("#ff9e64"),  # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#bb9af7"), # true / false / null (magenta)
+    )
+
+    THEMES        = {"goridark" => GORIDARK, "goriday" => GORIDAY, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT}
+    DEFAULT_THEME = "goridark"
+    # Pre-rename names so a settings.json from the first theme release still resolves.
+    LEGACY_ALIASES = {"dark" => "goridark", "light" => "goriday"}
+
+    @@active : Palette = GORIDARK
     @@active_name : String = DEFAULT_THEME
     @@revision : UInt32 = 0_u32
 
@@ -88,16 +145,24 @@ module Gori::Tui
       @@active_name
     end
 
+    # Resolve a (possibly legacy / unknown) name to a valid theme name: map legacy
+    # aliases, then fall back to the default for anything unrecognised.
+    def self.canonical(name : String) : String
+      name = LEGACY_ALIASES[name]? || name
+      THEMES.has_key?(name) ? name : DEFAULT_THEME
+    end
+
     # Bumped whenever the active palette changes; colour-baking render caches compare
     # it to know when to rebuild (see the module doc).
     def self.revision : UInt32
       @@revision
     end
 
-    # Switch the active palette by name (unknown name → DARK). Returns true when the
-    # palette actually changed (so the caller can force a repaint only when needed).
+    # Switch the active palette by name (legacy/unknown names are normalised via
+    # `canonical`). Returns true when the palette actually changed (so the caller can
+    # force a repaint only when needed).
     def self.apply(name : String) : Bool
-      key = THEMES.has_key?(name) ? name : DEFAULT_THEME
+      key = canonical(name)
       return false if key == @@active_name
       @@active = THEMES[key]
       @@active_name = key

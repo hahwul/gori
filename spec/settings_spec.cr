@@ -130,21 +130,21 @@ describe Gori::Settings do
     prev = ENV["GORI_HOME"]?
     begin
       ENV["GORI_HOME"] = dir
-      Gori::Settings.theme = "light"
+      Gori::Settings.theme = "tokyonight"
       Gori::Settings.save.should be_true
-      Gori::Settings.theme = "dark" # flip, then reload from disk
+      Gori::Settings.theme = "goridark" # flip, then reload from disk
       Gori::Settings.load
-      Gori::Settings.theme.should eq("light")
+      Gori::Settings.theme.should eq("tokyonight")
 
       # an older file with no "theme" key keeps the in-memory default
       File.write(Gori::Settings.path, %({"network":{"bind_host":"127.0.0.1"}}))
-      Gori::Settings.theme = "dark"
+      Gori::Settings.theme = "goridark"
       Gori::Settings.load
-      Gori::Settings.theme.should eq("dark")
+      Gori::Settings.theme.should eq("goridark")
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.theme = "dark"
+      Gori::Settings.theme = "goridark"
     end
   end
 

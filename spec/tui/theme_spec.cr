@@ -31,24 +31,24 @@ describe Gori::Tui::Theme do
   end
 
   it "lists the available themes" do
-    Theme.available.should eq(["dark", "light"])
+    Theme.available.should eq(["goridark", "goriday", "espresso", "tokyonight"])
   end
 
   it "swaps the active palette and bumps the revision" do
-    Theme.apply("dark")
+    Theme.apply("goridark")
     rev0 = Theme.revision
     dark_bg = Theme.bg
 
-    Theme.apply("light").should be_true
-    Theme.active_name.should eq("light")
+    Theme.apply("goriday").should be_true
+    Theme.active_name.should eq("goriday")
     Theme.revision.should eq(rev0 + 1)
     Theme.bg.should_not eq(dark_bg) # the canvas colour actually changed
   end
 
   it "is a no-op (no revision bump) when applying the already-active theme" do
-    Theme.apply("light")
+    Theme.apply("goriday")
     rev = Theme.revision
-    Theme.apply("light").should be_false
+    Theme.apply("goriday").should be_false
     Theme.revision.should eq(rev)
   end
 
@@ -57,8 +57,15 @@ describe Gori::Tui::Theme do
     Theme.active_name.should eq(Theme::DEFAULT_THEME)
   end
 
+  it "maps the pre-rename legacy theme names" do
+    Theme.canonical("dark").should eq("goridark")
+    Theme.canonical("light").should eq("goriday")
+    Theme.apply("light")
+    Theme.active_name.should eq("goriday")
+  end
+
   it "keeps HTTP status colours functional in every theme" do
-    %w(dark light).each do |name|
+    Theme.available.each do |name|
       Theme.apply(name)
       Theme.status_color(204).should eq(Theme.green)
       Theme.status_color(404).should eq(Theme.yellow)
@@ -68,8 +75,8 @@ describe Gori::Tui::Theme do
 
   # Regression guard against the light-theme contrast issues a review caught: every
   # functional foreground (status + syntax + body text) must clear WCAG AA (4.5:1) on
-  # the canvas in BOTH themes; muted is a deliberately dimmer secondary tier (≥3.5:1).
-  %w(dark light).each do |name|
+  # the canvas in EVERY theme; muted is a deliberately dimmer secondary tier (≥3.5:1).
+  Theme.available.each do |name|
     it "keeps functional colours legible on the canvas (#{name} theme)" do
       Theme.apply(name)
       bg = Theme.bg
@@ -102,22 +109,22 @@ describe Gori::Tui::SettingsView do
     saved_theme = Gori::Settings.theme
     begin
       ENV["GORI_HOME"] = dir
-      Gori::Settings.theme = "dark"
+      Gori::Settings.theme = "goridark"
 
       view = SettingsView.new
       view.reload(:theme)
       view.section.should eq(:theme)
 
-      view.toggle_or_move(1) # ←/→ cycles dark → light
+      view.toggle_or_move(1) # ←/→ cycles goridark → goriday
       view.save.should eq("settings saved")
-      Gori::Settings.theme.should eq("light")
+      Gori::Settings.theme.should eq("goriday")
       view.saved?.should be_true
 
       # it renders the option names (the choice list)
       backend = MemoryBackend.new(80, 24)
       view.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
-      backend.contains?("dark").should be_true
-      backend.contains?("light").should be_true
+      backend.contains?("goridark").should be_true
+      backend.contains?("goriday").should be_true
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
