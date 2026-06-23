@@ -128,6 +128,7 @@ module Gori::Tui
     def run : Symbol
       @history.reload(@session.store)
       @project_view.reload(@session.project, @session.store)
+      @notes.reload(@session.store) # load persisted notes up front so the menu's notes-count badge is right before the tab is ever focused
       refresh_findings_count
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
       # port-fallback note if the configured port was taken and we picked another.
