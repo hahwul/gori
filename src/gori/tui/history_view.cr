@@ -270,6 +270,7 @@ module Gori::Tui
       @detail_scroll = 0
       @detail_pane = :request
       @detail_cache = nil
+      @detail_hex = false # hex is a deliberate per-open peek — don't carry it into the next flow
       @detail_hex_bytes = nil
       true
     end
