@@ -29,7 +29,7 @@ module Gori::Tui
     # the Project tab body holds focus.
     getter pane : Symbol
 
-    def initialize(@scope : Scope)
+    def initialize(@scope : Scope, @proxy_url : String = "")
       @project = nil
       @flow_count = 0
       @findings_count = 0
@@ -282,7 +282,7 @@ module Gori::Tui
       desc_focused = focused && @pane == :desc
 
       # OVERVIEW card on top, full width — capped to ~2/5 height so the panes get the rest.
-      meta_h = {9, {rect.h * 2 // 5, 3}.max}.min
+      meta_h = {11, {rect.h * 2 // 5, 3}.max}.min
       render_overview(screen, Rect.new(rect.x, rect.y, rect.w, meta_h))
 
       content = Rect.new(rect.x, rect.y + meta_h, rect.w, {rect.h - meta_h, 0}.max)
@@ -300,6 +300,27 @@ module Gori::Tui
       p = @project
       return unless p
       inner = rect.inset(1, 1)
+      vx = inner.x + 1 + 14
+      vw = {inner.right - vx, 0}.max
+      y = inner.y
+      max_y = inner.bottom - 1
+
+      # Lead with the proxy address — the one thing a new user must know (point your
+      # client here). On first run (no flows yet) follow it with how to start, since
+      # the empty History/Sitemap tabs don't say.
+      unless @proxy_url.empty?
+        if y <= max_y
+          screen.text(inner.x + 1, y, "Proxy:", Theme.text_bright)
+          screen.text(vx, y, @proxy_url, Theme.accent, width: vw) if vw > 0
+          y += 1
+        end
+        if @flow_count == 0 && y <= max_y
+          screen.text(inner.x + 1, y, "▸ point your client here, then ^P: Open browser · Export CA certificate",
+            Theme.muted, width: {inner.right - inner.x - 1, 0}.max)
+          y += 1
+        end
+      end
+
       lines = [
         {"Name", p.name},
         {"Created", format_time(@created)},
@@ -309,14 +330,10 @@ module Gori::Tui
         {"Captured", human_size(@total_captured)},
         {"Findings", @findings_count.to_s},
       ]
-      y = inner.y
-      max_y = inner.bottom - 1
       lines.each do |(label, value)|
         break if y > max_y
         screen.text(inner.x + 1, y, label + ":", Theme.text_bright)
-        vx = inner.x + 1 + 14
-        w = {inner.right - vx, 0}.max
-        screen.text(vx, y, value, Theme.text, width: w) if w > 0
+        screen.text(vx, y, value, Theme.text, width: vw) if vw > 0
         y += 1
       end
     end

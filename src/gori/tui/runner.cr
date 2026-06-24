@@ -69,7 +69,7 @@ module Gori::Tui
       @findings = FindingsView.new
       @notes = NotesView.new
       @scope = @session.scope
-      @project_view = ProjectView.new(@scope)
+      @project_view = ProjectView.new(@scope, "http://#{@session.proxy.host}:#{@session.proxy.port}")
       @intercept = InterceptView.new
       @rules_overlay = RulesOverlay.new(@session.rules)
       @finding_form = FindingForm.new
