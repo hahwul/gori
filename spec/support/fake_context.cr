@@ -70,6 +70,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def scope_add_host : Nil; end
 
+  def scope_toggle_lens : Nil; end
+
   def rules_open : Nil; end
 
   def finding_create : Nil; end

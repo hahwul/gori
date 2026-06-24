@@ -59,8 +59,9 @@ module Gori
       abstract def sitemap_collapse : Nil
 
       # scope lens
-      abstract def scope_open : Nil     # open the scope overlay editor
-      abstract def scope_add_host : Nil # add the selected flow's host to scope
+      abstract def scope_open : Nil        # jump to the Project tab's scope editor
+      abstract def scope_add_host : Nil    # add the selected flow's host to scope
+      abstract def scope_toggle_lens : Nil # toggle the scope display lens on/off (filters History/Sitemap)
 
       # match&replace lens
       abstract def rules_open : Nil # open the match&replace overlay editor

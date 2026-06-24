@@ -655,12 +655,28 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2)
-      elsif filtering?
-        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme.text, width: rect.w - 10)
+        return
+      end
+
+      # Right cluster: a scope-lens chip (always shown so the ⇧S toggle is discoverable)
+      # and, when filtering, the row count. The scope lens is a filter too, so it lives
+      # on the filter bar next to the QL query.
+      scope_on = @scope.try(&.active?) == true
+      chip, chip_color = scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted}
+      rx = rect.right - 1
+      if filtering?
         count = @rows.size.to_s
-        screen.text({rect.right - count.size - 1, rect.x}.max, rect.y, count, Theme.muted)
+        screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
+        rx -= count.size + 2
+      end
+      screen.text({rx - chip.size, rect.x}.max, rect.y, chip, chip_color)
+
+      left_w = {(rx - chip.size) - (rect.x + 1) - 1, 0}.max
+      if filtering?
+        label = @query.blank? ? "(in-scope only)" : ": #{@query}"
+        screen.text(rect.x + 1, rect.y, label, Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  status:>=500  path:  scheme:", Theme.muted)
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  status:>=500  path:  scheme:", Theme.muted, width: left_w)
       end
     end
 

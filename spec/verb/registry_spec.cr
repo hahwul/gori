@@ -132,6 +132,10 @@ private class FakeContext < ExecContext
     @calls << :scope_add_host
   end
 
+  def scope_toggle_lens : Nil
+    @calls << :scope_toggle_lens
+  end
+
   def rules_open : Nil
     @calls << :rules_open
   end

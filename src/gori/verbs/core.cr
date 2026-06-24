@@ -68,6 +68,11 @@ module Gori
         Verb::Scope::Body, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }) { |ctx| ctx.scope_add_host; nil }
 
       r.register Verb::Definition.new(
+        "scope.toggle", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",
+        Verb::Scope::Body, [Verb::Chord.new("s", shift: true)],
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }) { |ctx| ctx.scope_toggle_lens; nil }
+
+      r.register Verb::Definition.new(
         "rules.edit", "Match & Replace", "Edit in-flight request/response head rewrite rules", Verb::Scope::Global,
         [Verb::Chord.new("m")]) { |ctx| ctx.rules_open; nil }
 

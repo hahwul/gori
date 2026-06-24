@@ -926,8 +926,13 @@ module Gori::Tui
     # never feels like a silent no-op.
     private def toast_scope_state : Nil
       n = @scope.size
-      @toast = @scope.enabled? ? "scope lens ON — #{n} rule#{n == 1 ? "" : "s"}" \
-                               : "scope lens OFF — showing all flows"
+      @toast = if !@scope.enabled?
+                 "scope lens OFF — showing all flows"
+               elsif n == 0
+                 "scope lens ON, but no rules yet — add some in Project (s)"
+               else
+                 "scope lens ON — showing in-scope only (#{n} rule#{n == 1 ? "" : "s"})"
+               end
     end
 
     # The inline add/edit row: type the pattern, ^K cycles include/exclude, ^T cycles
@@ -2133,6 +2138,15 @@ module Gori::Tui
         @history.reload(@session.store)
         @toast = "added #{row.host} to scope (#{@scope.size})"
       end
+    end
+
+    # Toggle the scope display lens (in-scope-only ⇄ all flows) right from History —
+    # the lens filters History/Sitemap, so reload the active list and confirm the state.
+    def scope_toggle_lens : Nil
+      @scope.toggle
+      @history.reload(@session.store)
+      @sitemap.reload(@session.store, @scope.filter) if @active_tab == :sitemap
+      toast_scope_state
     end
 
     def sitemap_move(delta : Int32) : Nil
