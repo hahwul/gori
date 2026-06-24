@@ -508,7 +508,7 @@ module Gori::Tui
 
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.h < 2
-      Frame.card(screen, rect, "target", bg: Theme.bg, border: pane_border(focused))
+      Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused))
       row = rect.y + 1
       screen.text(rect.x + 2, row, "›", focused ? Theme.accent : Theme.muted)
       base = rect.x + 4

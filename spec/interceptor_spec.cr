@@ -117,7 +117,7 @@ describe Gori::Interceptor do
       ic.intercepts_host?("acme.test").should be_false # disabled
       ic.toggle
       ic.intercepts_host?("acme.test").should be_true # enabled, scope inactive → all
-      scope.add("acme.test")
+      scope.add("include", "host", "acme.test")
       scope.enable
       ic.intercepts_host?("acme.test").should be_true     # in scope
       ic.intercepts_host?("evil.test").should be_false    # out of scope
@@ -126,18 +126,18 @@ describe Gori::Interceptor do
   end
 end
 
-describe "Gori::Scope#matches?" do
-  it "matches exact host, subdomain, and glob" do
+describe "Gori::Scope host matching (intercept gate)" do
+  it "matches exact host, subdomain, and glob via may_match_host?" do
     with_store do |store|
       scope = Gori::Scope.load(store)
-      scope.add("acme.test")
-      scope.add("*.shop.test")
+      scope.add("include", "host", "acme.test")
+      scope.add("include", "host", "*.shop.test")
       scope.enable
-      scope.matches?("acme.test").should be_true
-      scope.matches?("api.acme.test").should be_true # subdomain
-      scope.matches?("notacme.test").should be_false
-      scope.matches?("a.shop.test").should be_true # glob
-      scope.matches?("shop.test").should be_false  # glob needs a label
+      scope.may_match_host?("acme.test").should be_true
+      scope.may_match_host?("api.acme.test").should be_true # subdomain
+      scope.may_match_host?("notacme.test").should be_false
+      scope.may_match_host?("a.shop.test").should be_true # glob
+      scope.may_match_host?("shop.test").should be_false  # glob needs a label
     end
   end
 end

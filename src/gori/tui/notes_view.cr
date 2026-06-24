@@ -1,8 +1,6 @@
 require "json"
 require "./screen"
 require "./theme"
-require "./chrome"
-require "./frame"
 require "./text_area"
 require "../store"
 require "../settings"
@@ -168,45 +166,28 @@ module Gori::Tui
       @dirty = false
     end
 
-    # `focused` = the editor has focus (cursor + bright); `subtabs_focused` = the
-    # sub-tab strip has focus (←/→ switch). They're distinct so landing on the strip
-    # lights IT, not the editor.
-    def render(screen : Screen, rect : Rect, focused : Bool = true, subtabs_focused : Bool = false) : Nil
+    # `focused` = the editor has focus (cursor + bright). The sub-tab strip is now
+    # runner-owned chrome above this frame (shared with Replay), so the view simply
+    # fills its framed interior with the current note's editor.
+    def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
-      screen.text(rect.x + 1, rect.y, "NOTES", Theme.accent, attr: Attribute::Bold)
-      hint = if focused
-               "^N new · ^W close · ^1-9 switch · esc tabs"
-             elsif subtabs_focused
-               "←/→ switch · ↵/↓ edit · esc tabs"
-             else
-               "↵/→ to edit"
-             end
-      screen.text(rect.x + 8, rect.y, hint, Theme.muted)
-      # The sub-tab strip only appears once there's more than one note, so a lone
-      # note keeps the full editor height (and looks exactly like the old Notes).
-      divider_y = rect.y + 1
-      if @notes.size > 1
-        render_tabs(screen, Rect.new(rect.x + 1, rect.y + 1, {rect.w - 2, 0}.max, 1), subtabs_focused)
-        divider_y = rect.y + 2
-      end
-      Frame.inner_divider(screen, rect, divider_y, border: Frame.pane_border(focused))
-      area_y = divider_y + 1
-      area = Rect.new(rect.x + 1, area_y, {rect.w - 2, 0}.max, {rect.bottom - area_y, 0}.max)
+      # Keep the 1-col gap from the frame border that every render_framed body uses
+      # (and that Notes used before): only the strip/band above the editor moved —
+      # the editor body renders exactly where it did, now filling the freed height.
+      area = Rect.new(rect.x + 1, rect.y, {rect.w - 2, 0}.max, rect.h)
       current.area.render(screen, area, cursor: focused,
         highlight: Settings.editor_markdown ? :markdown : nil)
+    end
+
+    # Sub-tab chip labels (one per note), sourced by the Runner's shared strip: each
+    # note's first non-blank line, with a positional fallback for empty notes.
+    def subtab_labels : Array(String)
+      @notes.map_with_index { |note, i| "#{i + 1}:#{note.label(i)}" }
     end
 
     # The note currently being edited; @current is kept in range by every mutator.
     private def current : Note
       @notes[@current.clamp(0, @notes.size - 1)]
-    end
-
-    # The horizontal sub-tab strip (mirrors the Replay strip): a windowed segmented
-    # control that scrolls so the active note is always visible, with ‹ / › markers
-    # for tabs hidden off either edge.
-    private def render_tabs(screen : Screen, rect : Rect, focused : Bool) : Nil
-      labels = @notes.map_with_index { |note, i| "#{i + 1}:#{note.label(i)}" }
-      Chrome.render_tab_strip(screen, rect, labels, @current, focused)
     end
 
     # Read the persisted notes: prefer the JSON set, fall back to the legacy

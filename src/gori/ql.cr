@@ -139,10 +139,17 @@ module Gori
 
     # Build a LIKE pattern, neutralising the LIKE metacharacters % and _ (and the
     # escape char itself) so a user's literal % / _ matches literally. Pair every
-    # use with `ESCAPE '\'` in the SQL. Backslash MUST be escaped first.
-    private def self.like(value : String) : DB::Any
-      escaped = value.downcase.gsub('\\', "\\\\").gsub('%', "\\%").gsub('_', "\\_")
-      "%#{escaped}%"
+    # use with `ESCAPE '\'` in the SQL. Backslash MUST be escaped first. Public so
+    # Scope's string-match rules reuse the one escaper (no second hand-rolled copy).
+    def self.like(value : String) : DB::Any
+      "%#{like_escape(value.downcase)}%"
+    end
+
+    # Neutralise LIKE metacharacters (% _ \) in `value` WITHOUT the surrounding `%`,
+    # for callers that splice it into a larger LIKE pattern (e.g. Scope's `%.<host>`
+    # subdomain match). Pair with `ESCAPE '\'`. Caller lowercases if it wants ci.
+    def self.like_escape(value : String) : String
+      value.gsub('\\', "\\\\").gsub('%', "\\%").gsub('_', "\\_")
     end
   end
 end

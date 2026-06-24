@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 12
+      VERSION = 13
 
       V1 = [
         <<-SQL,
@@ -206,7 +206,30 @@ module Gori
         "ALTER TABLE findings ADD COLUMN status INTEGER NOT NULL DEFAULT 0",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12]
+      # Scope rules gain a KIND (include/exclude) + MATCH_TYPE (host/string/regex)
+      # so scope is a real include/exclude lens with substring & regex matching (not
+      # just host globs). Rebuild the table to move UNIQUE onto the (kind,match_type,
+      # pattern) triple (same pattern can now be both an include and an exclude, or a
+      # host rule and a string rule). Pre-V13 rows were bare host include patterns →
+      # migrated as include/host. INSERT OR IGNORE is defensive (old pattern was
+      # already UNIQUE, so the triples can't collide). migrate! wraps this list in one
+      # transaction, so the rename/insert/drop is atomic.
+      V13 = [
+        "ALTER TABLE scope_rules RENAME TO scope_rules_old",
+        <<-SQL,
+        CREATE TABLE scope_rules (
+          id         INTEGER PRIMARY KEY,
+          kind       TEXT NOT NULL DEFAULT 'include',
+          match_type TEXT NOT NULL DEFAULT 'host',
+          pattern    TEXT NOT NULL,
+          UNIQUE(kind, match_type, pattern)
+        )
+        SQL
+        "INSERT OR IGNORE INTO scope_rules (kind, match_type, pattern) SELECT 'include', 'host', pattern FROM scope_rules_old",
+        "DROP TABLE scope_rules_old",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

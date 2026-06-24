@@ -133,6 +133,12 @@ module Gori::Tui
       @cy == 0
     end
 
+    # Cursor at the very start (first line, first column) — used to pop focus out of
+    # the editor on ← without swallowing normal cursor movement.
+    def at_start? : Bool
+      @cy == 0 && @cx == 0
+    end
+
     # Jump the cursor to 1-based line `n`, column 0 (out-of-range clamps to the
     # first/last line). render's ensure_visible scrolls it into view next frame.
     def goto_line(n : Int32) : Nil

@@ -84,13 +84,24 @@ module Gori
       now_on
     end
 
-    # The single gating predicate: hold this host's traffic? Used by ClientConn
-    # (whether to hold) AND by Tunnel (whether to downgrade h2→h1), so the held
-    # set and the downgraded set are identical.
+    # Conservative HOST-level gate, used by the Tunnel to decide whether to downgrade
+    # h2→h1 BEFORE any request exists (so only the host is known). Scope rules that
+    # match on path/URL can't be evaluated yet, so this is permissive: downgrade if the
+    # host COULD be in scope, then let ClientConn make the precise per-request call via
+    # intercepts_url?. Keeping the connection on h1 is what lets a request be held at all.
     def intercepts_host?(host : String) : Bool
       active = @mutex.synchronize { @enabled && !@shutting_down }
       return false unless active
-      @scope.active? ? @scope.matches?(host) : true
+      @scope.active? ? @scope.may_match_host?(host) : true
+    end
+
+    # Precise per-request gate, used by ClientConn (which has the full request): hold
+    # this exact flow? `url` is `scheme://host/target` — the same value the Scope SQL
+    # filter builds, so a held request is exactly an in-scope History row.
+    def intercepts_url?(url : String, host : String) : Bool
+      active = @mutex.synchronize { @enabled && !@shutting_down }
+      return false unless active
+      @scope.active? ? @scope.in_scope_url?(url, host) : true
     end
 
     # --- proxy fiber side (BLOCKS until a decision) --------------------------

@@ -51,7 +51,6 @@ describe Gori::Tui::NotesView do
       again = NotesView.new
       again.reload(store)
       backend = render_text(again)
-      backend.contains?("NOTES").should be_true
       backend.contains?("there").should be_true
     end
   end
@@ -71,12 +70,11 @@ describe Gori::Tui::NotesView do
       again = NotesView.new
       again.reload(store)
       again.count.should eq(2)
-      backend = render_text(again)
       # the active tab (cur) is restored — last edited was note 2
-      backend.contains?("second").should be_true
-      # the strip lists both note labels (derived from each note's first line)
-      backend.contains?("1:first").should be_true
-      backend.contains?("2:second").should be_true
+      render_text(again).contains?("second").should be_true
+      # the sub-tab strip is now runner-owned chrome; the view exposes its chip
+      # labels (derived from each note's first line) for the Runner to render.
+      again.subtab_labels.should eq(["1:first", "2:second"])
     end
   end
 

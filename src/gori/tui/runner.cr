@@ -13,7 +13,6 @@ require "./findings_view"
 require "./notes_view"
 require "./project_view"
 require "./intercept_view"
-require "./scope_overlay"
 require "./rules_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
@@ -69,17 +68,16 @@ module Gori::Tui
       @sitemap = SitemapView.new
       @findings = FindingsView.new
       @notes = NotesView.new
-      @project_view = ProjectView.new
-      @intercept = InterceptView.new
       @scope = @session.scope
-      @scope_overlay = ScopeOverlay.new(@scope)
+      @project_view = ProjectView.new(@scope)
+      @intercept = InterceptView.new
       @rules_overlay = RulesOverlay.new(@session.rules)
       @finding_form = FindingForm.new
       @palette = PaletteState.new(@session.registry)
       @command = CommandLine.new(@session.registry)
       @history.set_scope(@scope)
       @active_tab = :project
-      @overlay = :none # :none | :palette | :detail | :scope | :rules | :finding_new | :confirm | :browser
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser
       # The ":" context command line (vim/helix-style). Orthogonal to @overlay so it
       # floats over WHATEVER is underneath (the History list, an open detail, the
       # Sitemap …) without disturbing that state; the scope is captured at open time.
@@ -403,7 +401,6 @@ module Gori::Tui
       # composition preview, not just the Notes/Project/Replay editors.
       case @overlay
       when :palette     then @palette.set_preedit(text)
-      when :scope       then @scope_overlay.set_preedit(text)
       when :rules       then @rules_overlay.set_preedit(text)
       when :finding_new then @finding_form.set_preedit(text)
       when :settings    then @settings_view.set_preedit(text)
@@ -466,7 +463,6 @@ module Gori::Tui
         return
       end
       return handle_palette_key(ev) if @overlay == :palette
-      return handle_scope_key(ev) if @overlay == :scope
       return handle_rules_key(ev) if @overlay == :rules
       return handle_finding_new_key(ev) if @overlay == :finding_new
       return handle_confirm_key(ev) if @overlay == :confirm
@@ -486,7 +482,9 @@ module Gori::Tui
       # current tab's panes (tab-bar ▸ pane1 ▸ pane2 ▸ tab-bar). Claimed here so it
       # wins over the per-tab body editors below (Replay used to hijack Tab).
       # termisu decodes Shift-Tab as the distinct BackTab key (not Tab+shift).
-      if @overlay == :none && (ev.key.tab? || ev.key.back_tab?)
+      # The scope add/edit row owns Tab while open (it stays inert) so a stray ↹ can't
+      # strand a half-composed rule over the description editor.
+      if @overlay == :none && (ev.key.tab? || ev.key.back_tab?) && !project_scope_adding?
         focus_advance(ev.key.back_tab? || ev.shift? ? -1 : 1)
         return
       end
@@ -516,7 +514,7 @@ module Gori::Tui
         elsif @active_tab == :notes
           run_external_editor(@notes.current_text, :notes) { |t| @notes.replace_current(t) }
           return
-        elsif @active_tab == :project
+        elsif @active_tab == :project && @project_view.pane == :desc
           run_external_editor(@project_view.desc_text, :desc) { |t| @project_view.replace_desc(t) }
           return
         elsif @active_tab == :intercept && @intercept.editing?
@@ -550,45 +548,6 @@ module Gori::Tui
           @toast = result
         end
       end
-    end
-
-    # Scope overlay: type a host pattern; ↵ add, ⌫ edit/remove, ↑/↓ select,
-    # tab on/off, esc close (re-applying the lens to the views).
-    private def handle_scope_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      case
-
-      when key.escape?
-        @overlay = :none
-        refresh_lens
-      when key.enter?
-        @scope_overlay.submit
-        refresh_lens
-      when key.tab?
-        @scope_overlay.toggle
-        refresh_lens
-      when key.up?    then @scope_overlay.select_move(-1)
-      when key.down?  then @scope_overlay.select_move(1)
-      when key.left?  then @scope_overlay.move_cursor(-1)
-      when key.right? then @scope_overlay.move_cursor(1)
-      when key.backspace?
-        unless @scope_overlay.backspace
-          @scope_overlay.remove_selected
-          refresh_lens
-        end
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @scope_overlay.insert(c)
-          @scope_overlay.set_preedit("") # commit any preedit
-        end
-
-      end
-    end
-
-    private def refresh_lens : Nil
-      @history.reload(@session.store)
-      @sitemap.reload(@session.store, @scope.filter) if @active_tab == :sitemap
     end
 
     # Match&Replace overlay: type a `[req:|resp:] pattern => replacement` rule;
@@ -878,7 +837,19 @@ module Gori::Tui
 
     # Project tab body editor for the description field (live like Notes, but
     # coexists with the static metadata above it in the same tab).
+    # True while the Project SCOPE pane's inline add/edit row is composing — Tab stays
+    # inert then (the row owns it) instead of switching panes.
+    private def project_scope_adding? : Bool
+      @active_tab == :project && @focus == :body && @project_view.pane == :scope && @project_view.adding?
+    end
+
     private def handle_project_key(ev : Termisu::Event::Key) : Nil
+      @project_view.pane == :scope ? handle_project_scope_key(ev) : handle_project_desc_key(ev)
+    end
+
+    # DESCRIPTION pane: live multi-line editing. ↑ on the first line pops UP to the
+    # SCOPE pane (the section directly above), not all the way to the tab bar.
+    private def handle_project_desc_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
@@ -892,12 +863,14 @@ module Gori::Tui
       elsif key.backspace?
         @project_view.backspace
       elsif key.up?
-        if @project_view.at_top? # ↑ on the first line pops to the tab bar (save first, like esc)
+        if @project_view.at_top? # ↑ on the first line pops up to the tab bar (scope is the LEFT pane now — use ⇧↹/←)
           save_project_desc
           focus_pane(:menu)
         else
           @project_view.move(-1, 0)
         end
+      elsif key.left? && @project_view.desc_at_start?
+        @project_view.pane_advance(-1) # ← at the very start of the description crosses back to SCOPE (left)
       elsif key.down?
         @project_view.move(1, 0)
       elsif key.left?
@@ -907,9 +880,74 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @project_view.insert(c)
-          @project_view.set_preedit("")  # commit any preedit
+          @project_view.set_preedit("") # commit any preedit
         end
+      end
+    end
 
+    # SCOPE pane. Browsing the rule list: ↑/↓ select · a add · ↵/e edit · d del ·
+    # space lens on/off · ↹ desc · esc tabs. When the inline add/edit row is open,
+    # keys route to handle_project_add_key.
+    private def handle_project_scope_key(ev : Termisu::Event::Key) : Nil
+      return handle_project_add_key(ev) if @project_view.adding?
+      key = ev.key
+      c = ev.char || key.to_char
+      plain = c && !ev.ctrl? && !ev.alt?
+      if ev.ctrl? && key.lower_p?
+        save_project_desc
+        open_palette
+      elsif key.escape?
+        save_project_desc
+        focus_pane(:menu)
+      elsif key.up?
+        @project_view.scope_select(-1)
+      elsif key.down?
+        @project_view.scope_select(1)
+      elsif key.right?
+        @project_view.pane_advance(1) # → crosses from the SCOPE list to the DESCRIPTION (right pane)
+      elsif key.enter?
+        @project_view.scope_edit_start
+      elsif plain && c == ' '
+        @project_view.scope_toggle
+      elsif plain && c == 'a'
+        @project_view.scope_add_start
+      elsif plain && c == 'e'
+        @project_view.scope_edit_start
+      elsif plain && c == 'd'
+        @project_view.scope_delete
+      end
+    end
+
+    # The inline add/edit row: type the pattern, ^K cycles include/exclude, ^T cycles
+    # host/string/regex, ↵ commits, ⌫ on an empty input cancels, esc cancels.
+    private def handle_project_add_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        @project_view.cancel_add
+      elsif key.enter?
+        commit_scope_rule
+      elsif ev.ctrl? && key.lower_k?
+        @project_view.cycle_kind
+      elsif ev.ctrl? && key.lower_t?
+        @project_view.cycle_type
+      elsif key.left?
+        @project_view.scope_move_cursor(-1)
+      elsif key.right?
+        @project_view.scope_move_cursor(1)
+      elsif key.backspace?
+        @project_view.cancel_add unless @project_view.scope_backspace
+      elsif c && !ev.ctrl? && !ev.alt?
+        @project_view.scope_input(c)
+        @project_view.set_preedit("") # commit any preedit
+      end
+    end
+
+    private def commit_scope_rule : Nil
+      case @project_view.scope_commit
+      when :empty   then @toast = "scope: empty pattern"
+      when :invalid then @toast = "scope: invalid regex"
+      when :dup     then @toast = "scope: duplicate rule"
       end
     end
 
@@ -1251,7 +1289,7 @@ module Gori::Tui
         return :replay_request if v.focus == :request && !v.request_hex?
         :replay_response if v.focus == :response
       when :notes     then :notes
-      when :project   then :project
+      when :project   then @project_view.pane == :desc ? :project : nil # only the description editor (not the scope list)
       when :intercept then @intercept.editing? ? :intercept : nil # only the held-message editor
       else                 nil
       end
@@ -1431,7 +1469,6 @@ module Gori::Tui
         capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,
         write_failures: @session.store.write_failures)
       @palette.render(screen, layout.body) if @overlay == :palette
-      @scope_overlay.render(screen, layout.body) if @overlay == :scope
       @rules_overlay.render(screen, layout.body) if @overlay == :rules
       @finding_form.render(screen, layout.body) if @overlay == :finding_new
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
@@ -1472,7 +1509,7 @@ module Gori::Tui
     end
 
     private def scope_label : String
-      @scope.active? ? "scope:#{@scope.patterns.size}" : "scope:off"
+      @scope.active? ? "scope:#{@scope.size}" : "scope:off"
     end
 
     private def rules_label : String
@@ -1490,7 +1527,6 @@ module Gori::Tui
     private def focus_label : String
       case @overlay
       when :palette     then "PALETTE"
-      when :scope       then "SCOPE"
       when :rules       then "RULES"
       when :finding_new then "FINDING"
       when :detail      then "DETAIL"
@@ -1501,8 +1537,29 @@ module Gori::Tui
         case @focus
         when :menu    then "TABS"
         when :subtabs then "SUBTABS"
-        else               "BODY"
+        else               body_editor? ? "EDITOR" : "BODY"
         end
+      end
+    end
+
+    # Whether the focused body region captures typed characters as text (an
+    # editor) rather than driving a navigable list/tree or a read-only pane. Splits
+    # the BODY badge into EDITOR/BODY so the user can tell at a glance whether the
+    # keys under their fingers land as text or as commands.
+    private def body_editor? : Bool
+      return false unless @focus == :body
+      case @active_tab
+      when :replay
+        # request (incl. hex overtype) + target URL are editable; response is read-only.
+        (v = current_replay_view) ? (v.focus == :request || v.focus == :target) : false
+      when :notes     then true                  # body is a single TextArea
+      when :project
+        # the description editor + the scope add-row capture text; the scope rule list is navigation.
+        @project_view.pane == :desc || @project_view.adding?
+      when :intercept then @intercept.editing?   # else the held-message list
+      when :findings  then @findings.editing_notes? # else the list/read-only detail
+      when :history   then @history.querying?    # the filter-query input
+      else                 false                 # sitemap tree + any other list/read-only body
       end
     end
 
@@ -1512,7 +1569,6 @@ module Gori::Tui
     private def key_hints : String
       case @overlay
       when :palette     then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when :scope       then "type host · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
       when :rules       then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
       when :finding_new then "type title · ↵ create · esc cancel"
       when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
@@ -1548,8 +1604,20 @@ module Gori::Tui
       when :findings
         @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
                                : "↑/↓ move · ↵ open · n new · d delete · : cmds · esc tabs"
-      when :project  then "type to edit description · ↑/↓/↔ move · ^G goto · ^F find · ^B ws · ↵ nl · esc tabs"
+      when :project  then project_hints
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"
+      end
+    end
+
+    # Project hints depend on the focused pane (SCOPE rule list / its add-row, vs the
+    # DESCRIPTION editor).
+    private def project_hints : String
+      if @project_view.pane == :scope
+        @project_view.adding? \
+          ? "type pattern · ^K kind · ^T type · ↵ save · esc cancel" \
+          : "↑/↓ move · → desc · a add · ↵/e edit · d del · space on/off · esc tabs"
+      else
+        "type to edit · ↑/↓/↔ move · ← scope · ^G goto · ^F find · ^B ws · esc tabs"
       end
     end
 
@@ -1567,13 +1635,15 @@ module Gori::Tui
           render_framed(screen, rect, body_focused) { |inner| @history.render_list(screen, inner, focused: body_focused) }
         end
       when :replay
-        # The Replay sub-tab strip rides above the panes; the view frames its own
-        # target/request/response panes and gold-lights the focused one.
+        # The sub-tab strip rides above the panes (shared chrome with Notes); the
+        # view frames its own target/request/response panes and gold-lights the
+        # focused one. The strip only appears with ≥2 replays — a lone replay has
+        # nothing to switch to, so it keeps the full body (matches Notes + subtabs_shown?).
         body_rect = rect
-        if @replays.size > 0
-          sub_rect = Rect.new(rect.x, rect.y, rect.w, 1)
-          body_rect = Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1) if rect.h > 1
-          render_replay_subtabs(screen, sub_rect, subtabs_focused)
+        if @replays.size >= 2
+          sub_rect, body_rect = carve_subtab_row(rect)
+          labels = @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.flow_id || "new"}" }
+          render_subtab_strip(screen, sub_rect, labels, @current_replay_idx, subtabs_focused)
         end
         if v = current_replay_view
           v.render(screen, body_rect, focused: body_focused)
@@ -1587,9 +1657,17 @@ module Gori::Tui
       when :findings
         render_framed(screen, rect, body_focused) { |inner| @findings.render(screen, inner, focused: body_focused) }
       when :notes
-        render_framed(screen, rect, body_focused) { |inner| @notes.render(screen, inner, focused: body_focused, subtabs_focused: subtabs_focused) }
+        # Same chrome as Replay: the sub-tab strip rides above the framed editor
+        # (≥2 notes), drawn by the runner — not inside the view.
+        body_rect = rect
+        if @notes.count >= 2
+          sub_rect, body_rect = carve_subtab_row(rect)
+          render_subtab_strip(screen, sub_rect, @notes.subtab_labels, @notes.current_index, subtabs_focused)
+        end
+        render_framed(screen, body_rect, body_focused) { |inner| @notes.render(screen, inner, focused: body_focused) }
       when :project
-        render_framed(screen, rect, body_focused) { |inner| @project_view.render(screen, inner, focused: body_focused) }
+        # Self-frames its OVERVIEW + SCOPE|DESCRIPTION cards (multi-pane, like Replay).
+        @project_view.render(screen, rect, focused: body_focused)
       when :intercept
         @intercept.reload(@session.interceptor) # live refresh (50ms loop)
         @intercept.render(screen, rect, focused: body_focused) # view frames its own panes
@@ -1777,6 +1855,7 @@ module Gori::Tui
       case @active_tab
       when :replay    then current_replay_view.try(&.pane_advance(dir)) || false
       when :intercept then @intercept.pane_advance(dir)
+      when :project   then @project_view.pane_advance(dir)
       else                 false
       end
     end
@@ -1785,6 +1864,7 @@ module Gori::Tui
       case @active_tab
       when :replay    then current_replay_view.try(&.focus_first)
       when :intercept then @intercept.focus_first
+      when :project   then @project_view.focus_first
       end
     end
 
@@ -1792,6 +1872,7 @@ module Gori::Tui
       case @active_tab
       when :replay    then current_replay_view.try(&.focus_last)
       when :intercept then @intercept.focus_last
+      when :project   then @project_view.focus_last
       end
     end
 
@@ -1808,14 +1889,25 @@ module Gori::Tui
       end
     end
 
-    # `focused` = the strip itself holds focus (←/→ switch); the active chip then
-    # lights ACCENT_BG, vs SELECTION_DIM when the strip is merely on-screen (focus is
-    # in the editor or the tab bar). Mirrors the Notes strip + History chip strip.
-    private def render_replay_subtabs(screen : Screen, rect : Rect, focused : Bool = false) : Nil
+    # The sub-tab strip shared by Replay and Notes: a frame-less, runner-owned 1-row
+    # segmented control on the top body row (above the content frame), so both
+    # multi-instance tabs select an instance with identical chrome. `labels`/`active`
+    # are tab-specific; the windowed strip keeps the active chip on-screen. `focused`
+    # = the strip itself holds focus (←/→ switch) → active chip lights ACCENT_BG, vs
+    # SELECTION_DIM when it's merely on-screen (focus is in the body or the tab bar).
+    private def render_subtab_strip(screen : Screen, rect : Rect, labels : Array(String),
+                                    active : Int32, focused : Bool) : Nil
       return if rect.empty?
-      labels = @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.flow_id || "new"}" }
-      # Windowed strip so the current sub-tab is always visible (no off-right hiding).
-      Chrome.render_tab_strip(screen, rect, labels, @current_replay_idx, focused)
+      Chrome.render_tab_strip(screen, rect, labels, active, focused)
+    end
+
+    # Carve the top row of a body rect for the sub-tab strip, returning
+    # {strip_row, body_below}. Mirrors the original Replay split so Replay and Notes
+    # reserve the strip row identically; degenerate heights keep the body on `rect`.
+    private def carve_subtab_row(rect : Rect) : {Rect, Rect}
+      sub = Rect.new(rect.x, rect.y, rect.w, 1)
+      body = rect.h > 1 ? Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1) : rect
+      {sub, body}
     end
 
     # --- findings ExecContext ---
@@ -1990,9 +2082,11 @@ module Gori::Tui
       end
     end
 
+    # 's' / scope.edit: the Scope editor lives in the Project tab now, so jump there
+    # and focus its SCOPE pane (saving the outgoing tab, like any tab switch).
     def scope_open : Nil
-      @scope_overlay.reset
-      @overlay = :scope
+      focus_tab(:project)
+      @project_view.focus_scope
     end
 
     def rules_open : Nil
@@ -2004,10 +2098,10 @@ module Gori::Tui
       id = @history.selected_id
       return unless id
       if row = @session.store.flow_row(id)
-        @scope.add(row.host)
+        @scope.add("include", "host", row.host)
         @scope.enable
         @history.reload(@session.store)
-        @toast = "added #{row.host} to scope (#{@scope.patterns.size})"
+        @toast = "added #{row.host} to scope (#{@scope.size})"
       end
     end
 

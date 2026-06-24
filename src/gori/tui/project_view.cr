@@ -4,6 +4,7 @@ require "./frame"
 require "./text_area"
 require "../project"
 require "../store"
+require "../scope"
 require "../settings"
 
 module Gori::Tui
@@ -22,9 +23,13 @@ module Gori::Tui
     @total_captured : Int64
     @created : Time?
     @desc_area : TextArea
-    @desc_dirty : Bool
 
-    def initialize
+    # The body has two focusable panes (cycled with Tab, like Replay's panes): the
+    # SCOPE rule editor and the DESCRIPTION editor. @pane drives where keys land while
+    # the Project tab body holds focus.
+    getter pane : Symbol
+
+    def initialize(@scope : Scope)
       @project = nil
       @flow_count = 0
       @findings_count = 0
@@ -33,6 +38,16 @@ module Gori::Tui
       @created = nil
       @desc_area = TextArea.new
       @desc_dirty = false
+
+      @pane = :scope            # :scope | :desc
+      @sel = 0                  # selected rule row in the SCOPE list
+      @adding = false           # the inline add/edit row is open
+      @edit_id = nil.as(Int64?) # non-nil ⇒ the row is editing an existing rule
+      @input = ""               # add-row pattern text
+      @icx = 0                  # add-row cursor index
+      @add_preedit = ""         # IME preedit for the add-row
+      @pend_kind = "include"    # add-row kind chip
+      @pend_type = "host"       # add-row match_type chip
     end
 
     # Snapshot stats from the live session (called on tab enter and initial run).
@@ -54,12 +69,150 @@ module Gori::Tui
       @desc_dirty = false
     end
 
+    # IME preedit routes to whichever pane is composing: the SCOPE add-row when it's
+    # open, else the DESCRIPTION editor.
     def set_preedit(text : String) : Nil
-      @desc_area.set_preedit(text)
+      if @pane == :scope && @adding
+        @add_preedit = text
+      else
+        @desc_area.set_preedit(text)
+      end
     end
 
     def desc_text : String
       @desc_area.text
+    end
+
+    # --- focus ring (two panes: :scope ⇄ :desc, cycled by the Runner's Tab ring) ---
+    PANES = [:scope, :desc]
+
+    def focus_first : Nil
+      @pane = :scope
+    end
+
+    def focus_last : Nil
+      @pane = :desc
+    end
+
+    # The 's' / scope.edit jump target: focus the SCOPE pane fresh (no half-open row).
+    def focus_scope : Nil
+      @pane = :scope
+      cancel_add
+    end
+
+    # Step between panes; false when there's no further pane in `dir` (the Runner ring
+    # then wraps back to the tab bar). Mirrors ReplayView#pane_advance.
+    def pane_advance(dir : Int32) : Bool
+      i = PANES.index(@pane) || 0
+      ni = i + dir
+      return false if ni < 0 || ni >= PANES.size
+      @pane = PANES[ni]
+      true
+    end
+
+    # --- SCOPE pane editing (delegated from Runner#handle_project_scope_key) ---
+    def adding? : Bool
+      @adding
+    end
+
+    def scope_select(d : Int32) : Nil
+      n = @scope.rules.size
+      return if n == 0
+      @sel = (@sel + d).clamp(0, n - 1)
+    end
+
+    def scope_add_start : Nil
+      @adding = true
+      @edit_id = nil
+      @input = ""
+      @icx = 0
+      @add_preedit = ""
+      @pend_kind = "include"
+      @pend_type = "host"
+    end
+
+    # Open the add-row pre-filled from the selected rule (edit-in-place).
+    def scope_edit_start : Nil
+      rule = current_rule
+      return unless rule
+      @adding = true
+      @edit_id = rule.id
+      @input = rule.pattern
+      @icx = rule.pattern.size
+      @add_preedit = ""
+      @pend_kind = rule.kind
+      @pend_type = rule.match_type
+    end
+
+    def cancel_add : Nil
+      @adding = false
+      @edit_id = nil
+      @input = ""
+      @icx = 0
+      @add_preedit = ""
+    end
+
+    def cycle_kind : Nil
+      @pend_kind = @pend_kind == "include" ? "exclude" : "include"
+    end
+
+    def cycle_type : Nil
+      i = Scope::TYPES.index(@pend_type) || 0
+      @pend_type = Scope::TYPES[(i + 1) % Scope::TYPES.size]
+    end
+
+    def scope_input(ch : Char) : Nil
+      @input = "#{@input[0, @icx]}#{ch}#{@input[@icx..]}"
+      @icx += 1
+      @add_preedit = ""
+    end
+
+    # Backspace the add-row input; false when it's already empty (the Runner then
+    # closes the row), so a stray ⌫ can't delete a rule mid-edit.
+    def scope_backspace : Bool
+      return false if @icx == 0
+      @input = "#{@input[0, @icx - 1]}#{@input[@icx..]}"
+      @icx -= 1
+      true
+    end
+
+    def scope_move_cursor(d : Int32) : Nil
+      @icx = (@icx + d).clamp(0, @input.size)
+    end
+
+    # Commit the add/edit row. Returns :ok | :empty | :invalid | :dup so the Runner toasts.
+    def scope_commit : Symbol
+      pattern = @input.strip
+      return :empty if pattern.empty?
+      return :invalid unless Scope.valid?(@pend_type, pattern)
+      ok = if id = @edit_id
+             @scope.update(id, @pend_kind, @pend_type, pattern)
+           else
+             @scope.add(@pend_kind, @pend_type, pattern)
+           end
+      return :dup unless ok
+      cancel_add
+      clamp_sel
+      :ok
+    end
+
+    def scope_delete : Nil
+      rule = current_rule
+      return unless rule
+      @scope.remove(rule.id)
+      clamp_sel
+    end
+
+    def scope_toggle : Nil
+      @scope.toggle
+    end
+
+    private def current_rule : Scope::Rule?
+      @scope.rules[@sel]?
+    end
+
+    private def clamp_sel : Nil
+      @sel = @sel.clamp(0, {@scope.rules.size - 1, 0}.max)
     end
 
     # Replace the description (e.g. from the external editor); marks dirty so save
@@ -113,21 +266,38 @@ module Gori::Tui
       @desc_area.at_top?
     end
 
+    # Cursor at the very start of the description → ← crosses back to the SCOPE pane.
+    def desc_at_start? : Bool
+      @desc_area.at_start?
+    end
+
+    # Self-framed (like Replay/Intercept): an OVERVIEW card on top (read-only stats),
+    # then SCOPE (left) | DESCRIPTION (right) side-by-side cards — the two focusable
+    # panes. The focused pane's card lights gold.
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
-      screen.text(rect.x + 1, rect.y, "PROJECT", Theme.accent, attr: Attribute::Bold)
-      hint = "project overview"
-      screen.text(rect.x + 9, rect.y, hint, Theme.muted)
-      Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
+      scope_focused = focused && @pane == :scope
+      desc_focused = focused && @pane == :desc
 
+      # OVERVIEW card on top, full width — capped to ~2/5 height so the panes get the rest.
+      meta_h = {9, {rect.h * 2 // 5, 3}.max}.min
+      render_overview(screen, Rect.new(rect.x, rect.y, rect.w, meta_h))
+
+      content = Rect.new(rect.x, rect.y + meta_h, rect.w, {rect.h - meta_h, 0}.max)
+      return if content.h < 2 || content.w < 4
+      left_w = {(content.w - 1) // 2, 1}.max
+      left = Rect.new(content.x, content.y, left_w, content.h)
+      right = Rect.new(content.x + left_w + 1, content.y, {content.w - left_w - 1, 0}.max, content.h)
+      render_scope_card(screen, left, scope_focused)
+      render_desc_card(screen, right, desc_focused)
+    end
+
+    private def render_overview(screen : Screen, rect : Rect) : Nil
+      return if rect.h < 2 || rect.w < 2
+      Frame.card(screen, rect, "OVERVIEW", bg: Theme.bg, border: Theme.border)
       p = @project
       return unless p
-
-      y = rect.y + 2
-      max_y = rect.bottom - 1
-      return if y > max_y
-
-      # Static metadata (always visible at top of the tab).
+      inner = rect.inset(1, 1)
       lines = [
         {"Name", p.name},
         {"Created", format_time(@created)},
@@ -137,34 +307,101 @@ module Gori::Tui
         {"Captured", human_size(@total_captured)},
         {"Findings", @findings_count.to_s},
       ]
-
+      y = inner.y
+      max_y = inner.bottom - 1
       lines.each do |(label, value)|
         break if y > max_y
-        screen.text(rect.x + 2, y, label + ":", Theme.text_bright)
-        vx = rect.x + 2 + 18
-        w = {rect.right - vx, 0}.max
+        screen.text(inner.x + 1, y, label + ":", Theme.text_bright)
+        vx = inner.x + 1 + 14
+        w = {inner.right - vx, 0}.max
         screen.text(vx, y, value, Theme.text, width: w) if w > 0
         y += 1
       end
+    end
 
-      # Editable DESCRIPTION section (takes remaining vertical space).
-      # When the Project tab body is focused, the TextArea shows an active cursor
-      # and accepts input (delegated from Runner#handle_project_key).
-      y += 1
-      return if y > max_y
-      screen.text(rect.x + 2, y, "DESCRIPTION", Theme.accent, attr: Attribute::Bold)
-      edit_hint = focused ? "type to edit · esc tabs" : "↵/→ to edit"
-      screen.text(rect.x + 14, y, edit_hint, Theme.muted)
-      y += 1
-      return if y > max_y
-      Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
-      y += 1
-      return if y > max_y
+    # SCOPE card: title + the lens state riding the top border (right), then the rule
+    # list / inline add-row inside.
+    private def render_scope_card(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "SCOPE", bg: Theme.bg, border: Frame.pane_border(focused))
+      n = @scope.rules.size
+      meta = " lens:#{@scope.enabled? ? "on" : "off"} · #{n} "
+      mx = {rect.right - meta.size - 1, rect.x + 8}.max
+      screen.text(mx, rect.y, meta, @scope.active? ? Theme.text_bright : Theme.muted, Theme.bg) if rect.w > meta.size + 10
+      render_scope_list(screen, rect.inset(1, 1), focused)
+    end
 
-      desc_h = {max_y - y, 1}.max
-      desc_rect = Rect.new(rect.x + 2, y, {rect.w - 4, 0}.max, desc_h)
-      @desc_area.render(screen, desc_rect, cursor: focused,
+    # The rule list (windowed around the selection) + the inline add/edit row, drawn
+    # inside the SCOPE card's interior `inner`.
+    private def render_scope_list(screen : Screen, inner : Rect, focused : Bool) : Nil
+      return if inner.h <= 0 || inner.w <= 0
+      rules = @scope.rules
+      y = inner.y
+      rows = inner.h
+      if @adding
+        render_add_row(screen, inner, y, focused)
+        y += 1
+        rows -= 1
+      end
+      return if rows <= 0
+
+      if rules.empty?
+        screen.text(inner.x, y, "(no rules — a to add)", Theme.muted) unless @adding
+        return
+      end
+
+      scroll = scroll_for(@sel, rules.size, rows)
+      shown = {rows, rules.size - scroll}.min
+      shown.times do |i|
+        idx = scroll + i
+        rule = rules[idx]
+        ry = y + i
+        selected = focused && idx == @sel && !@adding
+        bg = selected ? Theme.accent_bg : Theme.bg
+        if selected
+          screen.fill(Rect.new(inner.x, ry, inner.w, 1), bg)
+          screen.cell(inner.x, ry, '▎', Theme.accent, bg)
+        end
+        render_rule_row(screen, inner, ry, rule, selected, bg)
+      end
+    end
+
+    private def render_rule_row(screen : Screen, inner : Rect, y : Int32, rule : Scope::Rule, selected : Bool, bg : Color) : Nil
+      fg = selected ? Theme.text_bright : Theme.text
+      ktag, kcolor = rule.include? ? {"incl", Theme.accent} : {"excl", Theme.yellow}
+      x = inner.x + 1
+      screen.text(x, y, ktag, kcolor, bg, Attribute::Bold)
+      screen.text(x + 5, y, rule.match_type, Theme.muted, bg)
+      px = x + 12
+      screen.text(px, y, rule.pattern, fg, bg, width: {inner.right - px, 1}.max) if inner.right > px
+    end
+
+    # The inline "add"/"edit" row: kind + match_type chips (cycled with ^K/^T) then
+    # the pattern input. Mirrors the old ScopeOverlay add line.
+    private def render_add_row(screen : Screen, inner : Rect, y : Int32, focused : Bool) : Nil
+      x = inner.x + 1
+      x = screen.text(x, y, @edit_id ? "edit " : "add ", Theme.accent, Theme.bg)
+      ktag, kcolor = @pend_kind == "include" ? {"incl", Theme.accent} : {"excl", Theme.yellow}
+      x = screen.text(x, y, "[", Theme.muted, Theme.bg)
+      x = screen.text(x, y, ktag, kcolor, Theme.bg, Attribute::Bold)
+      x = screen.text(x, y, "][", Theme.muted, Theme.bg)
+      x = screen.text(x, y, @pend_type, Theme.accent, Theme.bg)
+      x = screen.text(x, y, "] ", Theme.muted, Theme.bg)
+      w = {inner.right - x, 3}.max
+      screen.input_line(x, y, @input, @icx, @add_preedit, Theme.text_bright, Theme.bg, width: w)
+    end
+
+    private def render_desc_card(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "DESCRIPTION", bg: Theme.bg, border: Frame.pane_border(focused))
+      @desc_area.render(screen, rect.inset(1, 1), cursor: focused,
         highlight: Settings.editor_markdown ? :markdown : nil)
+    end
+
+    # Scroll offset that keeps `sel` visible in a window of `h` rows over `total`.
+    private def scroll_for(sel : Int32, total : Int32, h : Int32) : Int32
+      return 0 if total <= h || h <= 0
+      (sel - h // 2).clamp(0, total - h)
     end
 
     private def format_time(t : Time?) : String

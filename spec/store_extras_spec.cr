@@ -17,12 +17,16 @@ describe "Gori::Store scope rules + settings (v3)" do
   it "persists scope rules" do
     with_store do |store|
       store.scope_rules.should be_empty
-      store.add_scope_rule("acme.test")
-      store.add_scope_rule("acme.test") # UNIQUE → no dup
-      store.add_scope_rule("*.shop.test")
-      store.scope_rules.should eq(["*.shop.test", "acme.test"])
-      store.remove_scope_rule("acme.test")
-      store.scope_rules.should eq(["*.shop.test"])
+      store.add_scope_rule("include", "host", "acme.test")
+      store.add_scope_rule("include", "host", "acme.test") # UNIQUE(kind,type,pattern) → no dup
+      store.add_scope_rule("exclude", "regex", "\\.png$")
+      rows = store.scope_rules
+      rows.map { |(_, kind, mt, pat)| {kind, mt, pat} }.should eq([
+        {"include", "host", "acme.test"},
+        {"exclude", "regex", "\\.png$"},
+      ])
+      store.remove_scope_rule(rows.first[0]) # by id
+      store.scope_rules.map { |(_, _, _, pat)| pat }.should eq(["\\.png$"])
     end
   end
 
