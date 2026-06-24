@@ -107,6 +107,7 @@ module Gori::Tui
       @browser_picker = nil.as(BrowserPicker?)
       # The settings editor (palette → settings:network); @overlay is :settings.
       @settings_view = SettingsView.new
+      @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                  # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
       @outcome = :running             # :running | :quit | :back
@@ -660,6 +661,12 @@ module Gori::Tui
         @overlay = :none
         open_palette
       elsif key.escape?
+        # Cancel: undo any live theme preview (revert to the theme on open).
+        if restore = @theme_restore
+          Theme.apply(restore)
+          @resized = true
+          @theme_restore = nil
+        end
         @overlay = :none
       elsif key.enter?
         # :network rebinds the live proxy; :theme swaps the palette + repaints; the
@@ -670,14 +677,17 @@ module Gori::Tui
                  when :theme   then apply_theme(msg)
                  else               msg
                  end
+        @theme_restore = Settings.theme if @settings_view.section == :theme # saved → don't revert this on esc
       elsif key.up?
         @settings_view.move_field(-1)
       elsif key.down?
         @settings_view.move_field(1)
       elsif key.left?
         @settings_view.toggle_or_move(-1)
+        preview_theme
       elsif key.right?
         @settings_view.toggle_or_move(1)
+        preview_theme
       elsif key.backspace?
         @settings_view.backspace
       elsif c && !ev.ctrl? && !ev.alt?
@@ -2493,6 +2503,7 @@ module Gori::Tui
       when :network, :editor, :theme
         @settings_view.reload(section)
         @overlay = :settings
+        @theme_restore = section == :theme ? Settings.theme : nil # baseline for live-preview revert
       else
         @toast = "#{section} settings — coming soon (TODO)"
       end
@@ -2505,6 +2516,15 @@ module Gori::Tui
       Theme.apply(Settings.theme)
       @resized = true
       save_msg
+    end
+
+    # Live-apply the theme being cycled in settings so it's visible before committing;
+    # cancelling (esc) reverts to @theme_restore. No-op outside the theme section.
+    private def preview_theme : Nil
+      if name = @settings_view.theme_value
+        Theme.apply(name)
+        @resized = true
+      end
     end
 
     # Hand the focused field's text to the external editor; on a clean change write

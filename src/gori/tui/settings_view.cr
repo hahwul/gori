@@ -139,6 +139,12 @@ module Gori::Tui
       @status = nil
     end
 
+    # The currently-selected theme name (for live preview as the user cycles) — only
+    # meaningful in the :theme section.
+    def theme_value : String?
+      @section == :theme ? @values[0] : nil
+    end
+
     # Validate, apply, and persist. Returns a status message for the caller to
     # toast (nil decoded values are not possible here — port is the only check).
     def save : String
