@@ -88,10 +88,10 @@ module Gori::Tui
     private def handle_list(ev : Termisu::Event::Key) : Project | Symbol | Nil
       key = ev.key
       @preedit = "" # any committed key ends an in-progress IME composition
-      # Navigation is arrows only. Search is *deliberate*: arrow down past New/Temp
-      # to the Search row (index 2) to "enter" the search area. Only then does
-      # typing perform fuzzy filtering on the projects listed below it.
-      # This avoids the previous always-on live filter which was inconvenient.
+      # Arrows are pure navigation (never filter). Typing a printable key jumps into
+      # the Search row and filters — matching the "type to search" hint + the universal
+      # picker expectation — so a user who lands on New/Temp and types a project name to
+      # find it isn't met with silence. (↓ to the Search row also works.)
       if key.up?
         @selected = (@selected - 1).clamp(0, entry_count - 1)
       elsif key.down?
@@ -113,10 +113,10 @@ module Gori::Tui
         end
       elsif ev.ctrl_c?
         return :quit
-      elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && @selected == 2
-        # Only when the Search row is selected (we have "entered" it).
-        @query += c
+      elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt?
+        # Any printable key filters: enter the Search row (if not already) and append.
         @selected = 2
+        @query += c
         @results_scroll = 0
       elsif ev.ctrl? && key.lower_n?
         # ctrl-n: quick new. If query has text, prefill (or direct-create).
