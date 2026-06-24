@@ -652,8 +652,17 @@ module Gori::Tui
       when :replay    then click_replay(body, mx, my)
       when :project   then click_project(body, mx, my)
       when :intercept then click_intercept(body, mx, my)
+      when :notes     then click_notes(body, mx, my)
       else                 (@focus = :body)
       end
+    end
+
+    # Notes: a lone editor — focus it and place the cursor at the click (carve the
+    # sub-tab row + frame inset, matching render_body).
+    private def click_notes(body : Rect, mx : Int32, my : Int32) : Nil
+      @focus = :body
+      rect = @notes.count >= 2 ? carve_subtab_row(body)[1] : body
+      @notes.click_to_cursor(rect.inset(1, 1), mx, my)
     end
 
     # History: in detail, a chip click switches the request/response/frames pane. In
@@ -675,9 +684,12 @@ module Gori::Tui
     # Findings list: same select-first as History. No body hit-testing while the
     # detail/notes pane is open (it isn't the list).
     private def click_findings(body : Rect, mx : Int32, my : Int32) : Nil
-      return if @findings.detail_open?
-      @focus = :body
       inner = body.inset(1, 1)
+      if @findings.detail_open?
+        @findings.notes_click_to_cursor(inner, mx, my) if @findings.editing_notes? # place caret in the inline notes editor
+        return
+      end
+      @focus = :body
       return unless idx = @findings.list_row_at(inner, mx, my)
       idx == @findings.selected_index ? findings_open : @findings.select_index(idx)
     end
@@ -701,6 +713,8 @@ module Gori::Tui
         save_current_replay
         v.focus_pane(pane)
         @focus = :body
+        v.request_click_to_cursor(rect, mx, my) if pane == :request
+        v.target_click_to_cursor(rect, mx, my) if pane == :target
       end
     end
 
@@ -716,6 +730,7 @@ module Gori::Tui
         end
       when :desc
         @project_view.focus_pane(:desc)
+        @project_view.desc_click_to_cursor(body, mx, my)
       end # :overview band → just take body focus
     end
 
@@ -731,6 +746,7 @@ module Gori::Tui
         end
       else
         @intercept.focus_detail
+        @intercept.editor_click_to_cursor(body, mx, my)
       end
     end
 

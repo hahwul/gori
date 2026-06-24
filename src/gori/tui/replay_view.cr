@@ -362,6 +362,26 @@ module Gori::Tui
       mx >= content.x + half + 1 ? :response : nil
     end
 
+    # Mouse: place the request-editor cursor at a click. `rect` is the full body rect
+    # render() receives; re-derive the request half-pane (target band + split, then
+    # the card's 1-cell inset) exactly as render_request does. No-op in hex mode.
+    def request_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @loaded && @req_hex_edit.nil?
+      target_h = {rect.h, 3}.min
+      content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      return if content.h <= 0
+      half = {(content.w - 1) // 2, 1}.max
+      left = Rect.new(content.x, content.y, half, content.h)
+      @editor.click_to_cursor(left.inset(1, 1), mx, my)
+    end
+
+    # Mouse: place the single-line TARGET caret at a click. render_target draws
+    # @target at rect.x + 4 of the target band (which shares the body's x).
+    def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @loaded
+      @tcx = Screen.column_for(@target, mx - (rect.x + 4))
+    end
+
     # Top boundary of the focused pane — the Runner pops focus to the tab bar when
     # ↑ is pressed here (natural upward flow): the single-line target always, the
     # request editor at its first line, the response when scrolled to the top.

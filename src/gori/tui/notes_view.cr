@@ -117,6 +117,13 @@ module Gori::Tui
       current.area.move(dr, dc)
     end
 
+    # Mouse: place the cursor at a click. `rect` is the framed interior the runner
+    # passes to render; re-apply render's 1-col side inset so the editor geometry matches.
+    def click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      area = Rect.new(rect.x + 1, rect.y, {rect.w - 2, 0}.max, rect.h)
+      current.area.click_to_cursor(area, mx, my)
+    end
+
     def goto_line(n : Int32) : Nil
       current.area.goto_line(n)
     end

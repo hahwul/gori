@@ -140,6 +140,43 @@ describe "HistoryView#list_row_at / select-first" do
   end
 end
 
+describe "TextArea#click_to_cursor" do
+  it "places the caret at the clicked line/column (a subsequent insert lands there)" do
+    rect = Rect.new(0, 0, 40, 10)
+    ta = TextArea.new("hello\nworld")
+    ta.click_to_cursor(rect, 2, 0); ta.insert('X')
+    ta.text.should eq("heXllo\nworld") # row 0, col 2
+    ta = TextArea.new("hello\nworld")
+    ta.click_to_cursor(rect, 3, 1); ta.insert('Y')
+    ta.text.should eq("hello\nworYld") # row 1, col 3
+  end
+
+  it "clamps a click past the end of a line / below the text" do
+    rect = Rect.new(0, 0, 40, 10)
+    ta = TextArea.new("hi\nthere")
+    ta.click_to_cursor(rect, 99, 0); ta.insert('!')
+    ta.text.should eq("hi!\nthere") # past end → end of line 0
+    ta = TextArea.new("hi\nthere")
+    ta.click_to_cursor(rect, 0, 7); ta.insert('!')
+    ta.text.should eq("hi\n!there") # below text → last line, col 0
+  end
+
+  it "maps display columns across a wide (width-2) char" do
+    rect = Rect.new(0, 0, 40, 10)
+    ta = TextArea.new("あいbo") # あ,い are width 2; b,o width 1 → 'b' starts at display col 4
+    ta.click_to_cursor(rect, 4, 0); ta.insert('X')
+    ta.text.should eq("あいXbo")
+  end
+
+  it "accounts for the line-number gutter offset" do
+    rect = Rect.new(0, 0, 40, 10)
+    ta = TextArea.new("ab\ncd")
+    ta.gutter = true                               # 2 lines → gutter width 3
+    ta.click_to_cursor(rect, 4, 0); ta.insert('X') # mx 4 − gutter 3 = content col 1
+    ta.text.should eq("aXb\ncd")
+  end
+end
+
 describe "ReplayView#pane_at" do
   it "splits the body into target / request / response panes" do
     view = ReplayView.new

@@ -47,6 +47,15 @@ module Gori::Tui
 
     # Sets the list selection (clamped like #move); render's ensure_visible then
     # reconciles @scroll on the next frame.
+    # Mouse: place the inline NOTES-editor cursor at a click. `rect` is the framed
+    # detail interior render() receives; the NOTES editor sits at rect.y + 6 (after
+    # the badge/hint/meta/flow rows + divider + "NOTES" label), mirroring render_detail.
+    def notes_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @editing_notes
+      notes_rect = Rect.new(rect.x + 1, rect.y + 6, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 6), 0}.max)
+      @notes.click_to_cursor(notes_rect, mx, my)
+    end
+
     def select_index(idx : Int32) : Nil
       return if @findings.empty?
       @selected = idx.clamp(0, @findings.size - 1)

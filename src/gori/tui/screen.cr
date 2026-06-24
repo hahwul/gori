@@ -47,6 +47,22 @@ module Gori::Tui
       w
     end
 
+    # The codepoint index in `str` whose display cell the column `target` lands on,
+    # clamped to [0, str.size]. Inverts a left-to-right display-width advance (the
+    # same one `display_width` / `text` use), so click-to-cursor maps a click x to
+    # the right index even past CJK/emoji (width-2) cells. Each codepoint counts as
+    # at least one clickable cell to match the editor's codepoint cursor model.
+    def self.column_for(str : String, target : Int32) : Int32
+      return 0 if target <= 0
+      acc = 0
+      str.each_char_with_index do |ch, j|
+        w = {display_width(ch.to_s), 1}.max
+        return j if target < acc + w
+        acc += w
+      end
+      str.size
+    end
+
     def cell(x : Int32, y : Int32, grapheme : Char | String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None) : Nil
       return unless x >= 0 && y >= 0 && x < @width && y < @height

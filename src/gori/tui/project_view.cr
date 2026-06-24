@@ -157,6 +157,18 @@ module Gori::Tui
       @sel = idx.clamp(0, n - 1)
     end
 
+    # Mouse: place the description-editor cursor at a click. `rect` is the body rect
+    # render() receives; re-derive the right (DESCRIPTION) card + its 1-cell inset
+    # exactly as render does, then map into the @desc_area editor.
+    def desc_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      meta_h = {11, {rect.h * 2 // 5, 3}.max}.min
+      content = Rect.new(rect.x, rect.y + meta_h, rect.w, {rect.h - meta_h, 0}.max)
+      return if content.h < 2 || content.w < 4
+      left_w = {(content.w - 1) // 2, 1}.max
+      right = Rect.new(content.x + left_w + 1, content.y, {content.w - left_w - 1, 0}.max, content.h)
+      @desc_area.click_to_cursor(right.inset(1, 1), mx, my)
+    end
+
     # --- SCOPE pane editing (delegated from Runner#handle_project_scope_key) ---
     def adding? : Bool
       @adding

@@ -139,6 +139,20 @@ module Gori::Tui
       @cy == 0 && @cx == 0
     end
 
+    # Place the cursor at the click (mx,my), inverting render's layout: the visible
+    # row maps to @scroll + offset; the display-x (after the optional gutter) maps to
+    # a codepoint index via Screen.column_for. `rect` is the SAME rect render gets.
+    # Coords are 0-based; a click below the text lands on the last line, left of the
+    # text on column 0. render's ensure_visible reconciles @scroll next frame.
+    def click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return if rect.empty? || @lines.empty?
+      row = my - rect.y
+      return if row < 0
+      @cy = {@scroll + row, @lines.size - 1}.min
+      gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0
+      @cx = Screen.column_for(@lines[@cy], mx - (rect.x + gw))
+    end
+
     # Jump the cursor to 1-based line `n`, column 0 (out-of-range clamps to the
     # first/last line). render's ensure_visible scrolls it into view next frame.
     def goto_line(n : Int32) : Nil

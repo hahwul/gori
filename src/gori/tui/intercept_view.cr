@@ -201,6 +201,15 @@ module Gori::Tui
       toggle_edit unless @editing || selected_item.nil?
     end
 
+    # Mouse: place the held-message editor cursor at a click. `rect` is the body rect
+    # render() receives; re-derive the right (detail) pane + its 1-cell inset exactly
+    # as render_detail does. Only meaningful while editing (the editor is shown then).
+    def editor_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @editing
+      _, right = split_panes(rect)
+      @editor.click_to_cursor(right.inset(1, 1), mx, my)
+    end
+
     # --- rendering -----------------------------------------------------------
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
