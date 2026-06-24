@@ -559,7 +559,7 @@ module Gori::Tui
       case
 
       when key.escape? then @overlay = :none
-      when key.enter?  then @rules_overlay.submit
+      when key.enter?  then (@toast = "rule needs a pattern — e.g. resp: Old => New" unless @rules_overlay.submit)
       when key.tab?    then @rules_overlay.toggle_selected
       when key.up?     then @rules_overlay.select_move(-1)
       when key.down?   then @rules_overlay.select_move(1)
@@ -1113,6 +1113,8 @@ module Gori::Tui
         if (view = current_replay_view) && view.focus == :request
           on = view.toggle_request_hex
           @toast = on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off"
+        else
+          @toast = "hex edit (^X) applies to the REQUEST pane — ↹ to it"
         end
       elsif key.escape?
         if (view = current_replay_view) && view.focus == :request && view.request_hex?
