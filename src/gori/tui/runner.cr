@@ -1620,7 +1620,7 @@ module Gori::Tui
       when :notes    then "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
-        @findings.detail_open? ? "[ ] severity · e notes · d delete · ←/esc back" \
+        @findings.detail_open? ? "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · ←/esc back" \
                                : "↑/↓ move · ↵ open · n new · d delete · : cmds · esc tabs"
       when :project  then project_hints
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"
