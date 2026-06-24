@@ -6,6 +6,7 @@ require "./hex_view"
 require "./gutter"
 require "./search_hi"
 require "./reveal"
+require "./url"
 require "../store"
 require "../ql"
 require "../scope"
@@ -523,7 +524,7 @@ module Gori::Tui
         screen.text(method_x, y, row.method, Theme.method_color(row.method), bg)
         screen.text(proto_x, y, row.scheme.upcase, Theme.muted, bg)
         screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
-        screen.text(path_x, y, origin_path(row.target), fg, bg, width: path_w) if path_w > 0
+        screen.text(path_x, y, Url.origin_path(row.target), fg, bg, width: path_w) if path_w > 0
         status = row.status.try(&.to_s) || "···"
         screen.text(status_x, y, status, Theme.status_color(row.status), bg, width: 3)
         screen.text(type_x, y, fmt_mime(row.content_type), Theme.muted, bg, width: 6) if show_type
@@ -585,18 +586,6 @@ module Gori::Tui
       when sub.ends_with?("+xml")                              then sub == "svg+xml" ? "svg" : "xml"
       else                                                          sub.lchop("vnd.").lchop("x-")
       end
-    end
-
-    # Display the request target in origin-form. Plaintext forward-proxy requests
-    # are captured absolute-form (`http://host/path`, the truth — P7); here we
-    # strip the scheme+authority so the PATH column matches the HTTPS rows. The
-    # host/scheme live in their own columns.
-    private def origin_path(target : String) : String
-      return target unless target.starts_with?("http://") || target.starts_with?("https://")
-      scheme_end = target.index("://")
-      return target unless scheme_end
-      slash = target.index('/', scheme_end + 3)
-      slash ? target[slash..] : "/"
     end
 
     def render_detail(screen : Screen, rect : Rect, focused : Bool = true) : Nil

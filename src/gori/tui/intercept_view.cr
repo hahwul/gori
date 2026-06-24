@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./highlight"
 require "./text_area"
+require "./url"
 require "../interceptor"
 
 module Gori::Tui
@@ -191,7 +192,8 @@ module Gori::Tui
         end
         badge, bcolor = it.kind.request? ? {"REQ", Theme.yellow} : {"RES", Theme.accent}
         screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
-        label = it.kind.request? ? "#{it.method} #{it.host}#{it.target}" : "#{it.host} #{it.target}"
+        target = Url.origin_path(it.target) # strip scheme+authority for plaintext forward-proxy targets
+        label = it.kind.request? ? "#{it.method} #{it.host}#{target}" : "#{it.host} #{target}"
         screen.text(inner.x + 5, y, label, selected ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
       end
     end
