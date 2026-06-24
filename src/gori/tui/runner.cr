@@ -1621,7 +1621,7 @@ module Gori::Tui
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
         @findings.detail_open? ? "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · ←/esc back" \
-                               : "↑/↓ move · ↵ open · n new · d delete · : cmds · esc tabs"
+                               : "↑/↓ move · ↵ open · n new · d delete · x export · : cmds · esc tabs"
       when :project  then project_hints
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"
       end
@@ -2042,7 +2042,10 @@ module Gori::Tui
       content = format == :json ? findings_json(findings) : findings_markdown(findings)
       path = File.join(@session.project.dir, "findings.#{ext}")
       File.write(path, content)
-      @toast = "exported #{findings.size} findings → #{path}"
+      msg = "exported #{findings.size} finding#{findings.size == 1 ? "" : "s"} → #{path}"
+      # A temp project's dir is wiped on close — warn so the report isn't silently lost.
+      msg += "  ⚠ temp project — copy it before closing" if @session.project.ephemeral?
+      @toast = msg
     rescue ex
       @toast = "export failed: #{ex.message}"
     end

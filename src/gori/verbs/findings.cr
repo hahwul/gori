@@ -83,6 +83,13 @@ module Gori
       r.register Verb::Definition.new(
         "findings.export-json", "Export findings (JSON)", "Write all findings to findings.json in the project dir",
         Verb::Scope::Global, [] of Verb::Chord) { |ctx| ctx.findings_export(:json); nil }
+
+      # The discoverable 'x' export chord on the Findings tab (the verbs above are the
+      # palette entries / both formats). Findings-scoped so 'x' doesn't collide with
+      # the hex toggles elsewhere; defaults to the human-readable Markdown report.
+      r.register Verb::Definition.new(
+        "findings.export-key", "Export findings (Markdown)", "Write the Markdown report to the project dir",
+        Verb::Scope::Findings, [Verb::Chord.new("x")], hidden: true) { |ctx| ctx.findings_export(:markdown); nil }
     end
   end
 end
