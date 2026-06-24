@@ -1611,12 +1611,7 @@ module Gori::Tui
       when :intercept
         @intercept.editing? ? "type to edit · ^R forward · ⇧↹/esc queue" \
                             : "↑/↓ move · ↵/e edit · f forward · d drop · F all · : cmds · ↹ detail · esc tabs"
-      when :replay
-        if current_replay_view.try(&.request_hex?)
-          "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit"
-        else
-          "↹ pane · type to edit · ^R send · ^G goto · ^F find · ^X hex (req) · x hex · ^B ws · ^N new · ^W close · esc tabs"
-        end
+      when :replay   then replay_hints
       when :notes    then "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · ↹/esc tabs"
       when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
       when :findings
@@ -1624,6 +1619,23 @@ module Gori::Tui
                                : "↑/↓ move · ↵ open · n new · d delete · : cmds · esc tabs"
       when :project  then project_hints
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"
+      end
+    end
+
+    # Replay hints depend on the focused pane: the editable TARGET/REQUEST advertise
+    # editor keys, the read-only RESPONSE advertises scroll/diff/hex — instead of one
+    # pane-agnostic string that told the response pane to "type to edit".
+    private def replay_hints : String
+      v = current_replay_view
+      return "↹/esc tabs · ^N new" unless v
+      return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit" if v.request_hex?
+      case v.focus
+      when :target
+        "type URL · ↵/↓ request · ^R send · ↹ pane · ^N new · esc tabs"
+      when :response
+        "↑/↓ scroll · ←/→/d diff · x hex · ^F find · ^R send · ↹ pane · esc tabs"
+      else # :request
+        "type to edit · ^R send · ^G goto · ^F find · ^X hex · ^B ws · ^N new · ^W close · ↹ pane · esc tabs"
       end
     end
 
