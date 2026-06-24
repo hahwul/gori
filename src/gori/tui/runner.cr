@@ -2019,7 +2019,7 @@ module Gori::Tui
         @focus = :body
         @overlay = :detail
       else
-        @toast = "evidence no longer captured (flow ##{fid})"
+        @toast = "evidence no longer captured (pruned)"
       end
     end
 
@@ -2030,7 +2030,7 @@ module Gori::Tui
       if @session.store.get_flow(fid)
         replay_flow(fid)
       else
-        @toast = "evidence no longer captured (flow ##{fid})"
+        @toast = "evidence no longer captured (pruned)"
       end
     end
 
@@ -2204,7 +2204,7 @@ module Gori::Tui
       return unless id
       detail = @session.store.get_flow(id)
       unless detail
-        @toast = "copy: flow ##{id} not found"
+        @toast = "copy: flow no longer available"
         return
       end
       io = IO::Memory.new
@@ -2410,14 +2410,20 @@ module Gori::Tui
       return unless it = @intercept.selected_item
       @session.interceptor.forward(it.id, @intercept.forward_bytes(it))
       @intercept.reload(@session.interceptor)
-      @toast = "forwarded ##{it.id}"
+      @toast = "forwarded #{intercept_label(it)}"
     end
 
     def intercept_drop : Nil
       return unless it = @intercept.selected_item
       @session.interceptor.drop(it.id)
       @intercept.reload(@session.interceptor)
-      @toast = "dropped ##{it.id}"
+      @toast = "dropped #{intercept_label(it)}"
+    end
+
+    # A short human label for a held item — "GET /path" (request) or the status line
+    # (response) — for forward/drop toasts; the queue's internal id means nothing to the user.
+    private def intercept_label(it : Interceptor::Item) : String
+      it.kind.request? ? "#{it.method} #{Url.origin_path(it.target)}" : it.target
     end
 
     def intercept_forward_all : Nil
