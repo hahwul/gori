@@ -2211,7 +2211,7 @@ module Gori::Tui
       io.write(detail.request_head)
       io.write(detail.request_body.not_nil!) if detail.request_body
       Clipboard.copy(String.new(io.to_slice))
-      @toast = "copied request ##{id} to clipboard (#{io.size}b)"
+      @toast = "copied #{detail.row.method} #{Url.origin_path(detail.row.target)} to clipboard (#{io.size}b)"
     end
 
     def history_query : Nil
