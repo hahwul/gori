@@ -254,8 +254,12 @@ describe Gori::Verb do
       keymap.lookup(Chord.new("right"), Scope::HistoryDetail).should eq("detail.next-pane")
       keymap.lookup(Chord.new("left"), Scope::HistoryDetail).should eq("detail.prev-pane")
       keymap.lookup(Chord.new("x"), Scope::HistoryDetail).should eq("detail.toggle-hex")
-      # "q" is Global (back to projects) -> resolves from any scope
-      keymap.lookup(Chord.new("q"), Scope::Body).should eq("app.back")
+      # a Global chord (^P palette) resolves from ANY scope
+      keymap.lookup(Chord.new("p", ctrl: true), Scope::Body).should eq("app.palette")
+      # 'q' (back to projects) is bound only on the tab bar (Sidebar), not in a body —
+      # as a Global chord it used to dump you to the picker mid-browse.
+      keymap.lookup(Chord.new("q"), Scope::Sidebar).should eq("app.back-key")
+      keymap.lookup(Chord.new("q"), Scope::Body).should be_nil
       # an unbound chord
       keymap.lookup(Chord.new("z"), Scope::Body).should be_nil
       # scope-specific: the top menu navigates horizontally, the body vertically
