@@ -129,6 +129,36 @@ module Gori::Tui
       end
     end
 
+    # Inverts render's `y = rect.y + i` (no header) to find which visible_rows
+    # index a click lands on; nil past the last populated row.
+    def row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil if mx < rect.x || mx >= rect.right # reject the frame border columns (mirror the other list helpers)
+      i = my - rect.y
+      return nil if i < 0 || i >= rect.h
+      idx = @scroll + i
+      idx < visible_rows.size ? idx : nil
+    end
+
+    # Inverts render's marker column `rect.x + 1 + depth*2` for visible_rows[ri].
+    def marker_hit?(rect : Rect, mx : Int32, ri : Int32) : Bool
+      row = visible_rows[ri]?
+      return false unless row
+      mx == rect.x + 1 + row[1] * 2
+    end
+
+    # Mirrors `move`: set @selected clamped to the populated rows.
+    def select_index(idx : Int32) : Nil
+      rows = visible_rows
+      return if rows.empty?
+      @selected = idx.clamp(0, rows.size - 1)
+    end
+
+    # Single-click design: select the row, then expand/collapse it via `toggle`.
+    def toggle_at(idx : Int32) : Nil
+      select_index(idx)
+      toggle
+    end
+
     private def selected_node : Node?
       rows = visible_rows
       rows[@selected]?.try(&.[0])

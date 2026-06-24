@@ -40,7 +40,8 @@ module Gori
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame (picker included)
       projects = ProjectRegistry.new(Paths.projects_dir)
       term = Termisu.new
-      term.enable_enhanced_keyboard # Kitty 17u (disambig + report_text) for better IME/Unicode; avoids report_all_keys(31u) which can split Hangul jamo. Committed text via raw UTF-8 bytes (IME composed syllables) + CSI for specials; Preedit via 0-code CSI if terminal provides.
+      term.enable_enhanced_keyboard       # Kitty 17u (disambig + report_text) for better IME/Unicode; avoids report_all_keys(31u) which can split Hangul jamo. Committed text via raw UTF-8 bytes (IME composed syllables) + CSI for specials; Preedit via 0-code CSI if terminal provides.
+      term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav; one enable covers both the picker and the runner (same term). Runner reconciles live on settings save; term.close disables on exit.
 
       begin
         loop do

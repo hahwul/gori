@@ -54,6 +54,12 @@ module Gori::Tui
           when Project then return result
           when :quit   then return nil
           end
+        when Termisu::Event::Mouse
+          result = handle_picker_mouse(ev)
+          case result
+          when Project then return result
+          when :quit   then return nil
+          end
         when Termisu::Event::Preedit
           # Live IME composition for whichever field is active; the committed
           # syllable arrives afterwards as a normal Key and clears this.
@@ -286,6 +292,84 @@ module Gori::Tui
       nil
     end
 
+    # --- mouse ---------------------------------------------------------------
+
+    # Maps a click to a picker entry index (0=New, 1=Temp, 2=Search, 3+=projects),
+    # or nil outside the rows. Inverts render_list's layout: action rows at box.y+1+i,
+    # a divider, then the windowed project list (from @results_scroll) at box.y+5.
+    private def entry_at(mx : Int32, my : Int32) : Int32?
+      w, h = @backend.size
+      box, res_rows = card_metrics(w, h)
+      return nil unless box.contains?(mx, my)
+      arow = my - (box.y + 1)
+      return arow if 0 <= arow < 3 # New / Temp / Search action rows
+      list_top = box.y + 1 + 3 + 1 # action rows + divider
+      vi = my - list_top
+      return nil if vi < 0 || vi >= res_rows
+      ri = @results_scroll + vi
+      ri < filtered_projects.size ? ri + 3 : nil
+    end
+
+    private def handle_picker_mouse(ev : Termisu::Event::Mouse) : Project | Symbol | Nil
+      return nil unless ev.press? || ev.wheel?
+      w, h = @backend.size
+      mx, my = ev.x - 1, ev.y - 1
+      if ev.wheel?
+        return nil unless ev.button.wheel_up? || ev.button.wheel_down?
+        return picker_wheel(ev.button.wheel_up? ? -3 : 3)
+      end
+      case @mode
+      when :confirm  then handle_confirm_mouse(w, h, mx, my)
+      when :settings then handle_settings_mouse(w, h, mx, my)
+      when :new      then nil # text form — keyboard only (cursor placement is Phase 2)
+      else                handle_list_mouse(mx, my)
+      end
+    end
+
+    # List click: SELECT-FIRST — first click highlights the entry, a second click on
+    # the already-selected entry activates it (same model as the History/Findings list).
+    private def handle_list_mouse(mx : Int32, my : Int32) : Project | Symbol | Nil
+      return nil unless idx = entry_at(mx, my)
+      if idx == @selected
+        activate
+      else
+        @selected = idx
+        @results_scroll = 0 if idx < 3 # focusing an action row shows the list from the top
+        nil
+      end
+    end
+
+    private def picker_wheel(delta : Int32) : Nil
+      case @mode
+      when :settings      then @settings.move_field(delta)
+      when :new, :confirm then nil # nothing to scroll
+      else                     @selected = (@selected + delta).clamp(0, entry_count - 1)
+      end
+    end
+
+    private def handle_confirm_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
+      dlg = @confirm
+      return if dlg.nil?
+      box = dlg.overlay_box(Rect.new(0, 0, w, h))
+      return cancel_confirm unless box.contains?(mx, my) # click away → cancel
+      case dlg.button_at(box, mx, my)
+      when :confirm then commit_delete
+      when :cancel  then cancel_confirm
+      end
+    end
+
+    private def handle_settings_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
+      area = Rect.new(0, 0, w, h)
+      box = @settings.overlay_box(area)
+      if box.contains?(mx, my)
+        if idx = @settings.field_at(box, mx, my)
+          @settings.set_field(idx)
+        end
+      else
+        @mode = :list # click outside the settings card → back to the list
+      end
+    end
+
     # --- rendering -----------------------------------------------------------
 
     MENU_WIDTH = 50
@@ -332,6 +416,19 @@ module Gori::Tui
     #   🔍 Search   <--- arrow here ("enter" the search area) then type for fuzzy
     #   [gap]
     #   project matches (or all when no query)
+    # The picker card rect + the number of project rows it shows, for `w`×`h`. The
+    # ONE source of this geometry — render_list and the mouse hit-test (entry_at)
+    # both call it so a click maps to exactly the row that was drawn.
+    private def card_metrics(w : Int32, h : Int32) : {Rect, Int32}
+      cw = {w - 4, MENU_WIDTH}.min
+      cx = {(w - cw) // 2, 0}.max
+      actions = 3
+      res_rows = (h - 5 - 2 - actions - 1).clamp(1, 8) # 5: brand header + hints · 2: card borders
+      card_h = actions + 1 + res_rows + 2
+      top = {(h - (3 + card_h)) // 2, 0}.max
+      {Rect.new(cx, top + 3, cw, card_h), res_rows}
+    end
+
     private def render_list(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
       fp = filtered_projects
 
@@ -339,14 +436,12 @@ module Gori::Tui
       # then the scrollable project list — the same header + divider + list shape
       # the overlays use, so the picker matches the rest of the app.
       actions = 3
-      res_rows = (h - 5 - 2 - actions - 1).clamp(1, 8) # 5: brand header + hints · 2: card borders
-      card_h = actions + 1 + res_rows + 2
-      top = {(h - (3 + card_h)) // 2, 0}.max
+      box, res_rows = card_metrics(w, h)
+      top = box.y - 3 # the brand header sits 3 rows above the card
 
       centered(screen, top, "gori", Theme.text_bright, w, Attribute::Bold)
       centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme.muted, w)
 
-      box = Rect.new(cx, top + 3, cw, card_h)
       Frame.card(screen, box)
 
       # action rows — selection indices 0=New, 1=Temp, 2=Search

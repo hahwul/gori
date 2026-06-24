@@ -343,6 +343,25 @@ module Gori::Tui
       true
     end
 
+    # Public setter mirroring the focus ring: jump straight to a pane (e.g. a click)
+    # rather than stepping with pane_advance. Ignores anything not in PANE_ORDER.
+    def focus_pane(pane : Symbol) : Nil
+      @focus = pane if PANE_ORDER.includes?(pane)
+    end
+
+    # Inverts render's layout: a 3-row target band on top, then a half-width
+    # request|response split (the column at content.x + half is the divider).
+    def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil unless @loaded && rect.contains?(mx, my)
+      target_h = {rect.h, 3}.min
+      return :target if my < rect.y + target_h
+      content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      return nil if content.h <= 0
+      half = {(content.w - 1) // 2, 1}.max
+      return :request if mx < content.x + half
+      mx >= content.x + half + 1 ? :response : nil
+    end
+
     # Top boundary of the focused pane — the Runner pops focus to the tab bar when
     # ↑ is pressed here (natural upward flow): the single-line target always, the
     # request editor at its first line, the response when scrolled to the top.

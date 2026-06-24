@@ -171,6 +171,44 @@ module Gori::Tui
       @follow = (@selected == 0)
     end
 
+    getter selected : Int32
+
+    # Alias getter for the selected row index (mouse dispatch readability).
+    def selected_index : Int32
+      @selected
+    end
+
+    # Inverts render_list's vertical layout: QL bar (rect.y), optional suggestion
+    # row (only while querying), header + divider, then flow rows from list_top.
+    # Returns the @rows index under (mx,my), or nil outside the list / past the
+    # last populated row. Mirrors list_top/list_h and the @scroll+i row math.
+    def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil if rect.empty? || !rect.contains?(mx, my)
+      lt = list_top(rect)
+      list_h = {rect.bottom - lt, 0}.max
+      i = my - lt
+      return nil if i < 0 || i >= list_h
+      ri = @scroll + i
+      ri < @rows.size ? ri : nil
+    end
+
+    # The first flow-row screen-y — mirrors render_list: hdr_y = rect.y+1 (+1 for
+    # the suggestion row while querying), then +2 past the header row + divider.
+    private def list_top(rect : Rect) : Int32
+      hdr_y = rect.y + 1
+      hdr_y += 1 if @querying
+      hdr_y + 2
+    end
+
+    # Click-select a row WITHOUT opening detail: same post-conditions as `move`
+    # (clamp @selected, @follow only when on the top/newest row); @scroll is left
+    # to render's ensure_visible, exactly as the keyboard path relies on.
+    def select_row(idx : Int32) : Nil
+      return if @rows.empty?
+      @selected = idx.clamp(0, @rows.size - 1)
+      @follow = (@selected == 0)
+    end
+
     # At the first (top) row — used by the Runner to pop focus up to the tab bar
     # when ↑ is pressed at the top (natural upward keyboard flow).
     def at_top? : Bool
@@ -427,6 +465,12 @@ module Gori::Tui
       @detail_hex_bytes = nil # …and the hex source bytes
     end
 
+    # Public wrapper around the private set_detail_pane — lets the Runner switch
+    # panes from a chip click (it ignores an unknown/inactive pane symbol).
+    def set_detail_pane_public(pane : Symbol) : Nil
+      set_detail_pane(pane) if detail_panes.includes?(pane)
+    end
+
     # Tab: cycle forward through the panes, wrapping back to REQUEST.
     def toggle_pane : Nil
       panes = detail_panes
@@ -595,6 +639,20 @@ module Gori::Tui
       when sub.ends_with?("+xml")                              then sub == "svg+xml" ? "svg" : "xml"
       else                                                          sub.lchop("vnd.").lchop("x-")
       end
+    end
+
+    # Inverts render_detail's chip strip (the one-row REQUEST/RESPONSE/FRAMES band
+    # at rect.y): each chip is " LABEL " (width label.size+2) from rect.x+1 with a
+    # 1-col gap between. Returns the pane symbol whose chip is under (mx,my), else nil.
+    def detail_pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if @detail.nil? || my != rect.y
+      x = rect.x + 1
+      detail_panes.each do |pane|
+        w = detail_pane_label(pane).size + 2 # " LABEL "
+        return pane if mx >= x && mx < x + w
+        x += w + 1 # render's trailing 1-col gap between chips
+      end
+      nil
     end
 
     def render_detail(screen : Screen, rect : Rect, focused : Bool = true) : Nil

@@ -151,6 +151,56 @@ module Gori::Tui
       end
     end
 
+    # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
+
+    # The w//3 split render() uses (render: `half = {rect.w // 3, 1}.max`).
+    private def split_panes(rect : Rect) : {Rect, Rect}
+      half = {rect.w // 3, 1}.max
+      left = Rect.new(rect.x, rect.y, half, rect.h)
+      right = Rect.new(rect.x + half + 1, rect.y, {rect.w - half - 1, 0}.max, rect.h)
+      {left, right}
+    end
+
+    # Which pane a click landed in: :list (left queue), :detail (right editor),
+    # else nil. Mirrors render's split; nil while empty (single full-rect card, no
+    # split) and in the 1-cell gap column between the panes.
+    def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if @items.empty?
+      left, right = split_panes(rect)
+      return :list if left.contains?(mx, my)
+      return :detail if right.contains?(mx, my)
+      nil
+    end
+
+    # The @items index under a click in the LEFT queue list, or nil. Inverts
+    # render_list: the card border is `rect.inset(1, 1)`, then row i sits at
+    # `inner.y + i` for idx = @scroll + i (clamped to populated rows).
+    def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil if @items.empty?
+      left, _ = split_panes(rect)
+      inner = left.inset(1, 1)
+      return nil unless inner.contains?(mx, my)
+      idx = @scroll + (my - inner.y)
+      idx < @items.size ? idx : nil
+    end
+
+    # Set the selection, clamped to the populated rows (mirrors `move`).
+    def select_index(idx : Int32) : Nil
+      return if @items.empty?
+      @selected = idx.clamp(0, @items.size - 1)
+    end
+
+    # Click the queue list → focus the list (stop editing the detail editor).
+    def focus_list : Nil
+      @editing = false
+    end
+
+    # Click the detail pane → focus the editor, but only when an item is loaded
+    # (mirrors toggle_edit's guard; loads the selected item's bytes if needed).
+    def focus_detail : Nil
+      toggle_edit unless @editing || selected_item.nil?
+    end
+
     # --- rendering -----------------------------------------------------------
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil

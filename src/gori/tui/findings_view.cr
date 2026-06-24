@@ -32,6 +32,30 @@ module Gori::Tui
       @selected = (@selected + delta).clamp(0, @findings.size - 1)
     end
 
+    # Inverts render_list's row layout (header at rect.y, divider at +1, rows from
+    # top = rect.y + 2 spanning @scroll..): maps a click to a finding index, or nil
+    # past the last populated row / outside the list pane.
+    def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil if mx < rect.x || mx >= rect.right
+      top = rect.y + 2
+      list_h = {rect.bottom - top, 0}.max
+      i = my - top
+      return nil if i < 0 || i >= list_h
+      idx = @scroll + i
+      idx < @findings.size ? idx : nil
+    end
+
+    # Sets the list selection (clamped like #move); render's ensure_visible then
+    # reconciles @scroll on the next frame.
+    def select_index(idx : Int32) : Nil
+      return if @findings.empty?
+      @selected = idx.clamp(0, @findings.size - 1)
+    end
+
+    def selected_index : Int32
+      @selected
+    end
+
     # At the first (top) finding — lets the Runner pop focus to the tab bar on ↑.
     def at_top? : Bool
       @selected == 0

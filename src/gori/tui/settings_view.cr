@@ -27,6 +27,7 @@ module Gori::Tui
     EDITOR_FIELDS = [
       Field.new("External editor", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
       Field.new("Markdown highlight", "syntax-colour markdown in Notes/Project — ←/→/space toggles", bool: true),
+      Field.new("Mouse", "click + scroll-wheel navigation (off restores native text selection)", bool: true),
     ]
     THEME_FIELDS = [
       Field.new("Theme", "TUI colour theme — ←/→/space cycles, ↵ applies", choices: Theme.available),
@@ -54,7 +55,7 @@ module Gori::Tui
     def reload(section : Symbol = :network) : Nil
       @section = section
       @values = case section
-                when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off"]
+                when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off"]
                 when :theme  then [Theme.canonical(Settings.theme)]
                 else              [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
                 end
@@ -155,7 +156,8 @@ module Gori::Tui
       if @section == :editor
         Settings.editor = @values[0].strip # blank is valid → clears to $VISUAL/$EDITOR/vi
         Settings.editor_markdown = @values[1] == "on"
-        @values = [Settings.editor, Settings.editor_markdown ? "on" : "off"]
+        Settings.mouse = @values[2] == "on"
+        @values = [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off"]
         return persist
       end
       port = @values[1].strip.to_i?
@@ -196,15 +198,42 @@ module Gori::Tui
       ok ? "settings saved" : "settings: save failed (could not write #{Settings.path})"
     end
 
+    # The centred settings box for `area` — the exact Rect render draws into (so
+    # hit-tests can be mapped against the same geometry render uses).
+    def overlay_box(area : Rect) : Rect
+      w = {area.w - 4, 64}.min
+      h = fields.size + 6
+      # Empty when render would decline to draw (same guard as render below): a click
+      # then falls through to !contains? and closes instead of focusing a field on an
+      # undrawn card.
+      return Rect.new(area.x, area.y, 0, 0) if w < 30 || area.h < h
+      x = area.x + (area.w - w) // 2
+      y = area.y + (area.h - h) // 2
+      Rect.new(x, y, w, h)
+    end
+
+    # The field-row index under (mx,my) within `box`, mirroring render's row loop
+    # (rows are box.y+2 .. box.y+2+size); nil outside the field rows or the box.
+    def field_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless box.contains?(mx, my)
+      i = my - (box.y + 2)
+      (0 <= i < fields.size) ? i : nil
+    end
+
+    # Focus field `idx`, clamped to the current section's field count (same clamp
+    # as move_field) and resetting the caret/preedit to that field.
+    def set_field(idx : Int32) : Nil
+      @focused = idx.clamp(0, @values.size - 1)
+      @cursor = @values[@focused].size
+      @preedit = ""
+    end
+
     def render(screen : Screen, area : Rect) : Nil
       flds = fields
       label_w = flds.max_of(&.label.size)
-      w = {area.w - 4, 64}.min
-      h = flds.size + 6
-      return if w < 30 || area.h < h
-      x = area.x + (area.w - w) // 2
-      y = area.y + (area.h - h) // 2
-      box = Rect.new(x, y, w, h)
+      box = overlay_box(area)
+      w = box.w
+      return if w < 30 || area.h < box.h
       Frame.card(screen, box, "SETTINGS · #{@section.to_s.upcase}", border: Theme.border_focus)
 
       flds.each_with_index do |field, i|

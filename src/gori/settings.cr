@@ -19,6 +19,7 @@ module Gori
     class_property editor : String = ""          # external editor for ^E; "" = $VISUAL/$EDITOR/vi
     class_property editor_markdown : Bool = true # syntax-highlight markdown in Notes/Project
     class_property theme : String = "goridark"   # TUI colour theme name (settings:theme); applied by Theme.apply
+    class_property mouse : Bool = true           # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
 
     def self.path : String
       File.join(Paths.home_dir, "settings.json")
@@ -34,16 +35,20 @@ module Gori
         self.upstream_proxy = net["upstream_proxy"]?.try(&.as_s?) || upstream_proxy
       end
       self.theme = root["theme"]?.try(&.as_s?) || theme # validated against the known themes by Theme.apply
+      self.mouse = load_bool(root, "mouse", mouse)
       if ed = root["editor"]?
         self.editor = ed["command"]?.try(&.as_s?) || editor
-        # `|| editor_markdown` would wrongly resurrect a stored `false` (false is falsy),
-        # so assign only when a real bool is present.
-        if (m = ed["markdown"]?) && !(mb = m.as_bool?).nil?
-          self.editor_markdown = mb
-        end
+        self.editor_markdown = load_bool(ed, "markdown", editor_markdown)
       end
     rescue
       # no file yet / unreadable / bad JSON — keep current values
+    end
+
+    # Read a boolean field, keeping `current` when it's absent or non-bool. A plain
+    # `|| current` would wrongly resurrect a stored `false` (false is falsy), so we
+    # assign only when a real bool is present.
+    private def self.load_bool(node : JSON::Any, key : String, current : Bool) : Bool
+      (v = node[key]?) && !(b = v.as_bool?).nil? ? b : current
     end
 
     # Persist the current values. Never raises into the caller (a failed write must
@@ -60,6 +65,7 @@ module Gori
       JSON.build do |j|
         j.object do
           j.field "theme", theme
+          j.field "mouse", mouse
           j.field "network" do
             j.object do
               j.field "bind_host", bind_host

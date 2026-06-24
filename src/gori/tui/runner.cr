@@ -378,6 +378,8 @@ module Gori::Tui
       case ev
       when Termisu::Event::Key
         handle_key(ev)
+      when Termisu::Event::Mouse
+        handle_mouse(ev)
       when Termisu::Event::Resize
         # termisu already resized its cell buffer (prepare_event); flag the next
         # frame to full-repaint, since the diff renderer would leave stale cells.
@@ -551,6 +553,320 @@ module Gori::Tui
       end
     end
 
+    # --- mouse dispatch ------------------------------------------------------
+    # Mouse coords are 1-based; Rect is 0-based → convert once (mx/my). We recompute
+    # Layout.compute from the LIVE size (identical to render), so the click geometry
+    # can't drift from what was drawn. The click path mirrors handle_key's precedence:
+    # the ":" command line → centered modal overlays → tab bar → sub-tab strip →
+    # per-tab body. Wheel is routed separately. NOTE: enabling mouse takes over the
+    # terminal's alternate-scroll (which used to arrive as ↑/↓ key bursts), so wheel
+    # MUST be handled here or list scrolling silently dies.
+    private def handle_mouse(ev : Termisu::Event::Mouse) : Nil
+      return unless ev.press? || ev.wheel? # ignore motion + button-release (nav-only scope)
+      w, h = @backend.size
+      return unless Layout.usable?(w, h)
+      layout = Layout.compute(w, h)
+      mx, my = ev.x - 1, ev.y - 1
+      @quit_armed = false
+      @toast = nil
+      if ev.wheel?
+        return unless ev.button.wheel_up? || ev.button.wheel_down?
+        handle_wheel(layout, mx, my, ev.button.wheel_up? ? -1 : 1)
+      else
+        dispatch_click(layout, mx, my)
+      end
+    end
+
+    # Route a click in tier order. :detail is NOT a capturing modal — it's a History
+    # body drill-in, so it falls through to the tab bar + body (the bar stays live,
+    # like the keyboard). Centered modals capture every click (outside → dismiss).
+    private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
+      return if @command_open && click_command(layout, mx, my)
+      if @goto_open || @search_open
+        close_goto if @goto_open       # a click anywhere dismisses the bottom prompt (like esc)
+        close_search if @search_open
+        return
+      end
+      if modal_overlay?
+        handle_overlay_click(layout, mx, my)
+        return
+      end
+      return click_menu(layout.menu, mx, my) if layout.menu.contains?(mx, my)
+      return if subtabs_shown? && click_subtab_strip(layout.body, mx, my)
+      click_body(layout.body, mx, my) if layout.body.contains?(mx, my)
+    end
+
+    # The overlays that fully capture input (a centered card); :detail and :none do not.
+    private def modal_overlay? : Bool
+      case @overlay
+      when :palette, :rules, :finding_new, :confirm, :browser, :settings then true
+      else                                                                     false
+      end
+    end
+
+    # Click the top tab bar: switch to the clicked tab (immediate, like a number jump),
+    # re-focus the body when the active tab is re-clicked, else just focus the bar.
+    private def click_menu(rect : Rect, mx : Int32, my : Int32) : Nil
+      seg = Chrome.menu_segments(rect, @active_tab,
+        findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
+        replay_count: @replays.size, notes_count: @notes.count).find { |(_, r)| r.contains?(mx, my) }
+      if seg
+        seg[0] == @active_tab ? focus_pane(:body) : focus_tab(seg[0])
+      else
+        focus_pane(:menu) # empty menu area: land on the tab bar like the keyboard (clears a stale overlay, saves replay edits)
+      end
+    end
+
+    # Click a Replay/Notes sub-tab chip (carved off the body's top row). Returns true
+    # when the click landed on the strip row (handled), false to fall through to body.
+    private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
+      sub_rect, _ = carve_subtab_row(body)
+      return false unless sub_rect.contains?(mx, my)
+      if seg = Chrome.strip_segments(sub_rect, subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
+        jump_subtab(seg[0])
+        focus_pane(:subtabs)
+      end
+      true # consume any click on the strip row, even between chips
+    end
+
+    # Labels for the active tab's sub-tab strip — built identically to render_body.
+    private def subtab_labels : Array(String)
+      case @active_tab
+      when :replay then @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.view.summary(18)}" }
+      when :notes  then @notes.subtab_labels
+      else              [] of String
+      end
+    end
+
+    private def current_subtab_index : Int32
+      @active_tab == :replay ? @current_replay_idx : @notes.current_index
+    end
+
+    # Per-tab body click. Notes (a lone editor) + Agent just take focus; cursor
+    # placement inside editors is Phase 2.
+    private def click_body(body : Rect, mx : Int32, my : Int32) : Nil
+      case @active_tab
+      when :history   then click_history(body, mx, my)
+      when :findings  then click_findings(body, mx, my)
+      when :sitemap   then click_sitemap(body, mx, my)
+      when :replay    then click_replay(body, mx, my)
+      when :project   then click_project(body, mx, my)
+      when :intercept then click_intercept(body, mx, my)
+      else                 (@focus = :body)
+      end
+    end
+
+    # History: in detail, a chip click switches the request/response/frames pane. In
+    # the list, SELECT-FIRST — first click selects the row, a second click on the
+    # already-selected row opens the detail (the locked click model).
+    private def click_history(body : Rect, mx : Int32, my : Int32) : Nil
+      inner = body.inset(1, 1) # render_framed insets 1,1
+      if @overlay == :detail
+        if pane = @history.detail_pane_at(inner, mx, my)
+          @history.set_detail_pane_public(pane)
+        end
+        return
+      end
+      @focus = :body
+      return unless idx = @history.list_row_at(inner, mx, my)
+      idx == @history.selected_index ? open_detail : @history.select_row(idx)
+    end
+
+    # Findings list: same select-first as History. No body hit-testing while the
+    # detail/notes pane is open (it isn't the list).
+    private def click_findings(body : Rect, mx : Int32, my : Int32) : Nil
+      return if @findings.detail_open?
+      @focus = :body
+      inner = body.inset(1, 1)
+      return unless idx = @findings.list_row_at(inner, mx, my)
+      idx == @findings.selected_index ? findings_open : @findings.select_index(idx)
+    end
+
+    # Sitemap: a click selects the row; a click on the ▾/▸ marker toggles it
+    # (expand/collapse is single-click, per the locked model).
+    private def click_sitemap(body : Rect, mx : Int32, my : Int32) : Nil
+      @focus = :body
+      inner = body.inset(1, 1)
+      return unless ri = @sitemap.row_at(inner, mx, my)
+      @sitemap.select_index(ri)
+      @sitemap.toggle_at(ri) if @sitemap.marker_hit?(inner, mx, ri)
+    end
+
+    # Replay: click a pane (target/request/response) to focus it (saving the outgoing
+    # edits first, like the keyboard pane-advance).
+    private def click_replay(body : Rect, mx : Int32, my : Int32) : Nil
+      rect = @replays.size >= 2 ? carve_subtab_row(body)[1] : body
+      return unless v = current_replay_view
+      if pane = v.pane_at(rect, mx, my)
+        save_current_replay
+        v.focus_pane(pane)
+        @focus = :body
+      end
+    end
+
+    # Project: focus the clicked pane; in the SCOPE list a click also selects the rule.
+    private def click_project(body : Rect, mx : Int32, my : Int32) : Nil
+      return unless pane = @project_view.pane_at(body, mx, my)
+      @focus = :body
+      case pane
+      when :scope
+        @project_view.focus_pane(:scope)
+        if idx = @project_view.scope_row_at(body, mx, my)
+          @project_view.select_scope(idx)
+        end
+      when :desc
+        @project_view.focus_pane(:desc)
+      end # :overview band → just take body focus
+    end
+
+    # Intercept: click the left queue (focus list + select an item) or the right pane
+    # (focus the editor when an item is loaded).
+    private def click_intercept(body : Rect, mx : Int32, my : Int32) : Nil
+      return unless pane = @intercept.pane_at(body, mx, my)
+      @focus = :body
+      if pane == :list
+        @intercept.focus_list
+        if idx = @intercept.list_row_at(body, mx, my)
+          @intercept.select_index(idx)
+        end
+      else
+        @intercept.focus_detail
+      end
+    end
+
+    # The ":" command line floats over everything: a click on a suggestion runs it,
+    # a click elsewhere dismisses the line. Always consumes the click (returns true).
+    private def click_command(layout : Layout, mx : Int32, my : Int32) : Bool
+      if idx = @command.row_at(layout.body, mx, my)
+        @command.set_selected(idx)
+        verb = @command.selected_verb
+        close_command
+        @toast = verb.call(self) || @toast if verb
+      else
+        close_command
+      end
+      true
+    end
+
+    # Centered modal overlays: fan out by kind. Each dismisses on a click outside its
+    # box (or on the [x]); list overlays run/select on a row click.
+    private def handle_overlay_click(layout : Layout, mx : Int32, my : Int32) : Nil
+      area = layout.body
+      case @overlay
+      when :palette  then click_palette(area, mx, my)
+      when :rules    then click_rules(area, mx, my)
+      when :browser  then click_browser(area, mx, my)
+      when :confirm  then click_confirm(area, mx, my)
+      when :settings then click_settings(area, mx, my)
+        # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
+      end
+    end
+
+    private def click_palette(area : Rect, mx : Int32, my : Int32) : Nil
+      box = @palette.overlay_box(area)
+      return close_overlay if box.empty? || dismiss_zone?(box, mx, my)
+      return unless idx = @palette.row_at(box, mx, my)
+      @palette.set_selected(idx)
+      if verb = @palette.selected_verb
+        close_overlay
+        @toast = verb.call(self) || @toast
+      end
+    end
+
+    private def click_rules(area : Rect, mx : Int32, my : Int32) : Nil
+      box = @rules_overlay.overlay_box(area)
+      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = @rules_overlay.row_at(box, mx, my)
+        @rules_overlay.set_selected(idx)
+      end
+    end
+
+    private def click_browser(area : Rect, mx : Int32, my : Int32) : Nil
+      bp = @browser_picker
+      box = bp.try(&.overlay_box(area))
+      return close_browser_picker if bp.nil? || box.nil? || dismiss_zone?(box, mx, my)
+      if idx = bp.row_at(box, mx, my)
+        bp.set_selected(idx)
+        launch_selected_browser
+      end
+    end
+
+    private def click_confirm(area : Rect, mx : Int32, my : Int32) : Nil
+      cd = @confirm
+      return close_confirm if cd.nil?
+      box = cd.overlay_box(area)
+      return close_confirm if dismiss_zone?(box, mx, my)
+      case cd.button_at(box, mx, my)
+      when :confirm then run_confirm
+      when :cancel  then close_confirm
+      end # a click in the box but off the buttons keeps it open
+    end
+
+    private def click_settings(area : Rect, mx : Int32, my : Int32) : Nil
+      box = @settings_view.overlay_box(area)
+      return cancel_settings if dismiss_zone?(box, mx, my)
+      if idx = @settings_view.field_at(box, mx, my)
+        @settings_view.set_field(idx)
+      end
+    end
+
+    # True when a click should dismiss a modal: anywhere outside its box (click-away
+    # is the universal close affordance — every modal also still closes on esc).
+    private def dismiss_zone?(box : Rect, mx : Int32, my : Int32) : Bool
+      !box.contains?(mx, my)
+    end
+
+    # Cancel the settings modal: revert any live theme preview (mirrors the esc path).
+    private def cancel_settings : Nil
+      if restore = @theme_restore
+        Theme.apply(restore)
+        @resized = true
+        @theme_restore = nil
+      end
+      @overlay = :none
+    end
+
+    # Apply the persisted Mouse setting to the live terminal (both calls are
+    # idempotent — they guard on the current state), so toggling Mouse off in
+    # settings restores native text selection without a restart.
+    private def reconcile_mouse : Nil
+      Settings.mouse ? @term.enable_mouse : @term.disable_mouse
+    end
+
+    # --- scroll wheel --------------------------------------------------------
+    # ±3 per notch. Lists move the SELECTION (selection-follow, matches the keyboard);
+    # free-scroll panes (History detail, Replay response) scroll independently.
+    private def handle_wheel(layout : Layout, mx : Int32, my : Int32, dir : Int32) : Nil
+      step = dir * 3
+      return @command.move(step) if @command_open
+      return wheel_overlay(step) if modal_overlay?
+      return unless layout.body.contains?(mx, my)
+      case @active_tab
+      when :history   then @overlay == :detail ? @history.scroll_detail(step) : @history.move(step)
+      when :findings  then @findings.move(step) unless @findings.detail_open? # detail pane hides the list — don't shift the selection behind it
+
+      when :sitemap   then @sitemap.move(step)
+      when :intercept then @intercept.move(step)
+      when :replay    then wheel_replay(step)
+      end
+    end
+
+    # Wheel inside a centered modal scrolls its list (no movement for the button modals).
+    private def wheel_overlay(step : Int32) : Nil
+      case @overlay
+      when :palette  then @palette.move(step)
+      when :rules    then @rules_overlay.select_move(step)
+      when :browser  then @browser_picker.try(&.move(step))
+      when :settings then @settings_view.move_field(step)
+      end
+    end
+
+    # Replay wheel free-scrolls the response pane; the request editor is Phase 2.
+    private def wheel_replay(step : Int32) : Nil
+      return unless v = current_replay_view
+      v.scroll(step) if v.focus == :response
+    end
+
     # Match&Replace overlay: type a `[req:|resp:] pattern => replacement` rule;
     # ↵ add, ⌫ edit/remove, ↑/↓ select, tab on/off, esc close. No view reload —
     # rules act on the live proxy, not on already-captured flows.
@@ -661,13 +977,7 @@ module Gori::Tui
         @overlay = :none
         open_palette
       elsif key.escape?
-        # Cancel: undo any live theme preview (revert to the theme on open).
-        if restore = @theme_restore
-          Theme.apply(restore)
-          @resized = true
-          @theme_restore = nil
-        end
-        @overlay = :none
+        cancel_settings # revert any live theme preview, close
       elsif key.enter?
         # :network rebinds the live proxy; :theme swaps the palette + repaints; the
         # rest just persist (the value is read live or only matters next session).
@@ -678,6 +988,7 @@ module Gori::Tui
                  else               msg
                  end
         @theme_restore = Settings.theme if @settings_view.section == :theme # saved → don't revert this on esc
+        reconcile_mouse # the EDITOR section holds the Mouse toggle — apply it live
       elsif key.up?
         @settings_view.move_field(-1)
       elsif key.down?

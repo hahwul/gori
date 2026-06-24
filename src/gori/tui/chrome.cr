@@ -52,33 +52,57 @@ module Gori::Tui
       return if rect.empty?
       screen.fill(rect, Theme.panel)
 
-      labels = TABS.map { |(sym, label)| "#{label}#{menu_badge(sym, findings_count, intercept_count, replay_count, notes_count)}" }
-      widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
-      active_idx = TABS.index { |(sym, _)| sym == active_tab } || 0
-
-      # Window the strip so the active segment is ALWAYS visible: on a narrow row
-      # advance the start until segments [start..active] fit, so the menu scrolls
-      # instead of breaking and hiding every tab from the overflow point on.
-      start = scroll_start(widths, active_idx, rect.w - 2)
-
-      x = rect.x + 1
+      segs, start = menu_layout(rect, active_tab, findings_count, intercept_count, replay_count, notes_count)
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.panel) if start > 0 # earlier tabs hidden
-      TABS.each_with_index do |(sym, _), i|
-        next if i < start
-        seg_w = widths[i]
-        break if x + seg_w > rect.right + 1
+      segs.each do |(sym, label, seg)|
         if sym == active_tab
           # focus brightens the active segment (ACCENT) so the user sees the menu
           # is live; when the body holds focus it stays bold but settles to TEXT.
           bg = focused ? Theme.accent_bg : Theme.selection_dim
           fg = focused ? Theme.accent : Theme.text
-          screen.fill(Rect.new(x, rect.y, seg_w, 1), bg)
-          screen.text(x + 1, rect.y, labels[i], fg, bg, Attribute::Bold)
+          screen.fill(seg, bg)
+          screen.text(seg.x + 1, seg.y, label, fg, bg, Attribute::Bold)
         else
-          screen.text(x + 1, rect.y, labels[i], Theme.muted, Theme.panel)
+          screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.panel)
         end
+      end
+    end
+
+    # Pure: the visible tab segments under the menu strip — {symbol, cell rect} —
+    # computed IDENTICALLY to render_menu (shares menu_layout) so a click hit-test
+    # can never drift from what was drawn. Coords are 0-based cells.
+    def self.menu_segments(rect : Rect, active_tab : Symbol, *,
+                           findings_count : Int32 = 0, intercept_count : Int32 = 0,
+                           replay_count : Int32 = 0, notes_count : Int32 = 0) : Array({Symbol, Rect})
+      return [] of {Symbol, Rect} if rect.empty?
+      menu_layout(rect, active_tab, findings_count, intercept_count, replay_count, notes_count)[0]
+        .map { |(sym, _, seg)| {sym, seg} }
+    end
+
+    # The single source of menu-segment geometry: each visible tab's {symbol, label,
+    # rect} plus the window `start` (so render can flag the `‹` overflow marker).
+    # Mirrors the old inline render_menu loop exactly — windowing via scroll_start,
+    # segments laid " label " with a 1-col gap, the same `> rect.right + 1` break.
+    private def self.menu_layout(rect : Rect, active_tab : Symbol, findings_count : Int32,
+                                 intercept_count : Int32, replay_count : Int32,
+                                 notes_count : Int32) : {Array({Symbol, String, Rect}), Int32}
+      segs = [] of {Symbol, String, Rect}
+      labels = TABS.map { |(sym, label)| "#{label}#{menu_badge(sym, findings_count, intercept_count, replay_count, notes_count)}" }
+      widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
+      active_idx = TABS.index { |(sym, _)| sym == active_tab } || 0
+      # Window the strip so the active segment is ALWAYS visible: on a narrow row
+      # advance the start until segments [start..active] fit, so the menu scrolls
+      # instead of breaking and hiding every tab from the overflow point on.
+      start = scroll_start(widths, active_idx, rect.w - 2)
+      x = rect.x + 1
+      TABS.each_with_index do |(sym, _), i|
+        next if i < start
+        seg_w = widths[i]
+        break if x + seg_w > rect.right + 1
+        segs << {sym, labels[i], Rect.new(x, rect.y, seg_w, 1)}
         x += seg_w + 1 # a column of breathing room between segments
       end
+      {segs, start}
     end
 
     # Leftmost visible segment index that keeps `active_idx` on-screen, given each
@@ -106,31 +130,51 @@ module Gori::Tui
       return if rect.empty? || labels.empty?
       screen.fill(rect, bg)
       active = active.clamp(0, labels.size - 1)
-      widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
+      segs, start, last = strip_layout(rect, labels, active)
+      segs.each do |(i, label, seg)|
+        if i == active
+          abg = focused ? Theme.accent_bg : Theme.selection_dim
+          afg = focused ? Theme.text_bright : Theme.text
+          screen.fill(seg, abg)
+          screen.text(seg.x + 1, seg.y, label, afg, abg, attr: Attribute::Bold)
+        else
+          screen.text(seg.x + 1, seg.y, label, Theme.muted, bg)
+        end
+      end
+      screen.cell(rect.x, rect.y, '‹', Theme.muted, bg) if start > 0
+      screen.cell(rect.right - 1, rect.y, '›', Theme.muted, bg) if last < labels.size - 1
+    end
 
+    # Pure: the visible sub-tab chips — {index, cell rect} — computed IDENTICALLY to
+    # render_tab_strip (shares strip_layout) so a click hit-test can't drift. Used by
+    # the Replay/Notes sub-tab strips.
+    def self.strip_segments(rect : Rect, labels : Array(String), active : Int32) : Array({Int32, Rect})
+      return [] of {Int32, Rect} if rect.empty? || labels.empty?
+      strip_layout(rect, labels, active.clamp(0, labels.size - 1))[0].map { |(i, _, seg)| {i, seg} }
+    end
+
+    # The single source of sub-tab-chip geometry: each visible chip's {index, label,
+    # rect} plus the window `start` and `last` drawn index (so render can flag the
+    # ‹ / › overflow markers). Mirrors the old inline render_tab_strip loop exactly —
+    # reserves a column each edge (the `> rect.right - 1` break) for the markers.
+    private def self.strip_layout(rect : Rect, labels : Array(String),
+                                  active : Int32) : {Array({Int32, String, Rect}), Int32, Int32}
+      segs = [] of {Int32, String, Rect}
+      widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
       # Reserve a column on each edge for the ‹ / › overflow markers, then advance
       # the start until the segments [start..active] fit in what remains.
       start = scroll_start(widths, active, {rect.w - 2, 0}.max)
-
       x = rect.x + 1
       last = start - 1
       labels.each_with_index do |label, i|
         next if i < start
         seg_w = widths[i]
         break if x + seg_w > rect.right - 1 # leave the last column for the › marker
-        if i == active
-          abg = focused ? Theme.accent_bg : Theme.selection_dim
-          afg = focused ? Theme.text_bright : Theme.text
-          screen.fill(Rect.new(x, rect.y, seg_w, 1), abg)
-          screen.text(x + 1, rect.y, label, afg, abg, attr: Attribute::Bold)
-        else
-          screen.text(x + 1, rect.y, label, Theme.muted, bg)
-        end
+        segs << {i, label, Rect.new(x, rect.y, seg_w, 1)}
         x += seg_w + 1
         last = i
       end
-      screen.cell(rect.x, rect.y, '‹', Theme.muted, bg) if start > 0
-      screen.cell(rect.right - 1, rect.y, '›', Theme.muted, bg) if last < labels.size - 1
+      {segs, start, last}
     end
 
     # The header hairline (row 2) separating the chrome from the body.

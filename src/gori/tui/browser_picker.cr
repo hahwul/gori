@@ -24,14 +24,38 @@ module Gori::Tui
       @browsers[@selected]?
     end
 
-    # Centered list card over `area` (the body rect).
-    def render(screen : Screen, area : Rect) : Nil
+    # Geometry of the centered card over `area` — inverse of render's offset
+    # math. Returns nil when render would draw nothing (same w/h guard).
+    def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 52}.min
       h = {@browsers.size + 4, area.h - 2}.min
-      return if w < 24 || area.h < 6
+      return nil if w < 24 || area.h < 6
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
-      box = Rect.new(x, y, w, h)
+      Rect.new(x, y, w, h)
+    end
+
+    # Browser-row index under (mx,my), mirroring render's list loop; nil outside.
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      list_top = box.y + 3
+      list_h = box.bottom - 1 - list_top
+      i = my - list_top
+      return nil if i < 0 || i >= list_h
+      return nil if mx < box.x + 1 || mx >= box.right - 1
+      i < @browsers.size ? i : nil
+    end
+
+    # Clamp + set the highlighted row (mirrors `move`'s clamp).
+    def set_selected(idx : Int32) : Nil
+      return if @browsers.empty?
+      @selected = idx.clamp(0, @browsers.size - 1)
+    end
+
+    # Centered list card over `area` (the body rect).
+    def render(screen : Screen, area : Rect) : Nil
+      box = overlay_box(area)
+      return unless box
+      w = box.w
       Frame.card(screen, box, "OPEN BROWSER", border: Theme.border_focus)
       screen.text(box.x + 2, box.y + 1, "pre-trusted · proxy auto-set", Theme.muted, Theme.panel)
       Frame.tee_divider(screen, box, box.y + 2)

@@ -110,6 +110,53 @@ module Gori::Tui
       true
     end
 
+    # Mouse: focus a body pane directly (click-to-focus). Ignores unknown symbols.
+    def focus_pane(pane : Symbol) : Nil
+      @pane = pane if PANES.includes?(pane)
+    end
+
+    # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
+
+    # The pane symbol under (mx,my): :scope (left card), :desc (right card), or
+    # :overview (top band). Mirrors render's meta_h split + left/right card layout.
+    def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if rect.empty? || !rect.contains?(mx, my)
+      meta_h = {11, {rect.h * 2 // 5, 3}.max}.min
+      return :overview if my < rect.y + meta_h
+      content = Rect.new(rect.x, rect.y + meta_h, rect.w, {rect.h - meta_h, 0}.max)
+      return nil if content.h < 2 || content.w < 4
+      left_w = {(content.w - 1) // 2, 1}.max
+      return :scope if Rect.new(content.x, content.y, left_w, content.h).contains?(mx, my)
+      right = Rect.new(content.x + left_w + 1, content.y, {content.w - left_w - 1, 0}.max, content.h)
+      right.contains?(mx, my) ? :desc : nil
+    end
+
+    # Index of the scope-rule row clicked, or nil outside the populated list. Mirrors
+    # render_scope_list: card interior inset(1,1), the optional add-row offset, and
+    # scroll_for's windowing.
+    def scope_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless pane_at(rect, mx, my) == :scope
+      meta_h = {11, {rect.h * 2 // 5, 3}.max}.min
+      content = Rect.new(rect.x, rect.y + meta_h, rect.w, {rect.h - meta_h, 0}.max)
+      left_w = {(content.w - 1) // 2, 1}.max
+      inner = Rect.new(content.x, content.y, left_w, content.h).inset(1, 1)
+      return nil if inner.h <= 0 || !inner.contains?(mx, my)
+      y = @adding ? inner.y + 1 : inner.y
+      rows = @adding ? inner.h - 1 : inner.h
+      i = my - y
+      return nil if i < 0 || i >= rows
+      n = @scope.rules.size
+      idx = scroll_for(@sel, n, rows) + i
+      idx < n ? idx : nil
+    end
+
+    # Mouse: select a scope rule by row index (clamped to the populated list).
+    def select_scope(idx : Int32) : Nil
+      n = @scope.rules.size
+      return if n == 0
+      @sel = idx.clamp(0, n - 1)
+    end
+
     # --- SCOPE pane editing (delegated from Runner#handle_project_scope_key) ---
     def adding? : Bool
       @adding

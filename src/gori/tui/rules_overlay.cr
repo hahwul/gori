@@ -95,13 +95,21 @@ module Gori::Tui
       end
     end
 
-    def render(screen : Screen, area : Rect) : Nil
+    # Centered overlay box for `area` — the exact rect render() draws into, or
+    # nil when too small (mirrors render's w/h clamp + < 16/6 bail).
+    def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 64}.min
       h = {area.h - 2, 16}.min
-      return if w < 16 || h < 6
+      return nil if w < 16 || h < 6
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
-      box = Rect.new(x, y, w, h)
+      Rect.new(x, y, w, h)
+    end
+
+    def render(screen : Screen, area : Rect) : Nil
+      box = overlay_box(area)
+      return unless box
+      w = box.w
       Frame.card(screen, box, "MATCH & REPLACE", border: Theme.border_focus)
 
       rules = @rules.rules
@@ -139,6 +147,21 @@ module Gori::Tui
       screen.text(box.x + 5, py, tag, rule.enabled? ? Theme.text : Theme.muted, bg)
       desc = "#{rule.pattern} → #{rule.replacement}"
       screen.text(box.x + 9, py, desc, selected ? Theme.text_bright : Theme.text, bg, width: w - 11)
+    end
+
+    # Rule-row index under (mx,my) — inverts the list loop: input line sits at
+    # box.y+1 and the divider at box.y+2, so rows start at box.y+3 (row i at +3+i).
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless box.contains?(mx, my)
+      list_top = box.y + 3
+      i = my - list_top
+      return nil if i < 0 || i >= box.bottom - 1 - list_top
+      i < @rules.rules.size ? i : nil
+    end
+
+    # Clamp the selection to a populated row (matches select_move's bounds).
+    def set_selected(idx : Int32) : Nil
+      @selected = idx.clamp(0, {@rules.rules.size - 1, 0}.max)
     end
   end
 end

@@ -64,14 +64,22 @@ module Gori::Tui
       @selected = @selected.clamp(0, {@results.size - 1, 0}.max)
     end
 
-    # Renders a centered overlay box within `area`.
-    def render(screen : Screen, area : Rect) : Nil
+    # Inverts render's centered-box math: same w/h clamp + centering as render.
+    # Returns an empty Rect (w/h 0) when too small to draw (render's early-return).
+    def overlay_box(area : Rect) : Rect
       w = {area.w - 4, 60}.min
       h = {area.h - 4, 16}.min
-      return if w < 10 || h < 4
+      return Rect.new(0, 0, 0, 0) if w < 10 || h < 4
       x = area.x + (area.w - w) // 2
       y = area.y + (area.h - h) // 2
-      box = Rect.new(x, y, w, h)
+      Rect.new(x, y, w, h)
+    end
+
+    # Renders a centered overlay box within `area`.
+    def render(screen : Screen, area : Rect) : Nil
+      box = overlay_box(area)
+      return if box.empty?
+      w = box.w
       Frame.card(screen, box, "COMMANDS", border: Theme.border_focus)
 
       # query line (caret always at end; preedit shown underlined there)
@@ -115,6 +123,26 @@ module Gori::Tui
       @scroll = @selected if @selected < @scroll
       @scroll = @selected - h + 1 if @selected >= @scroll + h
       @scroll = 0 if @scroll < 0
+    end
+
+    # Inverts render's result-list loop: list starts at box.y + 3, rows fill the
+    # box-x+1..right-1 band, height = box.bottom - 1 - list_top. Returns the result
+    # index under (mx,my), or nil outside the list / past the last real result.
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      return nil if box.empty?
+      list_top = box.y + 3
+      list_h = box.bottom - 1 - list_top
+      return nil if mx < box.x + 1 || mx >= box.right - 1
+      i = my - list_top
+      return nil if i < 0 || i >= list_h
+      idx = @scroll + i
+      idx < @results.size ? idx : nil
+    end
+
+    # Selects a result by index (clamped), mirroring move/ensure_visible bounds.
+    def set_selected(idx : Int32) : Nil
+      return if @results.empty?
+      @selected = idx.clamp(0, @results.size - 1)
     end
   end
 end

@@ -111,6 +111,27 @@ module Gori::Tui
         Theme.text_bright, Theme.panel, width: {status.w - 1, 0}.max)
     end
 
+    # Inverts render's stacked-above layout: maps a click in `body` (the SAME rect
+    # render() draws the suggestion list into) to a result index. The list is
+    # bottom-anchored at list_top = body.y + body.h - shown and row i shows
+    # @results[@scroll + i]; the ":" input sits on the separate `status` row below,
+    # so clicks there don't reach here. Returns nil outside the populated rows.
+    def row_at(body : Rect, mx : Int32, my : Int32) : Int32?
+      return nil if @results.empty?
+      return nil unless body.contains?(mx, my)
+      shown = { {@results.size, MAX_ROWS}.min, body.h }.min
+      list_top = body.y + body.h - shown
+      i = my - list_top
+      return nil if i < 0 || i >= shown
+      idx = @scroll + i
+      idx < @results.size ? idx : nil # clamp to populated rows (blank filler past the end)
+    end
+
+    # Sets the active suggestion, clamped to the populated range (for click-select).
+    def set_selected(idx : Int32) : Nil
+      @selected = idx.clamp(0, {@results.size - 1, 0}.max)
+    end
+
     private def draw_row(screen : Screen, x : Int32, ry : Int32, width : Int32, verb : Verb::Definition, active : Bool) : Nil
       bg = active ? Theme.accent_bg : Theme.panel
       soon = verb.coming_soon?
