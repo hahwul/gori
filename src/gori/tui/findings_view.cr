@@ -198,7 +198,7 @@ module Gori::Tui
       screen.text(rect.x + 6, rect.y, status_tag(finding.status), status_color(finding.status))
       screen.text(rect.x + 11, rect.y, finding.title, Theme.text_bright, width: {rect.w - 12, 0}.max)
       hint = @editing_notes ? "esc save · ^W discard" \
-                            : "[ ] sev · { } status · t title · e notes · o open · r replay · d del · esc back"
+                            : "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · esc back"
       screen.text(rect.x + 1, rect.y + 1, hint, Theme.muted, width: {rect.w - 2, 0}.max)
       meta = "##{finding.id} · #{finding.status.label} · #{fmt_ts(finding.created_at)}"
       meta += " · edited #{fmt_ts(finding.updated_at)}" if finding.updated_at > finding.created_at

@@ -1806,8 +1806,11 @@ module Gori::Tui
       screen.fill(rect, Theme.panel)
       prefix = "go to line: "
       screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
+      hint = "↵ jump · esc cancel" # mirror the find prompt so the keys are discoverable
       x = rect.x + prefix.size
-      screen.input_line(x, rect.y, @goto_buffer, @goto_buffer.size, "", Theme.text_bright, Theme.panel, width: {rect.right - x, 0}.max)
+      iw = {rect.right - x - hint.size - 2, 4}.max
+      screen.input_line(x, rect.y, @goto_buffer, @goto_buffer.size, "", Theme.text_bright, Theme.panel, width: iw)
+      screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
     private def render_search_prompt(screen : Screen, rect : Rect) : Nil
