@@ -2438,7 +2438,12 @@ module Gori::Tui
     end
 
     def export_ca : Nil
-      @toast = "root CA: #{@session.ca.ca_cert_path}"
+      # Copy the path so it's actionable (paste into `--cacert`, a cert import, or a
+      # file manager) — a transient toast you can't select is useless for the one
+      # step that unblocks HTTPS capture.
+      path = @session.ca.ca_cert_path
+      Clipboard.copy(path)
+      @toast = "root CA path copied to clipboard: #{path}"
     end
 
     # --- browser (open a pre-trusted system browser) ---
