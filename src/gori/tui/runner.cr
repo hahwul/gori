@@ -1172,7 +1172,7 @@ module Gori::Tui
       c = ev.char || key.to_char
       case
 
-      when key.enter?     then replay_send
+      when key.enter?     then view.pane_advance(1)                          # ↵ confirms the URL → Request pane (^R sends, not ↵, so you don't fire a live request mid-edit)
       when key.up?        then focus_pane(subtabs_shown? ? :subtabs : :menu) # target is the top pane → ↑ pops up
       when key.down?      then view.pane_advance(1)                          # ↓ → drop into the Request pane below
       when key.backspace? then view.target_backspace
