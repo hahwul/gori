@@ -95,10 +95,11 @@ module Gori
       getter? response_body_truncated : Bool
       getter h2_conn_id : Int64?
       getter h2_stream_id : Int64?
+      getter error : String? # upstream/parse/tls failure message for Error/Aborted flows (response side is empty)
 
       def initialize(@row, @http_version, @request_head, @request_body,
                      @response_head, @response_body, @h2_conn_id = nil, @h2_stream_id = nil,
-                     @request_body_truncated = false, @response_body_truncated = false)
+                     @request_body_truncated = false, @response_body_truncated = false, @error = nil)
       end
     end
 

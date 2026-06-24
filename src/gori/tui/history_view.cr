@@ -525,8 +525,16 @@ module Gori::Tui
         screen.text(proto_x, y, row.scheme.upcase, Theme.muted, bg)
         screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
         screen.text(path_x, y, Url.origin_path(row.target), fg, bg, width: path_w) if path_w > 0
-        status = row.status.try(&.to_s) || "···"
-        screen.text(status_x, y, status, Theme.status_color(row.status), bg, width: 3)
+        # Failed flows store status 0 — show the STATE (ERR/ABT) so they don't read as a
+        # cryptic "0" indistinguishable from a still-pending "···".
+        status, scolor = if row.state.error?
+                           {"ERR", Theme.red}
+                         elsif row.state.aborted?
+                           {"ABT", Theme.yellow}
+                         else
+                           {row.status.try(&.to_s) || "···", Theme.status_color(row.status)}
+                         end
+        screen.text(status_x, y, status, scolor, bg, width: 3)
         screen.text(type_x, y, fmt_mime(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
         screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6) if show_dur
@@ -775,6 +783,20 @@ module Gori::Tui
         return DetailView.new(head, [] of String, :text, EMPTY_LINES)
       end
       request = @detail_pane == :request
+      # A failed/pending flow has no response bytes — surface WHY (like Replay does)
+      # instead of a blank pane.
+      if !request && ((rh = detail.response_head).nil? || rh.empty?)
+        span = if (err = detail.error) && !err.empty?
+                 Highlight::Span.new("upstream error: #{err}", Theme.red)
+               elsif detail.row.state.aborted?
+                 Highlight::Span.new("— connection aborted (no response captured) —", Theme.yellow)
+               elsif detail.row.state.pending?
+                 Highlight::Span.new("— waiting for response… —", Theme.muted)
+               else
+                 Highlight::Span.new("— no response —", Theme.muted)
+               end
+        return DetailView.new([[span]], [] of String, :text, EMPTY_LINES)
+      end
       head, body = request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
       truncated = request ? detail.request_body_truncated? : detail.response_body_truncated?
 
