@@ -196,11 +196,13 @@ module Gori::Tui
       :ok
     end
 
-    def scope_delete : Nil
+    # Removes the selected rule, returning its pattern (for the Runner's toast) or nil.
+    def scope_delete : String?
       rule = current_rule
-      return unless rule
+      return nil unless rule
       @scope.remove(rule.id)
       clamp_sel
+      rule.pattern
     end
 
     def scope_toggle : Nil

@@ -909,13 +909,25 @@ module Gori::Tui
         @project_view.scope_edit_start
       elsif plain && c == ' '
         @project_view.scope_toggle
+        toast_scope_state
       elsif plain && c == 'a'
         @project_view.scope_add_start
       elsif plain && c == 'e'
         @project_view.scope_edit_start
       elsif plain && c == 'd'
-        @project_view.scope_delete
+        if pat = @project_view.scope_delete
+          @toast = "removed scope rule: #{pat}"
+        end
       end
+    end
+
+    # Feedback after a scope-lens change in the Project tab, mirroring the
+    # explicitness of the History "add host to scope" quick action — so editing scope
+    # never feels like a silent no-op.
+    private def toast_scope_state : Nil
+      n = @scope.size
+      @toast = @scope.enabled? ? "scope lens ON — #{n} rule#{n == 1 ? "" : "s"}" \
+                               : "scope lens OFF — showing all flows"
     end
 
     # The inline add/edit row: type the pattern, ^K cycles include/exclude, ^T cycles
@@ -948,6 +960,12 @@ module Gori::Tui
       when :empty   then @toast = "scope: empty pattern"
       when :invalid then @toast = "scope: invalid regex"
       when :dup     then @toast = "scope: duplicate rule"
+      when :ok
+        n = @scope.size
+        # Confirm the add AND surface that the lens is still off (the common "I added
+        # a rule but nothing filtered" confusion — space enables it).
+        @toast = @scope.enabled? ? "scope rule added — #{n} rule#{n == 1 ? "" : "s"}" \
+                                 : "scope rule added — #{n} rule#{n == 1 ? "" : "s"} · press space to enable the lens"
       end
     end
 
