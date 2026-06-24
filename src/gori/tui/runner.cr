@@ -1609,7 +1609,7 @@ module Gori::Tui
         @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
                            : "↑/↓ move · ↵ open · ^R replay · y copy · / filter · : cmds · i intercept · esc tabs"
       when :intercept
-        @intercept.editing? ? "type to edit · ^R forward · ⇧↹ queue · esc tabs" \
+        @intercept.editing? ? "type to edit · ^R forward · ⇧↹/esc queue" \
                             : "↑/↓ move · ↵/e edit · f forward · d drop · F all · : cmds · ↹ detail · esc tabs"
       when :replay
         if current_replay_view.try(&.request_hex?)
