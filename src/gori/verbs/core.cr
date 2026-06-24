@@ -5,9 +5,16 @@ module Gori
   # thereby becomes both a keybinding and a palette entry (P1).
   module Verbs
     def self.register_core(r : Verb::Registry) : Nil
+      # Discoverable from anywhere via the palette (Global). The 'q' KEY, though, only
+      # fires on the tab bar (Sidebar) — where "q projects" is actually hinted —
+      # because as a Global chord it also dumped you to the picker from the
+      # verb-driven Sitemap/Findings bodies (a surprising one-key dead-end mid-browse).
       r.register Verb::Definition.new(
         "app.back", "Back to projects", "Close this project and return to the picker", Verb::Scope::Global,
-        [Verb::Chord.new("q")]) { |ctx| ctx.leave_project; nil }
+        [] of Verb::Chord) { |ctx| ctx.leave_project; nil }
+      r.register Verb::Definition.new(
+        "app.back-key", "Back to projects", "Close this project (q on the tab bar)", Verb::Scope::Sidebar,
+        [Verb::Chord.new("q")], hidden: true) { |ctx| ctx.leave_project; nil }
 
       # Quit is palette-only here; the keyboard path is a deliberate double ^D/^C
       # handled in the Runner (single Q quitting was too easy to hit by accident).
