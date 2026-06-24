@@ -157,11 +157,30 @@ module Gori::Tui
         @status = "invalid port"
         return "settings: invalid bind port #{@values[1].inspect}"
       end
+      up = @values[2].strip
+      if err = upstream_port_error(up)
+        @status = "invalid upstream port"
+        return err
+      end
       Settings.bind_host = @values[0].strip
       Settings.bind_port = port
-      Settings.upstream_proxy = @values[2].strip
+      Settings.upstream_proxy = up
       @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
       persist
+    end
+
+    # nil if the upstream-proxy string is acceptable; an error message if its explicit
+    # port segment isn't a valid 0-65535 int — so a typo ("proxy:8O80") is caught at
+    # save time instead of silently resolving to 8080 (Settings.upstream_proxy_addr)
+    # and failing every captured flow later, far from the mistake.
+    private def upstream_port_error(value : String) : String?
+      return nil if value.empty?
+      bare = value.sub(/\Ahttps?:\/\//, "").rstrip('/')
+      i = bare.rindex(':')
+      return nil unless i && i < bare.size - 1 # no explicit port → defaults are fine
+      seg = bare[(i + 1)..]
+      p = seg.to_i?
+      (p && 0 <= p <= 65535) ? nil : "settings: invalid upstream proxy port #{seg.inspect}"
     end
 
     private def persist : String
