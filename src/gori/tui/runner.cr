@@ -1642,7 +1642,7 @@ module Gori::Tui
         body_rect = rect
         if @replays.size >= 2
           sub_rect, body_rect = carve_subtab_row(rect)
-          labels = @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.flow_id || "new"}" }
+          labels = @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.view.summary(18)}" }
           render_subtab_strip(screen, sub_rect, labels, @current_replay_idx, subtabs_focused)
         end
         if v = current_replay_view
@@ -2209,7 +2209,7 @@ module Gori::Tui
       @current_replay_idx = @replays.size - 1
       @active_tab = :replay
       @focus = :body
-      @toast = "Replay ##{id} — type to edit · ^R send · ^N new · ^1-9 switch · esc back"
+      @toast = "replay: #{view.summary} — type to edit · ^R send · ^N new · ^1-9 switch · esc back"
     end
 
     # Insert a freshly-opened replay tab into the store so it has a stable row id
@@ -2238,8 +2238,7 @@ module Gori::Tui
     # last response are discarded. No-op when no replay is open.
     private def request_close_replay : Nil
       return unless tab = current_replay_tab
-      label = tab.flow_id ? "Replay ##{tab.flow_id}" : "this new replay"
-      confirm("CLOSE REPLAY", "Close #{label}?\nThe edited request and response are discarded.",
+      confirm("CLOSE REPLAY", "Close replay \"#{tab.view.summary}\"?\nThe edited request and response are discarded.",
         confirm_label: "close") { close_replay_tab }
     end
 

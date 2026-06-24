@@ -130,6 +130,19 @@ module Gori::Tui
       (h = @req_hex_edit) ? String.new(h.to_bytes) : @editor.text # lossy snapshot in hex mode
     end
 
+    # A short, human label for this replay — "METHOD /path" from the request line,
+    # truncated to `max`. Used by the sub-tab strip, the open toast, and the close
+    # prompt: far more recognizable than the source flow's internal numeric id, and
+    # it tracks live as the request is edited.
+    def summary(max : Int32 = 28) : String
+      line = (@editor.first_nonblank_line || "").strip
+      parts = line.split(' ')
+      s = "#{parts[0]?} #{parts[1]?}".strip # METHOD + request-target (drop the HTTP/x.y)
+      s = line if s.empty?
+      return "new" if s.empty?
+      s.size > max ? "#{s[0, max - 1]}…" : s
+    end
+
     # Replace the request body (e.g. from the external editor); marks dirty so the
     # tab persists + the cross-session reconcile won't clobber it.
     def replace_request(text : String) : Nil
