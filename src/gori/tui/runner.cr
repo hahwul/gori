@@ -1592,7 +1592,7 @@ module Gori::Tui
       when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser     then "↑/↓ select · ↵ open · esc cancel"
       when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
-      when :detail      then "←/→ panes (REQ·RES·FRAMES) · ↑/↓ scroll · ^G goto · ^F find · esc back"
+      when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-8 jump · ^P cmds · q projects · ^D quit" if @focus == :menu

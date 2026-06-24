@@ -99,6 +99,14 @@ module Gori
         "detail.replay", "Replay flow", "Open this flow in the Replay tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("r", ctrl: true)],
         hidden: true) { |ctx| ctx.close_detail; ctx.replay_selected; nil }
+
+      # Create a finding while reading the flow — the natural moment to file one.
+      # Mirrors detail.replay (close the detail, then act on the still-selected flow);
+      # without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb).
+      r.register Verb::Definition.new(
+        "detail.finding", "Add finding", "Create a finding from this flow",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("f", shift: true)],
+        hidden: true) { |ctx| ctx.close_detail; ctx.finding_create; nil }
     end
 
     # Builds a registry with every built-in verb registered.
