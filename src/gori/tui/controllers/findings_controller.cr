@@ -1,7 +1,7 @@
-require "json"
 require "../tab_controller"
 require "../findings_view"
 require "../../store"
+require "../../findings_export"
 
 module Gori::Tui
   # The Findings tab: the triage list + a finding's detail (with an inline notes
@@ -143,7 +143,7 @@ module Gori::Tui
       findings = @host.session.store.findings
       return @host.status("no findings to export") if findings.empty?
       ext = format == :json ? "json" : "md"
-      content = format == :json ? findings_json(findings) : findings_markdown(findings)
+      content = format == :json ? Findings::Export.json(findings) : Findings::Export.markdown(findings, @host.session.store, @host.session.project.name)
       path = File.join(@host.session.project.dir, "findings.#{ext}")
       File.write(path, content)
       msg = "exported #{findings.size} finding#{findings.size == 1 ? "" : "s"} → #{path}"
@@ -152,77 +152,6 @@ module Gori::Tui
       @host.status(msg)
     rescue ex
       @host.status("export failed: #{ex.message}")
-    end
-
-    private def findings_markdown(findings : Array(Store::Finding)) : String
-      store = @host.session.store
-      String.build do |io|
-        io << "# Findings — " << @host.session.project.name << "\n\n"
-        io << "_" << findings.size << " findings · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
-        findings.each do |f|
-          flow = f.flow_id.try { |fid| store.get_flow(fid) }
-          io << "\n## [" << f.severity.label << "] " << f.title << "\n\n"
-          io << "- **Severity:** " << f.severity.label << "\n"
-          io << "- **Status:** " << f.status.label << "\n"
-          io << "- **Host:** " << (f.host || "—") << "\n"
-          if fid = f.flow_id
-            io << "- **Flow:** "
-            if flow
-              loc = flow.row.target.starts_with?("http") ? flow.row.target : "#{flow.row.host}#{flow.row.target}"
-              io << flow.row.method << " " << loc << " → " << (flow.row.status || "-") << " (#" << fid << ")\n"
-            else
-              io << "#" << fid << " (no longer captured)\n"
-            end
-          end
-          io << "\n" << f.notes << "\n" unless f.notes.strip.empty?
-          if flow
-            append_evidence(io, "Request", flow.request_head, flow.request_body)
-            append_evidence(io, "Response", flow.response_head, flow.response_body)
-          end
-        end
-      end
-    end
-
-    private def append_evidence(io : String::Builder, label : String, head : Bytes?, body : Bytes?) : Nil
-      return unless head && !head.empty?
-      cap = 64 * 1024
-      io << "\n### " << label << "\n\n```http\n"
-      # HEAD: headers are text but can carry stray non-UTF-8 (obs-text) bytes — scrub
-      # them so the report stays a valid UTF-8 file; cap it like the body.
-      hslice = head.size > cap ? head[0, cap] : head
-      io << String.new(hslice).scrub
-      io << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
-      if body && !body.empty?
-        slice = body[0, {body.size, cap}.min]
-        text = String.new(slice)
-        if text.valid_encoding?
-          io << "\n\n" << text
-          io << "\n\n[… body truncated, #{body.size} bytes total …]" if body.size > cap
-        else
-          io << "\n\n[binary body omitted, #{body.size} bytes]"
-        end
-      end
-      io << "\n```\n"
-    end
-
-    private def findings_json(findings : Array(Store::Finding)) : String
-      JSON.build do |j|
-        j.array do
-          findings.each do |f|
-            j.object do
-              j.field "id", f.id
-              j.field "title", f.title
-              j.field "severity", f.severity.label
-              j.field "status", f.status.label
-              j.field "host", f.host
-              j.field "flow_id", f.flow_id
-              j.field "created_at", f.created_at
-              j.field "updated_at", f.updated_at
-              j.field "notes", f.notes
-            end
-          end
-        end
-      end
     end
   end
 end

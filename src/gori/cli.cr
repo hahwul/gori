@@ -3,6 +3,7 @@ require "./config"
 require "./paths"
 require "./settings"
 require "./app"
+require "./cli/run"
 require "./proxy/tls/cert_authority"
 
 module Gori
@@ -11,7 +12,8 @@ module Gori
   # - `gori` or `gori tui [flags]`  → interactive TUI (or --headless for compat)
   # - `gori settings [--edit]`      → print (and lazily init) / edit settings.json
   # - `gori export ca-cert`         → print CA cert path (refactors old --export-ca)
-  # - `gori run` / `gori wizard`    → placeholders (non-interactive CLI / setup wizard)
+  # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
+  # - `gori wizard`                 → placeholder (setup wizard)
   # - `gori mcp` / `gori update`    → placeholders for future work
   #
   # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
@@ -66,7 +68,7 @@ module Gori
       puts "  tui       Start the interactive TUI (default when no command)"
       puts "  settings  Print/edit the persistent settings file (settings.json)"
       puts "  export    Export things (currently only ca-cert)"
-      puts "  run       [placeholder] Run gori at the CLI level (non-interactive)"
+      puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
       puts "  wizard    [placeholder] Interactive setup wizard"
       puts "  mcp       [placeholder] MCP server"
       puts "  update    [placeholder] Self-update"
@@ -183,15 +185,10 @@ module Gori
     end
 
     # Handler for `gori run` (the non-interactive CLI mode). Named run_run to match
-    # the run_<subcommand> dispatch convention.
+    # the run_<subcommand> dispatch convention; the subcommand suite itself lives in
+    # `Gori::CLI::Run` (src/gori/cli/run.cr).
     private def self.run_run(args : Array(String)) : Nil
-      if args.any? { |a| ["-h", "--help"].includes?(a) }
-        puts "Usage: gori run <command>"
-        puts "  (placeholder) Will run gori operations at the CLI level — scripting the"
-        puts "  proxy/history/replay non-interactively, without the TUI."
-        return
-      end
-      puts "gori run: non-interactive CLI mode is not yet implemented."
+      Run.dispatch(args)
     end
 
     private def self.run_wizard(args : Array(String)) : Nil

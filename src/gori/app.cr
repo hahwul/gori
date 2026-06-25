@@ -7,6 +7,7 @@ require "./project_registry"
 require "./session"
 require "./store"
 require "./proxy/tls/cert_authority"
+require "./cli/output"
 require "./verb"
 require "./verbs/core"
 require "./verbs/history"
@@ -54,13 +55,20 @@ module Gori
       end
     end
 
-    # Headless capture into a single default project at --db (no picker).
+    # Legacy `--headless`: capture into a single default project at --db, text
+    # output, runs until INT/TERM. A thin wrapper over the shared capture engine so
+    # `gori run capture` and `--headless` can never drift.
     def run_headless : Nil
+      run_capture(Project.new("default", @config.db_path), format: :text, max: nil, every: nil)
+    end
+
+    # Non-interactive capture into `project`. Binds the proxy (fatal on failure, as
+    # capture is the whole point here), streams one line per completed/errored flow
+    # (`:text` = the legacy format, `:json` = JSON-Lines), and runs until INT/TERM,
+    # an optional wall-clock `every` duration, or an optional completed-flow `max`.
+    def run_capture(project : Project, format : Symbol, max : Int32?, every : Time::Span?) : Nil
       setup_logging(STDERR)
-      project = Project.new("default", @config.db_path)
       session = Session.open(@config, @ca, @registry, project)
-      # Headless exists to capture, so a bind failure is fatal HERE (unlike the
-      # TUI, which opens capture-off) — exit cleanly instead of running uselessly.
       if err = session.bind_error
         STDERR.puts "gori: not capturing — #{err}"
         STDERR.puts "  another gori instance may hold this project or the port; close it or pass --port."
@@ -68,8 +76,15 @@ module Gori
         exit 1
       end
       print_banner(session)
-      spawn { headless_printer(session) }
+      spawn { capture_printer(session, format, max) }
       install_signal_traps
+      if span = every
+        # Wall-clock terminator: nudge the same shutdown channel the signal traps use.
+        spawn do
+          sleep span
+          @shutdown.send(nil) rescue nil
+        end
+      end
       @shutdown.receive
       session.close
     end
@@ -98,12 +113,19 @@ module Gori
       end
     end
 
-    private def headless_printer(session : Session) : Nil
+    private def capture_printer(session : Session, format : Symbol, max : Int32?) : Nil
+      printed = 0
       loop do
         event = session.flow_events.receive
         next unless event.kind == :updated # one line per completed/errored flow
         if row = session.store.flow_row(event.id)
-          puts format_row(row)
+          puts(format == :json ? CLI::Output.flow_row_json(row) : format_row(row))
+          STDOUT.flush # stream each flow promptly even when piped (block-buffered)
+          printed += 1
+          if max && printed >= max
+            @shutdown.send(nil) rescue nil # hit --max: ask the main fiber to wind down
+            break
+          end
         end
       end
     rescue Channel::ClosedError
