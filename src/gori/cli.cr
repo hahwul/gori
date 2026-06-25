@@ -235,7 +235,7 @@ module Gori
 
       # Logs to STDERR ONLY — STDOUT is reserved for the JSON-RPC stream.
       Log.setup(:info, Log::IOBackend.new(STDERR))
-      Settings.load # picked up by the replay engines (upstream proxy / bind defaults)
+      Settings.load # send_request's replay engines read the upstream-proxy setting from here
 
       resolved = resolve_mcp_db(db_path, project)
       Log.info { "mcp: serving #{resolved} (actions=#{!read_only})" }
@@ -252,7 +252,7 @@ module Gori
     # Resolves which project DB `gori mcp` serves: explicit --db wins, then a named
     # --project, then the most-recently-used project, then the default headless db.
     private def self.resolve_mcp_db(db : String?, project : String?) : String
-      return db if db
+      return db if db && !db.empty? # an empty --db= falls through to project/MRU (Crystal: "" is truthy)
       Paths.ensure_dirs
       registry = ProjectRegistry.new(Paths.projects_dir)
       if name = project

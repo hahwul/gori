@@ -178,6 +178,28 @@ describe Gori::MCP::Server do
         resp["result"]["isError"].as_bool.should be_true
       end
     end
+
+    it "accepts an integer id sent as a JSON string (client compat)" do
+      with_store do |store|
+        id = seed_flow(store, "ex.test", "GET", "/", 200)
+        call = %({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":"#{id}"}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_false
+        tool_payload(resp)["id"].as_i64.should eq(id)
+      end
+    end
+  end
+
+  describe "arg coercion" do
+    it "honours a limit passed as a JSON string or float" do
+      with_store do |store|
+        3.times { |i| seed_flow(store, "h#{i}.test", "GET", "/", 200) }
+        as_str = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":"2"}}})
+        tool_payload(drive(store, as_str)[0]).as_a.size.should eq(2)
+        as_float = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":2.0}}})
+        tool_payload(drive(store, as_float)[0]).as_a.size.should eq(2)
+      end
+    end
   end
 
   describe "findings write tools" do
@@ -293,10 +315,17 @@ describe Gori::MCP::RequestBuilder do
     String.new(Gori::MCP::RequestBuilder.build(args).bytes).should start_with("GET / HTTP/1.1\r\n")
   end
 
-  it "passes a raw request through, normalising LF to CRLF" do
+  it "passes a raw request through, normalising the header block's LFs to CRLF" do
     raw = "GET /x HTTP/1.1\nHost: h.test\n\n" # real LFs, as a JSON-parsed raw value carries
     args = {"url" => JSON::Any.new("http://h.test/"), "raw" => JSON::Any.new(raw)}
     String.new(Gori::MCP::RequestBuilder.build(args).bytes).should eq("GET /x HTTP/1.1\r\nHost: h.test\r\n\r\n")
+  end
+
+  it "keeps the raw body byte-exact (bare LFs in the body are NOT rewritten)" do
+    raw = "POST /x HTTP/1.1\nContent-Length: 5\n\na\nb\nc" # body 'a\nb\nc' = 5 bytes
+    args = {"url" => JSON::Any.new("http://h.test/"), "raw" => JSON::Any.new(raw)}
+    out = String.new(Gori::MCP::RequestBuilder.build(args).bytes)
+    out.should eq("POST /x HTTP/1.1\r\nContent-Length: 5\r\n\r\na\nb\nc") # head CRLF, body LFs intact
   end
 
   it "raises when the url has no host" do

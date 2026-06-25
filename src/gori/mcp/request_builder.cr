@@ -26,7 +26,7 @@ module Gori
 
         bytes =
           if (raw = args["raw"]?.try(&.as_s?)) && !raw.empty?
-            normalize_crlf(raw).to_slice
+            normalize_raw(raw)
           else
             build_from_parts(uri, scheme, host, port, args)
           end
@@ -69,10 +69,23 @@ module Gori
         scheme == "https" ? 443 : 80
       end
 
-      # Promote lone LFs to CRLF so a hand-typed `raw` request frames correctly
-      # (already-CRLF input is untouched).
-      private def self.normalize_crlf(raw : String) : String
-        raw.gsub(/\r?\n/, "\r\n")
+      # A `raw` request is sent byte-for-byte EXCEPT that lone LFs in the HEADER
+      # block are promoted to CRLF, so a hand-typed request still frames. The body
+      # (everything after the first blank line) is left UNTOUCHED — rewriting a bare
+      # LF there would grow the payload past the caller's Content-Length and desync
+      # the origin (request smuggling). The header terminator is the first blank
+      # line (`\r\n\r\n` or `\n\n`, whichever comes first).
+      private def self.normalize_raw(raw : String) : Bytes
+        crlf = raw.index("\r\n\r\n")
+        lf = raw.index("\n\n")
+        ends = [] of Int32
+        ends << crlf + 4 if crlf
+        ends << lf + 2 if lf
+        head_len = ends.min? || raw.size
+        String.build do |io|
+          io << raw[0, head_len].gsub(/\r?\n/, "\r\n")
+          io << raw[head_len..]
+        end.to_slice
       end
     end
   end

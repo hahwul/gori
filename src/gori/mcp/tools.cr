@@ -230,6 +230,10 @@ module Gori
         return Result.new("missing required 'title'", is_error: true) if title.nil? || title.empty?
         severity = severity_from(str(h, "severity")) || Store::Severity::Info
         id = @store.insert_finding(title, severity, str(h, "host"), int(h, "flow_id"))
+        # insert_finding returns 0 (never raises) when the write batch fails — e.g.
+        # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
+        # the same project) or the disk is full. Don't report a phantom success.
+        return Result.new("failed to persist finding (store busy or unwritable)", is_error: true) if id == 0
         Result.new(JSON.build { |j| j.object { j.field "id", id } })
       end
 
@@ -264,10 +268,13 @@ module Gori
         h[key]?.try(&.as_s?)
       end
 
+      # Coerce a JSON arg to Int64. Accepts a JSON integer, a float (100.0 → 100),
+      # and a numeric STRING ("5" → 5) — many MCP clients/LLMs serialize tool args
+      # as strings, and the schema's "integer" type is advisory, not enforced.
       private def int(h, key : String) : Int64?
         v = h[key]?
         return nil unless v
-        v.as_i64? || v.as_i?.try(&.to_i64)
+        v.as_i64? || v.as_f?.try(&.to_i64) || v.as_s?.try(&.to_i64?)
       end
 
       private def bool(h, key : String) : Bool?
