@@ -108,6 +108,7 @@ module Gori
       {
         "1" => :project, "2" => :history, "3" => :intercept, "4" => :sitemap,
         "5" => :replay, "6" => :findings, "7" => :notes, "8" => :agent,
+        "9" => :help,
       }.each do |key, tab|
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{tab.to_s.capitalize}", "Focus the #{tab} tab", Verb::Scope::Global,

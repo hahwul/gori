@@ -13,6 +13,7 @@ module Gori::Tui
       {:findings, "Findings"},
       {:notes, "Notes"},
       {:agent, "Agent"},
+      {:help, "Help"},
     ]
 
     def self.tab_at(index : Int32) : Symbol

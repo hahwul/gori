@@ -9,6 +9,7 @@ require "./chrome"
 require "./history_view"
 require "./replay_view"
 require "./sitemap_view"
+require "./help_view"
 require "./findings_view"
 require "./notes_view"
 require "./project_view"
@@ -69,6 +70,7 @@ module Gori::Tui
       @sitemap = SitemapView.new
       @findings = FindingsView.new
       @notes = NotesView.new
+      @help = HelpView.new
       @scope = @session.scope
       @project_view = ProjectView.new(@scope, "http://#{@session.proxy.host}:#{@session.proxy.port}")
       @intercept = InterceptView.new
@@ -548,6 +550,7 @@ module Gori::Tui
       # Tab is handled by the focus ring above (so ring always works); other keys (letters,
       # arrows, enter, esc, etc.) are consumed here for desc editing (consistent with Notes).
       return handle_project_key(ev) if @active_tab == :project && @overlay == :none && @focus == :body
+      return handle_help_key(ev) if @active_tab == :help && @overlay == :none && @focus == :body
 
       # ":" opens the context command line for the focused area. Only reached here
       # in NAVIGABLE contexts — text editors (Replay request/target, Notes, Project
@@ -893,6 +896,7 @@ module Gori::Tui
       when :sitemap   then @sitemap.move(step)
       when :intercept then @intercept.move(step)
       when :replay    then wheel_replay(step)
+      when :help      then @help.move(step)
       end
     end
 
@@ -1158,6 +1162,17 @@ module Gori::Tui
         focus_pane(:body) if !@replays.empty? && !subtabs_shown?
       else
         focus_pane(:body) unless subtabs_shown? # close_note always keeps ≥1 note
+      end
+    end
+
+    # Help tab: read-only scroll (↑/↓ or j/k, or the wheel). ↑ at the top pops to the
+    # tab bar (like the body lists); esc returns to it. Nothing is selectable.
+    private def handle_help_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      case
+      when key.up?, key.lower_k?   then @help.at_top? ? focus_pane(:menu) : @help.move(-1)
+      when key.down?, key.lower_j? then @help.move(1)
+      when key.escape?             then focus_pane(:menu)
       end
     end
 
@@ -1869,10 +1884,7 @@ module Gori::Tui
       @settings_view.render(screen, layout.body) if @overlay == :settings
       # The ":" command line floats over everything else (drawn last), anchored to
       # the bottom: the input on the status row, the suggestion list stacked above.
-      @command.render(screen, layout.status, layout.body) if @command_open
-      render_goto_prompt(screen, layout.status) if @goto_open
-      render_search_prompt(screen, layout.status) if @search_open
-      render_rename_prompt(screen, layout.status) if @rename_open
+      render_prompts(screen, layout)
 
       # Sync terminal hardware cursor to the focused input caret (if any view
       # called screen.cursor). This is critical for terminal IME preedit
@@ -1889,6 +1901,15 @@ module Gori::Tui
       end
 
       flush_screen
+    end
+
+    # The bottom-anchored input prompts (drawn last, over the status row). All four
+    # are orthogonal to @overlay, so they float over whatever is underneath.
+    private def render_prompts(screen : Screen, layout : Layout) : Nil
+      @command.render(screen, layout.status, layout.body) if @command_open
+      render_goto_prompt(screen, layout.status) if @goto_open
+      render_search_prompt(screen, layout.status) if @search_open
+      render_rename_prompt(screen, layout.status) if @rename_open
     end
 
     # Emit the frame: a full repaint right after a resize (the diff renderer would
@@ -1971,7 +1992,7 @@ module Gori::Tui
       when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
-        return "←/→ switch tab · ↹/↵ enter · 1-8 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
+        return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
         return "←/→ switch sub-tab · ↓/↵ edit · ^1-9 jump · ^N new · ^W close · ↑/esc tabs" if @focus == :subtabs
         body_hints
       end
@@ -1994,6 +2015,7 @@ module Gori::Tui
         @findings.detail_open? ? "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · ←/esc back" \
                                : "↑/↓ move · ↵ open · n new · d delete · x export · : cmds · esc tabs"
       when :project  then project_hints
+      when :help     then "↑/↓ scroll · ↹/esc tabs · ^P cmds · q projects"
       else "↹/esc tabs · ^P cmds · q projects · ^D quit"
       end
     end
@@ -2041,22 +2063,7 @@ module Gori::Tui
           render_framed(screen, rect, body_focused) { |inner| @history.render_list(screen, inner, focused: body_focused) }
         end
       when :replay
-        # The sub-tab strip rides above the panes (shared chrome with Notes); the
-        # view frames its own target/request/response panes and gold-lights the
-        # focused one. The strip only appears with ≥2 replays — a lone replay has
-        # nothing to switch to, so it keeps the full body (matches Notes + subtabs_shown?).
-        body_rect = rect
-        if @replays.size >= 2
-          sub_rect, body_rect = carve_subtab_row(rect)
-          render_subtab_strip(screen, sub_rect, subtab_labels, @current_replay_idx, subtabs_focused)
-        end
-        if v = current_replay_view
-          v.render(screen, body_rect, focused: body_focused)
-        else
-          render_framed(screen, body_rect, body_focused) do |inner|
-            screen.text(inner.x + 1, inner.y, "no replays — ^N new request · ^R from History", Theme.muted)
-          end
-        end
+        render_replay_body(screen, rect, body_focused, subtabs_focused)
       when :sitemap
         render_framed(screen, rect, body_focused) { |inner| @sitemap.render(screen, inner, focused: body_focused) }
       when :findings
@@ -2076,9 +2083,30 @@ module Gori::Tui
       when :intercept
         @intercept.reload(@session.interceptor) # live refresh (50ms loop)
         @intercept.render(screen, rect, focused: body_focused) # view frames its own panes
+      when :help
+        render_framed(screen, rect, body_focused) { |inner| @help.render(screen, inner, focused: body_focused) }
       else
         render_framed(screen, rect, body_focused) do |inner|
           screen.text(inner.x + 1, inner.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme.muted)
+        end
+      end
+    end
+
+    # The Replay body: the sub-tab strip rides above the panes (shared chrome with
+    # Notes); the view frames its own target/request/response panes and gold-lights the
+    # focused one. The strip only appears with ≥2 replays — a lone replay has nothing
+    # to switch to, so it keeps the full body (matches Notes + subtabs_shown?).
+    private def render_replay_body(screen : Screen, rect : Rect, body_focused : Bool, subtabs_focused : Bool) : Nil
+      body_rect = rect
+      if @replays.size >= 2
+        sub_rect, body_rect = carve_subtab_row(rect)
+        render_subtab_strip(screen, sub_rect, subtab_labels, @current_replay_idx, subtabs_focused)
+      end
+      if v = current_replay_view
+        v.render(screen, body_rect, focused: body_focused)
+      else
+        render_framed(screen, body_rect, body_focused) do |inner|
+          screen.text(inner.x + 1, inner.y, "no replays — ^N new request · ^R from History", Theme.muted)
         end
       end
     end
