@@ -34,7 +34,7 @@ module Gori::Tui
     # "older not loaded" note; the raw frames remain whole in SQLite.
     DETAIL_LOG_CAP = 10_000
     QL_FIELDS      = %w(host method status path scheme body flag)
-    METHOD_VAL     = %w(GET POST PUT DELETE PATCH HEAD OPTIONS)
+    METHOD_VAL     = %w(GET POST PUT DELETE PATCH HEAD OPTIONS QUERY)
 
     getter rows : Array(Store::FlowRow)
     getter? follow : Bool

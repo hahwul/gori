@@ -210,7 +210,7 @@ module Gori::Tui
 
     def self.method_color(method : String) : Color
       case method.upcase
-      when "GET", "HEAD"                    then green
+      when "GET", "HEAD", "QUERY"           then green # QUERY is safe + idempotent like GET (RFC 10008)
       when "POST", "PUT", "PATCH", "DELETE" then yellow
       else                                       muted
       end
