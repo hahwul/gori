@@ -177,6 +177,46 @@ describe "TextArea#click_to_cursor" do
   end
 end
 
+describe "HexEdit#click_to_nibble" do
+  it "maps a hex-digit click to that byte and nibble" do
+    he = HexEdit.new(Bytes.new(3) { |i| (0xAA + i * 0x11).to_u8 }) # AA BB CC
+    rect = Rect.new(0, 0, 80, 10)
+    he.click_to_nibble(rect, 10, 0, 0); he.nib.should eq(0) # byte 0 high (x+10)
+    he.click_to_nibble(rect, 11, 0, 0); he.nib.should eq(1) # byte 0 low
+    he.click_to_nibble(rect, 13, 0, 0); he.nib.should eq(2) # byte 1 high (+3)
+    he.click_to_nibble(rect, 14, 0, 0); he.nib.should eq(3) # byte 1 low
+  end
+
+  it "accounts for the mid-row gap after byte 7" do
+    he = HexEdit.new(Bytes.new(16) { |i| i.to_u8 })
+    rect = Rect.new(0, 0, 80, 10)
+    he.click_to_nibble(rect, 35, 0, 0) # byte 8 high = x+10+8*3+1
+    he.nib.should eq(16)
+  end
+
+  it "maps an ASCII-gutter click to the byte's high nibble" do
+    he = HexEdit.new("ABC".to_slice)
+    rect = Rect.new(0, 0, 80, 10)
+    he.click_to_nibble(rect, 63, 0, 0) # 'C' (byte 2) at x+61+2
+    he.nib.should eq(4)
+  end
+
+  it "uses scroll + row to resolve the byte offset" do
+    he = HexEdit.new(Bytes.new(40) { |i| i.to_u8 }) # 3 rows (16,16,8)
+    rect = Rect.new(0, 0, 80, 4)
+    he.click_to_nibble(rect, 10, 1, 0); he.nib.should eq(32) # row 1, byte 0 = byte 16
+    he.click_to_nibble(rect, 10, 0, 1); he.nib.should eq(32) # scroll 1, row 0 = byte 16
+  end
+
+  it "ignores clicks on inter-byte gaps and the offset column" do
+    he = HexEdit.new(Bytes.new(3) { |i| i.to_u8 })
+    rect = Rect.new(0, 0, 80, 10)
+    he.click_to_nibble(rect, 13, 0, 0); he.nib.should eq(2) # byte 1 high
+    he.click_to_nibble(rect, 5, 0, 0); he.nib.should eq(2)  # offset column → no-op
+    he.click_to_nibble(rect, 12, 0, 0); he.nib.should eq(2) # space between bytes → no-op
+  end
+end
+
 describe "ReplayView#pane_at" do
   it "splits the body into target / request / response panes" do
     view = ReplayView.new

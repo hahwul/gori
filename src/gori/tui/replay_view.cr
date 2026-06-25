@@ -362,17 +362,21 @@ module Gori::Tui
       mx >= content.x + half + 1 ? :response : nil
     end
 
-    # Mouse: place the request-editor cursor at a click. `rect` is the full body rect
-    # render() receives; re-derive the request half-pane (target band + split, then
-    # the card's 1-cell inset) exactly as render_request does. No-op in hex mode.
+    # Mouse: place the request-editor caret (text) or nibble cursor (hex) at a click.
+    # `rect` is the full body rect render() receives; re-derive the request half-pane
+    # (target band + split, then the card's 1-cell inset) exactly as render_request does.
     def request_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless @loaded && @req_hex_edit.nil?
+      return unless @loaded
       target_h = {rect.h, 3}.min
       content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
       return if content.h <= 0
       half = {(content.w - 1) // 2, 1}.max
-      left = Rect.new(content.x, content.y, half, content.h)
-      @editor.click_to_cursor(left.inset(1, 1), mx, my)
+      inner = Rect.new(content.x, content.y, half, content.h).inset(1, 1)
+      if h = @req_hex_edit
+        h.click_to_nibble(inner, mx, my, @scroll_req) # hex mode: place the nibble cursor
+      else
+        @editor.click_to_cursor(inner, mx, my)
+      end
     end
 
     # Mouse: place the single-line TARGET caret at a click. render_target draws

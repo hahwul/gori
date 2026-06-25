@@ -56,6 +56,41 @@ module Gori::Tui
       @nib = {(row * COLS + COLS) * 2 - 1, len * 2}.min
     end
 
+    # Mouse: move the nibble cursor to a click, inverting draw_row's layout. `rect`
+    # and `scroll` are what render() received. A click on a hex digit lands on that
+    # nibble; on an ASCII char, that byte's high nibble; on a gap/offset, a no-op.
+    # Coords are 0-based.
+    def click_to_nibble(rect : Rect, mx : Int32, my : Int32, scroll : Int32) : Nil
+      return if rect.empty? || my < rect.y
+      row = scroll + (my - rect.y)
+      return if row < 0
+      base = row * COLS # first byte index on the clicked row
+      if no = hex_nibble_col(rect.x, mx)
+        @nib = (base * 2 + no).clamp(0, len * 2)
+      elsif col = ascii_col(rect.x, mx)
+        @nib = ((base + col) * 2).clamp(0, len * 2)
+      end
+    end
+
+    # The within-row nibble offset (col*2 + low?) for a hex-cell click at column `mx`,
+    # else nil. Mirrors draw_row's hx advance: high nibble at x+10+col*3 (+1 after the
+    # byte-7 mid-row gap), low nibble one cell right.
+    private def hex_nibble_col(x : Int32, mx : Int32) : Int32?
+      COLS.times do |col|
+        hi = x + 10 + col * 3 + (col >= 8 ? 1 : 0)
+        return col * 2 if mx == hi
+        return col * 2 + 1 if mx == hi + 1
+      end
+      nil
+    end
+
+    # The byte column for an ASCII-gutter click, else nil. The ASCII chars start two
+    # columns past the hex block (the closing space + the '|' bar): x + 10 + COLS*3 + 1 + 2.
+    private def ascii_col(x : Int32, mx : Int32) : Int32?
+      col = mx - (x + 10 + COLS * 3 + 1 + 2)
+      (0 <= col < COLS) ? col : nil
+    end
+
     # --- edits (return true iff they mutated, so the caller marks dirty) ---
 
     # Overtype the nibble under the cursor with `v` (0..15) and advance one nibble.
