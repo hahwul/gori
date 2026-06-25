@@ -8,7 +8,7 @@ module Gori::Tui
   # list pane + an inline editor pane) and the intercept verbs. The view self-frames
   # its panes and is reloaded every frame off the 50ms loop so async holds appear
   # live. `view` is exposed for the shell's still-centralized orthogonal prompts
-  # (^G/^F/^E) until Step 10 inverts those to the Searchable/edit hooks.
+  # (^G/^F/^E).
   class InterceptController < TabController
     def initialize(host : Host)
       super(host)

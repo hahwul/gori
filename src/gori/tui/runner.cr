@@ -36,8 +36,6 @@ require "./clipboard"
 require "./keybind"
 require "../scope"
 require "../rules"
-require "../replay/engine"
-require "../replay/diff"
 
 module Gori::Tui
 
@@ -493,7 +491,7 @@ module Gori::Tui
     # acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
       return unless @active_tab == :replay && @overlay == :none && !@command_open && !@rename_open && subtabs_shown?
-      sub_rect, _ = carve_subtab_row(layout.body)
+      sub_rect, _ = BodyChrome.carve_subtab_row(layout.body)
       return unless sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(sub_rect, subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
         open_rename(seg[0])
@@ -544,7 +542,7 @@ module Gori::Tui
     # Click a Replay/Notes sub-tab chip (carved off the body's top row). Returns true
     # when the click landed on the strip row (handled), false to fall through to body.
     private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
-      sub_rect, _ = carve_subtab_row(body)
+      sub_rect, _ = BodyChrome.carve_subtab_row(body)
       return false unless sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(sub_rect, subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
         jump_subtab(seg[0])
@@ -1273,18 +1271,9 @@ module Gori::Tui
         return
       end
       # Unmigrated/placeholder tab (e.g. the half-wired :agent).
-      render_framed(screen, rect, @focus == :body) do |inner|
+      BodyChrome.framed(screen, rect, @focus == :body) do |inner|
         screen.text(inner.x + 1, inner.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme.muted)
       end
-    end
-
-    # Frames a single body pane and yields the inset interior to draw into. The
-    # outline is gold (FOCUS_GOLD) when the body holds focus, hairline at rest.
-    private def render_framed(screen : Screen, rect : Rect, focused : Bool, & : Rect ->) : Nil
-      # Body panes are outline-only on the canvas (bg = BG), distinct from the
-      # lifted PANEL-filled modal overlays. Gold outline when focused.
-      Frame.card(screen, rect, bg: Theme.bg, border: focused ? Theme.focus_gold : Theme.border)
-      yield rect.inset(1, 1)
     end
 
     # --- ExecContext (verbs drive the UI through these) ----------------------
@@ -1582,27 +1571,6 @@ module Gori::Tui
     # whatever has been captured so far). Project tab refreshes its stats snapshot.
     private def on_enter_tab : Nil
       @tabs[@active_tab]?.try(&.on_enter) # migrated tabs refresh their own derived data
-    end
-
-    # The sub-tab strip shared by Replay and Notes: a frame-less, runner-owned 1-row
-    # segmented control on the top body row (above the content frame), so both
-    # multi-instance tabs select an instance with identical chrome. `labels`/`active`
-    # are tab-specific; the windowed strip keeps the active chip on-screen. `focused`
-    # = the strip itself holds focus (←/→ switch) → active chip lights ACCENT_BG, vs
-    # SELECTION_DIM when it's merely on-screen (focus is in the body or the tab bar).
-    private def render_subtab_strip(screen : Screen, rect : Rect, labels : Array(String),
-                                    active : Int32, focused : Bool) : Nil
-      return if rect.empty?
-      Chrome.render_tab_strip(screen, rect, labels, active, focused)
-    end
-
-    # Carve the top row of a body rect for the sub-tab strip, returning
-    # {strip_row, body_below}. Mirrors the original Replay split so Replay and Notes
-    # reserve the strip row identically; degenerate heights keep the body on `rect`.
-    private def carve_subtab_row(rect : Rect) : {Rect, Rect}
-      sub = Rect.new(rect.x, rect.y, rect.w, 1)
-      body = rect.h > 1 ? Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1) : rect
-      {sub, body}
     end
 
     # --- findings ExecContext ---

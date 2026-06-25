@@ -33,17 +33,6 @@ module Gori::Tui
     abstract def toggle_reveal : Nil                   # flip the whitespace-reveal pref (^B from any view)
   end
 
-  # A multi-line view that the orthogonal ^G goto / ^F find prompts can drive. A
-  # controller returns the currently-focused Searchable from `goto_target` (an
-  # adapter over its concrete view), so the prompt fan-out lives inside the
-  # controller, not in a shell-wide `case @active_tab`.
-  module Searchable
-    abstract def lines : Array(String)
-    abstract def goto_line(n : Int32) : Nil
-    abstract def search_lines(query : String) : Array(Int32)
-    abstract def set_search_highlight(query : String) : Nil
-  end
-
   # Shared, state-free body chrome used by BOTH Runner and the per-tab
   # controllers, so the framed-card outline and the Replay/Notes sub-tab strip are
   # drawn identically wherever they appear. Extracted from Runner so a controller
@@ -140,8 +129,9 @@ module Gori::Tui
 
     # --- orthogonal ^G/^F prompts: the symbol naming the currently-focused
     # searchable pane (e.g. :replay_request, :notes), or nil if none. The shell's
-    # goto/search prompt dispatches on this. (The Searchable module above is the
-    # richer interface a future inversion can return instead.) ---
+    # goto/search prompt dispatches on this symbol. A future cleanup could return a
+    # richer Searchable object to also fold the shell's per-symbol jump/search
+    # dispatch into the controller. ---
     def goto_symbol : Symbol?
       nil
     end
