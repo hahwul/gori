@@ -297,18 +297,23 @@ module Gori
         verify = !insecure
         result = use_h2 ? Replay::H2Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify) : Replay::Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
 
-        orig = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
-        neu = message_lines(result.head, display_body(result.head, result.body))
-        diff = do_diff ? Replay::Diff.lines(orig, neu) : nil
+        # Decode the response body once; only build the diff lines when --diff asked
+        # for them (decoding the captured baseline isn't free for large bodies).
+        new_body = display_body(result.head, result.body)
+        diff =
+          if do_diff
+            orig = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
+            Replay::Diff.lines(orig, message_lines(result.head, new_body))
+          end
 
         if format == :json
-          puts replay_json(result, diff)
+          puts replay_json(result, new_body, diff)
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}"
           if d = diff
             print_diff(d)
           else
-            print_message_text(result.head, display_body(result.head, result.body))
+            print_message_text(result.head, new_body)
           end
         else
           STDERR.puts "replay failed: #{result.error}"
@@ -316,7 +321,7 @@ module Gori
         exit 1 unless result.ok?
       end
 
-      private def self.replay_json(result : Replay::Result, diff : Array(Replay::DiffLine)?) : String
+      private def self.replay_json(result : Replay::Result, body : Bytes?, diff : Array(Replay::DiffLine)?) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
@@ -324,7 +329,7 @@ module Gori
             j.field "duration_us", result.duration_us
             j.field "error", result.error
             j.field "head", scrub(result.head)
-            j.field "body", scrub(display_body(result.head, result.body))
+            j.field "body", scrub(body)
             if d = diff
               j.field "changed_lines", Replay::Diff.change_count(d)
             end
