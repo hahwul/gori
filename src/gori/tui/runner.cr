@@ -6,6 +6,15 @@ require "./screen"
 require "./theme"
 require "./layout"
 require "./chrome"
+require "./tab_controller"
+require "./controllers/help_controller"
+require "./controllers/sitemap_controller"
+require "./controllers/intercept_controller"
+require "./controllers/notes_controller"
+require "./controllers/history_controller"
+require "./controllers/findings_controller"
+require "./controllers/project_controller"
+require "./controllers/replay_controller"
 require "./history_view"
 require "./replay_view"
 require "./sitemap_view"
@@ -32,53 +41,21 @@ require "../replay/diff"
 
 module Gori::Tui
 
-  # One open replay session (a "sub-tab" under the top-level Replay tab).
-  # Each carries its own ReplayView (editor state, last result, scroll, focus etc.).
-  # `flow_id` is the source flow when opened from History (^R), or nil for a
-  # hand-authored blank request (^N).
-  # `db_id` is the persisted `replays` row id (nil only transiently if the store
-  # was closing when the tab was created) — the key the cross-session reconcile
-  # matches local tabs against.
-  private record ReplayTab, view : ReplayView, flow_id : Int64?, db_id : Int64?
   # The shell controller for ONE open project: owns view state, implements the
   # verb ExecContext (so verbs drive the UI), and runs the main loop —
   # poll(50ms) → drain new-flow events → render (diff). `run` returns :quit (exit
   # gori) or :back (return to the project picker).
   class Runner < Verb::ExecContext
+    include Host # the narrow facade per-tab controllers drive the shell through
+
     def initialize(@session : Session, @term : Termisu)
       @backend = TermisuBackend.new(@term)
       @keymap = Verb::Keymap.build(@session.registry)
-      @history = HistoryView.new
-      # Multiple independent replay sessions (sub-tabs) under the Replay top-level tab.
-      # Ctrl+R from History always appends a fresh one; previous sessions stay alive
-      # so the user can switch back (ctrl+1..9) and see prior edits/results.
-      # Re-open replay tabs persisted for this project — they survive a reopen AND
-      # the request side syncs across sessions on the same project DB. This is the
-      # ONE place a tab's last send response (V11) is restored: a fresh project
-      # open. (Live cross-session reconcile carries only the request — see
-      # reconcile_replays — so a peer's resend never clobbers the local response.)
-      @replays = [] of ReplayTab
-      @session.store.replays.each do |r|
-        view = ReplayView.new
-        view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
-          r.response_head, r.response_body, r.response_error, r.response_duration_us)
-        view.name = r.name # custom sub-tab label survives reopen
-        seed_replay_original(view, r.flow_id)
-        @replays << ReplayTab.new(view, r.flow_id, r.id)
-      end
-      @current_replay_idx = @replays.empty? ? -1 : 0
-      @sitemap = SitemapView.new
-      @findings = FindingsView.new
-      @notes = NotesView.new
-      @help = HelpView.new
       @scope = @session.scope
-      @project_view = ProjectView.new(@scope, "http://#{@session.proxy.host}:#{@session.proxy.port}")
-      @intercept = InterceptView.new
       @rules_overlay = RulesOverlay.new(@session.rules)
       @finding_form = FindingForm.new
       @palette = PaletteState.new(@session.registry)
       @command = CommandLine.new(@session.registry)
-      @history.set_scope(@scope)
       @active_tab = :project
       @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser
       # The ":" context command line (vim/helix-style). Orthogonal to @overlay so it
@@ -104,8 +81,8 @@ module Gori::Tui
       @rename_buffer = ""
       @rename_preedit = ""
       # The target is held by VIEW identity (not a positional index): the cross-session
-      # reconcile can reorder/remove @replays while the prompt is open, so apply_rename
-      # re-finds the tab by its view — never renaming a neighbour that shifted into its slot.
+      # reconcile can reorder/remove replay tabs while the prompt is open, so the
+      # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
       @rename_view = nil.as(ReplayView?)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
       # propagated to the focused view in render_body. Handy for smuggling tests.
@@ -126,20 +103,63 @@ module Gori::Tui
       @quit_armed = false             # first ^D/^C arms quit; second confirms (avoids accidental exit)
       @findings_count = 0             # cached findings badge (count_findings is too costly to re-query per frame)
       @resized = false                # set on a Resize event → next frame full-repaints
-      # Live QL filter is debounced: typing updates the query text immediately but
-      # the (potentially O(rows)) search reload is deferred until typing pauses, so a
-      # big project doesn't lag a keystroke. nil = nothing pending.
-      @query_reload_at = nil.as(Time::Instant?)
-      # Replay round-trips run off the UI fiber and deliver their Result here; the
-      # run loop applies it to the originating view on a later tick (buffered so a
-      # finished replay never blocks its background fiber).
-      @replay_results = Channel({ReplayView, Replay::Result}).new(8)
+
+      # Per-tab controllers (strangler-fig: tabs migrate into this registry one at a
+      # time; an unmigrated tab is absent and still runs through the case ladders
+      # below). The registry hash is assigned FIRST so that constructing a controller
+      # (which escapes `self` as the Host) never leaves a later-assigned ivar looking
+      # nil to Crystal's "used before initialized" analysis. Controllers are built
+      # LAST, after every other ivar is set.
+      @tabs = {} of Symbol => TabController
+      [
+        HelpController.new(self),
+        SitemapController.new(self),
+        InterceptController.new(self),
+        NotesController.new(self),
+        HistoryController.new(self),
+        FindingsController.new(self),
+        ProjectController.new(self),
+        ReplayController.new(self),
+      ].each { |c| @tabs[c.tab] = c }
+    end
+
+    # Typed controller accessors. The registry value type is the abstract
+    # TabController; a controller reached for its tab-specific public API (cross-tab
+    # actions, the shell's ExecContext delegates) is downcast here, ONCE per tab, so
+    # call sites stay cast-free. The key is always present after initialize, so `.as`
+    # never raises in practice (a missing key would be a registry-wiring bug).
+    private def sitemap_controller : SitemapController
+      @tabs[:sitemap].as(SitemapController)
+    end
+
+    private def intercept_controller : InterceptController
+      @tabs[:intercept].as(InterceptController)
+    end
+
+    private def notes_controller : NotesController
+      @tabs[:notes].as(NotesController)
+    end
+
+    private def history_controller : HistoryController
+      @tabs[:history].as(HistoryController)
+    end
+
+    private def findings_controller : FindingsController
+      @tabs[:findings].as(FindingsController)
+    end
+
+    private def project_controller : ProjectController
+      @tabs[:project].as(ProjectController)
+    end
+
+    private def replay_controller : ReplayController
+      @tabs[:replay].as(ReplayController)
     end
 
     def run : Symbol
-      @history.reload(@session.store)
-      @project_view.reload(@session.project, @session.store)
-      @notes.reload(@session.store) # load persisted notes up front so the menu's notes-count badge is right before the tab is ever focused
+      history_controller.view.reload(@session.store)
+      project_controller.reload
+      notes_controller.view.reload(@session.store) # load persisted notes up front so the menu's notes-count badge is right before the tab is ever focused
       refresh_findings_count
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
       # port-fallback note if the configured port was taken and we picked another.
@@ -188,7 +208,10 @@ module Gori::Tui
           end
         end
         dirty = true if drain_events          # always drains; true if anything arrived
-        dirty = true if drain_replay_results
+        if replay_controller.drain_results
+          search_recompute # a ^F over a now-updated response keeps fresh hits
+          dirty = true
+        end
         if (rev = @session.interceptor.revision) != last_rev
           last_rev = rev
           dirty = true
@@ -211,52 +234,11 @@ module Gori::Tui
           end
         end
         # Debounced QL filter: fire the deferred search once typing has paused.
-        if (deadline = @query_reload_at) && now >= deadline
-          flush_query_reload
-          dirty = true
-        end
+        dirty = true if history_controller.flush_query_reload_if_due(now)
         render if dirty
         break unless @outcome == :running
       end
       @outcome
-    end
-
-    # Apply any replay results that finished since the last tick (the network
-    # round-trip ran on a background fiber; view state is mutated here, on the UI
-    # fiber that owns it).
-    private def drain_replay_results : Bool
-      applied = false
-      while pair = nonblocking_replay_result
-        view, result = pair
-        # Drop a result whose sub-tab was closed (^W) mid-flight — applying it
-        # would mutate an orphaned view and flash a toast for a gone session.
-        next unless tab = @replays.find { |t| t.view.same?(view) }
-        view.apply(result)
-        # Persist a SUCCESSFUL send as the tab's last response (V11) so it survives
-        # a reopen. Only on success: a later failed resend (connection refused, …)
-        # must not wipe a good response the user wants to keep. Skips a tab with no
-        # db row yet (store was closing on creation).
-        if (id = tab.db_id) && result.ok?
-          @session.store.update_replay_response(id, result.head, result.body, result.error, result.duration_us)
-        end
-        @toast = if result.ok?
-                   "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms"
-                 else
-                   "replay error: #{result.error}"
-                 end
-        applied = true
-      end
-      search_recompute if applied # an open ^F over the response now has fresh content
-      applied
-    end
-
-    private def nonblocking_replay_result : {ReplayView, Replay::Result}?
-      select
-      when p = @replay_results.receive
-        p
-      else
-        nil
-      end
     end
 
     # --- main loop helpers ---------------------------------------------------
@@ -269,11 +251,11 @@ module Gori::Tui
     private def drain_events : Bool
       drained = false
       while event = nonblocking_event
-        @history.on_event(event, @session.store)
+        history_controller.view.on_event(event, @session.store)
         drained = true
       end
       # Coalesce a filtered-view reload to once per drain (on_event only flagged it).
-      @history.flush_filter(@session.store)
+      history_controller.view.flush_filter(@session.store)
       drained
     end
 
@@ -285,94 +267,11 @@ module Gori::Tui
       # Reload a store-backed view only when it's the ACTIVE tab (others reload on
       # tab entry via on_enter_tab) — avoids re-querying History's page ~1.3×/sec
       # while the user is elsewhere. Own-session captures stay live via flow_events.
-      if @active_tab == :history
-        @history.reload(@session.store)
-        @history.refresh_detail(@session.store) if @overlay == :detail # peer filled the open flow
-      end
-      @sitemap.reload(@session.store, @scope.filter) if @active_tab == :sitemap
-      @findings.reload(@session.store) if @active_tab == :findings
-      reconcile_replays
-      @notes.reload(@session.store) unless notes_locked?
+      @tabs[@active_tab]?.try(&.on_external_change) # migrated tabs refresh themselves
+      replay_controller.reconcile
+      notes_controller.view.reload(@session.store) unless notes_locked?
       refresh_findings_count
       search_recompute # a ^F prompt open over the reloaded view keeps fresh hits
-    end
-
-    # Converge local replay tabs with the project's `replays` rows after a peer
-    # committed. Keyed by db_id: update changed tabs in place (keeping the
-    # ReplayView object so an inflight result still matches by identity), append
-    # peer-created tabs, drop peer-deleted ones — but NEVER touch a locked tab
-    # (actively edited / inflight / locally dirty); those stay local-only and win on
-    # the next save. The user's OWN saves don't reach here (data_version ignores our
-    # own pool writes), so this only ever applies a peer's changes.
-    private def reconcile_replays : Nil
-      # Metadata only (no response BLOBs): reconcile converges the request side and
-      # restores responses only at project-open, so loading every tab's response
-      # here — on every 750ms poll — would be pure waste (and an OOM risk at scale).
-      rows = @session.store.replays_meta # ORDER BY position, id
-      by_id = rows.index_by(&.id)
-      cur_db = current_replay_tab.try(&.db_id)
-
-      @replays.each do |tab|
-        next unless (id = tab.db_id) && (row = by_id[id]?)
-        next if replay_tab_locked?(tab)
-        v = tab.view
-        # Only re-apply when the PERSISTED content actually changed. data_version
-        # bumps on ANY peer commit (notes/settings/another replay/h2/ws…), so most
-        # polls touch a tab whose row is identical — restoring then would needlessly
-        # wipe its on-screen response/scroll/focus. (restore() resets all of that.)
-        next if v.target == row.target && v.request_text == row.request &&
-                v.http2? == row.http2? && v.auto_content_length? == row.auto_content_length?
-        # Live cross-session sync carries only the REQUEST. A replay response is
-        # personal to each session's view (persisted only so it survives that
-        # session's OWN reopen — restored at project-open, not here): pulling a
-        # peer's response would clobber the local response/scroll/focus on every
-        # peer resend. So restore() is called response-less, blanking the pane only
-        # when the peer actually changed the request (which the compare above gates).
-        v.restore(row.target, row.request, row.http2?, row.auto_content_length?)
-        seed_replay_original(v, row.flow_id) # restore() drops the baseline; re-seed it
-      end
-
-      local_ids = @replays.compact_map(&.db_id).to_set
-      rows.each do |row|
-        next if local_ids.includes?(row.id)
-        view = ReplayView.new
-        # Peer-created tab: request only (its response shows on this session's next
-        # project-open, per the personal-response rule above).
-        view.restore(row.target, row.request, row.http2?, row.auto_content_length?)
-        seed_replay_original(view, row.flow_id)
-        @replays << ReplayTab.new(view, row.flow_id, row.id)
-      end
-
-      @replays.reject! do |tab|
-        (id = tab.db_id) && !by_id.has_key?(id) && !replay_tab_locked?(tab)
-      end
-
-      @replays.sort_by! do |tab|
-        if (id = tab.db_id) && (row = by_id[id]?)
-          {row.position, id}
-        else
-          {Int32::MAX, Int64::MAX} # local-only / unsaved tabs sort last, stable
-        end
-      end
-
-      @current_replay_idx =
-        if cur_db && (idx = @replays.index { |t| t.db_id == cur_db })
-          idx
-        elsif @replays.empty?
-          -1
-        else
-          @current_replay_idx.clamp(0, @replays.size - 1)
-        end
-    end
-
-    # Re-seed a ^R-from-History tab's captured-original diff baseline after a
-    # restore() (reopen / cross-session sync), which is non-diffable on its own.
-    # The source response lives in `flows`, re-fetched by the persisted flow_id;
-    # no-op for a hand-authored (^N) tab or a flow that's since been deleted.
-    private def seed_replay_original(view : ReplayView, flow_id : Int64?) : Nil
-      return unless flow_id
-      return unless detail = @session.store.get_flow(flow_id)
-      view.seed_original(detail.response_head, detail.response_body)
     end
 
     private def nonblocking_event : Store::FlowEvent?
@@ -431,17 +330,7 @@ module Gori::Tui
     # tab/sub-mode fan-out doesn't inflate apply_preedit's complexity.
     private def apply_preedit_body(text : String) : Nil
       return unless @focus == :body
-      if @active_tab == :history && @history.querying?
-        @history.set_preedit(text)
-      elsif @active_tab == :findings && @findings.editing_notes?
-        @findings.set_preedit(text)
-      else
-        case @active_tab
-        when :notes   then @notes.set_preedit(text)
-        when :project then @project_view.set_preedit(text)
-        when :replay  then current_replay_view.try { |v| v.set_preedit(text) unless v.request_hex? }
-        end
-      end
+      @tabs[@active_tab]?.try(&.set_preedit(text)) # each controller routes (or ignores) IME text
     end
 
     private def handle_key(ev : Termisu::Event::Key) : Nil
@@ -490,8 +379,12 @@ module Gori::Tui
       return handle_settings_key(ev) if @overlay == :settings
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
-      return handle_query_key(ev) if @active_tab == :history && @overlay == :none && @focus == :body && @history.querying?
-      return handle_findings_notes_key(ev) if @active_tab == :findings && @overlay == :none && @focus == :body && @findings.editing_notes?
+      if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
+        return if history_controller.handle_query_key(ev)
+      end
+      if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.editing_notes?
+        return if findings_controller.handle_notes_key(ev)
+      end
 
       # Focusable sub-tab strip (Replay/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
       # the editor, ↑/esc pop to the tab bar. Claimed BEFORE the Tab ring + ^N so the
@@ -504,7 +397,8 @@ module Gori::Tui
       # termisu decodes Shift-Tab as the distinct BackTab key (not Tab+shift).
       # The scope add/edit row owns Tab while open (it stays inert) so a stray ↹ can't
       # strand a half-composed rule over the description editor.
-      if @overlay == :none && (ev.key.tab? || ev.key.back_tab?) && !project_scope_adding?
+      if @overlay == :none && (ev.key.tab? || ev.key.back_tab?) &&
+         !(@active_tab == :project && @focus == :body && project_controller.scope_adding?)
         focus_advance(ev.key.back_tab? || ev.shift? ? -1 : 1)
         return
       end
@@ -512,14 +406,14 @@ module Gori::Tui
       # ^N opens a new blank replay whenever the Replay tab is active — body OR
       # tab-bar focus — so the advertised empty-state shortcut is never a dead key.
       if @active_tab == :replay && @overlay == :none && ev.ctrl? && ev.key.lower_n?
-        replay_new
+        replay_controller.replay_new
         return
       end
 
       # ^N opens a new note from the Notes tab (body OR tab-bar focus), mirroring
       # Replay's new-request shortcut so it's never a dead key.
       if @active_tab == :notes && @overlay == :none && ev.ctrl? && ev.key.lower_n?
-        notes_new
+        notes_controller.notes_new
         return
       end
 
@@ -527,30 +421,28 @@ module Gori::Tui
       # settings:editor). A Body-scope verb would be shadowed by the per-tab handlers
       # below, so claim it inline here. Each target is gated to where it's editable.
       if @overlay == :none && @focus == :body && ev.ctrl? && ev.key.lower_e?
-        if @active_tab == :replay && (v = current_replay_view) && v.focus == :request
+        if @active_tab == :replay && (v = replay_controller.current_view) && v.focus == :request
           v.toggle_request_hex if v.request_hex? # commit + drop the hex buffer (external editor is text)
           run_external_editor(v.request_text, :request) { |t| v.replace_request(t) }
           return
         elsif @active_tab == :notes
-          run_external_editor(@notes.current_text, :notes) { |t| @notes.replace_current(t) }
+          run_external_editor(notes_controller.view.current_text, :notes) { |t| notes_controller.view.replace_current(t) }
           return
-        elsif @active_tab == :project && @project_view.pane == :desc
-          run_external_editor(@project_view.desc_text, :desc) { |t| @project_view.replace_desc(t) }
+        elsif @active_tab == :project && project_controller.view.pane == :desc
+          run_external_editor(project_controller.view.desc_text, :desc) { |t| project_controller.view.replace_desc(t) }
           return
-        elsif @active_tab == :intercept && @intercept.editing?
-          run_external_editor(@intercept.editor_text, :intercept) { |t| @intercept.replace_editor(t) }
+        elsif @active_tab == :intercept && intercept_controller.view.editing?
+          iv = intercept_controller.view
+          run_external_editor(iv.editor_text, :intercept) { |t| iv.replace_editor(t) }
           return
         end
       end
 
-      return handle_replay_key(ev) if @active_tab == :replay && @overlay == :none && @focus == :body
-      return handle_notes_key(ev) if @active_tab == :notes && @overlay == :none && @focus == :body
-      return handle_intercept_key(ev) if @active_tab == :intercept && @overlay == :none && @focus == :body
-      # Project description editor (live TextArea for the DESCRIPTION section when body focused).
-      # Tab is handled by the focus ring above (so ring always works); other keys (letters,
-      # arrows, enter, esc, etc.) are consumed here for desc editing (consistent with Notes).
-      return handle_project_key(ev) if @active_tab == :project && @overlay == :none && @focus == :body
-      return handle_help_key(ev) if @active_tab == :help && @overlay == :none && @focus == :body
+      # Migrated tabs: the controller claims body keys (true = handled). An unmigrated
+      # tab is absent from @tabs and falls through to ":" / the verb keymap below.
+      if @overlay == :none && @focus == :body && (c = @tabs[@active_tab]?)
+        return if c.handle_body_key(ev)
+      end
 
       # ":" opens the context command line for the focused area. Only reached here
       # in NAVIGABLE contexts — text editors (Replay request/target, Notes, Project
@@ -641,7 +533,7 @@ module Gori::Tui
     private def click_menu(rect : Rect, mx : Int32, my : Int32) : Nil
       seg = Chrome.menu_segments(rect, @active_tab,
         findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
-        replay_count: @replays.size, notes_count: @notes.count).find { |(_, r)| r.contains?(mx, my) }
+        replay_count: replay_controller.count, notes_count: notes_controller.view.count).find { |(_, r)| r.contains?(mx, my) }
       if seg
         seg[0] == @active_tab ? focus_pane(:body) : focus_tab(seg[0])
       else
@@ -663,124 +555,27 @@ module Gori::Tui
 
     # Labels for the active tab's sub-tab strip — built identically to render_body.
     private def subtab_labels : Array(String)
-      case @active_tab
-      when :replay then @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.view.label(18)}" }
-      when :notes  then @notes.subtab_labels
-      else              [] of String
-      end
+      @tabs[@active_tab]?.try(&.subtab_labels) || [] of String
     end
 
     private def current_subtab_index : Int32
-      @active_tab == :replay ? @current_replay_idx : @notes.current_index
+      @tabs[@active_tab]?.try(&.subtab_index) || 0
     end
 
     # Per-tab body click. Notes (a lone editor) + Agent just take focus; cursor
     # placement inside editors is Phase 2.
     private def click_body(body : Rect, mx : Int32, my : Int32) : Nil
-      case @active_tab
-      when :history   then click_history(body, mx, my)
-      when :findings  then click_findings(body, mx, my)
-      when :sitemap   then click_sitemap(body, mx, my)
-      when :replay    then click_replay(body, mx, my)
-      when :project   then click_project(body, mx, my)
-      when :intercept then click_intercept(body, mx, my)
-      when :notes     then click_notes(body, mx, my)
-      else                 (@focus = :body)
-      end
-    end
-
-    # Notes: a lone editor — focus it and place the cursor at the click (carve the
-    # sub-tab row + frame inset, matching render_body).
-    private def click_notes(body : Rect, mx : Int32, my : Int32) : Nil
-      @focus = :body
-      rect = @notes.count >= 2 ? carve_subtab_row(body)[1] : body
-      @notes.click_to_cursor(rect.inset(1, 1), mx, my)
-    end
-
-    # History: in detail, a chip click switches the request/response/frames pane. In
-    # the list, SELECT-FIRST — first click selects the row, a second click on the
-    # already-selected row opens the detail (the locked click model).
-    private def click_history(body : Rect, mx : Int32, my : Int32) : Nil
-      inner = body.inset(1, 1) # render_framed insets 1,1
-      if @overlay == :detail
-        if pane = @history.detail_pane_at(inner, mx, my)
-          @history.set_detail_pane_public(pane)
-        end
+      if c = @tabs[@active_tab]? # migrated tab — controller owns its body clicks
+        c.handle_click(body, mx, my)
         return
       end
-      @focus = :body
-      return unless idx = @history.list_row_at(inner, mx, my)
-      idx == @history.selected_index ? open_detail : @history.select_row(idx)
-    end
-
-    # Findings list: same select-first as History. No body hit-testing while the
-    # detail/notes pane is open (it isn't the list).
-    private def click_findings(body : Rect, mx : Int32, my : Int32) : Nil
-      inner = body.inset(1, 1)
-      if @findings.detail_open?
-        @findings.notes_click_to_cursor(inner, mx, my) if @findings.editing_notes? # place caret in the inline notes editor
-        return
-      end
-      @focus = :body
-      return unless idx = @findings.list_row_at(inner, mx, my)
-      idx == @findings.selected_index ? findings_open : @findings.select_index(idx)
+      @focus = :body # unmigrated/placeholder tab (e.g. :agent) — just take focus
     end
 
     # Sitemap: a click selects the row; a click on the ▾/▸ marker toggles it
     # (expand/collapse is single-click, per the locked model).
-    private def click_sitemap(body : Rect, mx : Int32, my : Int32) : Nil
-      @focus = :body
-      inner = body.inset(1, 1)
-      return unless ri = @sitemap.row_at(inner, mx, my)
-      @sitemap.select_index(ri)
-      @sitemap.toggle_at(ri) if @sitemap.marker_hit?(inner, mx, ri)
-    end
 
-    # Replay: click a pane (target/request/response) to focus it (saving the outgoing
-    # edits first, like the keyboard pane-advance).
-    private def click_replay(body : Rect, mx : Int32, my : Int32) : Nil
-      rect = @replays.size >= 2 ? carve_subtab_row(body)[1] : body
-      return unless v = current_replay_view
-      if pane = v.pane_at(rect, mx, my)
-        save_current_replay
-        v.focus_pane(pane)
-        @focus = :body
-        v.request_click_to_cursor(rect, mx, my) if pane == :request
-        v.target_click_to_cursor(rect, mx, my) if pane == :target
-      end
-    end
-
-    # Project: focus the clicked pane; in the SCOPE list a click also selects the rule.
-    private def click_project(body : Rect, mx : Int32, my : Int32) : Nil
-      return unless pane = @project_view.pane_at(body, mx, my)
-      @focus = :body
-      case pane
-      when :scope
-        @project_view.focus_pane(:scope)
-        if idx = @project_view.scope_row_at(body, mx, my)
-          @project_view.select_scope(idx)
-        end
-      when :desc
-        @project_view.focus_pane(:desc)
-        @project_view.desc_click_to_cursor(body, mx, my)
-      end # :overview band → just take body focus
-    end
-
-    # Intercept: click the left queue (focus list + select an item) or the right pane
-    # (focus the editor when an item is loaded).
-    private def click_intercept(body : Rect, mx : Int32, my : Int32) : Nil
-      return unless pane = @intercept.pane_at(body, mx, my)
-      @focus = :body
-      if pane == :list
-        @intercept.focus_list
-        if idx = @intercept.list_row_at(body, mx, my)
-          @intercept.select_index(idx)
-        end
-      else
-        @intercept.focus_detail
-        @intercept.editor_click_to_cursor(body, mx, my)
-      end
-    end
+    # (click_project moved to ProjectController#handle_click)
 
     # The ":" command line floats over everything: a click on a suggestion runs it,
     # a click elsewhere dismisses the line. Always consumes the click (returns true).
@@ -889,15 +684,7 @@ module Gori::Tui
       return @command.move(step) if @command_open
       return wheel_overlay(step) if modal_overlay?
       return unless layout.body.contains?(mx, my)
-      case @active_tab
-      when :history   then @overlay == :detail ? @history.scroll_detail(step) : @history.move(step)
-      when :findings  then @findings.move(step) unless @findings.detail_open? # detail pane hides the list — don't shift the selection behind it
-
-      when :sitemap   then @sitemap.move(step)
-      when :intercept then @intercept.move(step)
-      when :replay    then wheel_replay(step)
-      when :help      then @help.move(step)
-      end
+      @tabs[@active_tab]?.try(&.handle_wheel(step)) # all body tabs are migrated; controller owns the wheel
     end
 
     # Wheel inside a centered modal scrolls its list (no movement for the button modals).
@@ -908,12 +695,6 @@ module Gori::Tui
       when :browser  then @browser_picker.try(&.move(step))
       when :settings then @settings_view.move_field(step)
       end
-    end
-
-    # Replay wheel free-scrolls the response pane; the request editor is Phase 2.
-    private def wheel_replay(step : Int32) : Nil
-      return unless v = current_replay_view
-      v.scroll(step) if v.focus == :response
     end
 
     # Match&Replace overlay: type a `[req:|resp:] pattern => replacement` rule;
@@ -981,8 +762,8 @@ module Gori::Tui
 
     # Open the confirmation modal for a destructive action; `action` runs only if
     # the user accepts. Defaults to a red "danger" confirm button.
-    private def confirm(title : String, message : String, *, confirm_label : String = "delete",
-                        danger : Bool = true, &action : -> Nil) : Nil
+    def confirm(title : String, message : String, *, confirm_label : String = "delete",
+                danger : Bool = true, &action : -> Nil) : Nil
       @confirm = ConfirmDialog.new(title, message, confirm_label: confirm_label,
         cancel_label: "cancel", danger: danger)
       @confirm_action = action
@@ -1056,36 +837,12 @@ module Gori::Tui
       end
     end
 
-    # Findings notes inline editor.
-    private def handle_findings_notes_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      case
-
-      when ev.ctrl? && key.lower_w? then @findings.cancel_notes_edit # discard edits
-      when key.escape?              then @findings.save_notes(@session.store)
-      when key.enter?               then @findings.notes_newline
-      when key.backspace?           then @findings.notes_backspace
-      when key.up?                  then @findings.notes_move(-1, 0)
-      when key.down?                then @findings.notes_move(1, 0)
-      when key.left?                then @findings.notes_move(0, -1)
-      when key.right?               then @findings.notes_move(0, 1)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @findings.notes_insert(c)
-          @findings.set_preedit("") # commit any preedit
-        end
-
-      end
-    end
-
     # The Notes tab is a live editor (like Replay): typing edits the document
     # directly. Esc / Ctrl-P / Ctrl-C leave editing and persist first.
     # A navigable sub-tab strip exists (≥2 chips) — gates entry into :subtabs. Replay
     # draws its strip at size>0 but a lone chip has nowhere to switch to.
     private def subtabs_shown? : Bool
-      (@active_tab == :replay && @replays.size >= 2) ||
-        (@active_tab == :notes && @notes.count >= 2)
+      (@tabs[@active_tab]?.try(&.subtab_labels).try(&.size) || 0) >= 2 # only Replay/Notes expose a strip
     end
 
     # The focusable sub-tab strip for Replay/Notes (@focus == :subtabs). Mirrors the
@@ -1096,17 +853,17 @@ module Gori::Tui
       c = ev.char || key.to_char
       case
       when ev.ctrl? && key.lower_n?
-        @active_tab == :replay ? replay_new : notes_new # creates + drops to :body
+        @active_tab == :replay ? replay_controller.replay_new : notes_controller.notes_new # creates + drops to :body
       when ev.ctrl? && key.lower_w?
-        @active_tab == :replay ? request_close_replay : notes_close
+        @active_tab == :replay ? replay_controller.request_close : notes_controller.notes_close
         resolve_subtab_focus_after_close
       when ev.ctrl? && key.lower_p?
-        @active_tab == :replay ? save_current_replay : save_notes
+        @active_tab == :replay ? replay_controller.save_current_replay : notes_controller.save_notes
         open_palette
       when ev.ctrl? && c && '1' <= c <= '9'
         jump_subtab(c.to_i - 1) # switch + stay on the strip
       when rename_chord?(ev)
-        open_rename(@current_replay_idx) # rename the active replay sub-tab
+        open_rename(replay_controller.current_idx) # rename the active replay sub-tab
       when key.left?, key.lower_h?
         move_subtab(-1)
       when key.right?, key.lower_l?
@@ -1123,98 +880,22 @@ module Gori::Tui
     # Move the active sub-tab by ±1 (clamped, no wrap — matches the chips), saving
     # the outgoing tab first so a cross-session reconcile can't clobber its edits.
     private def move_subtab(dir : Int32) : Nil
-      case @active_tab
-      when :replay
-        return unless @replays.size >= 2
-        nidx = (@current_replay_idx + dir).clamp(0, @replays.size - 1)
-        return if nidx == @current_replay_idx
-        save_current_replay
-        @current_replay_idx = nidx
-      when :notes
-        return unless @notes.count >= 2
-        nidx = (@notes.current_index + dir).clamp(0, @notes.count - 1)
-        return if nidx == @notes.current_index
-        save_notes
-        @notes.switch_note(nidx)
-      end
+      @tabs[@active_tab]?.try(&.move_subtab(dir))
     end
 
     # Jump to an absolute sub-tab index (^1-9 on the strip) and STAY on the strip.
     private def jump_subtab(idx : Int32) : Nil
-      case @active_tab
-      when :replay
-        return unless 0 <= idx < @replays.size
-        return if idx == @current_replay_idx
-        save_current_replay
-        @current_replay_idx = idx
-      when :notes
-        return unless 0 <= idx < @notes.count
-        save_notes
-        @notes.switch_note(idx)
-      end
+      @tabs[@active_tab]?.try(&.jump_subtab(idx))
     end
 
     # After ^W on the strip the chip count may drop below 2 (strip gone) or to 0
     # (Replay only) — re-resolve focus so we never sit on an invisible strip.
     private def resolve_subtab_focus_after_close : Nil
       if @active_tab == :replay
-        focus_pane(:menu) if @replays.empty?
-        focus_pane(:body) if !@replays.empty? && !subtabs_shown?
+        focus_pane(:menu) if replay_controller.empty?
+        focus_pane(:body) if !replay_controller.empty? && !subtabs_shown?
       else
         focus_pane(:body) unless subtabs_shown? # close_note always keeps ≥1 note
-      end
-    end
-
-    # Help tab: read-only scroll (↑/↓ or j/k, or the wheel). ↑ at the top pops to the
-    # tab bar (like the body lists); esc returns to it. Nothing is selectable.
-    private def handle_help_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      case
-      when key.up?, key.lower_k?   then @help.at_top? ? focus_pane(:menu) : @help.move(-1)
-      when key.down?, key.lower_j? then @help.move(1)
-      when key.escape?             then focus_pane(:menu)
-      end
-    end
-
-    private def handle_notes_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if ev.ctrl? && key.lower_p?
-
-        save_notes
-        open_palette
-      elsif ev.ctrl? && key.lower_w?
-        notes_close
-      elsif ev.ctrl? && c && '1' <= c <= '9'
-        # Switch note sub-tab (the ctrl check keeps digits literal while editing).
-        @notes.switch_note(c.to_i - 1)
-      elsif key.escape?
-        save_notes
-        focus_pane(:menu)
-      elsif key.enter?
-        @notes.newline
-      elsif key.backspace?
-        @notes.backspace
-      elsif key.up?
-        if @notes.at_top? # ↑ on the first line pops up (to the sub-tab strip, else the tab bar)
-          save_notes
-          focus_pane(subtabs_shown? ? :subtabs : :menu)
-        else
-          @notes.move(-1, 0)
-        end
-      elsif key.down?
-        @notes.move(1, 0)
-      elsif key.left?
-        @notes.move(0, -1)
-      elsif key.right?
-        @notes.move(0, 1)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @notes.insert(c)
-          @notes.set_preedit("")  # commit any preedit
-        end
-
-
       end
     end
 
@@ -1222,225 +903,11 @@ module Gori::Tui
     # coexists with the static metadata above it in the same tab).
     # True while the Project SCOPE pane's inline add/edit row is composing — Tab stays
     # inert then (the row owns it) instead of switching panes.
-    private def project_scope_adding? : Bool
-      @active_tab == :project && @focus == :body && @project_view.pane == :scope && @project_view.adding?
-    end
-
-    private def handle_project_key(ev : Termisu::Event::Key) : Nil
-      @project_view.pane == :scope ? handle_project_scope_key(ev) : handle_project_desc_key(ev)
-    end
-
-    # DESCRIPTION pane: live multi-line editing. ↑ on the first line pops UP to the
-    # SCOPE pane (the section directly above), not all the way to the tab bar.
-    private def handle_project_desc_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if ev.ctrl? && key.lower_p?
-        save_project_desc
-        open_palette
-      elsif key.escape?
-        save_project_desc
-        focus_pane(:menu)
-      elsif key.enter?
-        @project_view.newline
-      elsif key.backspace?
-        @project_view.backspace
-      elsif key.up?
-        if @project_view.at_top? # ↑ on the first line pops up to the tab bar (scope is the LEFT pane now — use ⇧↹/←)
-          save_project_desc
-          focus_pane(:menu)
-        else
-          @project_view.move(-1, 0)
-        end
-      elsif key.left? && @project_view.desc_at_start?
-        @project_view.pane_advance(-1) # ← at the very start of the description crosses back to SCOPE (left)
-      elsif key.down?
-        @project_view.move(1, 0)
-      elsif key.left?
-        @project_view.move(0, -1)
-      elsif key.right?
-        @project_view.move(0, 1)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @project_view.insert(c)
-          @project_view.set_preedit("") # commit any preedit
-        end
-      end
-    end
-
-    # SCOPE pane. Browsing the rule list: ↑/↓ select · a add · ↵/e edit · d del ·
-    # space lens on/off · ↹ desc · esc tabs. When the inline add/edit row is open,
-    # keys route to handle_project_add_key.
-    private def handle_project_scope_key(ev : Termisu::Event::Key) : Nil
-      return handle_project_add_key(ev) if @project_view.adding?
-      key = ev.key
-      c = ev.char || key.to_char
-      plain = c && !ev.ctrl? && !ev.alt?
-      if ev.ctrl? && key.lower_p?
-        save_project_desc
-        open_palette
-      elsif key.escape?
-        save_project_desc
-        focus_pane(:menu)
-      elsif key.up?
-        @project_view.scope_select(-1)
-      elsif key.down?
-        @project_view.scope_select(1)
-      elsif key.right?
-        @project_view.pane_advance(1) # → crosses from the SCOPE list to the DESCRIPTION (right pane)
-      elsif key.enter?
-        @project_view.scope_edit_start
-      elsif plain && c == ' '
-        @project_view.scope_toggle
-        toast_scope_state
-      elsif plain && c == 'a'
-        @project_view.scope_add_start
-      elsif plain && c == 'e'
-        @project_view.scope_edit_start
-      elsif plain && c == 'd'
-        if pat = @project_view.scope_delete
-          @toast = "removed scope rule: #{pat}"
-        end
-      end
-    end
-
-    # Feedback after a scope-lens change in the Project tab, mirroring the
-    # explicitness of the History "add host to scope" quick action — so editing scope
-    # never feels like a silent no-op.
-    private def toast_scope_state : Nil
-      n = @scope.size
-      @toast = if !@scope.enabled?
-                 "scope lens OFF — showing all flows"
-               elsif n == 0
-                 "scope lens ON, but no rules yet — add some in Project (s)"
-               else
-                 "scope lens ON — showing in-scope only (#{n} rule#{n == 1 ? "" : "s"})"
-               end
-    end
-
-    # The inline add/edit row: type the pattern, ^K cycles include/exclude, ^T cycles
-    # host/string/regex, ↵ commits, ⌫ on an empty input cancels, esc cancels.
-    private def handle_project_add_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if key.escape?
-        @project_view.cancel_add
-      elsif key.enter?
-        commit_scope_rule
-      elsif ev.ctrl? && key.lower_k?
-        @project_view.cycle_kind
-      elsif ev.ctrl? && key.lower_t?
-        @project_view.cycle_type
-      elsif key.left?
-        @project_view.scope_move_cursor(-1)
-      elsif key.right?
-        @project_view.scope_move_cursor(1)
-      elsif key.backspace?
-        @project_view.cancel_add unless @project_view.scope_backspace
-      elsif c && !ev.ctrl? && !ev.alt?
-        @project_view.scope_input(c)
-        @project_view.set_preedit("") # commit any preedit
-      end
-    end
-
-    private def commit_scope_rule : Nil
-      case @project_view.scope_commit
-      when :empty   then @toast = "scope: empty pattern"
-      when :invalid then @toast = "scope: invalid regex"
-      when :dup     then @toast = "scope: duplicate rule"
-      when :ok
-        n = @scope.size
-        # Confirm the add AND surface that the lens is still off (the common "I added
-        # a rule but nothing filtered" confusion — space enables it).
-        @toast = @scope.enabled? ? "scope rule added — #{n} rule#{n == 1 ? "" : "s"}" \
-                                 : "scope rule added — #{n} rule#{n == 1 ? "" : "s"} · press space to enable the lens"
-      end
-    end
-
-
-    private def save_notes : Nil
-
-      @notes.save(@session.store)
-    end
-
-    # Open a fresh note sub-tab and drop into it (reachable from the Notes tab bar
-    # or while editing, via ^N), mirroring Replay's ^N.
-    private def notes_new : Nil
-      @notes.new_note
-      @active_tab = :notes
-      @focus = :body
-      @toast = "new note (#{@notes.count}) — ^1-9 switch · ^W close · esc tabs"
-    end
-
-    # Close the current note sub-tab (^W) — after a confirm, since the note's text
-    # is discarded. A blank note has nothing to lose, so it closes immediately.
-    # NotesView keeps at least one note open.
-    private def notes_close : Nil
-      if @notes.current_blank?
-        do_notes_close
-        return
-      end
-      confirm("CLOSE NOTE", "Close \"#{@notes.current_label}\"?\nIts text will be discarded.",
-        confirm_label: "close") { do_notes_close }
-    end
-
-    private def do_notes_close : Nil
-      @notes.close_note
-      @toast = "closed note (#{@notes.count} open)"
-    end
-
-    private def save_project_desc : Nil
-      @project_view.save(@session.store)
-    end
-
-
     # The Intercept queue. Not editing: navigate + decide. Editing: typing edits
     # the held bytes (Replay-style): type to edit, `^R` forwards the edited bytes,
     # `esc` leaves editing. While editing, EVERY letter is literal (incl. f/d) —
     # the queue's f/F/d shortcuts only apply when not editing, exactly like the
     # Replay editor reserves actions for modifier chords.
-    private def handle_intercept_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if ev.ctrl? && key.lower_p?
-
-        open_palette
-      elsif ev.char == ':' && !ev.ctrl? && !ev.alt? && !@intercept.editing?
-        open_command # ":" cmdline in the navigable queue (editing swallows ":" as a char)
-      elsif @intercept.editing?
-        if key.escape?
-          @intercept.stop_edit
-        elsif ev.ctrl? && key.lower_r?
-          intercept_forward
-        elsif key.enter?
-          @intercept.edit_newline
-        elsif key.backspace?
-          @intercept.edit_backspace
-        elsif key.up?
-          @intercept.edit_move(-1, 0)
-        elsif key.down?
-          @intercept.edit_move(1, 0)
-        elsif key.left?
-          @intercept.edit_move(0, -1)
-        elsif key.right?
-          @intercept.edit_move(0, 1)
-        elsif c && !ev.ctrl? && !ev.alt?
-          @intercept.edit_insert(c)
-        end
-
-      else
-        case
-        when key.escape?               then focus_pane(:menu)
-        when key.lower_j?, key.down?   then @intercept.move(1)
-        when key.lower_k?, key.up?     then @intercept.at_top? ? focus_pane(:menu) : @intercept.move(-1)
-        when key.enter?, key.lower_e?  then @intercept.toggle_edit
-        when key.lower_f? && ev.shift? then intercept_forward_all
-        when key.lower_f?              then intercept_forward
-        when key.lower_d?              then intercept_drop
-        end
-      end
-    end
-
     private def create_finding_from_form : Nil
       form = @finding_form
       title = form.title.strip
@@ -1448,196 +915,19 @@ module Gori::Tui
       if id = form.edit_id
         # editing an existing finding's title + severity (from its detail view)
         @session.store.update_finding(id, title: title, severity: form.severity)
-        @findings.resync(@session.store)
+        findings_controller.view.resync(@session.store)
         @toast = "finding updated"
       else
         @session.store.insert_finding(title, form.severity, form.host, form.flow_id)
         @active_tab = :findings
         @focus = :body
-        @findings.reload(@session.store)
+        findings_controller.view.reload(@session.store)
         refresh_findings_count
         @toast = "finding created"
       end
       @overlay = :none
     end
 
-    # The Replay tab drives input directly (the request pane is a live editor;
-    # no edit mode). A few keys are actions; the rest type into the request.
-    # When multiple replays are open they live as sub-tabs; ctrl+1..9 switches them.
-    private def handle_replay_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      if ev.ctrl? && key.lower_p?
-        save_current_replay # persist the tab before the palette takes over
-        open_palette
-      elsif ev.ctrl? && (c = ev.char || key.to_char) && '1' <= c <= '9'
-        # Switch replay sub-tab (works even while editing fields because of the ctrl check).
-        idx = c.to_i - 1
-        if idx < @replays.size
-          save_current_replay # persist the tab we're leaving before switching
-          @current_replay_idx = idx
-          @focus = :body
-        end
-      elsif ev.ctrl? && key.lower_r?
-        replay_send
-      elsif ev.ctrl? && key.lower_w?
-        request_close_replay
-      elsif ev.ctrl? && key.lower_l?
-        # Toggle auto Content-Length (recompute from the body on send).
-        if (view = current_replay_view)
-          if view.request_hex?
-            @toast = "auto Content-Length disabled in hex edit"
-          else
-            on = view.toggle_auto_content_length
-            @toast = on ? "auto Content-Length: on" : "auto Content-Length: off"
-          end
-        end
-      elsif ev.ctrl? && key.lower_x?
-        # ^X toggles editable hex on the REQUEST pane (byte-exact; see ReplayView).
-        if (view = current_replay_view) && view.focus == :request
-          on = view.toggle_request_hex
-          @toast = on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off"
-        else
-          @toast = "hex edit (^X) applies to the REQUEST pane — ↹ to it"
-        end
-      elsif key.escape?
-        if (view = current_replay_view) && view.focus == :request && view.request_hex?
-          view.toggle_request_hex # exit hex back to the text editor (only when on the request pane)
-        else
-          focus_pane(:menu)
-        end
-      else
-        view = current_replay_view
-        return if view.nil?
-        case view.focus
-        when :request  then edit_replay_request(ev, view)
-        when :target   then edit_replay_target(ev, view)
-        when :response then handle_replay_response(ev, view)
-        end
-      end
-    end
-
-    private def edit_replay_request(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return edit_replay_request_hex(ev, view) if view.request_hex?
-      key = ev.key
-      c = ev.char || key.to_char
-      case
-      when key.enter?     then view.edit_newline
-      when key.backspace? then view.edit_backspace
-      when key.up?        then view.at_top? ? view.focus_first : view.edit_move(-1, 0) # ↑-at-top → target field above
-      when key.down?      then view.edit_move(1, 0)
-      when key.left?      then view.edit_move(0, -1)
-      when key.right?     then view.edit_move(0, 1)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          view.edit_insert(c)
-          current_replay_view.try(&.set_preedit("")) if @focus == :body  # commit preedit
-        end
-
-      end
-
-    end
-
-    # Hex-edit keys for the REQUEST pane (overtype with 0-9a-f; Ins/Del/⌫ change
-    # length; arrows navigate; ↑-at-top pops focus like the text editor).
-    private def edit_replay_request_hex(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      case
-      when key.up?        then view.at_top? ? view.focus_first : view.hex_move(-1, 0) # ↑-at-top → target field above
-      when key.down?      then view.hex_move(1, 0)
-      when key.left?      then view.hex_move(0, -1)
-      when key.right?     then view.hex_move(0, 1)
-      when key.home?      then view.hex_home
-      when key.end?       then view.hex_end
-      when key.insert?    then view.hex_insert
-      when key.delete?    then view.hex_delete
-      when key.backspace? then view.hex_backspace
-      else
-        view.hex_set_nibble(c) if c && !ev.ctrl? && !ev.alt? # only 0-9a-fA-F take effect
-      end
-    end
-
-    private def edit_replay_target(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      case
-
-      when key.enter?     then view.pane_advance(1)                          # ↵ confirms the URL → Request pane (^R sends, not ↵, so you don't fire a live request mid-edit)
-      when key.up?        then focus_pane(subtabs_shown? ? :subtabs : :menu) # target is the top pane → ↑ pops up
-      when key.down?      then view.pane_advance(1)                          # ↓ → drop into the Request pane below
-      when key.backspace? then view.target_backspace
-      when key.left?      then view.target_move(-1)
-      when key.right?     then view.target_move(1)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          view.target_insert(c)
-          current_replay_view.try(&.set_preedit("")) if @focus == :body
-        end
-
-
-      end
-    end
-
-    # Response/Diff pane: read-only. ←/→ or d toggles response↔diff, ↑/↓ scroll,
-    # Enter re-sends.
-    private def handle_replay_response(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return open_command if ev.char == ':' && !ev.ctrl? && !ev.alt? # ":" cmdline (response is navigable)
-      key = ev.key
-      case
-      when key.enter?            then replay_send
-      when key.up?               then view.at_top? ? view.focus_first : view.scroll(-1) # ↑-at-top → target field above
-      when key.down?             then view.scroll(1)
-      when key.left?, key.right? then view.toggle_resp_mode
-      when key.lower_d?          then view.toggle_resp_mode
-      when key.lower_x?          then view.toggle_resp_hex
-      when key.lower_b?          then toggle_reveal
-      end
-    end
-
-    # History QL bar: type to filter live (Tab completes a suggestion, Enter
-    # keeps the filter, Esc clears it).
-    # How long to wait after the last QL keystroke before re-running the filter
-    # search. The query text shows instantly; only the result reload is deferred.
-    QUERY_DEBOUNCE = 110.milliseconds
-
-    # Defer the filter reload until typing pauses (coalesces a burst into one search).
-    private def schedule_query_reload : Nil
-      @query_reload_at = Time.instant + QUERY_DEBOUNCE
-    end
-
-    # Run a pending filter reload NOW (on leaving the bar, or when the debounce
-    # deadline passes). reload() always uses the latest @query, so this is never
-    # stale — only the timing is deferred.
-    private def flush_query_reload : Nil
-      return unless @query_reload_at
-      @query_reload_at = nil
-      @history.reload(@session.store)
-    end
-
-    private def handle_query_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      store = @session.store
-      case
-
-      when key.enter?     then flush_query_reload; @history.stop_query
-      when key.escape?    then @query_reload_at = nil; @history.cancel_query; @history.reload(store)
-      when key.tab?       then (@history.query_complete; schedule_query_reload)
-      when key.backspace? then @history.query_backspace; schedule_query_reload
-      when key.left?      then @history.query_move(-1)
-      when key.right?     then @history.query_move(1)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @history.query_insert(c)
-          schedule_query_reload
-          @history.set_preedit("")  # clear preedit on committed char
-        end
-
-
-
-
-      end
-    end
 
     private def handle_palette_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
@@ -1686,21 +976,12 @@ module Gori::Tui
       end
     end
 
-    # Which focused multi-line view ^G jumps, or nil if the context has none.
+    # Which focused multi-line view ^G/^F jumps, or nil if the context has none. The
+    # detail drill-in is shell state (@overlay); the rest is each controller's call.
     private def goto_target : Symbol?
       return :detail if @overlay == :detail
       return nil unless @overlay == :none && @focus == :body
-      case @active_tab
-      when :replay
-        v = current_replay_view
-        return nil unless v
-        return :replay_request if v.focus == :request && !v.request_hex?
-        :replay_response if v.focus == :response
-      when :notes     then :notes
-      when :project   then @project_view.pane == :desc ? :project : nil # only the description editor (not the scope list)
-      when :intercept then @intercept.editing? ? :intercept : nil # only the held-message editor
-      else                 nil
-      end
+      @tabs[@active_tab]?.try(&.goto_symbol)
     end
 
     # The ^G "go to line" prompt: digits only; Enter jumps the captured target, Esc
@@ -1729,23 +1010,23 @@ module Gori::Tui
     # read-only panes). Shared by ^G go-to-line and ^F search.
     private def jump_line(target : Symbol, n : Int32) : Nil
       case target
-      when :replay_request  then current_replay_view.try(&.goto_request_line(n))
-      when :replay_response then current_replay_view.try(&.goto_response_line(n))
-      when :notes           then @notes.goto_line(n)
-      when :project         then @project_view.goto_line(n)
-      when :detail          then @history.goto_detail_line(n)
-      when :intercept       then @intercept.edit_goto_line(n)
+      when :replay_request  then replay_controller.current_view.try(&.goto_request_line(n))
+      when :replay_response then replay_controller.current_view.try(&.goto_response_line(n))
+      when :notes           then notes_controller.view.goto_line(n)
+      when :project         then project_controller.view.goto_line(n)
+      when :detail          then history_controller.view.goto_detail_line(n)
+      when :intercept       then intercept_controller.view.edit_goto_line(n)
       end
     end
 
     private def search_lines_for(target : Symbol, query : String) : Array(Int32)
       case target
-      when :replay_request  then current_replay_view.try(&.request_search_lines(query)) || [] of Int32
-      when :replay_response then current_replay_view.try(&.response_search_lines(query)) || [] of Int32
-      when :notes           then @notes.search_lines(query)
-      when :project         then @project_view.search_lines(query)
-      when :detail          then @history.detail_search_lines(query)
-      when :intercept       then @intercept.edit_search_lines(query)
+      when :replay_request  then replay_controller.current_view.try(&.request_search_lines(query)) || [] of Int32
+      when :replay_response then replay_controller.current_view.try(&.response_search_lines(query)) || [] of Int32
+      when :notes           then notes_controller.view.search_lines(query)
+      when :project         then project_controller.view.search_lines(query)
+      when :detail          then history_controller.view.detail_search_lines(query)
+      when :intercept       then intercept_controller.view.edit_search_lines(query)
       else                       [] of Int32
       end
     end
@@ -1754,12 +1035,12 @@ module Gori::Tui
     # with "" on close). Routes like jump_line; replay covers both panes.
     private def set_search_hl(q : String) : Nil
       case @search_target
-      when :replay_request  then current_replay_view.try { |v| v.request_search_hl = q }
-      when :replay_response then current_replay_view.try { |v| v.response_search_hl = q }
-      when :notes                            then @notes.search_hl = q
-      when :project                          then @project_view.search_hl = q
-      when :detail                           then @history.search_hl = q
-      when :intercept                        then @intercept.search_hl = q
+      when :replay_request  then replay_controller.current_view.try { |v| v.request_search_hl = q }
+      when :replay_response then replay_controller.current_view.try { |v| v.response_search_hl = q }
+      when :notes                            then notes_controller.view.search_hl = q
+      when :project                          then project_controller.view.search_hl = q
+      when :detail                           then history_controller.view.search_hl = q
+      when :intercept                        then intercept_controller.view.search_hl = q
       end
     end
 
@@ -1841,13 +1122,7 @@ module Gori::Tui
         Verb::Scope::HistoryDetail
       else
         return Verb::Scope::Sidebar if @focus == :menu
-        case @active_tab
-        when :replay    then Verb::Scope::Replay
-        when :sitemap   then Verb::Scope::Sitemap
-        when :intercept then Verb::Scope::Intercept
-        when :findings  then @findings.detail_open? ? Verb::Scope::FindingsDetail : Verb::Scope::Findings
-        else                 Verb::Scope::Body
-        end
+        @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body # tab tail (controller-owned)
       end
     end
 
@@ -1870,7 +1145,7 @@ module Gori::Tui
         identity: "user", scope: scope_label, rules: rules_label, intercept: intercept_label)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
         findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
-        replay_count: @replays.size, notes_count: @notes.count)
+        replay_count: replay_controller.count, notes_count: notes_controller.view.count)
       Chrome.render_rule(screen, layout.rule)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: @toast || key_hints,
@@ -1963,19 +1238,7 @@ module Gori::Tui
     # keys under their fingers land as text or as commands.
     private def body_editor? : Bool
       return false unless @focus == :body
-      case @active_tab
-      when :replay
-        # request (incl. hex overtype) + target URL are editable; response is read-only.
-        (v = current_replay_view) ? (v.focus == :request || v.focus == :target) : false
-      when :notes     then true                  # body is a single TextArea
-      when :project
-        # the description editor + the scope add-row capture text; the scope rule list is navigation.
-        @project_view.pane == :desc || @project_view.adding?
-      when :intercept then @intercept.editing?   # else the held-message list
-      when :findings  then @findings.editing_notes? # else the list/read-only detail
-      when :history   then @history.querying?    # the filter-query input
-      else                 false                 # sitemap tree + any other list/read-only body
-      end
+      @tabs[@active_tab]?.try(&.body_badge) == :editor
     end
 
     # Contextual key hints for the bottom row — change with the focused region,
@@ -1998,116 +1261,20 @@ module Gori::Tui
       end
     end
 
-    # Body hints end with the focus-ring reminder: ↹ moves between panes, esc pops
-    # back to the tab bar.
+    # Body hints come from the active tab's controller (it knows its focused pane);
+    # an unmigrated/placeholder tab falls back to the bare ring reminder.
     private def body_hints : String
-      case @active_tab
-      when :history
-        @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
-                           : "↑/↓ move · ↵ open · ^R replay · ⇧F finding · f follow · / filter · i hold-mode · : cmds · esc tabs"
-      when :intercept
-        @intercept.editing? ? "type to edit · ^R forward · ⇧↹/esc queue" \
-                            : "↑/↓ move · ↵/e edit · f forward · d drop · F all · : cmds · ↹ detail · esc tabs"
-      when :replay   then replay_hints
-      when :notes    then "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · ↹/esc tabs"
-      when :sitemap  then "↑/↓ move · ↵/→ expand · ← collapse · esc tabs"
-      when :findings
-        @findings.detail_open? ? "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · ←/esc back" \
-                               : "↑/↓ move · ↵ open · n new · d delete · x export · : cmds · esc tabs"
-      when :project  then project_hints
-      when :help     then "↑/↓ scroll · ↹/esc tabs · ^P cmds · q projects"
-      else "↹/esc tabs · ^P cmds · q projects · ^D quit"
-      end
-    end
-
-    # Replay hints depend on the focused pane: the editable TARGET/REQUEST advertise
-    # editor keys, the read-only RESPONSE advertises scroll/diff/hex — instead of one
-    # pane-agnostic string that told the response pane to "type to edit".
-    private def replay_hints : String
-      v = current_replay_view
-      return "↹/esc tabs · ^N new" unless v
-      return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit" if v.request_hex?
-      case v.focus
-      when :target
-        "type URL · ↵/↓ request · ^R send · ↹ pane · ^N new · esc tabs"
-      when :response
-        "↑/↓ scroll · ←/→/d diff · x hex · ^F find · ^R send · ↹ pane · esc tabs"
-      else # :request
-        "type to edit · ^R send · ^G goto · ^F find · ^X hex · ^B ws · ^N new · ^W close · ↹ pane · esc tabs"
-      end
-    end
-
-    # Project hints depend on the focused pane (SCOPE rule list / its add-row, vs the
-    # DESCRIPTION editor).
-    private def project_hints : String
-      if @project_view.pane == :scope
-        @project_view.adding? \
-          ? "type pattern · ^K kind · ^T type · ↵ save · esc cancel" \
-          : "↑/↓ move · → desc · a add · ↵/e edit · d del · space on/off · esc tabs"
-      else
-        "type to edit · ↑/↓/↔ move · ← scope · ^G goto · ^F find · ^B ws · esc tabs"
-      end
+      @tabs[@active_tab]?.try(&.body_hint(@focus)) || "↹/esc tabs · ^P cmds · q projects · ^D quit"
     end
 
     private def render_body(screen : Screen, rect : Rect) : Nil
-      body_focused = @focus == :body
-      subtabs_focused = @focus == :subtabs # the sub-tab strip (Replay/Notes) holds focus
-      @history.reveal = @reveal            # propagate the global whitespace-reveal pref
-      current_replay_view.try { |v| v.reveal = @reveal }
-      case @active_tab
-      when :history
-        # Single body pane; the detail view is a drill-in within the same frame.
-        if @overlay == :detail
-          render_framed(screen, rect, body_focused) { |inner| @history.render_detail(screen, inner, focused: body_focused) }
-        else
-          render_framed(screen, rect, body_focused) { |inner| @history.render_list(screen, inner, focused: body_focused) }
-        end
-      when :replay
-        render_replay_body(screen, rect, body_focused, subtabs_focused)
-      when :sitemap
-        render_framed(screen, rect, body_focused) { |inner| @sitemap.render(screen, inner, focused: body_focused) }
-      when :findings
-        render_framed(screen, rect, body_focused) { |inner| @findings.render(screen, inner, focused: body_focused) }
-      when :notes
-        # Same chrome as Replay: the sub-tab strip rides above the framed editor
-        # (≥2 notes), drawn by the runner — not inside the view.
-        body_rect = rect
-        if @notes.count >= 2
-          sub_rect, body_rect = carve_subtab_row(rect)
-          render_subtab_strip(screen, sub_rect, @notes.subtab_labels, @notes.current_index, subtabs_focused)
-        end
-        render_framed(screen, body_rect, body_focused) { |inner| @notes.render(screen, inner, focused: body_focused) }
-      when :project
-        # Self-frames its OVERVIEW + SCOPE|DESCRIPTION cards (multi-pane, like Replay).
-        @project_view.render(screen, rect, focused: body_focused)
-      when :intercept
-        @intercept.reload(@session.interceptor) # live refresh (50ms loop)
-        @intercept.render(screen, rect, focused: body_focused) # view frames its own panes
-      when :help
-        render_framed(screen, rect, body_focused) { |inner| @help.render(screen, inner, focused: body_focused) }
-      else
-        render_framed(screen, rect, body_focused) do |inner|
-          screen.text(inner.x + 1, inner.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme.muted)
-        end
+      if c = @tabs[@active_tab]? # migrated tab — controller owns its body render
+        c.render_body(screen, rect, @focus)
+        return
       end
-    end
-
-    # The Replay body: the sub-tab strip rides above the panes (shared chrome with
-    # Notes); the view frames its own target/request/response panes and gold-lights the
-    # focused one. The strip only appears with ≥2 replays — a lone replay has nothing
-    # to switch to, so it keeps the full body (matches Notes + subtabs_shown?).
-    private def render_replay_body(screen : Screen, rect : Rect, body_focused : Bool, subtabs_focused : Bool) : Nil
-      body_rect = rect
-      if @replays.size >= 2
-        sub_rect, body_rect = carve_subtab_row(rect)
-        render_subtab_strip(screen, sub_rect, subtab_labels, @current_replay_idx, subtabs_focused)
-      end
-      if v = current_replay_view
-        v.render(screen, body_rect, focused: body_focused)
-      else
-        render_framed(screen, body_rect, body_focused) do |inner|
-          screen.text(inner.x + 1, inner.y, "no replays — ^N new request · ^R from History", Theme.muted)
-        end
+      # Unmigrated/placeholder tab (e.g. the half-wired :agent).
+      render_framed(screen, rect, @focus == :body) do |inner|
+        screen.text(inner.x + 1, inner.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme.muted)
       end
     end
 
@@ -2136,10 +1303,10 @@ module Gori::Tui
     # so the per-handler ctrl-c saves moved here). save_notes/save_project_desc are
     # dirty-guarded; findings notes only persist when actively being edited.
     private def commit_pending_edits : Nil
-      save_notes
-      save_project_desc
-      save_current_replay
-      @findings.save_notes(@session.store) if @findings.editing_notes?
+      notes_controller.save_notes
+      project_controller.commit
+      replay_controller.save_current_replay
+      findings_controller.commit
     end
 
 
@@ -2156,11 +1323,61 @@ module Gori::Tui
       @overlay = :none
     end
 
+    # --- Host (the facade per-tab controllers drive the shell through) -------
+    # Thin wrappers over the existing shell setters so a controller never writes
+    # @overlay/@focus/@active_tab directly. `status` (above) already satisfies Host.
+
+    def request_overlay(kind : Symbol) : Nil
+      @overlay = kind
+    end
+
+    def request_focus(pane : Symbol) : Nil
+      focus_pane(pane)
+    end
+
+    # Raw body focus for clicks: set @focus = :body WITHOUT view_focus_first, so a
+    # click that then selects a specific pane/row isn't first reset to pane 1.
+    def focus_body : Nil
+      @focus = :body
+    end
+
+    def switch_tab(tab : Symbol) : Nil
+      focus_tab(tab)
+    end
+
+    # Raw tab switch: set the active tab + drop into the body, WITHOUT on_enter_tab /
+    # view_focus_first (which would reload/reset). For ^R/^N-style "open this and land
+    # in it" jumps that manage their own view state.
+    def goto_tab(tab : Symbol) : Nil
+      @active_tab = tab
+      @focus = :body
+    end
+
+    def session : Session
+      @session
+    end
+
+    def overlay : Symbol
+      @overlay
+    end
+
+    def active_tab : Symbol
+      @active_tab
+    end
+
+    def focus : Symbol
+      @focus
+    end
+
+    def reveal? : Bool
+      @reveal
+    end
+
     # Open the ":" command line scoped to the CURRENT focus area. current_scope is
     # read BEFORE flipping @command_open (which is orthogonal to @overlay) so the
     # scope reflects where ":" was pressed — the History list → Body, an open detail
     # → HistoryDetail, the Replay response → Replay, the tab bar → Sidebar.
-    private def open_command : Nil
+    def open_command : Nil
       @command.open(current_scope, self) # captures the scope + populates results
       # Don't open an empty modal: some focus areas (the tab bar, Sitemap, an open
       # detail) have only hidden nav verbs, so for_scope is empty. Opening there would
@@ -2227,8 +1444,7 @@ module Gori::Tui
     # (empty when it's still the auto label) so it can be edited in place. The target
     # is captured by VIEW identity so a reconcile reorder/remove can't redirect it.
     private def open_rename(idx : Int32) : Nil
-      return unless 0 <= idx < @replays.size
-      view = @replays[idx].view
+      return unless view = replay_controller.view_at(idx)
       @rename_view = view
       @rename_buffer = view.name || ""
       @rename_preedit = ""
@@ -2247,12 +1463,7 @@ module Gori::Tui
     # custom label (the chip reverts to the request-derived summary).
     private def apply_rename(name : String) : Nil
       return unless v = @rename_view
-      return unless tab = @replays.find { |t| t.view.same?(v) }
-      clean = name.strip
-      v.name = clean.empty? ? nil : clean
-      if id = tab.db_id
-        @session.store.set_replay_name(id, v.name)
-      end
+      replay_controller.apply_rename(v, name)
     end
 
     private def render_rename_prompt(screen : Screen, rect : Rect) : Nil
@@ -2296,7 +1507,7 @@ module Gori::Tui
       pane = :menu if pane == :subtabs && !subtabs_shown? # never strand focus on an absent strip
       # Leaving the Replay editor for the tab bar (esc / ↑-to-bar) — persist edits,
       # mirroring how Notes saves on leave. Cheap no-op when the tab is clean.
-      save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
+      replay_controller.save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
       @focus = pane
       @overlay = :none
       view_focus_first if pane == :body
@@ -2313,9 +1524,9 @@ module Gori::Tui
 
     def focus_tab(tab : Symbol) : Nil
       if @active_tab == :project
-        @project_view.save(@session.store)
+        project_controller.commit
       end
-      save_current_replay if @active_tab == :replay # persist the outgoing replay tab
+      replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       @active_tab = tab
       @focus = :body # explicit "jump to tab" (e.g. number keys) drills into content; startup defaults to :menu (tab bar)
       @overlay = :none
@@ -2326,9 +1537,9 @@ module Gori::Tui
 
     def cycle_tab(delta : Int32) : Nil
       if @active_tab == :project
-        @project_view.save(@session.store)
+        project_controller.commit
       end
-      save_current_replay if @active_tab == :replay # persist the outgoing replay tab
+      replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       idx = Chrome.tab_index(@active_tab)
       @active_tab = Chrome.tab_at((idx + delta) % Chrome::TABS.size)
       @overlay = :none
@@ -2356,41 +1567,21 @@ module Gori::Tui
     # pane in `dir` (the ring then wraps back to the tab bar). Single-pane tabs
     # have nowhere to go, so any step exits to the bar.
     private def view_pane_advance(dir : Int32) : Bool
-      case @active_tab
-      when :replay    then current_replay_view.try(&.pane_advance(dir)) || false
-      when :intercept then @intercept.pane_advance(dir)
-      when :project   then @project_view.pane_advance(dir)
-      else                 false
-      end
+      @tabs[@active_tab]?.try(&.pane_advance(dir)) || false
     end
 
     private def view_focus_first : Nil
-      case @active_tab
-      when :replay    then current_replay_view.try(&.focus_first)
-      when :intercept then @intercept.focus_first
-      when :project   then @project_view.focus_first
-      end
+      @tabs[@active_tab]?.try(&.focus_first)
     end
 
     private def view_focus_last : Nil
-      case @active_tab
-      when :replay    then current_replay_view.try(&.focus_last)
-      when :intercept then @intercept.focus_last
-      when :project   then @project_view.focus_last
-      end
+      @tabs[@active_tab]?.try(&.focus_last)
     end
 
     # Refresh a tab's data when it becomes active (the Sitemap is derived from
     # whatever has been captured so far). Project tab refreshes its stats snapshot.
     private def on_enter_tab : Nil
-      case @active_tab
-      when :history   then @history.reload(@session.store) # catch peer captures while we were elsewhere
-      when :sitemap   then @sitemap.reload(@session.store, @scope.filter)
-      when :findings  then @findings.reload(@session.store)
-      when :notes     then @notes.reload(@session.store)
-      when :project   then @project_view.reload(@session.project, @session.store)
-      when :intercept then @intercept.reload(@session.interceptor)
-      end
+      @tabs[@active_tab]?.try(&.on_enter) # migrated tabs refresh their own derived data
     end
 
     # The sub-tab strip shared by Replay and Notes: a frame-less, runner-owned 1-row
@@ -2417,7 +1608,7 @@ module Gori::Tui
     # --- findings ExecContext ---
 
     def finding_create : Nil
-      id = @history.selected_id
+      id = history_controller.view.selected_id
       return unless id
       if row = @session.store.flow_row(id)
         @finding_form = FindingForm.new("#{row.method} #{row.target}", row.host, id)
@@ -2431,59 +1622,54 @@ module Gori::Tui
     end
 
     def findings_move(delta : Int32) : Nil
-      if delta < 0 && @findings.at_top?
-        return focus_pane(:menu) # ↑ at the top finding pops up to the tab bar
-      end
-      @findings.move(delta)
+      findings_controller.findings_move(delta)
     end
 
     def findings_open : Nil
-      @findings.open_detail(@session.store)
+      findings_controller.findings_open
     end
 
     def finding_close : Nil
-      @findings.close_detail
+      findings_controller.finding_close
     end
 
     def findings_delete : Nil
-      return unless f = @findings.target_finding
-      confirm("DELETE FINDING", "Delete \"#{f.title}\"?\nThis can't be undone.", confirm_label: "delete") do
-        @findings.delete(@session.store)
-        refresh_findings_count
-      end
+      findings_controller.findings_delete
     end
 
     # Cached findings badge for the tab bar — refreshed only when findings change
     # (create/delete), not re-queried from SQLite on every render frame.
-    private def refresh_findings_count : Nil
+    def refresh_findings_count : Nil
       @findings_count = @session.store.count_findings
     end
 
     def finding_severity(delta : Int32) : Nil
-      @findings.severity_delta(delta, @session.store)
+      findings_controller.finding_severity(delta)
     end
 
     def finding_status(delta : Int32) : Nil
-      @findings.status_delta(delta, @session.store)
+      findings_controller.finding_status(delta)
     end
 
     def finding_edit_notes : Nil
-      @findings.start_notes_edit
+      findings_controller.finding_edit_notes
     end
 
     # Re-open the create form seeded from the open finding (title + severity), in
     # edit mode — commit updates instead of inserting (create_finding_from_form).
+    # Stays in the shell: it opens the finding-form OVERLAY (shell-owned).
     def finding_edit_title : Nil
-      return unless f = @findings.detail_finding
+      return unless f = findings_controller.view.detail_finding
       @finding_form = FindingForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT FINDING")
       @overlay = :finding_new
     end
 
-    # Jump from a finding to its linked flow's request/response in History.
+    # Jump from a finding to its linked flow's request/response in History. CROSS-TAB
+    # mediator: reads the Findings controller, drives the History controller + overlay.
     def finding_open_flow : Nil
-      return unless f = @findings.detail_finding
+      return unless f = findings_controller.view.detail_finding
       return (@toast = "this finding has no linked flow") unless fid = f.flow_id
-      if @history.open_detail_id(fid, @session.store)
+      if history_controller.view.open_detail_id(fid, @session.store)
         @active_tab = :history
         @focus = :body
         @overlay = :detail
@@ -2492,9 +1678,10 @@ module Gori::Tui
       end
     end
 
-    # Send a finding's linked flow to the Replay tab to re-test the evidence.
+    # Send a finding's linked flow to the Replay tab to re-test the evidence. CROSS-TAB
+    # mediator: reads the Findings controller, opens a Replay tab.
     def finding_replay_flow : Nil
-      return unless f = @findings.detail_finding
+      return unless f = findings_controller.view.detail_finding
       return (@toast = "this finding has no linked flow") unless fid = f.flow_id
       if @session.store.get_flow(fid)
         replay_flow(fid)
@@ -2503,97 +1690,15 @@ module Gori::Tui
       end
     end
 
-    # Write all findings to the project dir as Markdown (the report) or JSON.
     def findings_export(format : Symbol) : Nil
-      findings = @session.store.findings
-      return (@toast = "no findings to export") if findings.empty?
-      ext = format == :json ? "json" : "md"
-      content = format == :json ? findings_json(findings) : findings_markdown(findings)
-      path = File.join(@session.project.dir, "findings.#{ext}")
-      File.write(path, content)
-      msg = "exported #{findings.size} finding#{findings.size == 1 ? "" : "s"} → #{path}"
-      # A temp project's dir is wiped on close — warn so the report isn't silently lost.
-      msg += "  ⚠ temp project — copy it before closing" if @session.project.ephemeral?
-      @toast = msg
-    rescue ex
-      @toast = "export failed: #{ex.message}"
-    end
-
-    private def findings_markdown(findings : Array(Store::Finding)) : String
-      String.build do |io|
-        io << "# Findings — " << @session.project.name << "\n\n"
-        io << "_" << findings.size << " findings · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
-        findings.each do |f|
-          flow = f.flow_id.try { |fid| @session.store.get_flow(fid) }
-          io << "\n## [" << f.severity.label << "] " << f.title << "\n\n"
-          io << "- **Severity:** " << f.severity.label << "\n"
-          io << "- **Status:** " << f.status.label << "\n"
-          io << "- **Host:** " << (f.host || "—") << "\n"
-          if fid = f.flow_id
-            io << "- **Flow:** "
-            if flow
-              loc = flow.row.target.starts_with?("http") ? flow.row.target : "#{flow.row.host}#{flow.row.target}"
-              io << flow.row.method << " " << loc << " → " << (flow.row.status || "-") << " (#" << fid << ")\n"
-            else
-              io << "#" << fid << " (no longer captured)\n"
-            end
-          end
-          io << "\n" << f.notes << "\n" unless f.notes.strip.empty?
-          if flow
-            append_evidence(io, "Request", flow.request_head, flow.request_body)
-            append_evidence(io, "Response", flow.response_head, flow.response_body)
-          end
-        end
-      end
-    end
-
-    private def append_evidence(io : String::Builder, label : String, head : Bytes?, body : Bytes?) : Nil
-      return unless head && !head.empty?
-      cap = 64 * 1024
-      io << "\n### " << label << "\n\n```http\n"
-      # HEAD: headers are text but can carry stray non-UTF-8 (obs-text) bytes — scrub
-      # them so the report stays a valid UTF-8 file; cap it like the body.
-      hslice = head.size > cap ? head[0, cap] : head
-      io << String.new(hslice).scrub
-      io << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
-      if body && !body.empty?
-        slice = body[0, {body.size, cap}.min]
-        text = String.new(slice)
-        if text.valid_encoding?
-          io << "\n\n" << text
-          io << "\n\n[… body truncated, #{body.size} bytes total …]" if body.size > cap
-        else
-          io << "\n\n[binary body omitted, #{body.size} bytes]"
-        end
-      end
-      io << "\n```\n"
-    end
-
-    private def findings_json(findings : Array(Store::Finding)) : String
-      JSON.build do |j|
-        j.array do
-          findings.each do |f|
-            j.object do
-              j.field "id", f.id
-              j.field "title", f.title
-              j.field "severity", f.severity.label
-              j.field "status", f.status.label
-              j.field "host", f.host
-              j.field "flow_id", f.flow_id
-              j.field "created_at", f.created_at
-              j.field "updated_at", f.updated_at
-              j.field "notes", f.notes
-            end
-          end
-        end
-      end
+      findings_controller.findings_export(format)
     end
 
     # 's' / scope.edit: the Scope editor lives in the Project tab now, so jump there
     # and focus its SCOPE pane (saving the outgoing tab, like any tab switch).
     def scope_open : Nil
       focus_tab(:project)
-      @project_view.focus_scope
+      project_controller.focus_scope
     end
 
     def rules_open : Nil
@@ -2602,12 +1707,12 @@ module Gori::Tui
     end
 
     def scope_add_host : Nil
-      id = @history.selected_id
+      id = history_controller.view.selected_id
       return unless id
       if row = @session.store.flow_row(id)
         @scope.add("include", "host", row.host)
         @scope.enable
-        @history.reload(@session.store)
+        history_controller.view.reload(@session.store)
         @toast = "added #{row.host} to scope (#{@scope.size})"
       end
     end
@@ -2616,242 +1721,102 @@ module Gori::Tui
     # the lens filters History/Sitemap, so reload the active list and confirm the state.
     def scope_toggle_lens : Nil
       @scope.toggle
-      @history.reload(@session.store)
-      @sitemap.reload(@session.store, @scope.filter) if @active_tab == :sitemap
-      toast_scope_state
+      history_controller.view.reload(@session.store)
+      sitemap_controller.reload if @active_tab == :sitemap
+      project_controller.toast_scope_state
     end
 
     def sitemap_move(delta : Int32) : Nil
-      if delta < 0 && @sitemap.at_top?
-        focus_pane(:menu) # ↑ at the top node pops up to the tab bar
-      else
-        @sitemap.move(delta)
-      end
+      sitemap_controller.sitemap_move(delta)
     end
 
     def sitemap_toggle : Nil
-      @sitemap.toggle
+      sitemap_controller.sitemap_toggle
     end
 
     def sitemap_expand : Nil
-      @sitemap.expand
+      sitemap_controller.sitemap_expand
     end
 
     def sitemap_collapse : Nil
-      @sitemap.collapse # ← collapses the node; at the root it's a no-op (esc goes up, not ←)
+      sitemap_controller.sitemap_collapse
     end
 
+    # --- History / detail ExecContext --- (delegated to HistoryController)
     def move_selection(delta : Int32) : Nil
-      # ↑ at the top row pops focus up to the tab bar (natural upward keyboard flow);
-      # otherwise move within the list.
-      if delta < 0 && @history.at_top?
-        focus_pane(:menu)
-      else
-        @history.move(delta)
-      end
+      history_controller.move_selection(delta)
     end
 
     def open_detail : Nil
-      @overlay = :detail if @history.open_detail(@session.store)
+      history_controller.open_detail
     end
 
     def close_detail : Nil
-      @overlay = :none
-      @history.close_detail
+      history_controller.close_detail
     end
 
     def toggle_follow : Nil
-      @history.toggle_follow
-      @toast = @history.follow? ? "following newest" : "follow off"
+      history_controller.toggle_follow
     end
 
     def selected_flow_id : Int64?
-      @history.selected_id
+      history_controller.selected_flow_id
     end
 
-    # Copy the selected flow's raw request (head + body, byte-exact P7) to the
-    # system clipboard via OSC 52.
     def copy_selection : Nil
-      id = @history.selected_id
-      return unless id
-      detail = @session.store.get_flow(id)
-      unless detail
-        @toast = "copy: flow no longer available"
-        return
-      end
-      io = IO::Memory.new
-      io.write(detail.request_head)
-      io.write(detail.request_body.not_nil!) if detail.request_body
-      Clipboard.copy(String.new(io.to_slice))
-      @toast = "copied #{detail.row.method} #{Url.origin_path(detail.row.target)} to clipboard (#{io.size}b)"
+      history_controller.copy_selection
     end
 
     def history_query : Nil
-      @history.start_query
-      @toast = "filter: type a query · ↹ complete · ↵ apply · esc clear"
+      history_controller.history_query
     end
 
     def scroll_detail(delta : Int32) : Nil
-      @history.scroll_detail(delta)
+      history_controller.scroll_detail(delta)
     end
 
     def toggle_detail_pane : Nil
-      @history.toggle_pane
+      history_controller.toggle_detail_pane
     end
 
-    # ← / → in the detail view walk REQ → RES → FRAMES. Right past the last pane is a
-    # no-op; left past the first (REQUEST) returns to the History list.
     def move_detail_pane(dir : Int32) : Nil
-      moved = @history.detail_pane_advance(dir)
-      close_detail if !moved && dir < 0
+      history_controller.move_detail_pane(dir)
     end
 
     def toggle_detail_hex : Nil
-      @history.toggle_detail_hex
+      history_controller.toggle_detail_hex
     end
 
+    # --- Replay ExecContext --- (delegated to ReplayController; cross-tab mediators kept)
+    # CROSS-TAB mediator: load History's selection into a new Replay tab.
     def replay_selected : Nil
-      id = @history.selected_id
-      replay_flow(id) if id
+      id = history_controller.selected_flow_id
+      replay_controller.replay_flow(id) if id
     end
 
-    # Open flow `id` as a new Replay tab. Shared by History's ^R and the Findings
-    # tab's "send evidence to Replay". No-op if the flow is gone (pruned).
+    # Open flow `id` as a new Replay tab. Shared by History's ^R + Findings' "send to
+    # Replay" mediator. Public so those mediators can drive it.
     def replay_flow(id : Int64) : Nil
-      return unless detail = @session.store.get_flow(id)
-      view = ReplayView.new
-      view.load(detail)
-      @replays << ReplayTab.new(view, id, persist_new_replay(view, id))
-      @current_replay_idx = @replays.size - 1
-      @active_tab = :replay
-      @focus = :body
-      @toast = "replay: #{view.summary} — type to edit · ^R send · ^N new · ^1-9 switch · esc back"
+      replay_controller.replay_flow(id)
     end
 
-    # Insert a freshly-opened replay tab into the store so it has a stable row id
-    # (the reconcile key) + persists immediately. A closing store returns 0 → nil,
-    # leaving the tab unsaved (treated as local-only; never UPSERTs a bogus row).
-    private def persist_new_replay(view : ReplayView, flow_id : Int64?) : Int64?
-      id = @session.store.insert_replay(view.target, view.request_text, view.http2?,
-        view.auto_content_length?, flow_id, @replays.size)
-      id == 0 ? nil : id
-    end
-
-    # Open a fresh, hand-authored replay session (Replay `^N`) — a blank request
-    # the user fills in and sends, with no source flow. Reachable even when no
-    # replays are open yet (the empty Replay tab).
     def replay_new : Nil
-      view = ReplayView.new
-      view.load_blank
-      @replays << ReplayTab.new(view, nil, persist_new_replay(view, nil))
-      @current_replay_idx = @replays.size - 1
-      @active_tab = :replay
-      @focus = :body
-      @toast = "new replay — edit the request & target · ^R send · ^1-9 switch · esc back"
+      replay_controller.replay_new
     end
 
-    # Confirm before closing a replay sub-tab (^W) — the edited request and its
-    # last response are discarded. No-op when no replay is open.
-    private def request_close_replay : Nil
-      return unless tab = current_replay_tab
-      confirm("CLOSE REPLAY", "Close replay \"#{tab.view.summary}\"?\nThe edited request and response are discarded.",
-        confirm_label: "close") { close_replay_tab }
+    def replay_send : Nil
+      replay_controller.replay_send
     end
 
-    # Close the current replay sub-tab so they don't accumulate without bound
-    # (each holds an editor + last result). Clamps the active index; when the last
-    # one closes the Replay tab shows its empty hint.
     def close_replay_tab : Nil
-      return if @current_replay_idx < 0 || @current_replay_idx >= @replays.size
-      if id = @replays[@current_replay_idx].db_id
-        @session.store.delete_replay(id) # also propagates the close to peer sessions
-      end
-      @replays.delete_at(@current_replay_idx)
-      @current_replay_idx = @replays.empty? ? -1 : @current_replay_idx.clamp(0, @replays.size - 1)
-      @toast = @replays.empty? ? "closed replay — none open (^N new · ^R from History)" : "closed replay (#{@replays.size} open)"
-    end
-
-    private def current_replay_tab : ReplayTab?
-      return nil if @current_replay_idx < 0 || @current_replay_idx >= @replays.size
-      @replays[@current_replay_idx]
-    end
-
-    private def current_replay_view : ReplayView?
-      current_replay_tab.try(&.view)
-    end
-
-    # Persist the current replay tab's edits (cheap no-op when clean). Sprinkled on
-    # every path that leaves the editor — like the Notes save-on-leave — so a tab's
-    # edits reach the DB (and peer sessions) without a per-keystroke write.
-    private def save_current_replay : Nil
-      return unless tab = current_replay_tab
-      return unless (id = tab.db_id) && tab.view.dirty?
-      v = tab.view
-      @session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?)
-      v.clear_dirty
-    end
-
-    # The tab the user is actively typing into (identity match on the ReplayView).
-    private def replay_tab_editing?(tab : ReplayTab) : Bool
-      @active_tab == :replay && @focus == :body && current_replay_view.try(&.same?(tab.view)) == true
-    end
-
-    # A tab a cross-session reload must NOT overwrite/remove: actively edited, mid
-    # round-trip, or holding unsaved local edits.
-    private def replay_tab_locked?(tab : ReplayTab) : Bool
-      # request_hex? too: a hex-edit session isn't necessarily dirty (a pure peek),
-      # and request_text reads CRLF in hex mode vs the LF-persisted row, so the
-      # reconcile compare would wrongly see a change and restore() — wiping the hex
-      # buffer + response. Lock it so the live hex session is never clobbered.
-      replay_tab_editing?(tab) || tab.view.inflight? || tab.view.dirty? || tab.view.request_hex?
+      replay_controller.close_replay_tab
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is
     # insufficient (Tab / tab-switch / sub-tab-switch leave the buffer dirty without
     # saving), so consult the dirty flag too.
     private def notes_locked? : Bool
-      (@active_tab == :notes && @focus == :body) || @notes.dirty?
-    end
-
-    def replay_send : Nil
-      return unless (tab = current_replay_tab) && (view = tab.view).loaded?
-      if view.inflight? # one outstanding round-trip per view — don't pile up fibers/sockets on ^R mashing
-        @toast = "replay already in flight…"
-        return
-      end
-      scheme, host, port = view.parse_target
-      if host.empty?
-        @toast = "replay: invalid target"
-        return
-      end
-      save_current_replay # persist the request we're about to send (before it goes inflight)
-      verify = !@session.config.insecure_upstream?
-      bytes = view.request_bytes
-      http2 = view.http2?
-      results = @replay_results
-      view.inflight = true
-      @toast = "replaying → #{host}:#{port}…"
-      # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only
-      # these captured locals + the inflight flag — and hands the Result back
-      # through the channel; the run loop applies it (see #drain_replay_results).
-      spawn(name: "gori-replay") do
-        result = if http2
-                   Replay::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
-                 else
-                   Replay::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
-                 end
-        # Non-blocking hand-off: if the user already left the project the channel
-        # is orphaned (un-drained, never closed), so drop the late result instead
-        # of blocking this fiber forever once its small buffer fills.
-        select
-        when results.send({view, result})
-        else
-        end
-      ensure
-        # Clear HERE (not in the drain) — a dropped late send never reaches the
-        # drain, which would otherwise leave the flag stuck and wedge re-send.
-        view.inflight = false
-      end
+      (@active_tab == :notes && @focus == :body) || notes_controller.view.dirty?
     end
 
     def toggle_capture : Nil
@@ -2870,43 +1835,26 @@ module Gori::Tui
       @toast = "can't start capture: #{ex.message} — free the port in settings (^P)"
     end
 
-    # --- intercept (hold-and-decide) ExecContext ---
+    # --- intercept (hold-and-decide) ExecContext --- (delegated to InterceptController)
 
     def intercept_toggle : Nil
-      on = @session.interceptor.toggle
-      @intercept.reload(@session.interceptor)
-      @toast = on ? "intercept ON — held traffic waits (HTTPS→h1 for in-scope; gRPC may fail)" : "intercept off"
+      intercept_controller.intercept_toggle
     end
 
     def intercept_forward : Nil
-      return unless it = @intercept.selected_item
-      @session.interceptor.forward(it.id, @intercept.forward_bytes(it))
-      @intercept.reload(@session.interceptor)
-      @toast = "forwarded #{intercept_label(it)}"
+      intercept_controller.intercept_forward
     end
 
     def intercept_drop : Nil
-      return unless it = @intercept.selected_item
-      @session.interceptor.drop(it.id)
-      @intercept.reload(@session.interceptor)
-      @toast = "dropped #{intercept_label(it)}"
-    end
-
-    # A short human label for a held item — "GET /path" (request) or the status line
-    # (response) — for forward/drop toasts; the queue's internal id means nothing to the user.
-    private def intercept_label(it : Interceptor::Item) : String
-      it.kind.request? ? "#{it.method} #{Url.origin_path(it.target)}" : it.target
+      intercept_controller.intercept_drop
     end
 
     def intercept_forward_all : Nil
-      n = @session.interceptor.pending_count
-      @session.interceptor.forward_all
-      @intercept.reload(@session.interceptor)
-      @toast = "forwarded all (#{n})"
+      intercept_controller.intercept_forward_all
     end
 
     def selected_intercept_id : Int64?
-      @intercept.selected_id
+      intercept_controller.selected_intercept_id
     end
 
     def export_ca : Nil
