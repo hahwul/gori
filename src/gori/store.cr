@@ -306,12 +306,12 @@ module Gori
     # (potentially multi-MB) response on each cross-session commit.
     def replays : Array(ReplayRecord)
       list = [] of ReplayRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us FROM replays ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name FROM replays ORDER BY position, id") do |rs|
         rs.each do
           list << ReplayRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?))
+            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?))
         end
       end
       list
@@ -348,6 +348,15 @@ module Gori
       exec_task ->(c : DB::Connection) {
         c.exec("UPDATE replays SET target = ?, request = ?, http2 = ?, auto_content_length = ?, updated_at = ? WHERE id = ?",
           target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, now_us, id)
+        nil
+      }
+    end
+
+    # Set (or clear, with nil) a replay tab's custom name — its own UPDATE, separate
+    # from the request-side update_replay so a rename never rewrites the request.
+    def set_replay_name(id : Int64, name : String?) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE replays SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
         nil
       }
     end

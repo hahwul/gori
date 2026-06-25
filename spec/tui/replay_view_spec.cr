@@ -243,4 +243,35 @@ describe Gori::Tui::ReplayView do
     view.restore("https://z.test", "GET / HTTP/1.1\n\n", false, true)
     view.dirty?.should be_false
   end
+
+  it "label uses the custom name when set, else the request summary" do
+    view = ReplayView.new
+    view.load_blank
+    view.label(18).should eq("GET /") # auto-derived from the request line
+    view.name = "auth flow"
+    view.label(18).should eq("auth flow")
+    view.name = "   " # blank → revert to the auto label
+    view.label(18).should eq("GET /")
+    view.name = nil
+    view.label(18).should eq("GET /")
+  end
+
+  it "label truncates a long custom name" do
+    view = ReplayView.new
+    view.load_blank
+    view.name = "a-very-long-custom-tab-name"
+    label = view.label(8)
+    label.size.should be <= 8
+    label.should end_with("…")
+  end
+
+  it "persists a replay tab's custom name (set / clear)" do
+    replay_tmp_store do |store|
+      id = store.insert_replay("http://h/x", "GET /x HTTP/1.1", false, true, nil, 0)
+      store.set_replay_name(id, "my-tab")
+      store.replays.first.name.should eq("my-tab")
+      store.set_replay_name(id, nil) # blank clears the custom name
+      store.replays.first.name.should be_nil
+    end
+  end
 end

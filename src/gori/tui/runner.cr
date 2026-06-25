@@ -61,6 +61,7 @@ module Gori::Tui
         view = ReplayView.new
         view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us)
+        view.name = r.name # custom sub-tab label survives reopen
         seed_replay_original(view, r.flow_id)
         @replays << ReplayTab.new(view, r.flow_id, r.id)
       end
@@ -95,6 +96,15 @@ module Gori::Tui
       @search_target = :none
       @search_hits = [] of Int32
       @search_idx = 0
+      # The Replay sub-tab rename prompt — orthogonal to @overlay (floats over the
+      # bottom status row, like ^G/^F). @rename_idx is the replay tab being renamed.
+      @rename_open = false
+      @rename_buffer = ""
+      @rename_preedit = ""
+      # The target is held by VIEW identity (not a positional index): the cross-session
+      # reconcile can reorder/remove @replays while the prompt is open, so apply_rename
+      # re-finds the tab by its view — never renaming a neighbour that shifted into its slot.
+      @rename_view = nil.as(ReplayView?)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
       # propagated to the focused view in render_body. Handy for smuggling tests.
       @reveal = false
@@ -396,6 +406,10 @@ module Gori::Tui
         @search_preedit = text
         return
       end
+      if @rename_open # sub-tab rename — IME composing text (e.g. a Hangul name)
+        @rename_preedit = text
+        return
+      end
       # Route preedit to whichever input is active so composing text (e.g. Hangul
       # jamo building into a syllable) shows live with an underline, until it
       # commits (a normal char insert then clears the preedit). The dispatch
@@ -448,6 +462,7 @@ module Gori::Tui
       return handle_command_key(ev) if @command_open # the ":" line is modal while up
       return handle_goto_key(ev) if @goto_open       # the ^G line prompt is modal while up
       return handle_search_key(ev) if @search_open   # the ^F find prompt is modal while up
+      return handle_rename_key(ev) if @rename_open   # the sub-tab rename prompt is modal while up
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
       # multi-line view (editors move the cursor, read-only panes scroll). Modifier
       # keys, so they work inside text editors without conflicting with typing.
@@ -572,8 +587,21 @@ module Gori::Tui
       if ev.wheel?
         return unless ev.button.wheel_up? || ev.button.wheel_down?
         handle_wheel(layout, mx, my, ev.button.wheel_up? ? -1 : 1)
+      elsif ev.button.right?
+        handle_right_click(layout, mx, my)
       else
-        dispatch_click(layout, mx, my)
+        dispatch_click(layout, mx, my) # left (middle treated as left)
+      end
+    end
+
+    # Right-click: rename a Replay sub-tab chip (the one context menu we have). Only
+    # acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
+    private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
+      return unless @active_tab == :replay && @overlay == :none && !@command_open && !@rename_open && subtabs_shown?
+      sub_rect, _ = carve_subtab_row(layout.body)
+      return unless sub_rect.contains?(mx, my)
+      if seg = Chrome.strip_segments(sub_rect, subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
+        open_rename(seg[0])
       end
     end
 
@@ -582,9 +610,10 @@ module Gori::Tui
     # like the keyboard). Centered modals capture every click (outside → dismiss).
     private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
       return if @command_open && click_command(layout, mx, my)
-      if @goto_open || @search_open
+      if @goto_open || @search_open || @rename_open
         close_goto if @goto_open       # a click anywhere dismisses the bottom prompt (like esc)
         close_search if @search_open
+        close_rename if @rename_open
         return
       end
       if modal_overlay?
@@ -632,7 +661,7 @@ module Gori::Tui
     # Labels for the active tab's sub-tab strip — built identically to render_body.
     private def subtab_labels : Array(String)
       case @active_tab
-      when :replay then @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.view.summary(18)}" }
+      when :replay then @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.view.label(18)}" }
       when :notes  then @notes.subtab_labels
       else              [] of String
       end
@@ -1072,6 +1101,8 @@ module Gori::Tui
         open_palette
       when ev.ctrl? && c && '1' <= c <= '9'
         jump_subtab(c.to_i - 1) # switch + stay on the strip
+      when rename_chord?(ev)
+        open_rename(@current_replay_idx) # rename the active replay sub-tab
       when key.left?, key.lower_h?
         move_subtab(-1)
       when key.right?, key.lower_l?
@@ -1841,6 +1872,7 @@ module Gori::Tui
       @command.render(screen, layout.status, layout.body) if @command_open
       render_goto_prompt(screen, layout.status) if @goto_open
       render_search_prompt(screen, layout.status) if @search_open
+      render_rename_prompt(screen, layout.status) if @rename_open
 
       # Sync terminal hardware cursor to the focused input caret (if any view
       # called screen.cursor). This is critical for terminal IME preedit
@@ -2016,8 +2048,7 @@ module Gori::Tui
         body_rect = rect
         if @replays.size >= 2
           sub_rect, body_rect = carve_subtab_row(rect)
-          labels = @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.view.summary(18)}" }
-          render_subtab_strip(screen, sub_rect, labels, @current_replay_idx, subtabs_focused)
+          render_subtab_strip(screen, sub_rect, subtab_labels, @current_replay_idx, subtabs_focused)
         end
         if v = current_replay_view
           v.render(screen, body_rect, focused: body_focused)
@@ -2137,6 +2168,74 @@ module Gori::Tui
       x = rect.x + prefix.size
       iw = {rect.right - x - hint.size - 2, 4}.max
       screen.input_line(x, rect.y, @goto_buffer, @goto_buffer.size, "", Theme.text_bright, Theme.panel, width: iw)
+      screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
+    end
+
+    # --- Replay sub-tab rename (bottom prompt, like ^G/^F) -------------------
+
+    private def handle_rename_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        close_rename
+      elsif key.enter?
+        apply_rename(@rename_buffer)
+        close_rename
+      elsif key.backspace?
+        @rename_buffer = @rename_buffer[0, {@rename_buffer.size - 1, 0}.max]
+      elsif c && !ev.ctrl? && !ev.alt?
+        @rename_buffer += c
+        @rename_preedit = "" # commit any IME preedit
+      end
+    end
+
+    # `r` (no modifiers) on the Replay sub-tab strip opens the rename prompt. Factored
+    # out of handle_subtabs_key's case so its conditions don't inflate that method.
+    private def rename_chord?(ev : Termisu::Event::Key) : Bool
+      @active_tab == :replay && ev.key.lower_r? && !ev.ctrl? && !ev.alt?
+    end
+
+    # Open the rename prompt for replay tab `idx`, seeding its current custom name
+    # (empty when it's still the auto label) so it can be edited in place. The target
+    # is captured by VIEW identity so a reconcile reorder/remove can't redirect it.
+    private def open_rename(idx : Int32) : Nil
+      return unless 0 <= idx < @replays.size
+      view = @replays[idx].view
+      @rename_view = view
+      @rename_buffer = view.name || ""
+      @rename_preedit = ""
+      @rename_open = true
+    end
+
+    private def close_rename : Nil
+      @rename_open = false
+      @rename_preedit = ""
+      @rename_view = nil
+    end
+
+    # Apply the typed name to the captured tab + persist. Re-find the tab by its view
+    # (the reconcile may have reordered/removed it since the prompt opened — if it's
+    # gone, the rename is a no-op rather than hitting a neighbour). Blank clears the
+    # custom label (the chip reverts to the request-derived summary).
+    private def apply_rename(name : String) : Nil
+      return unless v = @rename_view
+      return unless tab = @replays.find { |t| t.view.same?(v) }
+      clean = name.strip
+      v.name = clean.empty? ? nil : clean
+      if id = tab.db_id
+        @session.store.set_replay_name(id, v.name)
+      end
+    end
+
+    private def render_rename_prompt(screen : Screen, rect : Rect) : Nil
+      return if rect.w < 6
+      screen.fill(rect, Theme.panel)
+      prefix = "rename tab: "
+      screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
+      hint = "↵ save · esc cancel · empty: auto"
+      x = rect.x + prefix.size
+      iw = {rect.right - x - hint.size - 2, 4}.max
+      screen.input_line(x, rect.y, @rename_buffer, @rename_buffer.size, @rename_preedit, Theme.text_bright, Theme.panel, width: iw)
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 

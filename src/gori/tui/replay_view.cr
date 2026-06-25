@@ -22,11 +22,13 @@ module Gori::Tui
   class ReplayView
     getter? loaded : Bool
     getter? http2 : Bool
-    getter focus : Symbol  # :request | :response | :target
-    getter target : String # the raw target URL (persistence + cross-session sync)
-    getter? dirty : Bool   # unsaved local edits — gates persistence + protects the tab from sync clobber
+    getter focus : Symbol   # :request | :response | :target
+    getter target : String  # the raw target URL (persistence + cross-session sync)
+    getter? dirty : Bool    # unsaved local edits — gates persistence + protects the tab from sync clobber
+    property name : String? # custom sub-tab chip label (nil = derive from the request); set separately from restore()
 
     def initialize
+      @name = nil
       @flow = nil.as(Store::FlowDetail?)
       @target = ""
       @tcx = 0 # target cursor
@@ -141,6 +143,16 @@ module Gori::Tui
       s = line if s.empty?
       return "new" if s.empty?
       s.size > max ? "#{s[0, max - 1]}…" : s
+    end
+
+    # The sub-tab chip label: the custom name if set (non-blank), else the
+    # request-derived summary. Truncated to `max` either way.
+    def label(max : Int32 = 18) : String
+      if (n = @name) && !(t = n.strip).empty?
+        t.size > max ? "#{t[0, max - 1]}…" : t
+      else
+        summary(max)
+      end
     end
 
     # Replace the request body (e.g. from the external editor); marks dirty so the

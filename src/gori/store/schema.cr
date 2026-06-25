@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 13
+      VERSION = 14
 
       V1 = [
         <<-SQL,
@@ -229,7 +229,14 @@ module Gori
         "DROP TABLE scope_rules_old",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13]
+      # A replay tab can carry a custom NAME (the sub-tab chip label, set via rename).
+      # NULL = derive the label from the request line (the default). Persisted so a
+      # rename survives a reopen.
+      V14 = [
+        "ALTER TABLE replays ADD COLUMN name TEXT",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

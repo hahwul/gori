@@ -215,10 +215,11 @@ module Gori
       getter response_body : Bytes?
       getter response_error : String?
       getter response_duration_us : Int64?
+      getter name : String? # custom sub-tab label (nil = derive from the request)
 
       def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position,
                      @response_head = nil, @response_body = nil, @response_error = nil,
-                     @response_duration_us = nil)
+                     @response_duration_us = nil, @name = nil)
       end
     end
 
