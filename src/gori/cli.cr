@@ -1,9 +1,13 @@
 require "option_parser"
+require "log"
 require "./config"
 require "./paths"
 require "./settings"
 require "./app"
 require "./cli/run"
+require "./store"
+require "./project_registry"
+require "./mcp"
 require "./proxy/tls/cert_authority"
 
 module Gori
@@ -13,8 +17,8 @@ module Gori
   # - `gori settings [--edit]`      → print (and lazily init) / edit settings.json
   # - `gori export ca-cert`         → print CA cert path (refactors old --export-ca)
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
-  # - `gori wizard`                 → placeholder (setup wizard)
-  # - `gori mcp` / `gori update`    → placeholders for future work
+  # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
+  # - `gori wizard` / `gori update` → placeholders for future work
   #
   # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
   # via the tui path for backward compatibility.
@@ -70,7 +74,7 @@ module Gori
       puts "  export    Export things (currently only ca-cert)"
       puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
       puts "  wizard    [placeholder] Interactive setup wizard"
-      puts "  mcp       [placeholder] MCP server"
+      puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
       puts "  update    [placeholder] Self-update"
       puts ""
       puts "See 'gori <command> --help' for more."
@@ -201,13 +205,58 @@ module Gori
       puts "gori wizard: the setup wizard is not yet implemented."
     end
 
+    # `gori mcp` starts a Model Context Protocol server over stdio (JSON-RPC 2.0):
+    # an AI client (Claude Desktop / Claude Code) spawns it and queries gori's
+    # captured data + drives replays. STDOUT is the protocol channel, so EVERYTHING
+    # else (logs, the resolved-db banner, errors) goes to STDERR.
     private def self.run_mcp(args : Array(String)) : Nil
-      if args.any? { |a| ["-h", "--help"].includes?(a) }
-        puts "Usage: gori mcp"
-        puts "  (placeholder) Will eventually start an MCP server for AI/tool integration."
-        return
+      db_path = nil.as(String?)
+      project = nil.as(String?)
+      insecure_upstream = false
+      read_only = false
+
+      parser = OptionParser.new do |p|
+        p.banner = "Usage: gori mcp [options]\n\n" \
+                   "Start an MCP (Model Context Protocol) server over stdio. An AI client\n" \
+                   "spawns this and talks JSON-RPC on stdin/stdout. With no --db/--project,\n" \
+                   "the most-recently-used project is served."
+        p.on("--db=PATH", "Serve this SQLite db (overrides --project)") { |v| db_path = v }
+        p.on("--project=NAME", "Serve a named project's db") { |v| project = v }
+        p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
+        p.on("--read-only", "Disable action tools (send_request, create/update_finding)") { read_only = true }
+        p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
       end
-      puts "gori mcp: MCP support is not yet implemented."
+      parser.parse(args)
+
+      # Logs to STDERR ONLY — STDOUT is reserved for the JSON-RPC stream.
+      Log.setup(:info, Log::IOBackend.new(STDERR))
+      Settings.load # send_request's replay engines read the upstream-proxy setting from here
+
+      resolved = resolve_mcp_db(db_path, project)
+      Log.info { "mcp: serving #{resolved} (actions=#{!read_only})" }
+
+      store = Store.open(resolved, events: nil, retention_flows: 0) # never prune the user's history
+      begin
+        server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream)
+        server.run # blocks until STDIN EOF (client closed)
+      ensure
+        store.close
+      end
+    end
+
+    # Resolves which project DB `gori mcp` serves: explicit --db wins, then a named
+    # --project, then the most-recently-used project, then the default headless db.
+    private def self.resolve_mcp_db(db : String?, project : String?) : String
+      return db if db && !db.empty? # an empty --db= falls through to project/MRU (Crystal: "" is truthy)
+      Paths.ensure_dirs
+      registry = ProjectRegistry.new(Paths.projects_dir)
+      if name = project
+        proj = registry.list.find { |p| p.name == name }
+        abort "gori mcp: no such project: #{name}" unless proj
+        return proj.db_path
+      end
+      registry.list.first?.try(&.db_path) || Paths.default_db
     end
 
     private def self.run_update(args : Array(String)) : Nil
