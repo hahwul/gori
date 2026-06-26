@@ -112,7 +112,8 @@ module Gori::Proxy
       # SAME target that gets captured (sent_req.target, used at the insert below), so a
       # held request is precisely an in-scope History row with no live/SQL divergence.
       scope_url = "#{scheme}://#{host}#{sent_req.target}"
-      if (ic = @interceptor) && ic.intercepts_url?(scope_url, host)
+      if (ic = @interceptor) && ic.intercepts_request?(scope_url,
+           method: sent_req.method, host: host, target: sent_req.target, scheme: scheme)
         return handle_held_request(ic, req, sent_req, sent_head, host, port, scheme,
           created_at, started, req_framing, req_len)
       end
@@ -142,7 +143,7 @@ module Gori::Proxy
         return false
       end
       handle_response(upstream, req, flow_id, started, host, port, scheme,
-        reused: reused, sent_head: sent_head, can_retry: retryable, scope_url: scope_url)
+        reused: reused, sent_head: sent_head, can_retry: retryable, scope_url: scope_url, sent_req: sent_req)
     end
 
     # The intercept-hold request path: buffer the body, let the human edit/drop
@@ -178,7 +179,7 @@ module Gori::Proxy
         body: stored, body_truncated: trunc, body_size: size))
       handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: retryable,
-        scope_url: "#{scheme}://#{host}#{sent_req.target}")
+        scope_url: "#{scheme}://#{host}#{sent_req.target}", sent_req: sent_req)
     end
 
     # Acquires the (reused-or-fresh) upstream and runs `send` on it. If a REUSED
@@ -223,7 +224,8 @@ module Gori::Proxy
     # keep the connection alive.
     private def handle_response(upstream : IO, req : Codec::RawRequest, flow_id : Int64,
                                 started : Time::Instant, host : String, port : Int32, scheme : String,
-                                *, reused : Bool, sent_head : Bytes, can_retry : Bool, scope_url : String) : Bool
+                                *, reused : Bool, sent_head : Bytes, can_retry : Bool, scope_url : String,
+                                sent_req : Codec::RawRequest) : Bool
       resp_head, upstream = read_response_head(upstream, host, port, reused, sent_head, can_retry)
       if resp_head.nil?
         @sink.on_response(FlowMapper.error_response(flow_id, "no response from upstream"))
@@ -242,7 +244,12 @@ module Gori::Proxy
       # close-delimited / WebSocket bodies would buffer forever, so they bypass.
       # Use the SAME precise URL gate as the request hold (scope_url built above), so a
       # string/regex-excluded flow whose request wasn't held doesn't get its response held.
-      if (ic = @interceptor) && ic.intercepts_url?(scope_url, host) &&
+      # The response gate also honours the catch direction + can test `status:`. Match the
+      # CONDITION against `sent_req` (the rewritten/edited request that was captured + scope-
+      # gated), not the original `req`, so a `method:`/`path:` rule that holds the request
+      # also holds its response when a Match&Replace rule changed the request line.
+      if (ic = @interceptor) && ic.intercepts_response?(scope_url,
+           method: sent_req.method, host: host, target: sent_req.target, scheme: scheme, status: resp.status) &&
          !resp_framing.close_delimited? && !sse?(resp) && !websocket_upgrade?(resp)
         return handle_held_response(ic, upstream, req, flow_id, host, port, scheme,
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)

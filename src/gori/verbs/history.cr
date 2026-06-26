@@ -24,7 +24,7 @@ module Gori
         available: history_selected) { |ctx| ctx.open_detail; nil }
 
       r.register Verb::Definition.new(
-        "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 …)",
+        "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 size:>10000 body~regex …)",
         Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history) { |ctx| ctx.history_query; nil }
 
       r.register Verb::Definition.new(

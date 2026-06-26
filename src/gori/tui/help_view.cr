@@ -70,7 +70,7 @@ module Gori::Tui
         {"Findings", "↵ open · n new · d delete · x export"},
         {"Notes", "type to edit · ^N new · ^1-9 switch"},
         {"Project", "scope rules + the description editor"},
-        {"Intercept", "↵/e edit · f forward · d drop · F all"},
+        {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition"},
       ]},
       {"OVERLAYS", [
         {"palette / settings", "↑/↓ · ↵ · esc"},

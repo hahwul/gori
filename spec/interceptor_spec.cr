@@ -126,6 +126,92 @@ describe Gori::Interceptor do
   end
 end
 
+describe "Gori::Interceptor direction + condition gates" do
+  it "cycle_direction wraps Both → RequestOnly → ResponseOnly → Both" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.direction.should eq(Gori::Interceptor::Direction::Both)
+      ic.cycle_direction.should eq(Gori::Interceptor::Direction::RequestOnly)
+      ic.cycle_direction.should eq(Gori::Interceptor::Direction::ResponseOnly)
+      ic.cycle_direction.should eq(Gori::Interceptor::Direction::Both)
+    end
+  end
+
+  it "honours the catch direction at the request/response gates" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.toggle # enable (default Both)
+      req_ok = -> { ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http") }
+      res_ok = -> { ic.intercepts_response?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200) }
+
+      req_ok.call.should be_true
+      res_ok.call.should be_true
+
+      ic.cycle_direction # RequestOnly
+      req_ok.call.should be_true
+      res_ok.call.should be_false
+
+      ic.cycle_direction # ResponseOnly
+      req_ok.call.should be_false
+      res_ok.call.should be_true
+    end
+  end
+
+  it "disabled → both gates closed regardless of direction" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
+      ic.intercepts_response?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200).should be_false
+    end
+  end
+
+  it "the condition filter narrows holding (matched against in-flight attrs)" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.toggle
+      ic.set_filter("method:POST")
+      ic.intercepts_request?("http://acme.test/x", method: "POST", host: "acme.test", target: "/x", scheme: "http").should be_true
+      ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
+    end
+  end
+
+  it "a status: condition holds only matching responses, never requests" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.toggle
+      ic.set_filter("status:>=500")
+      ic.intercepts_response?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 503).should be_true
+      ic.intercepts_response?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200).should be_false
+      ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
+    end
+  end
+
+  it "bumps revision on cycle_direction / set_filter (drives the TUI redraw)" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      r0 = ic.revision
+      ic.cycle_direction
+      (ic.revision > r0).should be_true
+      r1 = ic.revision
+      ic.set_filter("host:acme")
+      (ic.revision > r1).should be_true
+    end
+  end
+
+  it "the condition still respects the Scope lens" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      ic = Gori::Interceptor.new(scope)
+      ic.toggle
+      scope.add("include", "host", "acme.test")
+      scope.enable
+      ic.set_filter("method:GET")
+      ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_true
+      ic.intercepts_request?("http://evil.test/x", method: "GET", host: "evil.test", target: "/x", scheme: "http").should be_false # out of scope
+    end
+  end
+end
+
 describe "Gori::Scope host matching (intercept gate)" do
   it "matches exact host, subdomain, and glob via may_match_host?" do
     with_store do |store|

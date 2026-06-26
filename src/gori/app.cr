@@ -39,6 +39,7 @@ module Gori
     # `q`, exit on quit. Logs go to a file (never STDOUT — that's the screen).
     def run_tui : Nil
       setup_logging(File.open(File.join(Paths.home_dir, "gori.log"), "a"))
+      Tui::Theme.load_custom           # register user themes from <GORI_HOME>/themes/*.json
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame (picker included)
       projects = ProjectRegistry.new(Paths.projects_dir)
       term = Termisu.new

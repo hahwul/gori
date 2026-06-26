@@ -14,7 +14,13 @@ module Gori::Tui
   # Pure view: it reads the shared Interceptor snapshot; the Runner performs the
   # actual forward/drop. No diff (that's Replay's job).
   class InterceptView
+    # Height of the top filter bar (catch direction + condition), reserved above the
+    # queue|detail split — the Intercept tab's analogue of History's QL bar.
+    FILTER_BAR_H = 1
+
     getter? editing : Bool
+    getter? querying : Bool
+    getter query : String
 
     def initialize
       @items = [] of Interceptor::Item
@@ -23,6 +29,15 @@ module Gori::Tui
       @editor = TextArea.new
       @editor.gutter = true # line numbers in the held-message editor (pairs with ^G)
       @editing = false
+      # Filter bar: the catch direction + on/off mirror the Interceptor (captured on
+      # reload, rendered as chips); the condition query is a local edit buffer pushed
+      # to the Interceptor on every keystroke (live, like History's filter).
+      @enabled = false
+      @direction = Interceptor::Direction::Both
+      @querying = false
+      @query = ""
+      @qcx = 0
+      @preedit = ""
       @loaded_id = nil.as(Int64?) # which item the editor currently holds
       # Cached highlight of the selected held item's raw bytes (read-only detail
       # pane). Held bytes are immutable and item ids are monotonic, so the id is a
@@ -38,6 +53,8 @@ module Gori::Tui
     def reload(interceptor : Interceptor) : Nil
       @items = interceptor.pending
       @selected = @selected.clamp(0, {@items.size - 1, 0}.max)
+      @enabled = interceptor.enabled?
+      @direction = interceptor.direction
       if @editing && (id = @loaded_id) && @items.none? { |it| it.id == id }
         @editing = false
         @loaded_id = nil
@@ -65,6 +82,44 @@ module Gori::Tui
     # to the tab bar on ↑.
     def at_top? : Bool
       !@editing && @selected == 0
+    end
+
+    # --- catch-condition filter bar (a text sub-mode; mirrors History's QL bar) ---
+    def start_query : Nil
+      @querying = true
+      @qcx = @query.size
+    end
+
+    def stop_query : Nil # Enter: keep the condition, leave edit mode
+      @querying = false
+    end
+
+    def cancel_query : Nil # Esc: clear the condition, leave edit mode
+      @querying = false
+      @query = ""
+      @qcx = 0
+      @preedit = ""
+    end
+
+    def query_insert(ch : Char) : Nil
+      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
+      @qcx += 1
+    end
+
+    def query_backspace : Nil
+      return if @qcx == 0
+      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
+      @qcx -= 1
+    end
+
+    def query_move(d : Int32) : Nil
+      @qcx = (@qcx + d).clamp(0, @query.size)
+    end
+
+    # Live IME composition shown underlined ahead of the committed query; cleared
+    # when a char commits (same model as the History bar / TextArea).
+    def set_preedit(text : String) : Nil
+      @preedit = text
     end
 
     def toggle_edit : Nil
@@ -153,31 +208,49 @@ module Gori::Tui
 
     # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
 
-    # The w//3 split render() uses (render: `half = {rect.w // 3, 1}.max`).
-    private def split_panes(rect : Rect) : {Rect, Rect}
-      half = {rect.w // 3, 1}.max
-      left = Rect.new(rect.x, rect.y, half, rect.h)
-      right = Rect.new(rect.x + half + 1, rect.y, {rect.w - half - 1, 0}.max, rect.h)
+    # The body (queue|detail split) sits BELOW the filter bar — every hit-test must
+    # subtract the bar row first, exactly as render() does.
+    private def body_rect(rect : Rect) : Rect
+      Rect.new(rect.x, rect.y + FILTER_BAR_H, rect.w, {rect.h - FILTER_BAR_H, 0}.max)
+    end
+
+    # The w//3 split render() uses (render: `half = {body.w // 3, 1}.max`). `body` is
+    # the post-bar rect (body_rect), NOT the full tab rect.
+    private def split_panes(body : Rect) : {Rect, Rect}
+      half = {body.w // 3, 1}.max
+      left = Rect.new(body.x, body.y, half, body.h)
+      right = Rect.new(body.x + half + 1, body.y, {body.w - half - 1, 0}.max, body.h)
       {left, right}
+    end
+
+    # Which catch direction (if any) the filter-bar click landed on: :direction (the
+    # catch chip), :condition (the rest of the bar), else nil. Only on the bar row and
+    # only while NOT editing the condition (then the bar is a plain input line).
+    def bar_zone_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if @querying || my != rect.y
+      label, _ = direction_chip
+      cx = rect.x + 1
+      return :direction if mx >= cx && mx < cx + label.size
+      mx < rect.right ? :condition : nil
     end
 
     # Which pane a click landed in: :list (left queue), :detail (right editor),
     # else nil. Mirrors render's split; nil while empty (single full-rect card, no
-    # split) and in the 1-cell gap column between the panes.
+    # split), on the filter-bar row, and in the 1-cell gap column between the panes.
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if @items.empty?
-      left, right = split_panes(rect)
+      left, right = split_panes(body_rect(rect))
       return :list if left.contains?(mx, my)
       return :detail if right.contains?(mx, my)
       nil
     end
 
     # The @items index under a click in the LEFT queue list, or nil. Inverts
-    # render_list: the card border is `rect.inset(1, 1)`, then row i sits at
+    # render_list: the card border is `left.inset(1, 1)`, then row i sits at
     # `inner.y + i` for idx = @scroll + i (clamped to populated rows).
     def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil if @items.empty?
-      left, _ = split_panes(rect)
+      left, _ = split_panes(body_rect(rect))
       inner = left.inset(1, 1)
       return nil unless inner.contains?(mx, my)
       idx = @scroll + (my - inner.y)
@@ -206,7 +279,7 @@ module Gori::Tui
     # as render_detail does. Only meaningful while editing (the editor is shown then).
     def editor_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless @editing
-      _, right = split_panes(rect)
+      _, right = split_panes(body_rect(rect))
       @editor.click_to_cursor(right.inset(1, 1), mx, my)
     end
 
@@ -214,19 +287,64 @@ module Gori::Tui
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
+      render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused)
+      body = body_rect(rect)
+      return if body.empty?
+
       if @items.empty?
-        Frame.card(screen, rect, "INTERCEPT", bg: Theme.bg, border: pane_border(focused))
-        inner = rect.inset(1, 1)
+        Frame.card(screen, body, "INTERCEPT", bg: Theme.bg, border: pane_border(focused))
+        inner = body.inset(1, 1)
         screen.text(inner.x + 1, inner.y, "no held messages", Theme.muted)
         screen.text(inner.x + 1, inner.y + 2, "turn intercept on (i) — held requests/responses appear here", Theme.muted)
         return
       end
 
-      half = {rect.w // 3, 1}.max
-      left = Rect.new(rect.x, rect.y, half, rect.h)
-      right = Rect.new(rect.x + half + 1, rect.y, {rect.w - half - 1, 0}.max, rect.h)
-      render_list(screen, left, focused && !@editing)
+      left, right = split_panes(body)
+      render_list(screen, left, focused && !@editing && !@querying)
       render_detail(screen, right, focused && @editing)
+    end
+
+    # The top filter bar: while editing the condition it's a single input line
+    # (`catch › …`); otherwise a catch-direction chip, the committed condition (or a
+    # field hint), and a right-aligned held count. Mirrors History's QL bar.
+    private def render_filter_bar(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.empty?
+      if @querying
+        prefix = "catch › "
+        screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
+        base = rect.x + 1 + prefix.size
+        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max)
+        return
+      end
+
+      label, color = direction_chip
+      x = rect.x + 1
+      x = screen.text(x, rect.y, label, color, Theme.bg, Attribute::Bold) + 2
+
+      rx = rect.right - 1
+      if !@items.empty?
+        count = @items.size.to_s
+        screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
+        rx -= count.size + 2
+      end
+
+      left_w = {rx - x, 0}.max
+      if @query.blank?
+        screen.text(x, rect.y, "/ condition  ·  host:  method:  path:  status:>=500  scheme:", Theme.muted, width: left_w)
+      else
+        screen.text(x, rect.y, ": #{@query}", Theme.text, width: left_w)
+      end
+    end
+
+    # The catch-direction chip: text + colour. Dim when intercept is OFF (nothing is
+    # held yet, so the chip advertises what WILL be caught once toggled on).
+    private def direction_chip : {String, Color}
+      label = case @direction
+              when .request_only?  then "catch:req"
+              when .response_only? then "catch:res"
+              else                      "catch:all"
+              end
+      {label, @enabled ? Theme.accent : Theme.muted}
     end
 
     private def pane_border(focused : Bool) : Color

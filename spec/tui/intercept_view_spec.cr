@@ -80,6 +80,65 @@ describe Gori::Tui::InterceptView do
   end
 end
 
+describe "Intercept filter bar" do
+  it "shows the catch-direction chip and the condition hint" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      backend.row(0).includes?("catch:all").should be_true # default direction chip
+      backend.contains?("/ condition").should be_true      # field hint
+    end
+  end
+
+  it "reflects the interceptor's catch direction after a cycle" do
+    tmp_interceptor do |ic|
+      ic.cycle_direction # Both → RequestOnly
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      backend.row(0).includes?("catch:req").should be_true
+    end
+  end
+
+  it "edits the condition query inline" do
+    tmp_interceptor do |ic|
+      view = InterceptView.new
+      view.reload(ic)
+      view.start_query
+      view.querying?.should be_true
+      "host:acme".each_char { |c| view.query_insert(c) }
+      view.query.should eq("host:acme")
+      view.query_backspace
+      view.query.should eq("host:acm")
+
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
+      backend.contains?("catch ›").should be_true # editing prompt
+      backend.contains?("host:acm").should be_true
+
+      view.cancel_query
+      view.querying?.should be_false
+      view.query.should eq("")
+    end
+  end
+
+  it "keeps the queue rendered below the filter bar" do
+    tmp_interceptor do |ic|
+      hold_req(ic, "acme.test", "/login", "GET /login HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+      backend = MemoryBackend.new(100, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
+      backend.row(0).includes?("catch:all").should be_true # bar on the top row
+      backend.contains?("QUEUE (1)").should be_true        # queue card still drawn below
+      backend.contains?("acme.test/login").should be_true
+    end
+  end
+end
+
 describe "Intercept verbs (P1)" do
   it "binds `i` to intercept.toggle and scopes forward/drop to Intercept" do
     reg = Gori::Verbs.registry

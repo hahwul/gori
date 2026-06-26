@@ -34,7 +34,8 @@ module Gori
         j.array do
           tool j, "list_history",
             "List captured HTTP flows, newest first. Optional gori QL `query` " \
-            "filters (e.g. 'host:example.com status:500 method:POST', 'body:token'); " \
+            "filters (e.g. 'host:example.com status:>=500 size:>10000 dur:>500', " \
+            "'header:set-cookie', 'body~secret\\d+' — `~` is regex, dur is ms); " \
             "empty query returns the most recent. Returns light rows (no bodies); " \
             "use get_flow for full detail." do |s|
             s.field "query", strprop("gori QL filter; empty = most recent")
