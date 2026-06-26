@@ -12,6 +12,7 @@ module Gori::Tui
       {:intercept, "Intercept"},
       {:sitemap, "Sitemap"},
       {:replay, "Replay"},
+      {:fuzzer, "Fuzzer"},
       {:comparer, "Comparer"},
       {:findings, "Findings"},
       {:notes, "Notes"},

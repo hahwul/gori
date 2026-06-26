@@ -120,6 +120,36 @@ module Gori
         Verb::Scope::HistoryDetail) { |ctx| ctx.comparer_add_selected; nil }
     end
 
+    # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette
+    # from Replay) + the Fuzzer-scope palette actions (the keys are handled inline by
+    # the controller, so these are chord-less, for discoverability + the ":" palette).
+    def self.register_fuzz(r : Verb::Registry) : Nil
+      history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
+      in_fuzzer = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer }
+      in_replay = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay }
+
+      r.register Verb::Definition.new(
+        "history.fuzz", "Send to Fuzzer", "Open the selected flow in the Fuzzer tab",
+        Verb::Scope::Body, [Verb::Chord.new("i", shift: true)],
+        available: history_selected) { |ctx| ctx.fuzz_selected; nil }
+      r.register Verb::Definition.new(
+        "replay.fuzz", "Send to Fuzzer", "Turn this replay request into a fuzz template",
+        Verb::Scope::Replay, available: in_replay) { |ctx| ctx.fuzz_from_replay; nil }
+
+      r.register Verb::Definition.new(
+        "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,
+        available: in_fuzzer) { |ctx| ctx.fuzz_run; nil }
+      r.register Verb::Definition.new(
+        "fuzz.stop", "Stop fuzz", "Stop the running fuzz", Verb::Scope::Fuzzer,
+        available: in_fuzzer) { |ctx| ctx.fuzz_stop; nil }
+      r.register Verb::Definition.new(
+        "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
+        available: in_fuzzer) { |ctx| ctx.fuzz_new; nil }
+      r.register Verb::Definition.new(
+        "fuzz.automark", "Auto-mark params", "Mark every request parameter value", Verb::Scope::Fuzzer,
+        available: in_fuzzer) { |ctx| ctx.fuzz_automark; nil }
+    end
+
     # Builds a registry with every built-in verb registered.
     def self.registry : Verb::Registry
       r = Verb::Registry.new
@@ -127,6 +157,7 @@ module Gori
       register_history(r)
       register_sitemap(r)
       register_findings(r)
+      register_fuzz(r)
       register_comparer(r)
       r
     end

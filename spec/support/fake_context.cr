@@ -60,6 +60,18 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_send : Nil; end
 
+  def fuzz_selected : Nil; end
+
+  def fuzz_from_replay : Nil; end
+
+  def fuzz_run : Nil; end
+
+  def fuzz_stop : Nil; end
+
+  def fuzz_new : Nil; end
+
+  def fuzz_automark : Nil; end
+
   def sitemap_move(delta : Int32) : Nil; end
 
   def sitemap_toggle : Nil; end

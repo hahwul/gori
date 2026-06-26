@@ -224,6 +224,69 @@ module Gori
       end
     end
 
+    # A persisted Fuzzer/Intruder session: the marked template (with §…§ positions)
+    # plus an opaque `config` JSON the TUI owns (mode / payload sets / matchers /
+    # engine opts). Mirrors ReplayRecord — survives reopen and syncs across sessions.
+    struct FuzzSessionRecord
+      getter id : Int64
+      getter target : String
+      getter template : String
+      getter? http2 : Bool
+      getter sni : String?
+      getter config : String # opaque JSON managed by the frontend
+      getter flow_id : Int64?
+      getter position : Int32
+      getter name : String? # custom sub-tab label (nil = derive from the request line)
+
+      def initialize(@id, @target, @template, @http2, @sni, @config, @flow_id, @position, @name = nil)
+      end
+    end
+
+    # One fuzz sweep's metadata. Live counters are updated as the run streams; `status`
+    # is running | done | stopped | error.
+    struct FuzzRunRecord
+      getter id : Int64
+      getter session_id : Int64?
+      getter created_at : Int64
+      getter finished_at : Int64?
+      getter target : String
+      getter mode : String
+      getter total : Int64?
+      getter sent : Int64
+      getter matched : Int64
+      getter errors : Int64
+      getter status : String
+
+      def initialize(@id, @session_id, @created_at, @finished_at, @target, @mode,
+                     @total, @sent, @matched, @errors, @status)
+      end
+    end
+
+    # One persisted fuzz result row. `payloads` is a JSON array; the captured bytes are
+    # present only for the matched/kept results (per keep_bodies).
+    struct FuzzResultRecord
+      getter id : Int64
+      getter run_id : Int64
+      getter idx : Int64
+      getter payloads : String
+      getter status : Int32?
+      getter length : Int64
+      getter words : Int32
+      getter lines : Int32
+      getter duration_us : Int64
+      getter error : String?
+      getter? matched : Bool
+      getter extracted : String?
+      getter request : Bytes?
+      getter response_head : Bytes?
+      getter response_body : Bytes?
+
+      def initialize(@id, @run_id, @idx, @payloads, @status, @length, @words, @lines,
+                     @duration_us, @error, @matched, @extracted,
+                     @request = nil, @response_head = nil, @response_body = nil)
+      end
+    end
+
     # An intercepted HTTP/2 connection (one per CONNECT→TLS h2 session). Its raw
     # frames are the truth (P7); decoded streams project into `flows` separately.
     struct H2Connection

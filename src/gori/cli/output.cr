@@ -1,5 +1,6 @@
 require "json"
 require "../store"
+require "../fuzz"
 
 module Gori
   module CLI
@@ -50,6 +51,46 @@ module Gori
           io << "  " << human_size(row.size)
           io << dur
           io << "  [" << row.state << ']' unless row.state.complete?
+        end
+      end
+
+      # --- fuzz result rows ---------------------------------------------------
+
+      def self.fuzz_row_json(r : Fuzz::Result) : String
+        JSON.build { |j| fuzz_row_fields(j, r) }
+      end
+
+      def self.fuzz_array_json(results : Array(Fuzz::Result)) : String
+        JSON.build { |j| j.array { results.each { |r| fuzz_row_fields(j, r) } } }
+      end
+
+      def self.fuzz_row_fields(j : JSON::Builder, r : Fuzz::Result) : Nil
+        j.object do
+          j.field "index", r.index
+          j.field("payloads") { j.array { r.payloads.each { |p| j.string(p) } } }
+          j.field "position", r.position
+          j.field "status", r.status
+          j.field "length", r.length
+          j.field "words", r.words
+          j.field "lines", r.lines
+          j.field "duration_us", r.duration_us
+          j.field "matched", r.matched?
+          j.field "error", r.error
+          j.field "extracted", r.extracted
+        end
+      end
+
+      # "#0     admin                 200   1.2kB     142w    31ms"
+      def self.fuzz_row_text(r : Fuzz::Result) : String
+        String.build do |io|
+          io << '#' << r.index.to_s.ljust(6)
+          io << r.payloads.join(", ").ljust(24)
+          io << "  " << (r.status.try(&.to_s) || (r.error ? "ERR" : "—")).ljust(4)
+          io << "  " << human_size(r.length).ljust(8)
+          io << "  " << "#{r.words}w".ljust(7)
+          io << "  " << human_us(r.duration_us)
+          io << "  ⟦" << r.extracted << '⟧' if r.extracted
+          io << "  " << r.error if r.error
         end
       end
 

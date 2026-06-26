@@ -6,14 +6,14 @@ include Gori::Tui
 describe Gori::Tui::HelpView do
   it "renders the grouped shortcut sections" do
     view = HelpView.new
-    backend = MemoryBackend.new(90, 60) # tall enough for every row
-    view.render(Screen.new(backend), Rect.new(0, 0, 90, 60))
+    backend = MemoryBackend.new(90, 90) # tall enough for every row (grows as tabs are added)
+    view.render(Screen.new(backend), Rect.new(0, 0, 90, 90))
 
     backend.contains?("GLOBAL").should be_true
     backend.contains?("command palette").should be_true
     backend.contains?("MOUSE").should be_true
     backend.contains?("REPLAY").should be_true
-    backend.contains?("rename").should be_true # the new sub-tab rename shortcut is documented
+    backend.contains?("rename").should be_true  # the new sub-tab rename shortcut is documented
     backend.contains?("CONVERT").should be_true # the Convert tab cheat-sheet
   end
 

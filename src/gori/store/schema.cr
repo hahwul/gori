@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 15
+      VERSION = 16
 
       V1 = [
         <<-SQL,
@@ -244,7 +244,71 @@ module Gori
         "ALTER TABLE replays ADD COLUMN sni TEXT",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15]
+      # Fuzzer / Intruder persistence:
+      #  - fuzz_sessions: a saved template + opaque config JSON (the TUI manages its
+      #    shape), mirroring `replays` so a Fuzzer tab survives reopen and syncs across
+      #    sessions sharing the project (reconciled by `id` on the data_version poll).
+      #  - fuzz_runs: one sweep's metadata (live counters + status), linked to a session.
+      #  - fuzz_results: per-request rows (metrics + optional captured bytes for the
+      #    matched/kept results), so a finished run can be reopened and inspected. The
+      #    frontends persist selectively per keep_bodies (a billion-row cluster bomb is
+      #    never stored whole).
+      V16 = [
+        <<-SQL,
+        CREATE TABLE fuzz_sessions (
+          id         INTEGER PRIMARY KEY,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          target     TEXT    NOT NULL,
+          template   TEXT    NOT NULL,
+          http2      INTEGER NOT NULL DEFAULT 0,
+          sni        TEXT,
+          config     TEXT    NOT NULL DEFAULT '',
+          flow_id    INTEGER,
+          position   INTEGER NOT NULL DEFAULT 0,
+          name       TEXT
+        )
+        SQL
+        "CREATE INDEX idx_fuzz_sessions_position ON fuzz_sessions (position, id)",
+        <<-SQL,
+        CREATE TABLE fuzz_runs (
+          id          INTEGER PRIMARY KEY,
+          session_id  INTEGER,
+          created_at  INTEGER NOT NULL,
+          finished_at INTEGER,
+          target      TEXT    NOT NULL,
+          mode        TEXT    NOT NULL,
+          total       INTEGER,
+          sent        INTEGER NOT NULL DEFAULT 0,
+          matched     INTEGER NOT NULL DEFAULT 0,
+          errors      INTEGER NOT NULL DEFAULT 0,
+          status      TEXT    NOT NULL DEFAULT 'running'
+        )
+        SQL
+        "CREATE INDEX idx_fuzz_runs_session ON fuzz_runs (session_id, id)",
+        <<-SQL,
+        CREATE TABLE fuzz_results (
+          id            INTEGER PRIMARY KEY,
+          run_id        INTEGER NOT NULL,
+          idx           INTEGER NOT NULL,
+          payloads      TEXT    NOT NULL,
+          status        INTEGER,
+          length        INTEGER NOT NULL DEFAULT 0,
+          words         INTEGER NOT NULL DEFAULT 0,
+          lines         INTEGER NOT NULL DEFAULT 0,
+          duration_us   INTEGER NOT NULL DEFAULT 0,
+          error         TEXT,
+          matched       INTEGER NOT NULL DEFAULT 0,
+          extracted     TEXT,
+          request       BLOB,
+          response_head BLOB,
+          response_body BLOB
+        )
+        SQL
+        "CREATE INDEX idx_fuzz_results_run ON fuzz_results (run_id, idx)",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

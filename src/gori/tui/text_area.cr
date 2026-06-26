@@ -171,6 +171,14 @@ module Gori::Tui
       @lines.size
     end
 
+    # Flat char offset of the cursor into `text` (LF-joined) — for marking helpers
+    # that operate on the whole buffer text (e.g. the Fuzzer's §-position toggle).
+    def cursor_offset : Int32
+      off = 0
+      (0...@cy).each { |i| off += @lines[i].size + 1 } # +1 for the joining '\n'
+      off + @cx.clamp(0, @lines[@cy].size)
+    end
+
     # ^F search: 0-based indices of lines containing `query` (case-insensitive).
     def search_lines(query : String) : Array(Int32)
       hits = [] of Int32

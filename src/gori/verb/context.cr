@@ -55,6 +55,14 @@ module Gori
       abstract def replay_new : Nil      # open a blank, hand-authored replay request
       abstract def replay_send : Nil     # resend the (edited) request to the target
 
+      # fuzzer workbench (run/stop/marking handled inline; these power the palette + cross-tab)
+      abstract def fuzz_selected : Nil    # send History's selection to the Fuzzer tab
+      abstract def fuzz_from_replay : Nil # turn the current Replay request into a fuzz template
+      abstract def fuzz_run : Nil         # start the fuzz run
+      abstract def fuzz_stop : Nil        # stop the running fuzz
+      abstract def fuzz_new : Nil         # open a blank fuzz session
+      abstract def fuzz_automark : Nil    # auto-mark every request parameter
+
       # sitemap tree
       abstract def sitemap_move(delta : Int32) : Nil
       abstract def sitemap_toggle : Nil
