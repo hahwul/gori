@@ -48,6 +48,7 @@ module Gori::Tui
         {"^N / ^W", "new / close a sub-tab"},
         {"r", "rename the sub-tab (on the strip)"},
         {"^X", "hex-edit the request"},
+        {"^S", "SNI override (on the target)"},
         {"↹", "cycle target → request → response"},
         {"x · d", "response: hex · diff"},
       ]},
@@ -57,7 +58,7 @@ module Gori::Tui
         {"^B", "reveal whitespace"},
       ]},
       {"OTHER TABS", [
-        {"Sitemap", "↑/↓ move · ↵/→ expand · ← collapse"},
+        {"Sitemap", "↑/↓ move · / filter · ↵/→ expand · ← collapse"},
         {"Findings", "↵ open · n new · d delete · x export"},
         {"Notes", "type to edit · ^N new · ^1-9 switch"},
         {"Project", "scope rules + the description editor"},

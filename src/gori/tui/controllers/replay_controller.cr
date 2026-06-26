@@ -30,7 +30,7 @@ module Gori::Tui
       @host.session.store.replays.each do |r|
         view = ReplayView.new
         view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
-          r.response_head, r.response_body, r.response_error, r.response_duration_us)
+          r.response_head, r.response_body, r.response_error, r.response_duration_us, sni: r.sni || "")
         view.name = r.name # custom sub-tab label survives reopen
         seed_replay_original(view, r.flow_id)
         @replays << ReplayTab.new(view, r.flow_id, r.id)
@@ -85,7 +85,8 @@ module Gori::Tui
       return "↹/esc tabs · ^N new" unless v
       return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit" if v.request_hex?
       case v.focus
-      when :target   then "type URL · ↵/↓ request · ^R send · ↹ pane · ^N new · esc tabs"
+      when :target   then v.editing_sni? ? "type SNI host · ^S/↵/esc back to URL · ^R send" \
+                                          : "type URL · ^S SNI · ↵/↓ request · ^R send · ↹ pane · esc tabs"
       when :response then "↑/↓ scroll · ←/→/d diff · x hex · ^F find · ^R send · ↹ pane · esc tabs"
       else                "type to edit · ^R send · ^G goto · ^F find · ^X hex · ^B ws · ^N new · ^W close · ↹ pane · esc tabs"
       end
@@ -154,8 +155,19 @@ module Gori::Tui
         else
           @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
         end
+      elsif ev.ctrl? && key.lower_s?
+        # ^S toggles the SNI override sub-field (TARGET pane only). The dialed host
+        # is unchanged — only the TLS ClientHello name differs.
+        if (view = current_view) && view.focus == :target
+          view.toggle_sni_field
+          @host.status(view.editing_sni? ? "SNI override: type a domain · ^S/↵/esc back to URL" : "editing target URL")
+        else
+          @host.status("SNI override (^S) applies to the TARGET pane — ↹ to it")
+        end
       elsif key.escape?
-        if (view = current_view) && view.focus == :request && view.request_hex?
+        if (view = current_view) && view.focus == :target && view.editing_sni?
+          view.exit_sni_field # leave the SNI field, back to the URL (value kept)
+        elsif (view = current_view) && view.focus == :request && view.request_hex?
           view.toggle_request_hex # exit hex back to the text editor (only when on the request pane)
         else
           @host.request_focus(:menu)
@@ -298,11 +310,12 @@ module Gori::Tui
         # on ANY peer commit, so most polls touch an identical row — restoring then
         # would needlessly wipe its on-screen response/scroll/focus).
         next if v.target == row.target && v.request_text == row.request &&
-                v.http2? == row.http2? && v.auto_content_length? == row.auto_content_length?
+                v.http2? == row.http2? && v.auto_content_length? == row.auto_content_length? &&
+                v.sni_override == row.sni
         # Live cross-session sync carries only the REQUEST (a response is personal to
         # each session's view); restore() is response-less so a peer's resend never
         # clobbers the local response/scroll/focus.
-        v.restore(row.target, row.request, row.http2?, row.auto_content_length?)
+        v.restore(row.target, row.request, row.http2?, row.auto_content_length?, sni: row.sni || "")
         seed_replay_original(v, row.flow_id) # restore() drops the baseline; re-seed it
       end
 
@@ -310,7 +323,7 @@ module Gori::Tui
       rows.each do |row|
         next if local_ids.includes?(row.id)
         view = ReplayView.new
-        view.restore(row.target, row.request, row.http2?, row.auto_content_length?)
+        view.restore(row.target, row.request, row.http2?, row.auto_content_length?, sni: row.sni || "")
         seed_replay_original(view, row.flow_id)
         @replays << ReplayTab.new(view, row.flow_id, row.id)
       end
@@ -364,7 +377,7 @@ module Gori::Tui
     # reconcile key). A closing store returns 0 → nil, leaving the tab unsaved.
     private def persist_new_replay(view : ReplayView, flow_id : Int64?) : Int64?
       id = @host.session.store.insert_replay(view.target, view.request_text, view.http2?,
-        view.auto_content_length?, flow_id, @replays.size)
+        view.auto_content_length?, flow_id, @replays.size, view.sni_override)
       id == 0 ? nil : id
     end
 
@@ -403,17 +416,18 @@ module Gori::Tui
       verify = !@host.session.config.insecure_upstream?
       bytes = view.request_bytes
       http2 = view.http2?
+      sni = view.sni_override # custom TLS SNI host (nil → present the dialed host)
       results = @replay_results
       view.inflight = true
-      @host.status("replaying → #{host}:#{port}…")
+      @host.status("replaying → #{host}:#{port}#{sni ? " (SNI #{sni})" : ""}…")
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).
       spawn(name: "gori-replay") do
         result = if http2
-                   Replay::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
+                   Replay::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni)
                  else
-                   Replay::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
+                   Replay::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni)
                  end
         # Non-blocking hand-off: if the user already left the project the channel is
         # orphaned, so drop the late result instead of blocking this fiber forever.
@@ -440,7 +454,7 @@ module Gori::Tui
       return unless tab = current_replay_tab
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
-      @host.session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?)
+      @host.session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?, v.sni_override)
       v.clear_dirty
     end
 
@@ -506,15 +520,36 @@ module Gori::Tui
     end
 
     private def edit_replay_target(ev : Termisu::Event::Key, view : ReplayView) : Nil
+      return edit_replay_sni(ev, view) if view.editing_sni? # ^S sub-field of the TARGET pane
       key = ev.key
       c = ev.char || key.to_char
       case
       when key.enter?     then view.pane_advance(1)                                       # ↵ confirms URL → Request (^R sends, not ↵)
       when key.up?        then @host.request_focus(@replays.size >= 2 ? :subtabs : :menu) # target is the top pane → ↑ pops up
-      when key.down?      then view.pane_advance(1)                                       # ↓ → drop into the Request pane below
+      when key.down?      then view.pane_advance(1)                                        # ↓ → drop into the Request pane below
       when key.backspace? then view.target_backspace
       when key.left?      then view.target_move(-1)
       when key.right?     then view.target_move(1)
+      else
+        if c && !ev.ctrl? && !ev.alt?
+          view.target_insert(c)
+          view.set_preedit("")
+        end
+      end
+    end
+
+    # The SNI override sub-field: same single-line editing (the view's target mutators
+    # self-route to it while editing_sni?), but ↵/↑ return to the URL row rather than
+    # advancing panes, and ↓ still drops into the Request pane below.
+    private def edit_replay_sni(ev : Termisu::Event::Key, view : ReplayView) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      case
+      when key.enter?, key.up? then view.exit_sni_field
+      when key.down?           then view.pane_advance(1)
+      when key.backspace?      then view.target_backspace
+      when key.left?           then view.target_move(-1)
+      when key.right?          then view.target_move(1)
       else
         if c && !ev.ctrl? && !ev.alt?
           view.target_insert(c)

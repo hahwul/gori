@@ -7,6 +7,7 @@ require "./gutter"
 require "./search_hi"
 require "./reveal"
 require "./url"
+require "./fmt"
 require "../store"
 require "../ql"
 require "../scope"
@@ -597,29 +598,13 @@ module Gori::Tui
     # boundary (e.g. 1023.6 KB) rolls up to the next unit ("1.0MB") instead of the
     # misleading "1024KB".
     private def fmt_size(bytes : Int64?) : String
-      return "—" unless bytes
-      return "#{bytes}B" if bytes < 1024
-      kb = bytes / 1024.0
-      return fmt_unit(kb, "KB") if kb.round < 1024
-      mb = bytes / 1_048_576.0
-      return fmt_unit(mb, "MB") if mb.round < 1024
-      fmt_unit(bytes / 1_073_741_824.0, "GB")
-    end
-
-    # One decimal under 10 (3.4KB), whole at/above (345KB) — keeps the cell ≤6 cols.
-    private def fmt_unit(v : Float64, unit : String) : String
-      v < 10 ? "#{v.round(1)}#{unit}" : "#{v.round.to_i}#{unit}"
+      Fmt.size(bytes)
     end
 
     # Compact request→response latency (ms/s/m/h), bounded to ≤6 cols. "—" until the
     # response lands; a minute/hour tier keeps very slow flows from overflowing.
     private def fmt_dur(us : Int64?) : String
-      return "—" unless us
-      ms = us // 1000
-      return "#{ms}ms" if ms < 1000
-      return "#{(ms / 1000.0).round(1)}s" if ms < 60_000
-      return "#{(ms / 60_000.0).round(1)}m" if ms < 3_600_000
-      "#{(ms / 3_600_000.0).round(1)}h"
+      Fmt.dur(us)
     end
 
     # Compact response MIME — the useful subtype (json/html/png/js…), params dropped.

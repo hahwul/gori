@@ -306,12 +306,12 @@ module Gori
     # (potentially multi-MB) response on each cross-session commit.
     def replays : Array(ReplayRecord)
       list = [] of ReplayRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name FROM replays ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni FROM replays ORDER BY position, id") do |rs|
         rs.each do
           list << ReplayRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?))
+            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?))
         end
       end
       list
@@ -322,11 +322,12 @@ module Gori
     # response (responses are personal per session). Response fields stay nil.
     def replays_meta : Array(ReplayRecord)
       list = [] of ReplayRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position FROM replays ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni FROM replays ORDER BY position, id") do |rs|
         rs.each do
           list << ReplayRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
-            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32))
+            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
+            sni: rs.read(String?))
         end
       end
       list
@@ -335,19 +336,19 @@ module Gori
     # Returns the new row id (or 0 if the store is closing — the caller normalizes
     # 0 → nil so a later update never targets a bogus row).
     def insert_replay(target : String, request : String, http2 : Bool,
-                      auto_cl : Bool, flow_id : Int64?, position : Int32) : Int64
+                      auto_cl : Bool, flow_id : Int64?, position : Int32, sni : String? = nil) : Int64
       ts = now_us
       exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO replays (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position) VALUES (?,?,?,?,?,?,?,?)",
-          ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position)
+        c.exec("INSERT INTO replays (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni) VALUES (?,?,?,?,?,?,?,?,?)",
+          ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position, sni)
         nil
       }
     end
 
-    def update_replay(id : Int64, target : String, request : String, http2 : Bool, auto_cl : Bool) : Nil
+    def update_replay(id : Int64, target : String, request : String, http2 : Bool, auto_cl : Bool, sni : String? = nil) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE replays SET target = ?, request = ?, http2 = ?, auto_content_length = ?, updated_at = ? WHERE id = ?",
-          target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, now_us, id)
+        c.exec("UPDATE replays SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, updated_at = ? WHERE id = ?",
+          target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, now_us, id)
         nil
       }
     end
@@ -575,6 +576,12 @@ module Gori
         rs.each { rows << {rs.read(String), rs.read(String), rs.read(String)} }
       end
       rows
+    rescue ex
+      # The Sitemap's `/` filter feeds user QL here; a malformed FTS phrase raises a
+      # SQLite error. A live filter must never crash the run loop — degrade to no
+      # matches (mirrors #search) and let the user fix the query.
+      STDERR.puts "gori: sitemap query failed (#{ex.message})"
+      [] of {String, String, String}
     end
 
     # Passive-signal tags for a flow, fetched lazily per on-screen row (P8 pull,

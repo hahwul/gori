@@ -57,6 +57,7 @@ module Gori
       abstract def sitemap_toggle : Nil
       abstract def sitemap_expand : Nil
       abstract def sitemap_collapse : Nil
+      abstract def sitemap_query : Nil # focus the QL filter bar
 
       # scope lens
       abstract def scope_open : Nil        # jump to the Project tab's scope editor

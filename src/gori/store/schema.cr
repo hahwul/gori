@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 14
+      VERSION = 15
 
       V1 = [
         <<-SQL,
@@ -236,7 +236,15 @@ module Gori
         "ALTER TABLE replays ADD COLUMN name TEXT",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14]
+      # A replay tab can carry a custom SNI host — the name presented in the TLS
+      # ClientHello, decoupled from the dialed target host (domain fronting / vhost
+      # confusion / IP-direct sends). NULL = present the target host (the default).
+      # Request-side config, so it syncs across sessions like target/request.
+      V15 = [
+        "ALTER TABLE replays ADD COLUMN sni TEXT",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

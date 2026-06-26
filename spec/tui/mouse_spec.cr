@@ -107,10 +107,11 @@ describe "SitemapView#row_at / #marker_hit?" do
       rect = Rect.new(0, 0, 70, 20)
       view.render(Screen.new(MemoryBackend.new(70, 20)), rect)
 
-      view.row_at(rect, 5, rect.y).should eq(0)           # first row = host node
-      view.row_at(rect, 5, rect.y - 1).should be_nil      # above the list
-      view.row_at(rect, 5, rect.y + 19).should be_nil     # past the populated rows
-      view.row_at(rect, rect.right, rect.y).should be_nil # past the right frame column (mx bound)
+      # not querying → the tree starts at rect.y + 1 (the QL filter bar takes row 0)
+      view.row_at(rect, 5, rect.y + 1).should eq(0)           # first tree row = host node
+      view.row_at(rect, 5, rect.y).should be_nil             # the QL bar row, above the tree
+      view.row_at(rect, 5, rect.y + 19).should be_nil        # past the populated rows
+      view.row_at(rect, rect.right, rect.y + 1).should be_nil # past the right frame column (mx bound)
 
       view.marker_hit?(rect, rect.x + 1, 0).should be_true  # host marker at depth 0 → x+1
       view.marker_hit?(rect, rect.x + 9, 0).should be_false # elsewhere on the row
