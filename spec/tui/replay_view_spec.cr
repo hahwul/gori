@@ -325,6 +325,17 @@ describe Gori::Tui::ReplayView do
     view.sni.should eq("evil.com")         # …and leave the SNI value untouched
   end
 
+  it "a click on the TARGET card's bottom border does not enter the SNI sub-field" do
+    view = ReplayView.new
+    view.restore("https://10.0.0.5", "GET / HTTP/1.1\n\n", false, true, sni: "evil.com")
+    rect = Rect.new(0, 0, 120, 20)
+    # With an SNI override the card is 4 rows: border@y, URL@y+1, SNI@y+2, border@y+3.
+    view.target_click_to_cursor(rect, 5, rect.y + 3) # the decorative bottom border
+    view.editing_sni?.should be_false                # …must NOT switch to the SNI field
+    view.target_click_to_cursor(rect, 5, rect.y + 2) # the real SNI row does
+    view.editing_sni?.should be_true
+  end
+
   it "restore seeds a persisted SNI override and shows it" do
     view = ReplayView.new
     view.restore("https://10.0.0.5", "GET / HTTP/1.1\n\n", false, true, sni: "evil.com")

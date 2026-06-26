@@ -439,7 +439,9 @@ module Gori::Tui
     # and place that field's caret. The value bases mirror render_target (field_base).
     def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless @loaded
-      if sni_active? && my >= rect.y + 2
+      # The SNI row is at exactly rect.y+2 (bottom border is rect.y+3) — match it
+      # precisely, so a click on the card's border doesn't route edits into @sni.
+      if sni_active? && my == rect.y + 2
         @target_field = :sni
         @scx = Screen.column_for(@sni, mx - field_base(rect, SNI_PREFIX))
       else
@@ -693,10 +695,15 @@ module Gori::Tui
       base = field_base(rect, prefix)
       screen.text(base, row, value, Theme.text_bright, width: {rect.right - base - 1, 1}.max)
       if active
-        ch = cx < value.size ? value[cx] : ' '
         cursor_x = base + Screen.display_width(value[0, cx])
-        screen.cell(cursor_x, row, ch, Theme.bg, Theme.accent)
-        screen.cursor(cursor_x, row)
+        # Only paint the caret while it's inside the field (before the right border) —
+        # a value longer than the drawn width must not place the cursor over the
+        # border or into the neighbouring pane (mirrors Screen#input_line's guard).
+        if cursor_x < rect.right - 1
+          ch = cx < value.size ? value[cx] : ' '
+          screen.cell(cursor_x, row, ch, Theme.bg, Theme.accent)
+          screen.cursor(cursor_x, row)
+        end
       end
     end
 
