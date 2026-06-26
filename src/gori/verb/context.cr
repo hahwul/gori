@@ -86,10 +86,12 @@ module Gori
       abstract def findings_export(format : Symbol) : Nil # :markdown | :json → project dir
 
       # intercept (hold-and-decide; P4)
-      abstract def intercept_toggle : Nil      # toggle the hold queue on/off
-      abstract def intercept_forward : Nil     # forward the selected held message (edited bytes)
-      abstract def intercept_drop : Nil        # drop the selected held message
-      abstract def intercept_forward_all : Nil # forward every held message
+      abstract def intercept_toggle : Nil          # toggle the hold queue on/off
+      abstract def intercept_forward : Nil         # forward the selected held message (edited bytes)
+      abstract def intercept_drop : Nil            # drop the selected held message
+      abstract def intercept_forward_all : Nil     # forward every held message
+      abstract def intercept_query : Nil           # focus the catch-condition filter bar
+      abstract def intercept_cycle_direction : Nil # cycle catch direction (all/req/res)
       abstract def selected_intercept_id : Int64?
 
       # capture / proxy control

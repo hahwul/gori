@@ -27,13 +27,18 @@ module Gori::Tui
       Verb::Scope::Intercept
     end
 
-    def body_badge : Symbol # the held-message editor captures text; else the queue list
-      @intercept.editing? ? :editor : :body
+    def body_badge : Symbol # the editor / condition bar capture text; else the queue list
+      @intercept.editing? || @intercept.querying? ? :editor : :body
     end
 
     def body_hint(focus : Symbol) : String
-      @intercept.editing? ? "type to edit · ^R forward · ⇧↹/esc queue" \
-                          : "↑/↓ move · ↵/e edit · f forward · d drop · F all · : cmds · ↹ detail · esc tabs"
+      if @intercept.editing?
+        "type to edit · ^R forward · ⇧↹/esc queue"
+      elsif @intercept.querying?
+        "type condition · ↵ apply · esc clear"
+      else
+        "↑/↓ move · ↵/e edit · f fwd · d drop · F all · / filter · c catch · i on/off · : cmds · ↹ detail · esc tabs"
+      end
     end
 
     def goto_symbol : Symbol? # the held-message editor is ^G/^F-searchable
@@ -47,46 +52,100 @@ module Gori::Tui
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
         @host.open_palette
       elsif ev.char == ':' && !ev.ctrl? && !ev.alt? && !@intercept.editing?
         @host.open_command # ":" cmdline in the navigable queue (editing swallows ":" as a char)
       elsif @intercept.editing?
-        if key.escape?
-          @intercept.stop_edit
-        elsif ev.ctrl? && key.lower_r?
-          intercept_forward
-        elsif key.enter?
-          @intercept.edit_newline
-        elsif key.backspace?
-          @intercept.edit_backspace
-        elsif key.up?
-          @intercept.edit_move(-1, 0)
-        elsif key.down?
-          @intercept.edit_move(1, 0)
-        elsif key.left?
-          @intercept.edit_move(0, -1)
-        elsif key.right?
-          @intercept.edit_move(0, 1)
-        elsif c && !ev.ctrl? && !ev.alt?
-          @intercept.edit_insert(c)
-        end
+        handle_edit_key(ev)
       else
-        case
-        when key.escape?               then @host.request_focus(:menu)
-        when key.lower_j?, key.down?   then @intercept.move(1)
-        when key.lower_k?, key.up?     then @intercept.at_top? ? @host.request_focus(:menu) : @intercept.move(-1)
-        when key.enter?, key.lower_e?  then @intercept.toggle_edit
-        when key.lower_f? && ev.shift? then intercept_forward_all
-        when key.lower_f?              then intercept_forward
-        when key.lower_d?              then intercept_drop
+        handle_queue_key(ev)
+      end
+      true
+    end
+
+    # Keys while editing the held-message bytes (the right detail editor).
+    private def handle_edit_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        @intercept.stop_edit
+      elsif ev.ctrl? && key.lower_r?
+        intercept_forward
+      elsif key.enter?
+        @intercept.edit_newline
+      elsif key.backspace?
+        @intercept.edit_backspace
+      elsif key.up?
+        @intercept.edit_move(-1, 0)
+      elsif key.down?
+        @intercept.edit_move(1, 0)
+      elsif key.left?
+        @intercept.edit_move(0, -1)
+      elsif key.right?
+        @intercept.edit_move(0, 1)
+      elsif c && !ev.ctrl? && !ev.alt?
+        @intercept.edit_insert(c)
+      end
+    end
+
+    # Keys while navigating the held queue (the left list).
+    private def handle_queue_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      case
+      when key.escape?               then @host.request_focus(:menu)
+      when ev.char == '/'            then intercept_query # catch-condition filter bar
+      when key.lower_j?, key.down?   then @intercept.move(1)
+      when key.lower_k?, key.up?     then @intercept.at_top? ? @host.request_focus(:menu) : @intercept.move(-1)
+      when key.enter?, key.lower_e?  then @intercept.toggle_edit
+      when key.lower_f? && ev.shift? then intercept_forward_all
+      when key.lower_f?              then intercept_forward
+      when key.lower_d?              then intercept_drop
+      when key.lower_c?              then intercept_cycle_direction
+      when key.lower_i?              then intercept_toggle
+      end
+    end
+
+    # --- catch-condition filter bar (a text sub-mode; the shell claims it before the
+    # focus ring, exactly like History's QL bar). Returns true (always swallows). ---
+    def querying? : Bool
+      @intercept.querying?
+    end
+
+    def handle_query_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      c = ev.char || key.to_char
+      ic = @host.session.interceptor
+      case
+      when key.enter?     then @intercept.stop_query
+      when key.escape?    then @intercept.cancel_query; ic.set_filter("")
+      when key.backspace? then @intercept.query_backspace; ic.set_filter(@intercept.query)
+      when key.left?      then @intercept.query_move(-1)
+      when key.right?     then @intercept.query_move(1)
+      else
+        if c && !ev.ctrl? && !ev.alt?
+          @intercept.query_insert(c)
+          ic.set_filter(@intercept.query) # live: narrow holding as you type (only ever narrows from "all")
+          @intercept.set_preedit("")
         end
       end
       true
     end
 
+    # Live IME composition only flows to the condition bar (the one text field besides
+    # the held-message editor, which the shell routes via ^F/^G, not preedit).
+    def set_preedit(text : String) : Bool
+      return false unless @intercept.querying?
+      @intercept.set_preedit(text)
+      true
+    end
+
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      if zone = @intercept.bar_zone_at(rect, mx, my) # click the top filter bar
+        @host.focus_body
+        zone == :direction ? intercept_cycle_direction : intercept_query
+        return true
+      end
       return true unless pane = @intercept.pane_at(rect, mx, my)
       @host.focus_body
       if pane == :list
@@ -149,6 +208,27 @@ module Gori::Tui
       @host.session.interceptor.forward_all
       @intercept.reload(@host.session.interceptor)
       @host.status("forwarded all (#{n})")
+    end
+
+    # Open the catch-condition filter bar (a query that narrows which messages hold).
+    def intercept_query : Nil
+      @intercept.start_query
+      @host.status("catch condition: host: method: path: status: scheme: · ↵ apply · esc clear")
+    end
+
+    # Cycle which leg(s) to hold: all → requests → responses → all.
+    def intercept_cycle_direction : Nil
+      dir = @host.session.interceptor.cycle_direction
+      @intercept.reload(@host.session.interceptor)
+      @host.status("intercept catch: #{direction_phrase(dir)}")
+    end
+
+    private def direction_phrase(dir : Interceptor::Direction) : String
+      case dir
+      when .request_only?  then "requests only"
+      when .response_only? then "responses only"
+      else                      "requests & responses"
+      end
     end
 
     def selected_intercept_id : Int64?

@@ -392,6 +392,9 @@ module Gori::Tui
       if @active_tab == :sitemap && @overlay == :none && @focus == :body && sitemap_controller.view.querying?
         return if sitemap_controller.handle_query_key(ev)
       end
+      if @active_tab == :intercept && @overlay == :none && @focus == :body && intercept_controller.querying?
+        return if intercept_controller.handle_query_key(ev)
+      end
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.editing_notes?
         return if findings_controller.handle_notes_key(ev)
       end
@@ -1921,6 +1924,14 @@ module Gori::Tui
 
     def intercept_forward_all : Nil
       intercept_controller.intercept_forward_all
+    end
+
+    def intercept_query : Nil
+      intercept_controller.intercept_query
+    end
+
+    def intercept_cycle_direction : Nil
+      intercept_controller.intercept_cycle_direction
     end
 
     def selected_intercept_id : Int64?
