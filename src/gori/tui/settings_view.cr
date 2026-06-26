@@ -29,10 +29,18 @@ module Gori::Tui
       Field.new("Markdown highlight", "syntax-colour markdown in Notes/Project — ←/→/space toggles", bool: true),
       Field.new("Mouse", "click + scroll-wheel navigation (off restores native text selection)", bool: true),
     ]
+    # The THEME section is special: a single field whose value is the selected theme
+    # name, but rendered as a vertical, scrollable list (built-ins + user themes) rather
+    # than the inline ←/→ cycle the other `choices` fields use. `choices` is kept only so
+    # `choice_field?` swallows typing; the live list comes from Theme.available.
     THEME_FIELDS = [
-      Field.new("Theme", "TUI colour theme — ←/→/space cycles, ↵ applies", choices: Theme.available),
+      Field.new("Theme", "TUI colour theme — ↑/↓ select, ↵ applies", choices: Theme.available),
     ]
     SECTIONS = {:network => NETWORK_FIELDS, :editor => EDITOR_FIELDS, :theme => THEME_FIELDS}
+
+    # Max theme rows shown at once before the list scrolls (the box also shrinks to the
+    # terminal height — see overlay_box).
+    THEME_LIST_MAX = 10
 
     getter? saved : Bool = false
     getter section : Symbol = :network
@@ -43,6 +51,7 @@ module Gori::Tui
       @cursor = 0
       @preedit = ""
       @status = nil.as(String?)
+      @theme_scroll = 0 # top row of the THEME list viewport (see render_theme_list)
       reload
     end
 
@@ -54,6 +63,7 @@ module Gori::Tui
     # editor opens). Defaults to :network so the no-arg picker call keeps working.
     def reload(section : Symbol = :network) : Nil
       @section = section
+      Theme.load_custom if section == :theme # pick up theme files dropped since startup
       @values = case section
                 when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off"]
                 when :theme  then [Theme.canonical(Settings.theme)]
@@ -64,9 +74,16 @@ module Gori::Tui
       @preedit = ""
       @status = nil
       @saved = false
+      @theme_scroll = 0 # render scrolls to the selected theme on the first frame
     end
 
+    # ↑/↓: move between fields — except in the THEME section, whose single field IS a
+    # vertical list, so up/down move the theme selection (render keeps it on screen).
     def move_field(delta : Int32) : Nil
+      if @section == :theme
+        cycle(delta)
+        return
+      end
       @focused = (@focused + delta).clamp(0, @values.size - 1)
       @cursor = @values[@focused].size
       @preedit = ""
@@ -131,8 +148,18 @@ module Gori::Tui
     end
 
     # Advance the focused choice field by `delta` (wraps; Crystal's % is modulo, so
-    # -1 wraps to the last option for ←).
+    # -1 wraps to the last option for ←). The THEME section reads the live theme list
+    # (Theme.available — includes user themes loaded after this view was built) rather
+    # than the field's captured `choices`.
     private def cycle(delta : Int32) : Nil
+      if @section == :theme
+        names = Theme.available
+        return if names.empty?
+        i = names.index(@values[0]) || 0
+        @values[0] = names[(i + delta) % names.size]
+        @status = nil
+        return
+      end
       choices = fields[@focused].choices
       return unless choices
       i = choices.index(@values[@focused]) || 0
@@ -199,10 +226,12 @@ module Gori::Tui
     end
 
     # The centred settings box for `area` — the exact Rect render draws into (so
-    # hit-tests can be mapped against the same geometry render uses).
+    # hit-tests can be mapped against the same geometry render uses). The interior
+    # holds `content_rows` rows (fields, or the THEME list viewport) plus 6 rows of
+    # chrome (borders + a pad + the footer note block).
     def overlay_box(area : Rect) : Rect
       w = {area.w - 4, 64}.min
-      h = fields.size + 6
+      h = content_rows(area) + 6
       # Empty when render would decline to draw (same guard as render below): a click
       # then falls through to !contains? and closes instead of focusing a field on an
       # undrawn card.
@@ -212,30 +241,59 @@ module Gori::Tui
       Rect.new(x, y, w, h)
     end
 
-    # The field-row index under (mx,my) within `box`, mirroring render's row loop
-    # (rows are box.y+2 .. box.y+2+size); nil outside the field rows or the box.
-    def field_at(box : Rect, mx : Int32, my : Int32) : Int32?
-      return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2)
-      (0 <= i < fields.size) ? i : nil
+    # Interior content rows for `area`: one per field, or — in the THEME section — the
+    # theme-list viewport (the list size, capped to THEME_LIST_MAX and to what the
+    # terminal can fit, so a long list scrolls instead of demanding the whole screen).
+    private def content_rows(area : Rect) : Int32
+      return fields.size unless @section == :theme
+      fit = {area.h - 6, 1}.max
+      {Theme.available.size, THEME_LIST_MAX, fit}.min
     end
 
-    # Focus field `idx`, clamped to the current section's field count (same clamp
-    # as move_field) and resetting the caret/preedit to that field.
+    # The row-index under (mx,my) within `box`, mirroring render's row loop. For fields
+    # it's the field index; for the THEME list it's the absolute theme index (offset by
+    # the scroll). nil outside the content rows or the box.
+    def field_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless box.contains?(mx, my)
+      row = my - (box.y + 2)
+      if @section == :theme
+        vp = {box.h - 6, 1}.max
+        return nil if row < 0 || row >= vp
+        i = @theme_scroll + row
+        return i < Theme.available.size ? i : nil
+      end
+      (0 <= row < fields.size) ? row : nil
+    end
+
+    # Act on a clicked row: focus a field, or — in the THEME section — select that
+    # theme (the caller live-previews it). Index is clamped to the valid range.
     def set_field(idx : Int32) : Nil
+      if @section == :theme
+        names = Theme.available
+        @values[0] = names[idx.clamp(0, names.size - 1)] unless names.empty?
+        return
+      end
       @focused = idx.clamp(0, @values.size - 1)
       @cursor = @values[@focused].size
       @preedit = ""
     end
 
     def render(screen : Screen, area : Rect) : Nil
-      flds = fields
-      label_w = flds.max_of(&.label.size)
       box = overlay_box(area)
-      w = box.w
-      return if w < 30 || area.h < box.h
+      return if box.w < 30 || area.h < box.h
       Frame.card(screen, box, "SETTINGS · #{@section.to_s.upcase}", border: Theme.border_focus)
+      if @section == :theme
+        render_theme_list(screen, box)
+      else
+        render_fields(screen, box)
+      end
+      render_footer(screen, box)
+    end
 
+    private def render_fields(screen : Screen, box : Rect) : Nil
+      flds = fields
+      w = box.w
+      label_w = flds.max_of(&.label.size)
       flds.each_with_index do |field, i|
         ry = box.y + 2 + i
         focused = i == @focused
@@ -246,43 +304,105 @@ module Gori::Tui
         screen.text(box.x + 3 + label_w + 1, ry, "›", focused ? Theme.accent : Theme.muted, bg)
         vx = box.x + 3 + label_w + 3
         vw = {box.right - vx - 1, 1}.max
-        value = @values[i]
-        if choices = field.choices
-          # List the options left-to-right; the active one is emphasised (◉ + bright).
-          cx = vx
-          left = vw
-          choices.each do |opt|
-            break if left <= 0
-            on = opt == value
-            seg = "#{on ? '◉' : '◯'} #{opt}"
-            screen.text(cx, ry, seg, on ? Theme.text_bright : Theme.muted, bg, width: left)
-            adv = seg.size + 2
-            cx += adv
-            left -= adv
-          end
-        elsif field.bool
-          on = value == "on"
-          glyph = on ? "◉ on" : "◯ off"
-          col = focused ? Theme.text_bright : (on ? Theme.green : Theme.muted)
-          screen.text(vx, ry, glyph, col, bg, width: vw)
-        elsif focused
-          screen.input_line(vx, ry, value, @cursor, @preedit, Theme.text_bright, bg, width: vw)
-        elsif value.empty?
-          screen.text(vx, ry, field.hint, Theme.muted, bg, width: vw)
-        else
-          screen.text(vx, ry, value, Theme.text, bg, width: vw)
-        end
+        render_field_value(screen, field, @values[i], vx, ry, vw, focused, bg)
       end
+    end
 
-      # status line (left) + hint (right) on the bottom interior row
+    # The value column of one field: a choice cycle, a bool toggle, the editable line
+    # (focused), the hint (empty + unfocused), or the plain value.
+    private def render_field_value(screen : Screen, field : Field, value : String,
+                                   vx : Int32, ry : Int32, vw : Int32, focused : Bool, bg : Color) : Nil
+      if choices = field.choices
+        # List the options left-to-right; the active one is emphasised (◉ + bright).
+        cx = vx
+        left = vw
+        choices.each do |opt|
+          break if left <= 0
+          on = opt == value
+          seg = "#{on ? '◉' : '◯'} #{opt}"
+          screen.text(cx, ry, seg, on ? Theme.text_bright : Theme.muted, bg, width: left)
+          adv = seg.size + 2
+          cx += adv
+          left -= adv
+        end
+      elsif field.bool
+        on = value == "on"
+        glyph = on ? "◉ on" : "◯ off"
+        col = focused ? Theme.text_bright : (on ? Theme.green : Theme.muted)
+        screen.text(vx, ry, glyph, col, bg, width: vw)
+      elsif focused
+        screen.input_line(vx, ry, value, @cursor, @preedit, Theme.text_bright, bg, width: vw)
+      elsif value.empty?
+        screen.text(vx, ry, field.hint, Theme.muted, bg, width: vw)
+      else
+        screen.text(vx, ry, value, Theme.text, bg, width: vw)
+      end
+    end
+
+    # The THEME section: a vertical, scrollable list of theme names (built-ins + user
+    # themes), each with a swatch previewing its own palette. The selected row is
+    # kept on screen by following it within the viewport.
+    private def render_theme_list(screen : Screen, box : Rect) : Nil
+      names = Theme.available
+      return if names.empty?
+      sel = names.index(@values[0]) || 0
+      vp = {box.h - 6, 1}.max # interior list rows (box.h == vp + 6 — see overlay_box)
+      # Scroll-follow: clamp to a valid window, then nudge to keep `sel` visible.
+      @theme_scroll = @theme_scroll.clamp(0, {names.size - vp, 0}.max)
+      @theme_scroll = sel if sel < @theme_scroll
+      @theme_scroll = sel - vp + 1 if sel >= @theme_scroll + vp
+
+      list_top = box.y + 2
+      vp.times do |row|
+        i = @theme_scroll + row
+        break if i >= names.size
+        draw_theme_row(screen, box, names[i], i == sel, list_top + row,
+          up: row == 0 && @theme_scroll > 0,
+          down: row == vp - 1 && i < names.size - 1)
+      end
+    end
+
+    private def draw_theme_row(screen : Screen, box : Rect, name : String, selected : Bool, ry : Int32, *, up : Bool, down : Bool) : Nil
+      bg = selected ? Theme.accent_bg : Theme.panel
+      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
+      screen.cell(box.x + 1, ry, selected ? '▎' : ' ', Theme.accent, bg)
+      screen.cell(box.x + 3, ry, selected ? '◉' : '◯', selected ? Theme.accent : Theme.muted, bg)
+      # Right edge, inside the card border (box.right-1): a scroll marker on the last
+      # interior column (box.right-2), then the swatch left of it with a 1-col gap.
+      mark_x = box.right - 2
+      swatch_w = 7
+      sx = mark_x - 1 - swatch_w
+      name_w = {sx - (box.x + 5) - 1, 1}.max
+      screen.text(box.x + 5, ry, name, selected ? Theme.text_bright : Theme.text, bg, width: name_w)
+      draw_swatch(screen, sx, ry, name)
+      screen.cell(mark_x, ry, '▲', Theme.muted, bg) if up
+      screen.cell(mark_x, ry, '▼', Theme.muted, bg) if down
+    end
+
+    # A tiny preview strip in the theme's OWN palette (not the active one): its canvas
+    # colour framing a few accent ticks, so each row previews the theme without making
+    # it active. Width must match `swatch_w` in draw_theme_row (1 + 5 ticks + 1).
+    private def draw_swatch(screen : Screen, x : Int32, ry : Int32, name : String) : Nil
+      pal = Theme.palette(name)
+      return unless pal
+      ticks = {pal.accent, pal.green, pal.yellow, pal.red, pal.syn_header}
+      screen.cell(x, ry, ' ', pal.bg, pal.bg)
+      ticks.each_with_index { |c, i| screen.cell(x + 1 + i, ry, '█', c, pal.bg) }
+      screen.cell(x + 6, ry, ' ', pal.bg, pal.bg)
+    end
+
+    private def render_footer(screen : Screen, box : Rect) : Nil
       note_y = box.bottom - 2
       if status = @status
         color = status.starts_with?("invalid") || status.starts_with?("save failed") ? Theme.yellow : Theme.green
         screen.text(box.x + 3, note_y, "• #{status}", color, Theme.panel)
+      elsif @section == :theme
+        names = Theme.available
+        screen.text(box.x + 3, note_y, "theme #{(names.index(@values[0]) || 0) + 1}/#{names.size}", Theme.muted, Theme.panel)
       else
         screen.text(box.x + 3, note_y, fields[@focused].hint, Theme.muted, Theme.panel)
       end
-      hint = "↑/↓ field · ↵ save · esc close"
+      hint = @section == :theme ? "↑/↓ select · ↵ apply · esc close" : "↑/↓ field · ↵ save · esc close"
       screen.text(box.right - hint.size - 2, note_y, hint, Theme.muted, Theme.panel)
     end
   end
