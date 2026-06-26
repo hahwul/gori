@@ -15,6 +15,7 @@ require "./controllers/history_controller"
 require "./controllers/findings_controller"
 require "./controllers/project_controller"
 require "./controllers/replay_controller"
+require "./controllers/convert_controller"
 require "./history_view"
 require "./replay_view"
 require "./sitemap_view"
@@ -125,6 +126,7 @@ module Gori::Tui
         FindingsController.new(self),
         ProjectController.new(self),
         ReplayController.new(self),
+        ConvertController.new(self),
       ].each { |c| @tabs[c.tab] = c }
     end
 
@@ -159,6 +161,10 @@ module Gori::Tui
 
     private def replay_controller : ReplayController
       @tabs[:replay].as(ReplayController)
+    end
+
+    private def convert_controller : ConvertController
+      @tabs[:convert].as(ConvertController)
     end
 
     def run : Symbol
@@ -397,6 +403,11 @@ module Gori::Tui
       end
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.editing_notes?
         return if findings_controller.handle_notes_key(ev)
+      end
+      # The Convert chain autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
+      # before the focus ring claims Tab. Non-popup keys fall through (return false).
+      if @active_tab == :convert && @overlay == :none && @focus == :body && convert_controller.completing?
+        return if convert_controller.handle_complete_key(ev)
       end
 
       # Focusable sub-tab strip (Replay/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
@@ -1384,6 +1395,7 @@ module Gori::Tui
       project_controller.commit
       replay_controller.save_current_replay
       findings_controller.commit
+      convert_controller.commit
     end
 
 

@@ -25,6 +25,14 @@ module Gori
     # Chrome maps ids→catalog symbols. Only an EXPLICIT false hides a tab.
     class_property tab_prefs : Array({String, Bool}) = [] of {String, Bool}
 
+    # Convert tab scratch state (a global scratch tool, not project data). The last
+    # input + chain spec are restored on restart; convert_chains are named, saved
+    # chain specs (name -> spec) the user can re-load. Written only on commit
+    # (Esc/quit), dirty-guarded, so an untouched Convert tab never rewrites the file.
+    class_property convert_input : String = ""
+    class_property convert_chain : String = ""
+    class_property convert_chains : Array({String, String}) = [] of {String, String}
+
     def self.path : String
       File.join(Paths.home_dir, "settings.json")
     end
@@ -45,8 +53,30 @@ module Gori
         self.editor_markdown = load_bool(ed, "markdown", editor_markdown)
       end
       self.tab_prefs = parse_tab_prefs(root["tabs"]?)
+      if cv = root["convert"]?
+        self.convert_input = cv["input"]?.try(&.as_s?) || convert_input
+        self.convert_chain = cv["chain"]?.try(&.as_s?) || convert_chain
+        self.convert_chains = parse_convert_chains(cv["chains"]?)
+      end
     rescue
       # no file yet / unreadable / bad JSON — keep current values
+    end
+
+    # Tolerant named-chain parse: a non-array (or absent) node keeps the current
+    # value (older configs are safe); entries missing/blank "name" or "spec" are
+    # dropped. Mirrors parse_tab_prefs.
+    private def self.parse_convert_chains(node : JSON::Any?) : Array({String, String})
+      arr = node.try(&.as_a?)
+      return convert_chains unless arr
+      out = [] of {String, String}
+      arr.each do |e|
+        next unless o = e.as_h?
+        name = o["name"]?.try(&.as_s?)
+        spec = o["spec"]?.try(&.as_s?)
+        next if name.nil? || name.empty? || spec.nil?
+        out << {name, spec}
+      end
+      out
     end
 
     # Tolerant tab-bar parse: a non-array (or absent) node keeps the current value;
@@ -107,6 +137,23 @@ module Gori
             j.field "tabs" do
               j.array do
                 tab_prefs.each { |(id, vis)| j.object { j.field "id", id; j.field "visible", vis } }
+              end
+            end
+          end
+          # Omit the whole block when Convert was never used, so an untouched install
+          # never writes a "convert" section.
+          unless convert_input.empty? && convert_chain.empty? && convert_chains.empty?
+            j.field "convert" do
+              j.object do
+                j.field "input", convert_input
+                j.field "chain", convert_chain
+                unless convert_chains.empty?
+                  j.field "chains" do
+                    j.array do
+                      convert_chains.each { |(name, spec)| j.object { j.field "name", name; j.field "spec", spec } }
+                    end
+                  end
+                end
               end
             end
           end

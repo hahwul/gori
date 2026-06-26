@@ -133,6 +133,13 @@ module Gori::Tui
       @cy == 0
     end
 
+    # Cursor is on the last line — used to cross out of the editor on ↓ (e.g. the
+    # Convert INPUT editor descends to the CHAIN field) without swallowing normal
+    # downward cursor movement.
+    def at_bottom? : Bool
+      @cy == @lines.size - 1
+    end
+
     # Cursor at the very start (first line, first column) — used to pop focus out of
     # the editor on ← without swallowing normal cursor movement.
     def at_start? : Bool
