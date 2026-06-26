@@ -15,6 +15,7 @@ require "./controllers/history_controller"
 require "./controllers/findings_controller"
 require "./controllers/project_controller"
 require "./controllers/replay_controller"
+require "./controllers/fuzzer_controller"
 require "./history_view"
 require "./replay_view"
 require "./sitemap_view"
@@ -125,6 +126,7 @@ module Gori::Tui
         FindingsController.new(self),
         ProjectController.new(self),
         ReplayController.new(self),
+        FuzzerController.new(self),
       ].each { |c| @tabs[c.tab] = c }
     end
 
@@ -159,6 +161,10 @@ module Gori::Tui
 
     private def replay_controller : ReplayController
       @tabs[:replay].as(ReplayController)
+    end
+
+    private def fuzzer_controller : FuzzerController
+      @tabs[:fuzzer].as(FuzzerController)
     end
 
     def run : Symbol
@@ -217,6 +223,7 @@ module Gori::Tui
           search_recompute # a ^F over a now-updated response keeps fresh hits
           dirty = true
         end
+        dirty = true if fuzzer_controller.drain_events
         if (rev = @session.interceptor.revision) != last_rev
           last_rev = rev
           dirty = true
@@ -420,6 +427,12 @@ module Gori::Tui
       # tab-bar focus — so the advertised empty-state shortcut is never a dead key.
       if @active_tab == :replay && @overlay == :none && ev.ctrl? && ev.key.lower_n?
         replay_controller.replay_new
+        return
+      end
+
+      # ^N opens a new fuzz session from the Fuzzer tab (body OR tab-bar focus).
+      if @active_tab == :fuzzer && @overlay == :none && ev.ctrl? && ev.key.lower_n?
+        fuzzer_controller.fuzz_new
         return
       end
 
@@ -931,16 +944,16 @@ module Gori::Tui
       c = ev.char || key.to_char
       case
       when ev.ctrl? && key.lower_n?
-        @active_tab == :replay ? replay_controller.replay_new : notes_controller.notes_new # creates + drops to :body
+        subtab_new # creates + drops to :body
       when ev.ctrl? && key.lower_w?
-        @active_tab == :replay ? replay_controller.request_close : notes_controller.notes_close
+        subtab_close
         resolve_subtab_focus_after_close
       when ev.ctrl? && key.lower_p?
-        @active_tab == :replay ? replay_controller.save_current_replay : notes_controller.save_notes
+        subtab_commit
         open_palette
       when ev.ctrl? && c && '1' <= c <= '9'
         jump_subtab(c.to_i - 1) # switch + stay on the strip
-      when rename_chord?(ev)
+      when rename_chord?(ev) && @active_tab == :replay
         open_rename(replay_controller.current_idx) # rename the active replay sub-tab
       when key.left?, key.lower_h?
         move_subtab(-1)
@@ -952,6 +965,31 @@ module Gori::Tui
         focus_pane(:menu) # pop to the tab bar
       else
         # swallow everything else — no type-through on the strip
+      end
+    end
+
+    # Sub-tab new/close/commit dispatched across the three multi-session tabs.
+    private def subtab_new : Nil
+      case @active_tab
+      when :replay then replay_controller.replay_new
+      when :fuzzer then fuzzer_controller.fuzz_new
+      else              notes_controller.notes_new
+      end
+    end
+
+    private def subtab_close : Nil
+      case @active_tab
+      when :replay then replay_controller.request_close
+      when :fuzzer then fuzzer_controller.request_close
+      else              notes_controller.notes_close
+      end
+    end
+
+    private def subtab_commit : Nil
+      case @active_tab
+      when :replay then replay_controller.save_current_replay
+      when :fuzzer then fuzzer_controller.save_current
+      else              notes_controller.save_notes
       end
     end
 
@@ -969,9 +1007,13 @@ module Gori::Tui
     # After ^W on the strip the chip count may drop below 2 (strip gone) or to 0
     # (Replay only) — re-resolve focus so we never sit on an invisible strip.
     private def resolve_subtab_focus_after_close : Nil
-      if @active_tab == :replay
+      case @active_tab
+      when :replay
         focus_pane(:menu) if replay_controller.empty?
         focus_pane(:body) if !replay_controller.empty? && !subtabs_shown?
+      when :fuzzer
+        focus_pane(:menu) if fuzzer_controller.empty?
+        focus_pane(:body) if !fuzzer_controller.empty? && !subtabs_shown?
       else
         focus_pane(:body) unless subtabs_shown? # close_note always keeps ≥1 note
       end
@@ -1379,6 +1421,7 @@ module Gori::Tui
       notes_controller.save_notes
       project_controller.commit
       replay_controller.save_current_replay
+      fuzzer_controller.save_current
       findings_controller.commit
     end
 
@@ -1581,6 +1624,7 @@ module Gori::Tui
       # Leaving the Replay editor for the tab bar (esc / ↑-to-bar) — persist edits,
       # mirroring how Notes saves on leave. Cheap no-op when the tab is clean.
       replay_controller.save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
+      fuzzer_controller.save_current if @active_tab == :fuzzer && @focus == :body && pane != :body
       @focus = pane
       @overlay = :none
       view_focus_first if pane == :body
@@ -1600,6 +1644,7 @@ module Gori::Tui
         project_controller.commit
       end
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
+      fuzzer_controller.save_current if @active_tab == :fuzzer
       @active_tab = tab
       @focus = :body # explicit "jump to tab" (e.g. number keys) drills into content; startup defaults to :menu (tab bar)
       @overlay = :none
@@ -1627,6 +1672,7 @@ module Gori::Tui
         project_controller.commit
       end
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
+      fuzzer_controller.save_current if @active_tab == :fuzzer
       # Cycle within the VISIBLE strip (skips hidden tabs); effective_tabs force-includes
       # the active tab so the index is always found and never falls back to 0.
       tabs = effective_tabs
@@ -1883,6 +1929,35 @@ module Gori::Tui
 
     def close_replay_tab : Nil
       replay_controller.close_replay_tab
+    end
+
+    # --- Fuzzer ExecContext / cross-tab mediators ---
+    # CROSS-TAB: open History's selection as a new Fuzzer session (⇧I).
+    def fuzz_selected : Nil
+      id = history_controller.selected_flow_id
+      fuzzer_controller.fuzz_flow(id) if id
+    end
+
+    # CROSS-TAB: turn the current Replay request into a Fuzzer template.
+    def fuzz_from_replay : Nil
+      return unless v = replay_controller.current_view
+      fuzzer_controller.fuzz_from_request(v.target, v.request_text, v.http2?, v.sni_override)
+    end
+
+    def fuzz_run : Nil
+      fuzzer_controller.fuzz_run
+    end
+
+    def fuzz_stop : Nil
+      fuzzer_controller.fuzz_stop
+    end
+
+    def fuzz_new : Nil
+      fuzzer_controller.fuzz_new
+    end
+
+    def fuzz_automark : Nil
+      (v = fuzzer_controller.current_view) && (@toast = v.auto_mark)
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is

@@ -13,6 +13,7 @@ module Gori
       Body           # the content pane has focus (e.g. the History list)
       HistoryDetail  # a flow's detail view is open
       Replay         # the Replay tab has focus
+      Fuzzer         # the Fuzzer tab has focus
       Sitemap        # the Sitemap tab has focus
       Findings       # the Findings list has focus
       FindingsDetail # a finding's detail is open

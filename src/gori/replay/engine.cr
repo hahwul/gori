@@ -30,9 +30,12 @@ module Gori
     # Reuses the proxy's dialer/codec; no proxying — this is a direct send.
     module Engine
       def self.send(request : Bytes, *, scheme : String, host : String, port : Int32,
-                    verify_upstream : Bool, sni : String? = nil) : Result
+                    verify_upstream : Bool, sni : String? = nil,
+                    timeout : Time::Span? = nil) : Result
         started = Time.instant
-        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni) : Proxy::Upstream.dial(host, port)
+        ct = timeout || Proxy::Upstream::CONNECT_TIMEOUT
+        it = timeout || Proxy::Upstream::IO_TIMEOUT
+        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it)
         return error("connect failed: #{host}:#{port}", started) unless upstream
 
         begin

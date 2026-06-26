@@ -112,6 +112,30 @@ private class FakeContext < ExecContext
     @calls << :replay_send
   end
 
+  def fuzz_selected : Nil
+    @calls << :fuzz_selected
+  end
+
+  def fuzz_from_replay : Nil
+    @calls << :fuzz_from_replay
+  end
+
+  def fuzz_run : Nil
+    @calls << :fuzz_run
+  end
+
+  def fuzz_stop : Nil
+    @calls << :fuzz_stop
+  end
+
+  def fuzz_new : Nil
+    @calls << :fuzz_new
+  end
+
+  def fuzz_automark : Nil
+    @calls << :fuzz_automark
+  end
+
   def sitemap_move(delta : Int32) : Nil
     @calls << :sitemap_move
   end

@@ -40,6 +40,7 @@ module Gori::Tui
       {"HISTORY", [
         {"↑/↓ · ↵", "move · open the flow"},
         {"^R", "send the flow to Replay"},
+        {"⇧I", "send the flow to the Fuzzer"},
         {"⇧F", "create a finding"},
         {"f · /", "follow newest · filter (query language)"},
         {"i", "toggle intercept hold-mode"},
@@ -52,6 +53,15 @@ module Gori::Tui
         {"^S", "SNI override (on the target)"},
         {"↹", "cycle target → request → response"},
         {"x · d", "response: hex · diff"},
+      ]},
+      {"FUZZER", [
+        {"⇧I", "send a flow/replay here (History/Replay)"},
+        {"^A · ^K · ^U", "auto-mark params · mark word · clear §"},
+        {"^O", "focus the config pane"},
+        {"config", "mode/list/file/num/null/brute/match/filter…"},
+        {"^R · ^X", "run · stop"},
+        {"↑/↓ · ↵", "results: select · open detail"},
+        {"o · m", "sort · matched-only · ^N/^W session"},
       ]},
       {"EDITORS", [
         {"^G · ^F", "go to line · find"},

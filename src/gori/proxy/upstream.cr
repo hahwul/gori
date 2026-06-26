@@ -15,20 +15,24 @@ module Gori::Proxy
     # Dial the origin (directly, or via the configured upstream proxy's CONNECT
     # tunnel). The returned socket is positioned at the start of the origin stream
     # either way, so callers (dial_tls / the request forwarder) are unaffected.
-    def self.dial(host : String, port : Int32) : TCPSocket?
+    def self.dial(host : String, port : Int32,
+                  connect_timeout : Time::Span = CONNECT_TIMEOUT,
+                  io_timeout : Time::Span = IO_TIMEOUT) : TCPSocket?
       if proxy = Settings.upstream_proxy_addr
-        dial_via_proxy(proxy[0], proxy[1], host, port)
+        dial_via_proxy(proxy[0], proxy[1], host, port, connect_timeout, io_timeout)
       else
-        direct_dial(host, port)
+        direct_dial(host, port, connect_timeout, io_timeout)
       end
     end
 
-    private def self.direct_dial(host : String, port : Int32) : TCPSocket?
-      sock = TCPSocket.new(host, port, connect_timeout: CONNECT_TIMEOUT)
+    private def self.direct_dial(host : String, port : Int32,
+                                 connect_timeout : Time::Span = CONNECT_TIMEOUT,
+                                 io_timeout : Time::Span = IO_TIMEOUT) : TCPSocket?
+      sock = TCPSocket.new(host, port, connect_timeout: connect_timeout)
       sock.sync = true # flush writes immediately (P6)
       sock.tcp_nodelay = true
-      sock.read_timeout = IO_TIMEOUT
-      sock.write_timeout = IO_TIMEOUT
+      sock.read_timeout = io_timeout
+      sock.write_timeout = io_timeout
       sock
     rescue
       nil
@@ -39,8 +43,10 @@ module Gori::Proxy
     # gori's existing TLS-wrap/forwarding works over it). The proxy must permit
     # CONNECT to the target port.
     private def self.dial_via_proxy(proxy_host : String, proxy_port : Int32,
-                                    host : String, port : Int32) : TCPSocket?
-      sock = direct_dial(proxy_host, proxy_port)
+                                    host : String, port : Int32,
+                                    connect_timeout : Time::Span = CONNECT_TIMEOUT,
+                                    io_timeout : Time::Span = IO_TIMEOUT) : TCPSocket?
+      sock = direct_dial(proxy_host, proxy_port, connect_timeout, io_timeout)
       return nil unless sock
       sock << "CONNECT #{host}:#{port} HTTP/1.1\r\nHost: #{host}:#{port}\r\n\r\n"
       sock.flush
@@ -91,8 +97,10 @@ module Gori::Proxy
     # the name the cert is checked against) WITHOUT changing the dialed host:port —
     # the replay workbench uses it for domain-fronting / vhost-confusion / IP-direct
     # sends. nil → the dialed host is used (the usual case).
-    def self.dial_tls(host : String, port : Int32, verify : Bool, alpn : String? = nil, sni : String? = nil) : OpenSSL::SSL::Socket::Client?
-      tcp = dial(host, port)
+    def self.dial_tls(host : String, port : Int32, verify : Bool, alpn : String? = nil, sni : String? = nil,
+                      connect_timeout : Time::Span = CONNECT_TIMEOUT,
+                      io_timeout : Time::Span = IO_TIMEOUT) : OpenSSL::SSL::Socket::Client?
+      tcp = dial(host, port, connect_timeout, io_timeout)
       return nil unless tcp
       ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn), sync_close: true, hostname: sni || host)
       ssl.sync = true

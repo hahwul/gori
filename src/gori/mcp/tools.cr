@@ -4,6 +4,8 @@ require "../store"
 require "../ql"
 require "../replay/engine"
 require "../replay/h2_engine"
+require "../replay/flow_request"
+require "../fuzz"
 require "./serialize"
 require "./request_builder"
 
@@ -24,10 +26,45 @@ module Gori
 
       EMPTY_HASH = {} of String => JSON::Any
 
+      # Fuzz-run safety rails (a single tool call must never launch an unbounded
+      # flood, and the in-memory result buffer can't grow without bound).
+      FUZZ_MAX_REQUESTS    = 100_000_i64
+      FUZZ_MAX_CONCURRENCY =         100
+      FUZZ_MAX_STORED      =      10_000
+
       def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool)
+        @jobs = {} of String => FuzzJob
+        @job_seq = 0
       end
 
       getter? allow_actions : Bool
+
+      # Raised by the fuzz arg-builders; converted to an is_error Result with a clean
+      # message instead of a generic "tool error".
+      class FuzzArgError < Exception
+      end
+
+      # A background fuzz run, polled by fuzz_status / fuzz_results. The runner fiber
+      # only mutates these fields (single-threaded scheduler → no lock needed); the
+      # stored results are matched-only and capped at FUZZ_MAX_STORED.
+      class FuzzJob
+        getter id : String
+        getter total : Int64?
+        property status : Symbol = :running # :running | :done | :stopped | :error
+        property sent = 0_i64
+        property matched = 0_i64
+        property errors = 0_i64
+        property error_msg : String? = nil
+        getter results = [] of Fuzz::Result
+        property? truncated = false
+
+        def initialize(@id : String, @total : Int64?, @engine : Fuzz::Engine)
+        end
+
+        def stop : Nil
+          @engine.stop
+        end
+      end
 
       # Emits the tools/list array, honouring the action gate.
       def list(j : JSON::Builder) : Nil
@@ -95,6 +132,47 @@ module Gori
               s.field "notes", strprop("free-form notes (replaces existing)")
               s.field "status", strprop("open|confirmed|false-positive|resolved")
             end
+
+            tool j, "fuzz_start",
+              "Start a fuzz/intruder run against an origin and return a job_id " \
+              "immediately (poll with fuzz_status / fuzz_results; end with fuzz_stop). " \
+              "ACTIVE: sends many real outbound requests from this host. Mark payload " \
+              "positions with §…§ in `template`, or pass `flow_id` + auto:true. Capped " \
+              "at #{FUZZ_MAX_REQUESTS} requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
+              s.field "template", strprop("raw HTTP request with §…§ position markers")
+              s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
+              s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
+              s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
+              s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
+              s.field "payloads", strprop(%(JSON array of sets, e.g. [{"list":["a","b"]},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}]))
+              s.field "match", strprop(%(JSON: keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"}))
+              s.field "filter", strprop(%(JSON: drop responses matching, same shape as match))
+              s.field "extract", strprop("regex; grep a value (capture group 1) from each response")
+              s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
+              s.field "rate", intprop("requests/sec cap (0 = unlimited)")
+              s.field "timeout_ms", intprop("per-request timeout in milliseconds")
+              s.field "retries", intprop("retries per request on a network error")
+              s.field "http2", boolprop("use real HTTP/2")
+              s.field "insecure", boolprop("skip upstream TLS verification")
+              s.field "max_requests", intprop("caller cap on total requests")
+            end
+
+            tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|stopped|error)." do |s|
+              s.field "job_id", strprop("id from fuzz_start"), required: true
+            end
+
+            tool j, "fuzz_results",
+              "Paged matched results for a fuzz job (metrics only — status/length/words/" \
+              "extracted; no raw bodies. Use get_flow/send_request for full detail)." do |s|
+              s.field "job_id", strprop("id from fuzz_start"), required: true
+              s.field "offset", intprop("start row (default 0)")
+              s.field "limit", intprop("max rows (default 100, max 1000)")
+              s.field "matched_only", boolprop("only matched rows (results are matched-only already)")
+            end
+
+            tool j, "fuzz_stop", "Stop a running fuzz job (in-flight requests finish)." do |s|
+              s.field "job_id", strprop("id from fuzz_start"), required: true
+            end
           end
         end
       end
@@ -130,6 +208,10 @@ module Gori
         when "send_request"   then gated { send_request(h) }
         when "create_finding" then gated { create_finding(h) }
         when "update_finding" then gated { update_finding(h) }
+        when "fuzz_start"     then gated { fuzz_start(h) }
+        when "fuzz_status"    then gated { fuzz_status(h) }
+        when "fuzz_results"   then gated { fuzz_results(h) }
+        when "fuzz_stop"      then gated { fuzz_stop(h) }
         end
       end
 
@@ -279,6 +361,269 @@ module Gori
 
         @store.update_finding(id, title: title, severity: severity, notes: notes, status: status)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "updated", true } })
+      end
+
+      # --- fuzz tools (gated, async job model) --------------------------------
+
+      private def fuzz_start(h) : Result
+        engine, origin, total = build_fuzz_job(h)
+        if total && total > FUZZ_MAX_REQUESTS
+          return Result.new("too many requests (#{total} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads", is_error: true)
+        end
+        @job_seq += 1
+        id = "fz_#{@job_seq}"
+        fjob = FuzzJob.new(id, total, engine)
+        @jobs[id] = fjob
+        # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
+        Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} total=#{total || "?"}" }
+        spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
+        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running" } })
+      rescue ex : FuzzArgError
+        Result.new(ex.message || "invalid fuzz arguments", is_error: true)
+      end
+
+      # Background drain (runs during the stdio loop's blocking read). Stores
+      # matched results only, capped, never touches STDOUT.
+      private def run_fuzz_job(fjob : FuzzJob, engine : Fuzz::Engine) : Nil
+        engine.run do |ev|
+          case ev
+          when Fuzz::ProgressEvent then apply_fuzz_progress(fjob, ev.progress)
+          when Fuzz::ResultEvent   then store_fuzz_result(fjob, ev.result)
+          when Fuzz::DoneEvent
+            apply_fuzz_progress(fjob, ev.progress)
+            fjob.status = ev.stopped ? :stopped : :done
+          when Fuzz::ErrorEvent
+            fjob.status = :error
+            fjob.error_msg = ev.message
+          end
+        end
+      end
+
+      private def apply_fuzz_progress(fjob : FuzzJob, p : Fuzz::Progress) : Nil
+        fjob.sent = p.sent
+        fjob.matched = p.matched
+        fjob.errors = p.errors
+      end
+
+      private def store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result) : Nil
+        return unless r.matched?
+        if fjob.results.size < FUZZ_MAX_STORED
+          fjob.results << r
+        else
+          fjob.truncated = true
+        end
+      end
+
+      private def fuzz_status(h) : Result
+        fjob = lookup_fuzz_job(h)
+        return fjob if fjob.is_a?(Result)
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "job_id", fjob.id
+            j.field "status", fjob.status.to_s
+            j.field "total", fjob.total
+            j.field "sent", fjob.sent
+            j.field "matched", fjob.matched
+            j.field "errors", fjob.errors
+            j.field "stored_results", fjob.results.size
+            j.field "results_truncated", fjob.truncated?
+            j.field "error", fjob.error_msg
+          end
+        end)
+      end
+
+      private def fuzz_results(h) : Result
+        fjob = lookup_fuzz_job(h)
+        return fjob if fjob.is_a?(Result)
+        rows = (bool(h, "matched_only") || false) ? fjob.results.select(&.matched?) : fjob.results
+        offset = clamp_nonneg(int(h, "offset"))
+        limit = clamp(int(h, "limit"), 100, 1000)
+        page = rows[offset, limit]? || [] of Fuzz::Result
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field("results") { j.array { page.each { |r| Serialize.fuzz_result(j, r) } } }
+            j.field "returned", page.size
+            j.field "offset", offset
+            j.field "total_available", rows.size
+            j.field "complete", fjob.status != :running
+            j.field "results_truncated", fjob.truncated?
+          end
+        end)
+      end
+
+      private def fuzz_stop(h) : Result
+        fjob = lookup_fuzz_job(h)
+        return fjob if fjob.is_a?(Result)
+        fjob.stop
+        Result.new(JSON.build { |j| j.object { j.field "job_id", fjob.id; j.field "status", "stopping" } })
+      end
+
+      # The job for `job_id`, or an error Result the caller returns as-is.
+      private def lookup_fuzz_job(h) : FuzzJob | Result
+        id = str(h, "job_id")
+        return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
+        @jobs[id]? || Result.new("no fuzz job #{id}", is_error: true)
+      end
+
+      # Build a ready-to-run engine + its origin + total from the tool args. Raises
+      # FuzzArgError (clean message) on any malformed input.
+      private def build_fuzz_job(h) : {Fuzz::Engine, Fuzz::Origin, Int64?}
+        text, default_target, src_h2 = fuzz_template_source(h)
+        use_h2 = (bool(h, "http2") || false) || src_h2
+        text = Fuzz::Template.auto_mark(text) if bool(h, "auto") || false
+        template = Fuzz::Template.parse(text, use_h2)
+        raise FuzzArgError.new("template has no §…§ positions (add markers, or pass auto:true with a flow_id)") if template.position_count == 0
+        origin = fuzz_origin(h, default_target)
+        mode = fuzz_mode(h)
+        sets = fuzz_sets(h)
+        raise FuzzArgError.new(%(no payloads — pass 'payloads' as a JSON array of sets, e.g. [{"list":["a","b"]}])) if sets.empty?
+        matcher = fuzz_matcher(h)
+        config = fuzz_config(h, mode)
+        gen_sets = mode.per_position? ? sets : [sets.first]
+        generator = Fuzz::Generator.new(template, gen_sets, config)
+        sender = Fuzz::Sender.new(origin, http2: use_h2,
+          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
+        engine = Fuzz::Engine.new(generator, matcher, sender, config)
+        {engine, origin, engine.total}
+      rescue ex : File::Error
+        raise FuzzArgError.new("wordlist error: #{ex.message}")
+      end
+
+      private def fuzz_template_source(h) : {String, String?, Bool}
+        if t = str(h, "template")
+          return {t, nil, false} unless t.strip.empty?
+        end
+        if id = int(h, "flow_id")
+          detail = @store.get_flow(id)
+          raise FuzzArgError.new("no flow with id #{id}") unless detail
+          built = Replay::FlowRequest.build(detail)
+          return {String.new(built.bytes).scrub, built.target, built.http2}
+        end
+        raise FuzzArgError.new("provide a 'template' (raw request with §…§) or a 'flow_id'")
+      end
+
+      private def fuzz_origin(h, default_target : String?) : Fuzz::Origin
+        url = str(h, "url").presence || default_target
+        raise FuzzArgError.new("provide a 'url' target (scheme://host) or a flow_id that carries one") unless url
+        scheme, host, port = Replay::FlowRequest.parse_target(url)
+        raise FuzzArgError.new("could not parse a host from '#{url}'") if host.empty?
+        Fuzz::Origin.new(scheme, host, port)
+      end
+
+      private def fuzz_mode(h) : Fuzz::Mode
+        s = str(h, "mode")
+        return Fuzz::Mode::Sniper if s.nil? || s.strip.empty?
+        Fuzz::Mode.parse?(s) || raise FuzzArgError.new("invalid mode '#{s}' (sniper|batteringram|pitchfork|clusterbomb)")
+      end
+
+      private def fuzz_sets(h) : Array(Fuzz::PayloadSet)
+        raw = str(h, "payloads")
+        return [] of Fuzz::PayloadSet if raw.nil? || raw.strip.empty?
+        parsed = JSON.parse(raw) rescue raise FuzzArgError.new("'payloads' must be a JSON array of sets")
+        arr = parsed.as_a? || raise FuzzArgError.new("'payloads' must be a JSON array")
+        arr.map { |spec| fuzz_set_from(spec) }
+      end
+
+      private def fuzz_set_from(spec : JSON::Any) : Fuzz::PayloadSet
+        obj = spec.as_h? || raise FuzzArgError.new("each payload set must be a JSON object")
+        Fuzz::PayloadSet.new(fuzz_source_from(obj, spec))
+      end
+
+      private def fuzz_source_from(obj : Hash(String, JSON::Any), spec : JSON::Any) : Fuzz::PayloadSource
+        if list = obj["list"]?.try(&.as_a?)
+          Fuzz::InlineList.new(list.map { |x| x.as_s? || x.to_s })
+        elsif wl = obj["wordlist"]?.try(&.as_s?)
+          Fuzz::WordlistFile.new(wl)
+        elsif nums = obj["numbers"]?.try(&.as_s?)
+          fuzz_numbers(nums)
+        elsif (nul = obj["null"]?) && (n = (nul.as_i64? || nul.as_s?.try(&.to_i64?)))
+          Fuzz::NullPayloads.new(n.to_i)
+        elsif br = obj["brute"]?.try(&.as_s?)
+          fuzz_brute(br)
+        else
+          raise FuzzArgError.new("unknown payload set #{spec} (use list/wordlist/numbers/null/brute)")
+        end
+      end
+
+      private def fuzz_numbers(v : String) : Fuzz::NumberRange
+        range_part, _, step_part = v.partition(':')
+        from_s, _, to_s = range_part.partition('-')
+        from = from_s.to_i64?
+        to = to_s.to_i64?
+        raise FuzzArgError.new("invalid numbers '#{v}' (use FROM-TO[:STEP])") unless from && to
+        step = step_part.empty? ? 1_i64 : (step_part.to_i64? || raise FuzzArgError.new("invalid numbers step '#{step_part}'"))
+        Fuzz::NumberRange.new(from, to, step)
+      end
+
+      private def fuzz_brute(v : String) : Fuzz::BruteForce
+        charset, _, lens = v.rpartition(':')
+        raise FuzzArgError.new("invalid brute '#{v}' (use CHARSET:MIN-MAX)") if charset.empty? || lens.empty?
+        min_s, _, max_s = lens.partition('-')
+        min = min_s.to_i?
+        max = max_s.empty? ? min : max_s.to_i?
+        raise FuzzArgError.new("invalid brute lengths '#{lens}'") unless min && max
+        Fuzz::BruteForce.new(charset, min, max)
+      end
+
+      private def fuzz_matcher(h) : Fuzz::Matcher
+        m = Fuzz::Matcher.new(keep_bodies: :none)
+        if c = fuzz_conditions(str(h, "match"), "match")
+          m.match_status = c[:status]
+          m.match_size = c[:size]
+          m.match_words = c[:words]
+          m.match_lines = c[:lines]
+          m.match_regex = fuzz_regex(c[:regex], "match")
+        end
+        if c = fuzz_conditions(str(h, "filter"), "filter")
+          m.filter_status = c[:status]
+          m.filter_size = c[:size]
+          m.filter_words = c[:words]
+          m.filter_lines = c[:lines]
+          m.filter_regex = fuzz_regex(c[:regex], "filter")
+        end
+        m.extract = fuzz_regex(str(h, "extract"), "extract")
+        m
+      end
+
+      private alias FuzzConds = NamedTuple(status: String?, size: String?, words: String?, lines: String?, regex: String?)
+
+      private def fuzz_conditions(raw : String?, which : String) : FuzzConds?
+        return nil if raw.nil? || raw.strip.empty?
+        obj = (JSON.parse(raw).as_h? rescue nil) || raise FuzzArgError.new("'#{which}' must be a JSON object")
+        {status: jstr(obj, "status"), size: jstr(obj, "size"), words: jstr(obj, "words"),
+         lines: jstr(obj, "lines"), regex: obj["regex"]?.try(&.as_s?)}
+      end
+
+      private def jstr(obj : Hash(String, JSON::Any), key : String) : String?
+        obj[key]?.try { |v| v.as_s? || v.to_s }
+      end
+
+      private def fuzz_regex(s : String?, which : String) : Regex?
+        return nil if s.nil? || s.empty?
+        Regex.new(s)
+      rescue
+        raise FuzzArgError.new("invalid #{which} regex: #{s}")
+      end
+
+      private def fuzz_config(h, mode : Fuzz::Mode) : Fuzz::Config
+        rate = int(h, "rate").try(&.to_f64)
+        cap = [int(h, "max_requests"), FUZZ_MAX_REQUESTS].compact.min
+        Fuzz::Config.new(mode: mode,
+          concurrency: clamp(int(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
+          rps: (rate && rate > 0 ? rate : nil),
+          retries: (int(h, "retries") || 0_i64).clamp(0_i64, 1000_i64).to_i,
+          timeout: fuzz_timeout(h),
+          keep_bodies: :none,
+          max_requests: cap)
+      end
+
+      private def fuzz_timeout(h) : Time::Span?
+        int(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
+      end
+
+      private def clamp_nonneg(n : Int64?) : Int32
+        return 0 unless n
+        n.clamp(0_i64, Int32::MAX.to_i64).to_i
       end
 
       # An error Result when `s` is a present, non-blank, UNRECOGNISED severity;

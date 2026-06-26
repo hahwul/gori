@@ -2,6 +2,7 @@ require "json"
 require "base64"
 require "../store"
 require "../replay/engine"
+require "../fuzz"
 require "../proxy/codec/content_decode"
 
 module Gori
@@ -32,6 +33,23 @@ module Gori
           j.field "response_size", row.response_size
           j.field "duration_us", row.duration_us
           j.field "content_type", row.content_type
+        end
+      end
+
+      # --- fuzz result (metrics only — no raw bodies; full detail stays behind
+      # get_flow/send_request, shrinking the injected-content surface) -----------
+      def self.fuzz_result(j : JSON::Builder, r : Fuzz::Result) : Nil
+        j.object do
+          j.field "index", r.index
+          j.field("payloads") { j.array { r.payloads.each { |p| j.string p } } }
+          j.field "position", r.position
+          j.field "status", r.status
+          j.field "length", r.length
+          j.field "words", r.words
+          j.field "lines", r.lines
+          j.field "duration_us", r.duration_us
+          j.field "error", r.error
+          j.field "extracted", r.extracted
         end
       end
 
