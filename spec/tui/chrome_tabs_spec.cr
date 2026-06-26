@@ -1,0 +1,60 @@
+require "../spec_helper"
+
+include Gori::Tui
+
+# The tab-bar config layer: Chrome.reconcile normalizes a stored {id,visible} layout
+# against the canonical catalog (drop unknown, dedupe, append-new, ≥1 visible), and
+# Chrome.visible_tabs derives the rendered/nav strip (with `force:` for the active tab).
+describe "Chrome.reconcile" do
+  it "yields the full catalog with Agent hidden by default on empty prefs" do
+    out = Chrome.reconcile([] of {String, Bool})
+    out.map(&.first).should eq(Chrome::TABS.map(&.first)) # canonical order, all present
+    out.select { |(_, _, v)| v }.map(&.first).includes?(:agent).should be_false
+    out.find { |(s, _, _)| s == :agent }.not_nil![2].should be_false
+    out.find { |(s, _, _)| s == :project }.not_nil![2].should be_true
+  end
+
+  it "honors a stored order and visibility, appending catalog tabs absent from prefs" do
+    out = Chrome.reconcile([{"help", true}, {"project", false}])
+    out[0][0].should eq(:help)    # stored order respected
+    out[1][0].should eq(:project)
+    out[1][2].should be_false     # explicit hide survives
+    out.map(&.first).includes?(:history).should be_true # appended (was absent from prefs)
+    out.find { |(s, _, _)| s == :history }.not_nil![2].should be_true # appended visible
+  end
+
+  it "drops unknown ids and collapses duplicates to the first occurrence" do
+    out = Chrome.reconcile([{"bogus", true}, {"replay", false}, {"replay", true}])
+    out.map(&.first).includes?(:bogus).should be_false
+    out.count { |(s, _, _)| s == :replay }.should eq(1)
+    out.find { |(s, _, _)| s == :replay }.not_nil![2].should be_false # first wins (hidden)
+  end
+
+  it "reveals the first entry when a hand-edited config hides everything" do
+    all_hidden = Chrome::TABS.map { |(sym, _)| {sym.to_s, false} }
+    out = Chrome.reconcile(all_hidden)
+    out.count { |(_, _, v)| v }.should eq(1)
+    out[0][2].should be_true
+  end
+end
+
+describe "Chrome.visible_tabs" do
+  it "returns only the visible tabs in order (Agent excluded by default)" do
+    vis = Chrome.visible_tabs([] of {String, Bool}).map(&.first)
+    vis.includes?(:agent).should be_false
+    vis.first.should eq(:project)
+    vis.size.should eq(Chrome::TABS.size - 1)
+  end
+
+  it "force-includes a hidden active tab at its catalog-relative position" do
+    # Agent hidden by default; forcing it must slot it where it sits in the catalog (last).
+    vis = Chrome.visible_tabs([] of {String, Bool}, force: :agent).map(&.first)
+    vis.includes?(:agent).should be_true
+    vis.index(:agent).not_nil!.should be > vis.index(:notes).not_nil!
+    vis.index(:agent).not_nil!.should be < vis.index(:help).not_nil!
+  end
+
+  it "is a no-op for force: when the active tab is already visible" do
+    Chrome.visible_tabs([] of {String, Bool}, force: :project).should eq(Chrome.visible_tabs([] of {String, Bool}))
+  end
+end

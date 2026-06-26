@@ -20,6 +20,10 @@ module Gori
     class_property editor_markdown : Bool = true # syntax-highlight markdown in Notes/Project
     class_property theme : String = "goridark"   # TUI colour theme name (settings:theme); applied by Theme.apply
     class_property mouse : Bool = true           # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
+    # Top tab-bar layout: ordered {tab-id, visible?}. Empty = never customized → Chrome
+    # reconciles to catalog defaults. Opaque String ids (Crystal has no runtime String→Symbol);
+    # Chrome maps ids→catalog symbols. Only an EXPLICIT false hides a tab.
+    class_property tab_prefs : Array({String, Bool}) = [] of {String, Bool}
 
     def self.path : String
       File.join(Paths.home_dir, "settings.json")
@@ -40,8 +44,26 @@ module Gori
         self.editor = ed["command"]?.try(&.as_s?) || editor
         self.editor_markdown = load_bool(ed, "markdown", editor_markdown)
       end
+      self.tab_prefs = parse_tab_prefs(root["tabs"]?)
     rescue
       # no file yet / unreadable / bad JSON — keep current values
+    end
+
+    # Tolerant tab-bar parse: a non-array (or absent) node keeps the current value;
+    # entries missing/blank "id" are dropped; "visible" absent or non-bool ⇒ visible
+    # (never hide a tab from a malformed flag). Unknown/duplicate ids are left for
+    # Chrome.reconcile to normalize against the canonical catalog.
+    private def self.parse_tab_prefs(node : JSON::Any?) : Array({String, Bool})
+      arr = node.try(&.as_a?)
+      return tab_prefs unless arr
+      out = [] of {String, Bool}
+      arr.each do |e|
+        next unless o = e.as_h?
+        id = o["id"]?.try(&.as_s?)
+        next if id.nil? || id.empty?
+        out << {id, o["visible"]?.try(&.as_bool?) != false} # only explicit false hides
+      end
+      out
     end
 
     # Read a boolean field, keeping `current` when it's absent or non-bool. A plain
@@ -77,6 +99,15 @@ module Gori
             j.object do
               j.field "command", editor
               j.field "markdown", editor_markdown
+            end
+          end
+          # Omit when empty so an untouched install never writes an ambiguous "tabs": []
+          # (a human reader might misread it as "all hidden").
+          unless tab_prefs.empty?
+            j.field "tabs" do
+              j.array do
+                tab_prefs.each { |(id, vis)| j.object { j.field "id", id; j.field "visible", vis } }
+              end
             end
           end
         end

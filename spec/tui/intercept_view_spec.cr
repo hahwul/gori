@@ -90,9 +90,11 @@ describe "Intercept verbs (P1)" do
     reg["intercept.forward-all"].scope.should eq(Gori::Verb::Scope::Intercept)
   end
 
-  it "maps `3` to the Intercept tab after the Project (leftmost) renumber" do
+  it "maps `3` to the positional jump verb (Nth visible tab — Intercept by default)" do
     reg = Gori::Verbs.registry
     keymap = Gori::Verb::Keymap.build(reg)
-    keymap.lookup(Gori::Verb::Chord.new("3"), Gori::Verb::Scope::Body).should eq("tab.intercept")
+    # Number keys are positional now (digit N → Nth visible tab), handled by nav.pos*; the
+    # Runner resolves N to the actual tab. With the default layout the 3rd visible is Intercept.
+    keymap.lookup(Gori::Verb::Chord.new("3"), Gori::Verb::Scope::Body).should eq("nav.pos3")
   end
 end

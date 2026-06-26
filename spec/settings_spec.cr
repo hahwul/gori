@@ -171,4 +171,50 @@ describe Gori::Settings do
       Gori::Settings.editor_markdown = true
     end
   end
+
+  it "round-trips the tab-bar layout (order + a hidden tab; false must survive)" do
+    dir = File.tempname("gori-settings-tabs")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.tab_prefs = [{"help", true}, {"project", true}, {"agent", false}]
+      Gori::Settings.save.should be_true
+      Gori::Settings.tab_prefs = [] of {String, Bool} # clear, then reload from disk
+      Gori::Settings.load
+      Gori::Settings.tab_prefs.should eq([{"help", true}, {"project", true}, {"agent", false}])
+
+      # an older file with no "tabs" key keeps the current in-memory value (the default
+      # [] at real startup), like the other fields — never resurrects a phantom layout
+      File.write(Gori::Settings.path, %({"theme":"goridark"}))
+      Gori::Settings.tab_prefs = [{"notes", false}]
+      Gori::Settings.load
+      Gori::Settings.tab_prefs.should eq([{"notes", false}])
+
+      # malformed entries are tolerated: blank/missing id dropped, non-bool visible ⇒ visible
+      File.write(Gori::Settings.path, %({"tabs":[{"id":"replay"},{"id":""},{"visible":false},{"id":"notes","visible":"x"}]}))
+      Gori::Settings.load
+      Gori::Settings.tab_prefs.should eq([{"replay", true}, {"notes", true}])
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.tab_prefs = [] of {String, Bool}
+    end
+  end
+
+  it "omits the tabs key entirely when tab_prefs is empty" do
+    dir = File.tempname("gori-settings-notabs")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.tab_prefs = [] of {String, Bool}
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).includes?("tabs").should be_false
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.tab_prefs = [] of {String, Bool}
+    end
+  end
 end

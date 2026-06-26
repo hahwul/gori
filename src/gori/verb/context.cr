@@ -21,6 +21,9 @@ module Gori
       # pane focus (:sidebar | :body) and tab navigation
       abstract def focus_pane(pane : Symbol) : Nil
       abstract def focus_tab(tab : Symbol) : Nil
+      # Focus the Nth (1-based) VISIBLE tab — the positional number-key target, which
+      # follows the user's settings:tabs order/visibility. Out-of-range n is a no-op.
+      abstract def focus_visible_tab(n : Int32) : Nil
       abstract def cycle_tab(delta : Int32) : Nil
       # Descend from the tab menu into the active tab's content. Tabs with a
       # navigable sub-tab strip (Replay/Notes) land on the STRIP first; others go
@@ -98,7 +101,8 @@ module Gori
       # browser: open a system browser pre-trusting gori's CA + routed via the proxy
       abstract def open_browser_picker : Nil
 
-      # settings: open the config editor for a section (:network | :theme | :hotkeys)
+      # settings: open the config editor for a section (:network | :editor | :theme |
+      # :tabs | :hotkeys). :tabs opens the tab-bar customizer overlay.
       abstract def open_settings(section : Symbol) : Nil
     end
   end

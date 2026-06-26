@@ -56,6 +56,9 @@ module Gori
         "settings.theme", "settings:theme", "Switch the TUI colour theme (goridark · goriday · latte · espresso · tokyonight)",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:theme); nil }
       r.register Verb::Definition.new(
+        "settings.tabs", "settings:tabs", "Customize the top tab bar — show/hide tabs and reorder them",
+        Verb::Scope::Global) { |ctx| ctx.open_settings(:tabs); nil }
+      r.register Verb::Definition.new(
         "settings.hotkeys", "settings:hotkeys", "Hotkey settings (coming soon)",
         Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:hotkeys); nil }
 
@@ -104,15 +107,24 @@ module Gori
         "nav.prev-tab", "Previous tab", "Focus the previous tab", Verb::Scope::Global,
         [Verb::Chord.new("[")]) { |ctx| ctx.cycle_tab(-1); nil }
 
-      # Direct tab focus (mirrors the sidebar). Project is 1 (new leftmost default).
-      {
-        "1" => :project, "2" => :history, "3" => :intercept, "4" => :sitemap,
-        "5" => :replay, "6" => :findings, "7" => :notes, "8" => :agent,
-        "9" => :help,
-      }.each do |key, tab|
+      # Positional tab jump: digit N focuses the Nth VISIBLE tab (the order on the bar) —
+      # so the numbers follow the user's settings:tabs order/visibility. Hidden (default:
+      # Agent), so the keys exist but don't clutter the palette; the named "Go to …" verbs
+      # below are the discoverable entries (and the way to reach a hidden tab by command).
+      (1..9).each do |n|
         r.register Verb::Definition.new(
-          "tab.#{tab}", "Go to #{tab.to_s.capitalize}", "Focus the #{tab} tab", Verb::Scope::Global,
-          [Verb::Chord.new(key)]) { |ctx| ctx.focus_tab(tab); nil }
+          "nav.pos#{n}", "Go to tab #{n}", "Focus the #{n}th visible tab", Verb::Scope::Global,
+          [Verb::Chord.new(n.to_s)], hidden: true) { |ctx| ctx.focus_visible_tab(n); nil }
+      end
+
+      # Named tab jumps (no chord) — palette discoverability + the only by-command way to
+      # reach a tab hidden in settings:tabs (focus_tab force-shows it while active).
+      {
+        :project => "Project", :history => "History", :intercept => "Intercept", :sitemap => "Sitemap",
+        :replay => "Replay", :findings => "Findings", :notes => "Notes", :agent => "Agent", :help => "Help",
+      }.each do |tab, label|
+        r.register Verb::Definition.new(
+          "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global) { |ctx| ctx.focus_tab(tab); nil }
       end
 
       # Close the command palette overlay.
