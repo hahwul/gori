@@ -14,14 +14,16 @@ module Gori::Tui
       {:replay, "Replay"},
       {:findings, "Findings"},
       {:notes, "Notes"},
+      {:convert, "Convert"},
       {:agent, "Agent"},
       {:help, "Help"},
     ]
 
     # Tabs hidden by default on a fresh install (re-enableable in settings:tabs). Agent
-    # is a non-functional "coming soon" placeholder. Only affects reconcile's append path
-    # — once the user saves, tab_prefs is explicit and this no longer applies.
-    DEFAULT_HIDDEN = [:agent]
+    # is a non-functional "coming soon" placeholder; Convert is a scratch utility reached
+    # from the palette ("Go to Convert"). Only affects reconcile's append path — once the
+    # user saves, tab_prefs is explicit and this no longer applies.
+    DEFAULT_HIDDEN = [:convert, :agent]
 
     # Reconcile stored prefs against the canonical catalog → full ordered
     # {symbol, label, visible?}. Removed/unknown ids are dropped, duplicates collapse to

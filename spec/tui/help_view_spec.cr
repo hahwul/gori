@@ -14,6 +14,7 @@ describe Gori::Tui::HelpView do
     backend.contains?("MOUSE").should be_true
     backend.contains?("REPLAY").should be_true
     backend.contains?("rename").should be_true # the new sub-tab rename shortcut is documented
+    backend.contains?("CONVERT").should be_true # the Convert tab cheat-sheet
   end
 
   it "scrolls — the first section leaves and the last arrives" do
