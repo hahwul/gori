@@ -45,6 +45,12 @@ module Gori
           print_help
           exit 1
         end
+      rescue ex : IO::Error
+        # `gori run … | head` (or any reader that closes early) breaks the STDOUT
+        # pipe; a well-behaved Unix filter exits quietly on EPIPE rather than
+        # dumping an IO::Error backtrace. Re-raise anything that isn't a broken pipe.
+        raise ex unless ex.os_error == Errno::EPIPE
+        exit 0
       end
 
       private def self.print_help : Nil
@@ -217,7 +223,7 @@ module Gori
       private def self.show_text(detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
         if req
           puts "=== REQUEST (#{detail.http_version}) ==="
-          print_message_text(detail.request_head, detail.request_body)
+          print_message_text(detail.request_head, display_body(detail.request_head, detail.request_body))
           puts "  [request body truncated]" if detail.request_body_truncated?
         end
         if resp
@@ -244,19 +250,23 @@ module Gori
             j.field "http_version", detail.http_version
             j.field "error", detail.error
             if req
+              req_body, req_decoded = decode_body(detail.request_head, detail.request_body)
               j.field "request" do
                 j.object do
                   j.field "head", scrub(detail.request_head)
-                  j.field "body", scrub(detail.request_body)
+                  j.field "body", scrub(req_body)
+                  j.field "body_decoded", req_decoded
                   j.field "body_truncated", detail.request_body_truncated?
                 end
               end
             end
             if resp
+              resp_body, resp_decoded = decode_body(detail.response_head, detail.response_body)
               j.field "response" do
                 j.object do
                   j.field "head", scrub(detail.response_head)
-                  j.field "body", scrub(display_body(detail.response_head, detail.response_body))
+                  j.field "body", scrub(resp_body)
+                  j.field "body_decoded", resp_decoded
                   j.field "body_truncated", detail.response_body_truncated?
                 end
               end
@@ -312,7 +322,7 @@ module Gori
 
         # Decode the response body once; only build the diff lines when --diff asked
         # for them (decoding the captured baseline isn't free for large bodies).
-        new_body = display_body(result.head, result.body)
+        new_body, body_decoded = decode_body(result.head, result.body)
         diff =
           if do_diff
             orig = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
@@ -320,7 +330,7 @@ module Gori
           end
 
         if format == :json
-          puts replay_json(result, new_body, diff)
+          puts replay_json(result, new_body, body_decoded, diff)
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}"
           if d = diff
@@ -334,7 +344,7 @@ module Gori
         exit 1 unless result.ok?
       end
 
-      private def self.replay_json(result : Replay::Result, body : Bytes?, diff : Array(Replay::DiffLine)?) : String
+      private def self.replay_json(result : Replay::Result, body : Bytes?, body_decoded : Bool, diff : Array(Replay::DiffLine)?) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
@@ -343,6 +353,7 @@ module Gori
             j.field "error", result.error
             j.field "head", scrub(result.head)
             j.field "body", scrub(body)
+            j.field "body_decoded", body_decoded
             if d = diff
               j.field "changed_lines", Replay::Diff.change_count(d)
             end
@@ -494,6 +505,7 @@ module Gori
 
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64
         abort "gori run #{sub}: missing <flow-id>" if rest.empty?
+        abort "gori run #{sub}: too many arguments (expected one <flow-id>, got: #{rest.join(" ")})" if rest.size > 1
         rest[0].to_i64? || abort "gori run #{sub}: invalid flow id '#{rest[0]}'"
       end
 
@@ -535,8 +547,17 @@ module Gori
       end
 
       private def self.display_body(head : Bytes?, body : Bytes?) : Bytes?
+        decode_body(head, body)[0]
+      end
+
+      # Decode a Content-Encoding/Transfer-Encoding body for display, returning the
+      # bytes plus whether any decoding actually happened. When `true`, the bytes no
+      # longer match the message's Content-Encoding/Content-Length headers — the JSON
+      # output surfaces this as `body_decoded` so scripts aren't misled. (`--format
+      # raw` still emits the exact wire bytes.)
+      private def self.decode_body(head : Bytes?, body : Bytes?) : {Bytes?, Bool}
         decoded, _ = Proxy::Codec::ContentDecode.decode(head, body)
-        decoded || body
+        decoded ? {decoded, true} : {body, false}
       end
 
       private def self.scrub(bytes : Bytes?) : String?

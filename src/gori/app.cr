@@ -137,6 +137,11 @@ module Gori
       # order), so a buffered event can race in and query a now-closed DB. That's
       # a clean shutdown, not an error — stop quietly instead of crashing the fiber
       # (which would drop the final lines).
+    rescue IO::Error
+      # STDOUT pipe closed (e.g. `gori run capture | head`): the consumer is gone,
+      # so there's nothing left to stream — wind the session down gracefully
+      # instead of letting the unhandled error take down the whole process.
+      @shutdown.send(nil) rescue nil
     end
 
     private def print_banner(session : Session) : Nil

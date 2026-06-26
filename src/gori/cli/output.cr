@@ -58,7 +58,10 @@ module Gori
         kb = bytes / 1024.0
         return "#{round1(kb)}kB" if kb < 1024
         mb = kb / 1024.0
-        "#{round1(mb)}MB"
+        return "#{round1(mb)}MB" if mb < 1024
+        gb = mb / 1024.0
+        return "#{round1(gb)}GB" if gb < 1024
+        "#{round1(gb / 1024.0)}TB"
       end
 
       def self.human_us(micros : Int64) : String

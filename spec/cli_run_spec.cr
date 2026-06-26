@@ -207,4 +207,10 @@ describe Gori::CLI::Output do
     Gori::CLI::Output.human_us(500_i64).should eq("500µs")
     Gori::CLI::Output.human_us(1_500_i64).should eq("1.5ms")
   end
+
+  it "scales human_size up to GB and TB (no '1024.0MB')" do
+    Gori::CLI::Output.human_size(1_073_741_824_i64).should eq("1.0GB")     # exactly 1 GiB
+    Gori::CLI::Output.human_size(5_368_709_120_i64).should eq("5.0GB")     # 5 GiB
+    Gori::CLI::Output.human_size(2_199_023_255_552_i64).should eq("2.0TB") # 2 TiB
+  end
 end
