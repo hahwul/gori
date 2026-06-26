@@ -72,6 +72,14 @@ module Gori::Tui
         {"Project", "scope rules + the description editor"},
         {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition"},
       ]},
+      {"CONVERT", [
+        {"^P → Go to Convert", "open the tab (hidden by default)"},
+        {"type / ↹", "edit input · switch input ↔ chain"},
+        {"chain", "base64 > url-encode > sha256 ( > | , )"},
+        {"↹ / ↵", "complete the suggested converter (popup)"},
+        {"^Y · ^X", "copy output · cycle text/hex/base64"},
+        {"^S · ^O", "save chain by name · load a saved chain"},
+      ]},
       {"OVERLAYS", [
         {"palette / settings", "↑/↓ · ↵ · esc"},
         {"confirm", "←/→ choose · y / n · ↵"},

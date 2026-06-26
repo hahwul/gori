@@ -217,4 +217,60 @@ describe Gori::Settings do
       Gori::Settings.tab_prefs = [] of {String, Bool}
     end
   end
+
+  it "round-trips the Convert scratch state (input + chain + named chains)" do
+    dir = File.tempname("gori-settings-convert")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.convert_input = "hello world"
+      Gori::Settings.convert_chain = "base64 > sha256"
+      Gori::Settings.convert_chains = [{"hash", "base64 > sha256"}, {"enc", "url-encode"}]
+      Gori::Settings.save.should be_true
+      Gori::Settings.convert_input = ""
+      Gori::Settings.convert_chain = ""
+      Gori::Settings.convert_chains = [] of {String, String}
+      Gori::Settings.load
+      Gori::Settings.convert_input.should eq("hello world")
+      Gori::Settings.convert_chain.should eq("base64 > sha256")
+      Gori::Settings.convert_chains.should eq([{"hash", "base64 > sha256"}, {"enc", "url-encode"}])
+
+      # an older file with no "convert" key keeps the current in-memory defaults
+      File.write(Gori::Settings.path, %({"theme":"goridark"}))
+      Gori::Settings.convert_input = "kept"
+      Gori::Settings.convert_chains = [{"x", "hex"}]
+      Gori::Settings.load
+      Gori::Settings.convert_input.should eq("kept")
+      Gori::Settings.convert_chains.should eq([{"x", "hex"}])
+
+      # malformed named chains tolerated: entries missing name/spec are dropped
+      File.write(Gori::Settings.path, %({"convert":{"chains":[{"name":"ok","spec":"hex"},{"name":""},{"spec":"md5"}]}}))
+      Gori::Settings.load
+      Gori::Settings.convert_chains.should eq([{"ok", "hex"}])
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.convert_input = ""
+      Gori::Settings.convert_chain = ""
+      Gori::Settings.convert_chains = [] of {String, String}
+    end
+  end
+
+  it "omits the convert key entirely when the Convert state is empty" do
+    dir = File.tempname("gori-settings-noconvert")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.convert_input = ""
+      Gori::Settings.convert_chain = ""
+      Gori::Settings.convert_chains = [] of {String, String}
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).includes?("convert").should be_false
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+    end
+  end
 end
