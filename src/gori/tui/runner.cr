@@ -907,7 +907,9 @@ module Gori::Tui
         on_enter_tab
         @focus = :menu
       end
-      @toast = ok ? "tabs saved" : "tabs: save failed (#{Settings.path})"
+      # The layout is applied to the live session regardless (like theme/network); only the
+      # disk write can fail, so say so honestly rather than implying nothing happened.
+      @toast = ok ? "tabs saved" : "tabs applied — could not save to #{Settings.path}"
     end
 
     # The Notes tab is a live editor (like Replay): typing edits the document

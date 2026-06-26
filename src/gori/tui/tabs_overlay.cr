@@ -64,41 +64,71 @@ module Gori::Tui
     end
 
     # Centered overlay box for `area` — the exact rect render() draws into, or nil when
-    # too small (mirrors render's bail, leaving room for the title, list, and hint row).
+    # even a windowed list can't fit. Height shrinks to the content but is also capped to
+    # the area, so on a short terminal the list scrolls instead of demanding all rows (and
+    # the card never becomes an invisible-but-input-capturing modal). The key-hint lives in
+    # the status bar (key_hints), so no row is reserved for it here.
     def overlay_box(area : Rect) : Rect?
       w = {area.w - 4, 48}.min
-      h = {area.h - 2, @items.size + 6}.min
-      return nil if w < 24 || h < @items.size + 6
+      h = {area.h - 2, @items.size + 3}.min # title + up to @items rows + bottom border
+      return nil if w < 24 || h < 6
       Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+    end
+
+    # List rows that fit between the title gap (box.y+2) and the bottom border (box.bottom-1).
+    private def list_capacity(box : Rect) : Int32
+      {box.bottom - 1 - (box.y + 2), 0}.max
+    end
+
+    # First visible row index, scrolled to keep @selected on screen without overscrolling
+    # past the end. Shared by render + row_at so the draw and the hit-test never drift.
+    private def list_window(cap : Int32) : Int32
+      return 0 if cap <= 0 || @items.size <= cap
+      { {@selected - cap + 1, 0}.max, @items.size - cap }.min
     end
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return unless box
+      unless box
+        # Too small to draw the editor — show a one-line hint so the (still input-capturing)
+        # :tabs modal is never fully invisible; esc closes it.
+        screen.text(area.x + 1, area.y, "tab editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        return
+      end
       Frame.card(screen, box, "TAB BAR", border: Theme.border_focus)
       meta = "#{visible_count}/#{@items.size} shown"
       screen.text({box.right - meta.size - 2, box.x + 12}.max, box.y, meta, Theme.muted, Theme.panel)
 
-      @items.each_with_index do |(_, label, vis), i|
-        py = box.y + 2 + i
-        sel = i == @selected
-        bg = sel ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
-        screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
-        screen.cell(box.x + 3, py, vis ? '✓' : '·', vis ? Theme.accent : Theme.muted, bg)
-        fg = vis ? (sel ? Theme.text_bright : Theme.text) : Theme.muted
-        screen.text(box.x + 5, py, label, fg, bg, width: box.w - 7)
+      list_top = box.y + 2
+      cap = list_capacity(box)
+      start = list_window(cap)
+      cap.times do |row|
+        i = start + row
+        break if i >= @items.size
+        draw_row(screen, box, i, list_top + row)
       end
-
-      hint = "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
-      screen.text(box.x + 3, box.bottom - 2, hint, Theme.muted, Theme.panel, width: box.w - 5)
     end
 
-    # Row index under (mx,my) — list starts at box.y+2 (mirrors render's `box.y + 2 + i`).
+    private def draw_row(screen : Screen, box : Rect, i : Int32, py : Int32) : Nil
+      _, label, vis = @items[i]
+      sel = i == @selected
+      bg = sel ? Theme.accent_bg : Theme.panel
+      screen.fill(Rect.new(box.x + 1, py, box.w - 2, 1), bg)
+      screen.cell(box.x + 1, py, sel ? '▎' : ' ', Theme.accent, bg)
+      screen.cell(box.x + 3, py, vis ? '✓' : '·', vis ? Theme.accent : Theme.muted, bg)
+      fg = vis ? (sel ? Theme.text_bright : Theme.text) : Theme.muted
+      screen.text(box.x + 5, py, label, fg, bg, width: box.w - 7)
+    end
+
+    # Row index under (mx,my) — inverts render's windowed layout (list at box.y+2, scrolled
+    # by list_window) so a click maps to the same row that was drawn.
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless box.contains?(mx, my)
-      i = my - (box.y + 2)
-      (0 <= i < @items.size) ? i : nil
+      cap = list_capacity(box)
+      row = my - (box.y + 2)
+      return nil if row < 0 || row >= cap
+      i = list_window(cap) + row
+      i < @items.size ? i : nil
     end
   end
 end

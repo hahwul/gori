@@ -23,14 +23,6 @@ module Gori::Tui
     # — once the user saves, tab_prefs is explicit and this no longer applies.
     DEFAULT_HIDDEN = [:agent]
 
-    def self.tab_at(index : Int32) : Symbol
-      TABS[index.clamp(0, TABS.size - 1)][0]
-    end
-
-    def self.tab_index(tab : Symbol) : Int32
-      TABS.index { |(sym, _)| sym == tab } || 0
-    end
-
     # Reconcile stored prefs against the canonical catalog → full ordered
     # {symbol, label, visible?}. Removed/unknown ids are dropped, duplicates collapse to
     # first occurrence, and catalog tabs absent from prefs are APPENDED with their default
