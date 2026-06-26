@@ -281,7 +281,7 @@ module Gori
           p.banner = "Usage: gori run replay <flow-id> [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--target=URL", "Send to URL instead of the captured origin") { |v| target_override = v }
+          p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept") { |v| target_override = v }
           p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { force_h2 = true }
           p.on("--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
