@@ -2,8 +2,10 @@ module Gori::Tui
   # The persistent shell: top bar, left sidebar (tabs), and bottom status line.
   # Stateless renderers — they take the current state and draw it (immediate mode).
   module Chrome
-    # Tab identity + sidebar label, in display order. Project is now the default
-    # home tab (leftmost) shown on project entry; History is the raw log (next).
+    # The canonical tab catalog: identity + sidebar label, in default display order.
+    # Project is the default home tab (leftmost); History is the raw log (next). The
+    # EFFECTIVE order/visibility is user config (settings:tabs) — see reconcile below;
+    # this constant is only the catalog every config is reconciled against.
     TABS = [
       {:project, "Project"},
       {:history, "History"},
@@ -16,12 +18,61 @@ module Gori::Tui
       {:help, "Help"},
     ]
 
+    # Tabs hidden by default on a fresh install (re-enableable in settings:tabs). Agent
+    # is a non-functional "coming soon" placeholder. Only affects reconcile's append path
+    # — once the user saves, tab_prefs is explicit and this no longer applies.
+    DEFAULT_HIDDEN = [:agent]
+
     def self.tab_at(index : Int32) : Symbol
       TABS[index.clamp(0, TABS.size - 1)][0]
     end
 
     def self.tab_index(tab : Symbol) : Int32
       TABS.index { |(sym, _)| sym == tab } || 0
+    end
+
+    # Reconcile stored prefs against the canonical catalog → full ordered
+    # {symbol, label, visible?}. Removed/unknown ids are dropped, duplicates collapse to
+    # first occurrence, and catalog tabs absent from prefs are APPENDED with their default
+    # visibility (a tab added in a newer build is never hidden by an older config).
+    # Guarantees ≥1 visible (a hand-edited all-hidden config reveals the first entry).
+    def self.reconcile(prefs : Array({String, Bool})) : Array({Symbol, String, Bool})
+      label_of = {} of Symbol => String
+      by_str = {} of String => Symbol
+      TABS.each { |(sym, label)| label_of[sym] = label; by_str[sym.to_s] = sym }
+
+      out = [] of {Symbol, String, Bool}
+      seen = [] of Symbol # ≤9 elems; avoids requiring "set"
+      prefs.each do |(id, vis)|
+        next unless sym = by_str[id]? # removed/unknown id → drop
+        next if seen.includes?(sym)   # duplicate → first wins
+        seen << sym
+        out << {sym, label_of[sym], vis}
+      end
+      TABS.each do |(sym, label)| # forward-compat: append missing catalog tabs
+        out << {sym, label, !DEFAULT_HIDDEN.includes?(sym)} unless seen.includes?(sym)
+      end
+      if out.none? { |(_, _, v)| v } # all-hidden (hand-edited json) → reveal #1
+        f = out.first
+        out[0] = {f[0], f[1], true}
+      end
+      out
+    end
+
+    # The rendered/navigation strip: visible, ordered {symbol, label}. `force` (the active
+    # tab) is ALWAYS present at its catalog-relative position even when hidden — so a jump
+    # to a hidden tab is never stranded off-bar and menu_layout's active_idx lookup always
+    # succeeds (instead of silently falling back to 0).
+    def self.visible_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : Array({Symbol, String})
+      ann = reconcile(prefs)
+      vis = ann.select { |(_, _, v)| v }.map { |(s, l, _)| {s, l} }
+      if force && vis.none? { |(s, _)| s == force }
+        if idx = ann.index { |(s, _, _)| s == force }
+          at = ann[0...idx].count { |(_, _, v)| v }
+          vis.insert(at, {ann[idx][0], ann[idx][1]})
+        end
+      end
+      vis
     end
 
     def self.render_top_bar(screen : Screen, rect : Rect, *, project : String,
@@ -48,12 +99,13 @@ module Gori::Tui
     # focus, so the user sees where keys land); inactive tabs are muted. Hot
     # counts (intercept held / findings) ride inline as `(N)` badges.
     def self.render_menu(screen : Screen, rect : Rect, *, active_tab : Symbol, focused : Bool,
+                         tabs : Array({Symbol, String}) = TABS,
                          findings_count : Int32 = 0, intercept_count : Int32 = 0,
                          replay_count : Int32 = 0, notes_count : Int32 = 0) : Nil
       return if rect.empty?
       screen.fill(rect, Theme.panel)
 
-      segs, start = menu_layout(rect, active_tab, findings_count, intercept_count, replay_count, notes_count)
+      segs, start = menu_layout(rect, active_tab, tabs, findings_count, intercept_count, replay_count, notes_count)
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.panel) if start > 0 # earlier tabs hidden
       segs.each do |(sym, label, seg)|
         if sym == active_tab
@@ -73,10 +125,11 @@ module Gori::Tui
     # computed IDENTICALLY to render_menu (shares menu_layout) so a click hit-test
     # can never drift from what was drawn. Coords are 0-based cells.
     def self.menu_segments(rect : Rect, active_tab : Symbol, *,
+                           tabs : Array({Symbol, String}) = TABS,
                            findings_count : Int32 = 0, intercept_count : Int32 = 0,
                            replay_count : Int32 = 0, notes_count : Int32 = 0) : Array({Symbol, Rect})
       return [] of {Symbol, Rect} if rect.empty?
-      menu_layout(rect, active_tab, findings_count, intercept_count, replay_count, notes_count)[0]
+      menu_layout(rect, active_tab, tabs, findings_count, intercept_count, replay_count, notes_count)[0]
         .map { |(sym, _, seg)| {sym, seg} }
     end
 
@@ -84,19 +137,19 @@ module Gori::Tui
     # rect} plus the window `start` (so render can flag the `‹` overflow marker).
     # Mirrors the old inline render_menu loop exactly — windowing via scroll_start,
     # segments laid " label " with a 1-col gap, the same `> rect.right + 1` break.
-    private def self.menu_layout(rect : Rect, active_tab : Symbol, findings_count : Int32,
-                                 intercept_count : Int32, replay_count : Int32,
+    private def self.menu_layout(rect : Rect, active_tab : Symbol, tabs : Array({Symbol, String}),
+                                 findings_count : Int32, intercept_count : Int32, replay_count : Int32,
                                  notes_count : Int32) : {Array({Symbol, String, Rect}), Int32}
       segs = [] of {Symbol, String, Rect}
-      labels = TABS.map { |(sym, label)| "#{label}#{menu_badge(sym, findings_count, intercept_count, replay_count, notes_count)}" }
+      labels = tabs.map { |(sym, label)| "#{label}#{menu_badge(sym, findings_count, intercept_count, replay_count, notes_count)}" }
       widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
-      active_idx = TABS.index { |(sym, _)| sym == active_tab } || 0
+      active_idx = tabs.index { |(sym, _)| sym == active_tab } || 0
       # Window the strip so the active segment is ALWAYS visible: on a narrow row
       # advance the start until segments [start..active] fit, so the menu scrolls
       # instead of breaking and hiding every tab from the overflow point on.
       start = scroll_start(widths, active_idx, rect.w - 2)
       x = rect.x + 1
-      TABS.each_with_index do |(sym, _), i|
+      tabs.each_with_index do |(sym, _), i|
         next if i < start
         seg_w = widths[i]
         break if x + seg_w > rect.right + 1

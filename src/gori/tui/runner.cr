@@ -27,6 +27,7 @@ require "./rules_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
 require "./settings_view"
+require "./tabs_overlay"
 require "./palette"
 require "./command_line"
 require "../paths"
@@ -54,8 +55,11 @@ module Gori::Tui
       @finding_form = FindingForm.new
       @palette = PaletteState.new(@session.registry)
       @command = CommandLine.new(@session.registry)
-      @active_tab = :project
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser
+      # Land on the home tab, but never on a hidden one (settings:tabs may hide Project,
+      # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
+      vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
+      @active_tab = vis.includes?(:project) ? :project : vis.first
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :settings | :tabs
       # The ":" context command line (vim/helix-style). Orthogonal to @overlay so it
       # floats over WHATEVER is underneath (the History list, an open detail, the
       # Sitemap …) without disturbing that state; the scope is captured at open time.
@@ -94,6 +98,9 @@ module Gori::Tui
       @browser_picker = nil.as(BrowserPicker?)
       # The settings editor (palette → settings:network); @overlay is :settings.
       @settings_view = SettingsView.new
+      # The tab-bar customizer (palette → settings:tabs); @overlay is :tabs. Distinct
+      # from @tabs (the controller registry built below).
+      @tabs_overlay = TabsOverlay.new
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                  # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
@@ -376,6 +383,7 @@ module Gori::Tui
       return handle_confirm_key(ev) if @overlay == :confirm
       return handle_browser_key(ev) if @overlay == :browser
       return handle_settings_key(ev) if @overlay == :settings
+      return handle_tabs_key(ev) if @overlay == :tabs
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
@@ -525,15 +533,15 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :settings then true
-      else                                                                     false
+      when :palette, :rules, :finding_new, :confirm, :browser, :settings, :tabs then true
+      else                                                                           false
       end
     end
 
     # Click the top tab bar: switch to the clicked tab (immediate, like a number jump),
     # re-focus the body when the active tab is re-clicked, else just focus the bar.
     private def click_menu(rect : Rect, mx : Int32, my : Int32) : Nil
-      seg = Chrome.menu_segments(rect, @active_tab,
+      seg = Chrome.menu_segments(rect, @active_tab, tabs: effective_tabs,
         findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
         replay_count: replay_controller.count, notes_count: notes_controller.view.count).find { |(_, r)| r.contains?(mx, my) }
       if seg
@@ -603,6 +611,7 @@ module Gori::Tui
       when :browser  then click_browser(area, mx, my)
       when :confirm  then click_confirm(area, mx, my)
       when :settings then click_settings(area, mx, my)
+      when :tabs     then click_tabs(area, mx, my)
         # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
@@ -655,6 +664,16 @@ module Gori::Tui
       end
     end
 
+    # Tab-bar customizer: a click outside dismisses (discards the working copy, like
+    # esc); a row click selects it (toggle/reorder stay keyboard-driven).
+    private def click_tabs(area : Rect, mx : Int32, my : Int32) : Nil
+      box = @tabs_overlay.overlay_box(area)
+      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = @tabs_overlay.row_at(box, mx, my)
+        @tabs_overlay.set_selected(idx)
+      end
+    end
+
     # True when a click should dismiss a modal: anywhere outside its box (click-away
     # is the universal close affordance — every modal also still closes on esc).
     private def dismiss_zone?(box : Rect, mx : Int32, my : Int32) : Bool
@@ -696,6 +715,7 @@ module Gori::Tui
       when :rules    then @rules_overlay.select_move(step)
       when :browser  then @browser_picker.try(&.move(step))
       when :settings then @settings_view.move_field(step)
+      when :tabs     then @tabs_overlay.select_move(step)
       end
     end
 
@@ -837,6 +857,57 @@ module Gori::Tui
         @settings_view.insert(c)
         @settings_view.set_preedit("")
       end
+    end
+
+    # The tab-bar customizer (settings:tabs). Working copy: ↵ saves+applies, esc discards.
+    # ↑/↓ (and k/j) move the selection; K/J reorder the selected tab; space toggles
+    # show/hide (refused for the last visible tab). ^P jumps back to the palette.
+    private def handle_tabs_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        @overlay = :none
+        open_palette
+      elsif key.escape?
+        @overlay = :none # discard the working copy
+      elsif key.enter?
+        save_tabs
+      elsif key.up? && ev.shift?
+        @tabs_overlay.move_selected(-1)
+      elsif key.down? && ev.shift?
+        @tabs_overlay.move_selected(1)
+      elsif key.up?
+        @tabs_overlay.select_move(-1)
+      elsif key.down?
+        @tabs_overlay.select_move(1)
+      elsif (c = ev.char) && c == ' '
+        @toast = "keep at least one tab visible" unless @tabs_overlay.toggle_selected
+      elsif (c = ev.char) && (c == 'K' || c == 'k')
+        c == 'K' ? @tabs_overlay.move_selected(-1) : @tabs_overlay.select_move(-1)
+      elsif (c = ev.char) && (c == 'J' || c == 'j')
+        c == 'J' ? @tabs_overlay.move_selected(1) : @tabs_overlay.select_move(1)
+      end
+    end
+
+    # Commit the tab-bar working copy: persist once, force a full repaint (the tab set/
+    # order changed behind the centered overlay), and if the active tab was just hidden
+    # snap to the first visible one — committing the outgoing tab's edits first (a hidden
+    # Project desc / Replay request must not be silently dropped), mirroring focus_tab.
+    private def save_tabs : Nil
+      Settings.tab_prefs = @tabs_overlay.to_prefs
+      ok = Settings.save
+      @overlay = :none
+      @resized = true
+      # Snap off a now-hidden active tab. Use the GENUINE visibility (no force:) for this
+      # decision — effective_tabs force-includes the active tab, which would mask the hide.
+      vis = Chrome.visible_tabs(Settings.tab_prefs)
+      unless vis.any? { |(s, _)| s == @active_tab }
+        project_controller.commit if @active_tab == :project
+        replay_controller.save_current_replay if @active_tab == :replay
+        @active_tab = vis.first[0]
+        on_enter_tab
+        @focus = :menu
+      end
+      @toast = ok ? "tabs saved" : "tabs: save failed (#{Settings.path})"
     end
 
     # The Notes tab is a live editor (like Replay): typing edits the document
@@ -1146,6 +1217,7 @@ module Gori::Tui
         capturing: @session.capturing?, listen: "#{@session.proxy.host}:#{@session.proxy.port}",
         identity: "user", scope: scope_label, rules: rules_label, intercept: intercept_label)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
+        tabs: effective_tabs,
         findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
         replay_count: replay_controller.count, notes_count: notes_controller.view.count)
       Chrome.render_rule(screen, layout.rule)
@@ -1159,6 +1231,7 @@ module Gori::Tui
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
       @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
       @settings_view.render(screen, layout.body) if @overlay == :settings
+      @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
       # The ":" command line floats over everything else (drawn last), anchored to
       # the bottom: the input on the status row, the suggestion list stacked above.
       render_prompts(screen, layout)
@@ -1225,6 +1298,7 @@ module Gori::Tui
       when :confirm     then "CONFIRM"
       when :browser     then "BROWSER"
       when :settings    then "SETTINGS"
+      when :tabs        then "TAB BAR"
       else
         case @focus
         when :menu    then "TABS"
@@ -1254,6 +1328,7 @@ module Gori::Tui
       when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser     then "↑/↓ select · ↵ open · esc cancel"
       when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
+      when :tabs        then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
       when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
@@ -1527,14 +1602,31 @@ module Gori::Tui
       view_focus_first
     end
 
+    # The effective tab strip — the configured order/visibility (settings:tabs), with the
+    # active tab force-included even if hidden (so a cross-tab jump to a hidden tab still
+    # renders + highlights). The single source the menu render, click hit-test, and nav read.
+    private def effective_tabs : Array({Symbol, String})
+      Chrome.visible_tabs(Settings.tab_prefs, force: @active_tab)
+    end
+
+    # Positional number-key target: focus the Nth (1-based) VISIBLE tab — the order shown
+    # on the bar. Out-of-range n (fewer tabs visible than the digit) is a no-op.
+    def focus_visible_tab(n : Int32) : Nil
+      if t = effective_tabs[n - 1]?
+        focus_tab(t[0])
+      end
+    end
 
     def cycle_tab(delta : Int32) : Nil
       if @active_tab == :project
         project_controller.commit
       end
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
-      idx = Chrome.tab_index(@active_tab)
-      @active_tab = Chrome.tab_at((idx + delta) % Chrome::TABS.size)
+      # Cycle within the VISIBLE strip (skips hidden tabs); effective_tabs force-includes
+      # the active tab so the index is always found and never falls back to 0.
+      tabs = effective_tabs
+      idx = tabs.index { |(s, _)| s == @active_tab } || 0
+      @active_tab = tabs[(idx + delta) % tabs.size][0]
       @overlay = :none
       on_enter_tab
       # Switching tabs on the bar (menu focus) just moves the highlight; switching
@@ -1877,14 +1969,17 @@ module Gori::Tui
       end
     end
 
-    # Open the settings editor for `section` (palette → settings:network/editor/
-    # theme/hotkeys). :network/:editor/:theme are implemented; the rest toast a TODO.
+    # Open the settings editor for `section` (palette → settings:network/editor/theme/
+    # tabs/hotkeys). :network/:editor/:theme/:tabs are implemented; the rest toast a TODO.
     def open_settings(section : Symbol) : Nil
       case section
       when :network, :editor, :theme
         @settings_view.reload(section)
         @overlay = :settings
         @theme_restore = section == :theme ? Settings.theme : nil # baseline for live-preview revert
+      when :tabs
+        @tabs_overlay.reset # rebuild the working copy from persisted config
+        @overlay = :tabs
       else
         @toast = "#{section} settings — coming soon (TODO)"
       end

@@ -25,7 +25,8 @@ module Gori::Tui
         {"←/→", "switch tab (on the tab bar)"},
         {"↹ / ⇧↹", "focus ring: tab bar ↔ panes"},
         {"↵ / ↓", "enter the tab body"},
-        {"1-9", "jump straight to tab N"},
+        {"1-9", "jump to the Nth visible tab"},
+        {"settings:tabs", "show/hide + reorder tabs"},
         {"esc", "pop back to the tab bar"},
       ]},
       {"MOUSE", [

@@ -24,6 +24,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def focus_tab(tab : Symbol) : Nil; end
 
+  def focus_visible_tab(n : Int32) : Nil; end
+
   def cycle_tab(delta : Int32) : Nil; end
 
   def move_selection(delta : Int32) : Nil; end

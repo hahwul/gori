@@ -44,6 +44,10 @@ private class FakeContext < ExecContext
     @calls << tab
   end
 
+  def focus_visible_tab(n : Int32) : Nil
+    @calls << :focus_visible_tab
+  end
+
   def cycle_tab(delta : Int32) : Nil
     @calls << :cycle_tab
   end
