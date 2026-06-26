@@ -33,6 +33,9 @@ module Gori
                     verify_upstream : Bool, sni : String? = nil,
                     timeout : Time::Span? = nil) : Result
         started = Time.instant
+        # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
+        # not a total request deadline — same model as the proxy's IO_TIMEOUT. A true
+        # whole-request deadline would need a timer fiber racing a socket close.
         ct = timeout || Proxy::Upstream::CONNECT_TIMEOUT
         it = timeout || Proxy::Upstream::IO_TIMEOUT
         upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it)

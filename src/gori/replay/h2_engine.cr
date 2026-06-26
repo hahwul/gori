@@ -66,7 +66,7 @@ module Gori
           end
           ssl
         else
-          Proxy::Upstream.dial(host, port) # h2c prior-knowledge
+          Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it) # h2c prior-knowledge
         end
       end
 

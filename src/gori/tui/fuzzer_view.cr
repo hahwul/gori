@@ -205,10 +205,12 @@ module Gori::Tui
 
     def mark_word : String
       return "mark word (^K) works on the TEMPLATE pane — ↹ to it" unless @focus == :template
-      off = @editor.cursor_offset
-      @editor.set_text(Fuzz::Template.mark_word(@editor.text, off))
+      before = @editor.text
+      after = Fuzz::Template.mark_word(before, @editor.cursor_offset)
+      return "no word at the cursor — place it on a token (or ^A to auto-mark)" if after == before
+      @editor.set_text(after)
       @dirty = true
-      "toggled § marker"
+      Fuzz::Template.parse(after).position_count < Fuzz::Template.parse(before).position_count ? "unmarked position" : "marked position"
     end
 
     def clear_marks : String
@@ -513,10 +515,21 @@ module Gori::Tui
       @s_f_regex = @matcher.filter_regex.try(&.source) || ""
     end
 
+    # A message when a non-empty regex buffer failed to compile (commit_buffers nils
+    # it, which would otherwise match everything with no feedback), else nil.
+    private def regex_error : String?
+      return "invalid match regex: #{@s_m_regex}" if !@s_m_regex.empty? && @matcher.match_regex.nil?
+      return "invalid filter regex: #{@s_f_regex}" if !@s_f_regex.empty? && @matcher.filter_regex.nil?
+      nil
+    end
+
     # --- engine assembly -----------------------------------------------------
     # Build an engine ready to run, or {nil, error}.
     def build_engine(verify : Bool) : {Fuzz::Engine?, String?}
       commit_buffers
+      if err = regex_error
+        return {nil, err} # don't silently run match-everything on a bad pattern
+      end
       template = Fuzz::Template.parse(@editor.text, @http2)
       return {nil, "mark a position first — ^A params · ^K word"} if template.position_count == 0
       return {nil, "add a payload set — ^O config · pick a type · ⏎ add"} if @sets.empty?

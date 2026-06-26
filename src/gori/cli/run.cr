@@ -422,7 +422,7 @@ module Gori
           p.on("--concurrency=N", "Parallel requests (default 20)") { |v| concurrency = parse_count(v) }
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }
           p.on("--throttle=MS", "Fixed delay between requests (ms)") { |v| throttle = parse_nonneg(v) }
-          p.on("--timeout=SEC", "Per-request timeout (seconds)") { |v| timeout = parse_count(v).seconds }
+          p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v).seconds }
           p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v) }
           p.on("--follow-redirects", "Follow same-origin redirects") { follow = true }
           p.on("--mc=SPEC", "Match status (e.g. 200,302,500-599,2xx)") { |v| matcher.match_status = v }

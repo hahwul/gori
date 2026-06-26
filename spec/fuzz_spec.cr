@@ -54,6 +54,12 @@ describe F::Template do
     String.new(t.render(t.default_payloads)).should eq("v=x")
   end
 
+  it "does not forge an empty position from a delimiter (a bare §§ parses as a literal §)" do
+    marked = F::Template.mark_word("a && b", 3) # cursor between the two delimiters → no token
+    marked.should eq("a && b")
+    F::Template.parse(marked).position_count.should eq(0)
+  end
+
   it "auto-marks query, cookie, and urlencoded body values" do
     raw = "POST /s?q=hi&p=2 HTTP/1.1\r\nHost: h\r\nCookie: sid=abc; t=1\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\na=1&b=2"
     marked = F::Template.auto_mark(raw)
@@ -212,6 +218,15 @@ describe F::Engine do
     results, _ = drain(engine)
     attempts.should eq(3) # 1 + 2 retries
     results.first.status.should eq(200)
+  end
+
+  it "treats a non-positive max_requests as no cap (doesn't halt at request 0)" do
+    set = F::PayloadSet.new(F::InlineList.new(["a", "b", "c"]))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 2, max_requests: 0_i64)
+    gen = F::Generator.new(base, [set], cfg)
+    backend = FakeBackend.new(F::Origin.new("http", "h", 80)) { |_b| ok_result(200, "x") }
+    results, _ = drain(F::Engine.new(gen, F::Matcher.new, backend, cfg))
+    results.size.should eq(3) # all sent — a 0 cap must not break at @dispatched >= 0
   end
 
   it "sends byte-exact requests to a real origin and records metrics" do

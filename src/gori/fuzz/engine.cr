@@ -44,7 +44,8 @@ module Gori::Fuzz
   #   coordinator fiber — waits for all workers to finish, emits Done, closes @events.
   # Progress events are droppable (latest wins); Result/Done/Error are not.
   class Engine
-    EVENT_BUFFER = 256
+    EVENT_BUFFER    =  256
+    MAX_CONCURRENCY = 1000 # hard ceiling on worker fibers / channel capacity
 
     enum State : UInt8
       Running
@@ -73,7 +74,9 @@ module Gori::Fuzz
     @total_computed : Bool
 
     def initialize(@generator : Generator, @matcher : Matcher, @backend : Backend, @config : Config)
-      conc = @config.concurrency < 1 ? 1 : @config.concurrency
+      # Clamp here (the deepest point) so no frontend can spawn an OOM-sized fiber +
+      # channel fleet — the CLI's --concurrency is otherwise unbounded.
+      conc = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @concurrency = conc
       @state = State::Running
       @wake = Channel(Nil).new(1)
@@ -156,7 +159,7 @@ module Gori::Fuzz
         raise Halt.new if @state == State::Stopped
         park_if_paused
         raise Halt.new if @state == State::Stopped
-        raise Halt.new if (cap = @config.max_requests) && @dispatched >= cap
+        raise Halt.new if (cap = @config.max_requests) && cap > 0 && @dispatched >= cap
         pace(interval)
         @jobs.send(job)
         @dispatched += 1

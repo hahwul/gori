@@ -123,8 +123,9 @@ module Gori::Fuzz
     end
 
     # Toggle a `§…§` marker around the token at char index `cursor`. Inside an
-    # existing pair → strip it; on a word → wrap it; on a delimiter/space → insert an
-    # empty `§§` so a position can be placed anywhere.
+    # existing pair → strip it; on a word → wrap it; on a delimiter/space → unchanged
+    # (a bare `§§` would parse as an escaped literal §, so empty positions aren't made
+    # this way — use auto_mark or type the default between the markers).
     def self.mark_word(text : String, cursor : Int32) : String
       chars = text.chars
       n = chars.size
@@ -142,7 +143,7 @@ module Gori::Fuzz
         hi += 1
       end
       if lo == hi
-        "#{chars[0, cur].join}#{MARKER}#{MARKER}#{chars[cur, n - cur].join}"
+        chars.join # on a delimiter/space: no token to wrap (a bare §§ would parse as an escaped literal §, not a position)
       else
         "#{chars[0, lo].join}#{MARKER}#{chars[lo, hi - lo].join}#{MARKER}#{chars[hi, n - hi].join}"
       end

@@ -150,7 +150,7 @@ module Gori
               s.field "extract", strprop("regex; grep a value (capture group 1) from each response")
               s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
               s.field "rate", intprop("requests/sec cap (0 = unlimited)")
-              s.field "timeout_ms", intprop("per-request timeout in milliseconds")
+              s.field "timeout_ms", intprop("per-request connect + idle (read/write) timeout in milliseconds")
               s.field "retries", intprop("retries per request on a network error")
               s.field "http2", boolprop("use real HTTP/2")
               s.field "insecure", boolprop("skip upstream TLS verification")
@@ -607,7 +607,10 @@ module Gori
 
       private def fuzz_config(h, mode : Fuzz::Mode) : Fuzz::Config
         rate = int(h, "rate").try(&.to_f64)
-        cap = [int(h, "max_requests"), FUZZ_MAX_REQUESTS].compact.min
+        # Ignore a non-positive caller cap (it would otherwise become a negative cap
+        # that halts the dispatcher at request 0); fall back to the hard ceiling.
+        caller_cap = int(h, "max_requests").try { |m| m > 0 ? m : nil }
+        cap = [caller_cap, FUZZ_MAX_REQUESTS].compact.min
         Fuzz::Config.new(mode: mode,
           concurrency: clamp(int(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
           rps: (rate && rate > 0 ? rate : nil),

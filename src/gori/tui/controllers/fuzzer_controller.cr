@@ -446,7 +446,9 @@ module Gori::Tui
 
     def close_tab : Nil
       return if @current_idx < 0 || @current_idx >= @fuzzers.size
-      if id = @fuzzers[@current_idx].db_id
+      tab = @fuzzers[@current_idx]
+      tab.view.request_stop # halt a running sweep before detaching its view (the run fiber polls this)
+      if id = tab.db_id
         @host.session.store.delete_fuzz_session(id)
       end
       @fuzzers.delete_at(@current_idx)
