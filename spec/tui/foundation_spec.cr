@@ -124,15 +124,16 @@ describe Gori::Tui::Chrome do
     backend.contains?("capture:on").should be_false # replaced, not appended
   end
 
-  it "renders the top bar with capture indicator" do
+  it "renders the top bar with project, scope, and the right-aligned clock" do
     backend = MemoryBackend.new(80, 1)
     screen = Screen.new(backend)
     Chrome.render_top_bar(screen, Rect.new(0, 0, 80, 1),
-      project: "acme", capturing: true, listen: "127.0.0.1:8080", identity: "user", scope: "scope:2")
+      project: "acme", listen: "127.0.0.1:8080", time: "13:37", scope: "scope:2")
     backend.row(0).should contain("gori")
     backend.row(0).should contain("acme")
-    backend.row(0).should contain("rec")
     backend.row(0).should contain("scope:2")
+    backend.row(0).should contain("13:37")
+    backend.row(0).should_not contain("rec") # capture state moved to the bottom status bar
   end
 end
 

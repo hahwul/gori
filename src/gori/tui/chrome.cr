@@ -73,21 +73,21 @@ module Gori::Tui
     end
 
     def self.render_top_bar(screen : Screen, rect : Rect, *, project : String,
-                            capturing : Bool, listen : String, identity : String,
+                            listen : String, time : String,
                             scope : String, rules : String = "", intercept : String = "") : Nil
       screen.fill(rect, Theme.panel)
       x = screen.text(rect.x + 1, rect.y, "gori", Theme.text_bright, Theme.panel, Attribute::Bold)
       screen.text(x + 1, rect.y, "· #{project}", Theme.muted, Theme.panel)
 
-      # right-aligned status chips: ● rec · scope:N · rules:N · intercept:on(N) · listen · id
-      # value-emphasized, dim · separators; hot states (capture, intercept) in RED.
+      # right-aligned status chips: scope:N · rules:N · intercept:on(N) · listen · HH:MM
+      # value-emphasized, dim · separators; the hot intercept state in RED. The clock
+      # is the rightmost anchor. (Capture state lives on the bottom status bar.)
       chips = [] of {String, Color}
-      chips << {capturing ? "● rec" : "○ idle", capturing ? Theme.red : Theme.muted}
       chips << {scope, scope.ends_with?(":off") ? Theme.muted : Theme.text} unless scope.empty?
       chips << {rules, Theme.text} unless rules.empty?
       chips << {intercept, Theme.red} unless intercept.empty?
       chips << {listen, Theme.muted}
-      chips << {"id:#{identity}", Theme.muted}
+      chips << {time, Theme.muted}
       render_chips(screen, rect, chips)
     end
 
