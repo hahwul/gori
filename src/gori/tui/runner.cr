@@ -81,15 +81,15 @@ module Gori::Tui
       @search_target = :none
       @search_hits = [] of Int32
       @search_idx = 0
-      # The Replay sub-tab rename prompt — orthogonal to @overlay (floats over the
-      # bottom status row, like ^G/^F). @rename_idx is the replay tab being renamed.
+      # The sub-tab rename prompt (Replay + Fuzzer) — orthogonal to @overlay (floats over
+      # the bottom status row, like ^G/^F).
       @rename_open = false
       @rename_buffer = ""
       @rename_preedit = ""
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove replay tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
-      @rename_view = nil.as(ReplayView?)
+      @rename_view = nil.as(ReplayView | FuzzerView | Nil)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
       # propagated to the focused view in render_body. Handy for smuggling tests.
       @reveal = false
@@ -541,10 +541,10 @@ module Gori::Tui
       end
     end
 
-    # Right-click: rename a Replay sub-tab chip (the one context menu we have). Only
-    # acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
+    # Right-click: rename a Replay/Fuzzer sub-tab chip (the one context menu we have).
+    # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
-      return unless @active_tab == :replay && @overlay == :none && !@command_open && !@rename_open && subtabs_shown?
+      return unless renameable_subtabs? && @overlay == :none && !@command_open && !@rename_open && subtabs_shown?
       sub_rect, _ = BodyChrome.carve_subtab_row(layout.body)
       return unless sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(sub_rect, subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
@@ -1031,8 +1031,8 @@ module Gori::Tui
         open_palette
       when ev.ctrl? && c && '1' <= c <= '9'
         jump_subtab(c.to_i - 1) # switch + stay on the strip
-      when rename_chord?(ev) && @active_tab == :replay
-        open_rename(replay_controller.current_idx) # rename the active replay sub-tab
+      when rename_chord?(ev)
+        open_rename(current_subtab_index) # rename the active sub-tab (Replay/Fuzzer)
       when key.left?, key.lower_h?
         move_subtab(-1)
       when key.right?, key.lower_l?
@@ -1465,7 +1465,10 @@ module Gori::Tui
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
-        return "←/→ switch sub-tab · ↓/↵ edit · ^1-9 jump · ^N new · ^W close · ↑/esc tabs" if @focus == :subtabs
+        if @focus == :subtabs
+          rn = renameable_subtabs? ? " · r rename" : ""
+          return "←/→ switch sub-tab · ↓/↵ edit · ^1-9 jump · ^N new · ^W close#{rn} · ↑/esc tabs"
+        end
         body_hints
       end
     end
@@ -1636,17 +1639,28 @@ module Gori::Tui
       end
     end
 
-    # `r` (no modifiers) on the Replay sub-tab strip opens the rename prompt. Factored
+    # `r` (no modifiers) on a renameable sub-tab strip opens the rename prompt. Factored
     # out of handle_subtabs_key's case so its conditions don't inflate that method.
     private def rename_chord?(ev : Termisu::Event::Key) : Bool
-      @active_tab == :replay && ev.key.lower_r? && !ev.ctrl? && !ev.alt?
+      renameable_subtabs? && ev.key.lower_r? && !ev.ctrl? && !ev.alt?
     end
 
-    # Open the rename prompt for replay tab `idx`, seeding its current custom name
-    # (empty when it's still the auto label) so it can be edited in place. The target
-    # is captured by VIEW identity so a reconcile reorder/remove can't redirect it.
+    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer). Notes derives
+    # its label from the body text, so it has no rename.
+    private def renameable_subtabs? : Bool
+      @active_tab == :replay || @active_tab == :fuzzer
+    end
+
+    # Open the rename prompt for sub-tab `idx` on the active tab, seeding its current
+    # custom name (empty when it's still the auto label) so it can be edited in place.
+    # The target is captured by VIEW identity so a reconcile reorder/remove can't
+    # redirect it.
     private def open_rename(idx : Int32) : Nil
-      return unless view = replay_controller.view_at(idx)
+      view = case @active_tab
+             when :replay then replay_controller.view_at(idx)
+             when :fuzzer then fuzzer_controller.view_at(idx)
+             end
+      return unless view
       @rename_view = view
       @rename_buffer = view.name || ""
       @rename_preedit = ""
@@ -1659,13 +1673,15 @@ module Gori::Tui
       @rename_view = nil
     end
 
-    # Apply the typed name to the captured tab + persist. Re-find the tab by its view
-    # (the reconcile may have reordered/removed it since the prompt opened — if it's
-    # gone, the rename is a no-op rather than hitting a neighbour). Blank clears the
-    # custom label (the chip reverts to the request-derived summary).
+    # Apply the typed name to the captured tab + persist. The controller re-finds the tab
+    # by its view (a reconcile may have reordered/removed it since the prompt opened — if
+    # it's gone the rename is a no-op, never a neighbour). Blank clears the custom label
+    # (the chip reverts to the request/template-derived summary).
     private def apply_rename(name : String) : Nil
-      return unless v = @rename_view
-      replay_controller.apply_rename(v, name)
+      case v = @rename_view
+      when ReplayView then replay_controller.apply_rename(v, name)
+      when FuzzerView then fuzzer_controller.apply_rename(v, name)
+      end
     end
 
     private def render_rename_prompt(screen : Screen, rect : Rect) : Nil
