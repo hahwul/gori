@@ -24,7 +24,6 @@ module Gori::Tui
     abstract def open_command : Nil                    # open the ":" context command line
     # Destructive-action confirmation modal; `action` runs on confirm.
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, &action : -> Nil) : Nil
-    abstract def refresh_findings_count : Nil # re-cache the tab-bar findings badge after a create/delete
     abstract def session : Session                     # store / scope / proxy / registry / interceptor
     abstract def overlay : Symbol                      # read the overlay state (e.g. History reads :detail)
     abstract def active_tab : Symbol                   # read the active tab (Replay reconcile gates on it)

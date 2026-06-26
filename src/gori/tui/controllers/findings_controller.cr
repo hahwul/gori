@@ -122,7 +122,6 @@ module Gori::Tui
       return unless f = @findings.target_finding
       @host.confirm("DELETE FINDING", "Delete \"#{f.title}\"?\nThis can't be undone.", confirm_label: "delete", danger: true) do
         @findings.delete(@host.session.store)
-        @host.refresh_findings_count
       end
     end
 
