@@ -86,10 +86,16 @@ module Gori::Convert
     end
 
     def ascii85_decode(s : String) : Bytes
+      # Strip only a leading "<~" / trailing "~>" Adobe wrapper at the BOUNDARIES —
+      # '<' (60) and '>' (62) are inside the 33..117 alphabet, so an interior one is
+      # real data and must NOT be dropped (else most round-trips corrupt).
+      body = s.strip
+      body = body[2..] if body.starts_with?("<~")
+      body = body[0...-2] if body.ends_with?("~>")
       sink = IO::Memory.new
       group = [] of UInt8
-      s.each_char do |c|
-        next if c.whitespace? || c == '<' || c == '~' || c == '>'
+      body.each_char do |c|
+        next if c.whitespace?
         if c == 'z' && group.empty?
           4.times { sink.write_byte(0_u8) }
         else

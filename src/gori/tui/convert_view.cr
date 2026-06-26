@@ -14,11 +14,19 @@ module Gori::Tui
   class ConvertView
     record Regions, input : Rect, chain : Rect, pipeline : Rect, output : Rect
 
-    OUT_MODES = {:auto, :hex, :base64}
+    # The ^X display cycle: auto (text, base64 fallback for binary) → hex → base64.
+    PREFER_CYCLE = [nil, Convert::RenderAs::Hex, Convert::RenderAs::Base64] of Convert::RenderAs?
 
-    getter out_mode : Symbol = :auto
+    @prefer : Convert::RenderAs? = nil # nil = auto
+    @prefer_idx : Int32 = 0
     @out_scroll : Int32 = 0
     @last_step_count : Int32 = 0
+    # Cached OUTPUT lines, rebuilt only when the chain recomputes or the display mode
+    # changes (NOT every frame) — encoding/splitting a near-MAX_OUT (32 MiB) output on
+    # the render hot path would stall the UI fiber. reset_output_scroll (called by the
+    # controller on every recompute) + cycle_out_mode set the dirty flag.
+    @out_lines : Array(String) = [] of String
+    @out_dirty : Bool = true
 
     # Sub-rects of the framed interior. Each section but INPUT is preceded by a
     # labelled divider row (INPUT rides just under the frame's top border, so it
@@ -33,7 +41,7 @@ module Gori::Tui
       input_h = {input_h, avail - 2}.min # always leave ≥2 for pipeline+output
       rest = avail - input_h
       steps = {@last_step_count, 1}.max
-      pipe_h = {steps, {rest - 1, 1}.max}.min.clamp(1, {rest - 1, 1}.max)
+      pipe_h = {steps, {rest - 1, 1}.max}.min # already in [1, rest-1]
       out_h = {rest - pipe_h, 1}.max
 
       y = inner.y + 1 # row inner.y holds the INPUT label
@@ -115,15 +123,24 @@ module Gori::Tui
 
     private def render_output(screen : Screen, rect : Rect, result : Convert::ChainResult) : Nil
       return if rect.h <= 0
-      text = output_text(result)
-      lines = text.split('\n')
+      lines = output_lines(result)
       @out_scroll = @out_scroll.clamp(0, {lines.size - rect.h, 0}.max)
+      fg = result.output.nil? ? Theme.red : Theme.text
       (0...rect.h).each do |i|
         line = lines[@out_scroll + i]?
         break unless line
-        fg = result.output.nil? ? Theme.red : Theme.text
         screen.text(rect.x, rect.y + i, line, fg, Theme.bg, width: rect.w)
       end
+    end
+
+    # The displayed OUTPUT split into lines, cached until the next recompute / mode
+    # change (so an idle frame never re-encodes + re-splits a large output).
+    private def output_lines(result : Convert::ChainResult) : Array(String)
+      if @out_dirty
+        @out_lines = output_text(result).split('\n')
+        @out_dirty = false
+      end
+      @out_lines
     end
 
     # The OUTPUT divider label: mode + byte count, or a failure marker.
@@ -135,19 +152,21 @@ module Gori::Tui
       end
     end
 
+    # The mode label WITHOUT re-encoding the (possibly huge) output: only :auto needs
+    # to peek at the bytes, and a UTF-8 validity check is far cheaper than a full
+    # hex/base64 encode that the old code immediately threw away.
     private def out_mode_label(bytes : Bytes) : String
-      _, mode = Convert.display(bytes, prefer)
-      case mode
+      case @prefer
       when Convert::RenderAs::Hex    then "hex"
-      when Convert::RenderAs::Base64 then @out_mode == :auto ? "binary→base64" : "base64"
-      else                                "text"
+      when Convert::RenderAs::Base64 then "base64"
+      else                                Convert.binary?(bytes) ? "binary→base64" : "text"
       end
     end
 
     # Final output as display text (honoring the ^X mode), or the failure message.
     def output_text(result : Convert::ChainResult) : String
       if bytes = result.output
-        text, _ = Convert.display(bytes, prefer)
+        text, _ = Convert.display(bytes, @prefer)
         text
       elsif fa = result.failed_at
         s = result.steps[fa]
@@ -159,15 +178,7 @@ module Gori::Tui
 
     # The OUTPUT bytes for clipboard copy (empty string when the chain failed).
     def output_copy(result : Convert::ChainResult) : String
-      (b = result.output) ? Convert.display(b, prefer)[0] : ""
-    end
-
-    private def prefer : Convert::RenderAs?
-      case @out_mode
-      when :hex    then Convert::RenderAs::Hex
-      when :base64 then Convert::RenderAs::Base64
-      else              nil
-      end
+      (b = result.output) ? Convert.display(b, @prefer)[0] : ""
     end
 
     # A single-line, control-char-sanitized preview of one step's bytes.
@@ -185,16 +196,20 @@ module Gori::Tui
     end
 
     def cycle_out_mode : Nil
-      i = OUT_MODES.index(@out_mode) || 0
-      @out_mode = OUT_MODES[(i + 1) % OUT_MODES.size]
+      @prefer_idx = (@prefer_idx + 1) % PREFER_CYCLE.size
+      @prefer = PREFER_CYCLE[@prefer_idx]
+      @out_dirty = true # re-encode the output for the new mode
     end
 
     def scroll_output(step : Int32) : Nil
       @out_scroll += step
     end
 
+    # Invoked by the controller after every recompute: reset scroll AND invalidate
+    # the cached output lines (the content changed).
     def reset_output_scroll : Nil
       @out_scroll = 0
+      @out_dirty = true
     end
   end
 
@@ -208,6 +223,7 @@ module Gori::Tui
     getter selected : Int32 = 0
     @tok_start = 0
     @tok_end = 0
+    @scroll = 0 # top visible row — keeps the selection on-screen past the 8-row fold
 
     # Replace the current match set (opens iff non-empty). The token span is the
     # caret-relative run of non-separator chars the controller computed.
@@ -216,6 +232,7 @@ module Gori::Tui
       @tok_start = tok_start
       @tok_end = tok_end
       @selected = 0
+      @scroll = 0
       @open = !matches.empty?
     end
 
@@ -234,7 +251,14 @@ module Gori::Tui
       name = @matches[@selected]? || return {chain, cx}
       head = chain[0...@tok_start].rstrip
       head = "#{head} " unless head.empty?
-      tail = (chain[@tok_end..]? || "").lstrip
+      # Drop leading whitespace AND a leading separator from the tail — repl already
+      # ends in " > ", so a token abutting a separator ("b64>sha") must not yield "> >".
+      tail = chain[@tok_end..]? || ""
+      ti = 0
+      while ti < tail.size && (tail[ti].whitespace? || tail[ti] == '>' || tail[ti] == '|' || tail[ti] == ',')
+        ti += 1
+      end
+      tail = tail[ti..]? || ""
       repl = "#{head}#{name} > "
       {"#{repl}#{tail}", repl.size}
     end
@@ -247,10 +271,18 @@ module Gori::Tui
       max_h = {inner.bottom - (chain_rect.y + 1), 1}.max
       h = {@matches.size, 8, max_h}.min
       return if h <= 0
+      # Scroll the window so the selected row is always painted (the match list can be
+      # taller than the 8-row fold; move() clamps @selected against the full list).
+      @scroll = @selected if @selected < @scroll
+      @scroll = @selected - h + 1 if @selected >= @scroll + h
+      @scroll = @scroll.clamp(0, {@matches.size - h, 0}.max)
       x = chain_rect.x + 2
       y = chain_rect.y + 1
-      @matches.first(h).each_with_index do |name, i|
-        active = i == @selected
+      (0...h).each do |i|
+        idx = @scroll + i
+        name = @matches[idx]?
+        break unless name
+        active = idx == @selected
         bg = active ? Theme.accent_bg : Theme.elevated
         screen.fill(Rect.new(x, y + i, w, 1), bg)
         screen.cell(x, y + i, active ? '▎' : ' ', Theme.accent, bg)

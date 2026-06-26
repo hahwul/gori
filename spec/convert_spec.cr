@@ -67,9 +67,19 @@ describe Gori::Convert do
       conv("base32-decode", "MZXW6YTBOI======").should eq "foobar"
     end
 
-    it "ascii85 round-trips" do
-      enc = conv("ascii85-encode", "hello world")
-      conv("ascii85-decode", enc).should eq "hello world"
+    it "ascii85 round-trips, incl. encodings that contain '<'/'>' data symbols" do
+      conv("ascii85-decode", conv("ascii85-encode", "hello world")).should eq "hello world"
+      # "foobar" encodes to "AoDTs@<)" — the interior '<' is real data, not a wrapper.
+      enc = conv("ascii85-encode", "foobar")
+      enc.should contain "<"
+      conv("ascii85-decode", enc).should eq "foobar"
+      # tolerates the optional <~ ~> Adobe wrapper at the boundaries
+      conv("ascii85-decode", "<~#{enc}~>").should eq "foobar"
+      # exhaustive small round-trip across byte values that exercise '<'/'>' outputs
+      (0..255).each_slice(3) do |sl|
+        bytes = Slice(UInt8).new(sl.size) { |i| sl[i].to_u8 }
+        conv_bytes("ascii85-decode", conv_bytes("ascii85-encode", bytes).dup).should eq bytes
+      end
     end
 
     it "base58 round-trips (incl. leading-zero bytes)" do

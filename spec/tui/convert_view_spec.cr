@@ -89,6 +89,25 @@ describe Gori::Tui::ChainComplete do
     cx.should eq(chain.size)
   end
 
+  it "does not produce a doubled separator when the token abuts a separator" do
+    c = ChainComplete.new
+    c.set(["url-encode"], 0, 3)            # "b64>sha256" — but completing the first token "url"
+    chain, _ = c.accept("url>sha256", 3)   # token [0,3) = "url", tail ">sha256"
+    chain.should eq("url-encode > sha256") # NOT "url-encode > >sha256"
+  end
+
+  it "keeps the selected row on-screen when it scrolls past the 8-row fold" do
+    c = ChainComplete.new
+    names = (1..20).map { |i| "conv#{i.to_s.rjust(2, '0')}" }
+    c.set(names, 0, 0)
+    14.times { c.move(1) } # select index 14 (well past the 8 visible)
+    c.selected.should eq 14
+    backend = MemoryBackend.new(60, 20)
+    inner = Rect.new(0, 0, 60, 20)
+    c.render(Screen.new(backend), Rect.new(0, 0, 40, 1), inner)
+    backend.contains?("conv15").should be_true # the selected (1-based) row is painted, not clipped
+  end
+
   it "is closed until a non-empty match set is supplied" do
     c = ChainComplete.new
     c.open?.should be_false
