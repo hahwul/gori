@@ -95,6 +95,10 @@ module Gori
               end
             end
             j.field "duration_us", r.duration_us
+            # The origin cut the body short (premature EOF on a Content-Length /
+            # chunked response). Surfaced top-level so it survives even an empty
+            # body, and kept distinct from a `body.truncated` display cap.
+            j.field "incomplete", true if r.incomplete?
             emit_body(j, "body", r.head, r.body, false)
           end
         end

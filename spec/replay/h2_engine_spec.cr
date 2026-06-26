@@ -50,6 +50,32 @@ private def start_h2_origin(status : Int32, body : String, seen : Channel(String
   port
 end
 
+# A cleartext-h2 origin that sends HEADERS(:status) + one DATA frame WITHOUT
+# END_STREAM, then drops the connection — a truncated response the client must
+# flag as incomplete (no END_STREAM ever arrives).
+private def start_h2_origin_truncated(status : Int32, partial : String) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    Frame.read_preface(conn)
+    loop do
+      f = Frame.read(conn)
+      break if f.nil?
+      break if f.frame_type.in?(Frame::Type::Headers, Frame::Type::Data) && f.end_stream?
+    end
+    conn.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32, Bytes.empty).to_bytes)
+    block = HPACK::Encoder.new.encode([{":status", status.to_s}])
+    conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, block).to_bytes)
+    # DATA WITHOUT END_STREAM, then close mid-stream.
+    conn.write(Frame::Header.new(Frame::Type::Data.value, 0_u8, 1_u32, partial.to_slice).to_bytes)
+    conn.flush
+    conn.close
+  end
+  port
+end
+
 describe Gori::Replay::H2Engine do
   it "replays a GET as real cleartext h2 and reassembles the response" do
     seen = Channel(String).new(1)
@@ -64,6 +90,19 @@ describe Gori::Replay::H2Engine do
     String.new(result.head).should contain("HTTP/2 200")
     String.new(result.head).should contain("server: gori-test")
     String.new(result.body.not_nil!).should eq("replayed!")
+    result.incomplete?.should be_false # END_STREAM was seen — a complete response
+  end
+
+  it "flags an h2 response cut short before END_STREAM as incomplete" do
+    port = start_h2_origin_truncated(200, "partial")
+
+    request = "GET /trunc HTTP/2\r\n\r\n".to_slice
+    result = Gori::Replay::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    result.ok?.should be_true                            # a status + partial body did arrive
+    result.response.not_nil!.status.should eq(200)
+    String.new(result.body.not_nil!).should eq("partial") # what arrived is captured
+    result.incomplete?.should be_true                     # but no END_STREAM — incomplete
   end
 
   it "sends a request body as DATA frames" do

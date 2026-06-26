@@ -70,10 +70,17 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "echoes the client's protocolVersion when given" do
+    it "echoes the client's protocolVersion when it is a supported revision" do
       with_store do |store|
         line = %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}})
         drive(store, line)[0]["result"]["protocolVersion"].as_s.should eq("2024-11-05")
+      end
+    end
+
+    it "falls back to our version for an unsupported/garbage protocolVersion" do
+      with_store do |store|
+        line = %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}})
+        drive(store, line)[0]["result"]["protocolVersion"].as_s.should eq(Gori::MCP::Server::PROTOCOL_VERSION)
       end
     end
 
@@ -191,13 +198,32 @@ describe Gori::MCP::Server do
   end
 
   describe "arg coercion" do
-    it "honours a limit passed as a JSON string or float" do
+    it "honours a limit passed as a JSON string or integral float" do
       with_store do |store|
         3.times { |i| seed_flow(store, "h#{i}.test", "GET", "/", 200) }
         as_str = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":"2"}}})
         tool_payload(drive(store, as_str)[0]).as_a.size.should eq(2)
         as_float = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":2.0}}})
         tool_payload(drive(store, as_float)[0]).as_a.size.should eq(2)
+      end
+    end
+
+    it "rejects a fractional float id rather than truncating it to the wrong flow" do
+      with_store do |store|
+        seed_flow(store, "ex.test", "GET", "/", 200) # id 1
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":1.9}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true # NOT a silent hit on flow 1
+      end
+    end
+
+    it "does not crash on an out-of-Int64-range float (clamps the limit)" do
+      with_store do |store|
+        2.times { |i| seed_flow(store, "h#{i}.test", "GET", "/", 200) }
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":1e19}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"]?.try(&.as_bool).should_not be_true # no OverflowError -> tool error
+        tool_payload(resp).as_a.size.should eq(2)
       end
     end
   end
@@ -214,6 +240,55 @@ describe Gori::MCP::Server do
         reloaded = store.get_finding(new_id).not_nil!
         reloaded.status.should eq(Gori::Store::Status::Confirmed)
         reloaded.severity.should eq(Gori::Store::Severity::Critical)
+      end
+    end
+
+    it "rejects an invalid severity on create (not silently coerced to info)" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","severity":"ultra"}}})
+        resp = drive(store, create)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("invalid severity")
+        store.count_findings.should eq(0)
+      end
+    end
+
+    it "defaults an absent severity to info on create" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x"}}})
+        new_id = tool_payload(drive(store, create)[0])["id"].as_i64
+        store.get_finding(new_id).not_nil!.severity.should eq(Gori::Store::Severity::Info)
+      end
+    end
+
+    it "rejects a present-but-invalid flow_id instead of silently unlinking" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","flow_id":1.9}}})
+        resp = drive(store, create)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("invalid 'flow_id'")
+        store.count_findings.should eq(0)
+      end
+    end
+
+    it "distinguishes a fractional id (invalid) from a missing id" do
+      with_store do |store|
+        bad = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":1.9}}})
+        drive(store, bad)[0]["result"]["content"][0]["text"].as_s.should contain("invalid 'id'")
+        missing = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{}}})
+        drive(store, missing)[0]["result"]["content"][0]["text"].as_s.should contain("missing required 'id'")
+      end
+    end
+
+    it "reports an error (not updated:true) when update_finding has no fields" do
+      with_store do |store|
+        store.insert_finding("f", Gori::Store::Severity::Info, nil, nil)
+        store.flush
+        id = store.findings.first.id
+        upd = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_finding","arguments":{"id":#{id}}}})
+        resp = drive(store, upd)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("no fields to update")
       end
     end
 
@@ -291,6 +366,20 @@ describe Gori::MCP::Serialize do
     text.valid_encoding?.should be_true
     text.should contain("A")
   end
+
+  it "flags a replay result as incomplete when the origin cut the body short" do
+    head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
+    r = Gori::Replay::Result.new(head, "hi".to_slice, nil, 1000_i64, incomplete: true)
+    out = JSON.parse(Gori::MCP::Serialize.replay_result_json(r))
+    out["incomplete"].as_bool.should be_true
+  end
+
+  it "omits the incomplete field for a complete replay result" do
+    head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
+    r = Gori::Replay::Result.new(head, "hi".to_slice, nil, 1000_i64)
+    out = JSON.parse(Gori::MCP::Serialize.replay_result_json(r))
+    out["incomplete"]?.should be_nil
+  end
 end
 
 describe Gori::MCP::RequestBuilder do
@@ -331,5 +420,77 @@ describe Gori::MCP::RequestBuilder do
   it "raises when the url has no host" do
     args = JSON.parse(%({"url":"/relative"})).as_h
     expect_raises(Gori::Error) { Gori::MCP::RequestBuilder.build(args) }
+  end
+
+  describe "structured-path injection guards" do
+    it "rejects CR/LF in a header value (header injection)" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "headers" => JSON::Any.new({"X-Inj" => JSON::Any.new("a\r\nX-Evil: 1")})}
+      expect_raises(Gori::Error, /header.*X-Inj/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects a bare LF in a header value (lenient origins split on LF)" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "headers" => JSON::Any.new({"X-LF" => JSON::Any.new("a\nX-Evil: 1")})}
+      expect_raises(Gori::Error) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects CR/LF in a header name" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "headers" => JSON::Any.new({"X-A\r\nX-S" => JSON::Any.new("1")})}
+      expect_raises(Gori::Error, /header name/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects an empty header name" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "headers" => JSON::Any.new({"" => JSON::Any.new("v")})}
+      expect_raises(Gori::Error, /empty/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects whitespace/CRLF in the method (request-line forgery)" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "method" => JSON::Any.new("GET /admin HTTP/1.1\r\nHost: a")}
+      expect_raises(Gori::Error, /method/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects a bare space in the request target (request-line forgery)" do
+      # URI.parse keeps the literal space in the path; emitting it would forge
+      # `GET /a b HTTP/1.1` — a lenient origin then reads target /a, version b.
+      args = {"url" => JSON::Any.new("http://h.test/a b")}
+      expect_raises(Gori::Error, /request target/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects a whitespace-padded header name (framing-dedup evasion)" do
+      # A leading space dodges the case-insensitive Content-Length dedup, so the
+      # auto length would be appended too — two conflicting lengths on the wire.
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "method" => JSON::Any.new("POST"),
+              "body" => JSON::Any.new("abc"),
+              "headers" => JSON::Any.new({" Content-Length" => JSON::Any.new("0")})}
+      expect_raises(Gori::Error, /header name/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "still allows a custom method and internal spaces in a header VALUE" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "method" => JSON::Any.new("propfind"),
+              "headers" => JSON::Any.new({"X-Note" => JSON::Any.new("hello world ok")})}
+      out = String.new(Gori::MCP::RequestBuilder.build(args).bytes)
+      out.should start_with("PROPFIND / HTTP/1.1\r\n")
+      out.should contain("X-Note: hello world ok\r\n")
+    end
+
+    it "rejects a URL whose host carries a CR/LF (auto Host-header injection)" do
+      # URI.parse keeps the CR/LF as part of the authority's host; left unchecked
+      # it would be written verbatim into the generated Host header.
+      args = {"url" => JSON::Any.new("http://h.com\r\nEvil:3/path")}
+      expect_raises(Gori::Error, /host/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "leaves the raw path byte-exact (smuggling is the caller's explicit choice)" do
+      raw = "GET /x HTTP/1.1\nX-Inj: a\r\nX-Evil: 1\n\n"
+      args = {"url" => JSON::Any.new("http://h.test/"), "raw" => JSON::Any.new(raw)}
+      # raw mode does NOT validate — it is byte-exact by contract.
+      Gori::MCP::RequestBuilder.build(args).should_not be_nil
+    end
   end
 end

@@ -149,7 +149,7 @@ module Gori
 
       private def get_flow(h) : Result
         id = int(h, "id")
-        return Result.new("missing required 'id'", is_error: true) unless id
+        return Result.new(id_error(h, "id"), is_error: true) unless id
         detail = @store.get_flow(id)
         return Result.new("no flow with id #{id}", is_error: true) unless detail
         Result.new(Serialize.flow_detail_json(detail))
@@ -175,7 +175,7 @@ module Gori
 
       private def get_finding(h) : Result
         id = int(h, "id")
-        return Result.new("missing required 'id'", is_error: true) unless id
+        return Result.new(id_error(h, "id"), is_error: true) unless id
         f = @store.get_finding(id)
         return Result.new("no finding with id #{id}", is_error: true) unless f
         Result.new(JSON.build { |j| Serialize.finding(j, f) })
@@ -228,8 +228,20 @@ module Gori
       private def create_finding(h) : Result
         title = str(h, "title")
         return Result.new("missing required 'title'", is_error: true) if title.nil? || title.empty?
-        severity = severity_from(str(h, "severity")) || Store::Severity::Info
-        id = @store.insert_finding(title, severity, str(h, "host"), int(h, "flow_id"))
+        # An unrecognised severity is rejected, not silently coerced to Info —
+        # matching update_finding (a typo'd 'severity' shouldn't quietly become
+        # an info finding). An absent/blank severity still defaults to Info.
+        sev_s = str(h, "severity")
+        if err = bad_severity(sev_s)
+          return err
+        end
+        severity = severity_from(sev_s) || Store::Severity::Info
+        # A present-but-invalid flow_id (1.9 / "oops") would otherwise be
+        # silently nulled, creating an UNLINKED finding while reporting success —
+        # reject it, consistent with how get_flow rejects a non-integer id.
+        flow_id = int(h, "flow_id")
+        return Result.new("invalid 'flow_id' (expected an integer)", is_error: true) if flow_id.nil? && present?(h, "flow_id")
+        id = @store.insert_finding(title, severity, str(h, "host"), flow_id)
         # insert_finding returns 0 (never raises) when the write batch fails — e.g.
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
@@ -239,22 +251,49 @@ module Gori
 
       private def update_finding(h) : Result
         id = int(h, "id")
-        return Result.new("missing required 'id'", is_error: true) unless id
+        return Result.new(id_error(h, "id"), is_error: true) unless id
         return Result.new("no finding with id #{id}", is_error: true) unless @store.get_finding(id)
+        # A blank severity/status means "leave unchanged"; only a present,
+        # non-blank, unrecognised value is an error.
         sev_s = str(h, "severity")
-        if sev_s && severity_from(sev_s).nil?
-          return Result.new("invalid severity: #{sev_s}", is_error: true)
+        if err = bad_severity(sev_s)
+          return err
         end
         stat_s = str(h, "status")
-        if stat_s && status_from(stat_s).nil?
-          return Result.new("invalid status: #{stat_s}", is_error: true)
+        if err = bad_status(stat_s)
+          return err
         end
-        @store.update_finding(id,
-          title: str(h, "title"),
-          severity: severity_from(sev_s),
-          notes: str(h, "notes"),
-          status: status_from(stat_s))
+
+        title = str(h, "title")
+        return Result.new("title must not be empty", is_error: true) if title && title.empty?
+        notes = str(h, "notes")
+        severity = severity_from(sev_s)
+        status = status_from(stat_s)
+
+        # Don't claim updated:true on a no-op. With no resolvable field the store
+        # write is a silent no-op, so returning success would mislead the caller
+        # (e.g. it'd think a typo'd field name took effect).
+        if title.nil? && severity.nil? && notes.nil? && status.nil?
+          return Result.new("no fields to update (provide at least one of title/severity/notes/status)", is_error: true)
+        end
+
+        @store.update_finding(id, title: title, severity: severity, notes: notes, status: status)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "updated", true } })
+      end
+
+      # An error Result when `s` is a present, non-blank, UNRECOGNISED severity;
+      # nil when it's absent/blank (caller's default) or a valid label. Shared by
+      # create + update so both reject the same typos.
+      private def bad_severity(s : String?) : Result?
+        return nil if s.nil? || s.strip.empty?
+        return nil if severity_from(s)
+        Result.new("invalid severity: #{s} (info|low|medium|high|critical)", is_error: true)
+      end
+
+      private def bad_status(s : String?) : Result?
+        return nil if s.nil? || s.strip.empty?
+        return nil if status_from(s)
+        Result.new("invalid status: #{s} (open|confirmed|false-positive|resolved)", is_error: true)
       end
 
       # --- helpers ------------------------------------------------------------
@@ -268,13 +307,43 @@ module Gori
         h[key]?.try(&.as_s?)
       end
 
-      # Coerce a JSON arg to Int64. Accepts a JSON integer, a float (100.0 → 100),
-      # and a numeric STRING ("5" → 5) — many MCP clients/LLMs serialize tool args
-      # as strings, and the schema's "integer" type is advisory, not enforced.
+      # Whether `key` is present with a non-null value (a JSON null reads as
+      # "absent" for our purposes). Lets a caller tell a missing arg from one that
+      # was supplied but couldn't be coerced.
+      private def present?(h, key : String) : Bool
+        v = h[key]?
+        return false unless v
+        !v.raw.nil?
+      end
+
+      # Error text for a REQUIRED integer id that didn't coerce: distinguishes a
+      # genuinely absent arg from one that was supplied but isn't an integer (e.g.
+      # 1.9 or "oops"), so the caller isn't told "missing" for a value it did send.
+      private def id_error(h, key : String) : String
+        present?(h, key) ? "invalid '#{key}' (expected an integer)" : "missing required '#{key}'"
+      end
+
+      # Coerce a JSON arg to Int64. Accepts a JSON integer, an INTEGRAL float
+      # (100.0 → 100; many encoders emit ints as floats), and a numeric STRING
+      # ("5" → 5) — clients/LLMs often serialize tool args as strings and the
+      # schema's "integer" type is advisory, not enforced. A fractional float
+      # (5.9) is rejected rather than silently truncated, so the number and
+      # string encodings of the same value agree; an out-of-Int64-range float
+      # returns nil rather than raising OverflowError — for a limit that falls
+      # back to the default, for an id it reads as no-such-id, never a crash.
       private def int(h, key : String) : Int64?
         v = h[key]?
         return nil unless v
-        v.as_i64? || v.as_f?.try(&.to_i64) || v.as_s?.try(&.to_i64?)
+        if i = v.as_i64?
+          return i
+        end
+        if f = v.as_f?
+          return nil unless f.finite? && f == f.trunc
+          return f.to_i64
+        end
+        v.as_s?.try(&.to_i64?)
+      rescue OverflowError
+        nil
       end
 
       private def bool(h, key : String) : Bool?

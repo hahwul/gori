@@ -38,11 +38,11 @@ module Gori
         begin
           headers, body = parse_request(request, scheme, host, port)
           write_request(upstream, headers, body)
-          status, resp_headers, resp_body = read_response(upstream)
+          status, resp_headers, resp_body, complete = read_response(upstream)
           return failure("no h2 response from #{host}:#{port}", started) if status == 0 && resp_headers.empty?
           head = synth_head(status, resp_headers)
           resp = Proxy::Codec::Http1.parse_response_head(head)
-          Result.new(head, resp_body, resp, elapsed(started))
+          Result.new(head, resp_body, resp, elapsed(started), incomplete: !complete)
         rescue ex
           failure(ex.message || "h2 replay error", started)
         ensure
@@ -88,14 +88,19 @@ module Gori
         end
       end
 
-      # Reads frames until stream 1 closes; returns {status, headers, body}.
-      private def self.read_response(io : IO) : {Int32, Array({String, String}), Bytes?}
+      # Reads frames until stream 1 closes; returns {status, headers, body,
+      # clean_eos}. clean_eos is true only when the stream ended on a real
+      # END_STREAM — false when it was cut by GOAWAY/RST_STREAM, a mid-stream
+      # connection drop, or a MAX_BODY truncation, so the caller can flag the
+      # response as incomplete (mirrors the h1 engine's premature-EOF signal).
+      private def self.read_response(io : IO) : {Int32, Array({String, String}), Bytes?, Bool}
         decoder = HPACK::Decoder.new
         header_buf = IO::Memory.new
         body = IO::Memory.new
         headers = [] of {String, String}
         status = 0
         done = false
+        clean_eos = false          # a genuine END_STREAM closed the stream
         end_stream_pending = false # END_STREAM seen on a HEADERS frame whose block isn't closed yet
 
         until done
@@ -122,7 +127,7 @@ module Gori
             end_stream_pending = frame.end_stream?
             if frame.end_headers?
               status = absorb(header_buf, decoder, headers, status)
-              done = true if end_stream_pending
+              done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Continuation
             next unless frame.stream_id == 1
@@ -130,19 +135,19 @@ module Gori
             header_buf.write(frame.payload)
             if frame.end_headers?
               status = absorb(header_buf, decoder, headers, status)
-              done = true if end_stream_pending
+              done = clean_eos = true if end_stream_pending
             end
           when Frame::Type::Data
             next unless frame.stream_id == 1
             body.write(data_block(frame)) if body.bytesize < MAX_BODY
-            done = true if frame.end_stream?
+            done = clean_eos = true if frame.end_stream?
             break if body.bytesize >= MAX_BODY # over-large/streaming body — truncate
           else
             # WINDOW_UPDATE / PUSH_PROMISE / PRIORITY — ignored for a one-shot
           end
         end
 
-        {status, headers, body.size == 0 ? nil : body.to_slice}
+        {status, headers, body.size == 0 ? nil : body.to_slice, clean_eos}
       end
 
       # Decode a completed header block, splitting :status from regular headers.
