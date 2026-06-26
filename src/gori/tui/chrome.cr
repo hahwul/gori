@@ -93,16 +93,15 @@ module Gori::Tui
 
     # A horizontal tab menu (row 1) styled as a segmented control. The active tab
     # is a solid filled segment with bold bright text (ACCENT when the menu has
-    # focus, so the user sees where keys land); inactive tabs are muted. Hot
-    # counts (intercept held / findings) ride inline as `(N)` badges.
+    # focus, so the user sees where keys land); inactive tabs are muted. The
+    # held-intercept count rides inline as a `(N)` badge.
     def self.render_menu(screen : Screen, rect : Rect, *, active_tab : Symbol, focused : Bool,
                          tabs : Array({Symbol, String}) = TABS,
-                         findings_count : Int32 = 0, intercept_count : Int32 = 0,
-                         replay_count : Int32 = 0, notes_count : Int32 = 0) : Nil
+                         intercept_count : Int32 = 0) : Nil
       return if rect.empty?
       screen.fill(rect, Theme.panel)
 
-      segs, start = menu_layout(rect, active_tab, tabs, findings_count, intercept_count, replay_count, notes_count)
+      segs, start = menu_layout(rect, active_tab, tabs, intercept_count)
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.panel) if start > 0 # earlier tabs hidden
       segs.each do |(sym, label, seg)|
         if sym == active_tab
@@ -123,10 +122,9 @@ module Gori::Tui
     # can never drift from what was drawn. Coords are 0-based cells.
     def self.menu_segments(rect : Rect, active_tab : Symbol, *,
                            tabs : Array({Symbol, String}) = TABS,
-                           findings_count : Int32 = 0, intercept_count : Int32 = 0,
-                           replay_count : Int32 = 0, notes_count : Int32 = 0) : Array({Symbol, Rect})
+                           intercept_count : Int32 = 0) : Array({Symbol, Rect})
       return [] of {Symbol, Rect} if rect.empty?
-      menu_layout(rect, active_tab, tabs, findings_count, intercept_count, replay_count, notes_count)[0]
+      menu_layout(rect, active_tab, tabs, intercept_count)[0]
         .map { |(sym, _, seg)| {sym, seg} }
     end
 
@@ -135,10 +133,9 @@ module Gori::Tui
     # Mirrors the old inline render_menu loop exactly — windowing via scroll_start,
     # segments laid " label " with a 1-col gap, the same `> rect.right + 1` break.
     private def self.menu_layout(rect : Rect, active_tab : Symbol, tabs : Array({Symbol, String}),
-                                 findings_count : Int32, intercept_count : Int32, replay_count : Int32,
-                                 notes_count : Int32) : {Array({Symbol, String, Rect}), Int32}
+                                 intercept_count : Int32) : {Array({Symbol, String, Rect}), Int32}
       segs = [] of {Symbol, String, Rect}
-      labels = tabs.map { |(sym, label)| "#{label}#{menu_badge(sym, findings_count, intercept_count, replay_count, notes_count)}" }
+      labels = tabs.map { |(sym, label)| "#{label}#{menu_badge(sym, intercept_count)}" }
       widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
       active_idx = tabs.index { |(sym, _)| sym == active_tab } || 0
       # Window the strip so the active segment is ALWAYS visible: on a narrow row
@@ -256,13 +253,10 @@ module Gori::Tui
       chips.sum { |(label, _)| label.size } + 3 * {chips.size - 1, 0}.max
     end
 
-    # Inline badge for the hot counts (held messages, confirmed findings).
-    private def self.menu_badge(sym : Symbol, findings_count : Int32, intercept_count : Int32,
-                                replay_count : Int32 = 0, notes_count : Int32 = 0) : String
-      return "(#{replay_count})" if sym == :replay && replay_count > 1
-      return "(#{notes_count})" if sym == :notes && notes_count > 1
+    # Inline badge for the held-intercept count — the one hot state worth flagging
+    # on the tab bar (pending requests await a decision). Other tabs carry no count.
+    private def self.menu_badge(sym : Symbol, intercept_count : Int32) : String
       return "(#{intercept_count})" if sym == :intercept && intercept_count > 0
-      return "(#{findings_count})" if sym == :findings && findings_count > 0
       ""
     end
 

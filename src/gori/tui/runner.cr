@@ -112,7 +112,6 @@ module Gori::Tui
       @toast = nil.as(String?)        # transient action feedback; nil → show key hints
       @outcome = :running             # :running | :quit | :back
       @quit_armed = false             # first ^D/^C arms quit; second confirms (avoids accidental exit)
-      @findings_count = 0             # cached findings badge (count_findings is too costly to re-query per frame)
       @resized = false                # set on a Resize event → next frame full-repaints
 
       # Per-tab controllers (strangler-fig: tabs migrate into this registry one at a
@@ -185,8 +184,7 @@ module Gori::Tui
     def run : Symbol
       history_controller.view.reload(@session.store)
       project_controller.reload
-      notes_controller.view.reload(@session.store) # load persisted notes up front so the menu's notes-count badge is right before the tab is ever focused
-      refresh_findings_count
+      notes_controller.view.reload(@session.store) # load persisted notes up front so the tab is ready before it's ever focused
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
       # port-fallback note if the configured port was taken and we picked another.
       requested = @session.config.port
@@ -298,7 +296,6 @@ module Gori::Tui
       @tabs[@active_tab]?.try(&.on_external_change) # migrated tabs refresh themselves
       replay_controller.reconcile
       notes_controller.view.reload(@session.store) unless notes_locked?
-      refresh_findings_count
       search_recompute # a ^F prompt open over the reloaded view keeps fresh hits
     end
 
@@ -580,8 +577,7 @@ module Gori::Tui
     # re-focus the body when the active tab is re-clicked, else just focus the bar.
     private def click_menu(rect : Rect, mx : Int32, my : Int32) : Nil
       seg = Chrome.menu_segments(rect, @active_tab, tabs: effective_tabs,
-        findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
-        replay_count: replay_controller.count, notes_count: notes_controller.view.count).find { |(_, r)| r.contains?(mx, my) }
+        intercept_count: @session.interceptor.pending_count).find { |(_, r)| r.contains?(mx, my) }
       if seg
         seg[0] == @active_tab ? focus_pane(:body) : focus_tab(seg[0])
       else
@@ -1117,7 +1113,6 @@ module Gori::Tui
         @active_tab = :findings
         @focus = :body
         findings_controller.view.reload(@session.store)
-        refresh_findings_count
         @toast = "finding created"
       end
       @overlay = :none
@@ -1339,9 +1334,7 @@ module Gori::Tui
         capturing: @session.capturing?, listen: "#{@session.proxy.host}:#{@session.proxy.port}",
         identity: "user", scope: scope_label, rules: rules_label, intercept: intercept_label)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
-        tabs: effective_tabs,
-        findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
-        replay_count: replay_controller.count, notes_count: notes_controller.view.count)
+        tabs: effective_tabs, intercept_count: @session.interceptor.pending_count)
       Chrome.render_rule(screen, layout.rule)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: @toast || key_hints,
@@ -1829,12 +1822,6 @@ module Gori::Tui
 
     def findings_delete : Nil
       findings_controller.findings_delete
-    end
-
-    # Cached findings badge for the tab bar — refreshed only when findings change
-    # (create/delete), not re-queried from SQLite on every render frame.
-    def refresh_findings_count : Nil
-      @findings_count = @session.store.count_findings
     end
 
     def finding_severity(delta : Int32) : Nil
