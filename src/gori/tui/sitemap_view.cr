@@ -39,7 +39,7 @@ module Gori::Tui
 
     # The QL fields meaningful for the endpoint tree (no `flag` — tags aren't
     # produced yet). Mirrors History's set so the same `/` query language applies.
-    QL_FIELDS = %w(host path method status scheme body)
+    QL_FIELDS = %w(host path method status scheme body header size dur)
 
     def initialize
       @hosts = [] of Node
@@ -271,7 +271,7 @@ module Gori::Tui
         label = @query.blank? ? "(in-scope only)" : ": #{@query}"
         screen.text(rect.x + 1, rect.y, label, Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  path:  status:>=500", Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  path:  status:>=500  size:>10000  dur:>500  header:  body~regex", Theme.muted, width: left_w)
       end
     end
 
