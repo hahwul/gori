@@ -64,6 +64,10 @@ module Gori::Tui
       @current_idx
     end
 
+    def view_at(idx : Int32) : FuzzerView?
+      (0 <= idx < @fuzzers.size) ? @fuzzers[idx].view : nil
+    end
+
     def body_badge : Symbol
       v = current_view
       return :body unless v
@@ -305,6 +309,20 @@ module Gori::Tui
       return if idx == @current_idx
       save_current
       @current_idx = idx
+    end
+
+    # --- rename (the shell's orthogonal rename prompt drives this by VIEW identity) ---
+    # Apply the typed name to the captured tab + persist it on its own (set_fuzz_session_name,
+    # separate from save_current so the rename lands even when the session is otherwise clean).
+    # Re-find by VIEW identity so a closed/reordered tab is a no-op, never a neighbour. Blank
+    # clears the custom label (the chip reverts to the template-derived summary).
+    def apply_rename(view : FuzzerView, name : String) : Nil
+      return unless tab = @fuzzers.find { |t| t.view.same?(view) }
+      clean = name.strip
+      view.name = clean.empty? ? nil : clean
+      if id = tab.db_id
+        @host.session.store.set_fuzz_session_name(id, view.name)
+      end
     end
 
     # --- async (run loop) ---

@@ -418,6 +418,16 @@ module Gori
       }
     end
 
+    # Set (or clear, with nil) a fuzz session's custom sub-tab name — its own UPDATE,
+    # separate from update_fuzz_session so a rename never rewrites the template/config
+    # (mirrors set_replay_name).
+    def set_fuzz_session_name(id : Int64, name : String?) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE fuzz_sessions SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
+        nil
+      }
+    end
+
     def delete_fuzz_session(id : Int64) : Nil
       exec_task ->(c : DB::Connection) { c.exec("DELETE FROM fuzz_sessions WHERE id = ?", id); nil }
     end

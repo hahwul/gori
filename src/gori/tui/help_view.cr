@@ -33,7 +33,7 @@ module Gori::Tui
         {"click tab", "switch to it"},
         {"click row", "select · click again opens"},
         {"click pane", "focus · in an editor, place the caret"},
-        {"sub-tab chip", "switch · right-click renames (Replay)"},
+        {"sub-tab chip", "switch · right-click renames (Replay/Fuzzer)"},
         {"wheel", "scroll / move the selection"},
         {"click outside", "close a popup"},
       ]},
@@ -62,6 +62,7 @@ module Gori::Tui
         {"^R · ^X", "run · stop"},
         {"↑/↓ · ↵", "results: select · open detail"},
         {"o · m", "sort · matched-only · ^N/^W session"},
+        {"r", "rename the sub-tab (on the strip)"},
       ]},
       {"COMPARER", [
         {"^P → Comparer", "open the tab (hidden by default)"},

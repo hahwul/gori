@@ -41,6 +41,23 @@ describe "Gori::Store fuzz persistence" do
     end
   end
 
+  it "set_fuzz_session_name sets/clears the custom name without touching the template" do
+    with_store do |store|
+      id = store.insert_fuzz_session("http://h", "GET /?x=§1§ HTTP/1.1\r\n\r\n", false, nil,
+        %({"mode":"sniper"}), nil, 0)
+      store.fuzz_sessions.first.name.should be_nil
+
+      store.set_fuzz_session_name(id, "auth fuzz")
+      s = store.fuzz_sessions.first
+      s.name.should eq("auth fuzz")
+      s.template.should contain("§1§") # the rename must not rewrite the template/config
+      s.config.should eq(%({"mode":"sniper"}))
+
+      store.set_fuzz_session_name(id, nil) # blank clears the custom name
+      store.fuzz_sessions.first.name.should be_nil
+    end
+  end
+
   it "round-trips a run + its results, with paging" do
     with_store do |store|
       run = store.insert_fuzz_run(nil, "http://h", "sniper", 3_i64)
