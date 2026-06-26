@@ -8,6 +8,7 @@ require "./search_hi"
 require "./reveal"
 require "./url"
 require "./fmt"
+require "./flow_status"
 require "../store"
 require "../ql"
 require "../scope"
@@ -34,7 +35,7 @@ module Gori::Tui
     # We load the MOST RECENT this-many (so a live tail keeps updating) and show an
     # "older not loaded" note; the raw frames remain whole in SQLite.
     DETAIL_LOG_CAP = 10_000
-    QL_FIELDS      = %w(host method status path scheme body flag)
+    QL_FIELDS      = %w(host method status path scheme body header size dur flag)
     METHOD_VAL     = %w(GET POST PUT DELETE PATCH HEAD OPTIONS QUERY)
 
     getter rows : Array(Store::FlowRow)
@@ -571,15 +572,9 @@ module Gori::Tui
         screen.text(proto_x, y, row.scheme.upcase, Theme.muted, bg)
         screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
         screen.text(path_x, y, Url.origin_path(row.target), fg, bg, width: path_w) if path_w > 0
-        # Failed flows store status 0 — show the STATE (ERR/ABT) so they don't read as a
-        # cryptic "0" indistinguishable from a still-pending "···".
-        status, scolor = if row.state.error?
-                           {"ERR", Theme.red}
-                         elsif row.state.aborted?
-                           {"ABT", Theme.yellow}
-                         else
-                           {row.status.try(&.to_s) || "···", Theme.status_color(row.status)}
-                         end
+        # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of
+        # a cryptic "0" indistinguishable from a still-pending "···".
+        status, scolor = FlowStatus.cell(row)
         screen.text(status_x, y, status, scolor, bg, width: 3)
         screen.text(type_x, y, fmt_mime(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
@@ -728,7 +723,7 @@ module Gori::Tui
         label = @query.blank? ? "(in-scope only)" : ": #{@query}"
         screen.text(rect.x + 1, rect.y, label, Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  status:>=500  path:  scheme:", Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  status:>=500  path:  scheme:  size:>10000  dur:>500  header:  body~regex", Theme.muted, width: left_w)
       end
     end
 
@@ -743,6 +738,8 @@ module Gori::Tui
                when "scheme" then ["http", "https"]
                when "method" then METHOD_VAL
                when "status" then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500"]
+               when "size"   then [">10000", ">100000", "<1000"]
+               when "dur"    then [">500", ">1s", ">=200", "<100"]
                else               return [] of String
                end
       values.select(&.downcase.starts_with?(prefix.downcase)).map { |v| "#{field}:#{v}" }

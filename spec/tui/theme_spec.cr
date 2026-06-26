@@ -19,6 +19,33 @@ private def wcag_contrast(fg : Termisu::Color, bg : Termisu::Color) : Float64
   l1 > l2 ? l1 / l2 : l2 / l1
 end
 
+# Run the block with GORI_HOME pointed at a fresh temp dir whose themes/ holds `files`
+# (name => JSON), so Theme.load_custom reads exactly those. Restores GORI_HOME, the
+# active theme, the persisted theme, AND the global custom registry (reloaded from an
+# empty dir) afterwards so the @@custom class var can't leak into other specs.
+private def with_themes(files : Hash(String, String), &)
+  home = File.tempname("gori-themes-home")
+  Dir.mkdir_p(File.join(home, "themes"))
+  files.each { |name, body| File.write(File.join(home, "themes", name), body) }
+  prev = ENV["GORI_HOME"]?
+  saved_active = Gori::Tui::Theme.active_name
+  saved_theme = Gori::Settings.theme
+  begin
+    ENV["GORI_HOME"] = home
+    yield
+  ensure
+    Gori::Tui::Theme.apply(saved_active) # back to a built-in before dropping custom
+    empty = File.tempname("gori-empty-home")
+    Dir.mkdir_p(empty)
+    ENV["GORI_HOME"] = empty
+    Gori::Tui::Theme.load_custom # rebuild @@custom from a themes-less dir → empties it
+    prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+    Gori::Settings.theme = saved_theme
+    FileUtils.rm_rf(home)
+    FileUtils.rm_rf(empty)
+  end
+end
+
 describe Gori::Tui::Theme do
   # Theme.active is global; restore it so later specs (which assert dark colours) pass.
   around_each do |example|
@@ -129,6 +156,201 @@ describe Gori::Tui::SettingsView do
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.theme = saved_theme
+    end
+  end
+end
+
+describe "Theme custom loading" do
+  it "loads user themes from <GORI_HOME>/themes/*.json, after the built-ins" do
+    with_themes({
+      "ocean.json"     => %({"base": "goridark", "accent": "#00ffcc", "green": "#00ff00"}),
+      "broken.json"    => %({not valid json),
+      "goridark.json"  => %({"bg": "#000000"}), # shadows a built-in → must be ignored
+      "Bad Name!.json" => %({"base": "latte"}), # sanitised to "badname"
+      "arr.json"       => %([1, 2, 3]),         # not an object → skipped
+    }) do
+      Gori::Tui::Theme.load_custom
+      avail = Gori::Tui::Theme.available
+      avail.first(5).should eq(["goridark", "goriday", "latte", "espresso", "tokyonight"]) # built-ins lead
+      avail.should contain("ocean")
+      avail.should contain("badname")
+      avail.should_not contain("broken")
+      avail.should_not contain("arr")
+      avail.count("goridark").should eq(1) # the shadowing file did not redefine it
+    end
+  end
+
+  it "merges overrides onto the base and inherits omitted colours" do
+    with_themes({"ocean.json" => %({"base": "goridark", "accent": "#00ffcc"})}) do
+      Gori::Tui::Theme.load_custom
+      pal = Gori::Tui::Theme.palette("ocean").not_nil!
+      base = Gori::Tui::Theme.palette("goridark").not_nil!
+      pal.accent.should eq(Termisu::Color.from_hex("#00ffcc")) # overridden
+      pal.bg.should eq(base.bg)                                # inherited from base
+      pal.green.should eq(base.green)                          # inherited from base
+    end
+  end
+
+  it "falls back to the base colour for an invalid hex (one typo can't sink a theme)" do
+    with_themes({"tweak.json" => %({"base": "tokyonight", "accent": "not-a-hex", "red": "#123456"})}) do
+      Gori::Tui::Theme.load_custom
+      pal = Gori::Tui::Theme.palette("tweak").not_nil!
+      base = Gori::Tui::Theme.palette("tokyonight").not_nil!
+      pal.accent.should eq(base.accent)                     # bad hex → base
+      pal.red.should eq(Termisu::Color.from_hex("#123456")) # valid override kept
+    end
+  end
+
+  it "applies a custom theme through canonical/apply" do
+    with_themes({"ocean.json" => %({"base": "goridark", "accent": "#00ffcc"})}) do
+      Gori::Tui::Theme.load_custom
+      Gori::Tui::Theme.canonical("ocean").should eq("ocean")
+      Gori::Tui::Theme.apply("ocean").should be_true
+      Gori::Tui::Theme.active_name.should eq("ocean")
+      Gori::Tui::Theme.accent.should eq(Termisu::Color.from_hex("#00ffcc"))
+    end
+  end
+
+  it "lets a custom theme named like a legacy alias (dark/light) be selected, not shadowed" do
+    with_themes({"dark.json" => %({"base": "tokyonight", "accent": "#00ffcc"})}) do
+      Gori::Tui::Theme.load_custom
+      Gori::Tui::Theme.available.should contain("dark")    # registered (not a built-in name)
+      Gori::Tui::Theme.canonical("dark").should eq("dark") # the real theme wins over the LEGACY_ALIAS
+      Gori::Tui::Theme.apply("dark").should be_true
+      Gori::Tui::Theme.active_name.should eq("dark")
+      Gori::Tui::Theme.accent.should eq(Termisu::Color.from_hex("#00ffcc"))
+    end
+  end
+
+  it "still maps a legacy alias when no custom theme by that name is loaded" do
+    with_themes({} of String => String) do
+      Gori::Tui::Theme.load_custom # no custom "dark"/"light"
+      Gori::Tui::Theme.canonical("dark").should eq("goridark")
+      Gori::Tui::Theme.canonical("light").should eq("goriday")
+    end
+  end
+end
+
+describe "SettingsView theme list" do
+  it "renders the themes as a vertical list and moves selection with ↑/↓" do
+    with_themes({} of String => String) do
+      Gori::Settings.theme = "goridark"
+      view = SettingsView.new
+      view.reload(:theme)
+      view.theme_value.should eq("goridark")
+      view.move_field(1) # ↓ to the next theme
+      view.theme_value.should eq("goriday")
+      view.move_field(-1)
+      view.theme_value.should eq("goridark")
+
+      # the built-ins render as stacked rows (one per line)
+      backend = MemoryBackend.new(80, 24)
+      area = Rect.new(0, 0, 80, 24)
+      view.render(Screen.new(backend), area)
+      box = view.overlay_box(area)
+      backend.row(box.y + 2).includes?("goridark").should be_true # first row
+      backend.row(box.y + 3).includes?("goriday").should be_true  # second row (below, not beside)
+    end
+  end
+
+  it "maps a clicked list row to the theme index" do
+    with_themes({} of String => String) do
+      Gori::Settings.theme = "goridark"
+      view = SettingsView.new
+      view.reload(:theme)
+      backend = MemoryBackend.new(80, 24)
+      area = Rect.new(0, 0, 80, 24)
+      view.render(Screen.new(backend), area)
+      box = view.overlay_box(area)
+      view.field_at(box, box.x + 5, box.y + 2).should eq(0)
+      view.field_at(box, box.x + 5, box.y + 3).should eq(1)
+      view.field_at(box, box.x + 5, box.y + 1).should be_nil # above the list
+      view.set_field(1)
+      view.theme_value.should eq(Gori::Tui::Theme.available[1])
+    end
+  end
+
+  it "scrolls to keep the selected theme visible when the list overflows" do
+    files = {} of String => String
+    (1..9).each { |i| files["z#{i}.json"] = %({"base": "goridark"}) } # 9 custom → 14 total > 10
+    with_themes(files) do
+      Gori::Settings.theme = "goridark"
+      view = SettingsView.new
+      view.reload(:theme)
+      names = Gori::Tui::Theme.available
+      (names.size - 1).times { view.move_field(1) } # select the last theme
+
+      backend = MemoryBackend.new(80, 24)
+      view.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
+      backend.contains?(names.last).should be_true  # selection scrolled into view
+      backend.contains?("goridark").should be_false # first rows scrolled off the top
+    end
+  end
+
+  it "paints each row's swatch in that theme's OWN palette, not the active one" do
+    with_themes({
+      "ocean.json" => %({"base": "goridark", "accent": "#00ffcc"}),
+      "ruby.json"  => %({"base": "goridark", "accent": "#ff0033"}),
+    }) do
+      Gori::Settings.theme = "goridark"
+      Gori::Tui::Theme.apply("goridark") # active accent (#fafafa) differs from both swatches
+      view = SettingsView.new
+      view.reload(:theme)
+      names = Gori::Tui::Theme.available # [..builtins.., ocean, ruby] (file-name order)
+      ocean_row = names.index("ocean").not_nil!
+      ruby_row = names.index("ruby").not_nil!
+
+      backend = MemoryBackend.new(80, 24)
+      area = Rect.new(0, 0, 80, 24)
+      view.render(Screen.new(backend), area)
+      box = view.overlay_box(area)
+      tick_x = box.right - 9 # first swatch tick = the theme's accent (see draw_swatch)
+      # each row's accent swatch is the theme's own colour, proving it's not the active palette
+      backend.fg_at(tick_x, box.y + 2 + ocean_row).should eq(Termisu::Color.from_hex("#00ffcc"))
+      backend.fg_at(tick_x, box.y + 2 + ruby_row).should eq(Termisu::Color.from_hex("#ff0033"))
+    end
+  end
+end
+
+describe "Theme.load_custom active reconciliation" do
+  it "refreshes the live palette when the active custom theme's file is edited" do
+    with_themes({"ocean.json" => %({"base": "goridark", "accent": "#00ffcc"})}) do
+      Gori::Tui::Theme.load_custom
+      Gori::Tui::Theme.apply("ocean")
+      Gori::Tui::Theme.accent.should eq(Termisu::Color.from_hex("#00ffcc"))
+      rev = Gori::Tui::Theme.revision
+
+      # edit the file (new accent) and reload — the active palette must follow, with a bump
+      home = ENV["GORI_HOME"]
+      File.write(File.join(home, "themes", "ocean.json"), %({"base": "goridark", "accent": "#ffaa00"}))
+      Gori::Tui::Theme.load_custom
+      Gori::Tui::Theme.active_name.should eq("ocean")
+      Gori::Tui::Theme.accent.should eq(Termisu::Color.from_hex("#ffaa00"))
+      Gori::Tui::Theme.revision.should eq(rev + 1)
+    end
+  end
+
+  it "falls back to the default when the active custom theme's file is removed" do
+    with_themes({"ocean.json" => %({"base": "goridark", "accent": "#00ffcc"})}) do
+      Gori::Tui::Theme.load_custom
+      Gori::Tui::Theme.apply("ocean")
+      rev = Gori::Tui::Theme.revision
+
+      File.delete(File.join(ENV["GORI_HOME"], "themes", "ocean.json"))
+      Gori::Tui::Theme.load_custom
+      Gori::Tui::Theme.active_name.should eq(Gori::Tui::Theme::DEFAULT_THEME)
+      Gori::Tui::Theme.available.should_not contain("ocean")
+      Gori::Tui::Theme.revision.should eq(rev + 1)
+    end
+  end
+
+  it "leaves a built-in active theme (and the revision) untouched on reload" do
+    with_themes({"ocean.json" => %({"base": "goridark", "accent": "#00ffcc"})}) do
+      Gori::Tui::Theme.apply("goriday")
+      rev = Gori::Tui::Theme.revision
+      Gori::Tui::Theme.load_custom # active is a built-in → no reconciliation, no bump
+      Gori::Tui::Theme.active_name.should eq("goriday")
+      Gori::Tui::Theme.revision.should eq(rev)
     end
   end
 end

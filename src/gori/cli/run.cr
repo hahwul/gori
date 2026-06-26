@@ -125,7 +125,7 @@ module Gori
           p.banner = "Usage: gori run history [options]   (alias: ls)"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 body:tok …)") { |v| query = v }
+          p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v) }
           p.on("--format=FMT", "Output: text (default) | json (JSON-Lines)") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }

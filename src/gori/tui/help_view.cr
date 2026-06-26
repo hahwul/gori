@@ -63,6 +63,13 @@ module Gori::Tui
         {"↑/↓ · ↵", "results: select · open detail"},
         {"o · m", "sort · matched-only · ^N/^W session"},
       ]},
+      {"COMPARER", [
+        {"^P → Comparer", "open the tab (hidden by default)"},
+        {"a · b", "pick flow A · flow B"},
+        {"←/→", "compare requests ⟷ responses"},
+        {"s", "swap A ⇄ B"},
+        {"Send to Comparer", "from History (: command line)"},
+      ]},
       {"EDITORS", [
         {"^G · ^F", "go to line · find"},
         {"^E", "open the field in $EDITOR"},
@@ -74,6 +81,14 @@ module Gori::Tui
         {"Notes", "type to edit · ^N new · ^1-9 switch"},
         {"Project", "scope rules + the description editor"},
         {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition"},
+      ]},
+      {"CONVERT", [
+        {"^P → Go to Convert", "open the tab (hidden by default)"},
+        {"type / ↹", "edit input · switch input ↔ chain"},
+        {"chain", "base64 > url-encode > sha256 ( > | , )"},
+        {"↹ / ↵", "complete the suggested converter (popup)"},
+        {"^Y · ^X", "copy output · cycle text/hex/base64"},
+        {"^S · ^O", "save chain by name · load a saved chain"},
       ]},
       {"OVERLAYS", [
         {"palette / settings", "↑/↓ · ↵ · esc"},

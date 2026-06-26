@@ -24,7 +24,7 @@ module Gori
         available: history_selected) { |ctx| ctx.open_detail; nil }
 
       r.register Verb::Definition.new(
-        "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 …)",
+        "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 size:>10000 body~regex …)",
         Verb::Scope::Body, [Verb::Chord.new("/")], available: in_history) { |ctx| ctx.history_query; nil }
 
       r.register Verb::Definition.new(
@@ -40,6 +40,12 @@ module Gori
         "history.replay", "Replay flow", "Open the selected flow in the Replay tab",
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
         available: history_selected) { |ctx| ctx.replay_selected; nil }
+
+      # Send the selected flow to the Comparer's next slot (A → B → A). The Comparer
+      # tab is hidden by default; reach it with ^P → "Go to Comparer".
+      r.register Verb::Definition.new(
+        "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
+        Verb::Scope::Body, available: history_selected) { |ctx| ctx.comparer_add_selected; nil }
 
       # --- replay workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
@@ -107,6 +113,11 @@ module Gori
         "detail.finding", "Add finding", "Create a finding from this flow",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("f", shift: true)],
         hidden: true) { |ctx| ctx.close_detail; ctx.finding_create; nil }
+
+      # Send the open flow to the Comparer (mirrors history.compare from the list).
+      r.register Verb::Definition.new(
+        "detail.compare", "Send to Comparer", "Send this flow to the Comparer (next slot A/B)",
+        Verb::Scope::HistoryDetail) { |ctx| ctx.comparer_add_selected; nil }
     end
 
     # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette
@@ -147,6 +158,7 @@ module Gori
       register_sitemap(r)
       register_findings(r)
       register_fuzz(r)
+      register_comparer(r)
       r
     end
   end

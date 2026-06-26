@@ -16,6 +16,8 @@ require "./controllers/findings_controller"
 require "./controllers/project_controller"
 require "./controllers/replay_controller"
 require "./controllers/fuzzer_controller"
+require "./controllers/comparer_controller"
+require "./controllers/convert_controller"
 require "./history_view"
 require "./replay_view"
 require "./sitemap_view"
@@ -27,6 +29,7 @@ require "./intercept_view"
 require "./rules_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
+require "./flow_picker"
 require "./settings_view"
 require "./tabs_overlay"
 require "./palette"
@@ -60,7 +63,7 @@ module Gori::Tui
       # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :settings | :tabs
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :comparer_pick | :settings | :tabs
       # The ":" context command line (vim/helix-style). Orthogonal to @overlay so it
       # floats over WHATEVER is underneath (the History list, an open detail, the
       # Sitemap …) without disturbing that state; the scope is captured at open time.
@@ -97,6 +100,8 @@ module Gori::Tui
       # The "open browser" picker (palette → browser.open); @overlay is :browser
       # while it's up.
       @browser_picker = nil.as(BrowserPicker?)
+      # The Comparer flow picker (a/b → choose flow A/B); @overlay is :comparer_pick.
+      @flow_picker = nil.as(FlowPicker?)
       # The settings editor (palette → settings:network); @overlay is :settings.
       @settings_view = SettingsView.new
       # The tab-bar customizer (palette → settings:tabs); @overlay is :tabs. Distinct
@@ -127,6 +132,8 @@ module Gori::Tui
         ProjectController.new(self),
         ReplayController.new(self),
         FuzzerController.new(self),
+        ComparerController.new(self),
+        ConvertController.new(self),
       ].each { |c| @tabs[c.tab] = c }
     end
 
@@ -165,6 +172,14 @@ module Gori::Tui
 
     private def fuzzer_controller : FuzzerController
       @tabs[:fuzzer].as(FuzzerController)
+    end
+
+    private def comparer_controller : ComparerController
+      @tabs[:comparer].as(ComparerController)
+    end
+
+    private def convert_controller : ConvertController
+      @tabs[:convert].as(ConvertController)
     end
 
     def run : Symbol
@@ -331,11 +346,12 @@ module Gori::Tui
       # then the focused tab body — so EVERY text field gets the same live
       # composition preview, not just the Notes/Project/Replay editors.
       case @overlay
-      when :palette     then @palette.set_preedit(text)
-      when :rules       then @rules_overlay.set_preedit(text)
-      when :finding_new then @finding_form.set_preedit(text)
-      when :settings    then @settings_view.set_preedit(text)
-      when :none        then apply_preedit_body(text)
+      when :palette       then @palette.set_preedit(text)
+      when :rules         then @rules_overlay.set_preedit(text)
+      when :finding_new   then @finding_form.set_preedit(text)
+      when :comparer_pick then @flow_picker.try(&.set_preedit(text))
+      when :settings      then @settings_view.set_preedit(text)
+      when :none          then apply_preedit_body(text)
       end
     end
 
@@ -389,6 +405,7 @@ module Gori::Tui
       return handle_finding_new_key(ev) if @overlay == :finding_new
       return handle_confirm_key(ev) if @overlay == :confirm
       return handle_browser_key(ev) if @overlay == :browser
+      return handle_flow_picker_key(ev) if @overlay == :comparer_pick
       return handle_settings_key(ev) if @overlay == :settings
       return handle_tabs_key(ev) if @overlay == :tabs
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
@@ -404,6 +421,11 @@ module Gori::Tui
       end
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.editing_notes?
         return if findings_controller.handle_notes_key(ev)
+      end
+      # The Convert chain autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
+      # before the focus ring claims Tab. Non-popup keys fall through (return false).
+      if @active_tab == :convert && @overlay == :none && @focus == :body && convert_controller.completing?
+        return if convert_controller.handle_complete_key(ev)
       end
 
       # Focusable sub-tab strip (Replay/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
@@ -549,8 +571,8 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :settings, :tabs then true
-      else                                                                           false
+      when :palette, :rules, :finding_new, :confirm, :browser, :comparer_pick, :settings, :tabs then true
+      else                                                                                          false
       end
     end
 
@@ -622,12 +644,13 @@ module Gori::Tui
     private def handle_overlay_click(layout : Layout, mx : Int32, my : Int32) : Nil
       area = layout.body
       case @overlay
-      when :palette  then click_palette(area, mx, my)
-      when :rules    then click_rules(area, mx, my)
-      when :browser  then click_browser(area, mx, my)
-      when :confirm  then click_confirm(area, mx, my)
-      when :settings then click_settings(area, mx, my)
-      when :tabs     then click_tabs(area, mx, my)
+      when :palette       then click_palette(area, mx, my)
+      when :rules         then click_rules(area, mx, my)
+      when :browser       then click_browser(area, mx, my)
+      when :comparer_pick then click_flow_picker(area, mx, my)
+      when :confirm       then click_confirm(area, mx, my)
+      when :settings      then click_settings(area, mx, my)
+      when :tabs          then click_tabs(area, mx, my)
         # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
@@ -677,6 +700,7 @@ module Gori::Tui
       return cancel_settings if dismiss_zone?(box, mx, my)
       if idx = @settings_view.field_at(box, mx, my)
         @settings_view.set_field(idx)
+        preview_theme # clicking a theme row live-previews it (no-op outside :theme)
       end
     end
 
@@ -727,11 +751,12 @@ module Gori::Tui
     # Wheel inside a centered modal scrolls its list (no movement for the button modals).
     private def wheel_overlay(step : Int32) : Nil
       case @overlay
-      when :palette  then @palette.move(step)
-      when :rules    then @rules_overlay.select_move(step)
-      when :browser  then @browser_picker.try(&.move(step))
-      when :settings then @settings_view.move_field(step)
-      when :tabs     then @tabs_overlay.select_move(step)
+      when :palette       then @palette.move(step)
+      when :rules         then @rules_overlay.select_move(step)
+      when :browser       then @browser_picker.try(&.move(step))
+      when :comparer_pick then @flow_picker.try(&.move(step))
+      when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
+      when :tabs          then @tabs_overlay.select_move(step)
       end
     end
 
@@ -836,13 +861,60 @@ module Gori::Tui
       @browser_picker = nil
     end
 
+    # Comparer flow picker (a/b → choose flow A/B): type to filter, ↑/↓ select,
+    # ↵ choose (load into the slot), esc cancel.
+    private def handle_flow_picker_key(ev : Termisu::Event::Key) : Nil
+      fp = @flow_picker
+      return close_flow_picker if fp.nil?
+      key = ev.key
+      case
+      when key.escape?    then close_flow_picker
+      when key.up?        then fp.move(-1)
+      when key.down?      then fp.move(1)
+      when key.enter?     then commit_flow_picker
+      when key.backspace? then fp.backspace
+      else
+        fp.query_char(ev.char.not_nil!) if ev.char
+      end
+    end
+
+    # Load the highlighted flow into the picker's target slot and close.
+    private def commit_flow_picker : Nil
+      fp = @flow_picker
+      return close_flow_picker if fp.nil?
+      if row = fp.selected_row
+        if detail = @session.store.get_flow(row.id)
+          comparer_controller.view.set_slot(fp.target, detail)
+          @toast = "comparer: set #{fp.target.to_s.upcase} — #{row.method} #{row.host}"
+        else
+          @toast = "flow no longer available"
+        end
+      end
+      close_flow_picker
+    end
+
+    private def click_flow_picker(area : Rect, mx : Int32, my : Int32) : Nil
+      fp = @flow_picker
+      box = fp.try(&.overlay_box(area))
+      return close_flow_picker if fp.nil? || box.nil? || dismiss_zone?(box, mx, my)
+      if idx = fp.row_at(box, mx, my)
+        fp.set_selected(idx)
+        commit_flow_picker
+      end
+    end
+
+    private def close_flow_picker : Nil
+      @overlay = :none
+      @flow_picker = nil
+    end
+
     # Settings editor (palette → settings:network): ↑/↓ pick a field, type to edit,
     # ↵ save (persist + apply), esc close, ^P jump to the palette.
     private def handle_settings_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
-        @overlay = :none
+        cancel_settings # revert any live theme preview before jumping (mirrors esc); sets @overlay=:none
         open_palette
       elsif key.escape?
         cancel_settings # revert any live theme preview, close
@@ -859,8 +931,10 @@ module Gori::Tui
         reconcile_mouse # the EDITOR section holds the Mouse toggle — apply it live
       elsif key.up?
         @settings_view.move_field(-1)
+        preview_theme # ↑/↓ moves the theme-list selection in the :theme section
       elsif key.down?
         @settings_view.move_field(1)
+        preview_theme
       elsif key.left?
         @settings_view.toggle_or_move(-1)
         preview_theme
@@ -872,6 +946,7 @@ module Gori::Tui
       elsif c && !ev.ctrl? && !ev.alt?
         @settings_view.insert(c)
         @settings_view.set_preedit("")
+        preview_theme # space cycles the theme in the :theme section — preview it too
       end
     end
 
@@ -1277,6 +1352,7 @@ module Gori::Tui
       @finding_form.render(screen, layout.body) if @overlay == :finding_new
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
       @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
+      @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
       # The ":" command line floats over everything else (drawn last), anchored to
@@ -1344,6 +1420,7 @@ module Gori::Tui
       when :detail      then "DETAIL"
       when :confirm     then "CONFIRM"
       when :browser     then "BROWSER"
+      when :comparer_pick then "PICK FLOW"
       when :settings    then "SETTINGS"
       when :tabs        then "TAB BAR"
       else
@@ -1374,6 +1451,7 @@ module Gori::Tui
       when :finding_new then "type title · ↵ create · esc cancel"
       when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser     then "↑/↓ select · ↵ open · esc cancel"
+      when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
       when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
       when :tabs        then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
       when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · ^G goto · ^F find · esc back"
@@ -1423,6 +1501,7 @@ module Gori::Tui
       replay_controller.save_current_replay
       fuzzer_controller.save_current
       findings_controller.commit
+      convert_controller.commit
     end
 
 
@@ -2057,6 +2136,37 @@ module Gori::Tui
       @overlay = :browser
     end
 
+    # --- comparer (diff two arbitrary flows) ---
+
+    # Open the flow picker to choose the flow for slot :a / :b. Snapshots recent
+    # flows; the picker filters them in memory.
+    def comparer_pick(slot : Symbol) : Nil
+      @flow_picker = FlowPicker.new(@session.store.recent_flows(2000), slot)
+      @overlay = :comparer_pick
+    end
+
+    def comparer_swap : Nil
+      comparer_controller.view.swap
+      @toast = "comparer: swapped A ⇄ B"
+    end
+
+    def comparer_toggle_pane : Nil
+      view = comparer_controller.view
+      view.toggle_pane
+      @toast = "comparer: comparing #{view.pane}s"
+    end
+
+    # CROSS-TAB mediator: send History's selected flow to the next Comparer slot
+    # (rings A → B → A). The Comparer tab is hidden by default — reach it via ^P.
+    def comparer_add_selected : Nil
+      id = history_controller.selected_flow_id
+      return (@toast = "select a flow first") unless id
+      detail = @session.store.get_flow(id)
+      return (@toast = "flow no longer available") unless detail
+      slot = comparer_controller.view.add_flow(detail)
+      @toast = "comparer: set #{slot.to_s.upcase} — open Comparer (^P) to view the diff"
+    end
+
     # --- settings (config control) ---
 
     # After a settings save: the upstream proxy is already live (Upstream reads it
@@ -2084,7 +2194,8 @@ module Gori::Tui
     def open_settings(section : Symbol) : Nil
       case section
       when :network, :editor, :theme
-        @settings_view.reload(section)
+        @settings_view.reload(section)            # :theme reloads custom themes — may reconcile the live palette
+        @resized = true if section == :theme      # so force a full repaint (an edited/removed active theme just changed)
         @overlay = :settings
         @theme_restore = section == :theme ? Settings.theme : nil # baseline for live-preview revert
       when :tabs

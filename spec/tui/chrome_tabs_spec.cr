@@ -6,11 +6,14 @@ include Gori::Tui
 # against the canonical catalog (drop unknown, dedupe, append-new, ≥1 visible), and
 # Chrome.visible_tabs derives the rendered/nav strip (with `force:` for the active tab).
 describe "Chrome.reconcile" do
-  it "yields the full catalog with Agent hidden by default on empty prefs" do
+  it "yields the full catalog with the default-hidden tabs hidden on empty prefs" do
     out = Chrome.reconcile([] of {String, Bool})
     out.map(&.first).should eq(Chrome::TABS.map(&.first)) # canonical order, all present
-    out.select { |(_, _, v)| v }.map(&.first).includes?(:agent).should be_false
+    visible = out.select { |(_, _, v)| v }.map(&.first)
+    Chrome::DEFAULT_HIDDEN.each { |sym| visible.includes?(sym).should be_false } # :agent + :comparer + :convert hidden
     out.find { |(s, _, _)| s == :agent }.not_nil![2].should be_false
+    out.find { |(s, _, _)| s == :comparer }.not_nil![2].should be_false
+    out.find { |(s, _, _)| s == :convert }.not_nil![2].should be_false
     out.find { |(s, _, _)| s == :project }.not_nil![2].should be_true
   end
 
@@ -39,11 +42,13 @@ describe "Chrome.reconcile" do
 end
 
 describe "Chrome.visible_tabs" do
-  it "returns only the visible tabs in order (Agent excluded by default)" do
+  it "returns only the visible tabs in order (default-hidden tabs excluded)" do
     vis = Chrome.visible_tabs([] of {String, Bool}).map(&.first)
-    vis.includes?(:agent).should be_false
+    vis.includes?(:agent).should be_false # Agent + Comparer + Convert are hidden by default
+    vis.includes?(:comparer).should be_false
+    vis.includes?(:convert).should be_false
     vis.first.should eq(:project)
-    vis.size.should eq(Chrome::TABS.size - 1)
+    vis.size.should eq(Chrome::TABS.size - Chrome::DEFAULT_HIDDEN.size)
   end
 
   it "force-includes a hidden active tab at its catalog-relative position" do
@@ -52,6 +57,14 @@ describe "Chrome.visible_tabs" do
     vis.includes?(:agent).should be_true
     vis.index(:agent).not_nil!.should be > vis.index(:notes).not_nil!
     vis.index(:agent).not_nil!.should be < vis.index(:help).not_nil!
+  end
+
+  it "force-includes the hidden Convert tab between Notes and Help" do
+    # Convert is hidden by default; the palette "Go to Convert" jump relies on force:.
+    vis = Chrome.visible_tabs([] of {String, Bool}, force: :convert).map(&.first)
+    vis.includes?(:convert).should be_true
+    vis.index(:convert).not_nil!.should be > vis.index(:notes).not_nil!
+    vis.index(:convert).not_nil!.should be < vis.index(:help).not_nil!
   end
 
   it "is a no-op for force: when the active tab is already visible" do

@@ -59,7 +59,7 @@ module Gori
         "settings.editor", "settings:editor", "Set the external editor opened by ^E in editable fields",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:editor); nil }
       r.register Verb::Definition.new(
-        "settings.theme", "settings:theme", "Switch the TUI colour theme (goridark · goriday · latte · espresso · tokyonight)",
+        "settings.theme", "settings:theme", "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)",
         Verb::Scope::Global) { |ctx| ctx.open_settings(:theme); nil }
       r.register Verb::Definition.new(
         "settings.tabs", "settings:tabs", "Customize the top tab bar — show/hide tabs and reorder them",
@@ -137,7 +137,8 @@ module Gori
       # reach a tab hidden in settings:tabs (focus_tab force-shows it while active).
       {
         :project => "Project", :history => "History", :intercept => "Intercept", :sitemap => "Sitemap",
-        :replay => "Replay", :findings => "Findings", :notes => "Notes", :agent => "Agent", :help => "Help",
+        :replay => "Replay", :comparer => "Comparer", :findings => "Findings", :notes => "Notes",
+        :convert => "Convert", :agent => "Agent", :help => "Help",
       }.each do |tab, label|
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global) { |ctx| ctx.focus_tab(tab); nil }
