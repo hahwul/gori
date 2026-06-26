@@ -213,6 +213,7 @@ module Gori::Tui
       last_wf = @session.store.write_failures
       last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
       last_dv_poll = Time.instant
+      last_clock = clock_label # top-bar wall clock; re-render only when the minute rolls over
       loop do
         ev = @term.poll_event(50)
         dirty = false
@@ -263,6 +264,12 @@ module Gori::Tui
         # Debounced QL filter: fire the deferred search once typing has paused.
         dirty = true if history_controller.flush_query_reload_if_due(now)
         dirty = true if sitemap_controller.flush_query_reload_if_due(now)
+        # Tick the top-bar clock: dirty only when the displayed minute changes, so the
+        # idle loop wakes once a minute to repaint rather than every second.
+        if (clock = clock_label) != last_clock
+          last_clock = clock
+          dirty = true
+        end
         render if dirty
         break unless @outcome == :running
       end
@@ -1336,8 +1343,8 @@ module Gori::Tui
 
       layout = Layout.compute(w, h)
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
-        capturing: @session.capturing?, listen: "#{@session.proxy.host}:#{@session.proxy.port}",
-        identity: "user", scope: scope_label, rules: rules_label, intercept: intercept_label)
+        listen: "#{@session.proxy.host}:#{@session.proxy.port}", time: clock_label,
+        scope: scope_label, rules: rules_label, intercept: intercept_label)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
         tabs: effective_tabs,
         findings_count: @findings_count, intercept_count: @session.interceptor.pending_count,
@@ -1398,6 +1405,13 @@ module Gori::Tui
 
     private def scope_label : String
       @scope.active? ? "scope:#{@scope.size}" : "scope:off"
+    end
+
+    # The wall clock shown at the far right of the top bar. Minute granularity — the
+    # event loop only bumps `dirty` when this string changes (see `last_clock`), so
+    # an idle TUI re-renders once a minute, not every second (preserves idle-zero-CPU).
+    private def clock_label : String
+      Time.local.to_s("%H:%M")
     end
 
     private def rules_label : String
