@@ -217,6 +217,36 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "rejects an invalid severity on create (not silently coerced to info)" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","severity":"ultra"}}})
+        resp = drive(store, create)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("invalid severity")
+        store.count_findings.should eq(0)
+      end
+    end
+
+    it "defaults an absent severity to info on create" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x"}}})
+        new_id = tool_payload(drive(store, create)[0])["id"].as_i64
+        store.get_finding(new_id).not_nil!.severity.should eq(Gori::Store::Severity::Info)
+      end
+    end
+
+    it "reports an error (not updated:true) when update_finding has no fields" do
+      with_store do |store|
+        store.insert_finding("f", Gori::Store::Severity::Info, nil, nil)
+        store.flush
+        id = store.findings.first.id
+        upd = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_finding","arguments":{"id":#{id}}}})
+        resp = drive(store, upd)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("no fields to update")
+      end
+    end
+
     it "rejects write tools in read-only mode" do
       with_store do |store|
         create = %({"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x"}}})

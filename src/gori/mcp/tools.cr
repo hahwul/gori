@@ -228,7 +228,14 @@ module Gori
       private def create_finding(h) : Result
         title = str(h, "title")
         return Result.new("missing required 'title'", is_error: true) if title.nil? || title.empty?
-        severity = severity_from(str(h, "severity")) || Store::Severity::Info
+        # An unrecognised severity is rejected, not silently coerced to Info —
+        # matching update_finding (a typo'd 'severity' shouldn't quietly become
+        # an info finding). An absent/blank severity still defaults to Info.
+        sev_s = str(h, "severity")
+        if err = bad_severity(sev_s)
+          return err
+        end
+        severity = severity_from(sev_s) || Store::Severity::Info
         id = @store.insert_finding(title, severity, str(h, "host"), int(h, "flow_id"))
         # insert_finding returns 0 (never raises) when the write batch fails — e.g.
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
@@ -241,20 +248,47 @@ module Gori
         id = int(h, "id")
         return Result.new("missing required 'id'", is_error: true) unless id
         return Result.new("no finding with id #{id}", is_error: true) unless @store.get_finding(id)
+        # A blank severity/status means "leave unchanged"; only a present,
+        # non-blank, unrecognised value is an error.
         sev_s = str(h, "severity")
-        if sev_s && severity_from(sev_s).nil?
-          return Result.new("invalid severity: #{sev_s}", is_error: true)
+        if err = bad_severity(sev_s)
+          return err
         end
         stat_s = str(h, "status")
-        if stat_s && status_from(stat_s).nil?
-          return Result.new("invalid status: #{stat_s}", is_error: true)
+        if err = bad_status(stat_s)
+          return err
         end
-        @store.update_finding(id,
-          title: str(h, "title"),
-          severity: severity_from(sev_s),
-          notes: str(h, "notes"),
-          status: status_from(stat_s))
+
+        title = str(h, "title")
+        return Result.new("title must not be empty", is_error: true) if title && title.empty?
+        notes = str(h, "notes")
+        severity = severity_from(sev_s)
+        status = status_from(stat_s)
+
+        # Don't claim updated:true on a no-op. With no resolvable field the store
+        # write is a silent no-op, so returning success would mislead the caller
+        # (e.g. it'd think a typo'd field name took effect).
+        if title.nil? && severity.nil? && notes.nil? && status.nil?
+          return Result.new("no fields to update (provide at least one of title/severity/notes/status)", is_error: true)
+        end
+
+        @store.update_finding(id, title: title, severity: severity, notes: notes, status: status)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "updated", true } })
+      end
+
+      # An error Result when `s` is a present, non-blank, UNRECOGNISED severity;
+      # nil when it's absent/blank (caller's default) or a valid label. Shared by
+      # create + update so both reject the same typos.
+      private def bad_severity(s : String?) : Result?
+        return nil if s.nil? || s.strip.empty?
+        return nil if severity_from(s)
+        Result.new("invalid severity: #{s} (info|low|medium|high|critical)", is_error: true)
+      end
+
+      private def bad_status(s : String?) : Result?
+        return nil if s.nil? || s.strip.empty?
+        return nil if status_from(s)
+        Result.new("invalid status: #{s} (open|confirmed|false-positive|resolved)", is_error: true)
       end
 
       # --- helpers ------------------------------------------------------------
