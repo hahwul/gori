@@ -97,6 +97,16 @@ module Gori
         "intercept.forward-all", "Forward all held", "Forward every held message",
         Verb::Scope::Intercept, available: intercept_selected) { |ctx| ctx.intercept_forward_all; nil }
 
+      # Catch controls — what to hold (direction) + a condition that narrows it. Both
+      # are handled inline on the Intercept tab (`c` / `/`); registered here (no chord)
+      # for palette discoverability (P1).
+      r.register Verb::Definition.new(
+        "intercept.direction", "Catch direction", "Cycle which to hold: all / requests only / responses only",
+        Verb::Scope::Intercept) { |ctx| ctx.intercept_cycle_direction; nil }
+      r.register Verb::Definition.new(
+        "intercept.filter", "Catch condition", "Only hold messages matching a query (host: method: path: status: scheme:)",
+        Verb::Scope::Intercept) { |ctx| ctx.intercept_query; nil }
+
       # Tab/Shift-Tab are the focus ring (handled directly in the Runner); these
       # bracket chords remain a from-anywhere shortcut to cycle tabs.
       r.register Verb::Definition.new(

@@ -112,7 +112,8 @@ module Gori::Proxy
       # SAME target that gets captured (sent_req.target, used at the insert below), so a
       # held request is precisely an in-scope History row with no live/SQL divergence.
       scope_url = "#{scheme}://#{host}#{sent_req.target}"
-      if (ic = @interceptor) && ic.intercepts_url?(scope_url, host)
+      if (ic = @interceptor) && ic.intercepts_request?(scope_url,
+           method: sent_req.method, host: host, target: sent_req.target, scheme: scheme)
         return handle_held_request(ic, req, sent_req, sent_head, host, port, scheme,
           created_at, started, req_framing, req_len)
       end
@@ -242,7 +243,9 @@ module Gori::Proxy
       # close-delimited / WebSocket bodies would buffer forever, so they bypass.
       # Use the SAME precise URL gate as the request hold (scope_url built above), so a
       # string/regex-excluded flow whose request wasn't held doesn't get its response held.
-      if (ic = @interceptor) && ic.intercepts_url?(scope_url, host) &&
+      # The response gate also honours the catch direction + can test `status:`.
+      if (ic = @interceptor) && ic.intercepts_response?(scope_url,
+           method: req.method, host: host, target: req.target, scheme: scheme, status: resp.status) &&
          !resp_framing.close_delimited? && !sse?(resp) && !websocket_upgrade?(resp)
         return handle_held_response(ic, upstream, req, flow_id, host, port, scheme,
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)

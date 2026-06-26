@@ -220,6 +220,14 @@ private class FakeContext < ExecContext
     @calls << :intercept_forward_all
   end
 
+  def intercept_query : Nil
+    @calls << :intercept_query
+  end
+
+  def intercept_cycle_direction : Nil
+    @calls << :intercept_cycle_direction
+  end
+
   def selected_intercept_id : Int64?
     @selected
   end

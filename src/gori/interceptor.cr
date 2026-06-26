@@ -1,4 +1,5 @@
 require "./scope"
+require "./intercept_filter"
 
 module Gori
   # The Intercept lens (P4 — the human decides): when enabled, an in-flight HTTP
@@ -21,6 +22,20 @@ module Gori
       Forward # send `bytes` onward (edited or original)
       Drop    # discard; the proxy answers the client with a canned 502
     end
+
+    # Which leg of a flow to hold: both, requests only, or responses only. Lets a
+    # user who only cares about outgoing requests (the common case) skip the
+    # response round-trip without disabling intercept. Does NOT relax the h2→h1
+    # downgrade gate — a response can only be held on the interceptable h1 path, so
+    # the connection must stay h1 for either direction.
+    enum Direction
+      Both
+      RequestOnly
+      ResponseOnly
+    end
+
+    # The Subject struct the conditional-intercept filter matches against.
+    alias Subject = InterceptFilter::Subject
 
     # The decision the TUI hands back over an Item's reply channel.
     record Decision, action : Action, bytes : Bytes
@@ -46,12 +61,20 @@ module Gori
       end
     end
 
+    @direction : Direction
+    @filter : InterceptFilter
+
     def initialize(@scope : Scope)
       @mutex = Mutex.new
       @enabled = false
       @items = {} of Int64 => Item
       @next_id = 0_i64
       @shutting_down = false
+      # Which leg(s) to hold + an optional in-memory condition that NARROWS holding
+      # (vs Scope, the global lens). Both default permissive (hold every in-scope
+      # message). Mutated by the TUI fiber, read on the proxy hot path → @mutex.
+      @direction = Direction::Both
+      @filter = InterceptFilter::EMPTY
       # Monotonic counter bumped on every queue/enabled change (incl. async holds
       # from proxy fibers). The TUI compares it to know when to re-render, since
       # the queue mutates without any flow event. Atomic → lock-free read.
@@ -65,6 +88,38 @@ module Gori
 
     def enabled? : Bool
       @mutex.synchronize { @enabled }
+    end
+
+    # Which leg(s) are currently held (TUI reads it to render the catch chip).
+    def direction : Direction
+      @mutex.synchronize { @direction }
+    end
+
+    # The raw condition source (TUI reads it to render the filter bar). The query
+    # itself lives in the TUI's edit buffer; this is the committed copy.
+    def filter_source : String
+      @mutex.synchronize { @filter.source }
+    end
+
+    # Cycle the catch direction Both → RequestOnly → ResponseOnly → Both. Returns
+    # the new value; bumps revision so the TUI redraws the chip.
+    def cycle_direction : Direction
+      now = @mutex.synchronize do
+        @direction = case @direction
+                     when .both?         then Direction::RequestOnly
+                     when .request_only? then Direction::ResponseOnly
+                     else                     Direction::Both
+                     end
+      end
+      @revision.add(1)
+      now
+    end
+
+    # Replace the conditional-intercept filter (parsed from a QL-like query). Cheap
+    # to rebuild, so the TUI can call it live on every keystroke. Bumps revision.
+    def set_filter(query : String) : Nil
+      @mutex.synchronize { @filter = InterceptFilter.new(query) }
+      @revision.add(1)
     end
 
     # Toggle on/off. Turning OFF auto-forwards everything currently held (so
@@ -88,19 +143,45 @@ module Gori
     # h2→h1 BEFORE any request exists (so only the host is known). Scope rules that
     # match on path/URL can't be evaluated yet, so this is permissive: downgrade if the
     # host COULD be in scope, then let ClientConn make the precise per-request call via
-    # intercepts_url?. Keeping the connection on h1 is what lets a request be held at all.
+    # intercepts_request?. Keeping the connection on h1 is what lets a request be held.
+    # Direction-agnostic on purpose: holding EITHER a request or a response needs h1.
     def intercepts_host?(host : String) : Bool
       active = @mutex.synchronize { @enabled && !@shutting_down }
       return false unless active
       @scope.active? ? @scope.may_match_host?(host) : true
     end
 
-    # Precise per-request gate, used by ClientConn (which has the full request): hold
-    # this exact flow? `url` is `scheme://host/target` — the same value the Scope SQL
-    # filter builds, so a held request is exactly an in-scope History row.
-    def intercepts_url?(url : String, host : String) : Bool
-      active = @mutex.synchronize { @enabled && !@shutting_down }
-      return false unless active
+    # Precise per-REQUEST gate, used by ClientConn (which has the full request): hold
+    # this exact request? `url` is `scheme://host/target` — the same value the Scope
+    # SQL filter builds, so a held request is exactly an in-scope History row. Folds
+    # in the catch direction (skip when responses-only) and the conditional filter.
+    def intercepts_request?(url : String, *, method : String, host : String,
+                            target : String, scheme : String) : Bool
+      enabled, dir, filter = gate_snapshot
+      return false unless enabled
+      return false if dir.response_only?
+      return false unless scope_allows?(url, host)
+      filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme))
+    end
+
+    # Precise per-RESPONSE gate (same shape as the request gate). Skips when
+    # requests-only; the condition can also test `status:` here (a response has one).
+    def intercepts_response?(url : String, *, method : String, host : String,
+                             target : String, scheme : String, status : Int32) : Bool
+      enabled, dir, filter = gate_snapshot
+      return false unless enabled
+      return false if dir.request_only?
+      return false unless scope_allows?(url, host)
+      filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme, status: status))
+    end
+
+    # One locked read of the enabled/direction/filter trio, so a single hot-path
+    # call takes @mutex once. Scope has its OWN mutex, so scope_allows? runs after.
+    private def gate_snapshot : {Bool, Direction, InterceptFilter}
+      @mutex.synchronize { {@enabled && !@shutting_down, @direction, @filter} }
+    end
+
+    private def scope_allows?(url : String, host : String) : Bool
       @scope.active? ? @scope.in_scope_url?(url, host) : true
     end
 

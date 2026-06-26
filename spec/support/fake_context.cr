@@ -114,6 +114,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def intercept_forward_all : Nil; end
 
+  def intercept_query : Nil; end
+
+  def intercept_cycle_direction : Nil; end
+
   def selected_intercept_id : Int64?
     nil
   end
