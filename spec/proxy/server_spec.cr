@@ -315,6 +315,56 @@ describe Gori::Proxy::Server do
     sink.requests.first.target.should eq("/held")
   end
 
+  it "evaluates the response intercept condition against the REWRITTEN request line" do
+    # Regression: a Match&Replace rule rewrites /hello → /hi. With a response-only
+    # catch + condition `path:/hi`, the response gate must match the REWRITTEN path
+    # (what was sent + captured + scope-gated), not the original /hello — else the
+    # request's response would slip through unheld.
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("ok", seen)
+
+    store_path = File.tempname("gori-icrw", ".db")
+    store = Gori::Store.open(store_path)
+    interceptor = Gori::Interceptor.new(Gori::Scope.load(store))
+    interceptor.toggle
+    interceptor.cycle_direction # Both → RequestOnly
+    interceptor.cycle_direction # → ResponseOnly (stream the request, hold only the response)
+    interceptor.set_filter("path:/hi")
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: StubRewriter.new, interceptor: interceptor)
+    proxy.start
+
+    held_kinds = [] of Gori::Interceptor::Kind
+    spawn do
+      loop do
+        interceptor.pending.each do |it|
+          held_kinds << it.kind
+          interceptor.forward(it.id)
+        end
+        sleep 0.01.seconds
+      end
+    end
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /hello HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    store.close
+    File.delete?(store_path)
+    File.delete?("#{store_path}-wal")
+    File.delete?("#{store_path}-shm")
+
+    seen.receive.should eq("GET /hi HTTP/1.1")                      # upstream saw the rewritten line
+    held_kinds.should contain(Gori::Interceptor::Kind::Response)    # response held: matched /hi (not /hello)
+    held_kinds.should_not contain(Gori::Interceptor::Kind::Request) # ResponseOnly → request streamed
+  end
+
   it "drops a held request with a 502 and records it Aborted" do
     done = Channel(Nil).new(1)
 
