@@ -37,15 +37,23 @@ module Gori
       private def self.build_from_parts(uri : URI, scheme : String, host : String, port : Int32,
                                         args : Hash(String, JSON::Any)) : Bytes
         method = (args["method"]?.try(&.as_s?) || "GET").upcase
+        validate_method(method)
         body = args["body"]?.try(&.as_s?)
 
         path = uri.path
         path = "/" if path.empty?
         target = uri.query ? "#{path}?#{uri.query}" : path
+        # uri.path/query are decoded views of the URL; a literal CR/LF/NUL here
+        # would forge the request line (split into a fake header or request).
+        reject_injection(target, "request target")
 
         headers = [] of {String, String}
         if h = args["headers"]?.try(&.as_h?)
-          h.each { |k, v| headers << {k, v.as_s? || v.to_s} }
+          h.each do |k, v|
+            value = v.as_s? || v.to_s
+            validate_header(k, value)
+            headers << {k, value}
+          end
         end
 
         unless headers.any? { |(k, _)| k.compare("host", case_insensitive: true) == 0 }
@@ -67,6 +75,38 @@ module Gori
 
       private def self.default_port(scheme : String) : Int32
         scheme == "https" ? 443 : 80
+      end
+
+      # The structured path frames the request itself, so a CR/LF/NUL smuggled
+      # into a header name/value (or the method/target) would split one logical
+      # header into many — or smuggle a whole second request — past the caller's
+      # intent. We reject those octets here so a tool arg can't desync framing.
+      # Callers who genuinely need malformed bytes use `raw` (byte-exact by
+      # contract); the body is likewise sent verbatim with a matching
+      # Content-Length, so it cannot smuggle and is not checked.
+      private def self.validate_header(name : String, value : String) : Nil
+        raise Gori::Error.new("header name must not be empty") if name.empty?
+        raise Gori::Error.new("illegal CR/LF/NUL in header name #{name.inspect}") if injection_char?(name)
+        raise Gori::Error.new("illegal CR/LF/NUL in value of header #{name.inspect}") if injection_char?(value)
+      end
+
+      # A method must be a non-empty token: no whitespace (a space forges the
+      # request line: `GET /admin HTTP/1.1`) and no controls (CR/LF inject
+      # headers). Any printable non-space char is allowed (custom verbs like
+      # PROPFIND/PURGE/QUERY pass).
+      private def self.validate_method(method : String) : Nil
+        raise Gori::Error.new("method must not be empty") if method.empty?
+        method.each_char do |c|
+          raise Gori::Error.new("illegal character in method #{method.inspect}") if c <= ' ' || c == '\u007F'
+        end
+      end
+
+      private def self.reject_injection(s : String, what : String) : Nil
+        raise Gori::Error.new("illegal CR/LF/NUL in #{what}") if injection_char?(s)
+      end
+
+      private def self.injection_char?(s : String) : Bool
+        s.includes?('\r') || s.includes?('\n') || s.includes?('\0')
       end
 
       # A `raw` request is sent byte-for-byte EXCEPT that lone LFs in the HEADER

@@ -332,4 +332,52 @@ describe Gori::MCP::RequestBuilder do
     args = JSON.parse(%({"url":"/relative"})).as_h
     expect_raises(Gori::Error) { Gori::MCP::RequestBuilder.build(args) }
   end
+
+  describe "structured-path injection guards" do
+    it "rejects CR/LF in a header value (header injection)" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "headers" => JSON::Any.new({"X-Inj" => JSON::Any.new("a\r\nX-Evil: 1")})}
+      expect_raises(Gori::Error, /header.*X-Inj/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects a bare LF in a header value (lenient origins split on LF)" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "headers" => JSON::Any.new({"X-LF" => JSON::Any.new("a\nX-Evil: 1")})}
+      expect_raises(Gori::Error) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects CR/LF in a header name" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "headers" => JSON::Any.new({"X-A\r\nX-S" => JSON::Any.new("1")})}
+      expect_raises(Gori::Error, /header name/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects an empty header name" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "headers" => JSON::Any.new({"" => JSON::Any.new("v")})}
+      expect_raises(Gori::Error, /empty/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects whitespace/CRLF in the method (request-line forgery)" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "method" => JSON::Any.new("GET /admin HTTP/1.1\r\nHost: a")}
+      expect_raises(Gori::Error, /method/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "still allows a custom method and internal spaces in a header VALUE" do
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "method" => JSON::Any.new("propfind"),
+              "headers" => JSON::Any.new({"X-Note" => JSON::Any.new("hello world ok")})}
+      out = String.new(Gori::MCP::RequestBuilder.build(args).bytes)
+      out.should start_with("PROPFIND / HTTP/1.1\r\n")
+      out.should contain("X-Note: hello world ok\r\n")
+    end
+
+    it "leaves the raw path byte-exact (smuggling is the caller's explicit choice)" do
+      raw = "GET /x HTTP/1.1\nX-Inj: a\r\nX-Evil: 1\n\n"
+      args = {"url" => JSON::Any.new("http://h.test/"), "raw" => JSON::Any.new(raw)}
+      # raw mode does NOT validate — it is byte-exact by contract.
+      Gori::MCP::RequestBuilder.build(args).should_not be_nil
+    end
+  end
 end
