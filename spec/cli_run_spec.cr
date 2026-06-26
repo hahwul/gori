@@ -139,7 +139,41 @@ describe Gori::Findings::Export do
       md.should contain("### Request")
       md.should contain("GET /v1/debug HTTP/1.1")
       md.should contain("(##{fid})")
+      # The header block's terminating CRLF CRLF is trimmed, so the last header
+      # line abuts the closing fence (no stack of blank lines inside the block).
+      md.should contain("Host: api.test\n```")
+      md.should_not contain("\r\n\r\n")
     end
+  end
+
+  it "separates evidence headers from the body with exactly one blank line" do
+    with_store do |store|
+      req = Gori::Store::CapturedRequest.new(
+        created_at: 0_i64, scheme: "https", host: "api.test", port: 443, method: "POST",
+        target: "/login", http_version: "HTTP/1.1",
+        head: "POST /login HTTP/1.1\r\nHost: api.test\r\nContent-Length: 9\r\n\r\n".to_slice,
+        body: "user=root".to_slice)
+      fid = store.insert_flow(req)
+      store.flush
+      findings = [Gori::Store::Finding.new(1_i64, 0_i64, 0_i64, "creds in body",
+        Gori::Store::Severity::High, "api.test", fid, "", Gori::Store::Status::Open)]
+      md = Gori::Findings::Export.markdown(findings, store, "demo")
+      # one blank line between the last header and the body — not three
+      md.should contain("Content-Length: 9\n\nuser=root")
+      md.should_not contain("Content-Length: 9\n\n\nuser=root")
+    end
+  end
+end
+
+describe Gori::QL do
+  # `gori run history -q` relies on this: a query that fails to compile to any
+  # clause collapses to the match-all EMPTY filter. The CLI special-cases that so
+  # a typo like `status:>=foo` errors instead of silently dumping every flow.
+  it "collapses an un-compilable query to EMPTY (so the CLI can reject it)" do
+    Gori::QL.parse("status:>=foo").should eq(Gori::QL::EMPTY)
+    Gori::QL.parse("-status:bar").should eq(Gori::QL::EMPTY)
+    Gori::QL.parse("login").should_not eq(Gori::QL::EMPTY)
+    Gori::QL.parse("status:>=500").should_not eq(Gori::QL::EMPTY)
   end
 end
 

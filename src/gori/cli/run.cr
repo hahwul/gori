@@ -126,7 +126,20 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          rows = (q = query) ? store.search(QL.parse(q), limit) : store.recent_flows(limit)
+          rows =
+            if q = query
+              filter = QL.parse(q)
+              # A query that fails to compile to ANY clause (e.g. `status:>=foo`)
+              # yields the match-all EMPTY filter — silently dumping every flow,
+              # the opposite of what the user asked. Refuse it instead.
+              if !q.strip.empty? && filter == QL::EMPTY
+                store.close
+                abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
+              end
+              store.search(filter, limit)
+            else
+              store.recent_flows(limit)
+            end
           if format == :json
             rows.each { |r| puts CLI::Output.flow_row_json(r) }
           elsif rows.empty?
@@ -358,7 +371,10 @@ module Gori
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
-        begin
+        # Build the report while the store is open (markdown resolves linked-flow
+        # evidence), then close BEFORE any file I/O so a write failure can't leak the
+        # connection — and so the abort below runs after a clean close.
+        result = begin
           findings = store.findings
           if findings.empty? && format == :text && export_path.nil?
             STDERR.puts "no findings"
@@ -370,14 +386,21 @@ module Gori
             when :markdown then Findings::Export.markdown(findings, store, project.name)
             else                findings_text(findings)
             end
-          if path = export_path
-            File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
-            STDERR.puts "exported #{findings.size} finding#{findings.size == 1 ? "" : "s"} → #{path}"
-          else
-            puts content
-          end
+          {content, findings.size}
         ensure
           store.close
+        end
+        content, count = result
+
+        if path = export_path
+          begin
+            File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
+          rescue ex : File::Error
+            abort "gori run findings: cannot write to #{path}: #{ex.message}"
+          end
+          STDERR.puts "exported #{count} finding#{count == 1 ? "" : "s"} → #{path}"
+        else
+          puts content
         end
       end
 
@@ -434,7 +457,7 @@ module Gori
       # else the most-recently-active project. Aborts when nothing resolves.
       private def self.resolve_read_project(project_name : String?, db_path : String?) : Project
         if path = db_path
-          abort "gori run: db not found: #{path}" unless File.exists?(path)
+          abort "gori run: --db is not a readable file: #{path}" unless File.file?(path)
           return Project.new(File.basename(File.dirname(path)), path)
         end
         projects = ProjectRegistry.new(Paths.projects_dir).list
@@ -451,13 +474,22 @@ module Gori
       # existing one). --db keeps the explicit-file behaviour of legacy --headless.
       private def self.resolve_capture_project(project_name : String?, db_path : String?) : Project
         if path = db_path
-          return Project.new(File.basename(File.dirname(path)), path)
+          # Catch the unopenable cases up front with a clean message — otherwise
+          # SQLite raises a raw DB::ConnectionRefused backtrace deep in Session.open.
+          abort "gori run capture: --db is a directory, not a file: #{path}" if Dir.exists?(path)
+          parent = File.dirname(path)
+          abort "gori run capture: --db parent directory does not exist: #{parent}" unless Dir.exists?(parent)
+          return Project.new(File.basename(parent), path)
         end
         ProjectRegistry.new(Paths.projects_dir).create(project_name || "default")
       end
 
+      # Opening a non-SQLite file (or a path we can't read) raises deep in the driver;
+      # turn that into a clean CLI error instead of an unhandled backtrace.
       private def self.open_store(project : Project) : Store
         Store.open(project.db_path)
+      rescue ex : DB::Error | SQLite3::Exception
+        abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
       end
 
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64
@@ -482,6 +514,7 @@ module Gori
         m = v.match(/\A(\d+)(s|m|h)?\z/)
         abort "gori run: invalid duration '#{v}' (use e.g. 30s, 5m, 1h)" unless m
         n = m[1].to_i
+        abort "gori run: --for must be greater than 0 (got '#{v}')" if n == 0
         case m[2]?
         when "m" then n.minutes
         when "h" then n.hours
@@ -521,6 +554,12 @@ module Gori
       # head lines + blank + body lines (scrubbed), for the --diff line comparison.
       private def self.message_lines(head : Bytes?, body : Bytes?) : Array(String)
         lines = bytes_to_lines(head)
+        # The head BLOB ends with the CRLF CRLF that terminates the header block,
+        # so splitting it leaves trailing empty lines; drop them and add exactly one
+        # blank separator before the body (matches the non-diff text view).
+        while !lines.empty? && lines.last.empty?
+          lines.pop
+        end
         if body && !body.empty?
           lines << ""
           lines.concat(bytes_to_lines(body))
