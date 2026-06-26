@@ -9,6 +9,7 @@ require "./text_area"
 require "./gutter"
 require "./search_hi"
 require "./reveal"
+require "./fmt"
 require "../store"
 require "../replay/engine"
 require "../replay/h2_engine"
@@ -31,7 +32,10 @@ module Gori::Tui
       @name = nil
       @flow = nil.as(Store::FlowDetail?)
       @target = ""
-      @tcx = 0 # target cursor
+      @tcx = 0              # target (URL) cursor
+      @sni = ""             # custom TLS SNI host ("" = present the target host)
+      @scx = 0              # SNI cursor
+      @target_field = :url  # which field the TARGET pane edits: :url | :sni
       @editor = TextArea.new
       @editor.gutter = true # line numbers in the request body (pairs with ^G)
       @search_hl = ""       # active ^F query → highlight in the response pane (request is via @editor)
@@ -185,6 +189,9 @@ module Gori::Tui
       @http2 = detail.http_version == "HTTP/2"
       @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
       @tcx = @target.size
+      @sni = ""
+      @scx = 0
+      @target_field = :url
       @editor.set_text(origin_form_text(detail))
       @original_lines = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
 
@@ -210,11 +217,15 @@ module Gori::Tui
     # us — that would echo back to the peer.
     def restore(target : String, request : String, http2 : Bool, auto_cl : Bool,
                 response_head : Bytes? = nil, response_body : Bytes? = nil,
-                response_error : String? = nil, response_duration_us : Int64? = nil) : Nil
+                response_error : String? = nil, response_duration_us : Int64? = nil,
+                sni : String = "") : Nil
       @flow = nil
       @http2 = http2
       @target = target
       @tcx = @target.size
+      @sni = sni
+      @scx = @sni.size
+      @target_field = :url
       @editor.set_text(request)
       @original_lines = [] of String
       # Rebuild the persisted result: a head (success) or an error (failed send)
@@ -259,6 +270,9 @@ module Gori::Tui
       @http2 = false
       @target = BLANK_TARGET
       @tcx = @target.size
+      @sni = ""
+      @scx = 0
+      @target_field = :url
       @editor.set_text(BLANK_REQUEST)
       @original_lines = [] of String
       @result = nil
@@ -329,6 +343,26 @@ module Gori::Tui
       {"http", "", 0}
     end
 
+    # The TARGET card grows to a second content row (4 high vs 3) whenever an SNI
+    # override is set OR is being edited — so the override is always visible, and the
+    # input row only appears once you reach for it (^S).
+    private def sni_active? : Bool
+      !@sni.strip.empty? || (editing_sni? && @focus == :target)
+    end
+
+    private def target_card_h : Int32
+      sni_active? ? 4 : 3
+    end
+
+    # The TARGET card row prefixes (marker + the field value 1 col to its right). Kept
+    # as constants so render_target and the click→caret mapping agree on the value base.
+    TARGET_PREFIX = "›"
+    SNI_PREFIX    = "SNI ›"
+
+    private def field_base(rect : Rect, prefix : String) : Int32
+      rect.x + 2 + prefix.size + 1
+    end
+
     # --- focus ring (driven by the Runner's Tab/Shift-Tab) ---
     # Pane order top-to-bottom: target ▸ request ▸ response. focus_first/last are
     # the ends of the ring; pane_advance returns false when it would step off an
@@ -336,11 +370,20 @@ module Gori::Tui
     PANE_ORDER = [:target, :request, :response]
 
     def focus_first : Nil
-      @focus = :target
+      set_focus(:target)
     end
 
     def focus_last : Nil
-      @focus = :response
+      set_focus(:response)
+    end
+
+    # Move focus to `pane`, exiting the ^S SNI sub-field. SNI editing is an explicit
+    # per-visit sub-mode (you opt in with ^S each time you're on the target), so ANY
+    # focus change drops back to the URL field — otherwise navigating away while
+    # editing SNI and returning would silently route URL keystrokes into @sni.
+    private def set_focus(pane : Symbol) : Nil
+      @focus = pane
+      @target_field = :url
     end
 
     def set_preedit(text : String) : Nil
@@ -351,21 +394,22 @@ module Gori::Tui
       i = PANE_ORDER.index(@focus) || 0
       ni = i + dir
       return false if ni < 0 || ni >= PANE_ORDER.size
-      @focus = PANE_ORDER[ni]
+      set_focus(PANE_ORDER[ni])
       true
     end
 
     # Public setter mirroring the focus ring: jump straight to a pane (e.g. a click)
     # rather than stepping with pane_advance. Ignores anything not in PANE_ORDER.
+    # (A click on the SNI row re-enters it: target_click_to_cursor runs after this.)
     def focus_pane(pane : Symbol) : Nil
-      @focus = pane if PANE_ORDER.includes?(pane)
+      set_focus(pane) if PANE_ORDER.includes?(pane)
     end
 
     # Inverts render's layout: a 3-row target band on top, then a half-width
     # request|response split (the column at content.x + half is the divider).
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless @loaded && rect.contains?(mx, my)
-      target_h = {rect.h, 3}.min
+      target_h = {rect.h, target_card_h}.min
       return :target if my < rect.y + target_h
       content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
       return nil if content.h <= 0
@@ -379,7 +423,7 @@ module Gori::Tui
     # (target band + split, then the card's 1-cell inset) exactly as render_request does.
     def request_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless @loaded
-      target_h = {rect.h, 3}.min
+      target_h = {rect.h, target_card_h}.min
       content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
       return if content.h <= 0
       half = {(content.w - 1) // 2, 1}.max
@@ -391,11 +435,17 @@ module Gori::Tui
       end
     end
 
-    # Mouse: place the single-line TARGET caret at a click. render_target draws
-    # @target at rect.x + 4 of the target band (which shares the body's x).
+    # Mouse: focus the URL or SNI field of the TARGET band by which row was clicked,
+    # and place that field's caret. The value bases mirror render_target (field_base).
     def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless @loaded
-      @tcx = Screen.column_for(@target, mx - (rect.x + 4))
+      if sni_active? && my >= rect.y + 2
+        @target_field = :sni
+        @scx = Screen.column_for(@sni, mx - field_base(rect, SNI_PREFIX))
+      else
+        @target_field = :url
+        @tcx = Screen.column_for(@target, mx - field_base(rect, TARGET_PREFIX))
+      end
     end
 
     # Top boundary of the focused pane — the Runner pops focus to the tab bar when
@@ -481,21 +531,68 @@ module Gori::Tui
     end
 
     # --- target field (focus == :target) ---
+    # The TARGET pane edits one of two single-line fields — the URL or the SNI host
+    # override — selected by @target_field (^S toggles). The mutators below act on
+    # whichever is active so one set of keys drives both.
+    getter sni : String
+
+    # The SNI host to present in the TLS handshake, or nil when blank (→ the dialed
+    # target host is used, the usual case).
+    def sni_override : String?
+      s = @sni.strip
+      s.empty? ? nil : s
+    end
+
+    def editing_sni? : Bool
+      @target_field == :sni
+    end
+
+    # ^S (on the TARGET pane): flip between editing the URL and the SNI host. Entering
+    # the SNI field homes its caret to the end; leaving it returns to the URL.
+    def toggle_sni_field : Nil
+      if @target_field == :sni
+        @target_field = :url
+      else
+        @target_field = :sni
+        @scx = @sni.size
+      end
+    end
+
+    # Drop back to URL editing (↵/esc in the SNI field) without changing the value.
+    def exit_sni_field : Nil
+      @target_field = :url
+    end
+
     def target_insert(ch : Char) : Nil
-      @target = "#{@target[0, @tcx]}#{ch}#{@target[@tcx..]}"
-      @tcx += 1
+      if @target_field == :sni
+        @sni = "#{@sni[0, @scx]}#{ch}#{@sni[@scx..]}"
+        @scx += 1
+      else
+        @target = "#{@target[0, @tcx]}#{ch}#{@target[@tcx..]}"
+        @tcx += 1
+      end
       @dirty = true
     end
 
     def target_backspace : Nil
-      return if @tcx == 0
-      @target = "#{@target[0, @tcx - 1]}#{@target[@tcx..]}"
-      @tcx -= 1
+      if @target_field == :sni
+        return if @scx == 0
+        @sni = "#{@sni[0, @scx - 1]}#{@sni[@scx..]}"
+        @scx -= 1
+      else
+        return if @tcx == 0
+        @target = "#{@target[0, @tcx - 1]}#{@target[@tcx..]}"
+        @tcx -= 1
+      end
       @dirty = true
     end
 
     def target_move(d : Int32) : Nil
-      @tcx = (@tcx + d).clamp(0, @target.size)
+      if @target_field == :sni
+        @scx = (@scx + d).clamp(0, @sni.size)
+      else
+        @tcx = (@tcx + d).clamp(0, @target.size)
+      end
       @dirty = true
     end
 
@@ -557,8 +654,9 @@ module Gori::Tui
         return
       end
 
-      # target pane: a 3-row card on top; request | response cards fill the rest.
-      target_h = {rect.h, 3}.min
+      # target pane: a 3-row card on top (4 when an SNI override is set/edited);
+      # request | response cards fill the rest.
+      target_h = {rect.h, target_card_h}.min
       render_target(screen, Rect.new(rect.x, rect.y, rect.w, target_h), focused && @focus == :target)
 
       content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
@@ -577,13 +675,26 @@ module Gori::Tui
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.h < 2
       Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused))
-      row = rect.y + 1
-      screen.text(rect.x + 2, row, "›", focused ? Theme.accent : Theme.muted)
-      base = rect.x + 4
-      screen.text(base, row, @target, Theme.text_bright, width: {rect.w - 6, 1}.max)
-      if focused
-        ch = @tcx < @target.size ? @target[@tcx] : ' '
-        cursor_x = base + Screen.display_width(@target[0, @tcx])
+      # An at-a-glance SNI marker on the top border (right of the title) whenever an
+      # override is set, so a custom SNI is visible even before the row is reached.
+      unless @sni.strip.empty?
+        badge = " SNI "
+        bx = {rect.right - badge.size - 1, rect.x + 9}.max
+        screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg)
+      end
+      draw_target_row(screen, rect, rect.y + 1, TARGET_PREFIX, @target, @tcx, focused && @target_field == :url)
+      draw_target_row(screen, rect, rect.y + 2, SNI_PREFIX, @sni, @scx, focused && @target_field == :sni) if sni_active? && rect.h >= 4
+    end
+
+    # One single-line field row of the TARGET card: a marker prefix, then the value,
+    # with the block caret + terminal cursor when this row is the active field.
+    private def draw_target_row(screen : Screen, rect : Rect, row : Int32, prefix : String, value : String, cx : Int32, active : Bool) : Nil
+      screen.text(rect.x + 2, row, prefix, active ? Theme.accent : Theme.muted)
+      base = field_base(rect, prefix)
+      screen.text(base, row, value, Theme.text_bright, width: {rect.right - base - 1, 1}.max)
+      if active
+        ch = cx < value.size ? value[cx] : ' '
+        cursor_x = base + Screen.display_width(value[0, cx])
         screen.cell(cursor_x, row, ch, Theme.bg, Theme.accent)
         screen.cursor(cursor_x, row)
       end
@@ -620,8 +731,18 @@ module Gori::Tui
         !@resp_hex && @resp_mode == :response ? Theme.accent_bg : Theme.bg) + 1
       tx = screen.text(tx, rect.y, " diff ", !@resp_hex && @resp_mode == :diff ? Theme.text_bright : Theme.muted,
         !@resp_hex && @resp_mode == :diff ? Theme.accent_bg : Theme.bg) + 1
-      screen.text(tx, rect.y, " hex ", @resp_hex ? Theme.text_bright : Theme.muted,
+      chips_end = screen.text(tx, rect.y, " hex ", @resp_hex ? Theme.text_bright : Theme.muted,
         @resp_hex ? Theme.accent_bg : Theme.bg)
+
+      # Latency · size of the last send, right-aligned on the top border (the body
+      # already shows the status line, so duration + total wire bytes are the gap).
+      # Drawn only when it clears the mode chips, so a narrow pane drops it cleanly.
+      if result = @result
+        meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}"
+                          : Fmt.dur(result.duration_us)
+        meta_x = rect.right - meta.size - 1
+        screen.text(meta_x, rect.y, meta, Theme.muted, Theme.bg) if meta_x > chips_end + 1
+      end
 
       body = rect.inset(1, 1)
       if @resp_hex

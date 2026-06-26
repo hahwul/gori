@@ -274,4 +274,75 @@ describe Gori::Tui::ReplayView do
       store.replays.first.name.should be_nil
     end
   end
+
+  it "shows the response duration and size on the RESPONSE pane after a send" do
+    view = ReplayView.new
+    view.load_blank
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
+    body = ("x" * 2048).to_slice
+    view.apply(Gori::Replay::Result.new(head, body, nil, 234_000_i64)) # 234 ms, head+body ≈ 2 KB
+
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("234ms").should be_true
+    backend.contains?("KB").should be_true
+  end
+
+  it "edits and exposes an SNI override (^S sub-field of the target)" do
+    view = ReplayView.new
+    view.load_blank # focus starts on :target
+    view.sni_override.should be_nil
+    view.editing_sni?.should be_false
+
+    view.toggle_sni_field # ^S → edit the SNI host
+    view.editing_sni?.should be_true
+    "evil.com".each_char { |c| view.target_insert(c) }
+    view.sni.should eq("evil.com")        # the SNI field took the input, not the URL
+    view.target.should eq("https://example.com") # URL untouched
+    view.sni_override.should eq("evil.com")
+    view.dirty?.should be_true
+
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("SNI").should be_true
+    backend.contains?("evil.com").should be_true
+  end
+
+  it "leaving the target pane exits the SNI sub-field (URL edits never land in SNI)" do
+    view = ReplayView.new
+    view.load_blank
+    view.toggle_sni_field
+    "evil.com".each_char { |c| view.target_insert(c) }
+    view.editing_sni?.should be_true
+
+    view.pane_advance(1) # ↓/Tab down into the request pane
+    view.editing_sni?.should be_false
+    view.focus_first # …then back up to the target pane
+
+    view.editing_sni?.should be_false      # arrives on the URL field, not the stale SNI sub-field
+    view.target_insert('Z')                # a URL keystroke must edit the URL…
+    view.target.should eq("https://example.comZ")
+    view.sni.should eq("evil.com")         # …and leave the SNI value untouched
+  end
+
+  it "restore seeds a persisted SNI override and shows it" do
+    view = ReplayView.new
+    view.restore("https://10.0.0.5", "GET / HTTP/1.1\n\n", false, true, sni: "evil.com")
+    view.sni_override.should eq("evil.com")
+    view.dirty?.should be_false # a restored tab must never be re-saved
+
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("evil.com").should be_true
+  end
+
+  it "persists a replay tab's SNI override (set / clear)" do
+    replay_tmp_store do |store|
+      id = store.insert_replay("https://h/x", "GET /x HTTP/1.1", false, true, nil, 0, "evil.com")
+      store.replays.first.sni.should eq("evil.com")
+      store.replays_meta.first.sni.should eq("evil.com") # syncs via the fast reconcile poll too
+      store.update_replay(id, "https://h/x", "GET /x HTTP/1.1", false, true, nil) # clear
+      store.replays.first.sni.should be_nil
+    end
+  end
 end

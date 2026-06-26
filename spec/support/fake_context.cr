@@ -66,6 +66,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def sitemap_collapse : Nil; end
 
+  def sitemap_query : Nil; end
+
   def scope_open : Nil; end
 
   def scope_add_host : Nil; end

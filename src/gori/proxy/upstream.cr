@@ -87,10 +87,14 @@ module Gori::Proxy
       end
     end
 
-    def self.dial_tls(host : String, port : Int32, verify : Bool, alpn : String? = nil) : OpenSSL::SSL::Socket::Client?
+    # `sni` overrides the name presented in the TLS ClientHello (and, under verify,
+    # the name the cert is checked against) WITHOUT changing the dialed host:port —
+    # the replay workbench uses it for domain-fronting / vhost-confusion / IP-direct
+    # sends. nil → the dialed host is used (the usual case).
+    def self.dial_tls(host : String, port : Int32, verify : Bool, alpn : String? = nil, sni : String? = nil) : OpenSSL::SSL::Socket::Client?
       tcp = dial(host, port)
       return nil unless tcp
-      ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn), sync_close: true, hostname: host)
+      ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn), sync_close: true, hostname: sni || host)
       ssl.sync = true
       ssl
     rescue

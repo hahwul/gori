@@ -233,6 +233,7 @@ module Gori::Tui
         end
         # Debounced QL filter: fire the deferred search once typing has paused.
         dirty = true if history_controller.flush_query_reload_if_due(now)
+        dirty = true if sitemap_controller.flush_query_reload_if_due(now)
         render if dirty
         break unless @outcome == :running
       end
@@ -379,6 +380,9 @@ module Gori::Tui
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
         return if history_controller.handle_query_key(ev)
+      end
+      if @active_tab == :sitemap && @overlay == :none && @focus == :body && sitemap_controller.view.querying?
+        return if sitemap_controller.handle_query_key(ev)
       end
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.editing_notes?
         return if findings_controller.handle_notes_key(ev)
@@ -1708,6 +1712,10 @@ module Gori::Tui
 
     def sitemap_collapse : Nil
       sitemap_controller.sitemap_collapse
+    end
+
+    def sitemap_query : Nil
+      sitemap_controller.sitemap_query
     end
 
     # --- History / detail ExecContext --- (delegated to HistoryController)

@@ -124,6 +124,10 @@ private class FakeContext < ExecContext
     @calls << :sitemap_collapse
   end
 
+  def sitemap_query : Nil
+    @calls << :sitemap_query
+  end
+
   def scope_open : Nil
     @calls << :scope_open
   end

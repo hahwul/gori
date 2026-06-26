@@ -31,9 +31,9 @@ module Gori
       FORBIDDEN = {"connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "host"}
 
       def self.send(request : Bytes, *, scheme : String, host : String, port : Int32,
-                    verify_upstream : Bool) : Result
+                    verify_upstream : Bool, sni : String? = nil) : Result
         started = Time.instant
-        upstream = open(scheme, host, port, verify_upstream)
+        upstream = open(scheme, host, port, verify_upstream, sni)
         return failure("h2 connect failed (no h2 negotiated): #{host}:#{port}", started) unless upstream
         begin
           headers, body = parse_request(request, scheme, host, port)
@@ -50,9 +50,9 @@ module Gori
         end
       end
 
-      private def self.open(scheme : String, host : String, port : Int32, verify : Bool) : IO?
+      private def self.open(scheme : String, host : String, port : Int32, verify : Bool, sni : String? = nil) : IO?
         if scheme == "https"
-          ssl = Proxy::Upstream.dial_tls(host, port, verify: verify, alpn: "h2")
+          ssl = Proxy::Upstream.dial_tls(host, port, verify: verify, alpn: "h2", sni: sni)
           return nil unless ssl
           # Origin completed the handshake but won't speak h2 — close the live
           # socket before bailing, else it leaks (it's never returned to `ensure`).

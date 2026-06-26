@@ -3,6 +3,7 @@ require "./screen"
 require "./theme"
 require "../store"
 require "../ql"
+require "../scope"
 
 module Gori::Tui
   # The Sitemap tab: a literal host → path tree built from captured flows (no ID
@@ -36,6 +37,10 @@ module Gori::Tui
       end
     end
 
+    # The QL fields meaningful for the endpoint tree (no `flag` — tags aren't
+    # produced yet). Mirrors History's set so the same `/` query language applies.
+    QL_FIELDS = %w(host path method status scheme body)
+
     def initialize
       @hosts = [] of Node
       @selected = 0
@@ -44,11 +49,25 @@ module Gori::Tui
       # Flattened (node, depth) rows, rebuilt only when the tree or its expand
       # state changes — not re-walked on every render frame.
       @visible_cache = nil.as(Array({Node, Int32})?)
+      # QL filter bar (mirrors HistoryView): the Scope lens + a `/` query are AND-ed
+      # into the one filter that builds the tree.
+      @scope = nil.as(Scope?)
+      @query = ""
+      @querying = false
+      @qcx = 0      # caret position within @query
+      @preedit = "" # IME composition, drawn at the caret
     end
 
-    def reload(store : Store, filter : QL::Filter = QL::EMPTY) : Nil
+    # Inject the Scope lens so the tree honours it AND the bar can show its state
+    # (the scope chip). Mirrors HistoryController wiring the same Scope into its view.
+    def set_scope(scope : Scope) : Nil
+      @scope = scope
+    end
+
+    def reload(store : Store) : Nil
+      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(@query))
       @hosts = [] of Node
-      store.sitemap_entries(filter).each do |(host, method, target)|
+      store.sitemap_entries(combined).each do |(host, method, target)|
         add(host, normalize_path(target), method)
       end
       @selected = 0
@@ -95,14 +114,103 @@ module Gori::Tui
       end
     end
 
+    # --- QL filter bar (mirrors HistoryView) ---------------------------------
+
+    def querying? : Bool
+      @querying
+    end
+
+    # True when the tree is a filtered subset (a `/` query or the Scope lens is on).
+    def filtering? : Bool
+      !@query.blank? || (@scope.try(&.active?) == true)
+    end
+
+    def start_query : Nil
+      @querying = true
+      @qcx = @query.size
+    end
+
+    def stop_query : Nil # Enter: keep the filter, leave edit mode
+      @querying = false
+    end
+
+    def cancel_query : Nil # Esc: clear the filter, leave edit mode
+      @querying = false
+      @query = ""
+      @qcx = 0
+      @preedit = ""
+    end
+
+    def query_insert(ch : Char) : Nil
+      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
+      @qcx += 1
+    end
+
+    def query_backspace : Nil
+      return if @qcx == 0
+      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
+      @qcx -= 1
+    end
+
+    def query_move(d : Int32) : Nil
+      @qcx = (@qcx + d).clamp(0, @query.size)
+    end
+
+    def set_preedit(text : String) : Nil
+      @preedit = text
+    end
+
+    # Tab-complete the current token to the first field-name suggestion.
+    def query_complete : Bool
+      sugg = query_suggestions
+      return false if sugg.empty?
+      s, e = current_token_bounds
+      @query = "#{@query[0, s]}#{sugg.first}#{@query[e..]}"
+      @qcx = s + sugg.first.size
+      true
+    end
+
+    # Field-name suggestions for the token under the cursor (values aren't suggested
+    # — the tree's useful axes are host/path/method, which are open-ended).
+    def query_suggestions : Array(String)
+      token = current_token
+      return [] of String if token.empty? || token.includes?(':')
+      QL_FIELDS.select(&.starts_with?(token.downcase)).map { |f| "#{f}:" }
+    end
+
+    private def current_token : String
+      s, e = current_token_bounds
+      @query[s...e]
+    end
+
+    private def current_token_bounds : {Int32, Int32}
+      s = @qcx
+      while s > 0 && @query[s - 1] != ' '
+        s -= 1
+      end
+      e = @qcx
+      while e < @query.size && @query[e] != ' '
+        e += 1
+      end
+      {s, e}
+    end
+
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
+      render_ql_bar(screen, rect)
+      # The bar takes the top row; while querying a suggestion row sits below it.
+      offset = bar_rows
+      tree = Rect.new(rect.x, rect.y + offset, rect.w, {rect.h - offset, 0}.max)
+      return if tree.h <= 0
+
       unless @loaded && !@hosts.empty?
-        screen.text(rect.x + 1, rect.y, "no traffic captured yet", Theme.muted)
-        screen.text(rect.x + 1, rect.y + 2, "browse through the proxy, then return here", Theme.muted)
+        msg = filtering? ? "no endpoints match" : "no traffic captured yet"
+        screen.text(tree.x + 1, tree.y, msg, Theme.muted)
+        screen.text(tree.x + 1, tree.y + 2, "browse through the proxy, then return here", Theme.muted) unless filtering?
         return
       end
 
+      rect = tree
       rows = visible_rows
       ensure_visible(rows.size, rect.h)
       (0...rect.h).each do |i|
@@ -129,12 +237,56 @@ module Gori::Tui
       end
     end
 
-    # Inverts render's `y = rect.y + i` (no header) to find which visible_rows
-    # index a click lands on; nil past the last populated row.
+    # Rows the QL bar occupies at the top of the body: 1 (the bar) + 1 suggestion
+    # row while querying. The tree renders below it; clicks subtract the same offset.
+    private def bar_rows : Int32
+      @querying ? 2 : 1
+    end
+
+    private def render_ql_bar(screen : Screen, rect : Rect) : Nil
+      if @querying
+        prefix = "query › "
+        screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
+        base = rect.x + 1 + prefix.size
+        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2)
+        render_suggestions(screen, rect, rect.y + 1)
+        return
+      end
+
+      # Right cluster: the scope-lens chip (always shown so the ⇧S toggle is
+      # discoverable — the Scope lens filters the tree too) and, when filtering, the
+      # matching host count.
+      scope_on = @scope.try(&.active?) == true
+      chip, chip_color = scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted}
+      rx = rect.right - 1
+      if filtering?
+        count = "#{@hosts.size}h"
+        screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
+        rx -= count.size + 2
+      end
+      screen.text({rx - chip.size, rect.x}.max, rect.y, chip, chip_color)
+
+      left_w = {(rx - chip.size) - (rect.x + 1) - 1, 0}.max
+      if filtering?
+        label = @query.blank? ? "(in-scope only)" : ": #{@query}"
+        screen.text(rect.x + 1, rect.y, label, Theme.text, width: left_w)
+      else
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  path:  status:>=500", Theme.muted, width: left_w)
+      end
+    end
+
+    private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
+      sugg = query_suggestions
+      return if sugg.empty?
+      screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: rect.w - 2)
+    end
+
+    # Inverts render's tree placement (offset below the QL bar) to find which
+    # visible_rows index a click lands on; nil past the last populated row.
     def row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil if mx < rect.x || mx >= rect.right # reject the frame border columns (mirror the other list helpers)
-      i = my - rect.y
-      return nil if i < 0 || i >= rect.h
+      i = my - (rect.y + bar_rows)
+      return nil if i < 0 || i >= {rect.h - bar_rows, 0}.max
       idx = @scroll + i
       idx < visible_rows.size ? idx : nil
     end

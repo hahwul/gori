@@ -74,4 +74,60 @@ describe Gori::Tui::SitemapView do
       backend.contains?("no traffic captured").should be_true
     end
   end
+
+  it "filters the tree with a QL query" do
+    tmp_store do |store|
+      capture(store, "api.acme.test", "GET", "/v1/users")
+      capture(store, "cdn.acme.test", "GET", "/assets/app.js")
+
+      view = SitemapView.new
+      view.reload(store)
+      b0 = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b0), Rect.new(0, 0, 70, 20))
+      b0.contains?("api.acme.test").should be_true
+      b0.contains?("cdn.acme.test").should be_true
+
+      # type `host:api` into the QL bar and re-derive the tree
+      view.start_query
+      "host:api".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+
+      b1 = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b1), Rect.new(0, 0, 70, 20))
+      b1.contains?("api.acme.test").should be_true
+      b1.contains?("cdn.acme.test").should be_false
+    end
+  end
+
+  it "renders the filter bar: scope chip + hint, then the query prompt" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/")
+      view = SitemapView.new
+      view.reload(store)
+
+      b0 = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b0), Rect.new(0, 0, 70, 20))
+      b0.contains?("filter").should be_true
+      b0.contains?("scope:off").should be_true
+
+      view.start_query
+      "host:acme".each_char { |c| view.query_insert(c) }
+      b1 = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b1), Rect.new(0, 0, 70, 20))
+      b1.contains?("query").should be_true
+      b1.contains?("host:acme").should be_true
+    end
+  end
+
+  it "completes a field name with Tab" do
+    view = SitemapView.new
+    view.start_query
+    "met".each_char { |c| view.query_insert(c) }
+    view.query_complete.should be_true
+    view.querying?.should be_true
+
+    b = MemoryBackend.new(70, 6)
+    view.render(Screen.new(b), Rect.new(0, 0, 70, 6))
+    b.contains?("method:").should be_true
+  end
 end
