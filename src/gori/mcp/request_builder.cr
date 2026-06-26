@@ -27,7 +27,7 @@ module Gori
         # the auto-generated Host header and inject. Reject it on BOTH paths (raw
         # too — `host` becomes the dialed target and, on the structured path, the
         # Host line).
-        reject_injection(host, "url host")
+        reject_token_breakers(host, "url host")
         port = uri.port || default_port(scheme)
 
         bytes =
@@ -51,7 +51,7 @@ module Gori
         target = uri.query ? "#{path}?#{uri.query}" : path
         # uri.path/query are decoded views of the URL; a literal CR/LF/NUL here
         # would forge the request line (split into a fake header or request).
-        reject_injection(target, "request target")
+        reject_token_breakers(target, "request target")
 
         headers = [] of {String, String}
         if h = args["headers"]?.try(&.as_h?)
@@ -83,32 +83,40 @@ module Gori
         scheme == "https" ? 443 : 80
       end
 
-      # The structured path frames the request itself, so a CR/LF/NUL smuggled
-      # into a header name/value (or the method/target) would split one logical
-      # header into many — or smuggle a whole second request — past the caller's
-      # intent. We reject those octets here so a tool arg can't desync framing.
-      # Callers who genuinely need malformed bytes use `raw` (byte-exact by
-      # contract); the body is likewise sent verbatim with a matching
+      # The structured path frames the request itself, so a header name/value (or
+      # the method/target/host) carrying a framing octet would split one logical
+      # header into many, smuggle a whole second request, or forge the request
+      # line — past the caller's intent. We validate them here so a tool arg can't
+      # desync framing. Callers who need deliberately malformed bytes use `raw`
+      # (byte-exact by contract); the body is sent verbatim with a matching
       # Content-Length, so it cannot smuggle and is not checked.
+      #
+      # A header VALUE may legitimately contain spaces, so it only forbids the
+      # framing octets CR/LF/NUL. A header NAME is a single token: whitespace
+      # there is never valid and would forge an obs-fold line AND evade the
+      # case-insensitive Host/Content-Length dedup (a padded " Content-Length"
+      # would slip a second, conflicting length onto the wire).
       private def self.validate_header(name : String, value : String) : Nil
         raise Gori::Error.new("header name must not be empty") if name.empty?
-        raise Gori::Error.new("illegal CR/LF/NUL in header name #{name.inspect}") if injection_char?(name)
+        reject_token_breakers(name, "header name #{name.inspect}")
         raise Gori::Error.new("illegal CR/LF/NUL in value of header #{name.inspect}") if injection_char?(value)
       end
 
-      # A method must be a non-empty token: no whitespace (a space forges the
-      # request line: `GET /admin HTTP/1.1`) and no controls (CR/LF inject
-      # headers). Any printable non-space char is allowed (custom verbs like
-      # PROPFIND/PURGE/QUERY pass).
+      # A method must be a non-empty token (no whitespace/controls). Any printable
+      # non-space char is allowed, so custom verbs (PROPFIND/PURGE/QUERY) pass.
       private def self.validate_method(method : String) : Nil
         raise Gori::Error.new("method must not be empty") if method.empty?
-        method.each_char do |c|
-          raise Gori::Error.new("illegal character in method #{method.inspect}") if c <= ' ' || c == '\u007F'
-        end
+        reject_token_breakers(method, "method #{method.inspect}")
       end
 
-      private def self.reject_injection(s : String, what : String) : Nil
-        raise Gori::Error.new("illegal CR/LF/NUL in #{what}") if injection_char?(s)
+      # Reject any whitespace or control octet (<= 0x20, incl. SP/TAB, or DEL) in
+      # `s`. Used for the method, header names, the request target, and the host —
+      # all single tokens where even a bare SP forges the request line
+      # (`GET /a b HTTP/1.1`: a lenient origin then reads target `/a`, version `b`).
+      private def self.reject_token_breakers(s : String, what : String) : Nil
+        s.each_char do |c|
+          raise Gori::Error.new("illegal whitespace/control character in #{what}") if c <= ' ' || c == '\u007F'
+        end
       end
 
       private def self.injection_char?(s : String) : Bool

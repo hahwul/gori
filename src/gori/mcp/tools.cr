@@ -149,7 +149,7 @@ module Gori
 
       private def get_flow(h) : Result
         id = int(h, "id")
-        return Result.new("missing required 'id'", is_error: true) unless id
+        return Result.new(id_error(h, "id"), is_error: true) unless id
         detail = @store.get_flow(id)
         return Result.new("no flow with id #{id}", is_error: true) unless detail
         Result.new(Serialize.flow_detail_json(detail))
@@ -175,7 +175,7 @@ module Gori
 
       private def get_finding(h) : Result
         id = int(h, "id")
-        return Result.new("missing required 'id'", is_error: true) unless id
+        return Result.new(id_error(h, "id"), is_error: true) unless id
         f = @store.get_finding(id)
         return Result.new("no finding with id #{id}", is_error: true) unless f
         Result.new(JSON.build { |j| Serialize.finding(j, f) })
@@ -236,7 +236,12 @@ module Gori
           return err
         end
         severity = severity_from(sev_s) || Store::Severity::Info
-        id = @store.insert_finding(title, severity, str(h, "host"), int(h, "flow_id"))
+        # A present-but-invalid flow_id (1.9 / "oops") would otherwise be
+        # silently nulled, creating an UNLINKED finding while reporting success —
+        # reject it, consistent with how get_flow rejects a non-integer id.
+        flow_id = int(h, "flow_id")
+        return Result.new("invalid 'flow_id' (expected an integer)", is_error: true) if flow_id.nil? && present?(h, "flow_id")
+        id = @store.insert_finding(title, severity, str(h, "host"), flow_id)
         # insert_finding returns 0 (never raises) when the write batch fails — e.g.
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
@@ -246,7 +251,7 @@ module Gori
 
       private def update_finding(h) : Result
         id = int(h, "id")
-        return Result.new("missing required 'id'", is_error: true) unless id
+        return Result.new(id_error(h, "id"), is_error: true) unless id
         return Result.new("no finding with id #{id}", is_error: true) unless @store.get_finding(id)
         # A blank severity/status means "leave unchanged"; only a present,
         # non-blank, unrecognised value is an error.
@@ -302,14 +307,30 @@ module Gori
         h[key]?.try(&.as_s?)
       end
 
+      # Whether `key` is present with a non-null value (a JSON null reads as
+      # "absent" for our purposes). Lets a caller tell a missing arg from one that
+      # was supplied but couldn't be coerced.
+      private def present?(h, key : String) : Bool
+        v = h[key]?
+        return false unless v
+        !v.raw.nil?
+      end
+
+      # Error text for a REQUIRED integer id that didn't coerce: distinguishes a
+      # genuinely absent arg from one that was supplied but isn't an integer (e.g.
+      # 1.9 or "oops"), so the caller isn't told "missing" for a value it did send.
+      private def id_error(h, key : String) : String
+        present?(h, key) ? "invalid '#{key}' (expected an integer)" : "missing required '#{key}'"
+      end
+
       # Coerce a JSON arg to Int64. Accepts a JSON integer, an INTEGRAL float
       # (100.0 → 100; many encoders emit ints as floats), and a numeric STRING
       # ("5" → 5) — clients/LLMs often serialize tool args as strings and the
       # schema's "integer" type is advisory, not enforced. A fractional float
       # (5.9) is rejected rather than silently truncated, so the number and
       # string encodings of the same value agree; an out-of-Int64-range float
-      # returns nil instead of raising OverflowError (which would surface as a
-      # generic tool error rather than, say, clamping a too-large limit).
+      # returns nil rather than raising OverflowError — for a limit that falls
+      # back to the default, for an id it reads as no-such-id, never a crash.
       private def int(h, key : String) : Int64?
         v = h[key]?
         return nil unless v

@@ -261,6 +261,25 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "rejects a present-but-invalid flow_id instead of silently unlinking" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","flow_id":1.9}}})
+        resp = drive(store, create)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("invalid 'flow_id'")
+        store.count_findings.should eq(0)
+      end
+    end
+
+    it "distinguishes a fractional id (invalid) from a missing id" do
+      with_store do |store|
+        bad = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":1.9}}})
+        drive(store, bad)[0]["result"]["content"][0]["text"].as_s.should contain("invalid 'id'")
+        missing = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{}}})
+        drive(store, missing)[0]["result"]["content"][0]["text"].as_s.should contain("missing required 'id'")
+      end
+    end
+
     it "reports an error (not updated:true) when update_finding has no fields" do
       with_store do |store|
         store.insert_finding("f", Gori::Store::Severity::Info, nil, nil)
@@ -432,6 +451,23 @@ describe Gori::MCP::RequestBuilder do
       args = {"url" => JSON::Any.new("http://h.test/"),
               "method" => JSON::Any.new("GET /admin HTTP/1.1\r\nHost: a")}
       expect_raises(Gori::Error, /method/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects a bare space in the request target (request-line forgery)" do
+      # URI.parse keeps the literal space in the path; emitting it would forge
+      # `GET /a b HTTP/1.1` — a lenient origin then reads target /a, version b.
+      args = {"url" => JSON::Any.new("http://h.test/a b")}
+      expect_raises(Gori::Error, /request target/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
+    it "rejects a whitespace-padded header name (framing-dedup evasion)" do
+      # A leading space dodges the case-insensitive Content-Length dedup, so the
+      # auto length would be appended too — two conflicting lengths on the wire.
+      args = {"url" => JSON::Any.new("http://h.test/"),
+              "method" => JSON::Any.new("POST"),
+              "body" => JSON::Any.new("abc"),
+              "headers" => JSON::Any.new({" Content-Length" => JSON::Any.new("0")})}
+      expect_raises(Gori::Error, /header name/) { Gori::MCP::RequestBuilder.build(args) }
     end
 
     it "still allows a custom method and internal spaces in a header VALUE" do
