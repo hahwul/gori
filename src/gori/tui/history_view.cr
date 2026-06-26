@@ -8,6 +8,7 @@ require "./search_hi"
 require "./reveal"
 require "./url"
 require "./fmt"
+require "./flow_status"
 require "../store"
 require "../ql"
 require "../scope"
@@ -571,15 +572,9 @@ module Gori::Tui
         screen.text(proto_x, y, row.scheme.upcase, Theme.muted, bg)
         screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
         screen.text(path_x, y, Url.origin_path(row.target), fg, bg, width: path_w) if path_w > 0
-        # Failed flows store status 0 — show the STATE (ERR/ABT) so they don't read as a
-        # cryptic "0" indistinguishable from a still-pending "···".
-        status, scolor = if row.state.error?
-                           {"ERR", Theme.red}
-                         elsif row.state.aborted?
-                           {"ABT", Theme.yellow}
-                         else
-                           {row.status.try(&.to_s) || "···", Theme.status_color(row.status)}
-                         end
+        # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of
+        # a cryptic "0" indistinguishable from a still-pending "···".
+        status, scolor = FlowStatus.cell(row)
         screen.text(status_x, y, status, scolor, bg, width: 3)
         screen.text(type_x, y, fmt_mime(row.content_type), Theme.muted, bg, width: 6) if show_type
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size

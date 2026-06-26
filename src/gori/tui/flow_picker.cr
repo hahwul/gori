@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./url"
+require "./flow_status"
 require "../store"
 
 module Gori::Tui
@@ -13,12 +14,21 @@ module Gori::Tui
   class FlowPicker
     getter target : Symbol
     getter selected : Int32
+    @indexed : Array({Store::FlowRow, String}) # each row paired with its precomputed filter haystack
 
     def initialize(@rows : Array(Store::FlowRow), @target : Symbol)
       @query = ""
+      @preedit = "" # live IME composition (e.g. Hangul jamo) shown under the filter caret
+      # Precompute each row's filter haystack ONCE (not per keystroke) so typing into
+      # a 2000-row snapshot doesn't rebuild 2000 strings on every character.
+      @indexed = @rows.map { |row| {row, haystack(row)} }
       @filtered = @rows
       @selected = 0
       @scroll = 0
+    end
+
+    def set_preedit(text : String) : Nil
+      @preedit = text
     end
 
     def selected_row : Store::FlowRow?
@@ -37,24 +47,23 @@ module Gori::Tui
 
     def query_char(ch : Char) : Nil
       return if ch.control?
+      @preedit = "" # a committed char ends any in-progress composition
       @query += ch
       refilter
     end
 
     def backspace : Nil
       return if @query.empty?
+      @preedit = ""
       @query = @query[0, @query.size - 1]
       refilter
     end
 
-    # Recompute the visible rows: every whitespace-separated term must appear
-    # (case-insensitive) in "METHOD host path status". Resets the cursor to the top.
+    # Recompute the visible rows from the precomputed haystacks: every whitespace-
+    # separated term must appear (case-insensitive). Resets the cursor to the top.
     private def refilter : Nil
       terms = @query.downcase.split
-      @filtered = terms.empty? ? @rows : @rows.select { |row|
-        hay = haystack(row)
-        terms.all? { |t| hay.includes?(t) }
-      }
+      @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
       @selected = 0
       @scroll = 0
     end
@@ -90,9 +99,16 @@ module Gori::Tui
       return unless box
       Frame.card(screen, box, "PICK FLOW #{@target.to_s.upcase}", border: Theme.border_focus)
 
-      qhint = @query.empty? ? "type to filter · ↑/↓ select · ↵ choose · esc cancel" : "filter: #{@query}"
-      screen.text(box.x + 2, box.y + 1, qhint, @query.empty? ? Theme.muted : Theme.text_bright,
-        Theme.panel, width: box.w - 4)
+      if @query.empty? && @preedit.empty?
+        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ choose · esc cancel",
+          Theme.muted, Theme.panel, width: box.w - 4)
+      else
+        # Live filter input — input_line shows committed text + IME preedit (underline)
+        # + a caret, and syncs the terminal cursor so Hangul/CJK composition shows.
+        px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
+        screen.input_line(px, box.y + 1, @query, @query.size, @preedit, Theme.text_bright,
+          Theme.panel, width: {box.right - 1 - px, 1}.max)
+      end
       Frame.tee_divider(screen, box, box.y + 2)
 
       list_top = box.y + 3
@@ -125,18 +141,8 @@ module Gori::Tui
 
       screen.text(method_x, ry, row.method, Theme.method_color(row.method), bg, width: 7)
       screen.text(host_x, ry, "#{row.host}#{Url.origin_path(row.target)}", fg, bg, width: host_w)
-      status, scolor = status_display(row)
+      status, scolor = FlowStatus.cell(row)
       screen.text(status_x, ry, status, scolor, bg, width: 4)
-    end
-
-    private def status_display(row : Store::FlowRow) : {String, Color}
-      if row.state.error?
-        {"ERR", Theme.red}
-      elsif row.state.aborted?
-        {"ABT", Theme.yellow}
-      else
-        {row.status.try(&.to_s) || "···", Theme.status_color(row.status)}
-      end
     end
 
     # Keep the selection on-screen (selection-follow scroll), like the History list.

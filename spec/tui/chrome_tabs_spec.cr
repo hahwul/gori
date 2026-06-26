@@ -6,11 +6,13 @@ include Gori::Tui
 # against the canonical catalog (drop unknown, dedupe, append-new, ≥1 visible), and
 # Chrome.visible_tabs derives the rendered/nav strip (with `force:` for the active tab).
 describe "Chrome.reconcile" do
-  it "yields the full catalog with Agent hidden by default on empty prefs" do
+  it "yields the full catalog with the default-hidden tabs hidden on empty prefs" do
     out = Chrome.reconcile([] of {String, Bool})
     out.map(&.first).should eq(Chrome::TABS.map(&.first)) # canonical order, all present
-    out.select { |(_, _, v)| v }.map(&.first).includes?(:agent).should be_false
+    visible = out.select { |(_, _, v)| v }.map(&.first)
+    Chrome::DEFAULT_HIDDEN.each { |sym| visible.includes?(sym).should be_false } # :agent + :comparer hidden
     out.find { |(s, _, _)| s == :agent }.not_nil![2].should be_false
+    out.find { |(s, _, _)| s == :comparer }.not_nil![2].should be_false
     out.find { |(s, _, _)| s == :project }.not_nil![2].should be_true
   end
 

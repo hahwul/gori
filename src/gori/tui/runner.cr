@@ -333,11 +333,12 @@ module Gori::Tui
       # then the focused tab body — so EVERY text field gets the same live
       # composition preview, not just the Notes/Project/Replay editors.
       case @overlay
-      when :palette     then @palette.set_preedit(text)
-      when :rules       then @rules_overlay.set_preedit(text)
-      when :finding_new then @finding_form.set_preedit(text)
-      when :settings    then @settings_view.set_preedit(text)
-      when :none        then apply_preedit_body(text)
+      when :palette       then @palette.set_preedit(text)
+      when :rules         then @rules_overlay.set_preedit(text)
+      when :finding_new   then @finding_form.set_preedit(text)
+      when :comparer_pick then @flow_picker.try(&.set_preedit(text))
+      when :settings      then @settings_view.set_preedit(text)
+      when :none          then apply_preedit_body(text)
       end
     end
 

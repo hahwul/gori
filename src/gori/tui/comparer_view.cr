@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./url"
+require "./flow_status"
 require "../store"
 require "../replay/diff"
 require "../replay/side_by_side"
@@ -25,8 +26,8 @@ module Gori::Tui
       @scroll = 0
       @fill_next = :a # the slot the next "Send to Comparer" fills (rings A → B → A …)
       @rows_cache = nil.as(Array(Replay::SideBySide::Row)?)
-      @rows_rev = -1 # the Theme.revision the cache was built under
       @truncated = false
+      @change_count = 0 # cached with @rows_cache so the footer doesn't recount each frame
     end
 
     # --- slot management (controller + cross-tab handoff) -------------------
@@ -69,15 +70,15 @@ module Gori::Tui
       @scroll == 0
     end
 
-    # --- diff (memoized; rebuilt on slot/pane change or a theme swap) -------
+    # --- diff (memoized; rebuilt only on a slot/pane change) ----------------
+    # The rows hold plain text (theme-independent — colours are applied at draw
+    # time), so the cache survives theme switches.
 
     private def invalidate : Nil
       @rows_cache = nil
     end
 
     private def rows : Array(Replay::SideBySide::Row)
-      @rows_cache = nil if @rows_rev != Theme.revision
-      @rows_rev = Theme.revision
       @rows_cache ||= build_rows
     end
 
@@ -88,7 +89,9 @@ module Gori::Tui
       al = lines_for(a)
       bl = lines_for(b)
       @truncated = al.size > Replay::Diff::MAX_LINES || bl.size > Replay::Diff::MAX_LINES
-      Replay::SideBySide.rows(Replay::Diff.lines(al, bl))
+      result = Replay::SideBySide.rows(Replay::Diff.lines(al, bl))
+      @change_count = Replay::SideBySide.change_count(result)
+      result
     end
 
     private def lines_for(d : Store::FlowDetail) : Array(String)
@@ -131,7 +134,7 @@ module Gori::Tui
         break if di >= data.size
         draw_diff_row(screen, rect.x, body_top + i, left_w, sep_x, right_x, right_w, data[di])
       end
-      draw_footer(screen, rect, footer_y, data)
+      draw_footer(screen, rect, footer_y)
     end
 
     private def draw_header(screen : Screen, rect : Rect, y : Int32, left_w : Int32,
@@ -146,8 +149,7 @@ module Gori::Tui
 
     private def summary(d : Store::FlowDetail) : String
       row = d.row
-      status = row.state.error? ? "ERR" : (row.state.aborted? ? "ABT" : (row.status.try(&.to_s) || "···"))
-      "#{row.method} #{row.host}#{Url.origin_path(row.target)} · #{status}"
+      "#{row.method} #{row.host}#{Url.origin_path(row.target)} · #{FlowStatus.cell(row)[0]}"
     end
 
     private def draw_diff_row(screen : Screen, x : Int32, y : Int32, left_w : Int32,
@@ -164,9 +166,9 @@ module Gori::Tui
       screen.text(right_x, y, r.right || "", rcolor, width: right_w) if right_w > 0
     end
 
-    private def draw_footer(screen : Screen, rect : Rect, y : Int32, data : Array(Replay::SideBySide::Row)) : Nil
+    private def draw_footer(screen : Screen, rect : Rect, y : Int32) : Nil
       return if y <= rect.y + 1 # no room: header + divider already fill the frame
-      changed = Replay::SideBySide.change_count(data)
+      changed = @change_count
       note = changed == 0 ? "identical" : "#{changed} changed line#{changed == 1 ? "" : "s"}"
       note += " · truncated to #{Replay::Diff::MAX_LINES}/side" if @truncated
       screen.text(rect.x + 1, y, "#{note} · comparing #{@pane} (←/→)", Theme.muted, width: {rect.w - 2, 1}.max)
