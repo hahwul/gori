@@ -18,6 +18,12 @@ module Gori
       File.join(home_dir, "projects")
     end
 
+    # User colour themes: each `*.json` here is loaded as a selectable TUI theme
+    # (filename stem = theme name), merged after the built-ins. See Tui::Theme.load_custom.
+    def self.themes_dir : String
+      File.join(home_dir, "themes")
+    end
+
     def self.default_ca_dir : String
       File.join(home_dir, "ca")
     end

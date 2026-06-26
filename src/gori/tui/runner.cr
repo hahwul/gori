@@ -664,6 +664,7 @@ module Gori::Tui
       return cancel_settings if dismiss_zone?(box, mx, my)
       if idx = @settings_view.field_at(box, mx, my)
         @settings_view.set_field(idx)
+        preview_theme # clicking a theme row live-previews it (no-op outside :theme)
       end
     end
 
@@ -717,7 +718,7 @@ module Gori::Tui
       when :palette  then @palette.move(step)
       when :rules    then @rules_overlay.select_move(step)
       when :browser  then @browser_picker.try(&.move(step))
-      when :settings then @settings_view.move_field(step)
+      when :settings then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs     then @tabs_overlay.select_move(step)
       end
     end
@@ -829,7 +830,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
-        @overlay = :none
+        cancel_settings # revert any live theme preview before jumping (mirrors esc); sets @overlay=:none
         open_palette
       elsif key.escape?
         cancel_settings # revert any live theme preview, close
@@ -846,8 +847,10 @@ module Gori::Tui
         reconcile_mouse # the EDITOR section holds the Mouse toggle — apply it live
       elsif key.up?
         @settings_view.move_field(-1)
+        preview_theme # ↑/↓ moves the theme-list selection in the :theme section
       elsif key.down?
         @settings_view.move_field(1)
+        preview_theme
       elsif key.left?
         @settings_view.toggle_or_move(-1)
         preview_theme
@@ -859,6 +862,7 @@ module Gori::Tui
       elsif c && !ev.ctrl? && !ev.alt?
         @settings_view.insert(c)
         @settings_view.set_preedit("")
+        preview_theme # space cycles the theme in the :theme section — preview it too
       end
     end
 
@@ -2009,7 +2013,8 @@ module Gori::Tui
     def open_settings(section : Symbol) : Nil
       case section
       when :network, :editor, :theme
-        @settings_view.reload(section)
+        @settings_view.reload(section)            # :theme reloads custom themes — may reconcile the live palette
+        @resized = true if section == :theme      # so force a full repaint (an edited/removed active theme just changed)
         @overlay = :settings
         @theme_restore = section == :theme ? Settings.theme : nil # baseline for live-preview revert
       when :tabs

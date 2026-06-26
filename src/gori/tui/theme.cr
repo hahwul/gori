@@ -1,3 +1,6 @@
+require "json"
+require "../paths"
+
 module Gori::Tui
   # The TUI colour palette. gori ships five themes — GORIDARK (the default; a
   # monochrome palette in the spirit of Grok Build: near-black canvas, white/grey
@@ -157,29 +160,47 @@ module Gori::Tui
       syn_literal: Color.from_hex("#bb9af7"), # true / false / null (magenta)
     )
 
-    THEMES        = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT}
-    DEFAULT_THEME = "goridark"
+    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT}
+    DEFAULT_THEME  = "goridark"
     # Pre-rename names so a settings.json from the first theme release still resolves.
     LEGACY_ALIASES = {"dark" => "goridark", "light" => "goriday"}
+
+    # User themes loaded from <GORI_HOME>/themes/*.json (filename stem = name), merged
+    # AFTER the built-ins. Empty until load_custom runs (startup + on opening
+    # settings:theme). Built-in names always win — a custom file that shadows one is
+    # ignored — so the canonical palettes (and the contrast spec) can't be redefined.
+    @@custom : Hash(String, Palette) = {} of String => Palette
+    @@custom_order : Array(String) = [] of String
 
     @@active : Palette = GORIDARK
     @@active_name : String = DEFAULT_THEME
     @@revision : UInt32 = 0_u32
 
-    # The names of the available themes (selectable in settings:theme), in display order.
+    # The names of the available themes (selectable in settings:theme), in display
+    # order: the built-ins first, then user themes in filename order.
     def self.available : Array(String)
-      THEMES.keys
+      BUILTIN_THEMES.keys + @@custom_order
     end
 
     def self.active_name : String
       @@active_name
     end
 
-    # Resolve a (possibly legacy / unknown) name to a valid theme name: map legacy
-    # aliases, then fall back to the default for anything unrecognised.
+    # The palette for `name` (built-in or custom), or nil when unknown — lets the
+    # settings list draw each theme's own swatch without making it active.
+    def self.palette(name : String) : Palette?
+      @@custom[name]? || BUILTIN_THEMES[name]?
+    end
+
+    # Resolve a (possibly legacy / unknown) name to a valid theme name: a real theme
+    # (built-in OR custom) wins as-is; otherwise map a legacy alias; otherwise fall
+    # back to the default. The real-theme check comes FIRST so a custom theme named
+    # `dark`/`light` isn't shadowed by the pre-rename aliases (which only matter for an
+    # old settings.json that has no matching theme loaded).
     def self.canonical(name : String) : String
+      return name if palette(name)
       name = LEGACY_ALIASES[name]? || name
-      THEMES.has_key?(name) ? name : DEFAULT_THEME
+      palette(name) ? name : DEFAULT_THEME
     end
 
     # Bumped whenever the active palette changes; colour-baking render caches compare
@@ -190,14 +211,98 @@ module Gori::Tui
 
     # Switch the active palette by name (legacy/unknown names are normalised via
     # `canonical`). Returns true when the palette actually changed (so the caller can
-    # force a repaint only when needed).
+    # force a repaint only when needed). Compares palette CONTENT, not just the name:
+    # a custom theme's colours can change under a stable name (its file was edited +
+    # reloaded), and re-applying it must still refresh the live palette + revision.
     def self.apply(name : String) : Bool
       key = canonical(name)
-      return false if key == @@active_name
-      @@active = THEMES[key]
+      pal = palette(key) || GORIDARK
+      return false if key == @@active_name && pal == @@active
+      @@active = pal
       @@active_name = key
       @@revision &+= 1
       true
+    end
+
+    # (Re)load user themes from <GORI_HOME>/themes/*.json. Each file is a JSON object
+    # of `"field": "#rrggbb"` colours; an optional `"base"` (a built-in theme name)
+    # supplies any colour the file omits, so a theme can override just an accent. A
+    # bad colour falls back to the base and a broken file is skipped — loading must
+    # never crash the TUI. Files whose stem collides with a built-in (or another
+    # already-loaded custom theme) are ignored. If the ACTIVE theme is a custom one,
+    # its live palette is reconciled to the rebuilt registry (so an edited file shows
+    # at once, and a removed one falls back to the default) with a revision bump.
+    def self.load_custom : Nil
+      custom = {} of String => Palette
+      order = [] of String
+      dir = Paths.themes_dir
+      if Dir.exists?(dir)
+        Dir.glob(File.join(dir, "*.json")).sort.each do |file|
+          name = sanitize_name(File.basename(file, ".json"))
+          next if name.empty? || BUILTIN_THEMES.has_key?(name) || custom.has_key?(name)
+          if pal = parse_theme_file(file)
+            custom[name] = pal
+            order << name
+          end
+        end
+      end
+      @@custom = custom
+      @@custom_order = order
+      # Re-seat the live palette against the rebuilt registry: re-applying the active
+      # name refreshes an edited custom theme (apply compares content → bumps revision)
+      # and falls a vanished one back to the default (canonical → DEFAULT_THEME). A
+      # built-in active, or an unchanged custom one, is a no-op (apply returns false).
+      apply(@@active_name)
+    rescue
+      # broken themes dir (permissions, etc.) — keep whatever was loaded before
+    end
+
+    # Theme names are used as JSON keys, display labels, and the persisted setting, so
+    # constrain them to a safe slug (lower-case alnum + - _); other characters are dropped.
+    private def self.sanitize_name(raw : String) : String
+      raw.downcase.gsub(/[^a-z0-9_-]/, "")
+    end
+
+    # Build a Palette from a theme file, or nil if it can't be read/parsed.
+    private def self.parse_theme_file(file : String) : Palette?
+      root = JSON.parse(File.read(file))
+      return nil unless root.as_h?
+      base = BUILTIN_THEMES[canonical_builtin(root["base"]?.try(&.as_s?) || DEFAULT_THEME)]
+      merge_palette(base, root)
+    rescue
+      nil
+    end
+
+    # A theme's `base` must be a BUILT-IN (custom themes can't chain off each other —
+    # load order would matter); unknown → the default.
+    private def self.canonical_builtin(name : String) : String
+      name = LEGACY_ALIASES[name]? || name
+      BUILTIN_THEMES.has_key?(name) ? name : DEFAULT_THEME
+    end
+
+    # Overlay the hex colours in `root` onto `base`, field by field. The {% begin %}
+    # wrapper forces the {% for %} to expand before the call args are parsed (a bare
+    # loop inside a call's parens doesn't compose).
+    private def self.merge_palette(base : Palette, root : JSON::Any) : Palette
+      {% begin %}
+        Palette.new(
+          {% for f in %w(bg panel elevated border border_focus focus_gold accent accent_bg selection_dim text text_bright muted green yellow red orange syn_header syn_string syn_number syn_literal) %}
+            {{ f.id }}: color_field(root, {{ f }}, base.{{ f.id }}),
+          {% end %}
+        )
+      {% end %}
+    end
+
+    # The hex colour at root[key], or `base` when the key is absent, not a string, or
+    # not a valid hex (a single typo'd colour inherits rather than sinking the theme).
+    private def self.color_field(root : JSON::Any, key : String, base : Color) : Color
+      if hex = root[key]?.try(&.as_s?)
+        Color.from_hex(hex)
+      else
+        base
+      end
+    rescue
+      base
     end
 
     # Colour accessors generated from the Palette fields. Each reads the active
