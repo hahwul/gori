@@ -302,13 +302,27 @@ module Gori
         h[key]?.try(&.as_s?)
       end
 
-      # Coerce a JSON arg to Int64. Accepts a JSON integer, a float (100.0 → 100),
-      # and a numeric STRING ("5" → 5) — many MCP clients/LLMs serialize tool args
-      # as strings, and the schema's "integer" type is advisory, not enforced.
+      # Coerce a JSON arg to Int64. Accepts a JSON integer, an INTEGRAL float
+      # (100.0 → 100; many encoders emit ints as floats), and a numeric STRING
+      # ("5" → 5) — clients/LLMs often serialize tool args as strings and the
+      # schema's "integer" type is advisory, not enforced. A fractional float
+      # (5.9) is rejected rather than silently truncated, so the number and
+      # string encodings of the same value agree; an out-of-Int64-range float
+      # returns nil instead of raising OverflowError (which would surface as a
+      # generic tool error rather than, say, clamping a too-large limit).
       private def int(h, key : String) : Int64?
         v = h[key]?
         return nil unless v
-        v.as_i64? || v.as_f?.try(&.to_i64) || v.as_s?.try(&.to_i64?)
+        if i = v.as_i64?
+          return i
+        end
+        if f = v.as_f?
+          return nil unless f.finite? && f == f.trunc
+          return f.to_i64
+        end
+        v.as_s?.try(&.to_i64?)
+      rescue OverflowError
+        nil
       end
 
       private def bool(h, key : String) : Bool?

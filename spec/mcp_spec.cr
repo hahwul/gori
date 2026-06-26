@@ -70,10 +70,17 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "echoes the client's protocolVersion when given" do
+    it "echoes the client's protocolVersion when it is a supported revision" do
       with_store do |store|
         line = %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}})
         drive(store, line)[0]["result"]["protocolVersion"].as_s.should eq("2024-11-05")
+      end
+    end
+
+    it "falls back to our version for an unsupported/garbage protocolVersion" do
+      with_store do |store|
+        line = %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}})
+        drive(store, line)[0]["result"]["protocolVersion"].as_s.should eq(Gori::MCP::Server::PROTOCOL_VERSION)
       end
     end
 
@@ -191,13 +198,32 @@ describe Gori::MCP::Server do
   end
 
   describe "arg coercion" do
-    it "honours a limit passed as a JSON string or float" do
+    it "honours a limit passed as a JSON string or integral float" do
       with_store do |store|
         3.times { |i| seed_flow(store, "h#{i}.test", "GET", "/", 200) }
         as_str = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":"2"}}})
         tool_payload(drive(store, as_str)[0]).as_a.size.should eq(2)
         as_float = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":2.0}}})
         tool_payload(drive(store, as_float)[0]).as_a.size.should eq(2)
+      end
+    end
+
+    it "rejects a fractional float id rather than truncating it to the wrong flow" do
+      with_store do |store|
+        seed_flow(store, "ex.test", "GET", "/", 200) # id 1
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":1.9}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true # NOT a silent hit on flow 1
+      end
+    end
+
+    it "does not crash on an out-of-Int64-range float (clamps the limit)" do
+      with_store do |store|
+        2.times { |i| seed_flow(store, "h#{i}.test", "GET", "/", 200) }
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"limit":1e19}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"]?.try(&.as_bool).should_not be_true # no OverflowError -> tool error
+        tool_payload(resp).as_a.size.should eq(2)
       end
     end
   end
@@ -401,6 +427,13 @@ describe Gori::MCP::RequestBuilder do
       out = String.new(Gori::MCP::RequestBuilder.build(args).bytes)
       out.should start_with("PROPFIND / HTTP/1.1\r\n")
       out.should contain("X-Note: hello world ok\r\n")
+    end
+
+    it "rejects a URL whose host carries a CR/LF (auto Host-header injection)" do
+      # URI.parse keeps the CR/LF as part of the authority's host; left unchecked
+      # it would be written verbatim into the generated Host header.
+      args = {"url" => JSON::Any.new("http://h.com\r\nEvil:3/path")}
+      expect_raises(Gori::Error, /host/) { Gori::MCP::RequestBuilder.build(args) }
     end
 
     it "leaves the raw path byte-exact (smuggling is the caller's explicit choice)" do

@@ -14,8 +14,16 @@ module Gori
 
       # Newest spec revision we implement. Our surface (initialize/tools.list/
       # tools.call/ping) is identical across recent revisions, so we echo the
-      # client's requested version when present and never hard-fail on a mismatch.
+      # client's requested version when it is one we recognise, and never
+      # hard-fail on a mismatch.
       PROTOCOL_VERSION = "2025-06-18"
+
+      # Revisions whose surface we're compatible with. Per the MCP lifecycle the
+      # server MUST answer initialize with a version it actually supports: we
+      # echo the client's version only when it's in this set, else fall back to
+      # PROTOCOL_VERSION — so a client probing "1999-01-01" can't conclude we
+      # speak a revision we don't.
+      SUPPORTED_VERSIONS = {"2025-06-18", "2025-03-26", "2024-11-05"}
 
       EMPTY_ARGS = JSON::Any.new({} of String => JSON::Any)
 
@@ -83,7 +91,7 @@ module Gori
 
       private def handle_initialize(id : JSON::Any, params : JSON::Any?) : Nil
         client_ver = obj_field(params, "protocolVersion").try(&.as_s?)
-        version = client_ver && !client_ver.empty? ? client_ver : PROTOCOL_VERSION
+        version = client_ver && SUPPORTED_VERSIONS.includes?(client_ver) ? client_ver : PROTOCOL_VERSION
         write_result(id) do |j|
           j.object do
             j.field "protocolVersion", version
