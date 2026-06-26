@@ -192,10 +192,13 @@ module Gori::Tui
       @@custom[name]? || BUILTIN_THEMES[name]?
     end
 
-    # Resolve a (possibly legacy / unknown) name to a valid theme name: map legacy
-    # aliases, then fall back to the default for anything unrecognised (built-in or
-    # custom — whatever is currently loaded).
+    # Resolve a (possibly legacy / unknown) name to a valid theme name: a real theme
+    # (built-in OR custom) wins as-is; otherwise map a legacy alias; otherwise fall
+    # back to the default. The real-theme check comes FIRST so a custom theme named
+    # `dark`/`light` isn't shadowed by the pre-rename aliases (which only matter for an
+    # old settings.json that has no matching theme loaded).
     def self.canonical(name : String) : String
+      return name if palette(name)
       name = LEGACY_ALIASES[name]? || name
       palette(name) ? name : DEFAULT_THEME
     end
@@ -245,25 +248,13 @@ module Gori::Tui
       end
       @@custom = custom
       @@custom_order = order
-      reconcile_active
+      # Re-seat the live palette against the rebuilt registry: re-applying the active
+      # name refreshes an edited custom theme (apply compares content → bumps revision)
+      # and falls a vanished one back to the default (canonical → DEFAULT_THEME). A
+      # built-in active, or an unchanged custom one, is a no-op (apply returns false).
+      apply(@@active_name)
     rescue
       # broken themes dir (permissions, etc.) — keep whatever was loaded before
-    end
-
-    # Re-seat the live palette after the custom registry is rebuilt. Built-in actives
-    # are immutable (name↔palette is 1:1) so they need nothing; a custom active may
-    # have changed colours (refresh) or vanished (fall back to the default). Bumps the
-    # revision when it changes anything so colour-baked render caches rebuild.
-    private def self.reconcile_active : Nil
-      return if BUILTIN_THEMES.has_key?(@@active_name)
-      if pal = @@custom[@@active_name]?
-        return if pal == @@active
-        @@active = pal
-      else
-        @@active = BUILTIN_THEMES[DEFAULT_THEME]
-        @@active_name = DEFAULT_THEME
-      end
-      @@revision &+= 1
     end
 
     # Theme names are used as JSON keys, display labels, and the persisted setting, so

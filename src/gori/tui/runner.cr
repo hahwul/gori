@@ -827,7 +827,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
-        @overlay = :none
+        cancel_settings # revert any live theme preview before jumping (mirrors esc); sets @overlay=:none
         open_palette
       elsif key.escape?
         cancel_settings # revert any live theme preview, close
@@ -2002,7 +2002,8 @@ module Gori::Tui
     def open_settings(section : Symbol) : Nil
       case section
       when :network, :editor, :theme
-        @settings_view.reload(section)
+        @settings_view.reload(section)            # :theme reloads custom themes — may reconcile the live palette
+        @resized = true if section == :theme      # so force a full repaint (an edited/removed active theme just changed)
         @overlay = :settings
         @theme_restore = section == :theme ? Settings.theme : nil # baseline for live-preview revert
       when :tabs

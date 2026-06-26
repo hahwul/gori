@@ -210,6 +210,25 @@ describe "Theme custom loading" do
       Gori::Tui::Theme.accent.should eq(Termisu::Color.from_hex("#00ffcc"))
     end
   end
+
+  it "lets a custom theme named like a legacy alias (dark/light) be selected, not shadowed" do
+    with_themes({"dark.json" => %({"base": "tokyonight", "accent": "#00ffcc"})}) do
+      Gori::Tui::Theme.load_custom
+      Gori::Tui::Theme.available.should contain("dark")    # registered (not a built-in name)
+      Gori::Tui::Theme.canonical("dark").should eq("dark") # the real theme wins over the LEGACY_ALIAS
+      Gori::Tui::Theme.apply("dark").should be_true
+      Gori::Tui::Theme.active_name.should eq("dark")
+      Gori::Tui::Theme.accent.should eq(Termisu::Color.from_hex("#00ffcc"))
+    end
+  end
+
+  it "still maps a legacy alias when no custom theme by that name is loaded" do
+    with_themes({} of String => String) do
+      Gori::Tui::Theme.load_custom # no custom "dark"/"light"
+      Gori::Tui::Theme.canonical("dark").should eq("goridark")
+      Gori::Tui::Theme.canonical("light").should eq("goriday")
+    end
+  end
 end
 
 describe "SettingsView theme list" do

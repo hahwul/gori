@@ -375,8 +375,15 @@ module Gori::Tui
       name_w = {sx - (box.x + 5) - 1, 1}.max
       screen.text(box.x + 5, ry, name, selected ? Theme.text_bright : Theme.text, bg, width: name_w)
       draw_swatch(screen, sx, ry, name)
-      screen.cell(mark_x, ry, '▲', Theme.muted, bg) if up
-      screen.cell(mark_x, ry, '▼', Theme.muted, bg) if down
+      # Scroll marker (one glyph): ↕ when this lone row can scroll both ways (a 1-row
+      # viewport on a tiny terminal), else ▲ for more-above / ▼ for more-below.
+      if up && down
+        screen.cell(mark_x, ry, '↕', Theme.muted, bg)
+      elsif up
+        screen.cell(mark_x, ry, '▲', Theme.muted, bg)
+      elsif down
+        screen.cell(mark_x, ry, '▼', Theme.muted, bg)
+      end
     end
 
     # A tiny preview strip in the theme's OWN palette (not the active one): its canvas
