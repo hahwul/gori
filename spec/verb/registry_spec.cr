@@ -100,6 +100,10 @@ private class FakeContext < ExecContext
     @calls << :toggle_reveal
   end
 
+  def toggle_pretty : Nil
+    @calls << :toggle_pretty
+  end
+
   def replay_selected : Nil
     @calls << :replay_selected
   end

@@ -67,6 +67,7 @@ module Gori::Tui
       @reveal_lines_src = Pointer(UInt8).null
       @detail_hex = false                # 'x' toggles a raw hex dump of the current pane (req/resp)
       @detail_hex_bytes = nil.as(Bytes?) # cached combined head+body for the current pane (hex source)
+      @pretty = Settings.pretty_bodies_default # 'p' pretty-prints bodies (display only); pushed from the runner
       # Windowed detail content, rebuilt only when the detail/pane changes (NOT on
       # scroll or every frame). The head/notes are pre-styled; the body is kept RAW
       # and styled per VISIBLE line, so opening a multi-MiB response is instant
@@ -82,7 +83,8 @@ module Gori::Tui
       head : Array(Highlight::Line),
       body : Array(String),
       kind : Symbol,
-      trailer : Array(Highlight::Line) do
+      trailer : Array(Highlight::Line),
+      pretty : Bool = false do # whether Pretty actually reflowed this body (drives the indicator)
       def total : Int32
         head.size + body.size + trailer.size
       end
@@ -357,6 +359,13 @@ module Gori::Tui
     # No-op when no detail is open. Returns true if it refreshed.
     def refresh_detail(store : Store) : Bool
       return false unless detail = @detail
+      # A Complete, non-streaming flow's captured bytes are immutable (written once),
+      # so a data_version poke from OTHER flows committing has nothing to pick up here.
+      # Skipping avoids re-running the windowed/pretty body build on a stable open flow
+      # every poll during a live capture. Pending flows (response still arriving) and
+      # streaming flows — WebSocket (101) and HTTP/2, whose message/frame logs keep
+      # growing — still refresh.
+      return false if detail.row.state.complete? && detail.row.status != 101 && detail.h2_conn_id.nil?
       id = detail.row.id
       return false unless fresh = store.get_flow(id)
       @detail = fresh
@@ -381,6 +390,16 @@ module Gori::Tui
     # insensitive). Empty in hex mode (the hex view has no text lines).
     setter search_hl : String
     setter reveal : Bool
+
+    # Pretty toggle feeds `build_detail_view`, so a change must drop the windowed
+    # cache (unlike reveal/hex, which render on separate paths). Change-detected
+    # because the runner pushes this every frame.
+    def pretty=(on : Bool) : Nil
+      return if @pretty == on
+      @pretty = on
+      @detail_cache = nil
+      @detail_scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like hex/pane toggles)
+    end
 
     # Revealed (whitespace-visible) lines of the current pane, cached + rebuilt only
     # when the pane bytes change (compared by pointer — detail_pane_bytes memoizes).
@@ -654,7 +673,10 @@ module Gori::Tui
       end
       hex = detail_hex?(detail)
       ws = @reveal && !hex
-      mode_hint = hex ? "x:text" : (ws ? "b:raw" : "x:hex · b:ws")
+      applied = !hex && !ws && detail_view.pretty # Pretty actually reflowed this body
+      mode = hex ? "HEX" : (ws ? "RAW" : (applied ? "PRETTY" : "RAW"))
+      ptog = applied ? "p:raw" : "p:pretty"
+      mode_hint = hex ? "#{mode} · x:text" : (ws ? "#{mode} · b:raw" : "#{mode} · x:hex · b:ws · #{ptog}")
       screen.text(x + 1, rect.y, "↑/↓ scroll · #{mode_hint} · esc back", Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
@@ -860,7 +882,13 @@ module Gori::Tui
       # is styled eagerly; the (possibly multi-MiB) body stays RAW and is styled per
       # visible line at render — so opening a huge response doesn't freeze the UI.
       display, decode_note = Proxy::Codec::ContentDecode.decode(head, body)
-      win = Highlight.message_windowed(head, display || body, request)
+      src = display || body
+      # Pretty-print AFTER decode (so JSON/XML/… are reflowed from the decoded bytes),
+      # display only — storage is untouched. nil = leave raw. `pretty.kind` overrides
+      # the styler when the reflow is no longer the content-type's language.
+      pretty = @pretty ? Pretty.format(head, src) : nil
+      pretty_kind = pretty.try(&.kind)
+      win = Highlight.message_windowed(head, pretty.try(&.bytes) || src, request, kind: pretty_kind)
       if decode_note
         note = [] of Highlight::Line
         note << Highlight::Line.new
@@ -868,7 +896,13 @@ module Gori::Tui
         note << [Highlight::Span.new("— #{decode_note} —", color)]
         trailer = note + trailer # decode note before the truncation note
       end
-      DetailView.new(win.head, win.body, win.kind, trailer)
+      if pn = pretty
+        prettied = [] of Highlight::Line
+        prettied << Highlight::Line.new
+        prettied << [Highlight::Span.new("— #{pn.note} —", Theme.green)]
+        trailer = prettied + trailer
+      end
+      DetailView.new(win.head, win.body, win.kind, trailer, pretty: pretty != nil)
     end
 
     # Wrap pre-formatted plain strings (frames / ws / gRPC hex) as single-span

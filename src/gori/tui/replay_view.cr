@@ -54,6 +54,8 @@ module Gori::Tui
       @diff_lines_cache = nil.as(Array(Replay::DiffLine)?)
       @resp_hex = false                # 'x' toggles a raw hex dump of the response bytes
       @resp_hex_bytes = nil.as(Bytes?) # cached combined head+body of the last result (hex source)
+      @pretty = Settings.pretty_bodies_default # 'p' pretty-prints the response body (display only); pushed from the runner
+      @resp_pretty_applied = false             # whether Pretty actually reflowed the current response (drives the chip)
       @req_hex_edit = nil.as(HexEdit?) # ^X: editable byte buffer for the REQUEST (authoritative while set)
       @scroll_req = 0                  # scroll offset for the hex request editor
       @focus = :request
@@ -523,6 +525,16 @@ module Gori::Tui
       @editor.reveal = on
     end
 
+    # Pretty toggle feeds `resp_view`, so a change drops only the response-view cache
+    # (the diff/hex caches are unaffected — pretty touches neither). Change-detected
+    # because the runner pushes this every frame.
+    def pretty=(on : Bool) : Nil
+      return if @pretty == on
+      @pretty = on
+      @resp_view_cache = nil
+      @scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like x/d toggles)
+    end
+
     # ^F highlight, scoped to the searched pane (the Runner picks which).
     def request_search_hl=(q : String) : Nil
       @editor.search_hl = q
@@ -611,6 +623,13 @@ module Gori::Tui
     end
 
     getter? resp_hex : Bool
+
+    # Whether Pretty actually reflowed the current response body (drives the chip).
+    # resp_view memoizes it; reading forces the (memoized) build so it's current.
+    def resp_pretty_applied? : Bool
+      resp_view
+      @resp_pretty_applied
+    end
 
     # Combined head+body of the last result (hex source), cached; nil when not sent
     # or errored. Invalidated when a new result is applied (reset_result_caches).
@@ -740,6 +759,12 @@ module Gori::Tui
         !@resp_hex && @resp_mode == :diff ? Theme.accent_bg : Theme.bg) + 1
       chips_end = screen.text(tx, rect.y, " hex ", @resp_hex ? Theme.text_bright : Theme.muted,
         @resp_hex ? Theme.accent_bg : Theme.bg)
+      # pretty chip: lit only when the styled response body is actually on screen and
+      # Pretty reflowed it — i.e. NOT in hex/diff/reveal mode (each shows raw/other bytes).
+      pretty_lit = !@resp_hex && !@reveal && @resp_mode == :response && resp_pretty_applied?
+      chips_end = screen.text(chips_end + 1, rect.y, " pretty ",
+        pretty_lit ? Theme.text_bright : Theme.muted,
+        pretty_lit ? Theme.accent_bg : Theme.bg)
 
       # Latency · size of the last send, right-aligned on the top border (the body
       # already shows the status line, so duration + total wire bytes are the gap).
@@ -874,12 +899,19 @@ module Gori::Tui
       @resp_view_rev = Theme.revision
       @resp_view_cache ||= begin
         result = @result
+        @resp_pretty_applied = false
         if !result
           RespView.new([[Highlight::Span.new("— not sent — press ^R to replay —", Theme.muted)]], [] of String, :text)
         elsif !result.ok?
           RespView.new([[Highlight::Span.new("replay error: #{result.error}", Theme.red)]], [] of String, :text)
         else
-          win = Highlight.message_windowed(result.head, display_body(result.head, result.body), request: false)
+          src = display_body(result.head, result.body)
+          # Pretty-print the response body (display only). The DIFF path uses
+          # `display_body` directly (not this view), so both diff sides stay on the
+          # same unformatted bytes — pretty never destabilises the diff.
+          pretty = @pretty ? Pretty.format(result.head, src) : nil
+          @resp_pretty_applied = pretty != nil
+          win = Highlight.message_windowed(result.head, pretty.try(&.bytes) || src, request: false, kind: pretty.try(&.kind))
           RespView.new(win.head, win.body, win.kind)
         end
       end

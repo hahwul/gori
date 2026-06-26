@@ -30,6 +30,8 @@ module Gori::Tui
     abstract def focus : Symbol                         # read the focus model (:menu | :subtabs | :body)
     abstract def reveal? : Bool                        # global whitespace-reveal pref, pushed into views
     abstract def toggle_reveal : Nil                   # flip the whitespace-reveal pref (^B from any view)
+    abstract def pretty? : Bool                        # global pretty-print-bodies pref, pushed into views
+    abstract def toggle_pretty : Nil                   # flip the pretty-print pref (`p` from History/Replay)
   end
 
   # Shared, state-free body chrome used by BOTH Runner and the per-tab

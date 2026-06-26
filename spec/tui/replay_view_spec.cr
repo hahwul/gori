@@ -17,6 +17,10 @@ private def replay_tmp_store(&)
 end
 
 describe Gori::Tui::ReplayView do
+  # These specs assert on RAW response rendering; keep the display-only pretty-printer
+  # off so a (future) valid-JSON/XML fixture can't silently reflow and shift assertions.
+  before_each { Gori::Settings.pretty_bodies_default = false }
+
   it "load_blank seeds an editable, sendable scaffold (no source flow)" do
     view = ReplayView.new
     view.load_blank

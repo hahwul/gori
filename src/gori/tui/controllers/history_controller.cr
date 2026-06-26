@@ -39,6 +39,7 @@ module Gori::Tui
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
       @history.reveal = @host.reveal? # propagate the global whitespace-reveal pref
+      @history.pretty = @host.pretty? # propagate the global pretty-print pref
       # Single body pane; the detail view is a drill-in within the same frame.
       if @host.overlay == :detail
         BodyChrome.framed(screen, rect, body_focused) { |inner| @history.render_detail(screen, inner, focused: body_focused) }

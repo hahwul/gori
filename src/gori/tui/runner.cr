@@ -93,6 +93,9 @@ module Gori::Tui
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
       # propagated to the focused view in render_body. Handy for smuggling tests.
       @reveal = false
+      # Pretty-print bodies (JSON/XML/form/…) toggle — global view pref like reveal,
+      # seeded from the persisted default, propagated to History/Replay each frame.
+      @pretty = Settings.pretty_bodies_default
       # A destructive-action guard (delete project / close a sub-tab). When set,
       # @overlay is :confirm; accepting runs @confirm_action.
       @confirm = nil.as(ConfirmDialog?)
@@ -931,7 +934,8 @@ module Gori::Tui
                  else               msg
                  end
         @theme_restore = Settings.theme if @settings_view.section == :theme # saved → don't revert this on esc
-        reconcile_mouse # the EDITOR section holds the Mouse toggle — apply it live
+        reconcile_mouse                            # the EDITOR section holds the Mouse toggle — apply it live
+        @pretty = Settings.pretty_bodies_default # …and the Pretty-print-bodies toggle — apply it live too
       elsif key.up?
         @settings_view.move_field(-1)
         preview_theme # ↑/↓ moves the theme-list selection in the :theme section
@@ -1311,6 +1315,13 @@ module Gori::Tui
       @toast = "whitespace: #{@reveal ? "on (·→␍␊)" : "off"}"
     end
 
+    # Toggle pretty-print of req/res bodies (display only) — global like reveal, so a
+    # single `p` flips both History detail and the Replay response.
+    def toggle_pretty : Nil
+      @pretty = !@pretty
+      @toast = "pretty bodies: #{@pretty ? "on" : "off"}"
+    end
+
     private def current_scope : Verb::Scope
       case @overlay
       when :palette
@@ -1461,7 +1472,7 @@ module Gori::Tui
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
       when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
       when :tabs        then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
-      when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · ^G goto · ^F find · esc back"
+      when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
@@ -1576,6 +1587,10 @@ module Gori::Tui
 
     def reveal? : Bool
       @reveal
+    end
+
+    def pretty? : Bool
+      @pretty
     end
 
     # Open the ":" command line scoped to the CURRENT focus area. current_scope is

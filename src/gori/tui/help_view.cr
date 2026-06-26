@@ -44,6 +44,7 @@ module Gori::Tui
         {"⇧F", "create a finding"},
         {"f · /", "follow newest · filter (query language)"},
         {"i", "toggle intercept hold-mode"},
+        {"x · b · p", "in a flow: hex · whitespace · pretty bodies"},
       ]},
       {"REPLAY", [
         {"^R", "send the request"},
@@ -52,7 +53,7 @@ module Gori::Tui
         {"^X", "hex-edit the request"},
         {"^S", "SNI override (on the target)"},
         {"↹", "cycle target → request → response"},
-        {"x · d", "response: hex · diff"},
+        {"x · d · p", "response: hex · diff · pretty"},
       ]},
       {"FUZZER", [
         {"⇧I", "send a flow/replay here (History/Replay)"},

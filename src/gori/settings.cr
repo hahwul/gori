@@ -20,6 +20,7 @@ module Gori
     class_property editor_markdown : Bool = true # syntax-highlight markdown in Notes/Project
     class_property theme : String = "goridark"   # TUI colour theme name (settings:theme); applied by Theme.apply
     class_property mouse : Bool = true           # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
+    class_property pretty_bodies_default : Bool = true # pretty-print JSON/XML/form/… bodies in History detail + Replay response (display only)
     # Top tab-bar layout: ordered {tab-id, visible?}. Empty = never customized → Chrome
     # reconciles to catalog defaults. Opaque String ids (Crystal has no runtime String→Symbol);
     # Chrome maps ids→catalog symbols. Only an EXPLICIT false hides a tab.
@@ -48,6 +49,7 @@ module Gori
       end
       self.theme = root["theme"]?.try(&.as_s?) || theme # validated against the known themes by Theme.apply
       self.mouse = load_bool(root, "mouse", mouse)
+      self.pretty_bodies_default = load_bool(root, "pretty_bodies", pretty_bodies_default)
       if ed = root["editor"]?
         self.editor = ed["command"]?.try(&.as_s?) || editor
         self.editor_markdown = load_bool(ed, "markdown", editor_markdown)
@@ -118,6 +120,7 @@ module Gori
         j.object do
           j.field "theme", theme
           j.field "mouse", mouse
+          j.field "pretty_bodies", pretty_bodies_default
           j.field "network" do
             j.object do
               j.field "bind_host", bind_host

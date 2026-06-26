@@ -69,10 +69,12 @@ module Gori::Tui
       end
     end
 
-    def self.message_windowed(head : Bytes?, body : Bytes?, request : Bool) : Windowed
+    # `kind` overrides the content-type-derived styling (used by Pretty when its
+    # output is no longer the content-type's language, e.g. GraphQL/JWT → :text).
+    def self.message_windowed(head : Bytes?, body : Bytes?, request : Bool, kind : Symbol? = nil) : Windowed
       head_lines = to_lines(head)
       has_body = !(body.nil? || body.empty?)
-      kind = body_kind(content_type_in(head_lines))
+      kind = kind || body_kind(content_type_in(head_lines))
       styled = [] of Line
       in_headers = true
       head_lines.each_with_index do |raw, i|

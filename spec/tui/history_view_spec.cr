@@ -30,6 +30,10 @@ private def add_flow(store, method, target, status = nil, content_type = nil)
 end
 
 describe Gori::Tui::HistoryView do
+  # These specs assert on RAW body rendering; keep the display-only pretty-printer off
+  # so a (future) valid-JSON/XML fixture can't silently reflow and shift assertions.
+  before_each { Gori::Settings.pretty_bodies_default = false }
+
   it "loads flows newest-first with the newest selected (follow)" do
     tmp_store do |store|
       add_flow(store, "GET", "/a", 200)
@@ -154,6 +158,58 @@ describe Gori::Tui::HistoryView do
       backend.contains?("MESSAGES").should be_true
       backend.contains?("hello").should be_true
       backend.contains?("world").should be_true
+    end
+  end
+
+  it "pretty-prints a JSON response body when enabled, and restores raw when off" do
+    tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/api", http_version: "HTTP/1.1",
+        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice,
+        body: %({"a":1,"b":[1,2]}).to_slice, content_type: "application/json"))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response
+
+      view.pretty = true
+      backend = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 16))
+      backend.contains?(%("a": 1)).should be_true # reflowed (space after colon)
+      backend.contains?("PRETTY").should be_true  # indicator
+
+      view.pretty = false # display-only toggle restores the raw, single-line body
+      raw = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(raw), Rect.new(0, 0, 80, 16))
+      raw.contains?(%("a": 1)).should be_false
+      raw.contains?("RAW").should be_true
+    end
+  end
+
+  it "refresh_detail picks up a Pending flow's response but skips a stable Complete one" do
+    tmp_store do |store|
+      pid = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/p", http_version: "HTTP/1.1",
+        head: "GET /p HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true # the (only) Pending flow
+
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: pid, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+        body: "done".to_slice, content_type: "text/plain"))
+      view.refresh_detail(store).should be_true # Pending → picks up the now-Complete response
+
+      # Now Complete + non-streaming → immutable; further pokes are skipped (no rebuild).
+      view.refresh_detail(store).should be_false
     end
   end
 

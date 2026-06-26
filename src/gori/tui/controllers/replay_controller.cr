@@ -87,7 +87,7 @@ module Gori::Tui
       case v.focus
       when :target   then v.editing_sni? ? "type SNI host · ^S/↵/esc back to URL · ^R send" \
                                           : "type URL · ^S SNI · ↵/↓ request · ^R send · ↹ pane · esc tabs"
-      when :response then "↑/↓ scroll · ←/→/d diff · x hex · ^F find · ^R send · ↹ pane · esc tabs"
+      when :response then "↑/↓ scroll · ←/→/d diff · x hex · p pretty · ^F find · ^R send · ↹ pane · esc tabs"
       else                "type to edit · ^R send · ^G goto · ^F find · ^X hex · ^B ws · ^N new · ^W close · ↹ pane · esc tabs"
       end
     end
@@ -105,7 +105,7 @@ module Gori::Tui
     # --- rendering ---
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
-      current_replay_tab.try { |t| t.view.reveal = @host.reveal? }
+      current_replay_tab.try { |t| t.view.reveal = @host.reveal?; t.view.pretty = @host.pretty? }
       body_rect = rect
       if @replays.size >= 2
         sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
@@ -570,6 +570,7 @@ module Gori::Tui
       when key.lower_d?          then view.toggle_resp_mode
       when key.lower_x?          then view.toggle_resp_hex
       when key.lower_b?          then @host.toggle_reveal
+      when key.lower_p?          then @host.toggle_pretty
       end
     end
   end

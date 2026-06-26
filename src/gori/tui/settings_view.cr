@@ -28,6 +28,7 @@ module Gori::Tui
       Field.new("External editor", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
       Field.new("Markdown highlight", "syntax-colour markdown in Notes/Project — ←/→/space toggles", bool: true),
       Field.new("Mouse", "click + scroll-wheel navigation (off restores native text selection)", bool: true),
+      Field.new("Pretty-print bodies", "reflow JSON/XML/form/… in History detail + Replay response — display only; ←/→/space toggles", bool: true),
     ]
     # The THEME section is special: a single field whose value is the selected theme
     # name, but rendered as a vertical, scrollable list (built-ins + user themes) rather
@@ -65,7 +66,7 @@ module Gori::Tui
       @section = section
       Theme.load_custom if section == :theme # pick up theme files dropped since startup
       @values = case section
-                when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off"]
+                when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
                 when :theme  then [Theme.canonical(Settings.theme)]
                 else              [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
                 end
@@ -184,7 +185,8 @@ module Gori::Tui
         Settings.editor = @values[0].strip # blank is valid → clears to $VISUAL/$EDITOR/vi
         Settings.editor_markdown = @values[1] == "on"
         Settings.mouse = @values[2] == "on"
-        @values = [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off"]
+        Settings.pretty_bodies_default = @values[3] == "on"
+        @values = [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
         return persist
       end
       port = @values[1].strip.to_i?

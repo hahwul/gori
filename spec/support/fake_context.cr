@@ -54,6 +54,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def toggle_reveal : Nil; end
 
+  def toggle_pretty : Nil; end
+
   def replay_selected : Nil; end
 
   def replay_new : Nil; end
