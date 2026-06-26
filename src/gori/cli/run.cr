@@ -525,7 +525,10 @@ module Gori
       private def self.parse_duration(v : String) : Time::Span
         m = v.match(/\A(\d+)(s|m|h)?\z/)
         abort "gori run: invalid duration '#{v}' (use e.g. 30s, 5m, 1h)" unless m
-        n = m[1].to_i
+        # .to_i? (not .to_i): the regex permits arbitrarily many digits, so a value
+        # like 99999999999999999999 would overflow Int32 and crash with an unhandled
+        # ArgumentError. Treat an out-of-range duration as a clean usage error.
+        n = m[1].to_i? || abort("gori run: --for '#{v}' is out of range")
         abort "gori run: --for must be greater than 0 (got '#{v}')" if n == 0
         case m[2]?
         when "m" then n.minutes

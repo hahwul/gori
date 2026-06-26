@@ -20,7 +20,7 @@ module Gori::Proxy::Codec
     # br — decode unsupported").
     def self.decode(head : Bytes?, body : Bytes?) : {Bytes?, String?}
       return {nil, nil} if body.nil? || body.empty? || head.nil?
-      te_chunked = header_values(head, "transfer-encoding").any?(&.downcase.includes?("chunked"))
+      te_chunked = transfer_encoding_chunked?(header_values(head, "transfer-encoding"))
       encodings = header_values(head, "content-encoding")
         .flat_map(&.split(','))
         .map(&.strip.downcase)
@@ -39,6 +39,14 @@ module Gori::Proxy::Codec
         entity = decoded
       end
       {entity, notes.empty? ? nil : notes.join(" · ")}
+    end
+
+    # `chunked` frames the body only when it's the FINAL transfer-coding (RFC 7230
+    # §3.3.1) — mirror the strict wire codec (Body.chunked?) rather than a loose
+    # substring scan, which would wrongly de-chunk a body whose TE merely contains
+    # the word (e.g. a non-final coding, or a token like "xchunked").
+    private def self.transfer_encoding_chunked?(values : Array(String)) : Bool
+      values.flat_map(&.split(',')).map(&.strip.downcase).reject(&.empty?).last? == "chunked"
     end
 
     # {decoded | nil, note | nil}. nil => stop (unsupported or hard error).

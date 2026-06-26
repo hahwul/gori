@@ -65,6 +65,16 @@ describe Gori::Proxy::Codec::ContentDecode do
     String.new(decoded || Bytes.empty).should_not contain("hello") # "+5" must NOT parse as size 5
   end
 
+  it "does NOT de-chunk a body whose TE only CONTAINS 'chunked' as a substring" do
+    # "xchunked" is not the chunked coding — a loose substring match used to
+    # wrongly de-chunk this, mangling the displayed body. The raw (passthrough)
+    # result is signalled by a nil decoded value.
+    body = "5\r\nhello\r\n0\r\n\r\n".to_slice
+    decoded, note = decode(head("HTTP/1.1 200 OK", "Transfer-Encoding: xchunked"), body)
+    decoded.should be_nil
+    note.should be_nil
+  end
+
   it "reports an unsupported encoding instead of decoding to garbage" do
     _, note = decode(head("HTTP/1.1 200 OK", "Content-Encoding: compress"), "rawbytes".to_slice)
     note.not_nil!.should contain("unsupported")

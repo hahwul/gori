@@ -273,8 +273,13 @@ module Gori::Proxy::Codec
       n && n >= 0 ? n : nil
     end
 
+    # A trailer-section blank line is JUST the terminator ("\r\n" / "\n"). Size
+    # alone is wrong: a 1-char trailer with a bare-LF terminator ("X\n") is also
+    # 2 bytes but NOT blank — treating it as the terminator would break the loop
+    # early, leaving the real blank line on the wire to desync the next keep-alive
+    # request. Check content (terminator octets only), not length.
     private def self.blank_line?(line : Bytes) : Bool
-      line.size <= 2 # "\r\n" or "\n"
+      line.all? { |b| b == 0x0d_u8 || b == 0x0a_u8 }
     end
   end
 end

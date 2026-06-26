@@ -1,6 +1,7 @@
 require "./frame"
 require "./hpack"
 require "../codec/body"
+require "../upstream"
 require "../sink"
 require "../../flow_mapper"
 require "../../store/models"
@@ -45,6 +46,13 @@ module Gori::Proxy::H2
       getter req = Side.new
       getter resp = Side.new
       property flow_id : Int64? = nil
+      # Monotonic timing for the response's ttfb/duration. h1 records these in
+      # client_conn; without them every h2 flow shows a null latency in History /
+      # QL / `gori run` JSON (and most HTTPS traffic negotiates h2). `started_at`
+      # is stamped when the stream is first seen; `resp_first_at` on the first
+      # response HEADERS/DATA frame (time-to-first-byte).
+      getter started_at : Time::Instant = Time.instant
+      property resp_first_at : Time::Instant? = nil
     end
 
     def initialize(@sink : FlowSink, @host : String, @port : Int32, @created_at : Int64,
@@ -74,6 +82,13 @@ module Gori::Proxy::H2
       request = direction == "out"
       side = request ? stream.req : stream.resp
       decoder = request ? @req_decoder : @resp_decoder
+
+      # First response byte (ttfb anchor): the first HEADERS/DATA in the response
+      # direction. Guard to those frame types so a leading WINDOW_UPDATE/PRIORITY
+      # doesn't pre-date ttfb (frame_type is nil for unknown frames).
+      if !request && stream.resp_first_at.nil? && (ft = frame.frame_type) && (ft.headers? || ft.data?)
+        stream.resp_first_at = Time.instant
+      end
 
       case frame.frame_type
       when Frame::Type::RstStream
@@ -248,10 +263,14 @@ module Gori::Proxy::H2
       body = cap.total == 0 ? nil : cap.to_slice
       content_type = header_value(headers, "content-type")
       head = synth_response_head(status, headers)
+      now = Time.instant
+      duration_us = (now - stream.started_at).total_microseconds.to_i64
+      ttfb_us = stream.resp_first_at.try { |t| (t - stream.started_at).total_microseconds.to_i64 }
       @sink.on_response(Store::CapturedResponse.new(
         flow_id: flow_id, status: status, head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
-        content_type: content_type, state: Store::FlowState::Complete))
+        content_type: content_type, state: Store::FlowState::Complete,
+        ttfb_us: ttfb_us, duration_us: duration_us))
     end
 
     private def pseudo(headers : Array({String, String}), name : String) : String?
@@ -262,12 +281,10 @@ module Gori::Proxy::H2
       headers.find { |(n, _)| n == name }.try(&.[1])
     end
 
+    # Reuse the one authority parser (bracketed-IPv6 aware) instead of a second
+    # hand-rolled copy that mishandles "[::1]:8443".
     private def split_authority(authority : String) : {String, Int32}
-      idx = authority.rindex(':')
-      return {authority, @port} unless idx
-      host = authority[0...idx]
-      return {authority, @port} if host.includes?(':') # unbracketed IPv6
-      {host, authority[(idx + 1)..].to_i? || @port}
+      Upstream.split_host_port(authority, @port)
     end
 
     # A readable HTTP/2 request head (the bytes shown in the detail view). The

@@ -172,6 +172,18 @@ describe Gori::Proxy::Codec::Body do
       src.gets_to_end.should eq("NEXT")
     end
 
+    it "does NOT mistake a 1-char bare-LF trailer line for the terminating blank line (keep-alive desync)" do
+      # "A\n" is 2 bytes like "\r\n" but is NOT blank — a size-only blank check used
+      # to stop here, leaving the REAL blank line on the wire to desync the next
+      # keep-alive request. Must consume through the real blank line instead.
+      wire = "0\r\nA\n\r\nNEXT"
+      src = IO::Memory.new(wire)
+      dst = IO::Memory.new
+      Body.stream(src, dst, BodyFraming::Chunked, 0_i64, IO::Memory.new).should be_true
+      dst.to_s.should eq("0\r\nA\n\r\n")  # forwarded through the genuine blank line
+      src.gets_to_end.should eq("NEXT")  # next message starts clean — no orphaned CRLF
+    end
+
     it "aborts a chunked body whose trailer section overruns the cap (memory/CPU DoS guard)" do
       # terminating 0-chunk, then an unbounded trailer that never sends the blank line
       src = IO::Memory.new("0\r\n#{"a" * (300 * 1024)}")

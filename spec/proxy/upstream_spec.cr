@@ -52,4 +52,21 @@ describe Gori::Proxy::Upstream do
       end
     end
   end
+
+  describe ".split_host_port" do
+    it "parses host:port and bare host" do
+      Gori::Proxy::Upstream.split_host_port("example.com:8080", 443).should eq({"example.com", 8080})
+      Gori::Proxy::Upstream.split_host_port("example.com", 443).should eq({"example.com", 443})
+    end
+
+    it "parses bracketed IPv6 with and without a port (regression: was split inside the literal)" do
+      Gori::Proxy::Upstream.split_host_port("[::1]:8443", 443).should eq({"::1", 8443})
+      Gori::Proxy::Upstream.split_host_port("[::1]", 443).should eq({"::1", 443})
+      Gori::Proxy::Upstream.split_host_port("[2001:db8::1]:8080", 443).should eq({"2001:db8::1", 8080})
+    end
+
+    it "treats an unbracketed IPv6 literal as a bare host" do
+      Gori::Proxy::Upstream.split_host_port("::1", 443).should eq({"::1", 443})
+    end
+  end
 end

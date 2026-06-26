@@ -133,10 +133,22 @@ module Gori
       value = upstream_proxy.strip
       return nil if value.empty?
       value = value.sub(/\Ahttps?:\/\//, "").rstrip('/')
+      # Bracketed IPv6 ("[::1]" / "[::1]:8080"): host is inside the brackets, the
+      # optional port follows ']'. Without this the rindex(':') below would split
+      # inside the IPv6 literal and yield a garbage host/port.
+      if value.starts_with?('[')
+        if close = value.index(']')
+          host = value[1...close]
+          return nil if host.empty?
+          rest = value[(close + 1)..]
+          return {host, rest.starts_with?(':') ? (rest[1..].to_i? || 8080) : 8080}
+        end
+      end
       idx = value.rindex(':')
       return {value, 8080} unless idx
       host = value[0...idx]
       return nil if host.empty?
+      return {value, 8080} if host.includes?(':') # unbracketed IPv6 literal → no port
       {host, value[(idx + 1)..].to_i? || 8080}
     end
   end

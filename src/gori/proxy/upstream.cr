@@ -108,9 +108,18 @@ module Gori::Proxy
     end
 
     # Splits an "host:port" / "host" authority. Falls back to default_port.
-    # IPv6 literals without brackets are treated as a bare host (skeleton; a
-    # bracketed-IPv6 parser is a later refinement).
+    # Handles bracketed IPv6 ("[::1]" / "[::1]:8080") by returning the bare inner
+    # address; an unbracketed IPv6 literal ("::1") is treated as a bare host (a
+    # port can't be disambiguated from the address colons without brackets).
     def self.split_host_port(authority : String, default_port : Int32) : {String, Int32}
+      if authority.starts_with?('[')
+        if close = authority.index(']')
+          host = authority[1...close]
+          rest = authority[(close + 1)..]
+          port = rest.starts_with?(':') ? (rest[1..].to_i? || default_port) : default_port
+          return {host, port}
+        end
+      end
       idx = authority.rindex(':')
       return {authority, default_port} unless idx
       host = authority[0...idx]

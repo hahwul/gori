@@ -74,6 +74,11 @@ describe Gori::Proxy::H2::Assembler do
     String.new(resp.body.not_nil!).should eq("hello h2 body")
     String.new(resp.head).should contain("HTTP/2 302")
     String.new(resp.head).should contain("location: https://www.example.com")
+    # h2 flows must record latency like h1 does — without this, History/QL/`gori
+    # run` JSON show a null duration for every (h2-negotiated) HTTPS flow.
+    resp.duration_us.should_not be_nil
+    resp.duration_us.not_nil!.should be >= 0
+    resp.ttfb_us.should_not be_nil # first response HEADERS frame anchors ttfb
   end
 
   it "carries a request body across DATA frames" do

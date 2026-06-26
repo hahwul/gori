@@ -63,8 +63,13 @@ module Gori::Proxy::Tls
     private def self.add_ext(x : LibCrypto::X509, nid : Int32, value : String) : Nil
       ext = LibCrypto.x509v3_ext_nconf_nid(Pointer(Void).null, Pointer(Void).null, nid, value)
       raise Gori::Error.new("X509V3_EXT_nconf_nid(#{nid}) failed") if ext.null?
-      LibCrypto.x509_add_ext(x, ext, -1)
+      # Check the add too (stdlib X509_add_ext returns the ext on success, NULL on
+      # failure): a silently-dropped basicConstraints/SAN would mint a cert that
+      # only fails later at client verification, with no error at build time. Free
+      # the ext regardless — X509_add_ext copies it.
+      added = LibCrypto.x509_add_ext(x, ext, -1)
       LibCrypto.x509_extension_free(ext)
+      raise Gori::Error.new("X509_add_ext(#{nid}) failed") if added.null?
     end
 
     private def self.random_serial : Int64
