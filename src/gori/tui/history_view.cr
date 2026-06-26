@@ -728,7 +728,7 @@ module Gori::Tui
         label = @query.blank? ? "(in-scope only)" : ": #{@query}"
         screen.text(rect.x + 1, rect.y, label, Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  status:>=500  size:>10000  dur:>500  header:  body~regex", Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  status:>=500  path:  scheme:  size:>10000  dur:>500  header:  body~regex", Theme.muted, width: left_w)
       end
     end
 

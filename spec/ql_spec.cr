@@ -107,6 +107,13 @@ describe Gori::QL do
     Gori::QL.parse("dur:>fast").sql.should eq("1")
   end
 
+  it "drops an out-of-range / non-finite dur: magnitude instead of raising OverflowError" do
+    Gori::QL.parse("dur:>1e20").sql.should eq("1")           # ms-scaled (×1000) overflows Int64 µs
+    Gori::QL.parse("dur:>1e16s").sql.should eq("1")          # s-scaled (×1e6) overflows
+    Gori::QL.parse("dur:>nan").sql.should eq("1")            # NaN is non-finite
+    Gori::QL.parse("dur:>500").args.should eq([500_000_i64]) # a sane value still compiles
+  end
+
   it "compiles header: as a case-insensitive substring over the head bytes" do
     f = Gori::QL.parse("header:Set-Cookie")
     f.sql.should eq("((lower(CAST(request_head AS TEXT)) LIKE ? ESCAPE '\\' OR " \

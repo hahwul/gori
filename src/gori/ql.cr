@@ -178,8 +178,13 @@ module Gori
         scale_us = 1_000_000.0
       end
       n = rest.to_f?
-      return nil unless n
-      {"duration_us #{op} ?", [(n * scale_us).round.to_i64] of DB::Any}
+      return nil unless n && n.finite?
+      us = (n * scale_us).round
+      # Drop an absurd magnitude rather than let Float#to_i64 raise OverflowError out of
+      # QL.parse (a crash on a single TUI keystroke); size: drops the same way via
+      # to_i64?. 9e18 is safely inside Int64 and astronomically beyond any real latency.
+      return nil unless us.abs < 9.0e18
+      {"duration_us #{op} ?", [us.to_i64] of DB::Any}
     end
 
     # header: substring-matches the raw request/response head bytes (request line /

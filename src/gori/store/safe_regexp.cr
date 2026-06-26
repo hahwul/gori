@@ -18,6 +18,24 @@ module Gori
   # stops at an embedded NUL — content past a NUL byte isn't scanned (acceptable for a
   # text search; binary bodies aren't usefully regex-matched anyway).
   module SafeRegexp
+    # SQLite fires this scalar callback once per row, but a query's pattern is constant
+    # across all rows — recompiling per row is O(rows) PCRE2 compiles. Memoise the last
+    # (pattern → Regex). gori is single-threaded (fibers, no -Dpreview_mt) and the
+    # callback never yields, so a bare last-value memo is race-free: the pattern+regex
+    # pair is assigned together with no yield point between the two stores.
+    @@cache_pattern : String? = nil
+    @@cache_regex : Regex? = nil
+
+    # :nodoc: — internal (called from FN, which needs an explicit receiver, so not private)
+    def self.compile(pattern : String) : Regex
+      cached = @@cache_regex
+      return cached if cached && @@cache_pattern == pattern
+      rx = Regex.new(pattern) # raises on a bad pattern (caught by FN); cache only on success
+      @@cache_pattern = pattern
+      @@cache_regex = rx
+      rx
+    end
+
     # Closure-free proc (no captured locals) so it is valid as a C callback, matching
     # the driver's own FuncCallback signature: (context, argc, argv) ordered args.
     FN = ->(context : LibSQLite3::SQLite3Context, _argc : Int32, argv : LibSQLite3::SQLite3Value*) do
@@ -26,7 +44,7 @@ module Gori
       text = String.new(LibSQLite3.value_text(args[1])).scrub
       matched =
         begin
-          Regex.new(pattern).matches?(text)
+          SafeRegexp.compile(pattern).matches?(text)
         rescue
           false
         end
