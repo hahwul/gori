@@ -137,8 +137,8 @@ module Gori
       # reach a tab hidden in settings:tabs (focus_tab force-shows it while active).
       {
         :project => "Project", :history => "History", :intercept => "Intercept", :sitemap => "Sitemap",
-        :replay => "Replay", :findings => "Findings", :notes => "Notes", :convert => "Convert",
-        :agent => "Agent", :help => "Help",
+        :replay => "Replay", :comparer => "Comparer", :findings => "Findings", :notes => "Notes",
+        :convert => "Convert", :agent => "Agent", :help => "Help",
       }.each do |tab, label|
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global) { |ctx| ctx.focus_tab(tab); nil }

@@ -104,6 +104,12 @@ module Gori
       # browser: open a system browser pre-trusting gori's CA + routed via the proxy
       abstract def open_browser_picker : Nil
 
+      # comparer: diff two arbitrary flows
+      abstract def comparer_pick(slot : Symbol) : Nil # open the flow picker for slot :a / :b
+      abstract def comparer_swap : Nil                # swap the A and B flows
+      abstract def comparer_toggle_pane : Nil         # toggle the diff between the requests and the responses
+      abstract def comparer_add_selected : Nil        # send History's selected flow to the next Comparer slot
+
       # settings: open the config editor for a section (:network | :editor | :theme |
       # :tabs | :hotkeys). :tabs opens the tab-bar customizer overlay.
       abstract def open_settings(section : Symbol) : Nil

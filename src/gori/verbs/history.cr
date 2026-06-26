@@ -41,6 +41,12 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
         available: history_selected) { |ctx| ctx.replay_selected; nil }
 
+      # Send the selected flow to the Comparer's next slot (A → B → A). The Comparer
+      # tab is hidden by default; reach it with ^P → "Go to Comparer".
+      r.register Verb::Definition.new(
+        "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
+        Verb::Scope::Body, available: history_selected) { |ctx| ctx.comparer_add_selected; nil }
+
       # --- replay workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
       in_replay = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay }
@@ -107,6 +113,11 @@ module Gori
         "detail.finding", "Add finding", "Create a finding from this flow",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("f", shift: true)],
         hidden: true) { |ctx| ctx.close_detail; ctx.finding_create; nil }
+
+      # Send the open flow to the Comparer (mirrors history.compare from the list).
+      r.register Verb::Definition.new(
+        "detail.compare", "Send to Comparer", "Send this flow to the Comparer (next slot A/B)",
+        Verb::Scope::HistoryDetail) { |ctx| ctx.comparer_add_selected; nil }
     end
 
     # Builds a registry with every built-in verb registered.
@@ -116,6 +127,7 @@ module Gori
       register_history(r)
       register_sitemap(r)
       register_findings(r)
+      register_comparer(r)
       r
     end
   end

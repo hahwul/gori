@@ -244,6 +244,22 @@ private class FakeContext < ExecContext
     @calls << :open_browser_picker
   end
 
+  def comparer_pick(slot : Symbol) : Nil
+    @calls << :comparer_pick
+  end
+
+  def comparer_swap : Nil
+    @calls << :comparer_swap
+  end
+
+  def comparer_toggle_pane : Nil
+    @calls << :comparer_toggle_pane
+  end
+
+  def comparer_add_selected : Nil
+    @calls << :comparer_add_selected
+  end
+
   def open_settings(section : Symbol) : Nil
     @calls << :open_settings
   end
