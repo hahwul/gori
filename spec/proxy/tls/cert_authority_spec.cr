@@ -148,6 +148,16 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
   end
 
+  it "recreates the CA dir if it was removed at runtime before regenerating" do
+    with_ca_dir do |dir|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+      FileUtils.rm_rf(dir) # the dir disappears out from under the live CA
+      ca.regenerate!       # must re-establish it (parity with load_or_create), not crash
+      File.exists?(File.join(dir, "root.crt.pem")).should be_true
+      File.exists?(File.join(dir, "root.key.pem")).should be_true
+    end
+  end
+
   it "mints a leaf under the NEW root after regeneration" do
     with_ca_dir do |dir|
       ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)

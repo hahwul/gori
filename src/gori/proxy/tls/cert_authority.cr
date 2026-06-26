@@ -82,7 +82,9 @@ module Gori::Proxy::Tls
     # key+identity, so any client that trusted the OLD CA must re-trust it.
     def regenerate!(common_name : String = DEFAULT_CN) : Nil
       cert, key = CertBuilder.build_root(common_name)
-      key_path = File.join(File.dirname(@ca_cert_path), CA_KEY_FILE)
+      dir = File.dirname(@ca_cert_path)
+      Gori::Paths.ensure_dir(dir) # parity with load_or_create: the dir may have been removed at runtime
+      key_path = File.join(dir, CA_KEY_FILE)
       # Regenerating overwrites a WORKING CA, so a half-written cert/key pair (disk
       # full, a permission error) must not corrupt it: stage both PEMs in full to
       # temp files, then rename into place (atomic on POSIX; both temps already
