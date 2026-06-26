@@ -75,6 +75,38 @@ module Gori::Proxy::Tls
       File.read(@ca_cert_path)
     end
 
+    # Regenerate the root CA in place: mint a brand-new self-signed root, persist
+    # it over the existing PEM files, and drop the per-host leaf cache so every
+    # subsequent connection is signed by the NEW root. The Tunnel/proxy hold THIS
+    # object, so the swap is live (no restart) — but the new root is a different
+    # key+identity, so any client that trusted the OLD CA must re-trust it.
+    def regenerate!(common_name : String = DEFAULT_CN) : Nil
+      cert, key = CertBuilder.build_root(common_name)
+      key_path = File.join(File.dirname(@ca_cert_path), CA_KEY_FILE)
+      # Regenerating overwrites a WORKING CA, so a half-written cert/key pair (disk
+      # full, a permission error) must not corrupt it: stage both PEMs in full to
+      # temp files, then rename into place (atomic on POSIX; both temps already
+      # exist, so the on-disk cert/key never disagree past the gap between renames).
+      cert_tmp = "#{@ca_cert_path}.tmp"
+      key_tmp = "#{key_path}.tmp"
+      begin
+        cert.write_pem(cert_tmp)
+        key.write_pem(key_tmp)
+        File.chmod(key_tmp, 0o600) # the CA private key is a machine secret
+        File.rename(key_tmp, key_path)
+        File.rename(cert_tmp, @ca_cert_path)
+      rescue ex
+        File.delete?(cert_tmp)
+        File.delete?(key_tmp)
+        raise ex
+      end
+      @mutex.synchronize do
+        @cert = cert
+        @key = key
+        @cache.clear # old leaves were signed by the previous root — drop them
+      end
+    end
+
     # Base64(SHA-256(DER SubjectPublicKeyInfo)) of the root CA — the value a
     # Chromium browser wants in `--ignore-certificate-errors-spki-list` to trust
     # exactly this CA (and nothing else) for the launched session.
