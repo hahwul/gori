@@ -10,8 +10,13 @@ module Gori
   #   method:post path:/api OR flag:x   # OR of AND-groups
   #   -host:cdn  status:5xx  login      # negation, status class, free text
   #   body:token                        # scan request/response body bytes
+  #   size:>10000 dur:>=500 dur:<2s     # response bytes / latency (ms; ms|s suffix)
+  #   header:set-cookie                 # substring over request/response head bytes
+  #   body~secret\d+  host~^api\.       # `~` = regex (host path url header body)
   module QL
-    # Fields: host path method scheme status flag body (+ bare words = free text).
+    # `:` fields:  host path method scheme status size dur header body flag
+    # `~` regex on: host path url header body   (+ bare words = free text).
+    # Comparison ops (<= >= < > =) apply to status/size/dur.
     struct Filter
       getter sql : String # safe to splice into "WHERE ..."; values are in `args`
       getter args : Array(DB::Any)
@@ -60,8 +65,21 @@ module Gori
       term = term[1..] if negate
       return nil if term.empty?
 
-      colon = term.index(':')
-      result = (colon && colon > 0) ? field_cond(term[0...colon].downcase, term[(colon + 1)..]) : free_text(term)
+      # The field/operator separator is the first ':' (field op) or '~' (regex op) —
+      # whichever appears first wins, so a regex value may itself contain ':' (e.g.
+      # body~https?://x). A leading separator (`:foo` / `~foo`) is treated as free text.
+      ci = term.index(':')
+      ti = term.index('~')
+      sep = [ci, ti].compact.min?
+
+      result =
+        if sep && sep > 0
+          field = term[0...sep].downcase
+          value = term[(sep + 1)..]
+          ti == sep ? regex_cond(field, value, term) : field_cond(field, value)
+        else
+          free_text(term)
+        end
       return nil unless result
 
       cond, args = result
@@ -76,6 +94,9 @@ module Gori
       when "method" then {"upper(method) = ?", [value.upcase] of DB::Any}
       when "scheme" then {"scheme = ?", [value.downcase] of DB::Any}
       when "status" then status_cond(value)
+      when "size"   then numeric_cond("response_size", value)
+      when "dur"    then duration_cond(value)
+      when "header" then header_cond(value)
       when "body"   then body_cond(value)
       when "flag"   then {"0", [] of DB::Any} # tags not implemented yet → matches nothing
       else               free_text(value)     # unknown field: treat the value as free text
@@ -102,16 +123,17 @@ module Gori
       {"id IN (SELECT rowid FROM flows_fts WHERE flows_fts MATCH ?)", [phrase] of DB::Any}
     end
 
-    private def self.status_cond(value : String) : {String, Array(DB::Any)}?
-      op = "="
-      rest = value
+    # Split a leading comparison operator (<= >= < > =, default =) off a value. Shared
+    # by status:, size:, dur: so the operator parsing lives in exactly one place.
+    private def self.split_op(value : String) : {String, String}
       {"<=", ">=", "<", ">", "="}.each do |o|
-        if value.starts_with?(o)
-          op = o
-          rest = value[o.size..]
-          break
-        end
+        return {o, value[o.size..]} if value.starts_with?(o)
       end
+      {"=", value}
+    end
+
+    private def self.status_cond(value : String) : {String, Array(DB::Any)}?
+      op, rest = split_op(value)
 
       # status class: 2xx / 4xx / 5xx — honour any comparison operator against the
       # class bounds (e.g. status:>=5xx → status >= 500; bare status:4xx → 400-499).
@@ -129,6 +151,88 @@ module Gori
       n = rest.to_i?
       return nil unless n
       {"status #{op} ?", [n] of DB::Any}
+    end
+
+    # Numeric comparison on an INTEGER column (size: → response_size). A NULL column
+    # (a pending flow has no response_size) never satisfies `col <op> ?`, so such rows
+    # fall out of both the positive and the negated form — pending flows just don't
+    # match. Non-numeric values yield nil (the term is dropped, like a bad status:).
+    private def self.numeric_cond(column : String, value : String) : {String, Array(DB::Any)}?
+      op, rest = split_op(value)
+      n = rest.to_i64?
+      return nil unless n
+      {"#{column} #{op} ?", [n] of DB::Any}
+    end
+
+    # dur: is milliseconds (how latency reads), compared against the microsecond
+    # `duration_us`. A trailing `ms` (×1000) or `s` (×1_000_000) overrides the default
+    # ms scale; the magnitude is parsed as a float so `dur:>1.5s` works. NULL duration
+    # (no response yet) never matches, same as size:.
+    private def self.duration_cond(value : String) : {String, Array(DB::Any)}?
+      op, rest = split_op(value)
+      scale_us = 1000.0 # ms → µs (default)
+      if rest.ends_with?("ms")
+        rest = rest[0...-2]
+      elsif rest.ends_with?('s')
+        rest = rest[0...-1]
+        scale_us = 1_000_000.0
+      end
+      n = rest.to_f?
+      return nil unless n
+      {"duration_us #{op} ?", [(n * scale_us).round.to_i64] of DB::Any}
+    end
+
+    # header: substring-matches the raw request/response head bytes (request line /
+    # status line + header lines), case-insensitively — same shape as body:. It scans
+    # the whole head, so it also sees the request/status line (rare false hit; fine).
+    # request_head is NOT NULL; response_head is guarded so a response-less flow
+    # contributes no match (and `-header:x` correctly keeps it).
+    private def self.header_cond(value : String) : {String, Array(DB::Any)}
+      p = like(value)
+      {"(lower(CAST(request_head AS TEXT)) LIKE ? ESCAPE '\\' OR " \
+       "(response_head IS NOT NULL AND lower(CAST(response_head AS TEXT)) LIKE ? ESCAPE '\\'))",
+       [p, p] of DB::Any}
+    end
+
+    # The `~` operator: case-sensitive regex (SQLite REGEXP, the same shard-provided
+    # function Scope's regex rules use, backed by Crystal Regex) over a text field —
+    # host/path/url/header/body. Any other field falls back to a literal free-text
+    # search of the whole token. An invalid pattern would raise inside the SQLite
+    # REGEXP callback, so we validate up front and emit a never-matches clause instead
+    # (like flag:). For case-insensitive matching use an inline (?i) flag.
+    private def self.regex_cond(field : String, value : String, term : String) : {String, Array(DB::Any)}?
+      return nil if value.empty?
+      return {"0", [] of DB::Any} unless valid_regex?(value)
+      case field
+      when "host"   then {"host REGEXP ?", [value] of DB::Any}
+      when "path"   then {"target REGEXP ?", [value] of DB::Any}
+      when "url"    then {"(scheme || '://' || host || target) REGEXP ?", [value] of DB::Any}
+      when "header" then header_regex_cond(value)
+      when "body"   then body_regex_cond(value)
+      else               free_text(term)
+      end
+    end
+
+    # NULL-guarded REGEXP over both body columns (a bodyless flow contributes no match,
+    # so `-body~x` keeps it — same null-safety as the body: LIKE fallback above).
+    private def self.body_regex_cond(value : String) : {String, Array(DB::Any)}
+      {"((request_body IS NOT NULL AND CAST(request_body AS TEXT) REGEXP ?) OR " \
+       "(response_body IS NOT NULL AND CAST(response_body AS TEXT) REGEXP ?))",
+       [value, value] of DB::Any}
+    end
+
+    private def self.header_regex_cond(value : String) : {String, Array(DB::Any)}
+      {"(CAST(request_head AS TEXT) REGEXP ? OR " \
+       "(response_head IS NOT NULL AND CAST(response_head AS TEXT) REGEXP ?))",
+       [value, value] of DB::Any}
+    end
+
+    # A pattern must compile or the SQLite REGEXP callback raises (mirrors Scope.valid?).
+    private def self.valid_regex?(pattern : String) : Bool
+      Regex.new(pattern)
+      true
+    rescue
+      false
     end
 
     private def self.free_text(word : String) : {String, Array(DB::Any)}

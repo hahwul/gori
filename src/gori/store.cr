@@ -1,6 +1,7 @@
 require "db"
 require "sqlite3"
 require "./store/models"
+require "./store/safe_regexp"
 require "./store/schema"
 require "./ql"
 
@@ -92,6 +93,9 @@ module Gori
                   retention_flows : Int32 = RETENTION_DEFAULT) : Store
       url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000"
       db = DB.open(url)
+      # Make REGEXP byte-safe on every connection before any query runs (so a binary
+      # body can't crash a `body~`/`header~` scan or a regex scope rule). See SafeRegexp.
+      SafeRegexp.install(db)
       Schema.migrate!(db)
       new(db, events, retention_flows)
     end
