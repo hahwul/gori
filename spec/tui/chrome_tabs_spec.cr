@@ -39,11 +39,12 @@ describe "Chrome.reconcile" do
 end
 
 describe "Chrome.visible_tabs" do
-  it "returns only the visible tabs in order (Agent excluded by default)" do
+  it "returns only the visible tabs in order (default-hidden tabs excluded)" do
     vis = Chrome.visible_tabs([] of {String, Bool}).map(&.first)
-    vis.includes?(:agent).should be_false
+    vis.includes?(:agent).should be_false # Agent + Comparer are hidden by default
+    vis.includes?(:comparer).should be_false
     vis.first.should eq(:project)
-    vis.size.should eq(Chrome::TABS.size - 1)
+    vis.size.should eq(Chrome::TABS.size - Chrome::DEFAULT_HIDDEN.size)
   end
 
   it "force-includes a hidden active tab at its catalog-relative position" do

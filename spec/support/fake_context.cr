@@ -124,5 +124,13 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def open_browser_picker : Nil; end
 
+  def comparer_pick(slot : Symbol) : Nil; end
+
+  def comparer_swap : Nil; end
+
+  def comparer_toggle_pane : Nil; end
+
+  def comparer_add_selected : Nil; end
+
   def open_settings(section : Symbol) : Nil; end
 end

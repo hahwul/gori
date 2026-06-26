@@ -53,6 +53,13 @@ module Gori::Tui
         {"↹", "cycle target → request → response"},
         {"x · d", "response: hex · diff"},
       ]},
+      {"COMPARER", [
+        {"^P → Comparer", "open the tab (hidden by default)"},
+        {"a · b", "pick flow A · flow B"},
+        {"←/→", "compare requests ⟷ responses"},
+        {"s", "swap A ⇄ B"},
+        {"Send to Comparer", "from History (: command line)"},
+      ]},
       {"EDITORS", [
         {"^G · ^F", "go to line · find"},
         {"^E", "open the field in $EDITOR"},

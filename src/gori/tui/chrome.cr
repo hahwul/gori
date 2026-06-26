@@ -12,6 +12,7 @@ module Gori::Tui
       {:intercept, "Intercept"},
       {:sitemap, "Sitemap"},
       {:replay, "Replay"},
+      {:comparer, "Comparer"},
       {:findings, "Findings"},
       {:notes, "Notes"},
       {:agent, "Agent"},
@@ -19,9 +20,10 @@ module Gori::Tui
     ]
 
     # Tabs hidden by default on a fresh install (re-enableable in settings:tabs). Agent
-    # is a non-functional "coming soon" placeholder. Only affects reconcile's append path
-    # — once the user saves, tab_prefs is explicit and this no longer applies.
-    DEFAULT_HIDDEN = [:agent]
+    # is a non-functional "coming soon" placeholder; Comparer is an opt-in power tool
+    # reached via the palette (^P → "Go to Comparer"). Only affects reconcile's append
+    # path — once the user saves, tab_prefs is explicit and this no longer applies.
+    DEFAULT_HIDDEN = [:comparer, :agent]
 
     # Reconcile stored prefs against the canonical catalog → full ordered
     # {symbol, label, visible?}. Removed/unknown ids are dropped, duplicates collapse to
