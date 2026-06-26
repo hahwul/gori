@@ -119,10 +119,17 @@ module Gori::Proxy::Codec
     # Reads a message body (by framing) into a single buffer — used by the Replay
     # engine to capture a response without forwarding it anywhere.
     def self.read(src : IO, framing : BodyFraming, length : Int64) : Bytes?
-      return nil if framing.none?
+      read_complete(src, framing, length)[0]
+    end
+
+    # As `read`, but also returns whether the body completed (false = a
+    # Content-Length/chunked body the origin cut short). Lets the Replay engine
+    # flag a half-delivered response instead of presenting it as whole.
+    def self.read_complete(src : IO, framing : BodyFraming, length : Int64) : {Bytes?, Bool}
+      return {nil, true} if framing.none?
       capture = IO::Memory.new
-      stream(src, capture, framing, length, IO::Memory.new) # tee discarded
-      capture.to_slice.dup
+      complete = stream(src, capture, framing, length, IO::Memory.new) # tee discarded
+      {capture.to_slice.dup, complete}
     end
 
     # RFC 7230 §3.3.1: `chunked` must be the FINAL transfer-coding. Accept it only

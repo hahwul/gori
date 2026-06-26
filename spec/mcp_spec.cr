@@ -347,6 +347,20 @@ describe Gori::MCP::Serialize do
     text.valid_encoding?.should be_true
     text.should contain("A")
   end
+
+  it "flags a replay result as incomplete when the origin cut the body short" do
+    head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
+    r = Gori::Replay::Result.new(head, "hi".to_slice, nil, 1000_i64, incomplete: true)
+    out = JSON.parse(Gori::MCP::Serialize.replay_result_json(r))
+    out["incomplete"].as_bool.should be_true
+  end
+
+  it "omits the incomplete field for a complete replay result" do
+    head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
+    r = Gori::Replay::Result.new(head, "hi".to_slice, nil, 1000_i64)
+    out = JSON.parse(Gori::MCP::Serialize.replay_result_json(r))
+    out["incomplete"]?.should be_nil
+  end
 end
 
 describe Gori::MCP::RequestBuilder do

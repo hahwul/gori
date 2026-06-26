@@ -35,6 +35,40 @@ describe Gori::Proxy::Codec::CaptureBuffer do
   end
 end
 
+describe "Gori::Proxy::Codec::Body.read_complete" do
+  it "reports complete for a fully-delivered Content-Length body" do
+    src = IO::Memory.new("hello")
+    bytes, complete = Body.read_complete(src, BodyFraming::Length, 5_i64)
+    complete.should be_true
+    String.new(bytes.not_nil!).should eq("hello")
+  end
+
+  it "reports INCOMPLETE for a Content-Length body cut short" do
+    src = IO::Memory.new("hi") # only 2 of the framed 10 bytes
+    bytes, complete = Body.read_complete(src, BodyFraming::Length, 10_i64)
+    complete.should be_false
+    String.new(bytes.not_nil!).should eq("hi") # captured what arrived
+  end
+
+  it "reports INCOMPLETE for a chunked body missing its 0-terminator" do
+    src = IO::Memory.new("5\r\nhello\r\n") # one chunk, no terminating 0-chunk
+    _, complete = Body.read_complete(src, BodyFraming::Chunked, 0_i64)
+    complete.should be_false
+  end
+
+  it "reports complete for a close-delimited body (EOF is the framing)" do
+    src = IO::Memory.new("whatever")
+    _, complete = Body.read_complete(src, BodyFraming::CloseDelimited, 0_i64)
+    complete.should be_true
+  end
+
+  it "reports complete with a nil body for None framing" do
+    bytes, complete = Body.read_complete(IO::Memory.new(""), BodyFraming::None, 0_i64)
+    bytes.should be_nil
+    complete.should be_true
+  end
+end
+
 describe Gori::Proxy::Codec::Body do
   describe "framing detection" do
     it "detects Content-Length on a request" do

@@ -11,8 +11,14 @@ module Gori
       getter response : Proxy::Codec::RawResponse?
       getter duration_us : Int64
       getter error : String?
+      # The origin closed before delivering the full body it framed: a
+      # Content-Length cut short, or a chunked body without its terminating
+      # 0-chunk. The captured `body` is what actually arrived — distinct from a
+      # *display* truncation (gori capping what it shows). A consumer must not
+      # treat a half-delivered response as the whole thing.
+      getter? incomplete : Bool
 
-      def initialize(@head, @body, @response, @duration_us, @error = nil)
+      def initialize(@head, @body, @response, @duration_us, @error = nil, @incomplete = false)
       end
 
       def ok? : Bool
@@ -37,8 +43,8 @@ module Gori
 
           resp = Proxy::Codec::Http1.parse_response_head(head)
           framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
-          body = Proxy::Codec::Body.read(upstream, framing, len)
-          Result.new(head, body, resp, elapsed(started))
+          body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len)
+          Result.new(head, body, resp, elapsed(started), incomplete: !complete)
         rescue ex
           error(ex.message || "replay error", started)
         ensure
