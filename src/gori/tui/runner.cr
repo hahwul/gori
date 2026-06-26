@@ -1936,6 +1936,28 @@ module Gori::Tui
       @toast = "root CA path copied to clipboard: #{path}"
     end
 
+    # Regenerate the root CA — irreversible (the old key is overwritten) and it
+    # voids any existing trust, so it's gated behind a confirm. On accept the swap
+    # is live (the proxy mints new leaves immediately); the path is copied so the
+    # operator's next step — re-trusting the new cert — is one paste away.
+    def regenerate_ca : Nil
+      path = @session.ca.ca_cert_path
+      confirm("REGENERATE CA",
+        "Replace the current root CA with a new one?\n\n" \
+        "The old CA becomes untrusted — re-export and\n" \
+        "re-trust the new certificate in your clients.\n" \
+        "New connections use it immediately.",
+        confirm_label: "regenerate", danger: true) do
+        begin
+          @session.ca.regenerate!
+          Clipboard.copy(path)
+          @toast = "root CA regenerated — re-export & re-trust it (path copied): #{path}"
+        rescue ex
+          @toast = "CA regeneration failed: #{ex.message}"
+        end
+      end
+    end
+
     # --- browser (open a pre-trusted system browser) ---
 
     # Detect installed browsers and open the picker; if none qualify, just toast.
