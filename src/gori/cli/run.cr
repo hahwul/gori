@@ -45,6 +45,12 @@ module Gori
           print_help
           exit 1
         end
+      rescue ex : IO::Error
+        # `gori run … | head` (or any reader that closes early) breaks the STDOUT
+        # pipe; a well-behaved Unix filter exits quietly on EPIPE rather than
+        # dumping an IO::Error backtrace. Re-raise anything that isn't a broken pipe.
+        raise ex unless ex.os_error == Errno::EPIPE
+        exit 0
       end
 
       private def self.print_help : Nil
@@ -126,7 +132,20 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
-          rows = (q = query) ? store.search(QL.parse(q), limit) : store.recent_flows(limit)
+          rows =
+            if q = query
+              filter = QL.parse(q)
+              # A query that fails to compile to ANY clause (e.g. `status:>=foo`)
+              # yields the match-all EMPTY filter — silently dumping every flow,
+              # the opposite of what the user asked. Refuse it instead.
+              if !q.strip.empty? && filter == QL::EMPTY
+                store.close
+                abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
+              end
+              store.search(filter, limit)
+            else
+              store.recent_flows(limit)
+            end
           if format == :json
             rows.each { |r| puts CLI::Output.flow_row_json(r) }
           elsif rows.empty?
@@ -204,7 +223,7 @@ module Gori
       private def self.show_text(detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
         if req
           puts "=== REQUEST (#{detail.http_version}) ==="
-          print_message_text(detail.request_head, detail.request_body)
+          print_message_text(detail.request_head, display_body(detail.request_head, detail.request_body))
           puts "  [request body truncated]" if detail.request_body_truncated?
         end
         if resp
@@ -231,19 +250,23 @@ module Gori
             j.field "http_version", detail.http_version
             j.field "error", detail.error
             if req
+              req_body, req_decoded = decode_body(detail.request_head, detail.request_body)
               j.field "request" do
                 j.object do
                   j.field "head", scrub(detail.request_head)
-                  j.field "body", scrub(detail.request_body)
+                  j.field "body", scrub(req_body)
+                  j.field "body_decoded", req_decoded
                   j.field "body_truncated", detail.request_body_truncated?
                 end
               end
             end
             if resp
+              resp_body, resp_decoded = decode_body(detail.response_head, detail.response_body)
               j.field "response" do
                 j.object do
                   j.field "head", scrub(detail.response_head)
-                  j.field "body", scrub(display_body(detail.response_head, detail.response_body))
+                  j.field "body", scrub(resp_body)
+                  j.field "body_decoded", resp_decoded
                   j.field "body_truncated", detail.response_body_truncated?
                 end
               end
@@ -268,7 +291,7 @@ module Gori
           p.banner = "Usage: gori run replay <flow-id> [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--target=URL", "Send to URL instead of the captured origin") { |v| target_override = v }
+          p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept") { |v| target_override = v }
           p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { force_h2 = true }
           p.on("--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
@@ -299,7 +322,7 @@ module Gori
 
         # Decode the response body once; only build the diff lines when --diff asked
         # for them (decoding the captured baseline isn't free for large bodies).
-        new_body = display_body(result.head, result.body)
+        new_body, body_decoded = decode_body(result.head, result.body)
         diff =
           if do_diff
             orig = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
@@ -307,7 +330,7 @@ module Gori
           end
 
         if format == :json
-          puts replay_json(result, new_body, diff)
+          puts replay_json(result, new_body, body_decoded, diff)
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}"
           if d = diff
@@ -321,7 +344,7 @@ module Gori
         exit 1 unless result.ok?
       end
 
-      private def self.replay_json(result : Replay::Result, body : Bytes?, diff : Array(Replay::DiffLine)?) : String
+      private def self.replay_json(result : Replay::Result, body : Bytes?, body_decoded : Bool, diff : Array(Replay::DiffLine)?) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
@@ -330,6 +353,7 @@ module Gori
             j.field "error", result.error
             j.field "head", scrub(result.head)
             j.field "body", scrub(body)
+            j.field "body_decoded", body_decoded
             if d = diff
               j.field "changed_lines", Replay::Diff.change_count(d)
             end
@@ -358,7 +382,10 @@ module Gori
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
-        begin
+        # Build the report while the store is open (markdown resolves linked-flow
+        # evidence), then close BEFORE any file I/O so a write failure can't leak the
+        # connection — and so the abort below runs after a clean close.
+        result = begin
           findings = store.findings
           if findings.empty? && format == :text && export_path.nil?
             STDERR.puts "no findings"
@@ -370,14 +397,21 @@ module Gori
             when :markdown then Findings::Export.markdown(findings, store, project.name)
             else                findings_text(findings)
             end
-          if path = export_path
-            File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
-            STDERR.puts "exported #{findings.size} finding#{findings.size == 1 ? "" : "s"} → #{path}"
-          else
-            puts content
-          end
+          {content, findings.size}
         ensure
           store.close
+        end
+        content, count = result
+
+        if path = export_path
+          begin
+            File.write(path, content.ends_with?('\n') ? content : "#{content}\n")
+          rescue ex : File::Error
+            abort "gori run findings: cannot write to #{path}: #{ex.message}"
+          end
+          STDERR.puts "exported #{count} finding#{count == 1 ? "" : "s"} → #{path}"
+        else
+          puts content
         end
       end
 
@@ -434,7 +468,7 @@ module Gori
       # else the most-recently-active project. Aborts when nothing resolves.
       private def self.resolve_read_project(project_name : String?, db_path : String?) : Project
         if path = db_path
-          abort "gori run: db not found: #{path}" unless File.exists?(path)
+          abort "gori run: --db is not a readable file: #{path}" unless File.file?(path)
           return Project.new(File.basename(File.dirname(path)), path)
         end
         projects = ProjectRegistry.new(Paths.projects_dir).list
@@ -451,17 +485,27 @@ module Gori
       # existing one). --db keeps the explicit-file behaviour of legacy --headless.
       private def self.resolve_capture_project(project_name : String?, db_path : String?) : Project
         if path = db_path
-          return Project.new(File.basename(File.dirname(path)), path)
+          # Catch the unopenable cases up front with a clean message — otherwise
+          # SQLite raises a raw DB::ConnectionRefused backtrace deep in Session.open.
+          abort "gori run capture: --db is a directory, not a file: #{path}" if Dir.exists?(path)
+          parent = File.dirname(path)
+          abort "gori run capture: --db parent directory does not exist: #{parent}" unless Dir.exists?(parent)
+          return Project.new(File.basename(parent), path)
         end
         ProjectRegistry.new(Paths.projects_dir).create(project_name || "default")
       end
 
+      # Opening a non-SQLite file (or a path we can't read) raises deep in the driver;
+      # turn that into a clean CLI error instead of an unhandled backtrace.
       private def self.open_store(project : Project) : Store
         Store.open(project.db_path)
+      rescue ex : DB::Error | SQLite3::Exception
+        abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
       end
 
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64
         abort "gori run #{sub}: missing <flow-id>" if rest.empty?
+        abort "gori run #{sub}: too many arguments (expected one <flow-id>, got: #{rest.join(" ")})" if rest.size > 1
         rest[0].to_i64? || abort "gori run #{sub}: invalid flow id '#{rest[0]}'"
       end
 
@@ -482,6 +526,7 @@ module Gori
         m = v.match(/\A(\d+)(s|m|h)?\z/)
         abort "gori run: invalid duration '#{v}' (use e.g. 30s, 5m, 1h)" unless m
         n = m[1].to_i
+        abort "gori run: --for must be greater than 0 (got '#{v}')" if n == 0
         case m[2]?
         when "m" then n.minutes
         when "h" then n.hours
@@ -502,8 +547,17 @@ module Gori
       end
 
       private def self.display_body(head : Bytes?, body : Bytes?) : Bytes?
+        decode_body(head, body)[0]
+      end
+
+      # Decode a Content-Encoding/Transfer-Encoding body for display, returning the
+      # bytes plus whether any decoding actually happened. When `true`, the bytes no
+      # longer match the message's Content-Encoding/Content-Length headers — the JSON
+      # output surfaces this as `body_decoded` so scripts aren't misled. (`--format
+      # raw` still emits the exact wire bytes.)
+      private def self.decode_body(head : Bytes?, body : Bytes?) : {Bytes?, Bool}
         decoded, _ = Proxy::Codec::ContentDecode.decode(head, body)
-        decoded || body
+        decoded ? {decoded, true} : {body, false}
       end
 
       private def self.scrub(bytes : Bytes?) : String?
@@ -521,6 +575,12 @@ module Gori
       # head lines + blank + body lines (scrubbed), for the --diff line comparison.
       private def self.message_lines(head : Bytes?, body : Bytes?) : Array(String)
         lines = bytes_to_lines(head)
+        # The head BLOB ends with the CRLF CRLF that terminates the header block,
+        # so splitting it leaves trailing empty lines; drop them and add exactly one
+        # blank separator before the body (matches the non-diff text view).
+        while !lines.empty? && lines.last.empty?
+          lines.pop
+        end
         if body && !body.empty?
           lines << ""
           lines.concat(bytes_to_lines(body))

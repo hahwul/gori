@@ -64,9 +64,11 @@ module Gori
         cap = EVIDENCE_CAP
         io << "\n### " << label << "\n\n```http\n"
         # HEAD: headers are text but can carry stray non-UTF-8 (obs-text) bytes — scrub
-        # them so the report stays a valid UTF-8 file; cap it like the body.
+        # them so the report stays a valid UTF-8 file; cap it like the body. rstrip the
+        # header block's trailing CRLF CRLF so a single blank line (added below) sits
+        # between headers and body instead of a stack of empty lines.
         hslice = head.size > cap ? head[0, cap] : head
-        io << String.new(hslice).scrub
+        io << String.new(hslice).scrub.rstrip
         io << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
         if body && !body.empty?
           slice = body[0, {body.size, cap}.min]
