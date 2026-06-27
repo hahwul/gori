@@ -90,7 +90,7 @@ module Gori::Tui
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove replay tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
-      @rename_view = nil.as(ReplayView | FuzzerView | Nil)
+      @rename_view = nil.as(ReplayView | FuzzerView | ConvertView | Nil)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
       # propagated to the focused view in render_body. Handy for smuggling tests.
       @reveal = false
@@ -1079,6 +1079,7 @@ module Gori::Tui
       unless vis.any? { |(s, _)| s == @active_tab }
         project_controller.commit if @active_tab == :project
         replay_controller.save_current_replay if @active_tab == :replay
+        convert_controller.commit if @active_tab == :convert # now a hideable default tab — flush before snapping off
         @active_tab = vis.first[0]
         on_enter_tab
         @focus = :menu
@@ -1156,10 +1157,10 @@ module Gori::Tui
     # A navigable sub-tab strip exists (≥2 chips) — gates entry into :subtabs. Replay
     # draws its strip at size>0 but a lone chip has nowhere to switch to.
     private def subtabs_shown? : Bool
-      (@tabs[@active_tab]?.try(&.subtab_labels).try(&.size) || 0) >= 2 # only Replay/Notes expose a strip
+      (@tabs[@active_tab]?.try(&.subtab_labels).try(&.size) || 0) >= 2 # Replay/Fuzzer/Notes/Convert expose a strip
     end
 
-    # The focusable sub-tab strip for Replay/Notes (@focus == :subtabs). Mirrors the
+    # The focusable sub-tab strip for Replay/Fuzzer/Notes/Convert (@focus == :subtabs). Mirrors the
     # tab bar's idiom one level down: ←/→ switch sub-tabs, ↓/↵/Tab enter the editor,
     # ↑/esc pop to the tab bar. ^1-9 jumps and stays on the strip; ^N/^W create/close.
     private def handle_subtabs_key(ev : Termisu::Event::Key) : Nil
@@ -1186,33 +1187,38 @@ module Gori::Tui
         focus_pane(:body) # drop into the editor
       when key.up?, key.lower_k?, key.escape?
         focus_pane(:menu) # pop to the tab bar
+      when key.space?
+        open_space_menu # the active tab's command menu, reachable from the strip
       else
         # swallow everything else — no type-through on the strip
       end
     end
 
-    # Sub-tab new/close/commit dispatched across the three multi-session tabs.
+    # Sub-tab new/close/commit dispatched across the multi-session tabs.
     private def subtab_new : Nil
       case @active_tab
-      when :replay then replay_controller.replay_new
-      when :fuzzer then fuzzer_controller.fuzz_new
-      else              notes_controller.notes_new
+      when :replay  then replay_controller.replay_new
+      when :fuzzer  then fuzzer_controller.fuzz_new
+      when :convert then convert_controller.convert_new
+      else               notes_controller.notes_new
       end
     end
 
     private def subtab_close : Nil
       case @active_tab
-      when :replay then replay_controller.request_close
-      when :fuzzer then fuzzer_controller.request_close
-      else              notes_controller.notes_close
+      when :replay  then replay_controller.request_close
+      when :fuzzer  then fuzzer_controller.request_close
+      when :convert then convert_controller.convert_close
+      else               notes_controller.notes_close
       end
     end
 
     private def subtab_commit : Nil
       case @active_tab
-      when :replay then replay_controller.save_current_replay
-      when :fuzzer then fuzzer_controller.save_current
-      else              notes_controller.save_notes
+      when :replay  then replay_controller.save_current_replay
+      when :fuzzer  then fuzzer_controller.save_current
+      when :convert then convert_controller.commit
+      else               notes_controller.save_notes
       end
     end
 
@@ -1238,7 +1244,7 @@ module Gori::Tui
         focus_pane(:menu) if fuzzer_controller.empty?
         focus_pane(:body) if !fuzzer_controller.empty? && !subtabs_shown?
       else
-        focus_pane(:body) unless subtabs_shown? # close_note always keeps ≥1 note
+        focus_pane(:body) unless subtabs_shown? # Notes/Convert always keep ≥1 session
       end
     end
 
@@ -1816,10 +1822,10 @@ module Gori::Tui
       renameable_subtabs? && ev.key.lower_r? && !ev.ctrl? && !ev.alt?
     end
 
-    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer). Notes derives
-    # its label from the body text, so it has no rename.
+    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer + Convert).
+    # Notes derives its label from the body text, so it has no rename.
     private def renameable_subtabs? : Bool
-      @active_tab == :replay || @active_tab == :fuzzer
+      @active_tab == :replay || @active_tab == :fuzzer || @active_tab == :convert
     end
 
     # Open the rename prompt for sub-tab `idx` on the active tab, seeding its current
@@ -1828,8 +1834,9 @@ module Gori::Tui
     # redirect it.
     private def open_rename(idx : Int32) : Nil
       view = case @active_tab
-             when :replay then replay_controller.view_at(idx)
-             when :fuzzer then fuzzer_controller.view_at(idx)
+             when :replay  then replay_controller.view_at(idx)
+             when :fuzzer  then fuzzer_controller.view_at(idx)
+             when :convert then convert_controller.view_at(idx)
              end
       return unless view
       @rename_view = view
@@ -1850,8 +1857,9 @@ module Gori::Tui
     # (the chip reverts to the request/template-derived summary).
     private def apply_rename(name : String) : Nil
       case v = @rename_view
-      when ReplayView then replay_controller.apply_rename(v, name)
-      when FuzzerView then fuzzer_controller.apply_rename(v, name)
+      when ReplayView  then replay_controller.apply_rename(v, name)
+      when FuzzerView  then fuzzer_controller.apply_rename(v, name)
+      when ConvertView then convert_controller.apply_rename(v, name)
       end
     end
 
@@ -1898,6 +1906,7 @@ module Gori::Tui
       # mirroring how Notes saves on leave. Cheap no-op when the tab is clean.
       replay_controller.save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
       fuzzer_controller.save_current if @active_tab == :fuzzer && @focus == :body && pane != :body
+      convert_controller.commit if @active_tab == :convert && @focus == :body && pane != :body
       @focus = pane
       @overlay = :none
       view_focus_first if pane == :body
@@ -1921,6 +1930,7 @@ module Gori::Tui
       end
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       fuzzer_controller.save_current if @active_tab == :fuzzer
+      convert_controller.commit if @active_tab == :convert # flush sub-tab edits/renames (dirty-guarded)
       @active_tab = tab
       @focus = focus
       @overlay = :none
@@ -1951,6 +1961,7 @@ module Gori::Tui
       end
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       fuzzer_controller.save_current if @active_tab == :fuzzer
+      convert_controller.commit if @active_tab == :convert # flush sub-tab edits/renames (dirty-guarded)
       # Cycle within the VISIBLE strip (skips hidden tabs); effective_tabs force-includes
       # the active tab so the index is always found and never falls back to 0.
       tabs = effective_tabs
@@ -2396,7 +2407,7 @@ module Gori::Tui
     end
 
     # CROSS-TAB mediator: send History's selected flow to the next Comparer slot
-    # (rings A → B → A). The Comparer tab is hidden by default — reach it via ^P.
+    # (rings A → B → A). Open the Comparer tab to view the diff.
     def comparer_add_selected : Nil
       id = history_controller.selected_flow_id
       return (@toast = "select a flow first") unless id
@@ -2404,6 +2415,41 @@ module Gori::Tui
       return (@toast = "flow no longer available") unless detail
       slot = comparer_controller.view.add_flow(detail)
       @toast = "comparer: set #{slot.to_s.upcase} — open Comparer (^P) to view the diff"
+    end
+
+    # --- convert workbench (sub-tab + output actions). The body's text editing +
+    # focus nav stay inline in ConvertController; these power the space menu (reachable
+    # from the sub-tab strip) + the palette. convert_new already drops to the body; the
+    # save/load prompts are serviced by the body editor, so focus there first. ---
+    def convert_new : Nil
+      convert_controller.convert_new
+    end
+
+    def convert_close : Nil
+      convert_controller.convert_close
+      resolve_subtab_focus_after_close # don't strand on a now-hidden strip
+    end
+
+    def convert_clear : Nil
+      convert_controller.clear_all
+    end
+
+    def convert_copy : Nil
+      convert_controller.copy_output
+    end
+
+    def convert_cycle_mode : Nil
+      convert_controller.cycle_output_mode
+    end
+
+    def convert_save : Nil
+      focus_pane(:body)
+      convert_controller.open_prompt(:save_as)
+    end
+
+    def convert_load : Nil
+      focus_pane(:body)
+      convert_controller.open_prompt(:load)
     end
 
     # --- settings (config control) ---

@@ -17,6 +17,9 @@ module Gori::Tui
     # The ^X display cycle: auto (text, base64 fallback for binary) → hex → base64.
     PREFER_CYCLE = [nil, Convert::RenderAs::Hex, Convert::RenderAs::Base64] of Convert::RenderAs?
 
+    # Custom sub-tab chip label (nil = derive from the chain spec); set by rename.
+    property name : String? = nil
+
     @prefer : Convert::RenderAs? = nil # nil = auto
     @prefer_idx : Int32 = 0
     @out_scroll : Int32 = 0

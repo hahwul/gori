@@ -328,6 +328,34 @@ private class FakeContext < ExecContext
     @calls << :comparer_add_selected
   end
 
+  def convert_new : Nil
+    @calls << :convert_new
+  end
+
+  def convert_close : Nil
+    @calls << :convert_close
+  end
+
+  def convert_clear : Nil
+    @calls << :convert_clear
+  end
+
+  def convert_copy : Nil
+    @calls << :convert_copy
+  end
+
+  def convert_cycle_mode : Nil
+    @calls << :convert_cycle_mode
+  end
+
+  def convert_save : Nil
+    @calls << :convert_save
+  end
+
+  def convert_load : Nil
+    @calls << :convert_load
+  end
+
   def open_settings(section : Symbol) : Nil
     @calls << :open_settings
   end

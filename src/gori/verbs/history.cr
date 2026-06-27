@@ -41,8 +41,8 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
         available: history_selected, mnemonic: 'r') { |ctx| ctx.replay_selected; nil }
 
-      # Send the selected flow to the Comparer's next slot (A → B → A). The Comparer
-      # tab is hidden by default; reach it with ^P → "Go to Comparer".
+      # Send the selected flow to the Comparer's next slot (A → B → A), then open the
+      # Comparer tab to view the diff.
       r.register Verb::Definition.new(
         "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
         Verb::Scope::Body, available: history_selected, mnemonic: 'c') { |ctx| ctx.comparer_add_selected; nil }
@@ -201,6 +201,7 @@ module Gori
       register_findings(r)
       register_fuzz(r)
       register_comparer(r)
+      register_convert(r)
       r
     end
   end

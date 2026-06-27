@@ -10,10 +10,10 @@ describe "Chrome.reconcile" do
     out = Chrome.reconcile([] of {String, Bool})
     out.map(&.first).should eq(Chrome::TABS.map(&.first)) # canonical order, all present
     visible = out.select { |(_, _, v)| v }.map(&.first)
-    Chrome::DEFAULT_HIDDEN.each { |sym| visible.includes?(sym).should be_false } # :agent + :comparer + :convert hidden
+    Chrome::DEFAULT_HIDDEN.each { |sym| visible.includes?(sym).should be_false } # only :agent hidden
     out.find { |(s, _, _)| s == :agent }.not_nil![2].should be_false
-    out.find { |(s, _, _)| s == :comparer }.not_nil![2].should be_false
-    out.find { |(s, _, _)| s == :convert }.not_nil![2].should be_false
+    out.find { |(s, _, _)| s == :comparer }.not_nil![2].should be_true # now a default-visible tab
+    out.find { |(s, _, _)| s == :convert }.not_nil![2].should be_true  # now a default-visible tab
     out.find { |(s, _, _)| s == :project }.not_nil![2].should be_true
   end
 
@@ -44,9 +44,9 @@ end
 describe "Chrome.visible_tabs" do
   it "returns only the visible tabs in order (default-hidden tabs excluded)" do
     vis = Chrome.visible_tabs([] of {String, Bool}).map(&.first)
-    vis.includes?(:agent).should be_false # Agent + Comparer + Convert are hidden by default
-    vis.includes?(:comparer).should be_false
-    vis.includes?(:convert).should be_false
+    vis.includes?(:agent).should be_false # only Agent is hidden by default now
+    vis.includes?(:comparer).should be_true
+    vis.includes?(:convert).should be_true
     vis.first.should eq(:project)
     vis.size.should eq(Chrome::TABS.size - Chrome::DEFAULT_HIDDEN.size)
   end

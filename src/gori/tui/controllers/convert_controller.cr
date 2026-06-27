@@ -6,32 +6,54 @@ require "../../convert"
 require "../../settings"
 
 module Gori::Tui
+  # One open conversion — a "sub-tab" under the Convert tab. Each carries its own
+  # INPUT editor, CHAIN spec (+ caret), derived result, focus pane, and output view
+  # (scroll + display mode + the custom strip label, ConvertView#name, set by rename).
+  # The controller holds an array of these; the transient overlays (the autocomplete
+  # popup, the save/load mini-prompt, the in-flight IME preedit) stay controller-level
+  # and act on the CURRENT session. `chain`/`chain_cx`/`result`/`pane` get reassigned,
+  # so this is a mutable class, not a record.
+  class ConvertSession
+    property view : ConvertView
+    property input : TextArea
+    property chain : String
+    property chain_cx : Int32
+    property pane : Symbol # internal focus ring: :input <-> :chain
+    property result : Convert::ChainResult
+
+    def initialize(@view, @input, @chain, @chain_cx, @pane, @result)
+    end
+  end
+
   # The Convert tab: a scratch encode/decode/hash workbench with eoyc-style
-  # left-to-right chaining. Two text-capturing panes — the INPUT editor (a TextArea)
-  # and the CHAIN spec line ("base64 > url-encode > sha256") — plus a read-only
-  # PIPELINE notebook + OUTPUT, all drawn by ConvertView. The body consumes EVERY
-  # printable key (like Notes), so command_scope is Body and handle_body_key always
-  # returns true (`:` stays literal; no per-tab single-letter verbs can collide).
-  #
-  # Reached via the palette ("Go to Convert") — hidden from the tab bar by default
-  # (Chrome::DEFAULT_HIDDEN). Last input + chain persist to the global settings.json.
+  # left-to-right chaining. Each sub-tab is an independent conversion session — two
+  # text-capturing panes (the INPUT editor + the CHAIN spec line "base64 > sha256")
+  # plus a read-only PIPELINE notebook + OUTPUT, drawn by ConvertView. The body
+  # consumes EVERY printable key (like Notes), so command_scope is the Convert scope
+  # and handle_body_key always returns true: the Convert verbs' single-letter
+  # mnemonics never collide with literal text (`:` stays literal) — they're reached
+  # only from the space menu + palette. A runner-owned sub-tab strip appears at ≥2
+  # sessions (^N new · ^W close · ^1-9/←→ switch · r rename); open sessions persist to
+  # the global settings.json.
   class ConvertController < TabController
     SEPS = {'>', '|', ','}
 
+    @sessions : Array(ConvertSession)
+
     def initialize(host : Host)
       super(host)
-      @view = ConvertView.new
       @registry = Convert.default_registry
-      @input = TextArea.new(Settings.convert_input)
-      @chain = Settings.convert_chain
-      @chain_cx = @chain.size
-      @chain_pre = ""
-      @pane = :input # internal focus ring: :input <-> :chain
       @popup = ChainComplete.new
       @prompt = nil # :save_as | :load inline mini-prompt (else nil)
       @prompt_buf = ""
-      @dirty = false # session (input/chain) changed since the last persist
-      @result = Convert.run(@registry, @input.text.to_slice, @chain)
+      @chain_pre = "" # IME preedit for the focused CHAIN field
+      @dirty = false  # session set changed since the last persist
+      # Restore open sub-tabs; fall back to the legacy single input/chain (migration)
+      # when no "sessions" array was persisted. Always ≥1 (blank when all empty).
+      src = Settings.convert_sessions
+      src = [{Settings.convert_input, Settings.convert_chain, ""}] if src.empty?
+      @sessions = src.map { |(input, chain, name)| make_session(input, chain, name.empty? ? nil : name) }
+      @idx = 0
     end
 
     def tab : Symbol
@@ -39,7 +61,7 @@ module Gori::Tui
     end
 
     def command_scope : Verb::Scope
-      Verb::Scope::Body
+      Verb::Scope::Convert
     end
 
     # Both regions capture text → always the EDITOR badge.
@@ -47,12 +69,107 @@ module Gori::Tui
       :editor
     end
 
+    # The current session (always valid: ≥1 session, @idx kept in range).
+    private def cur : ConvertSession
+      @sessions[@idx]
+    end
+
+    # Build a fresh session from persisted/blank text, running the initial chain.
+    private def make_session(input_text : String, chain : String, name : String?) : ConvertSession
+      input = TextArea.new(input_text)
+      result = Convert.run(@registry, input.text.to_slice, chain)
+      view = ConvertView.new
+      view.name = name
+      ConvertSession.new(view, input, chain, chain.size, :input, result)
+    end
+
+    # --- sub-tab strip (runner-owned chrome; shown at ≥2 sessions) ---
+    def subtab_labels : Array(String)
+      @sessions.map_with_index { |s, i| "#{i + 1}:#{session_label(s)}" }
+    end
+
+    def subtab_index : Int32
+      @idx
+    end
+
+    # The chip label: the custom name if set, else a compact preview of the chain
+    # spec (or "empty" when blank), capped to ~18 cols like Replay/Notes.
+    private def session_label(s : ConvertSession) : String
+      raw = (n = s.view.name) ? n : (s.chain.strip.empty? ? "empty" : s.chain.strip)
+      raw.size > 18 ? raw[0, 17] + "…" : raw
+    end
+
+    # Move the active sub-tab by ±1 (strip ←/→), clamped, no wrap. No persist needed:
+    # every session keeps its own state in memory, so switching loses nothing.
+    def move_subtab(dir : Int32) : Nil
+      return if @sessions.size < 2
+      nidx = (@idx + dir).clamp(0, @sessions.size - 1)
+      switch_to(nidx) unless nidx == @idx
+    end
+
+    def jump_subtab(idx : Int32) : Nil
+      switch_to(idx) if 0 <= idx < @sessions.size && idx != @idx
+    end
+
+    private def switch_to(idx : Int32) : Nil
+      @idx = idx
+      @popup.close
+      @chain_pre = ""
+    end
+
+    # Open a fresh blank conversion (^N / space menu) and drop into its editor.
+    def convert_new : Nil
+      @sessions << make_session("", "", nil)
+      @idx = @sessions.size - 1
+      @popup.close
+      @chain_pre = ""
+      @dirty = true
+      @host.request_focus(:body)
+      @host.status("new conversion (#{@sessions.size} open)")
+    end
+
+    # Close the active conversion (^W / space menu). Keeps ≥1 — closing the last just
+    # resets it to a blank session (like Notes). The runner re-resolves focus after.
+    def convert_close : Nil
+      if @sessions.size <= 1
+        @sessions[0] = make_session("", "", nil)
+        @idx = 0
+      else
+        @sessions.delete_at(@idx)
+        @idx = @idx.clamp(0, @sessions.size - 1)
+      end
+      @popup.close
+      @chain_pre = ""
+      @dirty = true
+      @host.status(@sessions.size == 1 ? "conversion closed" : "conversion closed (#{@sessions.size} open)")
+    end
+
+    # The session's output view, for the rename prompt (re-found by view identity).
+    def view_at(idx : Int32) : ConvertView?
+      (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
+    end
+
+    # Apply a typed name to the captured sub-tab's view (the prompt held it by identity,
+    # so mutating it is inherently the right session). Blank clears it (chip reverts to
+    # the auto label).
+    def apply_rename(view : ConvertView, name : String) : Nil
+      clean = name.strip
+      view.name = clean.empty? ? nil : clean
+      @dirty = true
+    end
+
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
-      BodyChrome.framed(screen, rect, body_focused) do |inner|
-        @view.render(screen, inner,
-          input: @input, chain: @chain, chain_cx: @chain_cx, chain_pre: @chain_pre,
-          result: @result, pane: @pane, focused: body_focused,
+      body_rect = rect
+      if @sessions.size >= 2
+        sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
+        BodyChrome.render_subtab_strip(screen, sub_rect, subtab_labels, @idx, focus == :subtabs)
+      end
+      s = cur
+      BodyChrome.framed(screen, body_rect, body_focused) do |inner|
+        s.view.render(screen, inner,
+          input: s.input, chain: s.chain, chain_cx: s.chain_cx, chain_pre: @chain_pre,
+          result: s.result, pane: s.pane, focused: body_focused,
           popup: @popup, prompt: @prompt, prompt_buf: @prompt_buf)
       end
     end
@@ -66,12 +183,18 @@ module Gori::Tui
       if ev.ctrl? && key.lower_p? # mirror notes_controller.cr
         commit
         @host.open_palette
+      elsif ev.ctrl? && c && '1' <= c <= '9'
+        jump_subtab(c.to_i - 1) # switch sub-tab mid-edit (works because of the ctrl check)
+      elsif ev.ctrl? && key.lower_n?
+        convert_new
+      elsif ev.ctrl? && key.lower_w?
+        convert_close
       elsif ev.ctrl? && key.lower_l?
         clear_all
       elsif ev.ctrl? && key.lower_y?
         copy_output
       elsif ev.ctrl? && key.lower_x?
-        @view.cycle_out_mode
+        cycle_output_mode
       elsif ev.ctrl? && key.lower_s?
         open_prompt(:save_as)
       elsif ev.ctrl? && key.lower_o?
@@ -81,7 +204,7 @@ module Gori::Tui
         commit
         @host.request_focus(:menu)
       else
-        @pane == :input ? edit_input(ev, c) : edit_chain(ev, c)
+        cur.pane == :input ? edit_input(ev, c) : edit_chain(ev, c)
       end
       true
     end
@@ -91,7 +214,7 @@ module Gori::Tui
     # via a pre-ring guard (gated on `completing?`). Returns false for any other key
     # so normal chain editing still flows down to handle_body_key + refilters.
     def completing? : Bool
-      @pane == :chain && @popup.open?
+      cur.pane == :chain && @popup.open?
     end
 
     def handle_complete_key(ev : Termisu::Event::Key) : Bool
@@ -107,59 +230,63 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      regions = @view.layout(rect.inset(1, 1))
+      body = @sessions.size >= 2 ? BodyChrome.carve_subtab_row(rect)[1] : rect
+      s = cur
+      regions = s.view.layout(body.inset(1, 1))
       if regions.input.contains?(mx, my)
-        @pane = :input
+        s.pane = :input
         @popup.close
-        @input.click_to_cursor(regions.input, mx, my)
+        s.input.click_to_cursor(regions.input, mx, my)
       elsif regions.chain.contains?(mx, my)
-        @pane = :chain
-        @chain_cx = Screen.column_for(@chain, mx - (regions.chain.x + 2))
+        s.pane = :chain
+        s.chain_cx = Screen.column_for(s.chain, mx - (regions.chain.x + 2))
         refilter_popup
       end
       true
     end
 
     def handle_wheel(step : Int32) : Bool
-      @view.scroll_output(step)
+      cur.view.scroll_output(step)
       true
     end
 
     def set_preedit(text : String) : Bool
-      @pane == :input ? @input.set_preedit(text) : (@chain_pre = text)
+      s = cur
+      s.pane == :input ? s.input.set_preedit(text) : (@chain_pre = text)
       true
     end
 
     # --- focus ring (Tab/Shift-Tab): menu ▸ input ▸ chain ▸ menu ---
     def pane_advance(dir : Int32) : Bool
+      s = cur
       @popup.close
       if dir > 0
-        return (@pane = :chain; true) if @pane == :input
+        return (s.pane = :chain; true) if s.pane == :input
         false
       else
-        return (@pane = :input; true) if @pane == :chain
+        return (s.pane = :input; true) if s.pane == :chain
         false
       end
     end
 
     def focus_first : Nil
-      @pane = :input
+      cur.pane = :input
       @popup.close
     end
 
     def focus_last : Nil
-      @pane = :chain
+      cur.pane = :chain
       @popup.close
     end
 
     def body_hint(focus : Symbol) : String
       return "type a name · ↵ save · esc cancel" if @prompt == :save_as
       return "type a name · ↵ load · esc cancel" if @prompt == :load
-      if @pane == :chain
+      if cur.pane == :chain
         return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if @popup.open?
-        "chain (> | ,) · ↑ input · ^Y copy · ^X mode · ^S save · ^O load · esc tabs"
+        "chain (> | ,) · ↑ input · ^Y copy · ^X mode · ^S save · ^O load · ^N new · esc tabs"
       else
-        "type to edit · ↓/↹ chain · ^L clear · ^Y copy · ^X mode · ^S save · ^O load · esc tabs"
+        "type to edit · ↓/↹ chain · ^L clear · ^Y copy · ^X mode · ^N new · ^W close · esc tabs"
       end
     end
 
@@ -169,32 +296,63 @@ module Gori::Tui
 
     def commit : Nil
       return unless @dirty
-      Settings.convert_input = @input.text
-      Settings.convert_chain = @chain
+      Settings.convert_sessions = session_tuples
       Settings.save
       @dirty = false
     end
 
+    # The persisted form of the open sub-tabs ({input, chain, name}).
+    private def session_tuples : Array({String, String, String})
+      @sessions.map { |s| {s.input.text, s.chain, s.view.name || ""} }
+    end
+
+    # ---- output actions (also the space-menu verbs, via the runner) ----
+    def cycle_output_mode : Nil
+      cur.view.cycle_out_mode
+    end
+
+    def clear_all : Nil
+      s = cur
+      s.input.set_text("")
+      s.chain = ""
+      s.chain_cx = 0
+      @popup.close
+      touch
+      @host.status("cleared")
+    end
+
+    def copy_output : Nil
+      s = cur
+      text = s.view.output_copy(s.result)
+      if text.empty?
+        @host.status("nothing to copy")
+      else
+        Clipboard.copy(text)
+        @host.status("output copied to clipboard")
+      end
+    end
+
     # ---- INPUT editor ----
     private def edit_input(ev : Termisu::Event::Key, c : Char?) : Nil
+      s = cur
       key = ev.key
       case
       when key.enter?
-        @input.insert_newline; touch
+        s.input.insert_newline; touch
       when key.backspace?
-        @input.backspace; touch
+        s.input.backspace; touch
       when key.up?
-        @input.at_top? ? (commit; @host.request_focus(:menu)) : @input.move(-1, 0)
+        s.input.at_top? ? (commit; @host.request_focus(:menu)) : s.input.move(-1, 0)
       when key.down?
-        @input.at_bottom? ? (@pane = :chain) : @input.move(1, 0)
+        s.input.at_bottom? ? (s.pane = :chain) : s.input.move(1, 0)
       when key.left?
-        @input.move(0, -1)
+        s.input.move(0, -1)
       when key.right?
-        @input.move(0, 1)
+        s.input.move(0, 1)
       else
         if c && !ev.ctrl? && !ev.alt?
-          @input.insert(c)
-          @input.set_preedit("") # commit any preedit (termisu dup-guard)
+          s.input.insert(c)
+          s.input.set_preedit("") # commit any preedit (termisu dup-guard)
           touch
         end
       end
@@ -202,31 +360,32 @@ module Gori::Tui
 
     # ---- CHAIN spec line ----
     private def edit_chain(ev : Termisu::Event::Key, c : Char?) : Nil
+      s = cur
       key = ev.key
       case
       when key.up?
-        @pane = :input
+        s.pane = :input
         @popup.close
       when key.backspace?
-        if @chain_cx > 0
-          @chain = @chain[0, @chain_cx - 1] + @chain[@chain_cx..]
-          @chain_cx -= 1
+        if s.chain_cx > 0
+          s.chain = s.chain[0, s.chain_cx - 1] + s.chain[s.chain_cx..]
+          s.chain_cx -= 1
           @chain_pre = ""
           touch
           refilter_popup
         end
       when key.left?
-        @chain_cx = {@chain_cx - 1, 0}.max
+        s.chain_cx = {s.chain_cx - 1, 0}.max
         refilter_popup
       when key.right?
-        @chain_cx = {@chain_cx + 1, @chain.size}.min
+        s.chain_cx = {s.chain_cx + 1, s.chain.size}.min
         refilter_popup
       when key.enter?
         recompute # the pipeline is already live; just re-derive
       else
         if c && !ev.ctrl? && !ev.alt?
-          @chain = @chain[0, @chain_cx] + c.to_s + @chain[@chain_cx..]
-          @chain_cx += 1
+          s.chain = s.chain[0, s.chain_cx] + c.to_s + s.chain[s.chain_cx..]
+          s.chain_cx += 1
           @chain_pre = ""
           touch
           refilter_popup
@@ -235,14 +394,16 @@ module Gori::Tui
     end
 
     private def accept_completion : Nil
-      @chain, @chain_cx = @popup.accept(@chain, @chain_cx)
+      s = cur
+      s.chain, s.chain_cx = @popup.accept(s.chain, s.chain_cx)
       @popup.close
       touch
     end
 
     private def refilter_popup : Nil
-      ts, te = token_span(@chain, @chain_cx)
-      tok = @chain[ts...te].strip
+      s = cur
+      ts, te = token_span(s.chain, s.chain_cx)
+      tok = s.chain[ts...te].strip
       if tok.empty?
         @popup.close
       else
@@ -264,38 +425,20 @@ module Gori::Tui
       {s, e}
     end
 
-    # Mark the session dirty and re-run the chain (the single recompute path).
+    # Mark the session set dirty and re-run the current chain (the single recompute path).
     private def touch : Nil
       @dirty = true
       recompute
     end
 
     private def recompute : Nil
-      @result = Convert.run(@registry, @input.text.to_slice, @chain)
-      @view.reset_output_scroll
-    end
-
-    private def clear_all : Nil
-      @input.set_text("")
-      @chain = ""
-      @chain_cx = 0
-      @popup.close
-      touch
-      @host.status("cleared")
-    end
-
-    private def copy_output : Nil
-      text = @view.output_copy(@result)
-      if text.empty?
-        @host.status("nothing to copy")
-      else
-        Clipboard.copy(text)
-        @host.status("output copied to clipboard")
-      end
+      s = cur
+      s.result = Convert.run(@registry, s.input.text.to_slice, s.chain)
+      s.view.reset_output_scroll
     end
 
     # ---- save / load named chains (in-body mini-prompt; no runner overlay) ----
-    private def open_prompt(kind : Symbol) : Nil
+    def open_prompt(kind : Symbol) : Nil
       @prompt = kind
       @prompt_buf = ""
     end
@@ -325,9 +468,14 @@ module Gori::Tui
       end
       existing = Settings.convert_chains.any? { |(n, _)| n == name }
       chains = Settings.convert_chains.reject { |(n, _)| n == name }
-      chains << {name, @chain}
+      chains << {name, cur.chain}
       Settings.convert_chains = chains
+      # ^S writes settings.json now (before the next commit), so flush the live sessions
+      # too — otherwise this save persists a stale/empty `sessions` block and an
+      # in-progress conversion is lost if the process dies before a normal leave/quit.
+      Settings.convert_sessions = session_tuples
       if Settings.save
+        @dirty = false
         @host.status(existing ? "updated chain \"#{name}\"" : "saved chain \"#{name}\"")
       else
         @host.status("could not save chain")
@@ -336,8 +484,9 @@ module Gori::Tui
 
     private def load_chain(name : String) : Nil
       if entry = Settings.convert_chains.find { |(n, _)| n == name }
-        @chain = entry[1]
-        @chain_cx = @chain.size
+        s = cur
+        s.chain = entry[1]
+        s.chain_cx = s.chain.size
         @popup.close
         touch
         @host.status("loaded chain \"#{name}\"")
