@@ -434,6 +434,12 @@ module Gori::Tui
       if @active_tab == :convert && @overlay == :none && @focus == :body && convert_controller.completing?
         return if convert_controller.handle_complete_key(ev)
       end
+      # The Fuzzer wordlist-path autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
+      # before the focus ring claims Tab. Gated on the :p_path field + an open popup, so
+      # Tab on any other field/pane still advances panes. Non-popup keys fall through.
+      if @active_tab == :fuzzer && @overlay == :none && @focus == :body && fuzzer_controller.path_completing?
+        return if fuzzer_controller.handle_path_complete_key(ev)
+      end
 
       # Focusable sub-tab strip (Replay/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
       # the editor, ↑/esc pop to the tab bar. Claimed BEFORE the Tab ring + ^N so the

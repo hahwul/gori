@@ -80,11 +80,16 @@ module Gori::Tui
       case v.focus
       when :target   then "type URL · ↵/↓ template · ^R run · ↹ pane · esc tabs"
       when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ↹ pane"
-      when :config   then "↑/↓ field · ←/→ change·type-tab · type edit · ⏎ add · Del rm · ↹ pane"
+      when :config   then config_hint(v)
       when :results  then "↑/↓ select · ↵ detail · o sort · m matched · ^R run · ^X stop · ↹ pane"
       when :detail   then "↑/↓ scroll · ←/→ req/resp · esc back"
       else                "↹/esc tabs"
       end
+    end
+
+    private def config_hint(v : FuzzerView) : String
+      return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if v.path_completing?
+      "↑/↓ field · ←/→ change · type edit · ⏎ add/toggle · Del rm · ↹ pane"
     end
 
     # --- rendering ---
@@ -113,6 +118,26 @@ module Gori::Tui
         ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
       end
       true
+    end
+
+    # The wordlist path autocomplete owns Tab/↵/↑/↓/Esc while its popup is up — the
+    # runner routes here via a pre-ring guard (gated on `path_completing?`) before the
+    # focus ring claims Tab. Mirrors ConvertController#completing?/handle_complete_key.
+    def path_completing? : Bool
+      current_view.try(&.path_completing?) || false
+    end
+
+    def handle_path_complete_key(ev : Termisu::Event::Key) : Bool
+      v = current_view
+      return false unless v
+      key = ev.key
+      case
+      when key.tab?, key.enter?   then v.path_complete_accept; true
+      when key.back_tab?, key.up? then v.path_complete_move(-1); true
+      when key.down?              then v.path_complete_move(1); true
+      when key.escape?            then v.path_complete_close; true
+      else                             false # printables fall through → form_type refilters
+      end
     end
 
     # Run the action a chord mapped to; false when it was not a chord (fall through).
