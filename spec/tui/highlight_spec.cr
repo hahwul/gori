@@ -58,19 +58,19 @@ describe Gori::Tui::Highlight do
       end
     end
 
-    it "message() reproduces the old `head + [\"\"] + body` plain layout 1:1" do
+    it "message() separates head from body with exactly one blank line" do
       head = "GET /a HTTP/1.1\r\nContent-Type: application/json\r\n\r\n".to_slice
       body = %({"x":1}).to_slice
-      head_lines = String.new(head).split('\n').map(&.rstrip('\r'))
-      expected = head_lines + [""] + [String.new(body)]
+      # The CRLFCRLF terminator must not leak extra blank lines: one separator only.
+      expected = ["GET /a HTTP/1.1", "Content-Type: application/json", "", String.new(body)]
 
       lines = Highlight.message(head, body, request: true)
       lines.map { |l| l.map(&.text).join }.should eq(expected)
     end
 
-    it "message() with no body matches the head-only plain layout" do
+    it "message() with no body ends on the last header, not blank lines" do
       head = "GET /a HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice
-      expected = String.new(head).split('\n').map(&.rstrip('\r'))
+      expected = ["GET /a HTTP/1.1", "Host: h.test"]
       lines = Highlight.message(head, nil, request: true)
       lines.map { |l| l.map(&.text).join }.should eq(expected)
       # an empty body slice is treated as no body (no spurious separator line)

@@ -906,12 +906,9 @@ module Gori::Tui
         note << [Highlight::Span.new("— #{decode_note} —", color)]
         trailer = note + trailer # decode note before the truncation note
       end
-      if pn = pretty
-        prettied = [] of Highlight::Line
-        prettied << Highlight::Line.new
-        prettied << [Highlight::Span.new("— #{pn.note} —", Theme.green)]
-        trailer = prettied + trailer
-      end
+      # No pretty trailer: the "PRETTY" mode indicator in the pane header already
+      # signals the reflow, so the "— pretty: … —" footer is redundant (and Replay
+      # never showed one — this keeps the two response views consistent).
       DetailView.new(win.head, win.body, win.kind, trailer, pretty: pretty != nil)
     end
 
