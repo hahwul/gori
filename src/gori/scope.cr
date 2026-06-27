@@ -133,28 +133,31 @@ module Gori
     end
 
     # Host-level scope membership evaluated against the rules REGARDLESS of the enabled
-    # flag, so the Sitemap can mark its targets even when the ⇧S lens is off. Burp-style
-    # host gate, mirroring may_match_host?'s body minus the active short-circuit:
-    # (no host-affecting includes OR one matches) AND no host-level exclude. Returns
-    # false when no rules exist (nothing to mark). Conservative on url-level (string/
-    # regex) includes — a host can't be ruled out by a rule whose path we don't know
-    # here — same as may_match_host?; host-type scoping (the common case) is precise.
+    # flag, so the Sitemap can mark its targets even when the ⇧S lens is off. False when
+    # no rules exist (nothing to mark). Conservative on url-level (string/regex) includes
+    # — a host can't be ruled out by a rule whose path we don't know here — same as
+    # may_match_host?; host-type scoping (the common case) is precise.
     def host_in_scope?(host : String) : Bool
-      @mutex.synchronize do
-        return false if @rules.empty?
-        includes = @rules.select(&.include?)
-        inc_ok = includes.empty? ||
-                 includes.any? { |r| r.host_type? && r.matches?("", host) } ||
-                 includes.any? { |r| !r.host_type? }
-        excluded = @rules.any? { |r| r.exclude? && r.host_type? && r.matches?("", host) }
-        inc_ok && !excluded
-      end
+      @mutex.synchronize { host_in_scope_unlocked?(host) }
     end
 
     # Lock-free body so synchronized callers reuse it WITHOUT re-entering the
     # non-reentrant mutex (which would deadlock).
     private def active_unlocked? : Bool
       @enabled && !@rules.empty?
+    end
+
+    # The shared Burp-style HOST gate (callers hold @mutex): (no host-affecting includes
+    # OR one matches) AND no host-level exclude. Empty rules ⇒ false; may_match_host?
+    # short-circuits its own inactive case before calling, so it never reaches the guard.
+    private def host_in_scope_unlocked?(host : String) : Bool
+      return false if @rules.empty?
+      includes = @rules.select(&.include?)
+      inc_ok = includes.empty? ||
+               includes.any? { |r| r.host_type? && r.matches?("", host) } ||
+               includes.any? { |r| !r.host_type? }
+      excluded = @rules.any? { |r| r.exclude? && r.host_type? && r.matches?("", host) }
+      inc_ok && !excluded
     end
 
     # Full include/exclude evaluation against a flow's URL + host. Used by ClientConn's
@@ -178,15 +181,7 @@ module Gori
     # never a whole host). ClientConn then makes the precise per-request call; this only
     # decides whether to keep the connection on h1 so a request CAN be held.
     def may_match_host?(host : String) : Bool
-      @mutex.synchronize do
-        return true unless active_unlocked?
-        includes = @rules.select(&.include?)
-        inc_ok = includes.empty? ||
-                 includes.any? { |r| r.host_type? && r.matches?("", host) } ||
-                 includes.any? { |r| !r.host_type? }
-        excluded = @rules.any? { |r| r.exclude? && r.host_type? && r.matches?("", host) }
-        inc_ok && !excluded
-      end
+      @mutex.synchronize { active_unlocked? ? host_in_scope_unlocked?(host) : true }
     end
 
     # A SQL filter selecting in-scope flows (QL::EMPTY when inactive). The URL the
