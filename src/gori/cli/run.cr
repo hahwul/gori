@@ -708,8 +708,10 @@ module Gori
       private def self.findings_text(findings : Array(Store::Finding)) : String
         String.build do |io|
           findings.each do |f|
-            io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << "]  " << f.title
-            io << "  (" << f.host << ')' if f.host
+            io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << "]  " << Findings::Export.one_line(f.title)
+            if h = f.host
+              io << "  (" << Findings::Export.one_line(h) << ')'
+            end
             io << "  flow#" << f.flow_id if f.flow_id
             io << '\n'
           end
