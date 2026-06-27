@@ -59,8 +59,12 @@ module Gori::Fuzz
           if closed
             defs << val.to_s
             i = j + 1
-          else # unbalanced trailing § → literal, no position
-            lit << MARKER << val.to_s
+          else # unbalanced trailing § → literal text, opens no position
+            # The preceding literal was optimistically pushed as a segment above;
+            # fold it back (with the § and the trailing chars) into `lit` so the
+            # tail lands in the FINAL segment. Otherwise render() — which emits only
+            # positions.size + 1 segments — would silently drop these trailing bytes.
+            lit << (segs.pop? || "") << MARKER << val.to_s
             i = n
           end
         else
@@ -191,9 +195,12 @@ module Gori::Fuzz
     end
 
     # Wrap the value after `=` in each `sep`-separated pair (leading space preserved).
+    # An EMPTY value (`a=`) is left unmarked: a bare `§§` parses as an escaped literal
+    # § (injecting a stray byte and creating no position), so empty values can't be
+    # auto-marked — wrap them by hand with an explicit default if you want to fuzz them.
     private def self.mark_pairs(s : String, sep : Char) : String
       s.split(sep).map do |pair|
-        (eq = pair.index('=')) ? "#{pair[0..eq]}#{MARKER}#{pair[(eq + 1)..]}#{MARKER}" : pair
+        (eq = pair.index('=')) && eq + 1 < pair.size ? "#{pair[0..eq]}#{MARKER}#{pair[(eq + 1)..]}#{MARKER}" : pair
       end.join(sep)
     end
 
@@ -213,9 +220,13 @@ module Gori::Fuzz
       body.includes?('=') && !body.includes?('\n') && !body.lstrip.starts_with?('{')
     end
 
-    # Wrap JSON string and number values (best-effort; keys are left alone).
+    # Wrap JSON string and number values (best-effort; keys are left alone). An
+    # EMPTY string value (`"k":""`) is skipped — `§§` would parse as a literal § and
+    # inject a stray byte (also producing invalid JSON), so empty values stay inert.
     private def self.mark_json(body : String) : String
-      out = body.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*")((?:[^"\\]|\\.)*)(")/) { "#{$1}#{MARKER}#{$2}#{MARKER}#{$3}" }
+      out = body.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*")((?:[^"\\]|\\.)*)(")/) do |m|
+        $2.empty? ? m : "#{$1}#{MARKER}#{$2}#{MARKER}#{$3}"
+      end
       out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(-?\d+(?:\.\d+)?)/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
     end
 

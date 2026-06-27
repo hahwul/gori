@@ -47,6 +47,24 @@ describe F::Template do
     F::Template.parse("a§§b").position_count.should eq(0)
     String.new(F::Template.parse("a§§b").render([] of String)).should eq("a§b")
     F::Template.parse("a§b").position_count.should eq(0) # unbalanced trailing § → literal
+    String.new(F::Template.parse("a§b").render([] of String)).should eq("a§b")
+  end
+
+  it "keeps the literal tail after a position when a trailing § is unbalanced (no truncation)" do
+    # x=§A§&y=§z : one position (A), then a stray trailing § that opens no pair.
+    t = F::Template.parse("x=§A§&y=§z")
+    t.position_count.should eq(1)
+    # render must keep '&y=§z' verbatim — it used to drop everything from the stray §.
+    String.new(t.render(["PP"])).should eq("x=PP&y=§z")
+  end
+
+  it "auto-mark leaves empty values unmarked instead of injecting a literal § (§§)" do
+    # Empty values across query / cookie / urlencoded body / JSON must not be wrapped.
+    F::Template.auto_mark("GET /?a=&b=2 HTTP/1.1\r\n\r\n").should eq("GET /?a=&b=§2§ HTTP/1.1\r\n\r\n")
+    body = "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"a\":\"\",\"b\":\"x\"}"
+    marked = F::Template.auto_mark(body)
+    marked.includes?("§§").should be_false                # no escaped-literal collision
+    F::Template.parse(marked).position_count.should eq(1) # only "b"
   end
 
   it "renders defaults back to the base request" do
