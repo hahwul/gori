@@ -19,14 +19,13 @@ module Gori::Tui
   class SpaceMenu
     MAX_ROWS = 12 # tallest popup (scopes have far fewer verbs; scrolling deferred)
 
-    getter scope : Verb::Scope
     getter selected : Int32
 
     def initialize(@registry : Verb::Registry)
       @entries = [] of Verb::Definition
       @selected = 0
-      @scroll = 0 # top visible row — keeps the selection on-screen on short terminals
-      @scope = Verb::Scope::Global
+      @scroll = 0  # top visible row — keeps the selection on-screen on short terminals
+      @title_w = 0 # widest entry title, cached at open() (drives the popup width)
     end
 
     # The verbs shown: scope-local, non-hidden, available AND carrying a menu_key.
@@ -37,10 +36,10 @@ module Gori::Tui
     # Open scoped to `scope` (captured by the Runner at the space keystroke, before
     # the overlay/focus state can change). Seeds the entry list.
     def open(scope : Verb::Scope, ctx : Verb::ExecContext) : Nil
-      @scope = scope
       @selected = 0
       @scroll = 0
       @entries = @registry.for_scope(scope, ctx).select(&.menu_key)
+      @title_w = @entries.empty? ? 0 : @entries.max_of(&.title.size)
     end
 
     def move(delta : Int32) : Nil
@@ -68,8 +67,7 @@ module Gori::Tui
     def box(body : Rect) : Rect
       return Rect.new(0, 0, 0, 0) if @entries.empty?
       rows = {@entries.size, MAX_ROWS}.min
-      title_w = @entries.max_of(&.title.size)
-      w = {title_w + 6, body.w - 2}.min
+      w = {@title_w + 6, body.w - 2}.min
       h = {rows + 2, body.h}.min
       return Rect.new(0, 0, 0, 0) if w < 10 || h < 3
       x = body.right - w - 1 # one-col gutter inside the body's right edge
