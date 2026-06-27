@@ -31,72 +31,102 @@ module Gori::Tui
     @out_lines : Array(String) = [] of String
     @out_dirty : Bool = true
 
-    # Sub-rects of the framed interior. Each section but INPUT is preceded by a
-    # labelled divider row (INPUT rides just under the frame's top border, so it
-    # gets a plain label line). Degenerate heights collapse toward OUTPUT-only.
-    def layout(inner : Rect) : Regions
-      empty = Rect.new(inner.x, inner.y, 0, 0)
-      return Regions.new(empty, empty, empty, inner) if inner.h < 8
+    # Card rects for the four sections, stacked top-to-bottom. Each is a full
+    # `Frame.card` (border + interior), NOT a divided slice of one outer frame —
+    # so focusing INPUT or CHAIN lights only that card (mirrors Replay's
+    # TARGET/REQUEST/RESPONSE). CHAIN is a fixed 3-high single-line field; INPUT
+    # takes ~a quarter; PIPELINE sizes to its step count; OUTPUT gets the rest.
+    # Tight bodies fold PIPELINE away, then collapse toward an OUTPUT-only card.
+    def layout(rect : Rect) : Regions
+      empty = Rect.new(rect.x, rect.y, 0, 0)
+      h = rect.h
+      return Regions.new(empty, empty, empty, empty) if h <= 0 || rect.w <= 0
 
-      # Fixed overhead: INPUT label (1) + 3 divider rows + CHAIN field (1) = 5.
-      avail = inner.h - 5
-      input_h = (inner.h * 25 // 100).clamp(2, 8)
-      input_h = {input_h, avail - 2}.min # always leave ≥2 for pipeline+output
-      rest = avail - input_h
-      steps = {@last_step_count, 1}.max
-      pipe_h = {steps, {rest - 1, 1}.max}.min # already in [1, rest-1]
-      out_h = {rest - pipe_h, 1}.max
-
-      y = inner.y + 1 # row inner.y holds the INPUT label
-      input = Rect.new(inner.x, y, inner.w, input_h); y += input_h
-      y += 1 # CHAIN divider
-      chain = Rect.new(inner.x, y, inner.w, 1); y += 1
-      y += 1 # PIPELINE divider
-      pipeline = Rect.new(inner.x, y, inner.w, pipe_h); y += pipe_h
-      y += 1 # OUTPUT divider
-      output = Rect.new(inner.x, y, inner.w, out_h)
-      Regions.new(input, chain, pipeline, output)
+      chain_h = 3 # 1-line field framed top + bottom
+      if h >= 12
+        rest = h - chain_h                           # input + pipeline + output (≥ 9)
+        input_h = (h * 25 // 100).clamp(3, rest - 6) # leave ≥3 each for pipe + out
+        remaining = rest - input_h                   # pipeline + output (≥ 6)
+        steps = {@last_step_count, 1}.max
+        pipe_h = (steps + 2).clamp(3, remaining - 3) # leave ≥3 for out
+        out_h = remaining - pipe_h
+        stack(rect, {input_h, chain_h, pipe_h, out_h})
+      elsif h >= 9
+        # No room for four min-height cards — fold PIPELINE away, keep the workflow
+        # cards (INPUT to type · CHAIN to spec · OUTPUT to read).
+        rest = h - chain_h # input + output (≥ 6)
+        input_h = (rest // 2).clamp(3, rest - 3)
+        stack(rect, {input_h, chain_h, 0, rest - input_h})
+      else
+        Regions.new(empty, empty, empty, rect) # too short for cards → output-only
+      end
     end
 
-    def render(screen : Screen, inner : Rect, *, input : TextArea, chain : String,
+    # Stack the four card rects vertically from the given heights (a 0 height = the
+    # folded-away section, returned as an empty rect the renderer skips).
+    private def stack(rect : Rect, heights : {Int32, Int32, Int32, Int32}) : Regions
+      y = rect.y
+      cards = heights.map do |hh|
+        c = hh > 0 ? Rect.new(rect.x, y, rect.w, hh) : Rect.new(rect.x, y, 0, 0)
+        y += hh
+        c
+      end
+      Regions.new(cards[0], cards[1], cards[2], cards[3])
+    end
+
+    def render(screen : Screen, rect : Rect, *, input : TextArea, chain : String,
                chain_cx : Int32, chain_pre : String, result : Convert::ChainResult,
                pane : Symbol, focused : Bool, popup : ChainComplete, prompt : Symbol?,
                prompt_buf : String) : Nil
-      return if inner.empty?
+      return if rect.empty?
       @last_step_count = result.steps.size
-      r = layout(inner)
-      return if r.input.empty? # too small to draw the notebook
+      r = layout(rect)
 
-      # INPUT — label rides under the frame top; the TextArea draws below it.
-      screen.text(inner.x, inner.y, "INPUT", Theme.muted, Theme.bg, Attribute::Bold)
-      input.render(screen, r.input, cursor: focused && pane == :input)
+      render_input(screen, r.input, input, focused && pane == :input) unless r.input.empty?
+      render_chain(screen, r.chain, chain, chain_cx, chain_pre, focused && pane == :chain) unless r.chain.empty?
+      render_pipeline(screen, r.pipeline, result) unless r.pipeline.empty?
+      render_output_card(screen, r.output, result, focused && pane == :output) unless r.output.empty?
 
-      # CHAIN — divider + single-line field with a "›" prompt.
-      divider(screen, inner, r.chain.y - 1, "CHAIN", focused)
-      screen.text(r.chain.x, r.chain.y, "› ", Theme.accent, Theme.bg)
-      chain_fg = pane == :chain ? Theme.text_bright : Theme.text
-      screen.input_line(r.chain.x + 2, r.chain.y, chain, chain_cx, pane == :chain ? chain_pre : "",
-        chain_fg, Theme.bg, width: {r.chain.w - 2, 1}.max)
-
-      # PIPELINE — one row per step.
-      divider(screen, inner, r.pipeline.y - 1, "PIPELINE", focused)
-      render_steps(screen, r.pipeline, result)
-
-      # OUTPUT — final bytes, scrollable; the divider names the active display mode.
-      divider(screen, inner, r.output.y - 1, output_header(result), focused)
-      render_output(screen, r.output, result)
-
-      # The autocomplete popup + the save/load prompt float LAST (over the notebook).
-      popup.render(screen, r.chain, inner) if pane == :chain && popup.open?
-      render_prompt(screen, r.output, prompt, prompt_buf) if prompt
+      # The autocomplete popup (anchored under the CHAIN field) + the save/load
+      # prompt float LAST, over the cards below them.
+      popup.render(screen, r.chain.inset(1, 1), rect) if pane == :chain && popup.open? && !r.chain.empty?
+      render_prompt(screen, r.output.inset(1, 1), prompt, prompt_buf) if prompt && !r.output.empty?
     end
 
-    # The ├ / ┤ tees land on the frame's side borders, so they must take the SAME
-    # colour as the enclosing card (gold when the body is focused) — otherwise the
-    # seam reads as a grey notch in the gold frame. Mirrors history_view/findings_view.
-    private def divider(screen : Screen, inner : Rect, y : Int32, label : String, focused : Bool) : Nil
-      Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Frame.pane_border(focused))
-      screen.text(inner.x + 1, y, " #{label} ", Theme.muted, Theme.bg, width: {inner.w - 2, 1}.max)
+    # INPUT — a framed TextArea; gold border only when it holds focus.
+    private def render_input(screen : Screen, card : Rect, input : TextArea, active : Bool) : Nil
+      Frame.card(screen, card, "INPUT", bg: Theme.bg, border: Frame.pane_border(active))
+      input.render(screen, card.inset(1, 1), cursor: active)
+    end
+
+    # CHAIN — a framed single-line spec field with a "›" prompt; gold when focused.
+    # Only the focused field shows the block caret (matches Replay's target row).
+    private def render_chain(screen : Screen, card : Rect, chain : String, chain_cx : Int32,
+                             chain_pre : String, active : Bool) : Nil
+      Frame.card(screen, card, "CHAIN", bg: Theme.bg, border: Frame.pane_border(active))
+      c = card.inset(1, 1)
+      return if c.h <= 0
+      screen.text(c.x, c.y, "› ", Theme.accent, Theme.bg)
+      fg = active ? Theme.text_bright : Theme.text
+      vw = {c.w - 2, 1}.max
+      if active
+        screen.input_line(c.x + 2, c.y, chain, chain_cx, chain_pre, fg, Theme.bg, width: vw)
+      else
+        screen.text(c.x + 2, c.y, chain, fg, Theme.bg, width: vw)
+      end
+    end
+
+    # PIPELINE — a read-only card (never focusable), one row per step.
+    private def render_pipeline(screen : Screen, card : Rect, result : Convert::ChainResult) : Nil
+      Frame.card(screen, card, "PIPELINE", bg: Theme.bg, border: Theme.border)
+      render_steps(screen, card.inset(1, 1), result)
+    end
+
+    # OUTPUT — read-only but navigable (↑/↓ scroll); the title names the active
+    # display mode + byte count, and the border gilds when the pane holds focus.
+    private def render_output_card(screen : Screen, card : Rect, result : Convert::ChainResult, active : Bool) : Nil
+      Frame.card(screen, card, output_header(result), bg: Theme.bg, border: Frame.pane_border(active))
+      render_output(screen, card.inset(1, 1), result)
     end
 
     private def render_steps(screen : Screen, rect : Rect, result : Convert::ChainResult) : Nil
@@ -206,6 +236,12 @@ module Gori::Tui
 
     def scroll_output(step : Int32) : Nil
       @out_scroll += step
+    end
+
+    # Whether the OUTPUT is scrolled to the top — ↑ here pops focus up to CHAIN
+    # (render clamps @out_scroll on every frame, so this reads the true top).
+    def output_at_top? : Bool
+      @out_scroll <= 0
     end
 
     # Invoked by the controller after every recompute: reset scroll AND invalidate

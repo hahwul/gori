@@ -62,21 +62,51 @@ describe Gori::Tui::ConvertView do
     b.contains?("myhash").should be_true
   end
 
-  it "colours the section-divider tees to match the frame (gold when focused)" do
-    # The ├/┤ land on the frame's side borders, so a focused body must light them
-    # gold instead of leaving a grey notch in the gold frame.
-    [{true, Theme.focus_gold}, {false, Theme.border}].each do |(focused, want)|
-      view = ConvertView.new
-      backend = MemoryBackend.new(80, 30)
-      inner = Rect.new(1, 1, 78, 28) # inset so the left tee at inner.x-1 = col 0 is on-screen
-      result = Gori::Convert.run(REG, "x".to_slice, "hex")
-      view.render(Screen.new(backend), inner,
-        input: TextArea.new("x"), chain: "hex", chain_cx: 3, chain_pre: "",
-        result: result, pane: :input, focused: focused, popup: ChainComplete.new, prompt: nil, prompt_buf: "")
-      tee_row = (0...30).find { |y| backend.grid[y][0] == '├' }
-      tee_row.should_not be_nil
-      backend.fg_at(0, tee_row.not_nil!).should eq(want)
-    end
+  it "lights only the focused section's card border gold (per-pane focus)" do
+    # Each section is its own card now (not a divided single frame), so focusing
+    # INPUT must gild only the INPUT card — the read-only PIPELINE/OUTPUT cards
+    # stay hairline grey. The card's top-left corner '╭' carries the border colour.
+    view = ConvertView.new
+    backend = MemoryBackend.new(80, 30)
+    rect = Rect.new(0, 0, 80, 30)
+    result = Gori::Convert.run(REG, "x".to_slice, "hex")
+    view.render(Screen.new(backend), rect,
+      input: TextArea.new("x"), chain: "hex", chain_cx: 3, chain_pre: "",
+      result: result, pane: :input, focused: true, popup: ChainComplete.new, prompt: nil, prompt_buf: "")
+
+    corners = (0...30).select { |y| backend.grid[y][0] == '╭' }
+    corners.size.should eq 4 # one per card: INPUT, CHAIN, PIPELINE, OUTPUT
+
+    backend.fg_at(0, corners[0]).should eq(Theme.focus_gold) # INPUT (focused) → gold
+    backend.fg_at(0, corners[1]).should eq(Theme.border)     # CHAIN (unfocused) → grey
+    backend.fg_at(0, corners[2]).should eq(Theme.border)     # PIPELINE (read-only) → grey
+    backend.fg_at(0, corners[3]).should eq(Theme.border)     # OUTPUT (read-only) → grey
+  end
+
+  it "gilds the CHAIN card border when the chain pane holds focus" do
+    view = ConvertView.new
+    backend = MemoryBackend.new(80, 30)
+    result = Gori::Convert.run(REG, "x".to_slice, "hex")
+    view.render(Screen.new(backend), Rect.new(0, 0, 80, 30),
+      input: TextArea.new("x"), chain: "hex", chain_cx: 3, chain_pre: "",
+      result: result, pane: :chain, focused: true, popup: ChainComplete.new, prompt: nil, prompt_buf: "")
+    corners = (0...30).select { |y| backend.grid[y][0] == '╭' }
+    backend.fg_at(0, corners[0]).should eq(Theme.border)     # INPUT (unfocused) → grey
+    backend.fg_at(0, corners[1]).should eq(Theme.focus_gold) # CHAIN (focused) → gold
+  end
+
+  it "gilds the OUTPUT card border when the (read-only but navigable) output pane holds focus" do
+    view = ConvertView.new
+    backend = MemoryBackend.new(80, 30)
+    result = Gori::Convert.run(REG, "x".to_slice, "hex")
+    view.render(Screen.new(backend), Rect.new(0, 0, 80, 30),
+      input: TextArea.new("x"), chain: "hex", chain_cx: 3, chain_pre: "",
+      result: result, pane: :output, focused: true, popup: ChainComplete.new, prompt: nil, prompt_buf: "")
+    corners = (0...30).select { |y| backend.grid[y][0] == '╭' }
+    backend.fg_at(0, corners[0]).should eq(Theme.border)     # INPUT → grey
+    backend.fg_at(0, corners[1]).should eq(Theme.border)     # CHAIN → grey
+    backend.fg_at(0, corners[2]).should eq(Theme.border)     # PIPELINE → grey
+    backend.fg_at(0, corners[3]).should eq(Theme.focus_gold) # OUTPUT (focused) → gold
   end
 end
 
