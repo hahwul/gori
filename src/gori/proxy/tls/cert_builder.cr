@@ -69,9 +69,19 @@ module Gori::Proxy::Tls
       ipv4?(host) ? "IP:#{host}" : "DNS:#{host}"
     end
 
+    # CANONICAL dotted-quad only. OpenSSL's IP-SAN parser (a2i_GENERAL_NAME) rejects
+    # zero-padded octets ("01.02.03.04"), so accepting them here would emit an
+    # IP:<host> SAN that fails X509V3_EXT_nconf_nid → the leaf mint aborts and the
+    # TLS MITM handshake tears down. A non-canonical IP falls through to a DNS SAN
+    # instead (harmless: it just won't verify for that odd literal), never a crash.
     private def self.ipv4?(host : String) : Bool
       octets = host.split('.')
-      octets.size == 4 && octets.all? { |o| o.to_u8? != nil }
+      return false unless octets.size == 4
+      octets.all? do |o|
+        next false if o.empty? || o.size > 3
+        next false if o.size > 1 && o[0] == '0' # no leading zeros
+        o.to_u8? != nil                         # 0..255
+      end
     end
 
     private def self.add_ext(x : LibCrypto::X509, nid : Int32, value : String) : Nil

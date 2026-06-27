@@ -165,6 +165,17 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
   end
 
+  it "does not abort the handshake for a non-canonical (zero-padded) IP authority" do
+    with_ca_dir do |dir|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+      # OpenSSL's IP-SAN parser rejects "01.02.03.04"; minting must fall back to a
+      # DNS SAN — context_for would raise Gori::Error out of CertBuilder.add_ext under
+      # the old lenient ipv4?, failing this test.
+      ctx = ca.context_for("01.02.03.04")
+      ctx.should be_a(OpenSSL::SSL::Context::Server)
+    end
+  end
+
   it "caches the context per host" do
     with_ca_dir do |dir|
       ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
