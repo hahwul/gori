@@ -3,27 +3,34 @@ require "./settings"
 
 module Gori
   # Facade over the hotkey engine (Verb::Keymap / OsProfile / Reserved / Conflicts) and
-  # the persisted Settings. The SINGLE read-path for a verb's effective chord, so a
-  # rebind is never visually stale — the dispatch keymap, the palette chord hint and the
-  # Help tab all resolve a verb's binding through here.
+  # the persisted Settings. The read-path the DISPATCH keymap (`build_keymap`) and the
+  # settings:hotkeys editor share for a verb's effective chord. NOTE: the Help tab and the
+  # status-bar hints still show DEFAULT chords (a documented limitation — they don't route
+  # through here), so a rebind isn't reflected there.
   module Hotkeys
     # Selectable OS default profiles (the Settings.keymap_os domain). "auto" tracks the
     # build's native platform.
     PROFILES = %w(auto darwin linux windows)
 
-    # Verb ids the editor must NOT expose. Guard-shadowed ids (`view.reveal-ws` — `^B` is
-    # claimed by a hardcoded guard in Runner#handle_key before the keymap, so rebinding it
-    # would silently do nothing) and deliberately-keyless app verbs (`app.quit`/`app.back`
-    # are palette-only on purpose — single-key quit is a footgun).
-    FIXED_IDS = {"view.reveal-ws", "app.quit", "app.back"}
+    # Verb ids the editor must NOT expose, because their chord is consumed by a hardcoded
+    # handler BEFORE the keymap — so a rebind/unbind on them can't take effect:
+    #   view.reveal-ws  ^B  — Runner#handle_key global guard
+    #   app.palette     ^P  — every controller's handle_body_key opens the palette (save-first)
+    #   replay.new/fuzz.new ^N — Runner#handle_key intercepts ^N at menu/body/subtabs focus
+    #   app.quit/app.back   — deliberately palette-only (single-key quit is a footgun)
+    FIXED_IDS = {"view.reveal-ws", "app.quit", "app.back", "app.palette", "replay.new", "fuzz.new"}
 
-    # gori claims these globally BEFORE the keymap (Runner#handle_key): ^G goto, ^F find,
-    # ^B reveal, ^E external editor. Binding a verb to one would be shadowed by the guard,
-    # so the editor refuses them on top of the terminal-reserved set.
-    GUARD_CLAIMED = [
-      Verb::Chord.new("g", ctrl: true), Verb::Chord.new("f", ctrl: true),
-      Verb::Chord.new("b", ctrl: true), Verb::Chord.new("e", ctrl: true),
-    ]
+    # Chords consumed by a hardcoded handler BEFORE the keymap is consulted, so binding ANY
+    # verb to one would be silently shadowed — the editor refuses them on top of the
+    # terminal-reserved set. Two sources, both of which this MUST stay in sync with (there is
+    # no shared constant yet — a guard moved without updating this set re-opens the footgun):
+    #   • Runner#handle_key global guards: ^G goto, ^F find, ^B reveal, ^E external editor.
+    #   • Controllers' handle_body_key + Runner's ^N: ^P palette, ^N new, ^W close, ^1-9 sub-tab.
+    CLAIMED_CHORDS = begin
+      cs = %w(g f b e p n w).map { |k| Verb::Chord.new(k, ctrl: true) }
+      (1..9).each { |n| cs << Verb::Chord.new(n.to_s, ctrl: true) }
+      cs
+    end
 
     # Build the dispatch keymap from the registry under the persisted OS profile + user
     # overrides. Replaces the bare Verb::Keymap.build at its call sites.
@@ -31,9 +38,19 @@ module Gori
       Verb::Keymap.build(registry, Verb::OsProfile.resolve(Settings.keymap_os), chord_overrides)
     end
 
-    # The persisted user overrides, parsed from Settings' label strings into Chords.
+    # The persisted user overrides, parsed from Settings' label strings into Chords. A
+    # reserved/unparseable chord is DROPPED here too (not just refused by the editor) so a
+    # hand-edited settings.json can't install e.g. a verb on `escape`/`enter`/`^C` into the
+    # dispatch keymap and shadow a structural handler. An entry that loses all its chords
+    # this way falls back to the default; a genuinely empty list stays an explicit unbind.
     def self.chord_overrides : Hash(String, Array(Verb::Chord))
-      Verb::Keymap.parse_overrides(Settings.keymap_overrides)
+      out = {} of String => Array(Verb::Chord)
+      Settings.keymap_overrides.each do |id, labels|
+        chords = labels.compact_map { |l| Verb::Chord.parse(l) }.reject { |c| reserved?(c) }
+        next if chords.empty? && !labels.empty? # malformed (garbage/reserved) → use the default
+        out[id] = chords
+      end
+      out
     end
 
     # Whether the editor should let the user rebind this verb. Excludes hidden nav
@@ -45,13 +62,13 @@ module Gori
       !verb.hidden? && !FIXED_IDS.includes?(verb.id) && verb.chords.size <= 1
     end
 
-    # A human reason if `chord` is unbindable — terminal-/structurally reserved, or
-    # claimed by a gori global guard before the keymap — else nil.
+    # A human reason if `chord` is unbindable — terminal-/structurally reserved, or claimed
+    # by a hardcoded gori shortcut before the keymap — else nil.
     def self.reserved?(chord : Verb::Chord) : String?
       if reason = Verb::Reserved.reserved?(chord)
         reason
-      elsif GUARD_CLAIMED.includes?(chord)
-        "#{chord.label} is reserved by a gori global shortcut"
+      elsif CLAIMED_CHORDS.includes?(chord)
+        "#{chord.label} is reserved by a gori shortcut"
       end
     end
 

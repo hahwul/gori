@@ -37,7 +37,9 @@ module Gori
         when "escape"    then "Escape is reserved (back / close)"
         when "tab"       then "Tab is reserved (focus ring)"
         when "backspace" then "Backspace is reserved (delete)"
-        when ":"         then chord.shift ? nil : "':' is reserved (command line)"
+          # ':' opens the command line in dispatch regardless of the shift modifier (the
+          # `ev.char == ':'` guard ignores shift), so reserve it unconditionally.
+        when ":" then "':' is reserved (command line)"
         end
       end
     end

@@ -33,8 +33,6 @@ module Gori::Tui
       Verb::Scope::PaletteOpen    => "PALETTE",
     }
 
-    getter? saved : Bool = false
-
     def initialize(@registry : Verb::Registry)
       @rows = [] of Row
       @overrides = {} of String => Verb::Chord?
@@ -56,7 +54,6 @@ module Gori::Tui
       @mode = :browse
       @feedback = nil
       @feedback_kind = :hint
-      @saved = false
     end
 
     private def build_rows : Array(Row)
@@ -89,6 +86,11 @@ module Gori::Tui
       @rows[@selected]?.try(&.verb_id) || ""
     end
 
+    # True when @selected points at a real binding row (the row-mutating verbs gate on this).
+    private def selected_binding? : Bool
+      (r = @rows[@selected]?) ? r.kind == :binding : false
+    end
+
     private def effective_chord(id : String) : Verb::Chord?
       return @overrides[id] if @overrides.has_key?(id)
       Hotkeys.default_for(@registry, id, @profile)
@@ -96,10 +98,6 @@ module Gori::Tui
 
     private def overridden?(id : String) : Bool
       @overrides.has_key?(id)
-    end
-
-    private def chord_label(id : String) : String
-      effective_chord(id).try(&.label) || "(unbound)"
     end
 
     # --- navigation ---
@@ -131,7 +129,7 @@ module Gori::Tui
 
     # --- capture sub-mode ---
     def begin_capture : Nil
-      return if @rows.empty? || @rows[@selected].kind != :binding
+      return unless selected_binding?
       @mode = :capture
       @feedback_kind = :hint
       @feedback = "press a key to bind · esc cancel"
@@ -170,14 +168,14 @@ module Gori::Tui
     end
 
     def unbind_selected : Nil
-      return if @rows.empty? || @rows[@selected].kind != :binding
+      return unless selected_binding?
       @overrides[selected_id] = nil
       @feedback_kind = :ok
       @feedback = "unbound"
     end
 
     def reset_selected : Nil
-      return if @rows.empty? || @rows[@selected].kind != :binding
+      return unless selected_binding?
       @overrides.delete(selected_id)
       @feedback_kind = :ok
       @feedback = "reset to default"
@@ -256,8 +254,9 @@ module Gori::Tui
       screen.cell(box.x + 3, ry, ov ? '●' : '·', ov ? Theme.accent : Theme.muted, bg)
 
       mark_x = box.right - 2
-      clabel = chord_label(r.verb_id)
-      unbound = effective_chord(r.verb_id).nil?
+      chord = effective_chord(r.verb_id) # resolve once (label + unbound flag derive from it)
+      clabel = chord.try(&.label) || "(unbound)"
+      unbound = chord.nil?
       cx = mark_x - 1 - clabel.size
       name_w = {cx - (box.x + 5) - 1, 1}.max
       screen.text(box.x + 5, ry, r.title, sel ? Theme.text_bright : Theme.text, bg, width: name_w)

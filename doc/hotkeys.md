@@ -48,9 +48,12 @@ Some keys can't be rebound because the terminal or gori needs them:
 - **Indistinguishable from named keys** — `Ctrl-M`/`Ctrl-J` (Enter), `Ctrl-I` (Tab),
   `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **Structural** — `Enter`, `Esc`, `Tab`, `Backspace`, and a bare `:` (the command line).
-- **gori global shortcuts** — `Ctrl-G` (go to line), `Ctrl-F` (find), `Ctrl-B` (reveal
-  whitespace), `Ctrl-E` (external editor). These are claimed before the keymap, so a
-  binding on them would never fire.
+- **gori shortcuts claimed before the keymap** — `Ctrl-G` (go to line), `Ctrl-F` (find),
+  `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette),
+  `Ctrl-N` (new replay/fuzz/note), `Ctrl-W` (close sub-tab), and `Ctrl-1`…`Ctrl-9` (switch
+  sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them
+  would never fire. For the same reason **Command palette**, **New replay request**, and
+  **New fuzz session** aren't listed in the editor — their key is fixed.
 
 Flow-control/signal chords like `Ctrl-S` are **not** reserved — gori runs the terminal
 in raw mode, so they reach the app (replay's SNI toggle ships on `Ctrl-S`).
