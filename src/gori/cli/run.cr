@@ -100,6 +100,7 @@ module Gori
           p.on("--max=N", "Stop after N completed flows") { |v| max = parse_count(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run capture: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run capture: missing value for #{f}" }
         end
         parser.parse(args)
 
@@ -130,6 +131,7 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json (JSON-Lines)") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
         parser.parse(args)
 
@@ -181,6 +183,7 @@ module Gori
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run show: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run show: missing value for #{f}" }
         end
         parser.parse(args)
         abort "gori run show: --request-only and --response-only are mutually exclusive" if req_only && resp_only
@@ -302,6 +305,7 @@ module Gori
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run replay: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run replay: missing value for #{f}" }
         end
         parser.parse(args)
         id = take_flow_id(positional, "replay")
@@ -443,6 +447,7 @@ module Gori
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run fuzz: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run fuzz: missing value for #{f}" }
         end
         parser.parse(args)
 
@@ -661,6 +666,7 @@ module Gori
           p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run findings: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run findings: missing value for #{f}" }
         end
         parser.parse(args)
 
@@ -719,6 +725,7 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run projects: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run projects: missing value for #{f}" }
         end
         parser.parse(args)
 
