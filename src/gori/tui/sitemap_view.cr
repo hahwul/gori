@@ -17,11 +17,17 @@ module Gori::Tui
       getter children : Array(Node)
       property methods : Array(String)
       property expanded : Bool
+      # Scope state, meaningful only on host (depth-0) nodes — stamped by `reload` so
+      # the render loop doesn't re-evaluate the (mutex-guarded) Scope every frame.
+      property in_scope : Bool
+      property endpoints : Int32 # # of captured endpoints (nodes with methods) under it
 
       def initialize(@label : String)
         @children = [] of Node
         @methods = [] of String
         @expanded = true
+        @in_scope = false
+        @endpoints = 0
       end
 
       def child(label : String) : Node
@@ -37,6 +43,11 @@ module Gori::Tui
       end
     end
 
+    # A flattened tree row. `guides` is a bitmask: bit L set ⇒ a vertical `│` tree-guide
+    # is drawn at ancestor level L (its branch continues below this row). Built once per
+    # tree/expand change in `collect`, not re-walked per frame.
+    private record VisibleRow, node : Node, depth : Int32, guides : UInt64
+
     # The QL fields meaningful for the endpoint tree (no `flag` — tags aren't
     # produced yet). Mirrors History's set so the same `/` query language applies.
     QL_FIELDS = %w(host path method status scheme body header size dur)
@@ -46,9 +57,12 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @loaded = false
-      # Flattened (node, depth) rows, rebuilt only when the tree or its expand
-      # state changes — not re-walked on every render frame.
-      @visible_cache = nil.as(Array({Node, Int32})?)
+      # Flattened rows (node, depth, tree-guide bitmask), rebuilt only when the tree or
+      # its expand state changes — not re-walked on every render frame.
+      @visible_cache = nil.as(Array(VisibleRow)?)
+      # Whether the Scope has any rules — gates the scope markers/dimming on host rows
+      # (stamped each reload so render needn't touch the mutex-guarded Scope).
+      @scope_configured = false
       # QL filter bar (mirrors HistoryView): the Scope lens + a `/` query are AND-ed
       # into the one filter that builds the tree.
       @scope = nil.as(Scope?)
@@ -70,10 +84,27 @@ module Gori::Tui
       store.sitemap_entries(combined).each do |(host, method, target)|
         add(host, normalize_path(target), method)
       end
+      # Stamp host-level scope state + endpoint counts once, so the render loop is a
+      # pure read (no per-frame Scope mutex hits). host_in_scope?/configured? evaluate
+      # the rules regardless of the ⇧S enabled flag, so targets are marked even with the
+      # lens off (all traffic shown).
+      @scope_configured = @scope.try(&.configured?) == true
+      @hosts.each do |h|
+        h.in_scope = @scope_configured && (@scope.try(&.host_in_scope?(h.label)) == true)
+        h.endpoints = endpoint_count(h)
+      end
       @selected = 0
       @scroll = 0
       @visible_cache = nil
       @loaded = true
+    end
+
+    # # of captured endpoints under a host node: descendant nodes carrying ≥1 method
+    # (= distinct (host, path) pairs, incl. folder-with-methods nodes like /api/users).
+    private def endpoint_count(node : Node) : Int32
+      n = node.methods.empty? ? 0 : 1
+      node.children.each { |c| n += endpoint_count(c) }
+      n
     end
 
     def move(delta : Int32) : Nil
@@ -216,24 +247,87 @@ module Gori::Tui
       (0...rect.h).each do |i|
         ri = @scroll + i
         break if ri >= rows.size
-        node, depth = rows[ri]
-        y = rect.y + i
-        selected = ri == @selected
-        bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
-        if selected
-          screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
-          screen.cell(rect.x, y, '▎', Theme.accent, bg)
-        end
+        draw_row(screen, rect, rows[ri], rect.y + i, ri == @selected, focused)
+      end
+    end
 
-        marker = node.leaf? ? " " : (node.expanded ? "▾" : "▸")
-        x = rect.x + 1 + depth * 2
-        screen.cell(x, y, marker[0], Theme.muted, bg)
-        fg = depth == 0 ? Theme.text_bright : Theme.text
-        x = screen.text(x + 2, y, node.label, fg, bg)
-        unless node.methods.empty?
-          tag = node.methods.join(" ")
-          screen.text({rect.right - tag.size - 1, x + 1}.max, y, tag, Theme.muted, bg)
-        end
+    # Draw one tree row: selection band + tree guides + marker + label + a right-aligned
+    # cluster (path count on host rows, colored method chips on endpoint rows).
+    private def draw_row(screen : Screen, rect : Rect, row : VisibleRow, y : Int32, selected : Bool, focused : Bool) : Nil
+      node = row.node
+      host = row.depth == 0
+      bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
+      if selected
+        screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
+        screen.cell(rect.x, y, '▎', Theme.accent, bg)
+      end
+      draw_guides(screen, rect, row, y, bg)
+
+      mx = rect.x + 1 + row.depth * 2
+      marker, mcolor = node_marker(node, host && node.in_scope)
+      screen.cell(mx, y, marker, mcolor, bg)
+      lx = screen.text(mx + 2, y, node.label, label_color(host, node), bg)
+      draw_cluster(screen, rect, node, host, y, bg, lx)
+    end
+
+    # Faint vertical guides at each ancestor level whose branch continues below this row.
+    private def draw_guides(screen : Screen, rect : Rect, row : VisibleRow, y : Int32, bg : Color) : Nil
+      (0...row.depth).each do |l|
+        screen.cell(rect.x + 1 + l * 2, y, '│', Theme.border, bg) unless (row.guides & (1_u64 << l)) == 0
+      end
+    end
+
+    # Label colour: in-scope hosts pop (bright); out-of-scope hosts recede (muted);
+    # otherwise the depth tone (host bright, deeper nodes normal). `in_scope` is only ever
+    # set on host nodes, so depth-0 alone decides the scope branch.
+    private def label_color(host : Bool, node : Node) : Color
+      if host && @scope_configured
+        node.in_scope ? Theme.text_bright : Theme.muted
+      else
+        host ? Theme.text_bright : Theme.text
+      end
+    end
+
+    # The right-aligned cluster: an endpoint count on host rows, colored method chips on
+    # endpoint rows (hosts carry no methods, so the two never collide).
+    private def draw_cluster(screen : Screen, rect : Rect, node : Node, host : Bool, y : Int32, bg : Color, label_end : Int32) : Nil
+      if host
+        draw_count(screen, rect, y, bg, node.endpoints, label_end) if node.endpoints > 0
+      elsif !node.methods.empty?
+        draw_methods(screen, rect, y, bg, node.methods, label_end)
+      end
+    end
+
+    # The marker glyph + colour for a node. In-scope hosts use a filled/hollow diamond
+    # (fill encodes expand state); everything else keeps the chevron (folders) / bullet
+    # (leaves) so the expand affordance is never lost.
+    private def node_marker(node : Node, in_scope : Bool) : {Char, Color}
+      if in_scope
+        {node.expanded ? '◆' : '◇', Theme.accent}
+      elsif node.leaf?
+        {'▪', Theme.muted}
+      else
+        {node.expanded ? '▾' : '▸', Theme.muted}
+      end
+    end
+
+    # Right-aligned endpoint count on a host row ("3 paths"). Omitted when it would
+    # collide with the host label.
+    private def draw_count(screen : Screen, rect : Rect, y : Int32, bg : Color, n : Int32, label_end : Int32) : Nil
+      txt = n == 1 ? "1 path" : "#{n} paths"
+      start = rect.right - txt.size - 1
+      screen.text(start, y, txt, Theme.muted, bg) if start >= label_end + 1
+    end
+
+    # Right-aligned, per-verb-coloured method chips (GET green, POST/… yellow), mirroring
+    # the History list. Dropped whole when it can't sit clear of the label.
+    private def draw_methods(screen : Screen, rect : Rect, y : Int32, bg : Color, methods : Array(String), label_end : Int32) : Nil
+      total = methods.sum(&.size) + (methods.size - 1) # +1-col gap between chips
+      x = rect.right - total - 1
+      return if x < label_end + 1
+      methods.each_with_index do |m, i|
+        x = screen.text(x, y, m, Theme.method_color(m), bg)
+        x = screen.text(x, y, " ", Theme.muted, bg) if i < methods.size - 1
       end
     end
 
@@ -295,7 +389,7 @@ module Gori::Tui
     def marker_hit?(rect : Rect, mx : Int32, ri : Int32) : Bool
       row = visible_rows[ri]?
       return false unless row
-      mx == rect.x + 1 + row[1] * 2
+      mx == rect.x + 1 + row.depth * 2
     end
 
     # Mirrors `move`: set @selected clamped to the populated rows.
@@ -313,21 +407,26 @@ module Gori::Tui
 
     private def selected_node : Node?
       rows = visible_rows
-      rows[@selected]?.try(&.[0])
+      rows[@selected]?.try(&.node)
     end
 
-    private def visible_rows : Array({Node, Int32})
+    private def visible_rows : Array(VisibleRow)
       @visible_cache ||= begin
-        rows = [] of {Node, Int32}
-        @hosts.each { |host| collect(host, 0, rows) }
+        rows = [] of VisibleRow
+        @hosts.each_with_index { |host, i| collect(host, 0, 0_u64, i < @hosts.size - 1, rows) }
         rows
       end
     end
 
-    private def collect(node : Node, depth : Int32, rows : Array({Node, Int32})) : Nil
-      rows << {node, depth}
+    # Flatten the expanded tree, threading the tree-guide bitmask down. `has_next` is
+    # whether `node` has a following sibling: when it does, descendants draw a `│` at
+    # `node`'s level (bit `depth`) so the branch reads as continuing.
+    private def collect(node : Node, depth : Int32, guides : UInt64, has_next : Bool, rows : Array(VisibleRow)) : Nil
+      rows << VisibleRow.new(node, depth, guides)
       return unless node.expanded
-      node.children.each { |child| collect(child, depth + 1, rows) }
+      child_guides = has_next ? (guides | (1_u64 << depth)) : guides
+      last = node.children.size - 1
+      node.children.each_with_index { |child, i| collect(child, depth + 1, child_guides, i < last, rows) }
     end
 
     private def add(host : String, path : String, method : String) : Nil

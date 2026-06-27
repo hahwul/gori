@@ -51,6 +51,24 @@ describe Gori::Scope do
     end
   end
 
+  it "host_in_scope? + configured? evaluate the rules regardless of the enabled flag" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.configured?.should be_false
+      scope.host_in_scope?("acme.test").should be_false # no rules → nothing to mark
+
+      scope.add("include", "host", "acme.test")
+      scope.active?.should be_false # configured but the lens is OFF…
+      scope.configured?.should be_true
+      scope.host_in_scope?("acme.test").should be_true     # …marking still works
+      scope.host_in_scope?("api.acme.test").should be_true # subdomain
+      scope.host_in_scope?("other.test").should be_false
+
+      scope.add("exclude", "host", "internal.acme.test")
+      scope.host_in_scope?("internal.acme.test").should be_false # host exclude carves out
+    end
+  end
+
   it "host include matches host + subdomain; a host exclude carves out" do
     with_store do |store|
       scope = Gori::Scope.load(store)
