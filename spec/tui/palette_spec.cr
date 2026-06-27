@@ -59,14 +59,19 @@ describe Gori::Tui::PaletteState do
   end
 
   it "marks coming-soon verbs with a 'soon' badge (exposed but not functional)" do
+    # No shipped verb is coming_soon anymore (settings:hotkeys went live), so exercise the
+    # badge mechanism with a synthetic registry.
     ctx = FakeExecContext.new
-    palette = PaletteState.new(Gori::Verbs.registry)
+    reg = Gori::Verb::Registry.new
+    reg.register(Gori::Verb::Definition.new("demo.soon", "demo:soon", "A future thing",
+      Gori::Verb::Scope::Global, coming_soon: true) { |_| nil })
+    palette = PaletteState.new(reg)
     palette.reset(ctx)
-    "settings:hotkeys".each_char { |c| palette.append(c, ctx) } # a coming_soon verb
+    "demo:soon".each_char { |c| palette.append(c, ctx) }
 
     backend = MemoryBackend.new(80, 24)
     palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
-    backend.contains?("settings:hotkeys").should be_true
+    backend.contains?("demo:soon").should be_true
     backend.contains?("soon").should be_true # the placeholder badge
   end
 end
