@@ -39,6 +39,7 @@ module Gori::Tui
       @qcx = 0
       @preedit = ""
       @loaded_id = nil.as(Int64?) # which item the editor currently holds
+      @editor_dirty = false       # whether the held bytes were actually edited (vs just viewed)
       # Cached highlight of the selected held item's raw bytes (read-only detail
       # pane). Held bytes are immutable and item ids are monotonic, so the id is a
       # perfect cache key — recomputed only when the selection changes, not on
@@ -128,6 +129,7 @@ module Gori::Tui
       elsif it = selected_item
         @editor.set_text(String.new(it.raw))
         @loaded_id = it.id
+        @editor_dirty = false # freshly loaded — not yet modified
         @editing = true
       end
     end
@@ -136,22 +138,33 @@ module Gori::Tui
       @editing = false
     end
 
-    # The forward payload: edited bytes when the editor holds THIS item, else the
-    # original bytes (byte-exact passthrough, P7).
+    # The forward payload: the edited bytes only when the editor holds THIS item AND
+    # it was actually modified — otherwise the original raw bytes byte-exact (P7).
+    # Merely OPENING the editor to view a held message must not mutate it: TextArea
+    # is a line editor (set_text splits on LF + rstrips CR; to_bytes rejoins with
+    # CRLF), so an un-dirty round-trip would rewrite bare LF/binary bodies. An actual
+    # edit still normalizes line endings — a documented text-editor limitation, same
+    # as the Replay editor; byte-exact tampering goes through replay/fuzz.
     def forward_bytes(it : Interceptor::Item) : Bytes
-      @loaded_id == it.id ? @editor.to_bytes : it.raw
+      @loaded_id == it.id && @editor_dirty ? @editor.to_bytes : it.raw
     end
 
     def edit_insert(ch : Char) : Nil
-      @editor.insert(ch) if @editing
+      return unless @editing
+      @editor.insert(ch)
+      @editor_dirty = true
     end
 
     def edit_newline : Nil
-      @editor.insert_newline if @editing
+      return unless @editing
+      @editor.insert_newline
+      @editor_dirty = true
     end
 
     def edit_backspace : Nil
-      @editor.backspace if @editing
+      return unless @editing
+      @editor.backspace
+      @editor_dirty = true
     end
 
     def edit_move(dr : Int32, dc : Int32) : Nil
@@ -178,7 +191,9 @@ module Gori::Tui
     # Replace the held item's editable bytes (e.g. from the external editor); only
     # while editing — forward_bytes then sends the edited text.
     def replace_editor(text : String) : Nil
-      @editor.set_text(text) if @editing
+      return unless @editing
+      @editor.set_text(text)
+      @editor_dirty = true
     end
 
     # --- focus ring (driven by the Runner's Tab/Shift-Tab) ---
