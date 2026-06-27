@@ -1042,9 +1042,10 @@ module Gori::Tui
       pp = @config.mode.per_position? # set i → marker i (Pitchfork/ClusterBomb)
       header = "Sets"
       screen.text(inner.x, y, header, Theme.muted, Theme.bg)
-      if pp && !@sets.empty? && @sets.size != marker_spans.size
+      mcount = marker_spans.size
+      if pp && !@sets.empty? && @sets.size != mcount
         hx = inner.x + header.size + 1
-        screen.text(hx, y, sets_hint(marker_spans.size, @sets.size), Theme.muted, Theme.bg,
+        screen.text(hx, y, sets_hint(mcount, @sets.size), Theme.muted, Theme.bg,
           width: {inner.right - hx, 1}.max)
       end
       y += 1

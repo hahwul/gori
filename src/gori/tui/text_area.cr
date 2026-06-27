@@ -213,9 +213,11 @@ module Gori::Tui
       cw = {rect.w - gw, 0}.max                                  # content width
       styled = highlight ? highlighted(highlight) : nil
       # Buffer char-offset of the first visible line — advanced per row so each line
-      # knows its start for the bg-region overlay without an O(n²) rescan.
+      # knows its start for the bg-region overlay without an O(n²) rescan. Only the
+      # opt-in bg_regions consumer (the Fuzzer template) pays the O(@scroll) prefix sum;
+      # Replay/Notes (no regions) skip it so their hot path is unchanged.
       line_off = 0
-      (0...@scroll).each { |k| line_off += @lines[k].size + 1 } # +1 for the joining '\n'
+      (0...@scroll).each { |k| line_off += @lines[k].size + 1 } unless @bg_regions.empty? # +1 for '\n'
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= @lines.size
