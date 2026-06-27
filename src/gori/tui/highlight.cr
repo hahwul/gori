@@ -23,10 +23,16 @@ module Gori::Tui
     # --- public entry points -------------------------------------------------
 
     # Highlight a full HTTP message held as separate head/body byte slices (the
-    # History detail and Replay response shapes). Mirrors the old
-    # `bytes_to_lines(head) + ["", *bytes_to_lines(body)]` layout exactly.
+    # History detail and Replay response shapes): styled head, then exactly ONE
+    # blank line, then the styled body.
     def self.message(head : Bytes?, body : Bytes?, request : Bool) : Array(Line)
       head_lines = to_lines(head)
+      # Drop the trailing "" entries the CRLFCRLF head terminator leaves behind
+      # (see `message_windowed`) so the head ends on its last header, not on 1–2
+      # blank lines.
+      while head_lines.size > 1 && head_lines[-1].empty?
+        head_lines.pop
+      end
       has_body = !(body.nil? || body.empty?)
       body_lines = has_body ? to_lines(body) : [] of String
       kind = body_kind(content_type_in(head_lines))
@@ -73,6 +79,13 @@ module Gori::Tui
     # output is no longer the content-type's language, e.g. GraphQL/JWT → :text).
     def self.message_windowed(head : Bytes?, body : Bytes?, request : Bool, kind : Symbol? = nil) : Windowed
       head_lines = to_lines(head)
+      # A captured head ends with the CRLFCRLF terminator, which `to_lines` turns
+      # into trailing "" entries ("…\r\n\r\n" → […, "", ""]). Drop them so the
+      # single separator appended below renders as exactly ONE blank line between
+      # the head and the body, not the 2–3 the terminator would otherwise leave.
+      while head_lines.size > 1 && head_lines[-1].empty?
+        head_lines.pop
+      end
       has_body = !(body.nil? || body.empty?)
       kind = kind || body_kind(content_type_in(head_lines))
       styled = [] of Line
