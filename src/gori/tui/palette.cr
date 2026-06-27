@@ -101,10 +101,16 @@ module Gori::Tui
         soon = verb.coming_soon?
         screen.fill(Rect.new(box.x + 1, ry, w - 2, 1), bg)
         screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+        # Category sigil — a colour-coded glyph grouping the command by kind
+        # (navigation »/action ▸/settings ≡/system ×) so the list reads at a glance.
+        # Drawn at a fixed column with the title one cell past it, so a width-1 or
+        # width-2 glyph both stay aligned. Dimmed (with the title) for coming-soon.
+        glyph, gfg = category_badge(verb.category)
+        screen.cell(box.x + 3, ry, glyph, soon && !active ? Theme.muted : gfg, bg)
         # Coming-soon verbs are dimmed at rest (still readable when selected) so the
         # list signals what's not functional yet without hiding it.
         title_fg = active ? Theme.text_bright : (soon ? Theme.muted : Theme.text)
-        screen.text(box.x + 3, ry, verb.title, title_fg, bg, width: w - 19)
+        screen.text(box.x + 5, ry, verb.title, title_fg, bg, width: w - 21)
         if soon
           badge = "soon"
           screen.text(box.right - badge.size - 2, ry, badge, Theme.yellow, bg)
@@ -112,6 +118,19 @@ module Gori::Tui
           hint = chord.label
           screen.text(box.right - hint.size - 2, ry, hint, Theme.muted, bg)
         end
+      end
+    end
+
+    # Maps a verb category to its palette sigil + colour. Pure presentation, so it
+    # lives here rather than on the Category enum (which stays Theme-free data). The
+    # glyphs are BMP, non-emoji, and render single-width — per the glyph-decoration
+    # notes — and the colours come from the active theme so they re-theme for free.
+    private def category_badge(cat : Verb::Category) : {Char, Color}
+      case cat
+      in Verb::Category::Navigation then {'»', Theme.accent}
+      in Verb::Category::Action     then {'▸', Theme.green}
+      in Verb::Category::Settings   then {'≡', Theme.orange}
+      in Verb::Category::System     then {'×', Theme.red}
       end
     end
 

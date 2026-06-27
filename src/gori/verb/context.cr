@@ -52,10 +52,14 @@ module Gori
       # Toggle pretty-print of req/res bodies (display only; `p` in History detail).
       abstract def toggle_pretty : Nil
 
-      # replay workbench (editing + focus/pane toggles are handled inline, not via verbs)
-      abstract def replay_selected : Nil # load History's selection into Replay
-      abstract def replay_new : Nil      # open a blank, hand-authored replay request
-      abstract def replay_send : Nil     # resend the (edited) request to the target
+      # replay workbench (text editing + focus/pane nav stay inline; these request-pane
+      # toggles are verbs so they're keymap-driven and rebindable)
+      abstract def replay_selected : Nil                   # load History's selection into Replay
+      abstract def replay_new : Nil                        # open a blank, hand-authored replay request
+      abstract def replay_send : Nil                       # resend the (edited) request to the target
+      abstract def replay_toggle_hex : Nil                 # toggle byte-exact hex editing of the request pane
+      abstract def replay_toggle_sni : Nil                 # toggle the SNI-override sub-field (target pane)
+      abstract def replay_toggle_auto_content_length : Nil # recompute Content-Length on send
 
       # fuzzer workbench (run/stop/marking handled inline; these power the palette + cross-tab)
       abstract def fuzz_selected : Nil    # send History's selection to the Fuzzer tab

@@ -133,37 +133,8 @@ module Gori::Tui
           save_current_replay # persist the tab we're leaving before switching
           @current_replay_idx = idx
         end
-      elsif ev.ctrl? && key.lower_r?
-        replay_send
       elsif ev.ctrl? && key.lower_w?
         request_close
-      elsif ev.ctrl? && key.lower_l?
-        # Toggle auto Content-Length (recompute from the body on send).
-        if (view = current_view)
-          if view.request_hex?
-            @host.status("auto Content-Length disabled in hex edit")
-          else
-            on = view.toggle_auto_content_length
-            @host.status(on ? "auto Content-Length: on" : "auto Content-Length: off")
-          end
-        end
-      elsif ev.ctrl? && key.lower_x?
-        # ^X toggles editable hex on the REQUEST pane (byte-exact; see ReplayView).
-        if (view = current_view) && view.focus == :request
-          on = view.toggle_request_hex
-          @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
-        else
-          @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
-        end
-      elsif ev.ctrl? && key.lower_s?
-        # ^S toggles the SNI override sub-field (TARGET pane only). The dialed host
-        # is unchanged — only the TLS ClientHello name differs.
-        if (view = current_view) && view.focus == :target
-          view.toggle_sni_field
-          @host.status(view.editing_sni? ? "SNI override: type a domain · ^S/↵/esc back to URL" : "editing target URL")
-        else
-          @host.status("SNI override (^S) applies to the TARGET pane — ↹ to it")
-        end
       elsif key.escape?
         if (view = current_view) && view.focus == :target && view.editing_sni?
           view.exit_sni_field # leave the SNI field, back to the URL (value kept)
@@ -172,6 +143,11 @@ module Gori::Tui
         else
           @host.request_focus(:menu)
         end
+      elsif ev.ctrl? || ev.alt?
+        # Any OTHER modified chord (^R send, ^X hex, ^S SNI, ^L auto-CL, …) defers to the
+        # central keymap so it's rebindable. Editors never insert ctrl/alt chars, so the
+        # defer is safe mid-edit; plain keys below still type literally.
+        return false
       else
         view = current_view
         return true if view.nil?
@@ -182,6 +158,35 @@ module Gori::Tui
         end
       end
       true
+    end
+
+    # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
+    def replay_toggle_hex : Nil
+      if (view = current_view) && view.focus == :request
+        on = view.toggle_request_hex
+        @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
+      else
+        @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
+      end
+    end
+
+    def replay_toggle_sni : Nil
+      if (view = current_view) && view.focus == :target
+        view.toggle_sni_field
+        @host.status(view.editing_sni? ? "SNI override: type a domain · ^S/↵/esc back to URL" : "editing target URL")
+      else
+        @host.status("SNI override (^S) applies to the TARGET pane — ↹ to it")
+      end
+    end
+
+    def replay_toggle_auto_content_length : Nil
+      return unless view = current_view
+      if view.request_hex?
+        @host.status("auto Content-Length disabled in hex edit")
+      else
+        on = view.toggle_auto_content_length
+        @host.status(on ? "auto Content-Length: on" : "auto Content-Length: off")
+      end
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool

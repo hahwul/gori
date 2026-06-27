@@ -77,10 +77,13 @@ describe Gori::Tui::SpaceMenu do
     backend.contains?(first).should be_false # the top entries scrolled off
   end
 
-  # Every menu-bearing scope's non-hidden verbs must each have a UNIQUE menu key —
-  # else two entries would answer the same keypress. Bypasses available? (which is
-  # ctx-gated) by reading the registry directly, so coverage is exhaustive.
-  it "assigns a unique, non-nil menu key to every non-hidden verb in each menu scope" do
+  # Per menu scope, the keyed entries must never collide, and any verb with NO chord
+  # at all must carry a mnemonic (else it's unreachable by ANY single key — the
+  # oversight this guards). A verb whose only chord is ctrl/shift (e.g. Replay's
+  # ^X/^S/^L toggles, rebindable since the hotkeys feature) legitimately has no
+  # single-key handle and is just excluded from the menu. Reads the registry
+  # directly to bypass the ctx-gated available?, so coverage is exhaustive.
+  it "gives every chordless menu verb a mnemonic, and never collides keys within a scope" do
     registry = Gori::Verbs.registry
     menu_scopes = [
       Gori::Verb::Scope::Body, Gori::Verb::Scope::Replay, Gori::Verb::Scope::Findings,
@@ -88,9 +91,9 @@ describe Gori::Tui::SpaceMenu do
     ]
     menu_scopes.each do |scope|
       verbs = registry.select { |v| v.scope == scope && !v.hidden? }
+      verbs.select(&.chords.empty?).all?(&.menu_key).should be_true # chordless ⇒ keyed
       keys = verbs.compact_map(&.menu_key)
-      keys.size.should eq(verbs.size)     # no non-hidden verb is left without a key
-      keys.uniq.size.should eq(keys.size) # and no two entries collide on one key
+      keys.uniq.size.should eq(keys.size) # no two entries collide on one key
     end
   end
 end

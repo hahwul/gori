@@ -32,6 +32,7 @@ require "./browser_picker"
 require "./flow_picker"
 require "./settings_view"
 require "./tabs_overlay"
+require "./hotkeys_overlay"
 require "./palette"
 require "./space_menu"
 require "../paths"
@@ -52,7 +53,7 @@ module Gori::Tui
 
     def initialize(@session : Session, @term : Termisu)
       @backend = TermisuBackend.new(@term)
-      @keymap = Verb::Keymap.build(@session.registry)
+      @keymap = Hotkeys.build_keymap(@session.registry) # base verbs + OS profile + user overrides
       @scope = @session.scope
       @rules_overlay = RulesOverlay.new(@session.rules)
       @finding_form = FindingForm.new
@@ -109,6 +110,8 @@ module Gori::Tui
       # The tab-bar customizer (palette → settings:tabs); @overlay is :tabs. Distinct
       # from @tabs (the controller registry built below).
       @tabs_overlay = TabsOverlay.new
+      # The hotkey rebinder (palette → settings:hotkeys); @overlay is :hotkeys.
+      @hotkeys_overlay = HotkeysOverlay.new(@session.registry)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)         # transient action feedback; nil → show key hints
@@ -384,7 +387,10 @@ module Gori::Tui
       end
       @quit_armed = false
 
-      @toast = nil                                         # clear last action's feedback; a new action may set it again
+      @toast = nil # clear last action's feedback; a new action may set it again
+      # In hotkey CAPTURE mode the next key IS the new binding — intercept it before the
+      # ^G/^F/^B guards (and everything else) so those chords can be recorded.
+      return handle_hotkeys_key(ev) if @overlay == :hotkeys && @hotkeys_overlay.capturing?
       return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
       return handle_goto_key(ev) if @goto_open             # the ^G line prompt is modal while up
       return handle_search_key(ev) if @search_open         # the ^F find prompt is modal while up
@@ -414,6 +420,7 @@ module Gori::Tui
       return handle_flow_picker_key(ev) if @overlay == :comparer_pick
       return handle_settings_key(ev) if @overlay == :settings
       return handle_tabs_key(ev) if @overlay == :tabs
+      return handle_hotkeys_key(ev) if @overlay == :hotkeys
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
@@ -432,6 +439,12 @@ module Gori::Tui
       # before the focus ring claims Tab. Non-popup keys fall through (return false).
       if @active_tab == :convert && @overlay == :none && @focus == :body && convert_controller.completing?
         return if convert_controller.handle_complete_key(ev)
+      end
+      # The Fuzzer wordlist-path autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
+      # before the focus ring claims Tab. Gated on the :p_path field + an open popup, so
+      # Tab on any other field/pane still advances panes. Non-popup keys fall through.
+      if @active_tab == :fuzzer && @overlay == :none && @focus == :body && fuzzer_controller.path_completing?
+        return if fuzzer_controller.handle_path_complete_key(ev)
       end
 
       # Focusable sub-tab strip (Replay/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
@@ -576,8 +589,8 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :comparer_pick, :settings, :tabs then true
-      else                                                                                           false
+      when :palette, :rules, :finding_new, :confirm, :browser, :comparer_pick, :settings, :tabs, :hotkeys then true
+      else                                                                                                    false
       end
     end
 
@@ -653,6 +666,7 @@ module Gori::Tui
       when :confirm       then click_confirm(area, mx, my)
       when :settings      then click_settings(area, mx, my)
       when :tabs          then click_tabs(area, mx, my)
+      when :hotkeys       then click_hotkeys(area, mx, my)
         # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
@@ -716,6 +730,16 @@ module Gori::Tui
       end
     end
 
+    # Hotkey editor: a click outside dismisses (discards the working copy, like esc); a
+    # row click selects that binding (rebind/unbind/reset stay keyboard-driven).
+    private def click_hotkeys(area : Rect, mx : Int32, my : Int32) : Nil
+      box = @hotkeys_overlay.overlay_box(area)
+      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = @hotkeys_overlay.row_at(box, mx, my)
+        @hotkeys_overlay.set_selected(idx)
+      end
+    end
+
     # True when a click should dismiss a modal: anywhere outside its box (click-away
     # is the universal close affordance — every modal also still closes on esc).
     private def dismiss_zone?(box : Rect, mx : Int32, my : Int32) : Bool
@@ -759,6 +783,7 @@ module Gori::Tui
       when :comparer_pick then @flow_picker.try(&.move(step))
       when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs          then @tabs_overlay.select_move(step)
+      when :hotkeys       then @hotkeys_overlay.select_move(step)
       end
     end
 
@@ -1000,6 +1025,69 @@ module Gori::Tui
       # The layout is applied to the live session regardless (like theme/network); only the
       # disk write can fail, so say so honestly rather than implying nothing happened.
       @toast = ok ? "tabs saved" : "tabs applied — could not save to #{Settings.path}"
+    end
+
+    # The hotkey rebinder (settings:hotkeys). Working copy: ↵ saves+applies, esc discards.
+    # Two sub-modes — :browse navigates/edits the list, :capture records the next key as
+    # the new binding (entered via e/space on a row; the capture early-return in handle_key
+    # routes keys here so ^G/^F/^B can be bound).
+    private def handle_hotkeys_key(ev : Termisu::Event::Key) : Nil
+      @hotkeys_overlay.capturing? ? handle_hotkeys_capture(ev) : handle_hotkeys_browse(ev)
+    end
+
+    private def handle_hotkeys_capture(ev : Termisu::Event::Key) : Nil
+      if ev.key.escape?
+        @hotkeys_overlay.cancel_capture
+      elsif chord = Keybind.from_event(ev)
+        @hotkeys_overlay.apply_capture(chord) # reserved/conflict → inline error, stays in capture
+      end
+      # an unmappable key (non-ASCII / a bare modifier) is ignored — capture stays open
+    end
+
+    private def handle_hotkeys_browse(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        @overlay = :none
+        open_palette
+      elsif key.escape?
+        @overlay = :none # discard the working copy
+      elsif key.enter?
+        save_hotkeys
+      elsif key.up?
+        @hotkeys_overlay.select_move(-1)
+      elsif key.down?
+        @hotkeys_overlay.select_move(1)
+      elsif key.left?
+        @hotkeys_overlay.cycle_profile(-1)
+      elsif key.right?
+        @hotkeys_overlay.cycle_profile(1)
+      elsif key.backspace?
+        @hotkeys_overlay.unbind_selected
+      elsif c = ev.char
+        handle_hotkeys_char(c)
+      end
+    end
+
+    private def handle_hotkeys_char(c : Char) : Nil
+      case c
+      when 'e', ' ' then @hotkeys_overlay.begin_capture
+      when 'x'      then @hotkeys_overlay.unbind_selected
+      when 'r'      then @hotkeys_overlay.reset_selected
+      when 'R'      then @hotkeys_overlay.reset_all
+      when 'k'      then @hotkeys_overlay.select_move(-1)
+      when 'j'      then @hotkeys_overlay.select_move(1)
+      end
+    end
+
+    # Commit the hotkey working copy: persist the overrides + profile, rebuild the live
+    # keymap so dispatch reflects them immediately, close.
+    private def save_hotkeys : Nil
+      working, profile = @hotkeys_overlay.to_working
+      Hotkeys.apply(working, profile)
+      ok = Settings.save
+      @keymap = Hotkeys.build_keymap(@session.registry)
+      @overlay = :none
+      @toast = ok ? "hotkeys saved" : "hotkeys applied — could not save to #{Settings.path}"
     end
 
     # The Notes tab is a live editor (like Replay): typing edits the document
@@ -1360,6 +1448,7 @@ module Gori::Tui
       @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
+      @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
 
@@ -1433,8 +1522,9 @@ module Gori::Tui
       when :confirm       then "CONFIRM"
       when :browser       then "BROWSER"
       when :comparer_pick then "PICK FLOW"
-      when :settings      then "SETTINGS"
-      when :tabs          then "TAB BAR"
+      when :settings    then "SETTINGS"
+      when :tabs        then "TAB BAR"
+      when :hotkeys     then "HOTKEYS"
       else
         case @focus
         when :menu    then "TABS"
@@ -1465,9 +1555,10 @@ module Gori::Tui
       when :confirm       then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when :settings      then "↑/↓ field · type to edit · ↵ save · esc close"
-      when :tabs          then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
-      when :detail        then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · ^G goto · ^F find · esc back"
+      when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
+      when :tabs        then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
+      when :hotkeys     then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
+      when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
@@ -2043,6 +2134,18 @@ module Gori::Tui
       replay_controller.replay_send
     end
 
+    def replay_toggle_hex : Nil
+      replay_controller.replay_toggle_hex
+    end
+
+    def replay_toggle_sni : Nil
+      replay_controller.replay_toggle_sni
+    end
+
+    def replay_toggle_auto_content_length : Nil
+      replay_controller.replay_toggle_auto_content_length
+    end
+
     def close_replay_tab : Nil
       replay_controller.close_replay_tab
     end
@@ -2227,7 +2330,7 @@ module Gori::Tui
     end
 
     # Open the settings editor for `section` (palette → settings:network/editor/theme/
-    # tabs/hotkeys). :network/:editor/:theme/:tabs are implemented; the rest toast a TODO.
+    # tabs/hotkeys). All sections are implemented; an unknown one toasts a TODO.
     def open_settings(section : Symbol) : Nil
       case section
       when :network, :editor, :theme
@@ -2238,6 +2341,9 @@ module Gori::Tui
       when :tabs
         @tabs_overlay.reset # rebuild the working copy from persisted config
         @overlay = :tabs
+      when :hotkeys
+        @hotkeys_overlay.reset # rebuild the working copy from persisted overrides
+        @overlay = :hotkeys
       else
         @toast = "#{section} settings — coming soon (TODO)"
       end

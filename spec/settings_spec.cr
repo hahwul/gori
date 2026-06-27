@@ -273,4 +273,63 @@ describe Gori::Settings do
       FileUtils.rm_rf(dir)
     end
   end
+
+  it "round-trips the hotkey overrides + OS profile (an unbind [] must survive)" do
+    dir = File.tempname("gori-settings-hotkeys")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.keymap_os = "linux"
+      Gori::Settings.keymap_overrides = {"rules.edit" => ["g"], "scope.edit" => [] of String}
+      Gori::Settings.save.should be_true
+
+      Gori::Settings.keymap_os = "auto"
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+      Gori::Settings.load
+      Gori::Settings.keymap_os.should eq("linux")
+      Gori::Settings.keymap_overrides.should eq({"rules.edit" => ["g"], "scope.edit" => [] of String})
+
+      # tolerant: non-array entry dropped, unparseable chord dropped, [] preserved
+      File.write(Gori::Settings.path,
+        %({"hotkeys":{"os":"WINDOWS","bindings":{"a":"x","b":["ctrl-g","nope"],"c":[]}}}))
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+      Gori::Settings.load
+      Gori::Settings.keymap_os.should eq("windows")                 # normalized lowercase
+      Gori::Settings.keymap_overrides.has_key?("a").should be_false # non-array dropped
+      Gori::Settings.keymap_overrides["b"].should eq(["ctrl-g"])    # garbage label dropped
+      Gori::Settings.keymap_overrides["c"].should eq([] of String)  # explicit unbind kept
+
+      # a file with no "hotkeys" block keeps the in-memory defaults
+      File.write(Gori::Settings.path, %({"theme":"goridark"}))
+      Gori::Settings.keymap_os = "darwin"
+      Gori::Settings.keymap_overrides = {"x" => ["y"]}
+      Gori::Settings.load
+      Gori::Settings.keymap_os.should eq("darwin")
+      Gori::Settings.keymap_overrides.should eq({"x" => ["y"]})
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.keymap_os = "auto"
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+    end
+  end
+
+  it "omits the hotkeys block entirely when untouched (auto + no overrides)" do
+    dir = File.tempname("gori-settings-nohotkeys")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.keymap_os = "auto"
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).includes?("hotkeys").should be_false
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.keymap_os = "auto"
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+    end
+  end
 end

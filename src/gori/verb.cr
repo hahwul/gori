@@ -22,9 +22,24 @@ module Gori
       PaletteOpen    # the command palette overlay is up
     end
 
+    # The KIND of action, orthogonal to Scope (where it fires). Drives the
+    # colour-coded sigil the command palette prints before each entry so users can
+    # tell navigation from a state-changing action at a glance. Action is the default
+    # (and covers every non-palette verb, which never renders a badge).
+    enum Category
+      Action     # does something / opens a tool (capture, intercept, scope, rules, CA …)
+      Navigation # moves focus around the app (tab jumps, back to projects)
+      Settings   # edits configuration (settings:*)
+      System     # app lifecycle (quit, the palette itself)
+    end
+
     # A keybinding as pure data (no terminal dependency). The TUI converts a
     # termisu key event into a Chord and looks it up in the Keymap.
     record Chord, key : String, ctrl : Bool = false, alt : Bool = false, shift : Bool = false do
+      # The named (non-character) keys a chord may carry, matching the names
+      # Tui::Keybind.from_event emits. Anything else must be a single ASCII char.
+      NAMED_KEYS = %w(enter escape tab up down left right backspace space)
+
       # Human-readable label for palette hints, e.g. "ctrl-p", "g", "enter".
       def label : String
         String.build do |io|
@@ -33,6 +48,33 @@ module Gori
           io << "shift-" if shift
           io << key
         end
+      end
+
+      # Inverse of #label: parse a stored chord string ("ctrl-shift-p", "enter", "[")
+      # back into a Chord, or nil if it isn't valid. Modifier prefixes are stripped
+      # GREEDILY from the front (each at most once; order-tolerant for hand-edits) so
+      # the literal "-" key round-trips ("ctrl--" → ctrl + "-") and bracket/colon keys
+      # survive. The remainder must be one ASCII char or one of NAMED_KEYS.
+      def self.parse(s : String) : Chord?
+        rest = s
+        ctrl = alt = shift = false
+        loop do
+          if rest.starts_with?("ctrl-") && !ctrl
+            ctrl = true
+            rest = rest[5..]
+          elsif rest.starts_with?("alt-") && !alt
+            alt = true
+            rest = rest[4..]
+          elsif rest.starts_with?("shift-") && !shift
+            shift = true
+            rest = rest[6..]
+          else
+            break
+          end
+        end
+        return nil if rest.empty?
+        return nil unless NAMED_KEYS.includes?(rest) || (rest.size == 1 && rest[0].ascii?)
+        new(rest, ctrl: ctrl, alt: alt, shift: shift)
       end
     end
 
@@ -45,6 +87,7 @@ module Gori
       getter title : String
       getter description : String
       getter scope : Scope
+      getter category : Category
       getter chords : Array(Chord)
       getter? hidden : Bool
       # Exposed for discoverability but not yet functional — the palette shows it
@@ -59,7 +102,8 @@ module Gori
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
                      @available : ExecContext -> Bool = ->(_ctx : ExecContext) { true },
-                     @coming_soon : Bool = false, @mnemonic : Char? = nil,
+                     @coming_soon : Bool = false, @category : Category = Category::Action,
+                     @mnemonic : Char? = nil,
                      &@handler : ExecContext -> String?)
       end
 
@@ -91,4 +135,7 @@ module Gori
 end
 
 require "./verb/registry"
+require "./verb/os_profile"
 require "./verb/keymap"
+require "./verb/reserved"
+require "./verb/conflicts"

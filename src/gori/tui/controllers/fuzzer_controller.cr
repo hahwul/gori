@@ -80,11 +80,16 @@ module Gori::Tui
       case v.focus
       when :target   then "type URL · ↵/↓ template · ^R run · ↹ pane · esc tabs"
       when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ↹ pane"
-      when :config   then "↑/↓ field · ←/→ change·type-tab · type edit · ⏎ add · Del rm · ↹ pane"
+      when :config   then config_hint(v)
       when :results  then "↑/↓ select · ↵ detail · o sort · m matched · ^R run · ^X stop · space cmds · ↹ pane"
       when :detail   then "↑/↓ scroll · ←/→ req/resp · esc back"
       else                "↹/esc tabs"
       end
+    end
+
+    private def config_hint(v : FuzzerView) : String
+      return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if v.path_completing?
+      "↑/↓ field · ←/→ change · type edit · ⏎ add/toggle · Del rm · ↹ pane"
     end
 
     # --- rendering ---
@@ -115,20 +120,39 @@ module Gori::Tui
         return true
       end
       c = ev.char || ev.key.to_char
-      unless dispatch_chord(chord_action(ev, c), v, c)
-        ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
-      end
+      return true if dispatch_chord(chord_action(ev, c), v, c)
+      # An unconsumed ctrl/alt chord (^R run, ^X stop, ^A automark, …) defers to the
+      # central keymap so it's rebindable; escape + plain keys stay with the pane editor.
+      return false if (ev.ctrl? || ev.alt?) && !ev.key.escape?
+      ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
       true
+    end
+
+    # The wordlist path autocomplete owns Tab/↵/↑/↓/Esc while its popup is up — the
+    # runner routes here via a pre-ring guard (gated on `path_completing?`) before the
+    # focus ring claims Tab. Mirrors ConvertController#completing?/handle_complete_key.
+    def path_completing? : Bool
+      current_view.try(&.path_completing?) || false
+    end
+
+    def handle_path_complete_key(ev : Termisu::Event::Key) : Bool
+      v = current_view
+      return false unless v
+      key = ev.key
+      case
+      when key.tab?, key.enter?   then v.path_complete_accept; true
+      when key.back_tab?, key.up? then v.path_complete_move(-1); true
+      when key.down?              then v.path_complete_move(1); true
+      when key.escape?            then v.path_complete_close; true
+      else                             false # printables fall through → form_type refilters
+      end
     end
 
     # Run the action a chord mapped to; false when it was not a chord (fall through).
     private def dispatch_chord(action : Symbol?, v : FuzzerView, c : Char?) : Bool
       case action
       when :palette   then save_current; @host.open_palette
-      when :run       then fuzz_run
-      when :stop      then fuzz_stop
       when :close     then request_close
-      when :automark  then @host.status(v.auto_mark)
       when :markword  then @host.status(v.mark_word)
       when :markpoint then @host.status(v.insert_marker)
       when :clear     then @host.status(v.clear_marks)
@@ -139,16 +163,14 @@ module Gori::Tui
       true
     end
 
-    # The ctrl-chord (or digit sub-tab switch) this key maps to, else nil.
+    # The ctrl-chord (or digit sub-tab switch) this key maps to, else nil. run/stop/
+    # automark are NOT here — they're keymap-driven verbs (rebindable) and fall through.
     private def chord_action(ev : Termisu::Event::Key, c : Char?) : Symbol?
       return nil unless ev.ctrl?
       key = ev.key
       case
       when key.lower_p?         then :palette
-      when key.lower_r?         then :run
-      when key.lower_x?         then :stop
       when key.lower_w?         then :close
-      when key.lower_a?         then :automark
       when key.lower_k?         then :markword
       when key.lower_t?         then :markpoint
       when key.lower_u?         then :clear

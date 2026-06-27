@@ -59,14 +59,41 @@ describe Gori::Tui::PaletteState do
   end
 
   it "marks coming-soon verbs with a 'soon' badge (exposed but not functional)" do
+    # No shipped verb is coming_soon anymore (settings:hotkeys went live), so exercise the
+    # badge mechanism with a synthetic registry.
     ctx = FakeExecContext.new
-    palette = PaletteState.new(Gori::Verbs.registry)
+    reg = Gori::Verb::Registry.new
+    reg.register(Gori::Verb::Definition.new("demo.soon", "demo:soon", "A future thing",
+      Gori::Verb::Scope::Global, coming_soon: true) { |_| nil })
+    palette = PaletteState.new(reg)
     palette.reset(ctx)
-    "settings:hotkeys".each_char { |c| palette.append(c, ctx) } # a coming_soon verb
+    "demo:soon".each_char { |c| palette.append(c, ctx) }
 
     backend = MemoryBackend.new(80, 24)
     palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
-    backend.contains?("settings:hotkeys").should be_true
+    backend.contains?("demo:soon").should be_true
     backend.contains?("soon").should be_true # the placeholder badge
+  end
+
+  it "categorizes Global verbs so the palette can group them by kind" do
+    r = Gori::Verbs.registry
+    r["tab.history"].category.should eq(Gori::Verb::Category::Navigation)
+    r["nav.next-tab"].category.should eq(Gori::Verb::Category::Navigation)
+    r["app.back"].category.should eq(Gori::Verb::Category::Navigation)
+    r["settings.theme"].category.should eq(Gori::Verb::Category::Settings)
+    r["app.quit"].category.should eq(Gori::Verb::Category::System)
+    r["app.palette"].category.should eq(Gori::Verb::Category::System)
+    r["capture.toggle"].category.should eq(Gori::Verb::Category::Action) # the default kind
+  end
+
+  it "prints a colour-coded category sigil before each entry" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+    "Toggle capture".each_char { |c| palette.append(c, ctx) } # an Action verb
+
+    backend = MemoryBackend.new(80, 24)
+    palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
+    backend.contains?("▸ Toggle capture").should be_true # the Action sigil precedes the title
   end
 end

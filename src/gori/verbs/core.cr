@@ -11,7 +11,7 @@ module Gori
       # verb-driven Sitemap/Findings bodies (a surprising one-key dead-end mid-browse).
       r.register Verb::Definition.new(
         "app.back", "Back to projects", "Close this project and return to the picker", Verb::Scope::Global,
-        [] of Verb::Chord) { |ctx| ctx.leave_project; nil }
+        [] of Verb::Chord, category: Verb::Category::Navigation) { |ctx| ctx.leave_project; nil }
       r.register Verb::Definition.new(
         "app.back-key", "Back to projects", "Close this project (q on the tab bar)", Verb::Scope::Sidebar,
         [Verb::Chord.new("q")], hidden: true) { |ctx| ctx.leave_project; nil }
@@ -20,11 +20,11 @@ module Gori
       # handled in the Runner (single Q quitting was too easy to hit by accident).
       r.register Verb::Definition.new(
         "app.quit", "Quit gori", "Exit gori entirely", Verb::Scope::Global,
-        [] of Verb::Chord) { |ctx| ctx.quit!; nil }
+        [] of Verb::Chord, category: Verb::Category::System) { |ctx| ctx.quit!; nil }
 
       r.register Verb::Definition.new(
         "app.palette", "Command palette", "Open the command palette", Verb::Scope::Global,
-        [Verb::Chord.new("p", ctrl: true)]) { |ctx| ctx.open_palette; nil }
+        [Verb::Chord.new("p", ctrl: true)], category: Verb::Category::System) { |ctx| ctx.open_palette; nil }
 
       r.register Verb::Definition.new(
         "capture.toggle", "Toggle capture", "Start/stop capturing traffic", Verb::Scope::Global,
@@ -54,19 +54,19 @@ module Gori
       # implemented; hotkeys is registered for discoverability (shown "soon") + a TODO toast.
       r.register Verb::Definition.new(
         "settings.network", "settings:network", "Edit the proxy bind address + upstream proxy",
-        Verb::Scope::Global) { |ctx| ctx.open_settings(:network); nil }
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:network); nil }
       r.register Verb::Definition.new(
         "settings.editor", "settings:editor", "Set the external editor opened by ^E in editable fields",
-        Verb::Scope::Global) { |ctx| ctx.open_settings(:editor); nil }
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:editor); nil }
       r.register Verb::Definition.new(
         "settings.theme", "settings:theme", "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)",
-        Verb::Scope::Global) { |ctx| ctx.open_settings(:theme); nil }
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:theme); nil }
       r.register Verb::Definition.new(
         "settings.tabs", "settings:tabs", "Customize the top tab bar — show/hide tabs and reorder them",
-        Verb::Scope::Global) { |ctx| ctx.open_settings(:tabs); nil }
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:tabs); nil }
       r.register Verb::Definition.new(
-        "settings.hotkeys", "settings:hotkeys", "Hotkey settings (coming soon)",
-        Verb::Scope::Global, coming_soon: true) { |ctx| ctx.open_settings(:hotkeys); nil }
+        "settings.hotkeys", "settings:hotkeys", "Rebind keyboard shortcuts (press a key) + pick an OS default profile",
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hotkeys); nil }
 
       r.register Verb::Definition.new(
         "scope.edit", "Scope lens", "Edit the in-scope host patterns", Verb::Scope::Global,
@@ -103,25 +103,25 @@ module Gori
         "intercept.forward-all", "Forward all held", "Forward every held message",
         Verb::Scope::Intercept, available: intercept_selected, mnemonic: 'a') { |ctx| ctx.intercept_forward_all; nil }
 
-      # Catch controls — what to hold (direction) + a condition that narrows it. Both
-      # are handled inline on the Intercept tab (`c` / `/`); registered here (no chord)
-      # for palette discoverability (P1).
+      # Catch controls — what to hold (direction) + a condition that narrows it. Keymap-
+      # driven (Intercept scope) so they're rebindable; the queue defers `c`/`/` to here,
+      # while the held-bytes editor + condition bar still swallow them as literal text.
       r.register Verb::Definition.new(
         "intercept.direction", "Catch direction", "Cycle which to hold: all / requests only / responses only",
-        Verb::Scope::Intercept, mnemonic: 'c') { |ctx| ctx.intercept_cycle_direction; nil }
+        Verb::Scope::Intercept, [Verb::Chord.new("c")]) { |ctx| ctx.intercept_cycle_direction; nil }
       r.register Verb::Definition.new(
         "intercept.filter", "Catch condition", "Only hold messages matching a query (host: method: path: status: scheme:)",
-        Verb::Scope::Intercept, mnemonic: '/') { |ctx| ctx.intercept_query; nil }
+        Verb::Scope::Intercept, [Verb::Chord.new("/")]) { |ctx| ctx.intercept_query; nil }
 
       # Tab/Shift-Tab are the focus ring (handled directly in the Runner); these
       # bracket chords remain a from-anywhere shortcut to cycle tabs.
       r.register Verb::Definition.new(
         "nav.next-tab", "Next tab", "Focus the next tab", Verb::Scope::Global,
-        [Verb::Chord.new("]")]) { |ctx| ctx.cycle_tab(1); nil }
+        [Verb::Chord.new("]")], category: Verb::Category::Navigation) { |ctx| ctx.cycle_tab(1); nil }
 
       r.register Verb::Definition.new(
         "nav.prev-tab", "Previous tab", "Focus the previous tab", Verb::Scope::Global,
-        [Verb::Chord.new("[")]) { |ctx| ctx.cycle_tab(-1); nil }
+        [Verb::Chord.new("[")], category: Verb::Category::Navigation) { |ctx| ctx.cycle_tab(-1); nil }
 
       # Positional tab jump: digit N focuses the Nth VISIBLE tab (the order on the bar) —
       # so the numbers follow the user's settings:tabs order/visibility. Hidden (default:
@@ -141,7 +141,8 @@ module Gori
         :convert => "Convert", :agent => "Agent", :help => "Help",
       }.each do |tab, label|
         r.register Verb::Definition.new(
-          "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global) { |ctx| ctx.focus_tab(tab); nil }
+          "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global,
+          category: Verb::Category::Navigation) { |ctx| ctx.focus_tab(tab); nil }
       end
 
       # Close the command palette overlay.
