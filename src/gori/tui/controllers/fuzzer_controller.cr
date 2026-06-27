@@ -79,7 +79,7 @@ module Gori::Tui
       return "↹/esc tabs · ^N new" unless v
       case v.focus
       when :target   then "type URL · ↵/↓ template · ^R run · ↹ pane · esc tabs"
-      when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ↹ pane"
+      when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ^N new · ↹ pane"
       when :config   then config_hint(v)
       when :results  then "↑/↓ select · ↵ detail · o sort · m matched · ^R run · ^X stop · space cmds · ↹ pane"
       when :detail   then "↑/↓ scroll · ←/→ req/resp · esc back"
@@ -104,7 +104,7 @@ module Gori::Tui
         v.render(screen, body_rect, focused: body_focused)
       else
         BodyChrome.framed(screen, body_rect, body_focused) do |inner|
-          screen.text(inner.x + 1, inner.y, "no fuzz sessions — ⇧I from History/Replay · ^N new", Theme.muted)
+          screen.text(inner.x + 1, inner.y, "no fuzz sessions — ^N new session · ⇧I from History/Replay", Theme.muted)
         end
       end
     end
@@ -452,9 +452,9 @@ module Gori::Tui
     # --- new / close / cross-tab seeds ---
     def fuzz_new : Nil
       view = FuzzerView.new
-      view.load_request("https://example.com", "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", false, "")
+      view.load_blank
       open_session(view, nil)
-      @host.status("new fuzz session — ^A mark params · ^O config · ^R run")
+      @host.status("new fuzz session — type the target URL · ^A mark params · ^O config · ^R run")
     end
 
     # ⇧I from History (or Findings evidence): open a captured flow as a fuzz session.
