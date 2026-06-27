@@ -57,7 +57,7 @@ module Gori::Tui
       ]},
       {"FUZZER", [
         {"⇧I", "send a flow/replay here (History/Replay)"},
-        {"^A · ^K · ^U", "auto-mark params · mark word · clear §"},
+        {"^A · ^K · ^T · ^U", "auto-mark params · mark word · mark point (manual §) · clear §"},
         {"^O", "focus the config pane"},
         {"config", "mode/list/file/num/null/brute/match/filter…"},
         {"^R · ^X", "run · stop"},
