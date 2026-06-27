@@ -232,8 +232,28 @@ module Gori::Proxy
         release_upstream
         return false
       end
-      ttfb = (Time.instant - started).total_microseconds.to_i64
       resp = Codec::Http1.parse_response_head(resp_head)
+
+      # Interim 1xx (RFC 9110 §15.2): an informational response (100 Continue,
+      # 103 Early Hints, …) is NOT the final response. A conformant proxy forwards
+      # it to the client verbatim and keeps reading until the final (>=200) status;
+      # otherwise the real response is stranded on the upstream socket — it gets
+      # wrongly recorded as THIS flow's response AND served to the next reused
+      # request on this connection (response desync). 101 Switching Protocols is the
+      # exception: it is terminal (the protocol upgrade), so it falls through to the
+      # normal path (WebSocket handling below).
+      while interim_response?(resp)
+        @io.write(resp_head) # forward byte-exact (P6/P7); no rewrite on interim
+        @io.flush
+        resp_head = Codec::Http1.read_head(upstream)
+        if resp_head.nil?
+          @sink.on_response(FlowMapper.error_response(flow_id, "upstream closed after interim 1xx response"))
+          release_upstream
+          return false
+        end
+        resp = Codec::Http1.parse_response_head(resp_head)
+      end
+      ttfb = (Time.instant - started).total_microseconds.to_i64
 
       # Match&Replace (response head). Framing/keep-alive/upgrade stay on the
       # ORIGINAL response so the upstream body is read correctly.
@@ -379,6 +399,13 @@ module Gori::Proxy
 
     private def websocket_upgrade?(resp : Codec::RawResponse) : Bool
       resp.status == 101 && resp.headers.get?("Upgrade").try(&.downcase) == "websocket"
+    end
+
+    # An interim 1xx informational response (100 Continue / 102 / 103 Early Hints /
+    # …) — forwarded to the client, then skipped to read the final status. 101
+    # Switching Protocols is terminal (handled as an upgrade), so it is NOT interim.
+    private def interim_response?(resp : Codec::RawResponse) : Bool
+      resp.status >= 100 && resp.status < 200 && resp.status != 101
     end
 
     # CONNECT host:port -> 200, then TLS MITM (if configured) or blind tunnel.

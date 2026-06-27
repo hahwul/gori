@@ -36,6 +36,23 @@ private class StubRewriter < Gori::Proxy::HeadRewriter
   end
 end
 
+# Reads from a socket until `marker` appears (or the read times out / EOFs),
+# returning everything read so far. Used to frame one response off a keep-alive
+# connection without consuming the next one.
+private def read_until(io : IO, marker : String) : String
+  buf = IO::Memory.new
+  chunk = Bytes.new(4096)
+  loop do
+    n = io.read(chunk)
+    break if n == 0
+    buf.write(chunk[0, n])
+    break if buf.to_s.includes?(marker)
+  end
+  buf.to_s
+rescue
+  buf.to_s
+end
+
 # A minimal origin server. For each connection: reads the request head, records
 # the request-line it saw, and replies with `body` (Connection: close).
 private def start_origin(body : String, seen : Channel(String)) : Int32
@@ -220,6 +237,59 @@ describe Gori::Proxy::Server do
     resp = sink.responses.first
     resp.content_type.should eq("text/event-stream")
     String.new(resp.body.not_nil!).should contain("data: two") # streamed body captured
+  end
+
+  it "forwards interim 1xx responses then reads the final status, with no reuse desync" do
+    # Origin: for each keep-alive request, send a 100 Continue THEN the real 200.
+    done = Channel(Nil).new(2)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        spawn do
+          n = 0
+          while head = Gori::Proxy::Codec::Http1.read_head(conn)
+            n += 1
+            body = "RESP-#{n}"
+            conn << "HTTP/1.1 100 Continue\r\n\r\n"
+            conn << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\nConnection: keep-alive\r\n\r\n" << body
+            conn.flush
+          end
+          conn.close
+        rescue
+        end
+      end
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    # One client connection, two sequential keep-alive requests through the proxy.
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 3.seconds
+    client << "GET http://127.0.0.1:#{origin_port}/one HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: keep-alive\r\n\r\n"
+    client.flush
+    r1 = read_until(client, "RESP-1")
+    client << "GET http://127.0.0.1:#{origin_port}/two HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: keep-alive\r\n\r\n"
+    client.flush
+    r2 = read_until(client, "RESP-2")
+    client.close
+
+    done.receive
+    done.receive
+    proxy.stop
+
+    # Client sees the interim 100 AND each request's own final 200 body — no desync.
+    r1.should contain("100 Continue")
+    r1.should contain("RESP-1")
+    r2.should contain("RESP-2")
+    r2.should_not contain("RESP-1")
+
+    # Both flows are recorded as the FINAL 200 (not the interim 100).
+    sink.responses.size.should eq(2)
+    sink.responses.each(&.status.should eq(200))
+    sink.responses.map { |r| String.new(r.body.not_nil!) }.sort.should eq(["RESP-1", "RESP-2"])
   end
 
   it "records an error flow when the upstream is unreachable" do
