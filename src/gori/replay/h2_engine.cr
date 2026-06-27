@@ -12,8 +12,11 @@ module Gori
     # `Replay::Result` the h1 engine produces (so the diff/view path is shared).
     #
     # One-shot and intentionally minimal: empty client SETTINGS (ACK on receipt),
-    # PING answered, no flow control beyond the default 64 KiB window (large
-    # request bodies could stall — fine for the manual workbench).
+    # PING answered. The RESPONSE side is flow-controlled — each DATA frame is
+    # credited straight back with a WINDOW_UPDATE on the connection + stream, so
+    # responses past the 65535-byte default window stream fine. The REQUEST side is
+    # not flow-controlled (a >64 KiB request body could stall — fine for the
+    # workbench; replay bodies are typically small).
     module H2Engine
       MAX_FRAME = 16384
       # Caps for the one-shot response read, mirroring the live assembler. Without
@@ -108,7 +111,11 @@ module Gori
         end_stream_pending = false # END_STREAM seen on a HEADERS frame whose block isn't closed yet
 
         until done
-          frame = Frame.read(io)
+          # A read error mid-response (connection reset, e.g. an origin that closed
+          # right after a non-END_STREAM DATA) is end-of-data, not a hard failure —
+          # treat it like a clean EOF and return what arrived, flagged incomplete
+          # (mirrors the h1 engine's premature-EOF handling).
+          frame = Frame.read(io) rescue nil
           break if frame.nil?
           case frame.frame_type
           when Frame::Type::Settings
@@ -143,9 +150,18 @@ module Gori
             end
           when Frame::Type::Data
             next unless frame.stream_id == 1
+            consumed = frame.payload.size # flow control counts the WHOLE DATA payload (incl. padding)
             body.write(data_block(frame)) if body.bytesize < MAX_BODY
             done = clean_eos = true if frame.end_stream?
             break if body.bytesize >= MAX_BODY # over-large/streaming body — truncate
+            # Replenish the connection (stream 0) AND stream flow-control windows by
+            # what we just consumed, so the origin keeps sending past the 65535-byte
+            # default window. Without this, any response body > 64 KiB stalls until
+            # the IO timeout (no WINDOW_UPDATE was ever sent).
+            if !done && consumed > 0
+              window_update(io, 0_u32, consumed)
+              window_update(io, 1_u32, consumed)
+            end
           else
             # WINDOW_UPDATE / PUSH_PROMISE / PRIORITY — ignored for a one-shot
           end
@@ -171,6 +187,20 @@ module Gori
       private def self.ack(io : IO, type : Frame::Type, payload : Bytes) : Nil
         io.write(Frame::Header.new(type.value, Frame::ACK, 0_u32, payload).to_bytes)
         io.flush
+      end
+
+      # WINDOW_UPDATE crediting `increment` bytes back to `stream_id` (0 = connection-
+      # level). The reserved high bit stays clear (increment is a small frame size).
+      private def self.window_update(io : IO, stream_id : UInt32, increment : Int32) : Nil
+        return if increment <= 0
+        payload = Bytes.new(4)
+        IO::ByteFormat::BigEndian.encode(increment.to_u32, payload)
+        io.write(Frame::Header.new(Frame::Type::WindowUpdate.value, 0_u8, stream_id, payload).to_bytes)
+        io.flush
+      rescue
+        # The origin may have already closed (e.g. a truncated response) — crediting a
+        # window we no longer need is moot; the next Frame.read sees the EOF and ends
+        # the loop. Don't let a dead-socket write fail an otherwise-usable response.
       end
 
       private def self.parse_request(request : Bytes, scheme : String, host : String,
