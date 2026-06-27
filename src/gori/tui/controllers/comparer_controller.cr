@@ -29,7 +29,7 @@ module Gori::Tui
     end
 
     # Scroll + the request/response toggle are consumed here; a/b/s fall through to
-    # the verb keymap (comparer.pick-a/pick-b/swap) and ":" opens the command line.
+    # the verb keymap (comparer.pick-a/pick-b/swap) and space opens the action menu.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       case
@@ -61,7 +61,7 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      "←/→ req|res · ↑/↓ scroll · a/b pick flow · s swap · : cmds · ↹/esc tabs"
+      "←/→ req|res · ↑/↓ scroll · a/b pick flow · s swap · space cmds · ↹/esc tabs"
     end
   end
 end

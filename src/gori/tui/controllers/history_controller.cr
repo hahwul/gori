@@ -74,7 +74,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
-                         : "↑/↓ move · ↵ open · ^R replay · ⇧F finding · f follow · / filter · i hold-mode · : cmds · esc tabs"
+                         : "↑/↓ move · ↵ open · ^R replay · ⇧F finding · f follow · / filter · i hold-mode · space cmds · esc tabs"
     end
 
     # Live IME composition only flows to the QL filter bar (the one text field).

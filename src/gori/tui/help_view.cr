@@ -15,7 +15,7 @@ module Gori::Tui
     SECTIONS = [
       {"GLOBAL", [
         {"^P", "command palette"},
-        {":", "context commands"},
+        {"space", "focus-area action menu"},
         {"c", "toggle capture"},
         {"^B", "reveal whitespace (·→␍␊)"},
         {"^D / ^C ×2", "quit gori"},
@@ -72,7 +72,7 @@ module Gori::Tui
         {"a · b", "pick flow A · flow B"},
         {"←/→", "compare requests ⟷ responses"},
         {"s", "swap A ⇄ B"},
-        {"Send to Comparer", "from History (: command line)"},
+        {"Send to Comparer", "from History (space menu)"},
       ]},
       {"EDITORS", [
         {"^G · ^F", "go to line · find"},

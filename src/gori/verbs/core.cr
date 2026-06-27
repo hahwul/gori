@@ -74,12 +74,12 @@ module Gori
 
       r.register Verb::Definition.new(
         "scope.add-host", "Add host to scope", "Add the selected flow's host to the scope lens",
-        Verb::Scope::Body, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }) { |ctx| ctx.scope_add_host; nil }
+        Verb::Scope::Body, available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }, mnemonic: 'h') { |ctx| ctx.scope_add_host; nil }
 
       r.register Verb::Definition.new(
         "scope.toggle", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",
         Verb::Scope::Body, [Verb::Chord.new("s", shift: true)],
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }) { |ctx| ctx.scope_toggle_lens; nil }
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }, mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
 
       r.register Verb::Definition.new(
         "rules.edit", "Match & Replace", "Edit in-flight request/response head rewrite rules", Verb::Scope::Global,
@@ -95,13 +95,13 @@ module Gori
       intercept_selected = ->(ctx : Verb::ExecContext) { !ctx.selected_intercept_id.nil? }
       r.register Verb::Definition.new(
         "intercept.forward", "Forward held", "Forward the selected held message (with edits)",
-        Verb::Scope::Intercept, available: intercept_selected) { |ctx| ctx.intercept_forward; nil }
+        Verb::Scope::Intercept, available: intercept_selected, mnemonic: 'f') { |ctx| ctx.intercept_forward; nil }
       r.register Verb::Definition.new(
         "intercept.drop", "Drop held", "Drop the selected held message",
-        Verb::Scope::Intercept, available: intercept_selected) { |ctx| ctx.intercept_drop; nil }
+        Verb::Scope::Intercept, available: intercept_selected, mnemonic: 'd') { |ctx| ctx.intercept_drop; nil }
       r.register Verb::Definition.new(
         "intercept.forward-all", "Forward all held", "Forward every held message",
-        Verb::Scope::Intercept, available: intercept_selected) { |ctx| ctx.intercept_forward_all; nil }
+        Verb::Scope::Intercept, available: intercept_selected, mnemonic: 'a') { |ctx| ctx.intercept_forward_all; nil }
 
       # Catch controls — what to hold (direction) + a condition that narrows it. Keymap-
       # driven (Intercept scope) so they're rebindable; the queue defers `c`/`/` to here,

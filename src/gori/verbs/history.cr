@@ -21,7 +21,7 @@ module Gori
       r.register Verb::Definition.new(
         "body.open", "Open flow detail", "View the selected request/response", Verb::Scope::Body,
         [Verb::Chord.new("enter"), Verb::Chord.new("right"), Verb::Chord.new("l")],
-        available: history_selected) { |ctx| ctx.open_detail; nil }
+        available: history_selected, mnemonic: 'o') { |ctx| ctx.open_detail; nil }
 
       r.register Verb::Definition.new(
         "history.query", "Filter (QL)", "Filter the list with a query (host: status:>=500 size:>10000 body~regex …)",
@@ -39,13 +39,13 @@ module Gori
       r.register Verb::Definition.new(
         "history.replay", "Replay flow", "Open the selected flow in the Replay tab",
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
-        available: history_selected) { |ctx| ctx.replay_selected; nil }
+        available: history_selected, mnemonic: 'r') { |ctx| ctx.replay_selected; nil }
 
       # Send the selected flow to the Comparer's next slot (A → B → A). The Comparer
       # tab is hidden by default; reach it with ^P → "Go to Comparer".
       r.register Verb::Definition.new(
         "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
-        Verb::Scope::Body, available: history_selected) { |ctx| ctx.comparer_add_selected; nil }
+        Verb::Scope::Body, available: history_selected, mnemonic: 'c') { |ctx| ctx.comparer_add_selected; nil }
 
       # --- replay workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
@@ -54,12 +54,12 @@ module Gori
       r.register Verb::Definition.new(
         "replay.send", "Send replay", "Resend the request byte-exact and diff the response",
         Verb::Scope::Replay, [Verb::Chord.new("r", ctrl: true)],
-        available: in_replay) { |ctx| ctx.replay_send; nil }
+        available: in_replay, mnemonic: 'r') { |ctx| ctx.replay_send; nil }
 
       r.register Verb::Definition.new(
         "replay.new", "New replay request", "Open a blank request in Replay to author and send",
         Verb::Scope::Replay, [Verb::Chord.new("n", ctrl: true)],
-        available: in_replay) { |ctx| ctx.replay_new; nil }
+        available: in_replay, mnemonic: 'n') { |ctx| ctx.replay_new; nil }
 
       # Request-pane toggles — keymap-driven (Replay scope) so they're rebindable. The
       # Runner delegators carry the pane-gating + status messages.
@@ -150,23 +150,23 @@ module Gori
       r.register Verb::Definition.new(
         "history.fuzz", "Send to Fuzzer", "Open the selected flow in the Fuzzer tab",
         Verb::Scope::Body, [Verb::Chord.new("i", shift: true)],
-        available: history_selected) { |ctx| ctx.fuzz_selected; nil }
+        available: history_selected, mnemonic: 'z') { |ctx| ctx.fuzz_selected; nil }
       r.register Verb::Definition.new(
         "replay.fuzz", "Send to Fuzzer", "Turn this replay request into a fuzz template",
-        Verb::Scope::Replay, available: in_replay) { |ctx| ctx.fuzz_from_replay; nil }
+        Verb::Scope::Replay, available: in_replay, mnemonic: 'f') { |ctx| ctx.fuzz_from_replay; nil }
 
       r.register Verb::Definition.new(
         "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,
-        [Verb::Chord.new("r", ctrl: true)], available: in_fuzzer) { |ctx| ctx.fuzz_run; nil }
+        [Verb::Chord.new("r", ctrl: true)], available: in_fuzzer, mnemonic: 'r') { |ctx| ctx.fuzz_run; nil }
       r.register Verb::Definition.new(
         "fuzz.stop", "Stop fuzz", "Stop the running fuzz", Verb::Scope::Fuzzer,
-        [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer) { |ctx| ctx.fuzz_stop; nil }
+        [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
       r.register Verb::Definition.new(
         "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
-        available: in_fuzzer) { |ctx| ctx.fuzz_new; nil }
+        available: in_fuzzer, mnemonic: 'n') { |ctx| ctx.fuzz_new; nil }
       r.register Verb::Definition.new(
         "fuzz.automark", "Auto-mark params", "Mark every request parameter value", Verb::Scope::Fuzzer,
-        [Verb::Chord.new("a", ctrl: true)], available: in_fuzzer) { |ctx| ctx.fuzz_automark; nil }
+        [Verb::Chord.new("a", ctrl: true)], available: in_fuzzer, mnemonic: 'm') { |ctx| ctx.fuzz_automark; nil }
     end
 
     # Builds a registry with every built-in verb registered.

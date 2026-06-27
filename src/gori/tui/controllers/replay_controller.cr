@@ -87,7 +87,7 @@ module Gori::Tui
       case v.focus
       when :target   then v.editing_sni? ? "type SNI host · ^S/↵/esc back to URL · ^R send" \
                                           : "type URL · ^S SNI · ↵/↓ request · ^R send · ↹ pane · esc tabs"
-      when :response then "↑/↓ scroll · ←/→/d diff · x hex · p pretty · ^F find · ^R send · ↹ pane · esc tabs"
+      when :response then "↑/↓ scroll · ←/→/d diff · x hex · p pretty · ^F find · ^R send · space cmds · ↹ pane · esc tabs"
       else                "type to edit · ^R send · ^G goto · ^F find · ^X hex · ^B ws · ^N new · ^W close · ↹ pane · esc tabs"
       end
     end
@@ -565,7 +565,7 @@ module Gori::Tui
 
     # Response/Diff pane: read-only. ←/→ or d toggles response↔diff, ↑/↓ scroll, Enter re-sends.
     private def handle_replay_response(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return @host.open_command if ev.char == ':' && !ev.ctrl? && !ev.alt? # ":" cmdline (response is navigable)
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt? # space menu (response is navigable)
       key = ev.key
       case
       when key.enter?            then replay_send

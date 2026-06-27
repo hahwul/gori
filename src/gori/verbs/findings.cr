@@ -7,7 +7,7 @@ module Gori
       r.register Verb::Definition.new(
         "finding.create", "Add finding", "Create a finding from the selected flow", Verb::Scope::Body,
         [Verb::Chord.new("f", shift: true)],
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }) { |ctx| ctx.finding_create; nil }
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }, mnemonic: 'a') { |ctx| ctx.finding_create; nil }
 
       # findings list
       r.register Verb::Definition.new(
