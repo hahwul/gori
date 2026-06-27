@@ -108,6 +108,15 @@ module Gori::Tui
       @dirty = false
     end
 
+    # A fresh, hand-authored fuzz session (^N). Focus starts on the TARGET field —
+    # the scaffold URL is a placeholder you almost always change first (mirrors
+    # ReplayView#load_blank; the ⇧I/from-Replay paths keep template focus since their
+    # URL is already real).
+    def load_blank : Nil
+      load_request("https://example.com", "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", false, "")
+      @focus = :target
+    end
+
     def restore(rec : Store::FuzzSessionRecord) : Nil
       @target = rec.target
       @tcx = rec.target.size

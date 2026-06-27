@@ -163,6 +163,7 @@ module Gori
         [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
       r.register Verb::Definition.new(
         "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
+        [Verb::Chord.new("n", ctrl: true)],
         available: in_fuzzer, mnemonic: 'n') { |ctx| ctx.fuzz_new; nil }
       r.register Verb::Definition.new(
         "fuzz.automark", "Auto-mark params", "Mark every request parameter value", Verb::Scope::Fuzzer,
