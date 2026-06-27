@@ -308,6 +308,12 @@ describe Gori::Settings do
       Gori::Settings.convert_sessions = [] of {String, String, String}
       Gori::Settings.save.should be_true
       File.read(Gori::Settings.path).includes?("convert").should be_false
+
+      # a single blank+unnamed open session is still "nothing to persist" — a cleared or
+      # dirtied-but-empty workbench must not write a stub "convert" block either
+      Gori::Settings.convert_sessions = [{"", "", ""}]
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).includes?("convert").should be_false
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)

@@ -1079,6 +1079,7 @@ module Gori::Tui
       unless vis.any? { |(s, _)| s == @active_tab }
         project_controller.commit if @active_tab == :project
         replay_controller.save_current_replay if @active_tab == :replay
+        convert_controller.commit if @active_tab == :convert # now a hideable default tab — flush before snapping off
         @active_tab = vis.first[0]
         on_enter_tab
         @focus = :menu
@@ -1156,10 +1157,10 @@ module Gori::Tui
     # A navigable sub-tab strip exists (≥2 chips) — gates entry into :subtabs. Replay
     # draws its strip at size>0 but a lone chip has nowhere to switch to.
     private def subtabs_shown? : Bool
-      (@tabs[@active_tab]?.try(&.subtab_labels).try(&.size) || 0) >= 2 # only Replay/Notes expose a strip
+      (@tabs[@active_tab]?.try(&.subtab_labels).try(&.size) || 0) >= 2 # Replay/Fuzzer/Notes/Convert expose a strip
     end
 
-    # The focusable sub-tab strip for Replay/Notes (@focus == :subtabs). Mirrors the
+    # The focusable sub-tab strip for Replay/Fuzzer/Notes/Convert (@focus == :subtabs). Mirrors the
     # tab bar's idiom one level down: ←/→ switch sub-tabs, ↓/↵/Tab enter the editor,
     # ↑/esc pop to the tab bar. ^1-9 jumps and stays on the strip; ^N/^W create/close.
     private def handle_subtabs_key(ev : Termisu::Event::Key) : Nil
@@ -1905,6 +1906,7 @@ module Gori::Tui
       # mirroring how Notes saves on leave. Cheap no-op when the tab is clean.
       replay_controller.save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
       fuzzer_controller.save_current if @active_tab == :fuzzer && @focus == :body && pane != :body
+      convert_controller.commit if @active_tab == :convert && @focus == :body && pane != :body
       @focus = pane
       @overlay = :none
       view_focus_first if pane == :body
@@ -2405,7 +2407,7 @@ module Gori::Tui
     end
 
     # CROSS-TAB mediator: send History's selected flow to the next Comparer slot
-    # (rings A → B → A). The Comparer tab is hidden by default — reach it via ^P.
+    # (rings A → B → A). Open the Comparer tab to view the diff.
     def comparer_add_selected : Nil
       id = history_controller.selected_flow_id
       return (@toast = "select a flow first") unless id

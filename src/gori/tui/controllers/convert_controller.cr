@@ -296,9 +296,14 @@ module Gori::Tui
 
     def commit : Nil
       return unless @dirty
-      Settings.convert_sessions = @sessions.map { |s| {s.input.text, s.chain, s.view.name || ""} }
+      Settings.convert_sessions = session_tuples
       Settings.save
       @dirty = false
+    end
+
+    # The persisted form of the open sub-tabs ({input, chain, name}).
+    private def session_tuples : Array({String, String, String})
+      @sessions.map { |s| {s.input.text, s.chain, s.view.name || ""} }
     end
 
     # ---- output actions (also the space-menu verbs, via the runner) ----
@@ -465,7 +470,12 @@ module Gori::Tui
       chains = Settings.convert_chains.reject { |(n, _)| n == name }
       chains << {name, cur.chain}
       Settings.convert_chains = chains
+      # ^S writes settings.json now (before the next commit), so flush the live sessions
+      # too — otherwise this save persists a stale/empty `sessions` block and an
+      # in-progress conversion is lost if the process dies before a normal leave/quit.
+      Settings.convert_sessions = session_tuples
       if Settings.save
+        @dirty = false
         @host.status(existing ? "updated chain \"#{name}\"" : "saved chain \"#{name}\"")
       else
         @host.status("could not save chain")

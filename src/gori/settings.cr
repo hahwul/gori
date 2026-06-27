@@ -223,11 +223,14 @@ module Gori
               end
             end
           end
-          # Omit the whole block when Convert was never used, so an untouched install
-          # never writes a "convert" section. Once any session is committed we write
-          # the "sessions" array (the source of truth); until then we preserve the
-          # legacy input/chain scalars so an un-opened Convert tab never loses them.
-          unless convert_sessions.empty? && convert_chains.empty? && convert_input.empty? && convert_chain.empty?
+          # Omit the whole block when there's nothing worth persisting — no saved chains,
+          # no legacy scalars, and every open session blank+unnamed — so an untouched OR
+          # cleared Convert workbench never writes a "convert" section. Once any session
+          # has content we write the "sessions" array (the source of truth); until then we
+          # preserve the legacy input/chain scalars so an un-opened Convert tab never loses
+          # them. (`all?` is vacuously true for an empty array.)
+          sessions_blank = convert_sessions.all? { |(i, c, n)| i.empty? && c.empty? && n.empty? }
+          unless sessions_blank && convert_chains.empty? && convert_input.empty? && convert_chain.empty?
             j.field "convert" do
               j.object do
                 if convert_sessions.empty?
