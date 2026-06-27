@@ -79,7 +79,7 @@ module Gori::Tui
       return "↹/esc tabs · ^N new" unless v
       case v.focus
       when :target   then "type URL · ↵/↓ template · ^R run · ↹ pane · esc tabs"
-      when :template then "type · ^A mark params · ^K word · ^U clear · ^O config · ^R run · ↹ pane"
+      when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ↹ pane"
       when :config   then "↑/↓ field · ←/→ change·type-tab · type edit · ⏎ add · Del rm · ↹ pane"
       when :results  then "↑/↓ select · ↵ detail · o sort · m matched · ^R run · ^X stop · ↹ pane"
       when :detail   then "↑/↓ scroll · ←/→ req/resp · esc back"
@@ -118,16 +118,17 @@ module Gori::Tui
     # Run the action a chord mapped to; false when it was not a chord (fall through).
     private def dispatch_chord(action : Symbol?, v : FuzzerView, c : Char?) : Bool
       case action
-      when :palette  then save_current; @host.open_palette
-      when :run      then fuzz_run
-      when :stop     then fuzz_stop
-      when :close    then request_close
-      when :automark then @host.status(v.auto_mark)
-      when :markword then @host.status(v.mark_word)
-      when :clear    then @host.status(v.clear_marks)
-      when :config   then v.focus_config
-      when :switch   then switch_subtab(c)
-      else                return false
+      when :palette   then save_current; @host.open_palette
+      when :run       then fuzz_run
+      when :stop      then fuzz_stop
+      when :close     then request_close
+      when :automark  then @host.status(v.auto_mark)
+      when :markword  then @host.status(v.mark_word)
+      when :markpoint then @host.status(v.insert_marker)
+      when :clear     then @host.status(v.clear_marks)
+      when :config    then v.focus_config
+      when :switch    then switch_subtab(c)
+      else                 return false
       end
       true
     end
@@ -143,6 +144,7 @@ module Gori::Tui
       when key.lower_w?         then :close
       when key.lower_a?         then :automark
       when key.lower_k?         then :markword
+      when key.lower_t?         then :markpoint
       when key.lower_u?         then :clear
       when key.lower_o?         then :config
       when c && '1' <= c <= '9' then :switch

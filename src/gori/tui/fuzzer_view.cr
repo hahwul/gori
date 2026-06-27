@@ -213,6 +213,24 @@ module Gori::Tui
       Fuzz::Template.parse(after).position_count < Fuzz::Template.parse(before).position_count ? "unmarked position" : "marked position"
     end
 
+    # Drop a single § marker at the cursor. Place two to bracket ANY region by hand:
+    # ^K auto-expands to a whole token, but this gives byte-exact control over the
+    # span — part of a token, or a region crossing delimiters that word-detection
+    # would never pick. An odd marker count means a position is still "open"; move
+    # the cursor and fire again to close it. (parse treats a dangling § as literal.)
+    def insert_marker : String
+      return "mark point (^T) works on the TEMPLATE pane — ↹ to it" unless @focus == :template
+      @editor.insert(Fuzz::Template::MARKER)
+      @editor.set_preedit("")
+      @dirty = true
+      if @editor.text.count(Fuzz::Template::MARKER).odd?
+        "marker opened — move the cursor and ^T again to close the region"
+      else
+        n = Fuzz::Template.parse(@editor.text).position_count
+        "marked point — #{n} position#{n == 1 ? "" : "s"}"
+      end
+    end
+
     def clear_marks : String
       @editor.set_text(@editor.text.gsub("§", ""))
       @dirty = true
