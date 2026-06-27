@@ -6,6 +6,8 @@ require "./text_area"
 require "./fmt"
 require "../store"
 require "../fuzz"
+require "../fuzzy"
+require "../paths"
 require "../replay/flow_request"
 
 module Gori::Tui
@@ -49,9 +51,11 @@ module Gori::Tui
       @cfg_field = 0
       @cfg_caret = 0
       @cfg_scroll = 0
-      @ptype = :list # selected payload-type tab
-      @s_conc = "20" # engine numeric fields are edited as string buffers, committed
-      @s_rate = ""   # to @config at build/persist time (so a field can be cleared)
+      @show_advanced = false            # Engine/Opts/Match/Filter collapsed by default
+      @path_complete = PathComplete.new # wordlist path inline auto-complete
+      @ptype = :list                    # selected payload-type tab
+      @s_conc = "20"                    # engine numeric fields are edited as string buffers, committed
+      @s_rate = ""                      # to @config at build/persist time (so a field can be cleared)
       @s_timeout = ""
       @s_retries = "0"
       @s_m_regex = "" # regex fields buffered as source strings, compiled on commit
@@ -166,6 +170,9 @@ module Gori::Tui
 
     def focus_config : Nil
       @focus = :config
+      @cfg_field = 0 # land straight on the payload type tabs
+      @cfg_caret = 0
+      @path_complete.close
     end
 
     def pane_advance(dir : Int32) : Bool
@@ -282,20 +289,25 @@ module Gori::Tui
     end
 
     # --- config form ---------------------------------------------------------
-    # A flat, ordered list of focusable field ids — ↑/↓ steps through ALL of them
-    # (so the cursor walks left-to-right along a multi-field line, then down).
-    # Payload-type fields are dynamic; payload-set rows live at indices past the
-    # fixed fields (one per @sets entry), addressed as the `:set` pseudo-field.
-    FORM_HEAD = [:mode, :conc, :rate, :timeout, :retries, :follow, :calibrate,
-                 :m_status, :m_size, :m_words, :m_regex,
-                 :f_status, :f_size, :f_words, :f_regex, :ptype]
+    # The cursor (@cfg_field, ↑/↓) walks an ordered field list split around the
+    # variable-length @sets rows: HEAD (payload type + its draft fields + add)
+    # comes first so entering CONFIG lands straight on the payload; the @sets rows
+    # sit in the MIDDLE (the `:set` pseudo-field); TAIL (mode + the collapsible
+    # `▸ Advanced` toggle, then Engine/Opts/Match/Filter only when expanded) is last.
+    ADVANCED_FIELDS = [:conc, :rate, :timeout, :retries, :follow, :calibrate,
+                       :m_status, :m_size, :m_words, :m_regex,
+                       :f_status, :f_size, :f_words, :f_regex]
 
     def config_field : Symbol
       current_field
     end
 
-    private def form_fields : Array(Symbol)
-      FORM_HEAD + ptype_fields + [:add]
+    private def head_fields : Array(Symbol)
+      [:ptype] + ptype_fields + [:add]
+    end
+
+    private def tail_fields : Array(Symbol)
+      @show_advanced ? [:mode, :advanced] + ADVANCED_FIELDS : [:mode, :advanced]
     end
 
     private def ptype_fields : Array(Symbol)
@@ -309,22 +321,25 @@ module Gori::Tui
     end
 
     private def field_count : Int32
-      form_fields.size + @sets.size
+      head_fields.size + @sets.size + tail_fields.size
     end
 
     private def current_field : Symbol
-      ff = form_fields
-      @cfg_field < ff.size ? ff[@cfg_field] : :set
+      h = head_fields.size
+      return head_fields[@cfg_field] if @cfg_field < h
+      return :set if @cfg_field < h + @sets.size
+      tail_fields[@cfg_field - h - @sets.size]? || :mode # `|| :mode` guards a stale index
     end
 
     private def current_set_index : Int32
-      @cfg_field - form_fields.size
+      @cfg_field - head_fields.size
     end
 
     # ↑/↓ — move the field cursor (caret resets to the end of the new field).
     def form_move(d : Int32) : Nil
       @cfg_field = (@cfg_field + d).clamp(0, {field_count - 1, 0}.max)
       @cfg_caret = field_text(current_field).size
+      sync_path_complete
     end
 
     # ←/→ — cycle an enum/toggle, else move the text caret.
@@ -332,15 +347,20 @@ module Gori::Tui
       case current_field
       when :mode      then cycle_mode(d)
       when :ptype     then cycle_ptype(d)
+      when :advanced  then toggle_advanced
       when :follow    then @config.follow_redirects = !@config.follow_redirects?; @dirty = true
       when :calibrate then toggle_calibrate
       else                 @cfg_caret = (@cfg_caret + d).clamp(0, field_text(current_field).size)
       end
     end
 
-    # ⏎ — on the Add field append the configured payload set; else step down.
+    # ⏎ — Add field appends the set, Advanced toggles the block, else step down.
     def form_enter : Nil
-      current_field == :add ? add_current_set : form_move(1)
+      case current_field
+      when :add      then add_current_set
+      when :advanced then toggle_advanced
+      else                form_move(1)
+      end
     end
 
     def form_delete : Nil
@@ -356,6 +376,7 @@ module Gori::Tui
         field_set(current_field, "#{s[0, @cfg_caret - 1]}#{s[@cfg_caret..]}")
         @cfg_caret -= 1
         @dirty = true
+        @path_complete.refresh(@p_path) if current_field == :p_path
       end
     end
 
@@ -365,6 +386,38 @@ module Gori::Tui
       field_set(current_field, "#{s[0, @cfg_caret]}#{ch}#{s[@cfg_caret..]}")
       @cfg_caret += 1
       @dirty = true
+      @path_complete.refresh(@p_path) if current_field == :p_path
+    end
+
+    # Keep the wordlist path popup in lockstep with the cursor: open/refresh while
+    # the :p_path field is focused, close on any other field.
+    private def sync_path_complete : Nil
+      current_field == :p_path ? @path_complete.refresh(@p_path) : @path_complete.close
+    end
+
+    # --- wordlist path completion (mirrors Convert's ChainComplete contract) -----
+    # True while the popup owns Tab/Enter/↑/↓/Esc — the runner's pre-ring guard routes
+    # those keys here (via the controller) before the focus ring claims Tab.
+    def path_completing? : Bool
+      @focus == :config && current_field == :p_path && @path_complete.open?
+    end
+
+    def path_complete_move(d : Int32) : Nil
+      @path_complete.move(d)
+    end
+
+    def path_complete_close : Nil
+      @path_complete.close
+    end
+
+    # Apply the highlighted completion: replace the field, jump the caret to the end,
+    # keep the popup open + drill on a directory, close on a file.
+    def path_complete_accept : Nil
+      res = @path_complete.accept || return
+      @p_path, is_dir = res
+      @cfg_caret = @p_path.size
+      @dirty = true
+      is_dir ? @path_complete.refresh(@p_path) : @path_complete.close
     end
 
     private def cycle_mode(d : Int32) : Nil
@@ -379,6 +432,7 @@ module Gori::Tui
       i = types.index(@ptype) || 0
       @ptype = types[(i + d) % types.size]
       @cfg_caret = 0
+      sync_path_complete # cursor stays on :ptype → closes a stale wordlist popup
     end
 
     private def toggle_calibrate : Nil
@@ -386,6 +440,13 @@ module Gori::Tui
       @config.auto_calibrate = on
       @matcher.auto_calibrate = on
       @dirty = true
+    end
+
+    # Collapse/expand the Advanced block. Pure UI state — NO @dirty (mirrors
+    # cycle_ptype); re-clamp the cursor since tail_fields just shrank/grew.
+    private def toggle_advanced : Nil
+      @show_advanced = !@show_advanced
+      @cfg_field = @cfg_field.clamp(0, {field_count - 1, 0}.max)
     end
 
     private def add_current_set : Nil
@@ -418,8 +479,8 @@ module Gori::Tui
 
     private def text_field?(f : Symbol) : Bool
       case f
-      when :mode, :ptype, :follow, :calibrate, :add, :set then false
-      else                                                     true
+      when :mode, :ptype, :follow, :calibrate, :add, :set, :advanced then false
+      else                                                                true
       end
     end
 
@@ -830,36 +891,69 @@ module Gori::Tui
       mx = inner.right
       y = inner.y
 
+      # 1. payload type tabs — the cursor lands here on entry
+      draw_ptype(screen, inner.x, y, mx, focused)
+      y += 1
+
+      # 2. the selected type's draft fields + add (capture the :p_path anchor)
+      x = inner.x + 2
+      ppath_x = nil
+      ppath_y = y
+      ptype_fields.each do |f|
+        if f == :p_path
+          ppath_x = x
+          ppath_y = y
+        end
+        x = draw_seg(screen, x, y, ptype_label(f), f, mx, focused)
+      end
+      draw_add(screen, x, y, mx, focused)
+      y += 2
+
+      # 3. payload sets (variable length) — capped so the tail stays on-screen
+      tail_h = @show_advanced ? 7 : 3
+      y = render_sets(screen, inner, y, focused, {inner.bottom - tail_h, y}.max)
+      y += 1
+
+      # 4. mode
       x = label_at(screen, inner.x, y, "Mode")
       x = draw_seg(screen, x, y, "", :mode, mx, focused)
       screen.text(x + 1, y, mode_formula, Theme.muted, Theme.bg) if x + 10 < mx
       y += 1
 
-      x = label_at(screen, inner.x, y, "Engine")
-      x = draw_seg(screen, x, y, "conc", :conc, mx, focused)
-      x = draw_seg(screen, x, y, "rate", :rate, mx, focused)
-      x = draw_seg(screen, x, y, "to", :timeout, mx, focused)
-      draw_seg(screen, x, y, "retry", :retries, mx, focused)
+      # 5. advanced toggle
+      draw_advanced(screen, inner.x, y, mx, focused)
       y += 1
 
-      x = label_at(screen, inner.x, y, "Opts")
-      x = draw_seg(screen, x, y, "follow", :follow, mx, focused)
-      draw_seg(screen, x, y, "calib", :calibrate, mx, focused)
-      y += 1
+      # 6. advanced block — only when expanded
+      if @show_advanced
+        x = label_at(screen, inner.x, y, "Engine")
+        x = draw_seg(screen, x, y, "conc", :conc, mx, focused)
+        x = draw_seg(screen, x, y, "rate", :rate, mx, focused)
+        x = draw_seg(screen, x, y, "to", :timeout, mx, focused)
+        draw_seg(screen, x, y, "retry", :retries, mx, focused)
+        y += 1
 
-      y = render_cond_line(screen, inner.x, y, mx, focused, "Match", :m_status, :m_size, :m_words, :m_regex)
-      y = render_cond_line(screen, inner.x, y, mx, focused, "Filtr", :f_status, :f_size, :f_words, :f_regex)
-      y += 1
+        x = label_at(screen, inner.x, y, "Opts")
+        x = draw_seg(screen, x, y, "follow", :follow, mx, focused)
+        draw_seg(screen, x, y, "calib", :calibrate, mx, focused)
+        y += 1
 
-      draw_ptype(screen, inner.x, y, mx, focused)
-      y += 1
+        y = render_cond_line(screen, inner.x, y, mx, focused, "Match", :m_status, :m_size, :m_words, :m_regex)
+        render_cond_line(screen, inner.x, y, mx, focused, "Filtr", :f_status, :f_size, :f_words, :f_regex)
+      end
 
-      x = inner.x + 2
-      ptype_fields.each { |f| x = draw_seg(screen, x, y, ptype_label(f), f, mx, focused) }
-      draw_add(screen, x, y, mx, focused)
-      y += 2
+      # the wordlist completion popup floats over the lines below the :p_path field
+      if @ptype == :wordlist && (ax = ppath_x) && @path_complete.open?
+        @path_complete.render(screen, ax, ppath_y + 1, inner)
+      end
+    end
 
-      render_sets(screen, inner, y, focused)
+    private def draw_advanced(screen, x, y, mx, pane_focused) : Nil
+      foc = pane_focused && current_field == :advanced
+      label = @show_advanced ? "▾ Advanced" : "▸ Advanced (Engine · Match · Filter)"
+      bg = foc ? Theme.accent_bg : Theme.bg
+      fg = foc ? Theme.text_bright : Theme.muted
+      screen.text(x, y, label, fg, bg, width: {mx - x, 1}.max)
     end
 
     private def render_cond_line(screen, ox, y, mx, focused, label, st, sz, wd, re) : Int32
@@ -871,15 +965,19 @@ module Gori::Tui
       y + 1
     end
 
-    private def render_sets(screen, inner, y, focused) : Nil
+    # Render the "Sets" header + rows, bounded so the rows never overrun `limit`
+    # (the bottom budget reserved for the Mode/Advanced tail). Overflow collapses
+    # into a "… +N more" line. Returns the next free y.
+    private def render_sets(screen, inner, y, focused, limit : Int32) : Int32
       screen.text(inner.x, y, "Sets", Theme.muted, Theme.bg)
       y += 1
       if @sets.empty?
         screen.text(inner.x + 2, y, "(none — pick a type above, ⏎ add)", Theme.muted, Theme.bg)
-        return
+        return y + 1
       end
-      @sets.each_with_index do |s, i|
-        break if y >= inner.bottom
+      avail = {limit - y, 1}.max
+      shown = @sets.size <= avail ? @sets.size : {avail - 1, 0}.max
+      @sets.first(shown).each_with_index do |s, i|
         sel = focused && current_field == :set && current_set_index == i
         bg = sel ? Theme.accent_bg : Theme.bg
         screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if sel
@@ -888,6 +986,11 @@ module Gori::Tui
           sel ? Theme.text_bright : Theme.text, bg, width: {inner.w - 2, 1}.max)
         y += 1
       end
+      if shown < @sets.size
+        screen.text(inner.x + 1, y, "… +#{@sets.size - shown} more", Theme.muted, Theme.bg)
+        y += 1
+      end
+      y
     end
 
     private def label_at(screen, x, y, label) : Int32
@@ -1080,6 +1183,124 @@ module Gori::Tui
         mx < rest.x + half ? :template : :config
       else
         @focus == :detail ? :detail : :results
+      end
+    end
+  end
+
+  # Inline filesystem path completion for the wordlist payload field. Mirrors the
+  # Convert tab's ChainComplete (scroll-window dropdown) but with path-aware accept:
+  # it keeps the typed directory prefix, replaces only the basename, and appends "/"
+  # to directories so the user can keep drilling. Bare names (no "/") complete from
+  # BOTH the current working dir and ~/.gori/wordlists. Per-directory child caching
+  # keeps steady-state keystrokes off the filesystem.
+  class PathComplete
+    CAP = 60
+
+    record Entry, label : String, insert : String, dir : Bool
+
+    getter? open : Bool = false
+    getter entries : Array(Entry) = [] of Entry
+    getter selected : Int32 = 0
+    @scroll = 0
+    @cache = {} of String => Array(String) # dir → sorted children
+
+    def refresh(value : String) : Nil
+      @entries = candidates(value)
+      @selected = 0
+      @scroll = 0
+      @open = !@entries.empty?
+    end
+
+    def move(d : Int32) : Nil
+      return if @entries.empty?
+      @selected = (@selected + d).clamp(0, @entries.size - 1)
+    end
+
+    def close : Nil
+      @open = false
+    end
+
+    # The chosen insert string + whether it is a directory (the caller keeps the
+    # popup open + refreshes on a dir, closes on a file). nil when nothing selectable.
+    def accept : {String, Bool}?
+      e = @entries[@selected]? || return nil
+      {e.insert, e.dir}
+    end
+
+    private def candidates(value : String) : Array(Entry)
+      if slash = value.rindex('/')
+        prefix = value[0..slash] # kept verbatim, incl. trailing '/'
+        partial = value[(slash + 1)..]
+        read_dir = Path[prefix].expand(home: true).to_s
+        merged = ranked(read_dir, partial).map do |name, is_dir, rank|
+          {Entry.new(name, "#{prefix}#{name}#{is_dir ? "/" : ""}", is_dir), rank}
+        end
+        merge_cap(merged)
+      else
+        # bare name → cwd (bare insert) + ~/.gori/wordlists (ABSOLUTE insert: the
+        # engine opens wordlist paths relative to CWD, so a wordlists-dir-only name
+        # MUST resolve absolutely or it would fail at run time). Both sources are
+        # ranked TOGETHER so a prefix/wordlist hit isn't buried under cwd fuzz.
+        wl = Gori::Paths.wordlists_dir
+        merged = ranked(Dir.current, value).map do |name, is_dir, rank|
+          {Entry.new(name, "#{name}#{is_dir ? "/" : ""}", is_dir), rank}
+        end
+        ranked(wl, value).each do |name, is_dir, rank|
+          merged << {Entry.new("#{name}  ·~/.gori", "#{File.join(wl, name)}#{is_dir ? "/" : ""}", is_dir), rank}
+        end
+        merge_cap(merged)
+      end
+    end
+
+    private def merge_cap(scored : Array({Entry, Int32})) : Array(Entry)
+      scored.sort_by! { |(e, rank)| {-rank, e.label} }
+      scored.first(CAP).map { |(e, _)| e }
+    end
+
+    # Children of `dir` matching `partial` (case-insensitive prefix OR fuzzy),
+    # ranked prefix-first then by score then name. Returns [{name, dir?, rank}],
+    # capped; only the survivors are stat'd for directory-ness.
+    private def ranked(dir : String, partial : String) : Array({String, Bool, Int32})
+      pl = partial.downcase
+      scored = children_of(dir).compact_map do |name|
+        dn = name.downcase
+        if partial.empty?
+          {name, 1}
+        elsif dn.starts_with?(pl)
+          {name, 1_000_000}
+        elsif s = Gori::Fuzzy.score(pl, dn)
+          {name, s}
+        else
+          nil
+        end
+      end
+      scored.sort_by! { |(name, rank)| {-rank, name} }
+      scored.first(CAP).map { |(name, rank)| {name, File.directory?(File.join(dir, name)), rank} }
+    end
+
+    # Per-directory children cache (bounded): re-read only when a dir is first seen.
+    private def children_of(dir : String) : Array(String)
+      @cache.clear if @cache.size > 8
+      @cache[dir] ||= (Dir.children(dir).sort rescue [] of String)
+    end
+
+    # Frame-less dropdown anchored at (x, y), clamped within `inner`. Same scroll +
+    # accent-bg selection as ChainComplete.
+    def render(screen : Screen, x : Int32, y : Int32, inner : Rect) : Nil
+      return if !@open || @entries.empty?
+      w = ({@entries.max_of(&.label.size) + 2, 18}.max).clamp(1, {inner.right - x, 1}.max)
+      h = {@entries.size, 8, {inner.bottom - y, 1}.max}.min
+      return if h <= 0
+      @scroll = @selected if @selected < @scroll
+      @scroll = @selected - h + 1 if @selected >= @scroll + h
+      @scroll = @scroll.clamp(0, {@entries.size - h, 0}.max)
+      (0...h).each do |i|
+        e = @entries[@scroll + i]? || break
+        active = (@scroll + i) == @selected
+        bg = active ? Theme.accent_bg : Theme.elevated
+        screen.fill(Rect.new(x, y + i, w, 1), bg)
+        screen.cell(x, y + i, active ? '▎' : ' ', Theme.accent, bg)
+        screen.text(x + 1, y + i, e.label, active ? Theme.text_bright : Theme.text, bg, width: {w - 1, 1}.max)
       end
     end
   end
