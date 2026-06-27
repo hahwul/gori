@@ -583,13 +583,13 @@ module Gori::Tui
       end
     end
 
-    # Click the top tab bar: switch to the clicked tab (immediate, like a number jump),
-    # re-focus the body when the active tab is re-clicked, else just focus the bar.
+    # Click the top tab bar: switch to the clicked tab and land focus on the bar
+    # (TABS level) — clicking a tab selects the tab, it does not drill into the body.
     private def click_menu(rect : Rect, mx : Int32, my : Int32) : Nil
       seg = Chrome.menu_segments(rect, @active_tab, tabs: effective_tabs,
         intercept_count: @session.interceptor.pending_count).find { |(_, r)| r.contains?(mx, my) }
       if seg
-        seg[0] == @active_tab ? focus_pane(:body) : focus_tab(seg[0])
+        seg[0] == @active_tab ? focus_pane(:menu) : focus_tab(seg[0], focus: :menu)
       else
         focus_pane(:menu) # empty menu area: land on the tab bar like the keyboard (clears a stale overlay, saves replay edits)
       end
@@ -1756,14 +1756,17 @@ module Gori::Tui
       focus_pane(subtabs_shown? ? :subtabs : :body)
     end
 
-    def focus_tab(tab : Symbol) : Nil
+    # Switch the active tab. `focus` is where focus lands: :body for explicit
+    # "jump to tab" (number keys) which drills into content, :menu for a tab-bar
+    # mouse click which selects the tab without descending into the body.
+    def focus_tab(tab : Symbol, focus : Symbol = :body) : Nil
       if @active_tab == :project
         project_controller.commit
       end
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       fuzzer_controller.save_current if @active_tab == :fuzzer
       @active_tab = tab
-      @focus = :body # explicit "jump to tab" (e.g. number keys) drills into content; startup defaults to :menu (tab bar)
+      @focus = focus
       @overlay = :none
       on_enter_tab
       view_focus_first
