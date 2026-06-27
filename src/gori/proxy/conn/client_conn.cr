@@ -167,9 +167,13 @@ module Gori::Proxy
       # Recompute Content-Length to match the (possibly edited) body — like Burp's
       # default. A human who grows/shrinks a held body would otherwise desync the
       # origin, which reads only the stale CL's worth and truncates the rest.
-      # No-ops on chunked / already-correct, so an unedited forward stays byte-exact;
-      # byte-exact CL-mismatch smuggling tests go through replay/fuzz, not the editor.
-      sent_head, edited_body = split_message(Fuzz::ContentLength.sync(decision.bytes))
+      # add_when_missing: true so adding a body to a request that had none (e.g. a
+      # GET) ALSO gets a Content-Length — otherwise the body is unframed: the origin
+      # drops it AND the bytes strand on the keep-alive upstream, prepended to the
+      # next reused request (smuggling). No-ops on chunked / already-correct, so an
+      # unedited forward stays byte-exact; byte-exact CL-mismatch smuggling tests go
+      # through replay/fuzz, not the editor.
+      sent_head, edited_body = split_message(Fuzz::ContentLength.sync(decision.bytes, add_when_missing: true))
       sent_req = Codec::Http1.parse_request_head(sent_head)
       retryable = retryable_request?(req, edited_body.nil? || edited_body.empty?)
       upstream, reused, sent = acquire_and_send(host, port, retryable) { |up| write_request(up, sent_head, edited_body) }
@@ -249,6 +253,16 @@ module Gori::Proxy
       # exception: it is terminal (the protocol upgrade), so it falls through to the
       # normal path (WebSocket handling below).
       while interim_response?(resp)
+        # RFC 9112 §6: a 1xx response MUST NOT carry content. An interim that declares
+        # a body (Content-Length / Transfer-Encoding) is malformed AND a desync vector
+        # — its "body" can embed a fake final response while the real one is stranded
+        # for the next reused request. Refuse it: close the connection (don't parse a
+        # body as the next response, don't reuse the upstream).
+        if interim_has_body?(resp)
+          @sink.on_response(FlowMapper.error_response(flow_id, "malformed interim 1xx response (declared a body)"))
+          release_upstream
+          return false
+        end
         @io.write(resp_head) # forward byte-exact (P6/P7); no rewrite on interim
         @io.flush
         resp_head = Codec::Http1.read_head(upstream)
@@ -370,9 +384,9 @@ module Gori::Proxy
         return false
       end
       # Sync Content-Length to the (possibly edited) body so the client isn't fed a
-      # stale length (truncation). No-ops on chunked / already-correct (P7-preserving
-      # for an unedited forward).
-      out_head, out_body = split_message(Fuzz::ContentLength.sync(decision.bytes))
+      # stale length (truncation) or an unframed body. No-ops on chunked / already-
+      # correct (P7-preserving for an unedited forward).
+      out_head, out_body = split_message(Fuzz::ContentLength.sync(decision.bytes, add_when_missing: true))
       sent_resp = Codec::Http1.parse_response_head(out_head)
       @io.write(out_head)
       @io.write(out_body) if out_body
@@ -415,6 +429,12 @@ module Gori::Proxy
     # Switching Protocols is terminal (handled as an upgrade), so it is NOT interim.
     private def interim_response?(resp : Codec::RawResponse) : Bool
       resp.status >= 100 && resp.status < 200 && resp.status != 101
+    end
+
+    # A 1xx that illegally declares body framing (Content-Length / Transfer-Encoding)
+    # — malformed per RFC 9112 §6 and a response-smuggling vector.
+    private def interim_has_body?(resp : Codec::RawResponse) : Bool
+      !!(resp.headers.get?("Content-Length") || resp.headers.get?("Transfer-Encoding"))
     end
 
     # CONNECT host:port -> 200, then TLS MITM (if configured) or blind tunnel.

@@ -54,6 +54,12 @@ module Gori
           # result. Read on until the final (>=200) status. 101 Switching Protocols
           # is terminal (a protocol upgrade), so it is NOT skipped.
           while resp.status >= 100 && resp.status < 200 && resp.status != 101
+            # RFC 9112 §6: a 1xx MUST NOT carry content. One that declares a body
+            # (Content-Length / Transfer-Encoding) is malformed and a desync vector
+            # (its body can embed a fake final response) — refuse it.
+            if resp.headers.get?("Content-Length") || resp.headers.get?("Transfer-Encoding")
+              return error("malformed interim 1xx response (declared a body) from #{host}:#{port}", started)
+            end
             head = Proxy::Codec::Http1.read_head(upstream)
             return error("upstream closed after interim 1xx from #{host}:#{port}", started) unless head
             resp = Proxy::Codec::Http1.parse_response_head(head)

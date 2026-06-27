@@ -292,6 +292,45 @@ describe Gori::Proxy::Server do
     sink.responses.map { |r| String.new(r.body.not_nil!) }.sort.should eq(["RESP-1", "RESP-2"])
   end
 
+  it "refuses a malformed interim 1xx that declares a body (no response smuggling)" do
+    done = Channel(Nil).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    # A 103 whose Content-Length body is a COMPLETE fake 200, then the real 200.
+    fake = "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nEVL"
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 103 Early Hints\r\nContent-Length: #{fake.bytesize}\r\n\r\n#{fake}"
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nREAL"
+        conn.flush
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 3.seconds
+    client << "GET http://127.0.0.1:#{origin_port}/a HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: keep-alive\r\n\r\n"
+    client.flush
+    got = begin
+      client.gets_to_end
+    rescue
+      ""
+    end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    got.should_not contain("EVL")                                       # fake body never served
+    sink.responses.first.state.should eq(Gori::Store::FlowState::Error) # recorded as an error
+  end
+
   it "records an error flow when the upstream is unreachable" do
     done = Channel(Nil).new(1)
     sink = RecordingSink.new(done)
@@ -443,6 +482,67 @@ describe Gori::Proxy::Server do
     # Origin received the FULL edited body (would be "GR" under the stale CL: 2).
     got_body.receive.should eq("GROWN-BODY")
     String.new(sink.requests.first.head).should contain("Content-Length: 10") # synced + captured
+  end
+
+  it "adds a Content-Length when a held GET gains a body (no unframed smuggling)" do
+    done = Channel(Nil).new(1)
+    got = Channel(String).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
+        m = String.new(head).match(/Content-Length:\s*(\d+)/i)
+        clen = m ? m[1].to_i : 0
+        body = Bytes.new(clen)
+        conn.read_fully(body) if clen > 0
+        got.send("#{clen}:#{String.new(body)}")
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+        conn.flush
+        conn.close
+      end
+    end
+
+    store_path = File.tempname("gori-icadd", ".db")
+    store = Gori::Store.open(store_path)
+    interceptor = Gori::Interceptor.new(Gori::Scope.load(store))
+    interceptor.toggle
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, interceptor: interceptor)
+    proxy.start
+
+    spawn do
+      loop do
+        interceptor.pending.each do |it|
+          if it.kind.request?
+            # add a body to a GET that had none + no Content-Length header
+            edited = String.new(it.raw).sub("\r\n\r\n", "\r\n\r\nADDED-BODY")
+            interceptor.forward(it.id, edited.to_slice)
+          else
+            interceptor.forward(it.id)
+          end
+        end
+        sleep 0.01.seconds
+      end
+    end
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET http://127.0.0.1:#{origin_port}/echo HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    store.close
+    File.delete?(store_path)
+    File.delete?("#{store_path}-wal")
+    File.delete?("#{store_path}-shm")
+
+    # Origin saw the full added body, framed by a synthesized Content-Length — not
+    # dropped + left unframed on the upstream socket.
+    got.receive.should eq("10:ADDED-BODY")
   end
 
   it "evaluates the response intercept condition against the REWRITTEN request line" do
