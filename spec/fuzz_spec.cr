@@ -98,6 +98,31 @@ describe F::Template do
     # cursor inside the marked span → strip it
     F::Template.mark_word("user=§admin§", 8).should eq("user=admin")
   end
+
+  it "marked_spans returns [start,end) char offsets incl. delimiters, 1:1 with positions" do
+    t = "GET /a?x=§foo§&y=§bar§ HTTP/1.1\r\n\r\n"
+    spans = F::Template.marked_spans(t)
+    spans.size.should eq(F::Template.parse(t).position_count)
+    a, b = spans[0]
+    t[a].should eq('§')
+    t[b - 1].should eq('§')
+    t[(a + 1)...(b - 1)].should eq("foo")
+  end
+
+  it "marked_spans honours §§ escape and unbalanced trailing § (matches parse)" do
+    F::Template.marked_spans("a§§b").should be_empty # escaped literal §
+    F::Template.marked_spans("a§b").should be_empty  # unbalanced trailing §
+    F::Template.marked_spans("x=§A§&y=§z").should eq([{2, 5}])
+    F::Template.marked_spans("§a§b§c§").should eq([{0, 3}, {4, 7}])
+    F::Template.marked_spans("k=§§§v§").should eq([{4, 7}]) # leading §§ escaped, then a pair
+  end
+
+  it "marked_spans count always equals parse.position_count" do
+    ["plain", "§a§", "§§", "§a§b§c§", "k=§§§v§", "x=§A§&y=§z",
+     F::Template.auto_mark("GET /?q=hi&p=2 HTTP/1.1\r\n\r\n")].each do |t|
+      F::Template.marked_spans(t).size.should eq(F::Template.parse(t).position_count)
+    end
+  end
 end
 
 describe F::ContentLength do

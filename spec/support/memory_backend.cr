@@ -5,10 +5,12 @@ require "../../src/gori"
 class MemoryBackend < Gori::Tui::Backend
   getter grid : Array(Array(Char))
   getter fg_grid : Array(Array(Gori::Tui::Color))
+  getter bg_grid : Array(Array(Gori::Tui::Color))
 
   def initialize(@w : Int32, @h : Int32)
     @grid = Array.new(@h) { Array.new(@w, ' ') }
     @fg_grid = Array.new(@h) { Array.new(@w, Gori::Tui::Color.default) }
+    @bg_grid = Array.new(@h) { Array.new(@w, Gori::Tui::Color.default) }
   end
 
   def put(x : Int32, y : Int32, grapheme : Char | String, fg : Gori::Tui::Color, bg : Gori::Tui::Color, attr : Gori::Tui::Attribute) : Nil
@@ -16,6 +18,7 @@ class MemoryBackend < Gori::Tui::Backend
     ch = grapheme.is_a?(Char) ? grapheme : (grapheme.empty? ? ' ' : grapheme[0])
     @grid[y][x] = ch
     @fg_grid[y][x] = fg
+    @bg_grid[y][x] = bg
   end
 
   def size : {Int32, Int32}
@@ -28,6 +31,10 @@ class MemoryBackend < Gori::Tui::Backend
 
   def fg_at(x : Int32, y : Int32) : Gori::Tui::Color
     @fg_grid[y][x]
+  end
+
+  def bg_at(x : Int32, y : Int32) : Gori::Tui::Color
+    @bg_grid[y][x]
   end
 
   def contains?(text : String) : Bool

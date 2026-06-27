@@ -4,6 +4,7 @@ require "./theme"
 require "./frame"
 require "./text_area"
 require "./fmt"
+require "./spark"
 require "../store"
 require "../fuzz"
 require "../fuzzy"
@@ -22,6 +23,20 @@ module Gori::Tui
     RESULT_CAP = 5000 # ring cap on retained result rows (metrics are cheap; bodies kept only for matched)
 
     record SetSpec, kind : Symbol, value : String
+
+    # Aggregated result distribution for the DIST sidebar. Raw numbers only — bakes no
+    # Color, so a theme switch needs no cache rebuild (colours resolve live at draw).
+    record DistData,
+      codes : Array({Int32, Int32}), # (status, count), ascending
+      err : Int32,                   # status-nil rows (network/timeout failures)
+      len_hist : Array(Int32), len_min : Int64, len_max : Int64,
+      words_hist : Array(Int32), words_min : Int32, words_max : Int32,
+      time_hist : Array(Int32), time_min : Int64, time_max : Int64
+
+    STATUS_MAX_ROWS =  6 # ≤ this many distinct codes → per-code bars; else collapse to classes
+    DIST_MIN_TOTAL  = 60 # narrowest bottom width that still earns a sidebar
+    DIST_MIN_VW     = 22 # min / max sidebar width
+    DIST_MAX_VW     = 34
 
     getter focus : Symbol # :target | :template | :config | :results | :detail
     getter target : String
@@ -70,10 +85,19 @@ module Gori::Tui
       @p_min = "1"
       @p_max = "3"
       @results = [] of Fuzz::Result
+      @results_rev = 0_i64 # bumped on every @results mutation — the DIST cache key
       @sel = 0
       @scroll = 0
       @sort = :index
       @matched_only = false
+      # §-region offsets, recomputed only when the buffer changes (keyed on @editor.edits).
+      # Backs BOTH the template tint colours and the Sets→marker chips, so they can't disagree.
+      @marker_text_rev = -1
+      @marker_spans = [] of {Int32, Int32}
+      @show_dist = true # the DIST sidebar beside RESULTS (toggled with `v`)
+      @dist_cache = nil.as(DistData?)
+      @dist_cache_rev = -1_i64
+      @dist_cache_w = -1
       @progress = nil.as(Fuzz::Progress?)
       @run_total = nil.as(Int64?)
       @stop_requested = false
@@ -254,7 +278,19 @@ module Gori::Tui
     end
 
     def position_count : Int32
-      Fuzz::Template.parse(@editor.text).position_count
+      marker_spans.size
+    end
+
+    # Cached `§…§` char-offset spans for the current template buffer, recomputed only
+    # when the editor content changes (cheap Int compare on @editor.edits). marked_spans
+    # is 1:1 with parse().positions, so `.size == position_count`. Backs the template
+    # tint colours AND the config Sets→marker chips so the two can never disagree.
+    private def marker_spans : Array({Int32, Int32})
+      if @editor.edits != @marker_text_rev
+        @marker_text_rev = @editor.edits
+        @marker_spans = Fuzz::Template.marked_spans(@editor.text)
+      end
+      @marker_spans
     end
 
     # --- run lifecycle -------------------------------------------------------
@@ -268,6 +304,7 @@ module Gori::Tui
 
     def begin_run(total : Int64?) : Nil
       @results.clear
+      @results_rev += 1
       @sel = 0
       @scroll = 0
       @running = true
@@ -287,6 +324,7 @@ module Gori::Tui
     def append_result(r : Fuzz::Result) : Nil
       @results << r
       @results.shift if @results.size > RESULT_CAP
+      @results_rev += 1 # grow AND ring-evict both bump (size is pinned once full)
     end
 
     def matched_count : Int32
@@ -856,10 +894,29 @@ module Gori::Tui
 
     private def render_bottom(screen : Screen, rect : Rect, focused : Bool) : Nil
       if @focus == :detail
-        render_detail(screen, rect, focused)
-      else
-        render_results(screen, rect, focused && @focus == :results)
+        render_detail(screen, rect, focused) # full width — detail is unchanged
+        return
       end
+      vw = @show_dist ? dist_width(rect.w) : 0
+      if vw <= 0
+        render_results(screen, rect, focused && @focus == :results) # graceful: full width
+      else
+        rw = rect.w - vw - 1 # results width minus the 1-col gap (mirrors render_top)
+        render_results(screen, Rect.new(rect.x, rect.y, rw, rect.h), focused && @focus == :results)
+        render_dist(screen, Rect.new(rect.x + rw + 1, rect.y, vw, rect.h)) # read-only sidebar
+      end
+    end
+
+    # Sidebar width for a bottom rect `w` cols wide, or 0 (no sidebar) when too narrow.
+    private def dist_width(w : Int32) : Int32
+      return 0 if w < DIST_MIN_TOTAL
+      vw = {w * 30 // 100, DIST_MAX_VW}.min
+      vw < DIST_MIN_VW ? 0 : vw
+    end
+
+    def toggle_dist : String
+      @show_dist = !@show_dist
+      @show_dist ? "distribution shown" : "distribution hidden"
     end
 
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -884,12 +941,16 @@ module Gori::Tui
 
     private def render_template(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      pc = position_count
+      spans = marker_spans
+      pc = spans.size
       label = @http2 ? "TEMPLATE (h2)" : "TEMPLATE"
       Frame.card(screen, rect, label, bg: Theme.bg, border: Frame.pane_border(focused))
       badge = " §#{pc} "
       screen.text({rect.right - badge.size - 1, rect.x + label.size + 4}.max, rect.y, badge,
         pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg)
+      # Marker i ↔ position i ↔ generator.set_for(i). Colours resolved fresh each frame
+      # (theme-reactive without a revision key, since the cached offsets are colour-free).
+      @editor.bg_regions = spans.map_with_index { |(a, b), i| {a, b, Theme.marker_bg(i)} }
       @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
     end
 
@@ -978,7 +1039,14 @@ module Gori::Tui
     # (the bottom budget reserved for the Mode/Advanced tail). Overflow collapses
     # into a "… +N more" line. Returns the next free y.
     private def render_sets(screen, inner, y, focused, limit : Int32) : Int32
-      screen.text(inner.x, y, "Sets", Theme.muted, Theme.bg)
+      pp = @config.mode.per_position? # set i → marker i (Pitchfork/ClusterBomb)
+      header = "Sets"
+      screen.text(inner.x, y, header, Theme.muted, Theme.bg)
+      if pp && !@sets.empty? && @sets.size != marker_spans.size
+        hx = inner.x + header.size + 1
+        screen.text(hx, y, sets_hint(marker_spans.size, @sets.size), Theme.muted, Theme.bg,
+          width: {inner.right - hx, 1}.max)
+      end
       y += 1
       if @sets.empty?
         screen.text(inner.x + 2, y, "(none — pick a type above, ⏎ add)", Theme.muted, Theme.bg)
@@ -988,11 +1056,7 @@ module Gori::Tui
       shown = @sets.size <= avail ? @sets.size : {avail - 1, 0}.max
       @sets.first(shown).each_with_index do |s, i|
         sel = focused && current_field == :set && current_set_index == i
-        bg = sel ? Theme.accent_bg : Theme.bg
-        screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if sel
-        pos = @config.mode.per_position? ? " →#{i + 1}" : ""
-        screen.text(inner.x + 1, y, "#{i + 1} #{s.kind} #{s.value}#{pos}",
-          sel ? Theme.text_bright : Theme.text, bg, width: {inner.w - 2, 1}.max)
+        render_set_row(screen, inner, y, s, i, sel, pp)
         y += 1
       end
       if shown < @sets.size
@@ -1000,6 +1064,32 @@ module Gori::Tui
         y += 1
       end
       y
+    end
+
+    # One Sets row. In per-position modes (pp) it carries a marker-coloured swatch + →N
+    # chip tying it to template marker i (same tint marker i shows in the editor); the
+    # chip draws AFTER the selection fill so it survives on the selected (accent_bg) row.
+    private def render_set_row(screen, inner : Rect, y : Int32, s : SetSpec, i : Int32, sel : Bool, pp : Bool) : Nil
+      bg = sel ? Theme.accent_bg : Theme.bg
+      screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if sel
+      fg = sel ? Theme.text_bright : Theme.text
+      label = "#{i + 1} #{s.kind} #{s.value}"
+      unless pp
+        screen.text(inner.x + 1, y, label, fg, bg, width: {inner.w - 2, 1}.max)
+        return
+      end
+      chip = "→#{i + 1}"
+      cwid = 2 + chip.size + 1 # '▎' + ' ' + token + ' '
+      cx = {inner.right - cwid, inner.x + 1}.max
+      screen.text(inner.x + 1, y, label, fg, bg, width: {cx - inner.x - 2, 1}.max)
+      screen.cell(cx, y, '▎', Theme.marker_hue(i), bg)
+      screen.text(cx + 1, y, " #{chip} ", Theme.marker_fg, Theme.marker_bg(i))
+    end
+
+    # set_for(p) = @sets[p]? || @sets[0]: with fewer sets than markers the extras wrap
+    # back to set 1; with more, the surplus sets are unused. 1-based to match the rows.
+    private def sets_hint(markers : Int32, sets : Int32) : String
+      sets < markers ? "· #{markers} markers, #{sets} sets — marker #{sets + 1}+ reuse set 1" : "· #{markers} markers — set #{markers + 1}+ unused"
     end
 
     private def label_at(screen, x, y, label) : Int32
@@ -1135,6 +1225,113 @@ module Gori::Tui
       end
     end
 
+    # ── DIST sidebar — result distribution at a glance ───────────────────────────
+    # Status bars + Len/Words/Time sparkline histograms over ALL @results (NOT the
+    # matched/sort-filtered view) so the outlier you're filtering out still shows and
+    # the picture stays stable while you re-sort. Read-only; data cached on @results_rev.
+
+    private def render_dist(screen : Screen, rect : Rect, focused : Bool = false) : Nil
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "DIST", bg: Theme.bg, border: Frame.pane_border(focused))
+      inner = rect.inset(1, 1)
+      return if inner.empty?
+      if @results.empty?
+        screen.text(inner.x, inner.y, @running ? "sampling…" : "no results yet",
+          Theme.muted, Theme.bg, width: inner.w)
+        return
+      end
+      d = dist_data(inner.w)
+      # Reserve 6 rows for the 3 spark sections when the pane is tall; else status takes all.
+      status_limit = inner.h >= 8 ? {inner.bottom - 6, inner.y + 1}.max : inner.bottom
+      y = render_dist_status(screen, inner, inner.y, status_limit, d)
+      y = render_dist_spark(screen, inner, y, "len", d.len_hist, Fmt.size(d.len_min), Fmt.size(d.len_max)) if y + 2 <= inner.bottom
+      y = render_dist_spark(screen, inner, y, "wrd", d.words_hist, d.words_min.to_s, d.words_max.to_s) if y + 2 <= inner.bottom
+      render_dist_spark(screen, inner, y, "tim", d.time_hist, Fmt.dur(d.time_min), Fmt.dur(d.time_max)) if y + 2 <= inner.bottom
+    end
+
+    private def render_dist_status(screen, inner : Rect, y0 : Int32, limit : Int32, d : DistData) : Int32
+      rows_budget = {limit - y0, 1}.max
+      groups = dist_status_groups(d, rows_budget)
+      return y0 if groups.empty?
+      total = d.codes.sum(&.[1]) + d.err
+      maxc = groups.max_of?(&.[1]) || 1
+      label_w = 4                      # "200 " / "5xx " / "ERR "
+      num_w = {total.to_s.size, 4}.min # right-aligned count column (≤ RESULT_CAP digits)
+      bar_w = {inner.w - label_w - num_w - 1, 1}.max
+      y = y0
+      groups.each_with_index do |(label, count, code), i|
+        break if y >= limit
+        if i == rows_budget - 1 && groups.size > rows_budget
+          screen.text(inner.x, y, "+#{groups.size - i} more", Theme.muted, Theme.bg, width: inner.w)
+          return y + 1
+        end
+        col = code ? Theme.status_color(code) : Theme.red # ERR (nil) → red; resolved LIVE
+        screen.text(inner.x, y, label.ljust(label_w), col, Theme.bg)
+        screen.text(inner.x + label_w, y, Spark.bar(count, maxc, bar_w), col, Theme.bg)
+        screen.text(inner.x + label_w + bar_w + 1, y, count.to_s.rjust(num_w), Theme.muted, Theme.bg, width: num_w)
+        y += 1
+      end
+      y
+    end
+
+    # Distinct codes when they fit (a lone 500 keeps its own red bar — max signal);
+    # otherwise collapse to classes 2xx/3xx/4xx/5xx (+ ERR for status-nil rows).
+    private def dist_status_groups(d : DistData, budget : Int32) : Array({String, Int32, Int32?})
+      n = d.codes.size + (d.err > 0 ? 1 : 0)
+      out = [] of {String, Int32, Int32?}
+      if n <= {budget, STATUS_MAX_ROWS}.min
+        d.codes.each { |(s, c)| out << {s.to_s, c, s.as(Int32?)} }
+      else
+        cls = Hash(Int32, Int32).new(0)
+        d.codes.each { |(s, c)| cls[s // 100] += c }
+        cls.to_a.sort_by!(&.[0]).each { |(k, c)| out << {"#{k}xx", c, (k * 100).as(Int32?)} }
+      end
+      out << {"ERR", d.err, nil.as(Int32?)} if d.err > 0
+      out
+    end
+
+    private def render_dist_spark(screen, inner : Rect, y : Int32, label : String,
+                                  hist : Array(Int32), lo_s : String, hi_s : String) : Int32
+      screen.text(inner.x, y, "#{label} #{lo_s} … #{hi_s}", Theme.muted, Theme.bg, width: inner.w)
+      screen.text(inner.x, y + 1, Spark.line(hist), Theme.text, Theme.bg, width: inner.w)
+      y + 2
+    end
+
+    # Aggregate @results into the DIST view, cached on {@results_rev, pane width}. NOT
+    # keyed on Theme.revision — DistData bakes no Color (resolved live at draw); NOT on
+    # @matched_only/@sort — the distribution is intentionally over the full result set.
+    private def dist_data(w : Int32) : DistData
+      c = @dist_cache
+      return c if c && @dist_cache_rev == @results_rev && @dist_cache_w == w
+      @dist_cache_rev = @results_rev
+      @dist_cache_w = w
+      @dist_cache = build_dist(w)
+    end
+
+    private def build_dist(w : Int32) : DistData
+      codes = Hash(Int32, Int32).new(0)
+      err = 0
+      lens = [] of Int64
+      words = [] of Int32
+      times = [] of Int64
+      @results.each do |r|
+        if s = r.status
+          codes[s] += 1
+          lens << r.length # response rows only — keep error 0-rows out of len/wrd spikes
+          words << r.words
+        else
+          err += 1
+        end
+        times << r.duration_us # every row: a timeout's latency IS the signal
+      end
+      DistData.new(
+        codes: codes.to_a.sort_by!(&.[0]), err: err,
+        len_hist: Spark.histogram(lens, w), len_min: (lens.min? || 0_i64), len_max: (lens.max? || 0_i64),
+        words_hist: Spark.histogram(words, w), words_min: (words.min? || 0), words_max: (words.max? || 0),
+        time_hist: Spark.histogram(times, w), time_min: (times.min? || 0_i64), time_max: (times.max? || 0_i64),
+      )
+    end
+
     private def adjust_scroll(h : Int32) : Nil
       rows_h = {h - 1, 1}.max
       @scroll = @sel if @sel < @scroll
@@ -1190,8 +1387,11 @@ module Gori::Tui
       if my < rest.y + top_h
         half = {(rest.w - 1) // 2, 1}.max
         mx < rest.x + half ? :template : :config
+      elsif @focus == :detail
+        :detail
       else
-        @focus == :detail ? :detail : :results
+        vw = @show_dist ? dist_width(rest.w) : 0
+        vw > 0 && mx >= rest.x + rest.w - vw ? nil : :results # read-only DIST sidebar → no-op
       end
     end
   end

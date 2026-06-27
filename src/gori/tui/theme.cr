@@ -313,6 +313,42 @@ module Gori::Tui
       end
     {% end %}
 
+    # ── Per-marker tints (Fuzzer §…§ regions + the config Sets→marker chips) ──────
+    # Derived at runtime from the ACTIVE palette so they re-theme for free (and need no
+    # new Palette fields). `marker_bg` is a subtle background band; `marker_hue` is the
+    # saturated source used for crisp 1-cell swatches.
+
+    MARKER_TINT = 0.22 # blend ratio toward the canvas: subtle band, still distinguishable
+
+    # 6 maximally-separated hues that exist in every palette (built-in + custom, which
+    # inherit a base). Cycles past 6, mirroring the generator's set_for() wrap.
+    def self.marker_hue(index : Int32) : Color
+      hues = [syn_header, syn_string, orange, syn_literal, yellow, red]
+      hues[index.abs % hues.size]
+    end
+
+    # Subtle background tint for marker `index` — blended toward the canvas so it stays
+    # legible on both dark and light themes (and never reads as the neutral selection band).
+    def self.marker_bg(index : Int32) : Color
+      blend(marker_hue(index), bg, MARKER_TINT)
+    end
+
+    # Foreground for tinted marker text — near-max contrast on the subtle band across themes.
+    def self.marker_fg : Color
+      text_bright
+    end
+
+    # Linear RGB blend of `hue` toward `base` by ratio t (0 = base, 1 = hue).
+    private def self.blend(hue : Color, base : Color, t : Float64) : Color
+      hr, hg, hb = hue.to_rgb_components
+      lr, lg, lb = base.to_rgb_components
+      Color.rgb(
+        (lr.to_i + (hr.to_i - lr.to_i) * t).round.to_i.clamp(0, 255),
+        (lg.to_i + (hg.to_i - lg.to_i) * t).round.to_i.clamp(0, 255),
+        (lb.to_i + (hb.to_i - lb.to_i) * t).round.to_i.clamp(0, 255),
+      )
+    end
+
     def self.method_color(method : String) : Color
       case method.upcase
       when "GET", "HEAD", "QUERY"           then green # QUERY is safe + idempotent like GET (RFC 10008)

@@ -81,6 +81,53 @@ module Gori::Fuzz
       @positions.size
     end
 
+    # The `[start, end)` CHARACTER offsets (into `text`) of every CLOSED `§…§`
+    # region, in marker order, INCLUDING both `§` delimiters. 1:1 with
+    # `parse(text).positions` — same `§§`-escape and unbalanced-trailing-§ rules — so
+    # a highlight built from these covers exactly the bytes that get fuzzed. An
+    # unbalanced trailing `§` yields NO span (parse folds it into literal text).
+    # Offsets index `text.chars`; feed the SAME LF-joined string the editor holds
+    # (`TextArea#text`), never the CRLF wire form. (Used for the TUI marker tint; the
+    # scan is branch-for-branch identical to `parse` above, minus the literal building,
+    # so `render`'s byte-exact path stays untouched.)
+    def self.marked_spans(text : String) : Array({Int32, Int32})
+      spans = [] of {Int32, Int32}
+      chars = text.chars
+      n = chars.size
+      i = 0
+      while i < n
+        if chars[i] == MARKER
+          if chars[i + 1]? == MARKER # escaped literal § — not an opener
+            i += 2
+            next
+          end
+          open = i
+          j = i + 1
+          closed = false
+          while j < n
+            if chars[j] == MARKER
+              if chars[j + 1]? == MARKER # §§ inside a marker → literal §
+                j += 2
+                next
+              end
+              closed = true
+              break
+            end
+            j += 1
+          end
+          if closed
+            spans << {open, j + 1} # [§ … §] inclusive of both delimiters
+            i = j + 1
+          else
+            break # unbalanced trailing § opens no position (matches parse's tail-fold)
+          end
+        else
+          i += 1
+        end
+      end
+      spans
+    end
+
     def default_payloads : Array(String)
       @positions.map(&.default)
     end

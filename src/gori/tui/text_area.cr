@@ -25,12 +25,20 @@ module Gori::Tui
       @gutter = false              # left line-number gutter (on for the Replay request body)
       @search_hl = ""              # active ^F query → matches highlighted in render
       @reveal = false              # show whitespace (space ·, tab →) instead of syntax colours
+      @edits = 0                   # monotonic content-change counter — cheap cache key for owners
+      # Opt-in background tints: [start, end) FULL-buffer char offsets + colour, painted
+      # UNDER the text (over syntax/plain, beneath search + cursor). Empty for every editor
+      # except the Fuzzer template — Replay/Notes never set it, so they're unaffected. The
+      # widget knows nothing about §-markers; the owner supplies offsets + resolved colours.
+      @bg_regions = [] of {Int32, Int32, Color}
       set_text(text)
     end
 
     setter gutter : Bool
     setter search_hl : String
     setter reveal : Bool
+    setter bg_regions : Array({Int32, Int32, Color})
+    getter edits : Int32
 
     def set_text(text : String) : Nil
       @lines = text.split('\n').map(&.rstrip('\r'))
@@ -40,6 +48,7 @@ module Gori::Tui
       @scroll = 0
       @preedit = ""
       @styled = nil
+      @edits += 1
     end
 
     # Preedit/composing text from IME (e.g. current Hangul syllable while typing jamo).
@@ -75,6 +84,7 @@ module Gori::Tui
       @lines[@cy] = "#{line[0, cx]}#{ch}#{line[cx..]}"
       @cx = cx + 1
       @styled = nil
+      @edits += 1
     end
 
     def insert_newline : Nil
@@ -85,6 +95,7 @@ module Gori::Tui
       @cy += 1
       @cx = 0
       @styled = nil
+      @edits += 1
     end
 
     def backspace : Nil
@@ -101,6 +112,7 @@ module Gori::Tui
         @cy -= 1
       end
       @styled = nil
+      @edits += 1
     end
 
     def move(dr : Int32, dc : Int32) : Nil
@@ -200,6 +212,10 @@ module Gori::Tui
       cx0 = rect.x + gw                                          # content start x (after the optional gutter)
       cw = {rect.w - gw, 0}.max                                  # content width
       styled = highlight ? highlighted(highlight) : nil
+      # Buffer char-offset of the first visible line — advanced per row so each line
+      # knows its start for the bg-region overlay without an O(n²) rescan.
+      line_off = 0
+      (0...@scroll).each { |k| line_off += @lines[k].size + 1 } # +1 for the joining '\n'
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= @lines.size
@@ -229,6 +245,11 @@ module Gori::Tui
             screen.text(cx0, rect.y + i, line, Theme.text, width: cw)
           end
         end
+        # Marker tint UNDER search/cursor — skip the IME-preedit line (its columns are
+        # shifted by the composing text, which isn't in `line`). paint_bg_regions itself
+        # no-ops when there are no regions or in reveal mode.
+        paint_bg_regions(screen, cx0, rect.y + i, line_off, line, cw) unless li == @cy && !@preedit.empty?
+        line_off += line.size + 1 # advance BEFORE the cursor `next` so it can't desync
         SearchHi.mark(screen, cx0, rect.y + i, line, @search_hl, cx0 + cw) unless @search_hl.empty?
         next unless cursor && li == @cy
         prefix_w = Screen.display_width(line[0, @cx])
@@ -243,6 +264,28 @@ module Gori::Tui
             screen.cell(cxs + off, rect.y + i, cch, Theme.bg, Theme.accent)
           end
         end
+      end
+    end
+
+    # Overlay the bg_regions intersecting THIS line. `off0` is the line's start offset
+    # in the full LF-joined buffer. Column math mirrors SearchHi.mark (same
+    # Screen.display_width as the base draw, so an ambiguous-width glyph can't drift the
+    # tint off the cells). Multi-line regions clamp to [0, line.size): first line tints
+    # col→EOL, fully-covered lines 0→size, last line BOL→col; the '\n' offset has no cell.
+    private def paint_bg_regions(screen : Screen, cx0 : Int32, y : Int32, off0 : Int32,
+                                 line : String, cw : Int32) : Nil
+      return if @bg_regions.empty? || @reveal # opt-in; reveal rewrites the glyphs
+      line_end = off0 + line.size
+      max_x = cx0 + cw
+      @bg_regions.each do |(a, b, color)|
+        next if b <= off0 || a >= line_end # region doesn't touch this line
+        la = (a - off0).clamp(0, line.size)
+        lb = (b - off0).clamp(0, line.size)
+        next if la >= lb
+        col = cx0 + Screen.display_width(line[0, la])
+        next unless col < max_x
+        seg = line[la, lb - la]
+        screen.text(col, y, seg, Theme.marker_fg, color, width: {max_x - col, 0}.max)
       end
     end
 
