@@ -312,15 +312,28 @@ module Gori::Tui
       Rect.new(cx, cy, cw, ch)
     end
 
+    # Interior content rows a step draws (below the card's top border + 1 pad row).
+    # Must be ACCURATE for the fixed-layout steps: `step_fits?` rejects a terminal too
+    # short to hold them, and render_* draw at fixed offsets up to `box.y + 2 + this`.
     private def content_rows : Int32
       case @step
-      when Step::Bind then 6
-        # ≥7 so the preview panel (header + 3 status rows) is never clipped, capped so
-        # a long theme list scrolls instead of taking the whole screen.
-      when Step::Appearance then { {Theme.available.size, 7}.max, THEME_VP_MAX }.min
-      when Step::Provider   then 6
-      else                       8 # review
+      when Step::Bind     then 7 # heading, gap, ip, port, gap, info, status
+      when Step::Provider then 7 # question, note, gap, yes, no, gap, footnote
+      when Step::Review   then 8 # title, gap, 3 recap rows, gap, 2 reminder rows
+      # ≥7 so the preview panel (header + 3 status rows) is never clipped, capped so a
+      # long theme list scrolls (the list viewport derives from the card height) instead
+      # of demanding the whole screen.
+      else { {Theme.available.size, 7}.max, THEME_VP_MAX }.min # appearance
       end
+    end
+
+    # Whether the current step's card can hold its content at height `h`. The theme
+    # step scrolls (its viewport derives from the card height) so it fits any usable
+    # size; the fixed-layout steps draw at fixed offsets and need `content_rows` rows
+    # below the top border + pad, i.e. a card height of at least `content_rows + 3`.
+    private def step_fits?(h : Int32) : Bool
+      return true if @step.appearance?
+      step_card(@backend.size[0], h).h - 3 >= content_rows
     end
 
     # --- rendering -----------------------------------------------------------
@@ -330,8 +343,10 @@ module Gori::Tui
       w, h = screen.width, screen.height
       screen.fill(Rect.new(0, 0, w, h), Theme.bg)
 
-      unless Layout.usable?(w, h)
-        screen.text(0, 0, "terminal too small (need ≥ 40×8)", Theme.red)
+      # Below the global minimum, or too short for THIS step's card (the fixed-layout
+      # steps would otherwise draw their lower rows over the card border / footer).
+      unless Layout.usable?(w, h) && step_fits?(h)
+        screen.text(0, 0, "terminal too small for the setup wizard — resize and retry", Theme.red)
         @term.hide_cursor
         flush
         return
