@@ -11,6 +11,7 @@ require "../upstream"
 require "../pump"
 require "../ws/relay"
 require "../../flow_mapper"
+require "../../fuzz/content_length"
 
 module Gori::Proxy
   # Handles one client connection over an `IO` (a plaintext TCPSocket, or — after
@@ -163,7 +164,12 @@ module Gori::Proxy
         return false
       end
       # forward (edited or original): re-parse the sent head for capture (P7).
-      sent_head, edited_body = split_message(decision.bytes)
+      # Recompute Content-Length to match the (possibly edited) body — like Burp's
+      # default. A human who grows/shrinks a held body would otherwise desync the
+      # origin, which reads only the stale CL's worth and truncates the rest.
+      # No-ops on chunked / already-correct, so an unedited forward stays byte-exact;
+      # byte-exact CL-mismatch smuggling tests go through replay/fuzz, not the editor.
+      sent_head, edited_body = split_message(Fuzz::ContentLength.sync(decision.bytes))
       sent_req = Codec::Http1.parse_request_head(sent_head)
       retryable = retryable_request?(req, edited_body.nil? || edited_body.empty?)
       upstream, reused, sent = acquire_and_send(host, port, retryable) { |up| write_request(up, sent_head, edited_body) }
@@ -363,7 +369,10 @@ module Gori::Proxy
         release_upstream
         return false
       end
-      out_head, out_body = split_message(decision.bytes)
+      # Sync Content-Length to the (possibly edited) body so the client isn't fed a
+      # stale length (truncation). No-ops on chunked / already-correct (P7-preserving
+      # for an unedited forward).
+      out_head, out_body = split_message(Fuzz::ContentLength.sync(decision.bytes))
       sent_resp = Codec::Http1.parse_response_head(out_head)
       @io.write(out_head)
       @io.write(out_body) if out_body
