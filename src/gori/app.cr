@@ -121,13 +121,15 @@ module Gori
       loop do
         event = session.flow_events.receive
         next unless event.kind == :updated # one line per completed/errored flow
-        # A streaming flow (WebSocket, HTTP/2, SSE) emits an :updated PER message /
-        # frame on the SAME id. Print + count it ONCE (its first update), else it
-        # prints duplicate rows and its own messages trip --max, tearing the live
-        # connection down mid-stream.
+        # A WebSocket flow (status 101) emits an :updated PER message on the SAME id;
+        # print + count it ONCE (its first update), else it prints duplicate rows and
+        # its own messages trip --max, tearing the live connection down mid-stream.
         next if seen.includes?(event.id)
         if row = session.store.flow_row(event.id)
-          seen << event.id
+          # Only WS re-emits :updated, so only WS ids need de-dup tracking — keeping
+          # `seen` bounded by concurrent WS flows instead of growing per HTTP flow for
+          # the lifetime of a long `gori run capture` session.
+          seen << event.id if row.status == 101
           # Stream the SAME row rendering `gori run history` prints, so capture and
           # history output never drift (text = human-readable; json = stable contract).
           puts(format == :json ? CLI::Output.flow_row_json(row) : CLI::Output.flow_row_text(row))
