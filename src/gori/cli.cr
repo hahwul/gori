@@ -240,7 +240,14 @@ module Gori
       resolved = resolve_mcp_db(db_path, project)
       Log.info { "mcp: serving #{resolved} (actions=#{!read_only})" }
 
-      store = Store.open(resolved, events: nil, retention_flows: 0) # never prune the user's history
+      # Opening a non-SQLite / unreadable file raises deep in the driver; turn that
+      # into a clean error instead of an unhandled backtrace (parity with `gori run`).
+      store =
+        begin
+          Store.open(resolved, events: nil, retention_flows: 0) # never prune the user's history
+        rescue ex : DB::Error | SQLite3::Exception
+          abort "gori mcp: cannot open database #{resolved}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
+        end
       begin
         server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream)
         server.run # blocks until STDIN EOF (client closed)

@@ -360,6 +360,7 @@ module Gori
         override = target_override # copy the closured flag into a plain local so || narrows
         scheme, host, port = Replay::FlowRequest.parse_target(override || built.target)
         abort "gori run replay: could not determine a target host" if host.empty?
+        abort "gori run replay: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
         use_h2 = force_h2 || built.http2
         verify = !insecure
         result = use_h2 ? Replay::H2Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify) : Replay::Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
@@ -611,6 +612,7 @@ module Gori
         target = override || default_target || abort("gori run fuzz: --target is required for --request/stdin")
         scheme, host, port = Replay::FlowRequest.parse_target(target)
         abort "gori run fuzz: could not determine a target host" if host.empty?
+        abort "gori run fuzz: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
         {scheme, host, port}
       end
 
