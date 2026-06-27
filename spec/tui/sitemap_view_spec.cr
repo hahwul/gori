@@ -130,4 +130,72 @@ describe Gori::Tui::SitemapView do
     view.render(Screen.new(b), Rect.new(0, 0, 70, 6))
     b.contains?("method:").should be_true
   end
+
+  it "marks in-scope hosts with a scope glyph even when the ⇧S lens is off" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      capture(store, "cdn.vendor.test", "GET", "/app.js")
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test") # configured but NOT enabled (lens off)
+      scope.active?.should be_false
+
+      view = SitemapView.new
+      view.set_scope(scope)
+      view.reload(store)
+
+      backend = MemoryBackend.new(70, 20)
+      view.render(Screen.new(backend), Rect.new(0, 0, 70, 20))
+      # Lens off ⇒ no filtering: both hosts are visible…
+      backend.contains?("acme.test").should be_true
+      backend.contains?("cdn.vendor.test").should be_true
+      # …but only the in-scope host carries the filled-diamond marker.
+      in_row = (0...20).find { |y| backend.row(y).includes?("acme.test") }.not_nil!
+      out_row = (0...20).find { |y| backend.row(y).includes?("cdn.vendor.test") }.not_nil!
+      backend.row(in_row).includes?('◆').should be_true
+      backend.row(out_row).includes?('◆').should be_false
+    end
+  end
+
+  it "shows an endpoint count on host rows" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      capture(store, "acme.test", "POST", "/api/orders")
+      capture(store, "acme.test", "GET", "/health")
+
+      view = SitemapView.new
+      view.reload(store)
+      backend = MemoryBackend.new(70, 20)
+      view.render(Screen.new(backend), Rect.new(0, 0, 70, 20))
+      backend.contains?("3 paths").should be_true
+    end
+  end
+
+  it "colours method chips by verb on endpoint rows" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/users")
+
+      view = SitemapView.new
+      view.reload(store)
+      backend = MemoryBackend.new(70, 20)
+      view.render(Screen.new(backend), Rect.new(0, 0, 70, 20))
+      backend.contains?("GET").should be_true
+      y = (0...20).find { |yy| backend.row(yy).includes?("GET") }.not_nil!
+      gx = backend.row(y).index("GET").not_nil!
+      backend.fg_at(gx, y).should eq(Theme.method_color("GET")) # not muted
+    end
+  end
+
+  it "draws tree guide lines for nested nodes" do
+    tmp_store do |store|
+      capture(store, "a.test", "GET", "/x/y") # nested + a following host ⇒ a │ guide
+      capture(store, "b.test", "GET", "/z")
+
+      view = SitemapView.new
+      view.reload(store)
+      backend = MemoryBackend.new(70, 20)
+      view.render(Screen.new(backend), Rect.new(0, 0, 70, 20))
+      backend.contains?("│").should be_true
+    end
+  end
 end

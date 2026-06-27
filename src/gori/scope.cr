@@ -125,6 +125,32 @@ module Gori
       @mutex.synchronize { active_unlocked? }
     end
 
+    # Has any scope rule at all, REGARDLESS of the enabled flag — drives whether the
+    # Sitemap shows scope markers (targets are marked even with the ⇧S lens off). Kept
+    # mutex-guarded so it shares the same discipline as the other rule readers.
+    def configured? : Bool
+      @mutex.synchronize { !@rules.empty? }
+    end
+
+    # Host-level scope membership evaluated against the rules REGARDLESS of the enabled
+    # flag, so the Sitemap can mark its targets even when the ⇧S lens is off. Burp-style
+    # host gate, mirroring may_match_host?'s body minus the active short-circuit:
+    # (no host-affecting includes OR one matches) AND no host-level exclude. Returns
+    # false when no rules exist (nothing to mark). Conservative on url-level (string/
+    # regex) includes — a host can't be ruled out by a rule whose path we don't know
+    # here — same as may_match_host?; host-type scoping (the common case) is precise.
+    def host_in_scope?(host : String) : Bool
+      @mutex.synchronize do
+        return false if @rules.empty?
+        includes = @rules.select(&.include?)
+        inc_ok = includes.empty? ||
+                 includes.any? { |r| r.host_type? && r.matches?("", host) } ||
+                 includes.any? { |r| !r.host_type? }
+        excluded = @rules.any? { |r| r.exclude? && r.host_type? && r.matches?("", host) }
+        inc_ok && !excluded
+      end
+    end
+
     # Lock-free body so synchronized callers reuse it WITHOUT re-entering the
     # non-reentrant mutex (which would deadlock).
     private def active_unlocked? : Bool
