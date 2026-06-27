@@ -82,7 +82,7 @@ module Gori::Tui
       ]},
       {"OTHER TABS", [
         {"Sitemap", "↑/↓ move · / filter · ↵/→ expand · ← collapse"},
-        {"Findings", "↵ open · n new · d delete · x export"},
+        {"Findings", "/ filter · ↵ open · n new · space triage · x export"},
         {"Notes", "type to edit · ^N new · ^1-9 switch"},
         {"Project", "scope rules + the description editor"},
         {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition"},

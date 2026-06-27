@@ -32,8 +32,8 @@ describe Gori::Tui::FindingsView do
       backend.contains?("SQL injection").should be_true
       backend.contains?("LOW").should be_true
       backend.contains?("open").should be_true # freshly created → Open status tag
-      # critical sorts first
-      backend.row(2).should contain("CRIT")
+      # critical sorts first; rows start at y+3 (filter bar, header, divider above)
+      backend.row(3).should contain("CRIT")
     end
   end
 
@@ -92,6 +92,26 @@ describe Gori::Tui::FindingsView do
       "poc".each_char { |c| view.notes_insert(c) }
       view.save_notes(store)
       store.get_finding(id).not_nil!.notes.should eq("poc")
+    end
+  end
+
+  it "filters the list and tab-completes a field without mangling a trailing-space query" do
+    tmp_store do |store|
+      store.insert_finding("SQL injection", Gori::Store::Severity::Critical, "api.test", nil)
+      store.insert_finding("Missing header", Gori::Store::Severity::Low, "app.test", nil)
+      view = FindingsView.new
+      view.reload(store)
+
+      view.start_query
+      "sev".each_char { |c| view.query_insert(c) }
+      view.query_complete.should be_true
+      view.query.should eq("severity:") # completed the field name
+
+      # trailing space → no adjacent word → don't complete and don't corrupt the query
+      view.query_insert(' ')
+      view.query.should eq("severity: ")
+      view.query_complete.should be_false
+      view.query.should eq("severity: ")
     end
   end
 

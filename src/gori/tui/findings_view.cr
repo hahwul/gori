@@ -3,14 +3,18 @@ require "./theme"
 require "./frame"
 require "./text_area"
 require "../store"
+require "../findings_query"
 
 module Gori::Tui
   # The Findings tab (DESIGN.md: the final output — human-confirmed vulns). A
   # severity-sorted list + a detail with inline-editable notes and a severity
   # control. Created from a flow (History `F`) or blank (`n`).
   class FindingsView
+    QUERY_FIELDS = %w(severity: status: host: title:)
+
     def initialize
-      @findings = [] of Store::Finding
+      @all = [] of Store::Finding      # the raw store list (severity-desc)
+      @findings = [] of Store::Finding # the filtered/visible subset
       @selected = 0
       @scroll = 0
       @detail = nil.as(Store::Finding?)
@@ -19,12 +23,24 @@ module Gori::Tui
       @editing_notes = false
       @notes = TextArea.new
       @loaded = false
+      # The `/` filter bar (mirrors History's QL bar but matches in memory).
+      @query = ""
+      @qcx = 0
+      @preedit_q = ""
+      @querying = false
     end
 
     def reload(store : Store) : Nil
-      @findings = store.findings
-      @selected = @selected.clamp(0, {@findings.size - 1, 0}.max)
+      @all = store.findings
+      apply_filter
       @loaded = true
+    end
+
+    # Recompute the visible list from the raw list through the active filter, then
+    # keep the selection in range (called live as the query is edited).
+    private def apply_filter : Nil
+      @findings = Findings::Filter.parse(@query).apply(@all)
+      @selected = @selected.clamp(0, {@findings.size - 1, 0}.max)
     end
 
     def move(delta : Int32) : Nil
@@ -32,12 +48,12 @@ module Gori::Tui
       @selected = (@selected + delta).clamp(0, @findings.size - 1)
     end
 
-    # Inverts render_list's row layout (header at rect.y, divider at +1, rows from
-    # top = rect.y + 2 spanning @scroll..): maps a click to a finding index, or nil
-    # past the last populated row / outside the list pane.
+    # Inverts render_list's row layout (filter bar at rect.y, header at +1, divider
+    # at +2, rows from top = rect.y + 3 spanning @scroll..): maps a click to a
+    # finding index, or nil past the last populated row / outside the list pane.
     def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil if mx < rect.x || mx >= rect.right
-      top = rect.y + 2
+      top = rect.y + 3 # filter bar (y) + header (y+1) + divider (y+2)
       list_h = {rect.bottom - top, 0}.max
       i = my - top
       return nil if i < 0 || i >= list_h
@@ -76,6 +92,75 @@ module Gori::Tui
 
     def editing_notes? : Bool
       @editing_notes
+    end
+
+    # --- `/` filter bar ------------------------------------------------------
+    # Findings are in memory, so filtering is live (no debounce) — each edit
+    # re-derives the visible list. Mirrors History's QL-bar editing surface.
+
+    def querying? : Bool
+      @querying
+    end
+
+    def filtering? : Bool
+      !@query.blank?
+    end
+
+    # The committed filter string (for tests / external inspection).
+    getter query : String
+
+    def start_query : Nil
+      @querying = true
+      @qcx = @query.size
+    end
+
+    def stop_query : Nil # Enter: keep the filter, leave edit mode
+      @querying = false
+    end
+
+    def cancel_query : Nil # Esc: clear the filter, leave edit mode
+      @querying = false
+      @query = ""
+      @qcx = 0
+      @preedit_q = ""
+      apply_filter
+    end
+
+    def query_insert(ch : Char) : Nil
+      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
+      @qcx += 1
+      apply_filter
+    end
+
+    def query_backspace : Nil
+      return if @qcx == 0
+      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
+      @qcx -= 1
+      apply_filter
+    end
+
+    def query_move(d : Int32) : Nil
+      @qcx = (@qcx + d).clamp(0, @query.size)
+    end
+
+    # IME composing text for the filter bar (underlined, doesn't touch @query).
+    def query_set_preedit(text : String) : Nil
+      @preedit_q = text
+    end
+
+    # Tab-complete the field name under the cursor (severity:/status:/host:/title:).
+    def query_complete : Bool
+      # The trailing run of non-whitespace right at the cursor — "" when the prefix
+      # ends in a space (don't complete; `split.last` would grab a non-adjacent word
+      # and the slice below would mangle the query).
+      token = @query[0, @qcx][/\S*\z/]
+      return false if token.empty? || token.includes?(':')
+      if field = QUERY_FIELDS.find(&.starts_with?(token.downcase))
+        @query = "#{@query[0, @qcx - token.size]}#{field}#{@query[@qcx..]}"
+        @qcx += field.size - token.size
+        return true
+      end
+      false
     end
 
     def open_detail(store : Store) : Bool
@@ -186,15 +271,18 @@ module Gori::Tui
     end
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
-      screen.text(rect.x + 1, rect.y, "SEV", Theme.muted)
-      screen.text(rect.x + 6, rect.y, "ST", Theme.muted)
-      screen.text(rect.x + 11, rect.y, "TITLE", Theme.muted)
-      Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
-      top = rect.y + 2
+      render_filter_bar(screen, rect)
+      screen.text(rect.x + 1, rect.y + 1, "SEV", Theme.muted)
+      screen.text(rect.x + 6, rect.y + 1, "ST", Theme.muted)
+      screen.text(rect.x + 11, rect.y + 1, "TITLE", Theme.muted)
+      Frame.inner_divider(screen, rect, rect.y + 2, border: Frame.pane_border(focused))
+      top = rect.y + 3
       list_h = {rect.bottom - top, 0}.max
 
       if @findings.empty?
-        screen.text(rect.x + 1, top, "no findings yet · Shift+F on a History flow, or n here", Theme.muted)
+        msg = filtering? ? "no findings match · esc clears the filter" \
+                         : "no findings yet · Shift+F on a History flow, or n here"
+        screen.text(rect.x + 1, top, msg, Theme.muted)
         return
       end
 
@@ -225,27 +313,69 @@ module Gori::Tui
       end
     end
 
+    # The `/` filter bar on the list's top row: while editing, `filter › <input>`;
+    # otherwise the applied query (+ a match count) or a usage hint.
+    private def render_filter_bar(screen : Screen, rect : Rect) : Nil
+      if @querying
+        prefix = "filter › "
+        screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
+        base = rect.x + 1 + prefix.size
+        screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max)
+        return
+      end
+      rx = rect.right - 1
+      if filtering?
+        count = @findings.size.to_s
+        screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
+        rx -= count.size + 2
+      end
+      left_w = {rx - (rect.x + 1), 0}.max
+      if filtering?
+        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme.text, width: left_w)
+      else
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  status:open  status:closed  host:", Theme.muted, width: left_w)
+      end
+    end
+
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
       finding = @detail.not_nil!
-      screen.text(rect.x + 1, rect.y, severity_badge(finding.severity), severity_color(finding.severity), attr: Attribute::Bold)
-      screen.text(rect.x + 6, rect.y, status_tag(finding.status), status_color(finding.status))
-      screen.text(rect.x + 11, rect.y, finding.title, Theme.text_bright, width: {rect.w - 12, 0}.max)
-      hint = @editing_notes ? "esc save · ^W discard" \
-                            : "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · esc back"
-      screen.text(rect.x + 1, rect.y + 1, hint, Theme.muted, width: {rect.w - 2, 0}.max)
-      meta = "##{finding.id} · #{finding.status.label} · #{fmt_ts(finding.created_at)}"
+      w = {rect.w - 2, 0}.max
+
+      # y0 — title row: a severity-coloured bullet + the bright title; #id at the right.
+      id_label = "##{finding.id}"
+      screen.text(rect.right - id_label.size - 1, rect.y, id_label, Theme.muted)
+      screen.cell(rect.x + 1, rect.y, '●', severity_color(finding.severity))
+      title_w = {(rect.right - id_label.size - 2) - (rect.x + 3), 0}.max
+      screen.text(rect.x + 3, rect.y, finding.title, Theme.text_bright, width: title_w, attr: Attribute::Bold)
+
+      # y1 — chips: a filled severity chip + a status chip.
+      cx = rect.x + 1
+      cx = chip(screen, cx, rect.y + 1, " #{severity_badge(finding.severity)} ", severity_color(finding.severity))
+      chip(screen, cx + 1, rect.y + 1, " #{finding.status.label} ", status_color(finding.status))
+
+      # y2 — timestamps.
+      meta = "created #{fmt_ts(finding.created_at)}"
       meta += " · edited #{fmt_ts(finding.updated_at)}" if finding.updated_at > finding.created_at
-      screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: {rect.w - 2, 0}.max)
-      y = rect.y + 3
-      if flow = @detail_flow
-        line = "flow ##{flow.id}: #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
-        screen.text(rect.x + 1, y, line, Theme.muted, width: {rect.w - 2, 0}.max)
-      elsif finding.flow_id
-        screen.text(rect.x + 1, y, "flow ##{finding.flow_id}: (no longer captured)", Theme.muted)
-      end
-      y += 1
+      screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: w)
+
+      # y3 — linked-flow evidence.
+      evidence = if flow = @detail_flow
+                   "evidence  #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
+                 elsif fid = finding.flow_id
+                   "evidence  flow ##{fid} (no longer captured)"
+                 else
+                   "evidence  (none — standalone finding)"
+                 end
+      screen.text(rect.x + 1, rect.y + 3, evidence, Theme.muted, width: w)
+
+      # y4 — divider; y5 — NOTES label (+ edit affordance); y6+ — notes body / editor.
+      y = rect.y + 4
       Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
       screen.text(rect.x + 1, y + 1, "NOTES", Theme.accent, attr: Attribute::Bold)
+      unless @editing_notes
+        edit_hint = "e to edit"
+        screen.text(rect.right - edit_hint.size - 1, y + 1, edit_hint, Theme.muted)
+      end
       notes_y = y + 2
       notes_rect = Rect.new(rect.x + 1, notes_y, {rect.w - 2, 0}.max, {rect.bottom - notes_y, 0}.max)
       if @editing_notes
@@ -256,6 +386,12 @@ module Gori::Tui
           screen.text(notes_rect.x, notes_rect.y + i, note_line, Theme.text, width: notes_rect.w)
         end
       end
+    end
+
+    # A filled "chip": ` LABEL ` painted with `color` as the background. Returns the
+    # x just past it so chips lay out left-to-right.
+    private def chip(screen : Screen, x : Int32, y : Int32, label : String, color : Color) : Int32
+      screen.text(x, y, label, Theme.bg, color, Attribute::Bold)
     end
 
     private def refresh_detail(store : Store) : Nil

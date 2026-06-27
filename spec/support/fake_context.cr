@@ -114,6 +114,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def findings_new : Nil; end
 
+  def findings_query : Nil; end
+
   def findings_move(delta : Int32) : Nil; end
 
   def findings_open : Nil; end
@@ -125,6 +127,10 @@ class FakeExecContext < Gori::Verb::ExecContext
   def finding_severity(delta : Int32) : Nil; end
 
   def finding_status(delta : Int32) : Nil; end
+
+  def finding_set_severity : Nil; end
+
+  def finding_set_status : Nil; end
 
   def finding_edit_notes : Nil; end
 

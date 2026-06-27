@@ -27,6 +27,10 @@ module Gori
         [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], mnemonic: 'o') { |ctx| ctx.findings_open; nil }
 
       r.register Verb::Definition.new(
+        "findings.filter", "Filter findings", "Filter the list (severity:/status:/host:/free text)",
+        Verb::Scope::Findings, [Verb::Chord.new("/")]) { |ctx| ctx.findings_query; nil }
+
+      r.register Verb::Definition.new(
         "findings.new", "New finding", "Create a blank finding", Verb::Scope::Findings,
         [Verb::Chord.new("n")]) { |ctx| ctx.findings_new; nil }
 
@@ -43,13 +47,24 @@ module Gori
         "finding.close", "Back to list", "Return to the findings list", Verb::Scope::FindingsDetail,
         [Verb::Chord.new("escape"), Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.finding_close; nil }
 
+      # Severity/status edits live on the Space menu (a colour picker) so arrows
+      # never change them by accident. The bracket/brace chords stay as hidden
+      # power-shortcuts (one-step cycling); the pickers are the discoverable path.
+      r.register Verb::Definition.new(
+        "finding.set-severity", "Set severity", "Pick this finding's severity",
+        Verb::Scope::FindingsDetail, [] of Verb::Chord, mnemonic: 's') { |ctx| ctx.finding_set_severity; nil }
+
+      r.register Verb::Definition.new(
+        "finding.set-status", "Set status", "Pick this finding's triage status",
+        Verb::Scope::FindingsDetail, [] of Verb::Chord, mnemonic: 'c') { |ctx| ctx.finding_set_status; nil }
+
       r.register Verb::Definition.new(
         "finding.severity-up", "Raise severity", "Increase severity", Verb::Scope::FindingsDetail,
-        [Verb::Chord.new("]"), Verb::Chord.new("right")], hidden: true) { |ctx| ctx.finding_severity(1); nil }
+        [Verb::Chord.new("]")], hidden: true) { |ctx| ctx.finding_severity(1); nil }
 
       r.register Verb::Definition.new(
         "finding.severity-down", "Lower severity", "Decrease severity", Verb::Scope::FindingsDetail,
-        [Verb::Chord.new("["), Verb::Chord.new("left")], hidden: true) { |ctx| ctx.finding_severity(-1); nil }
+        [Verb::Chord.new("[")], hidden: true) { |ctx| ctx.finding_severity(-1); nil }
 
       # edit-notes/edit-title/open-flow/replay-flow/delete are NON-hidden so they front
       # the finding-detail "space" action menu (parity with the History detail; the

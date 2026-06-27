@@ -29,6 +29,7 @@ require "./intercept_view"
 require "./rules_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
+require "./choice_picker"
 require "./flow_picker"
 require "./settings_view"
 require "./tabs_overlay"
@@ -63,7 +64,7 @@ module Gori::Tui
       # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :comparer_pick | :settings | :tabs
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :settings | :tabs
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -103,6 +104,8 @@ module Gori::Tui
       # The "open browser" picker (palette → browser.open); @overlay is :browser
       # while it's up.
       @browser_picker = nil.as(BrowserPicker?)
+      # The severity/status value picker (Findings detail → space); @overlay is :choice.
+      @choice_picker = nil.as(ChoicePicker?)
       # The Comparer flow picker (a/b → choose flow A/B); @overlay is :comparer_pick.
       @flow_picker = nil.as(FlowPicker?)
       # The settings editor (palette → settings:network); @overlay is :settings.
@@ -417,6 +420,7 @@ module Gori::Tui
       return handle_finding_new_key(ev) if @overlay == :finding_new
       return handle_confirm_key(ev) if @overlay == :confirm
       return handle_browser_key(ev) if @overlay == :browser
+      return handle_choice_key(ev) if @overlay == :choice
       return handle_flow_picker_key(ev) if @overlay == :comparer_pick
       return handle_settings_key(ev) if @overlay == :settings
       return handle_tabs_key(ev) if @overlay == :tabs
@@ -431,6 +435,9 @@ module Gori::Tui
       end
       if @active_tab == :intercept && @overlay == :none && @focus == :body && intercept_controller.querying?
         return if intercept_controller.handle_query_key(ev)
+      end
+      if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.querying?
+        return if findings_controller.handle_query_key(ev)
       end
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.editing_notes?
         return if findings_controller.handle_notes_key(ev)
@@ -590,7 +597,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :comparer_pick, :settings, :tabs, :hotkeys then true
+      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :settings, :tabs, :hotkeys then true
       else                                                                                                    false
       end
     end
@@ -663,6 +670,7 @@ module Gori::Tui
       when :palette       then click_palette(area, mx, my)
       when :rules         then click_rules(area, mx, my)
       when :browser       then click_browser(area, mx, my)
+      when :choice        then click_choice(area, mx, my)
       when :comparer_pick then click_flow_picker(area, mx, my)
       when :confirm       then click_confirm(area, mx, my)
       when :settings      then click_settings(area, mx, my)
@@ -781,6 +789,7 @@ module Gori::Tui
       when :palette       then @palette.move(step)
       when :rules         then @rules_overlay.select_move(step)
       when :browser       then @browser_picker.try(&.move(step))
+      when :choice        then @choice_picker.try(&.move(step))
       when :comparer_pick then @flow_picker.try(&.move(step))
       when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs          then @tabs_overlay.select_move(step)
@@ -883,6 +892,57 @@ module Gori::Tui
     private def close_browser_picker : Nil
       @overlay = :none
       @browser_picker = nil
+    end
+
+    # Severity/status value picker (Findings detail → space → s/c): ↑/↓ pick, ↵
+    # set, a printable matching a row's mnemonic sets it directly, esc cancels.
+    private def handle_choice_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      p = @choice_picker
+      return close_choice_picker unless p
+      case
+      when key.escape? then close_choice_picker
+      when key.up?     then p.move(-1)
+      when key.down?   then p.move(1)
+      when key.enter?  then apply_choice
+      else
+        if (c = ev.char) && !ev.ctrl? && !ev.alt? && (idx = p.index_for(c))
+          p.set_selected(idx)
+          apply_choice
+        end
+        # any other key is ignored (the picker stays up — a value pick is deliberate)
+      end
+    end
+
+    private def click_choice(area : Rect, mx : Int32, my : Int32) : Nil
+      p = @choice_picker
+      box = p.try(&.overlay_box(area))
+      return close_choice_picker if p.nil? || box.nil? || dismiss_zone?(box, mx, my)
+      if idx = p.row_at(box, mx, my)
+        p.set_selected(idx)
+        apply_choice
+      end
+    end
+
+    # Persist the picked value to the open finding, then close. The detail finding
+    # can't change while the modal is up, so reading it at commit is safe.
+    private def apply_choice : Nil
+      p = @choice_picker
+      return close_choice_picker unless p
+      if f = findings_controller.view.detail_finding
+        store = @session.store
+        case p.kind
+        when :severity then store.update_finding(f.id, severity: Store::Severity.new(p.selected_value))
+        when :status   then store.update_finding(f.id, status: Store::Status.new(p.selected_value))
+        end
+        findings_controller.view.resync(store)
+      end
+      close_choice_picker
+    end
+
+    private def close_choice_picker : Nil
+      @overlay = :none
+      @choice_picker = nil
     end
 
     # Comparer flow picker (a/b → choose flow A/B): type to filter, ↑/↓ select,
@@ -1446,6 +1506,7 @@ module Gori::Tui
       @finding_form.render(screen, layout.body) if @overlay == :finding_new
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
       @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
+      @choice_picker.try(&.render(screen, layout.body)) if @overlay == :choice
       @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
@@ -1522,6 +1583,7 @@ module Gori::Tui
       when :detail        then "DETAIL"
       when :confirm       then "CONFIRM"
       when :browser       then "BROWSER"
+      when :choice        then @choice_picker.try(&.title) || "CHOOSE"
       when :comparer_pick then "PICK FLOW"
       when :settings    then "SETTINGS"
       when :tabs        then "TAB BAR"
@@ -1555,6 +1617,7 @@ module Gori::Tui
       when :finding_new   then "type title · ↵ create · esc cancel"
       when :confirm       then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
+      when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
       when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
       when :tabs        then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
@@ -1950,6 +2013,10 @@ module Gori::Tui
       @overlay = :finding_new
     end
 
+    def findings_query : Nil
+      findings_controller.view.start_query
+    end
+
     def findings_move(delta : Int32) : Nil
       findings_controller.findings_move(delta)
     end
@@ -1972,6 +2039,20 @@ module Gori::Tui
 
     def finding_status(delta : Int32) : Nil
       findings_controller.finding_status(delta)
+    end
+
+    # Open the colour pickers for the finding currently in the detail view. The
+    # picker (a shell overlay) applies the chosen value on commit (apply_choice).
+    def finding_set_severity : Nil
+      return unless f = findings_controller.view.detail_finding
+      @choice_picker = ChoicePicker.for_severity(f.severity.value)
+      @overlay = :choice
+    end
+
+    def finding_set_status : Nil
+      return unless f = findings_controller.view.detail_finding
+      @choice_picker = ChoicePicker.for_status(f.status.value)
+      @overlay = :choice
     end
 
     def finding_edit_notes : Nil

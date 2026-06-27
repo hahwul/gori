@@ -93,12 +93,15 @@ module Gori
       # findings
       abstract def finding_create : Nil # new finding from the selected flow
       abstract def findings_new : Nil   # new blank finding
+      abstract def findings_query : Nil # focus the `/` filter bar (list)
       abstract def findings_move(delta : Int32) : Nil
       abstract def findings_open : Nil
       abstract def finding_close : Nil
       abstract def findings_delete : Nil
-      abstract def finding_severity(delta : Int32) : Nil
-      abstract def finding_status(delta : Int32) : Nil
+      abstract def finding_severity(delta : Int32) : Nil # ±1 step (hidden [ ] chords)
+      abstract def finding_status(delta : Int32) : Nil   # ±1 step (hidden { } chords)
+      abstract def finding_set_severity : Nil            # open the severity colour picker
+      abstract def finding_set_status : Nil              # open the triage-status colour picker
       abstract def finding_edit_notes : Nil
       abstract def finding_edit_title : Nil               # rename + set severity via the form overlay
       abstract def finding_open_flow : Nil                # open the linked flow's detail in History

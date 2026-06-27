@@ -33,8 +33,14 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      @findings.detail_open? ? "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · space cmds · ←/esc back" \
-                             : "↑/↓ move · ↵ open · n new · d delete · x export · space cmds · esc tabs"
+      if @findings.detail_open?
+        @findings.editing_notes? ? "esc save · ^W discard" \
+                                 : "e notes · o flow · r replay · space triage/cmds · ←/esc back"
+      elsif @findings.querying?
+        "type to filter · ↹ complete · ↵ apply · esc clear"
+      else
+        "↑/↓ move · ↵ open · / filter · n new · space cmds · esc tabs"
+      end
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
@@ -49,6 +55,11 @@ module Gori::Tui
         return true
       end
       @host.focus_body
+      # Click the top filter-bar row → start editing the filter (like History).
+      if my == inner.y && !@findings.querying?
+        @findings.start_query
+        return true
+      end
       return true unless idx = @findings.list_row_at(inner, mx, my)
       # SELECT-FIRST (same as History): first click selects, second opens.
       idx == @findings.selected_index ? findings_open : @findings.select_index(idx)
@@ -83,10 +94,43 @@ module Gori::Tui
       true
     end
 
-    # Live IME composition only flows to the inline notes editor.
+    # Live IME composition flows to the `/` filter bar (list) or the inline notes
+    # editor (detail) — whichever text field is active.
     def set_preedit(text : String) : Bool
-      return false unless @findings.editing_notes?
-      @findings.set_preedit(text)
+      if @findings.querying?
+        @findings.query_set_preedit(text)
+        true
+      elsif @findings.editing_notes?
+        @findings.set_preedit(text)
+        true
+      else
+        false
+      end
+    end
+
+    def querying? : Bool
+      @findings.querying?
+    end
+
+    # The `/` filter bar — a text sub-mode the shell claims before the focus ring
+    # (mirrors History's QL bar). Returns true (swallows). Filtering is live, so
+    # every edit re-derives the visible list inside the view.
+    def handle_query_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      c = ev.char || key.to_char
+      case
+      when key.enter?     then @findings.stop_query  # keep the filter, leave edit mode
+      when key.escape?    then @findings.cancel_query # clear + revert
+      when key.tab?       then @findings.query_complete
+      when key.backspace? then @findings.query_backspace
+      when key.left?      then @findings.query_move(-1)
+      when key.right?     then @findings.query_move(1)
+      else
+        if c && !ev.ctrl? && !ev.alt?
+          @findings.query_insert(c)
+          @findings.query_set_preedit("") # commit any preedit
+        end
+      end
       true
     end
 

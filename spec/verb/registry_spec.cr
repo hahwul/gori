@@ -212,6 +212,10 @@ private class FakeContext < ExecContext
     @calls << :findings_new
   end
 
+  def findings_query : Nil
+    @calls << :findings_query
+  end
+
   def findings_move(delta : Int32) : Nil
     @calls << :findings_move
   end
@@ -234,6 +238,14 @@ private class FakeContext < ExecContext
 
   def finding_status(delta : Int32) : Nil
     @calls << :finding_status
+  end
+
+  def finding_set_severity : Nil
+    @calls << :finding_set_severity
+  end
+
+  def finding_set_status : Nil
+    @calls << :finding_set_status
   end
 
   def finding_edit_notes : Nil
