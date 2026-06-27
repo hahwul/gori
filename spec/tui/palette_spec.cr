@@ -74,4 +74,26 @@ describe Gori::Tui::PaletteState do
     backend.contains?("demo:soon").should be_true
     backend.contains?("soon").should be_true # the placeholder badge
   end
+
+  it "categorizes Global verbs so the palette can group them by kind" do
+    r = Gori::Verbs.registry
+    r["tab.history"].category.should eq(Gori::Verb::Category::Navigation)
+    r["nav.next-tab"].category.should eq(Gori::Verb::Category::Navigation)
+    r["app.back"].category.should eq(Gori::Verb::Category::Navigation)
+    r["settings.theme"].category.should eq(Gori::Verb::Category::Settings)
+    r["app.quit"].category.should eq(Gori::Verb::Category::System)
+    r["app.palette"].category.should eq(Gori::Verb::Category::System)
+    r["capture.toggle"].category.should eq(Gori::Verb::Category::Action) # the default kind
+  end
+
+  it "prints a colour-coded category sigil before each entry" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+    "Toggle capture".each_char { |c| palette.append(c, ctx) } # an Action verb
+
+    backend = MemoryBackend.new(80, 24)
+    palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
+    backend.contains?("▸ Toggle capture").should be_true # the Action sigil precedes the title
+  end
 end

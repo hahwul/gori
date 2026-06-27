@@ -28,8 +28,16 @@ module Gori
       File.join(home_dir, "ca")
     end
 
+    # Convention dir for fuzzer wordlists: bare (slash-less) names typed into the
+    # Fuzzer's wordlist field auto-complete from here (and the current dir). Users
+    # drop `*.txt` lists in here for discovery without typing a full path.
+    def self.wordlists_dir : String
+      File.join(home_dir, "wordlists")
+    end
+
     def self.ensure_dirs : Nil
       ensure_dir(home_dir)
+      ensure_dir(wordlists_dir)
     end
 
     # Race-tolerant `mkdir -p`: two gori instances can start simultaneously and

@@ -22,6 +22,17 @@ module Gori
       PaletteOpen    # the command palette overlay is up
     end
 
+    # The KIND of action, orthogonal to Scope (where it fires). Drives the
+    # colour-coded sigil the command palette prints before each entry so users can
+    # tell navigation from a state-changing action at a glance. Action is the default
+    # (and covers every non-palette verb, which never renders a badge).
+    enum Category
+      Action     # does something / opens a tool (capture, intercept, scope, rules, CA …)
+      Navigation # moves focus around the app (tab jumps, back to projects)
+      Settings   # edits configuration (settings:*)
+      System     # app lifecycle (quit, the palette itself)
+    end
+
     # A keybinding as pure data (no terminal dependency). The TUI converts a
     # termisu key event into a Chord and looks it up in the Keymap.
     record Chord, key : String, ctrl : Bool = false, alt : Bool = false, shift : Bool = false do
@@ -76,6 +87,7 @@ module Gori
       getter title : String
       getter description : String
       getter scope : Scope
+      getter category : Category
       getter chords : Array(Chord)
       getter? hidden : Bool
       # Exposed for discoverability but not yet functional — the palette shows it
@@ -85,7 +97,7 @@ module Gori
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
                      @available : ExecContext -> Bool = ->(_ctx : ExecContext) { true },
-                     @coming_soon : Bool = false,
+                     @coming_soon : Bool = false, @category : Category = Category::Action,
                      &@handler : ExecContext -> String?)
       end
 
