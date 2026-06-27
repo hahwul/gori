@@ -106,37 +106,59 @@ module Gori
         "detail.toggle-pane", "Switch pane (cycle)", "Cycle REQ → RES → FRAMES",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("tab")], hidden: true) { |ctx| ctx.toggle_detail_pane; nil }
 
+      # The view-toggles are NON-hidden so they front the detail's "space" action menu
+      # (the palette stays Global-only, so un-hiding doesn't leak there). The shown
+      # menu key derives from each plain chord — exactly the key you'd press directly.
       r.register Verb::Definition.new(
         "detail.toggle-hex", "Hex view", "Toggle a raw hex dump of the request/response bytes",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("x")], hidden: true) { |ctx| ctx.toggle_detail_hex; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("x")]) { |ctx| ctx.toggle_detail_hex; nil }
 
       r.register Verb::Definition.new(
         "detail.toggle-ws", "Reveal whitespace", "Show whitespace/CR/LF as glyphs (·→␍␊)",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("b")], hidden: true) { |ctx| ctx.toggle_reveal; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("b")]) { |ctx| ctx.toggle_reveal; nil }
 
       r.register Verb::Definition.new(
         "detail.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… bodies (display only)",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("p")], hidden: true) { |ctx| ctx.toggle_pretty; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("p")]) { |ctx| ctx.toggle_pretty; nil }
 
-      # ^R replays the open flow (mirrors history.replay from the list) — close the
-      # detail first so it doesn't float over the Replay tab.
+      # The flow actions mirror the History list's "space" menu so the muscle memory
+      # carries into the drill-in (the user's goal). Each keeps the list's exact chord
+      # + mnemonic; replay/finding/fuzz close the detail first so it doesn't float over
+      # the destination tab.
       r.register Verb::Definition.new(
         "detail.replay", "Replay flow", "Open this flow in the Replay tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("r", ctrl: true)],
-        hidden: true) { |ctx| ctx.close_detail; ctx.replay_selected; nil }
+        mnemonic: 'r') { |ctx| ctx.close_detail; ctx.replay_selected; nil }
 
       # Create a finding while reading the flow — the natural moment to file one.
-      # Mirrors detail.replay (close the detail, then act on the still-selected flow);
-      # without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb).
+      # Without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb).
       r.register Verb::Definition.new(
         "detail.finding", "Add finding", "Create a finding from this flow",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("f", shift: true)],
-        hidden: true) { |ctx| ctx.close_detail; ctx.finding_create; nil }
+        mnemonic: 'a') { |ctx| ctx.close_detail; ctx.finding_create; nil }
 
       # Send the open flow to the Comparer (mirrors history.compare from the list).
       r.register Verb::Definition.new(
         "detail.compare", "Send to Comparer", "Send this flow to the Comparer (next slot A/B)",
-        Verb::Scope::HistoryDetail) { |ctx| ctx.comparer_add_selected; nil }
+        Verb::Scope::HistoryDetail, mnemonic: 'c') { |ctx| ctx.comparer_add_selected; nil }
+
+      # Copy the open flow (mirrors history.copy 'y' from the list) — stays in the detail.
+      r.register Verb::Definition.new(
+        "detail.copy", "Copy flow", "Copy this flow to the clipboard",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("y")]) { |ctx| ctx.copy_selection; nil }
+
+      # Send the open flow to the Fuzzer (mirrors history.fuzz ⇧I/'z' from the list) —
+      # close the detail first so it doesn't float over the Fuzzer tab.
+      r.register Verb::Definition.new(
+        "detail.fuzz", "Send to Fuzzer", "Open this flow in the Fuzzer tab",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("i", shift: true)],
+        mnemonic: 'z') { |ctx| ctx.close_detail; ctx.fuzz_selected; nil }
+
+      # Add the open flow's host to the scope lens (mirrors scope.add-host 'h' from the
+      # list — also menu-only there; 'h' is the ← pane-nav chord in the detail).
+      r.register Verb::Definition.new(
+        "detail.add-host", "Add host to scope", "Add this flow's host to the scope lens",
+        Verb::Scope::HistoryDetail, mnemonic: 'h') { |ctx| ctx.scope_add_host; nil }
     end
 
     # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette

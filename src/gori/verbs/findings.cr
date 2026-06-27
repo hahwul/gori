@@ -18,9 +18,13 @@ module Gori
         "findings.up", "Select previous finding", "Move up", Verb::Scope::Findings,
         [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.findings_move(-1); nil }
 
+      # open/delete are NON-hidden so they join New in the Findings list's "space" menu
+      # (the palette stays Global-only, so this doesn't leak there). open carries an
+      # explicit 'o' mnemonic — its primary chord is enter/l, which would otherwise
+      # front the menu with the unintuitive 'l'.
       r.register Verb::Definition.new(
         "findings.open", "Open finding", "View/edit the selected finding", Verb::Scope::Findings,
-        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], hidden: true) { |ctx| ctx.findings_open; nil }
+        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], mnemonic: 'o') { |ctx| ctx.findings_open; nil }
 
       r.register Verb::Definition.new(
         "findings.new", "New finding", "Create a blank finding", Verb::Scope::Findings,
@@ -28,7 +32,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "findings.delete", "Delete finding", "Delete the selected finding", Verb::Scope::Findings,
-        [Verb::Chord.new("d")], hidden: true) { |ctx| ctx.findings_delete; nil }
+        [Verb::Chord.new("d")]) { |ctx| ctx.findings_delete; nil }
 
       r.register Verb::Definition.new(
         "findings.leave", "Back to menu", "Return focus to the tab menu", Verb::Scope::Findings,
@@ -47,13 +51,18 @@ module Gori
         "finding.severity-down", "Lower severity", "Decrease severity", Verb::Scope::FindingsDetail,
         [Verb::Chord.new("["), Verb::Chord.new("left")], hidden: true) { |ctx| ctx.finding_severity(-1); nil }
 
+      # edit-notes/edit-title/open-flow/replay-flow/delete are NON-hidden so they front
+      # the finding-detail "space" action menu (parity with the History detail; the
+      # palette stays Global-only, so this doesn't leak there). Each menu key derives
+      # from its plain chord — the key you'd press directly. severity/status keep their
+      # bracket chords ([ ] { }) hidden (awkward as menu mnemonics; discoverable in Help).
       r.register Verb::Definition.new(
         "finding.edit-notes", "Edit notes", "Edit the finding notes inline", Verb::Scope::FindingsDetail,
-        [Verb::Chord.new("e"), Verb::Chord.new("enter")], hidden: true) { |ctx| ctx.finding_edit_notes; nil }
+        [Verb::Chord.new("e"), Verb::Chord.new("enter")]) { |ctx| ctx.finding_edit_notes; nil }
 
       r.register Verb::Definition.new(
         "finding.delete", "Delete finding", "Delete this finding", Verb::Scope::FindingsDetail,
-        [Verb::Chord.new("d")], hidden: true) { |ctx| ctx.findings_delete; nil }
+        [Verb::Chord.new("d")]) { |ctx| ctx.findings_delete; nil }
 
       r.register Verb::Definition.new(
         "finding.status-up", "Advance status", "Cycle triage status forward (open→confirmed→fp→resolved)",
@@ -65,15 +74,15 @@ module Gori
 
       r.register Verb::Definition.new(
         "finding.edit-title", "Edit title/severity", "Rename the finding and set its severity",
-        Verb::Scope::FindingsDetail, [Verb::Chord.new("t")], hidden: true) { |ctx| ctx.finding_edit_title; nil }
+        Verb::Scope::FindingsDetail, [Verb::Chord.new("t")]) { |ctx| ctx.finding_edit_title; nil }
 
       r.register Verb::Definition.new(
         "finding.open-flow", "Open evidence", "Open the linked flow's request/response in History",
-        Verb::Scope::FindingsDetail, [Verb::Chord.new("o")], hidden: true) { |ctx| ctx.finding_open_flow; nil }
+        Verb::Scope::FindingsDetail, [Verb::Chord.new("o")]) { |ctx| ctx.finding_open_flow; nil }
 
       r.register Verb::Definition.new(
         "finding.replay-flow", "Replay evidence", "Send the linked flow to the Replay tab",
-        Verb::Scope::FindingsDetail, [Verb::Chord.new("r")], hidden: true) { |ctx| ctx.finding_replay_flow; nil }
+        Verb::Scope::FindingsDetail, [Verb::Chord.new("r")]) { |ctx| ctx.finding_replay_flow; nil }
 
       # Export (palette/Global — the findings' way out): write a report to the project dir.
       r.register Verb::Definition.new(
@@ -87,9 +96,10 @@ module Gori
       # The discoverable 'x' export chord on the Findings tab (the verbs above are the
       # palette entries / both formats). Findings-scoped so 'x' doesn't collide with
       # the hex toggles elsewhere; defaults to the human-readable Markdown report.
+      # NON-hidden so it joins the Findings list's "space" menu (key derives from 'x').
       r.register Verb::Definition.new(
         "findings.export-key", "Export findings (Markdown)", "Write the Markdown report to the project dir",
-        Verb::Scope::Findings, [Verb::Chord.new("x")], hidden: true) { |ctx| ctx.findings_export(:markdown); nil }
+        Verb::Scope::Findings, [Verb::Chord.new("x")]) { |ctx| ctx.findings_export(:markdown); nil }
     end
   end
 end

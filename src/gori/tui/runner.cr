@@ -520,12 +520,13 @@ module Gori::Tui
 
       # "space" opens the focused area's action menu (helix leader). Placed AFTER the
       # scoped keymap so any area that already binds space wins — Sitemap's space
-      # toggles a tree node (sitemap.toggle), and Project's controller claims space
-      # for the scope-rule toggle above. Only reached in NAVIGABLE contexts: text
-      # editors (Replay request/target, Notes, Project desc, the QL "/" bar, Findings
-      # notes, Intercept edit) swallow keys upstream, so space stays a literal char
-      # there. (The read-only Replay response pane + the Intercept queue route space
-      # from their own handlers, which return before this point.)
+      # toggles a tree node (sitemap.toggle). The Project SCOPE pane instead DEFERS
+      # space to here (its lens toggle is the menu-only scope.lens-toggle verb). Only
+      # reached in NAVIGABLE contexts: text editors (Replay request/target, Notes,
+      # Project desc, the QL "/" bar, Findings notes, Intercept edit) swallow keys
+      # upstream, so space stays a literal char there. (The read-only Replay response
+      # pane + the Intercept queue route space from their own handlers, which return
+      # before this point.)
       open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
     end
 
@@ -1558,7 +1559,7 @@ module Gori::Tui
       when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
       when :tabs        then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
       when :hotkeys     then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
-      when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · ^G goto · ^F find · esc back"
+      when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
@@ -2046,6 +2047,23 @@ module Gori::Tui
       history_controller.view.reload(@session.store)
       sitemap_controller.reload if @active_tab == :sitemap
       project_controller.toast_scope_state
+    end
+
+    # Project SCOPE-pane rule editing (the inline a/e/d keys + its space menu both route here).
+    def scope_add_rule : Nil
+      project_controller.scope_add_rule
+    end
+
+    def scope_edit_rule : Nil
+      project_controller.scope_edit_rule
+    end
+
+    def scope_delete_rule : Nil
+      project_controller.scope_delete_rule
+    end
+
+    def scope_rule_selected? : Bool
+      @scope.size > 0
     end
 
     def sitemap_move(delta : Int32) : Nil

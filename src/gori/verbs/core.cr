@@ -81,6 +81,24 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("s", shift: true)],
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :history }, mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
 
+      # --- Project tab SCOPE pane: the rule-list action menu (space) + its a/e/d keys.
+      # Project scope is unique to that pane, so no current_tab gate is needed. The lens
+      # toggle is menu-only (mnemonic 's') — it REPLACED the old direct space=toggle, which
+      # now opens this menu instead; add/edit/delete keep their a/e/d direct chords.
+      scope_rule = ->(ctx : Verb::ExecContext) { ctx.scope_rule_selected? }
+      r.register Verb::Definition.new(
+        "scope.lens-toggle", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",
+        Verb::Scope::Project, mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
+      r.register Verb::Definition.new(
+        "scope.add-rule", "Add scope rule", "Open the inline row to add an include/exclude rule",
+        Verb::Scope::Project, [Verb::Chord.new("a")]) { |ctx| ctx.scope_add_rule; nil }
+      r.register Verb::Definition.new(
+        "scope.edit-rule", "Edit scope rule", "Edit the selected scope rule in place",
+        Verb::Scope::Project, [Verb::Chord.new("e")], available: scope_rule) { |ctx| ctx.scope_edit_rule; nil }
+      r.register Verb::Definition.new(
+        "scope.delete-rule", "Delete scope rule", "Remove the selected scope rule",
+        Verb::Scope::Project, [Verb::Chord.new("d")], available: scope_rule) { |ctx| ctx.scope_delete_rule; nil }
+
       r.register Verb::Definition.new(
         "rules.edit", "Match & Replace", "Edit in-flight request/response head rewrite rules", Verb::Scope::Global,
         [Verb::Chord.new("m")]) { |ctx| ctx.rules_open; nil }

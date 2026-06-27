@@ -19,6 +19,7 @@ module Gori
       FindingsDetail # a finding's detail is open
       Intercept      # the Intercept queue tab has focus
       Comparer       # the Comparer tab has focus
+      Project        # the Project tab's SCOPE rule list has focus
       PaletteOpen    # the command palette overlay is up
     end
 

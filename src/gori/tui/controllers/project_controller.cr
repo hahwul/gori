@@ -22,8 +22,11 @@ module Gori::Tui
       :project
     end
 
+    # The SCOPE rule list is a navigable area with its own action menu (Project scope);
+    # the DESCRIPTION pane is a text editor (no menu — space is literal there), so its
+    # scope is irrelevant (Body, like the other editor tabs).
     def command_scope : Verb::Scope
-      Verb::Scope::Body
+      @project_view.pane == :scope ? Verb::Scope::Project : Verb::Scope::Body
     end
 
     def body_badge : Symbol # the description editor + scope add-row capture text; the rule list is nav
@@ -35,7 +38,7 @@ module Gori::Tui
       if @project_view.pane == :scope
         @project_view.adding? \
           ? "type pattern · ^K kind · ^T type · ↵ save · esc cancel" \
-          : "↑/↓ move · → desc · a add · ↵/e edit · d del · space on/off · esc tabs"
+          : "↑/↓ move · → desc · a add · ↵/e edit · d del · space cmds · esc tabs"
       else
         "type to edit · ↑/↓/↔ move · ← scope · ^G goto · ^F find · ^B ws · esc tabs"
       end
@@ -51,8 +54,15 @@ module Gori::Tui
     end
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool
-      @project_view.pane == :scope ? handle_project_scope_key(ev) : handle_project_desc_key(ev)
-      true
+      # The SCOPE pane defers its action keys (a/e/d → Project verbs, space → action menu,
+      # Global chords → capture/rules/…) to the keymap by returning false; the DESCRIPTION
+      # editor swallows everything (text).
+      if @project_view.pane == :scope
+        handle_project_scope_key(ev)
+      else
+        handle_project_desc_key(ev)
+        true
+      end
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
@@ -153,11 +163,12 @@ module Gori::Tui
     end
 
     # --- SCOPE pane: browse the rule list (or route to the inline add/edit row) ---
-    private def handle_project_scope_key(ev : Termisu::Event::Key) : Nil
-      return handle_project_add_key(ev) if @project_view.adding?
+    # Returns true when consumed; false defers to the keymap — a/e/d fire the scope.*-rule
+    # verbs, space opens the action menu, and Global chords (capture/rules/…) work here too
+    # (the list is navigable, like History). The add-row sub-mode swallows everything (text).
+    private def handle_project_scope_key(ev : Termisu::Event::Key) : Bool
+      return (handle_project_add_key(ev); true) if @project_view.adding?
       key = ev.key
-      c = ev.char || key.to_char
-      plain = c && !ev.ctrl? && !ev.alt?
       if ev.ctrl? && key.lower_p?
         save
         @host.open_palette
@@ -172,17 +183,24 @@ module Gori::Tui
         @project_view.pane_advance(1) # → crosses from the SCOPE list to the DESCRIPTION (right pane)
       elsif key.enter?
         @project_view.scope_edit_start
-      elsif plain && c == ' '
-        @project_view.scope_toggle
-        toast_scope_state
-      elsif plain && c == 'a'
-        @project_view.scope_add_start
-      elsif plain && c == 'e'
-        @project_view.scope_edit_start
-      elsif plain && c == 'd'
-        if pat = @project_view.scope_delete
-          @host.status("removed scope rule: #{pat}")
-        end
+      else
+        return false # a/e/d (scope.*-rule verbs), space (action menu), Global chords
+      end
+      true
+    end
+
+    # --- SCOPE rule verbs (a/e/d via the keymap + the Project action menu) ---
+    def scope_add_rule : Nil
+      @project_view.scope_add_start
+    end
+
+    def scope_edit_rule : Nil
+      @project_view.scope_edit_start
+    end
+
+    def scope_delete_rule : Nil
+      if pat = @project_view.scope_delete
+        @host.status("removed scope rule: #{pat}")
       end
     end
 
@@ -195,7 +213,10 @@ module Gori::Tui
         if !scope.enabled?
           "scope lens OFF — showing all flows"
         elsif n == 0
-          "scope lens ON, but no rules yet — add some in Project (s)"
+          # Signpost the add path for where the toggle fired: 'a' on the Project scope
+          # pane itself, else 's' (scope.edit) to jump here from History/Sitemap.
+          @host.active_tab == :project ? "scope lens ON, but no rules yet — add one here (a)" \
+                                       : "scope lens ON, but no rules yet — add some in Project (s)"
         else
           "scope lens ON — showing in-scope only (#{n} rule#{n == 1 ? "" : "s"})"
         end
@@ -235,9 +256,9 @@ module Gori::Tui
       when :ok
         n = @host.session.scope.size
         # Confirm the add AND surface that the lens is still off (the common "I added
-        # a rule but nothing filtered" confusion — space enables it).
+        # a rule but nothing filtered" confusion — the space menu's 's' enables it).
         @host.status(@host.session.scope.enabled? ? "scope rule added — #{n} rule#{n == 1 ? "" : "s"}" \
-                                                   : "scope rule added — #{n} rule#{n == 1 ? "" : "s"} · press space to enable the lens")
+                                                   : "scope rule added — #{n} rule#{n == 1 ? "" : "s"} · space → s to enable the lens")
       end
     end
   end

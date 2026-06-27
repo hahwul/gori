@@ -96,6 +96,18 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def scope_toggle_lens : Nil; end
 
+  property scope_has_rule : Bool = false
+
+  def scope_add_rule : Nil; end
+
+  def scope_edit_rule : Nil; end
+
+  def scope_delete_rule : Nil; end
+
+  def scope_rule_selected? : Bool
+    @scope_has_rule
+  end
+
   def rules_open : Nil; end
 
   def finding_create : Nil; end
