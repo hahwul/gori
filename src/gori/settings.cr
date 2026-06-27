@@ -15,16 +15,23 @@ module Gori
   module Settings
     class_property bind_host : String = "127.0.0.1"
     class_property bind_port : Int32 = 8070
-    class_property upstream_proxy : String = ""  # "host:port" HTTP proxy; "" = connect directly
-    class_property editor : String = ""          # external editor for ^E; "" = $VISUAL/$EDITOR/vi
-    class_property editor_markdown : Bool = true # syntax-highlight markdown in Notes/Project
-    class_property theme : String = "goridark"   # TUI colour theme name (settings:theme); applied by Theme.apply
-    class_property mouse : Bool = true           # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
+    class_property upstream_proxy : String = ""        # "host:port" HTTP proxy; "" = connect directly
+    class_property editor : String = ""                # external editor for ^E; "" = $VISUAL/$EDITOR/vi
+    class_property editor_markdown : Bool = true       # syntax-highlight markdown in Notes/Project
+    class_property theme : String = "goridark"         # TUI colour theme name (settings:theme); applied by Theme.apply
+    class_property mouse : Bool = true                 # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
     class_property pretty_bodies_default : Bool = true # pretty-print JSON/XML/form/… bodies in History detail + Replay response (display only)
     # Top tab-bar layout: ordered {tab-id, visible?}. Empty = never customized → Chrome
     # reconciles to catalog defaults. Opaque String ids (Crystal has no runtime String→Symbol);
     # Chrome maps ids→catalog symbols. Only an EXPLICIT false hides a tab.
     class_property tab_prefs : Array({String, Bool}) = [] of {String, Bool}
+
+    # Hotkey customization (settings:hotkeys). `keymap_os` pins an OS default profile —
+    # "auto" tracks the build's platform; "darwin"/"linux"/"windows" force one.
+    # `keymap_overrides` is SPARSE: verb-id → chord-label strings ("ctrl-p", "shift-s").
+    # An empty list = explicit unbind; an absent id = use the profile default.
+    class_property keymap_os : String = "auto"
+    class_property keymap_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
     # Convert tab scratch state (a global scratch tool, not project data). The last
     # input + chain spec are restored on restart; convert_chains are named, saved
@@ -55,6 +62,7 @@ module Gori
         self.editor_markdown = load_bool(ed, "markdown", editor_markdown)
       end
       self.tab_prefs = parse_tab_prefs(root["tabs"]?)
+      parse_hotkeys(root["hotkeys"]?)
       if cv = root["convert"]?
         self.convert_input = cv["input"]?.try(&.as_s?) || convert_input
         self.convert_chain = cv["chain"]?.try(&.as_s?) || convert_chain
@@ -96,6 +104,36 @@ module Gori
         out << {id, o["visible"]?.try(&.as_bool?) != false} # only explicit false hides
       end
       out
+    end
+
+    # Tolerant hotkey parse: a non-object (or absent) node keeps current values. `os`
+    # is normalized (unknown → "auto"); `bindings` is a sparse verb-id → chord-label
+    # list (non-array entries dropped; unparseable chord labels dropped; an empty list
+    # is PRESERVED as an explicit unbind). Mirrors parse_tab_prefs' robustness.
+    private def self.parse_hotkeys(node : JSON::Any?) : Nil
+      return unless h = node.try(&.as_h?)
+      self.keymap_os = normalize_os(h["os"]?.try(&.as_s?))
+      self.keymap_overrides = parse_keymap_bindings(h["bindings"]?)
+    end
+
+    private def self.parse_keymap_bindings(node : JSON::Any?) : Hash(String, Array(String))
+      obj = node.try(&.as_h?)
+      return keymap_overrides unless obj # non-object / absent → keep current
+      out = {} of String => Array(String)
+      obj.each do |id, v|
+        next if id.empty?
+        arr = v.as_a?
+        next unless arr # a non-array entry is dropped (tolerant)
+        # Keep only labels that parse to a real chord (round-trip safe); a list that
+        # ends up empty is a deliberate unbind and is preserved.
+        out[id] = arr.compact_map(&.as_s?).select { |s| !Verb::Chord.parse(s).nil? }
+      end
+      out
+    end
+
+    private def self.normalize_os(raw : String?) : String
+      down = raw.try(&.downcase)
+      %w(darwin linux windows).includes?(down) ? down.not_nil! : "auto"
     end
 
     # Read a boolean field, keeping `current` when it's absent or non-bool. A plain
@@ -140,6 +178,24 @@ module Gori
             j.field "tabs" do
               j.array do
                 tab_prefs.each { |(id, vis)| j.object { j.field "id", id; j.field "visible", vis } }
+              end
+            end
+          end
+          # Omit when untouched (default profile + no overrides) so an untouched install
+          # never writes a "hotkeys" block.
+          unless keymap_overrides.empty? && keymap_os == "auto"
+            j.field "hotkeys" do
+              j.object do
+                j.field "os", keymap_os
+                unless keymap_overrides.empty?
+                  j.field "bindings" do
+                    j.object do
+                      keymap_overrides.each do |id, labels|
+                        j.field(id) { j.array { labels.each { |l| j.string l } } }
+                      end
+                    end
+                  end
+                end
               end
             end
           end

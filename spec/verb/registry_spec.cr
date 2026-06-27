@@ -116,6 +116,18 @@ private class FakeContext < ExecContext
     @calls << :replay_send
   end
 
+  def replay_toggle_hex : Nil
+    @calls << :replay_toggle_hex
+  end
+
+  def replay_toggle_sni : Nil
+    @calls << :replay_toggle_sni
+  end
+
+  def replay_toggle_auto_content_length : Nil
+    @calls << :replay_toggle_auto_content_length
+  end
+
   def fuzz_selected : Nil
     @calls << :fuzz_selected
   end
@@ -366,6 +378,43 @@ describe Gori::Verb do
       reg["sidebar.enter"].call(ctx)
       ctx.calls.should contain(:enter_content)
       ctx.calls.should_not contain(:focus_pane)
+    end
+  end
+
+  describe "migrated tab-local chords resolve in their per-tab scope" do
+    it "binds the Replay request-pane toggles + send in Replay scope" do
+      km = Keymap.build(Gori::Verbs.registry)
+      km.lookup(Chord.new("r", ctrl: true), Scope::Replay).should eq("replay.send")
+      km.lookup(Chord.new("x", ctrl: true), Scope::Replay).should eq("replay.toggle-hex")
+      km.lookup(Chord.new("s", ctrl: true), Scope::Replay).should eq("replay.toggle-sni")
+      km.lookup(Chord.new("l", ctrl: true), Scope::Replay).should eq("replay.toggle-auto-content-length")
+    end
+
+    it "binds the Fuzzer run/stop/automark chords in Fuzzer scope" do
+      km = Keymap.build(Gori::Verbs.registry)
+      km.lookup(Chord.new("r", ctrl: true), Scope::Fuzzer).should eq("fuzz.run")
+      km.lookup(Chord.new("x", ctrl: true), Scope::Fuzzer).should eq("fuzz.stop")
+      km.lookup(Chord.new("a", ctrl: true), Scope::Fuzzer).should eq("fuzz.automark")
+    end
+
+    it "binds the Intercept catch chords in Intercept scope, shadowing the Global/Body keys" do
+      km = Keymap.build(Gori::Verbs.registry)
+      km.lookup(Chord.new("c"), Scope::Intercept).should eq("intercept.direction")
+      km.lookup(Chord.new("/"), Scope::Intercept).should eq("intercept.filter")
+      # …without breaking capture (`c`) elsewhere or History's `/` filter
+      km.lookup(Chord.new("c"), Scope::Body).should eq("capture.toggle")
+      km.lookup(Chord.new("/"), Scope::Body).should eq("history.query")
+    end
+
+    it "routes the new Replay toggle verbs through the matching ExecContext methods" do
+      reg = Gori::Verbs.registry
+      ctx = FakeContext.new
+      reg["replay.toggle-hex"].call(ctx)
+      reg["replay.toggle-sni"].call(ctx)
+      reg["replay.toggle-auto-content-length"].call(ctx)
+      ctx.calls.should contain(:replay_toggle_hex)
+      ctx.calls.should contain(:replay_toggle_sni)
+      ctx.calls.should contain(:replay_toggle_auto_content_length)
     end
   end
 

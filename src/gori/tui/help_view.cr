@@ -20,6 +20,7 @@ module Gori::Tui
         {"^B", "reveal whitespace (·→␍␊)"},
         {"^D / ^C ×2", "quit gori"},
         {"q", "back to projects (on the tab bar)"},
+        {"settings:hotkeys", "rebind any shortcut below (^P → settings:hotkeys)"},
       ]},
       {"TABS & FOCUS", [
         {"←/→", "switch tab (on the tab bar)"},

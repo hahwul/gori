@@ -54,14 +54,16 @@ module Gori::Tui
       key = ev.key
       if ev.ctrl? && key.lower_p?
         @host.open_palette
+        true
       elsif ev.char == ':' && !ev.ctrl? && !ev.alt? && !@intercept.editing?
         @host.open_command # ":" cmdline in the navigable queue (editing swallows ":" as a char)
+        true
       elsif @intercept.editing?
         handle_edit_key(ev)
+        true
       else
-        handle_queue_key(ev)
+        handle_queue_key(ev) # false for c / / (and other unhandled keys) → defer to the keymap
       end
-      true
     end
 
     # Keys while editing the held-message bytes (the right detail editor).
@@ -89,21 +91,25 @@ module Gori::Tui
       end
     end
 
-    # Keys while navigating the held queue (the left list).
-    private def handle_queue_key(ev : Termisu::Event::Key) : Nil
+    # Keys while navigating the held queue (the left list). Returns true when consumed;
+    # false (the catch `c` / filter `/`, and anything unhandled) defers to the keymap —
+    # those are now Intercept-scope verbs so they're rebindable. The queue is a navigable
+    # list (not a text field), so deferring unhandled keys is safe; the held-bytes editor
+    # and condition bar keep swallowing `c`/`/` as literal text (separate handlers).
+    private def handle_queue_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       case
       when key.escape?               then @host.request_focus(:menu)
-      when ev.char == '/'            then intercept_query # catch-condition filter bar
       when key.lower_j?, key.down?   then @intercept.move(1)
       when key.lower_k?, key.up?     then @intercept.at_top? ? @host.request_focus(:menu) : @intercept.move(-1)
       when key.enter?, key.lower_e?  then @intercept.toggle_edit
       when key.lower_f? && ev.shift? then intercept_forward_all
       when key.lower_f?              then intercept_forward
       when key.lower_d?              then intercept_drop
-      when key.lower_c?              then intercept_cycle_direction
       when key.lower_i?              then intercept_toggle
+      else                                return false
       end
+      true
     end
 
     # --- catch-condition filter bar (a text sub-mode; the shell claims it before the

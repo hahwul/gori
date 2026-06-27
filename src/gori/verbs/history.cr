@@ -61,6 +61,21 @@ module Gori
         Verb::Scope::Replay, [Verb::Chord.new("n", ctrl: true)],
         available: in_replay) { |ctx| ctx.replay_new; nil }
 
+      # Request-pane toggles — keymap-driven (Replay scope) so they're rebindable. The
+      # Runner delegators carry the pane-gating + status messages.
+      r.register Verb::Definition.new(
+        "replay.toggle-hex", "Toggle hex edit", "Edit the request as raw bytes — sends exactly what you type",
+        Verb::Scope::Replay, [Verb::Chord.new("x", ctrl: true)],
+        available: in_replay) { |ctx| ctx.replay_toggle_hex; nil }
+      r.register Verb::Definition.new(
+        "replay.toggle-sni", "Toggle SNI override", "Override the TLS SNI on the target pane (dialed host unchanged)",
+        Verb::Scope::Replay, [Verb::Chord.new("s", ctrl: true)],
+        available: in_replay) { |ctx| ctx.replay_toggle_sni; nil }
+      r.register Verb::Definition.new(
+        "replay.toggle-auto-content-length", "Toggle auto Content-Length", "Recompute Content-Length from the body on send",
+        Verb::Scope::Replay, [Verb::Chord.new("l", ctrl: true)],
+        available: in_replay) { |ctx| ctx.replay_toggle_auto_content_length; nil }
+
       # --- detail view ---
       # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and only
       # returns to the list once past REQUEST; → walks forward (REQ→RES→FRAMES).
@@ -125,8 +140,8 @@ module Gori
     end
 
     # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette
-    # from Replay) + the Fuzzer-scope palette actions (the keys are handled inline by
-    # the controller, so these are chord-less, for discoverability + the ":" palette).
+    # from Replay) + the Fuzzer-scope actions. run/stop/automark are keymap-driven
+    # (rebindable); markword/point/clear/config stay inline in the controller for now.
     def self.register_fuzz(r : Verb::Registry) : Nil
       history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
       in_fuzzer = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer }
@@ -142,16 +157,16 @@ module Gori
 
       r.register Verb::Definition.new(
         "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,
-        available: in_fuzzer) { |ctx| ctx.fuzz_run; nil }
+        [Verb::Chord.new("r", ctrl: true)], available: in_fuzzer) { |ctx| ctx.fuzz_run; nil }
       r.register Verb::Definition.new(
         "fuzz.stop", "Stop fuzz", "Stop the running fuzz", Verb::Scope::Fuzzer,
-        available: in_fuzzer) { |ctx| ctx.fuzz_stop; nil }
+        [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer) { |ctx| ctx.fuzz_stop; nil }
       r.register Verb::Definition.new(
         "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
         available: in_fuzzer) { |ctx| ctx.fuzz_new; nil }
       r.register Verb::Definition.new(
         "fuzz.automark", "Auto-mark params", "Mark every request parameter value", Verb::Scope::Fuzzer,
-        available: in_fuzzer) { |ctx| ctx.fuzz_automark; nil }
+        [Verb::Chord.new("a", ctrl: true)], available: in_fuzzer) { |ctx| ctx.fuzz_automark; nil }
     end
 
     # Builds a registry with every built-in verb registered.

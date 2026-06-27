@@ -114,9 +114,11 @@ module Gori::Tui
       v = current_view
       return true if v.nil?
       c = ev.char || ev.key.to_char
-      unless dispatch_chord(chord_action(ev, c), v, c)
-        ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
-      end
+      return true if dispatch_chord(chord_action(ev, c), v, c)
+      # An unconsumed ctrl/alt chord (^R run, ^X stop, ^A automark, …) defers to the
+      # central keymap so it's rebindable; escape + plain keys stay with the pane editor.
+      return false if (ev.ctrl? || ev.alt?) && !ev.key.escape?
+      ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)
       true
     end
 
@@ -144,10 +146,7 @@ module Gori::Tui
     private def dispatch_chord(action : Symbol?, v : FuzzerView, c : Char?) : Bool
       case action
       when :palette   then save_current; @host.open_palette
-      when :run       then fuzz_run
-      when :stop      then fuzz_stop
       when :close     then request_close
-      when :automark  then @host.status(v.auto_mark)
       when :markword  then @host.status(v.mark_word)
       when :markpoint then @host.status(v.insert_marker)
       when :clear     then @host.status(v.clear_marks)
@@ -158,16 +157,14 @@ module Gori::Tui
       true
     end
 
-    # The ctrl-chord (or digit sub-tab switch) this key maps to, else nil.
+    # The ctrl-chord (or digit sub-tab switch) this key maps to, else nil. run/stop/
+    # automark are NOT here — they're keymap-driven verbs (rebindable) and fall through.
     private def chord_action(ev : Termisu::Event::Key, c : Char?) : Symbol?
       return nil unless ev.ctrl?
       key = ev.key
       case
       when key.lower_p?         then :palette
-      when key.lower_r?         then :run
-      when key.lower_x?         then :stop
       when key.lower_w?         then :close
-      when key.lower_a?         then :automark
       when key.lower_k?         then :markword
       when key.lower_t?         then :markpoint
       when key.lower_u?         then :clear

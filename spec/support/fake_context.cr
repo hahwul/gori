@@ -62,6 +62,12 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_send : Nil; end
 
+  def replay_toggle_hex : Nil; end
+
+  def replay_toggle_sni : Nil; end
+
+  def replay_toggle_auto_content_length : Nil; end
+
   def fuzz_selected : Nil; end
 
   def fuzz_from_replay : Nil; end
