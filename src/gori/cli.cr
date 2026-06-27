@@ -18,7 +18,8 @@ module Gori
   # - `gori export ca-cert`         → print CA cert path (refactors old --export-ca)
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
-  # - `gori wizard` / `gori update` → placeholders for future work
+  # - `gori wizard`                 → interactive first-run setup wizard (bind/theme/AI)
+  # - `gori update`                 → placeholder for future work
   #
   # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
   # via the tui path for backward compatibility.
@@ -73,7 +74,7 @@ module Gori
       puts "  settings  Print/edit the persistent settings file (settings.json)"
       puts "  export    Export things (currently only ca-cert)"
       puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
-      puts "  wizard    [placeholder] Interactive setup wizard"
+      puts "  wizard    Interactive setup wizard (bind, theme, AI) — also runs on first launch"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
       puts "  update    [placeholder] Self-update"
       puts ""
@@ -198,14 +199,31 @@ module Gori
       Run.dispatch(args)
     end
 
+    # `gori wizard` launches the interactive, step-by-step setup wizard (bind
+    # address → theme → AI provider). It also runs automatically on first launch
+    # (App#run_tui, when settings.json doesn't exist yet); this command re-runs it
+    # anytime. Config-only — it edits settings.json + the live theme, so it sets up
+    # its own terminal directly instead of going through App (which eagerly loads
+    # the CA).
     private def self.run_wizard(args : Array(String)) : Nil
       if args.any? { |a| ["-h", "--help"].includes?(a) }
         puts "Usage: gori wizard"
-        puts "  (placeholder) Will guide first-time setup + configuration interactively"
-        puts "  (bind address, CA trust, upstream proxy, editor, …)."
+        puts "  Interactive setup wizard: proxy bind address, TUI theme, AI provider."
+        puts "  Runs automatically on first launch; use this to re-run it anytime."
         return
       end
-      puts "gori wizard: the setup wizard is not yet implemented."
+      Paths.ensure_dirs
+      Settings.load
+      Tui::Theme.load_custom           # register user themes before the theme step
+      Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame
+      term = Termisu.new
+      term.enable_enhanced_keyboard       # Kitty disambiguation for IME/Unicode (mirrors App#run_tui)
+      term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav
+      begin
+        Tui::SetupWizard.new(term).run
+      ensure
+        term.close # restore the terminal even on error
+      end
     end
 
     # `gori mcp` starts a Model Context Protocol server over stdio (JSON-RPC 2.0):

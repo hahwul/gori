@@ -18,6 +18,7 @@ require "./verbs/convert"
 require "./tui"
 require "./tui/runner"
 require "./tui/project_picker"
+require "./tui/setup_wizard"
 
 module Gori
   # Top-level orchestrator. Owns the shared cert authority + verb registry and
@@ -48,6 +49,11 @@ module Gori
       term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav; one enable covers both the picker and the runner (same term). Runner reconciles live on settings save; term.close disables on exit.
 
       begin
+        # First-run onboarding: no settings.json yet → walk the user through bind /
+        # theme / AI setup once. Inside `begin` so the `ensure term.close` restores
+        # the terminal if it raises. The wizard persists settings.json (even on skip),
+        # so it never auto-launches again.
+        Tui::SetupWizard.new(term).run unless File.exists?(Settings.path)
         loop do
           project = Tui::ProjectPicker.new(term, projects).run
           break unless project # nil => quit gori
