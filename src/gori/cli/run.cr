@@ -190,10 +190,13 @@ module Gori
         id = take_flow_id(positional, "show")
 
         # Close the store before any abort (abort/exit skip ensure blocks); get_flow
-        # has already loaded the BLOBs we need.
+        # has already loaded the BLOBs we need. A WebSocket flow (101) also carries a
+        # ws_messages log — fetch it now while the store is open.
         store = open_store(resolve_read_project(project_name, db_path))
-        detail = begin
-          store.get_flow(id)
+        detail, ws_msgs = begin
+          d = store.get_flow(id)
+          msgs = d && d.row.status == 101 ? store.ws_messages(id) : [] of Store::WsMessage
+          {d, msgs}
         ensure
           store.close
         end
@@ -203,8 +206,8 @@ module Gori
         show_response = !req_only
         case format
         when :raw  then show_raw(detail, show_request, show_response)
-        when :json then puts show_json(detail, show_request, show_response)
-        else            show_text(detail, show_request, show_response)
+        when :json then puts show_json(detail, show_request, show_response, ws_msgs)
+        else            show_text(detail, show_request, show_response, ws_msgs)
         end
       end
 
@@ -226,7 +229,8 @@ module Gori
         STDOUT.flush
       end
 
-      private def self.show_text(detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
+      private def self.show_text(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                 ws_msgs : Array(Store::WsMessage)) : Nil
         if req
           puts "=== REQUEST (#{detail.http_version}) ==="
           print_message_text(detail.request_head, display_body(detail.request_head, detail.request_body))
@@ -244,10 +248,28 @@ module Gori
           elsif detail.error.nil?
             puts "(no response captured)"
           end
+          unless ws_msgs.empty?
+            puts ""
+            puts "=== WEBSOCKET MESSAGES (#{ws_msgs.size}) ==="
+            ws_msgs.each { |m| puts ws_message_text(m) }
+          end
         end
       end
 
-      private def self.show_json(detail : Store::FlowDetail, req : Bool, resp : Bool) : String
+      # "→ out" (client→server) / "← in" (server→client). Text frames print their
+      # (scrubbed) payload; binary frames print a size + short hex preview.
+      private def self.ws_message_text(m : Store::WsMessage) : String
+        arrow = m.direction == "out" ? "→" : "←"
+        if m.text?
+          "#{arrow} #{String.new(m.payload).scrub}"
+        else
+          preview = m.payload[0, {m.payload.size, 16}.min].hexstring
+          "#{arrow} [binary #{m.payload.size}B] #{preview}#{m.payload.size > 16 ? "…" : ""}"
+        end
+      end
+
+      private def self.show_json(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                 ws_msgs : Array(Store::WsMessage)) : String
         JSON.build do |j|
           j.object do
             j.field "flow" do
@@ -274,6 +296,21 @@ module Gori
                   j.field "body", scrub(resp_body)
                   j.field "body_decoded", resp_decoded
                   j.field "body_truncated", detail.response_body_truncated?
+                end
+              end
+              unless ws_msgs.empty?
+                j.field "ws_messages" do
+                  j.array do
+                    ws_msgs.each do |m|
+                      j.object do
+                        j.field "direction", m.direction
+                        j.field "opcode", m.opcode
+                        j.field "text", m.text?
+                        j.field "payload", m.text? ? String.new(m.payload).scrub : nil
+                        j.field "size", m.payload.size
+                      end
+                    end
+                  end
                 end
               end
             end
