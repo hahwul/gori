@@ -310,7 +310,8 @@ module Gori::Tui
         Frame.card(screen, body, "INTERCEPT", bg: Theme.bg, border: pane_border(focused))
         inner = body.inset(1, 1)
         screen.text(inner.x + 1, inner.y, "no held messages", Theme.muted)
-        screen.text(inner.x + 1, inner.y + 2, "turn intercept on (i) — held requests/responses appear here", Theme.muted)
+        hint = @enabled ? "intercept ON — in-scope requests/responses will appear here" : "turn intercept on (i) — held requests/responses appear here"
+        screen.text(inner.x + 1, inner.y + 2, hint, Theme.muted)
         return
       end
 

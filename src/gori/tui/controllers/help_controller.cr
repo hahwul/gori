@@ -28,8 +28,7 @@ module Gori::Tui
     # Read-only scroll (↑/↓ or j/k). ↑ at the top pops to the tab bar; esc returns
     # to it. Only the navigation keys are claimed (return true); EVERY other key
     # must fall through (return false) so the ':' command line and the global keymap
-    # still see it — otherwise the body's own hint ("^P cmds · q projects") points
-    # at dead keys.
+    # still see it — otherwise the body's own hint ("^P cmds") points at dead keys.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       case
@@ -47,7 +46,9 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      "↑/↓ scroll · ↹/esc tabs · ^P cmds · q projects"
+      # No "q projects": q (back to the picker) is tab-bar-only by design, so the
+      # body must not advertise it as a key (esc/↹ to the bar first, then q).
+      "↑/↓ scroll · ↹/esc tabs · ^P cmds"
     end
   end
 end
