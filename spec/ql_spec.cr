@@ -249,11 +249,12 @@ describe "Gori::Store#search (QL)" do
     end
   end
 
-  it "scans a binary / invalid-UTF-8 body with body~ without crashing the query" do
+  it "scans a binary / invalid-UTF-8 body with body~ past a NUL without crashing" do
     tmp_store do |store|
-      # leading invalid-UTF-8 bytes + an embedded NUL (the SQLite REGEXP callback
-      # builds the haystack with String.new(ptr), which stops at NUL and does not
-      # validate UTF-8). The scan must run over this row without raising.
+      # leading invalid-UTF-8 bytes + an embedded NUL with "ABC" AFTER it. The scan
+      # must (1) not crash on the invalid UTF-8 (scrubbed) and (2) still see content
+      # past the NUL — the haystack is read by its true byte length (value_bytes),
+      # not the NUL-terminated value_text.
       bin = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "bin.test", port: 80,
         method: "GET", target: "/img", http_version: "HTTP/1.1",
@@ -265,8 +266,8 @@ describe "Gori::Store#search (QL)" do
         head: "POST / HTTP/1.1\r\nHost: txt.test\r\n\r\n".to_slice,
         body: "hello ABC world".to_slice))
 
-      # REGEXP runs over BOTH rows; the binary one must not crash the query.
-      store.search(Gori::QL.parse("body~ABC"), 50).map(&.id).should eq([text])
+      # Both match now: the binary row's "ABC" after the NUL is no longer truncated.
+      store.search(Gori::QL.parse("body~ABC"), 50).map(&.id).sort.should eq([bin, text].sort)
     end
   end
 
