@@ -133,6 +133,16 @@ module Gori
       abstract def comparer_toggle_pane : Nil         # toggle the diff between the requests and the responses
       abstract def comparer_add_selected : Nil        # send History's selected flow to the next Comparer slot
 
+      # convert: the encode/decode/hash workbench (sub-tab + output actions; the body's
+      # text editing + focus nav stay inline, these power the space menu + palette)
+      abstract def convert_new : Nil        # open a fresh blank conversion sub-tab
+      abstract def convert_close : Nil      # close the active conversion sub-tab (keeps ≥1)
+      abstract def convert_clear : Nil      # clear the current input + chain
+      abstract def convert_copy : Nil       # copy the current output to the clipboard
+      abstract def convert_cycle_mode : Nil # cycle the output display (text/hex/base64)
+      abstract def convert_save : Nil       # save the current chain by name (in-body prompt)
+      abstract def convert_load : Nil       # load a saved chain by name (in-body prompt)
+
       # settings: open the config editor for a section (:network | :editor | :theme |
       # :tabs | :hotkeys). :tabs opens the tab-bar customizer overlay.
       abstract def open_settings(section : Symbol) : Nil

@@ -3,6 +3,7 @@ require "../../src/gori"
 # A no-op ExecContext for exercising registry/palette logic in specs.
 class FakeExecContext < Gori::Verb::ExecContext
   property selected : Int64? = nil
+  property current_tab : Symbol = :history # settable so tab-gated verbs (Convert, …) can be exercised
 
   def quit! : Nil; end
 
@@ -13,10 +14,6 @@ class FakeExecContext < Gori::Verb::ExecContext
   def open_palette : Nil; end
 
   def close_overlay : Nil; end
-
-  def current_tab : Symbol
-    :history
-  end
 
   def focus_pane(pane : Symbol) : Nil; end
 
@@ -173,6 +170,20 @@ class FakeExecContext < Gori::Verb::ExecContext
   def comparer_toggle_pane : Nil; end
 
   def comparer_add_selected : Nil; end
+
+  def convert_new : Nil; end
+
+  def convert_close : Nil; end
+
+  def convert_clear : Nil; end
+
+  def convert_copy : Nil; end
+
+  def convert_cycle_mode : Nil; end
+
+  def convert_save : Nil; end
+
+  def convert_load : Nil; end
 
   def open_settings(section : Symbol) : Nil; end
 end

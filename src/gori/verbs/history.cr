@@ -201,6 +201,7 @@ module Gori
       register_findings(r)
       register_fuzz(r)
       register_comparer(r)
+      register_convert(r)
       r
     end
   end

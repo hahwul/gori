@@ -218,12 +218,13 @@ describe Gori::Settings do
     end
   end
 
-  it "round-trips the Convert scratch state (input + chain + named chains)" do
+  it "round-trips the legacy Convert scratch state (input + chain + named chains)" do
     dir = File.tempname("gori-settings-convert")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
     begin
       ENV["GORI_HOME"] = dir
+      Gori::Settings.convert_sessions = [] of {String, String, String} # empty ⇒ legacy scalars are written
       Gori::Settings.convert_input = "hello world"
       Gori::Settings.convert_chain = "base64 > sha256"
       Gori::Settings.convert_chains = [{"hash", "base64 > sha256"}, {"enc", "url-encode"}]
@@ -254,6 +255,44 @@ describe Gori::Settings do
       Gori::Settings.convert_input = ""
       Gori::Settings.convert_chain = ""
       Gori::Settings.convert_chains = [] of {String, String}
+      Gori::Settings.convert_sessions = [] of {String, String, String}
+    end
+  end
+
+  it "round-trips open Convert sub-tabs (sessions) and reads a legacy file for migration" do
+    dir = File.tempname("gori-settings-convert-sessions")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.convert_input = ""
+      Gori::Settings.convert_chain = ""
+      Gori::Settings.convert_chains = [] of {String, String}
+      Gori::Settings.convert_sessions = [{"in1", "base64", "first"}, {"in2", "hex > upper", ""}]
+      Gori::Settings.save.should be_true
+      # sessions are the source of truth once present; the legacy scalars are not written
+      raw = File.read(Gori::Settings.path)
+      raw.includes?(%("sessions")).should be_true
+
+      Gori::Settings.convert_sessions = [] of {String, String, String}
+      Gori::Settings.load
+      Gori::Settings.convert_sessions.should eq([{"in1", "base64", "first"}, {"in2", "hex > upper", ""}])
+
+      # a legacy file (only input/chain, no "sessions" array) loads with sessions empty,
+      # so the controller migrates the scalars into a single session
+      File.write(Gori::Settings.path, %({"convert":{"input":"legacy","chain":"md5"}}))
+      Gori::Settings.convert_sessions = [] of {String, String, String}
+      Gori::Settings.load
+      Gori::Settings.convert_sessions.empty?.should be_true
+      Gori::Settings.convert_input.should eq("legacy")
+      Gori::Settings.convert_chain.should eq("md5")
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.convert_input = ""
+      Gori::Settings.convert_chain = ""
+      Gori::Settings.convert_chains = [] of {String, String}
+      Gori::Settings.convert_sessions = [] of {String, String, String}
     end
   end
 
@@ -266,11 +305,13 @@ describe Gori::Settings do
       Gori::Settings.convert_input = ""
       Gori::Settings.convert_chain = ""
       Gori::Settings.convert_chains = [] of {String, String}
+      Gori::Settings.convert_sessions = [] of {String, String, String}
       Gori::Settings.save.should be_true
       File.read(Gori::Settings.path).includes?("convert").should be_false
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
+      Gori::Settings.convert_sessions = [] of {String, String, String}
     end
   end
 

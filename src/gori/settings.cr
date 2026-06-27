@@ -33,12 +33,17 @@ module Gori
     class_property keymap_os : String = "auto"
     class_property keymap_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
-    # Convert tab scratch state (a global scratch tool, not project data). The last
-    # input + chain spec are restored on restart; convert_chains are named, saved
-    # chain specs (name -> spec) the user can re-load. Written only on commit
-    # (Esc/quit), dirty-guarded, so an untouched Convert tab never rewrites the file.
+    # Convert tab scratch state (a global scratch tool, not project data). Each open
+    # sub-tab (an independent conversion session) is restored on restart as a
+    # {input, chain, name} tuple; convert_chains are named, saved chain specs
+    # (name -> spec) the user can re-load. Written only on commit (Esc/quit),
+    # dirty-guarded, so an untouched Convert tab never rewrites the file.
+    # convert_input/convert_chain are the LEGACY single-session fields — read for
+    # back-compat migration (see ConvertController), no longer written once
+    # convert_sessions exists.
     class_property convert_input : String = ""
     class_property convert_chain : String = ""
+    class_property convert_sessions : Array({String, String, String}) = [] of {String, String, String}
     class_property convert_chains : Array({String, String}) = [] of {String, String}
 
     def self.path : String
@@ -66,10 +71,29 @@ module Gori
       if cv = root["convert"]?
         self.convert_input = cv["input"]?.try(&.as_s?) || convert_input
         self.convert_chain = cv["chain"]?.try(&.as_s?) || convert_chain
+        self.convert_sessions = parse_convert_sessions(cv["sessions"]?)
         self.convert_chains = parse_convert_chains(cv["chains"]?)
       end
     rescue
       # no file yet / unreadable / bad JSON — keep current values
+    end
+
+    # Tolerant sub-tab session parse: a non-array (or absent) node keeps the current
+    # value (older configs without a "sessions" array fall back to the legacy
+    # input/chain scalars in ConvertController). Missing fields default to "" (a blank
+    # session is valid — an empty sub-tab). Mirrors parse_convert_chains.
+    private def self.parse_convert_sessions(node : JSON::Any?) : Array({String, String, String})
+      arr = node.try(&.as_a?)
+      return convert_sessions unless arr
+      out = [] of {String, String, String}
+      arr.each do |e|
+        next unless o = e.as_h?
+        input = o["input"]?.try(&.as_s?) || ""
+        chain = o["chain"]?.try(&.as_s?) || ""
+        name = o["name"]?.try(&.as_s?) || ""
+        out << {input, chain, name}
+      end
+      out
     end
 
     # Tolerant named-chain parse: a non-array (or absent) node keeps the current
@@ -200,12 +224,28 @@ module Gori
             end
           end
           # Omit the whole block when Convert was never used, so an untouched install
-          # never writes a "convert" section.
-          unless convert_input.empty? && convert_chain.empty? && convert_chains.empty?
+          # never writes a "convert" section. Once any session is committed we write
+          # the "sessions" array (the source of truth); until then we preserve the
+          # legacy input/chain scalars so an un-opened Convert tab never loses them.
+          unless convert_sessions.empty? && convert_chains.empty? && convert_input.empty? && convert_chain.empty?
             j.field "convert" do
               j.object do
-                j.field "input", convert_input
-                j.field "chain", convert_chain
+                if convert_sessions.empty?
+                  j.field "input", convert_input
+                  j.field "chain", convert_chain
+                else
+                  j.field "sessions" do
+                    j.array do
+                      convert_sessions.each do |(input, chain, name)|
+                        j.object do
+                          j.field "input", input
+                          j.field "chain", chain
+                          j.field "name", name unless name.empty?
+                        end
+                      end
+                    end
+                  end
+                end
                 unless convert_chains.empty?
                   j.field "chains" do
                     j.array do

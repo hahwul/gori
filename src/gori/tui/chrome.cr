@@ -22,11 +22,9 @@ module Gori::Tui
     ]
 
     # Tabs hidden by default on a fresh install (re-enableable in settings:tabs). Agent
-    # is a non-functional "coming soon" placeholder; Comparer and Convert are opt-in power
-    # tools reached from the palette (^P → "Go to Comparer"/"Go to Convert"). Only affects
-    # reconcile's append path — once the user saves, tab_prefs is explicit and this no
-    # longer applies.
-    DEFAULT_HIDDEN = [:comparer, :convert, :agent]
+    # is a non-functional "coming soon" placeholder. Only affects reconcile's append
+    # path — once the user saves, tab_prefs is explicit and this no longer applies.
+    DEFAULT_HIDDEN = [:agent]
 
     # Reconcile stored prefs against the canonical catalog → full ordered
     # {symbol, label, visible?}. Removed/unknown ids are dropped, duplicates collapse to

@@ -71,6 +71,24 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('a').try(&.id).should eq("scope.add-rule")
   end
 
+  it "lists the Convert tab's actions in the Convert scope (reachable from the sub-tab strip)" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :convert # the Convert verbs gate on the active tab
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Convert, ctx)
+
+    menu.entries.size.should be > 0
+    menu.entries.all?(&.scope.convert?).should be_true # strictly scope-local
+    menu.entries.all?(&.menu_key).should be_true       # every shown entry has a key
+    ids = menu.entries.map(&.id)
+    ids.should contain("convert.new")
+    ids.should contain("convert.close")
+    ids.should contain("convert.copy")
+    menu.verb_for('n').try(&.id).should eq("convert.new")
+    menu.verb_for('w').try(&.id).should eq("convert.close")
+    menu.verb_for('y').try(&.id).should eq("convert.copy")
+  end
+
   it "hides the scope rule edit/delete entries when no rule is selected" do
     ctx = FakeExecContext.new # scope_has_rule defaults to false
     menu = SpaceMenu.new(Gori::Verbs.registry)
@@ -131,7 +149,7 @@ describe Gori::Tui::SpaceMenu do
       Gori::Verb::Scope::Body, Gori::Verb::Scope::Replay, Gori::Verb::Scope::Findings,
       Gori::Verb::Scope::Comparer, Gori::Verb::Scope::Fuzzer, Gori::Verb::Scope::Intercept,
       Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::FindingsDetail,
-      Gori::Verb::Scope::Project,
+      Gori::Verb::Scope::Project, Gori::Verb::Scope::Convert,
     ]
     menu_scopes.each do |scope|
       verbs = registry.select { |v| v.scope == scope && !v.hidden? }

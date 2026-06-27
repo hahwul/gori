@@ -69,7 +69,6 @@ module Gori::Tui
         {"r", "rename the sub-tab (on the strip)"},
       ]},
       {"COMPARER", [
-        {"^P → Comparer", "open the tab (hidden by default)"},
         {"a · b", "pick flow A · flow B"},
         {"←/→", "compare requests ⟷ responses"},
         {"s", "swap A ⇄ B"},
@@ -88,12 +87,14 @@ module Gori::Tui
         {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition"},
       ]},
       {"CONVERT", [
-        {"^P → Go to Convert", "open the tab (hidden by default)"},
         {"type / ↹", "edit input · switch input ↔ chain"},
         {"chain", "base64 > url-encode > sha256 ( > | , )"},
         {"↹ / ↵", "complete the suggested converter (popup)"},
         {"^Y · ^X", "copy output · cycle text/hex/base64"},
         {"^S · ^O", "save chain by name · load a saved chain"},
+        {"^N · ^W", "new · close conversion sub-tab"},
+        {"^1-9 · r", "switch sub-tab · rename (on the strip)"},
+        {"space", "command menu (on the sub-tab strip)"},
       ]},
       {"OVERLAYS", [
         {"palette / settings", "↑/↓ · ↵ · esc"},
