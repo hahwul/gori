@@ -1,7 +1,20 @@
 require "../spec_helper"
+require "../support/memory_backend"
 require "file_utils"
 
 include Gori::Tui
+
+private def fuzz_result(idx : Int32, status : Int32?, len : Int32, *,
+                        words : Int32 = 40, matched : Bool = false, error : String? = nil) : Gori::Fuzz::Result
+  Gori::Fuzz::Result.new(idx.to_i64, ["p#{idx}"], nil, status, len.to_i64, words, 5,
+    (1000 + idx * 100).to_i64, error, matched, false, nil)
+end
+
+private def loaded_fuzzer : FuzzerView
+  view = FuzzerView.new
+  view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+  view
+end
 
 describe Gori::Tui::FuzzerView do
   it "label uses the custom name when set, else the template summary" do
@@ -23,6 +36,81 @@ describe Gori::Tui::FuzzerView do
     label = view.label(8)
     label.size.should be <= 8
     label.should end_with("…")
+  end
+
+  describe "template marker highlight" do
+    it "tints the §…§ marked region (payload + delimiters) with the marker background" do
+      view = FuzzerView.new
+      view.load_request("https://h", "GET /?x=§foo§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      tint = Theme.marker_bg(0) # a unique chromatic blend — no other cell uses it
+      tinted = [] of Char
+      (0...30).each do |y|
+        (0...120).each { |x| tinted << backend.grid[y][x] if backend.bg_at(x, y) == tint }
+      end
+      tinted.should contain('f') # the "foo" payload value
+      tinted.should contain('§') # both delimiters bracketed
+    end
+
+    it "does not tint Replay/Notes editors (opt-in: bg_regions stays empty)" do
+      ta = TextArea.new("GET /?x=§foo§ HTTP/1.1")
+      backend = MemoryBackend.new(60, 5)
+      ta.render(Screen.new(backend), Rect.new(0, 0, 60, 5), cursor: false, highlight: :request)
+      marker = Theme.marker_bg(0)
+      (0...5).each do |y|
+        (0...60).each { |x| backend.bg_at(x, y).should_not eq(marker) }
+      end
+    end
+  end
+
+  describe "DIST sidebar" do
+    it "renders a colored status distribution beside the results (lone 500 in red)" do
+      view = loaded_fuzzer
+      5.times { |i| view.append_result(fuzz_result(i, 200, 1200)) }
+      view.append_result(fuzz_result(99, 500, 320))
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      backend.contains?("DIST").should be_true
+      backend.contains?("200").should be_true
+      # the 500 status label appears in the DIST columns (right of results) drawn in red
+      found = false
+      (0...30).each do |y|
+        idx = backend.row(y).index("500")
+        next unless idx && idx >= 86 # DIST region (results width ≈ 85)
+        backend.fg_at(idx, y).should eq(Theme.red)
+        found = true
+      end
+      found.should be_true
+    end
+
+    it "hides the sidebar on a narrow terminal (results take full width)" do
+      view = loaded_fuzzer
+      3.times { |i| view.append_result(fuzz_result(i, 200, 1200)) }
+      backend = MemoryBackend.new(50, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 50, 30))
+      backend.contains?("DIST").should be_false
+      backend.contains?("RESULTS").should be_true
+    end
+
+    it "shows the full distribution even when the results list is matched-filtered" do
+      view = loaded_fuzzer
+      3.times { |i| view.append_result(fuzz_result(i, 200, 1200, matched: true)) }
+      view.append_result(fuzz_result(99, 500, 320, matched: false)) # the anomaly, NOT matched
+      view.toggle_matched_only                                      # results list now hides the 500…
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      backend.contains?("500").should be_true # …but DIST still surfaces it
+    end
+
+    it "v toggles the sidebar off" do
+      view = loaded_fuzzer
+      view.append_result(fuzz_result(0, 200, 1200))
+      view.toggle_dist # hide
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      backend.contains?("DIST").should be_false
+    end
   end
 end
 

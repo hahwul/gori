@@ -265,6 +265,7 @@ module Gori::Tui
       when key.down?    then v.results_move(1)
       when key.lower_o? then @host.status(v.cycle_sort)
       when key.lower_m? then @host.status(v.toggle_matched_only)
+      when key.lower_v? then @host.status(v.toggle_dist)
       end
     end
 
