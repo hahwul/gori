@@ -64,9 +64,9 @@ module Gori::Tui
       Verb::Scope::Convert
     end
 
-    # Both regions capture text → always the EDITOR badge.
+    # INPUT + CHAIN capture text → EDITOR; the read-only OUTPUT pane is navigable.
     def body_badge : Symbol
-      :editor
+      cur.pane == :output ? :body : :editor
     end
 
     # The current session (always valid: ≥1 session, @idx kept in range).
@@ -166,12 +166,12 @@ module Gori::Tui
         BodyChrome.render_subtab_strip(screen, sub_rect, subtab_labels, @idx, focus == :subtabs)
       end
       s = cur
-      BodyChrome.framed(screen, body_rect, body_focused) do |inner|
-        s.view.render(screen, inner,
-          input: s.input, chain: s.chain, chain_cx: s.chain_cx, chain_pre: @chain_pre,
-          result: s.result, pane: s.pane, focused: body_focused,
-          popup: @popup, prompt: @prompt, prompt_buf: @prompt_buf)
-      end
+      # Each section frames its own card (per-pane focus border), so we hand the view
+      # the full body rect rather than wrapping it in one outer frame.
+      s.view.render(screen, body_rect,
+        input: s.input, chain: s.chain, chain_cx: s.chain_cx, chain_pre: @chain_pre,
+        result: s.result, pane: s.pane, focused: body_focused,
+        popup: @popup, prompt: @prompt, prompt_buf: @prompt_buf)
     end
 
     # The body dispatcher. Reached only when this tab is active, no overlay is up,
@@ -204,7 +204,11 @@ module Gori::Tui
         commit
         @host.request_focus(:menu)
       else
-        cur.pane == :input ? edit_input(ev, c) : edit_chain(ev, c)
+        case cur.pane
+        when :input  then edit_input(ev, c)
+        when :output then handle_output(ev)
+        else              edit_chain(ev, c)
+        end
       end
       true
     end
@@ -232,15 +236,21 @@ module Gori::Tui
       @host.focus_body
       body = @sessions.size >= 2 ? BodyChrome.carve_subtab_row(rect)[1] : rect
       s = cur
-      regions = s.view.layout(body.inset(1, 1))
+      # The view frames each card itself, so layout takes the full body rect; the
+      # editable content lives one cell inside each card border.
+      regions = s.view.layout(body)
       if regions.input.contains?(mx, my)
         s.pane = :input
         @popup.close
-        s.input.click_to_cursor(regions.input, mx, my)
+        s.input.click_to_cursor(regions.input.inset(1, 1), mx, my)
       elsif regions.chain.contains?(mx, my)
         s.pane = :chain
-        s.chain_cx = Screen.column_for(s.chain, mx - (regions.chain.x + 2))
+        field = regions.chain.inset(1, 1)
+        s.chain_cx = Screen.column_for(s.chain, mx - (field.x + 2))
         refilter_popup
+      elsif regions.output.contains?(mx, my)
+        s.pane = :output # OUTPUT is navigable now — a click focuses it (wheel still scrolls)
+        @popup.close
       end
       true
     end
@@ -256,17 +266,18 @@ module Gori::Tui
       true
     end
 
-    # --- focus ring (Tab/Shift-Tab): menu ▸ input ▸ chain ▸ menu ---
+    # --- focus ring (Tab/Shift-Tab): menu ▸ input ▸ chain ▸ output ▸ menu ---
+    # OUTPUT is read-only but joins the ring so it can be focused + scrolled.
+    PANE_ORDER = [:input, :chain, :output]
+
     def pane_advance(dir : Int32) : Bool
       s = cur
       @popup.close
-      if dir > 0
-        return (s.pane = :chain; true) if s.pane == :input
-        false
-      else
-        return (s.pane = :input; true) if s.pane == :chain
-        false
-      end
+      i = PANE_ORDER.index(s.pane) || 0
+      ni = i + dir
+      return false if ni < 0 || ni >= PANE_ORDER.size
+      s.pane = PANE_ORDER[ni]
+      true
     end
 
     def focus_first : Nil
@@ -275,16 +286,19 @@ module Gori::Tui
     end
 
     def focus_last : Nil
-      cur.pane = :chain
+      cur.pane = :output
       @popup.close
     end
 
     def body_hint(focus : Symbol) : String
       return "type a name · ↵ save · esc cancel" if @prompt == :save_as
       return "type a name · ↵ load · esc cancel" if @prompt == :load
-      if cur.pane == :chain
+      case cur.pane
+      when :chain
         return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if @popup.open?
-        "chain (> | ,) · ↑ input · ^Y copy · ^X mode · ^S save · ^O load · ^N new · esc tabs"
+        "chain (> | ,) · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc tabs"
+      when :output
+        "↑/↓ scroll · ↑-top chain · ↹ next · space menu · ^X mode · ^Y copy · esc tabs"
       else
         "type to edit · ↓/↹ chain · ^L clear · ^Y copy · ^X mode · ^N new · ^W close · esc tabs"
       end
@@ -366,6 +380,9 @@ module Gori::Tui
       when key.up?
         s.pane = :input
         @popup.close
+      when key.down?
+        s.pane = :output # down from CHAIN drops into the OUTPUT pane (popup owns ↓ while open)
+        @popup.close
       when key.backspace?
         if s.chain_cx > 0
           s.chain = s.chain[0, s.chain_cx - 1] + s.chain[s.chain_cx..]
@@ -390,6 +407,19 @@ module Gori::Tui
           touch
           refilter_popup
         end
+      end
+    end
+
+    # ---- OUTPUT pane (read-only but navigable) ----
+    # Mirrors Replay's response pane: space opens the action menu (nothing to type
+    # here), ↑/↓ scroll, and ↑ at the top pops focus up to the CHAIN field above.
+    private def handle_output(ev : Termisu::Event::Key) : Nil
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+      s = cur
+      key = ev.key
+      case
+      when key.up?   then s.view.output_at_top? ? (s.pane = :chain) : s.view.scroll_output(-1)
+      when key.down? then s.view.scroll_output(1)
       end
     end
 
