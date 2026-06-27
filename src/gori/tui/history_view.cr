@@ -35,7 +35,7 @@ module Gori::Tui
     # We load the MOST RECENT this-many (so a live tail keeps updating) and show an
     # "older not loaded" note; the raw frames remain whole in SQLite.
     DETAIL_LOG_CAP = 10_000
-    QL_FIELDS      = %w(host method status path scheme body header size dur flag)
+    QL_FIELDS      = %w(host method status path scheme body header size reqsize respsize dur flag)
     METHOD_VAL     = %w(GET POST PUT DELETE PATCH HEAD OPTIONS QUERY)
 
     getter rows : Array(Store::FlowRow)

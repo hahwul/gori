@@ -85,12 +85,17 @@ describe Gori::QL do
     f.args.should eq(["%ab%", "%ab%"])
   end
 
-  it "compiles size: as a numeric comparison on response_size" do
+  it "compiles size: as a comparison on the TOTAL (req+resp), matching the displayed size" do
     f = Gori::QL.parse("size:>1000")
-    f.sql.should eq("(response_size > ?)")
+    f.sql.should eq("((request_size + COALESCE(response_size, 0)) > ?)")
     f.args.should eq([1000_i64])
-    Gori::QL.parse("size:<=500").sql.should eq("(response_size <= ?)")
-    Gori::QL.parse("size:0").sql.should eq("(response_size = ?)") # bare value → equality
+    Gori::QL.parse("size:<=500").sql.should eq("((request_size + COALESCE(response_size, 0)) <= ?)")
+    Gori::QL.parse("size:0").sql.should eq("((request_size + COALESCE(response_size, 0)) = ?)") # bare → equality
+  end
+
+  it "compiles reqsize: / respsize: against a single side" do
+    Gori::QL.parse("reqsize:>1000").sql.should eq("(request_size > ?)")
+    Gori::QL.parse("respsize:<500").sql.should eq("(response_size < ?)")
   end
 
   it "compiles dur: as milliseconds against duration_us, honouring ms/s suffixes" do
@@ -265,7 +270,7 @@ describe "Gori::Store#search (QL)" do
     end
   end
 
-  it "filters by response size and duration (size: / dur:), excluding pending rows" do
+  it "filters by total size and duration; respsize:/dur: exclude pending rows" do
     tmp_store do |store|
       big = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "acme.test", port: 80,
@@ -285,12 +290,16 @@ describe "Gori::Store#search (QL)" do
 
       pending = capture(store, "acme.test", "GET", "/pending") # no response → NULL size/dur
 
-      store.search(Gori::QL.parse("size:>10000"), 50).map(&.id).should eq([big])
-      store.search(Gori::QL.parse("dur:>500"), 50).map(&.id).should eq([big])   # 500ms
-      store.search(Gori::QL.parse("dur:<100"), 50).map(&.id).should eq([small]) # 100ms
+      store.search(Gori::QL.parse("size:>10000"), 50).map(&.id).should eq([big]) # total ~20KB
+      store.search(Gori::QL.parse("dur:>500"), 50).map(&.id).should eq([big])    # 500ms
+      store.search(Gori::QL.parse("dur:<100"), 50).map(&.id).should eq([small])  # 100ms
 
-      # NULL response_size / duration_us never satisfy a numeric comparison
-      store.search(Gori::QL.parse("size:>=0"), 50).map(&.id).should_not contain(pending)
+      # size: spans the TOTAL (incl. the request), so a pending flow matches on its
+      # request bytes — consistent with the displayed `size` column.
+      store.search(Gori::QL.parse("size:>=0"), 50).map(&.id).should contain(pending)
+      # respsize:/dur: target a response-only column that's NULL until the response
+      # lands, so a pending flow never matches them.
+      store.search(Gori::QL.parse("respsize:>=0"), 50).map(&.id).should_not contain(pending)
       store.search(Gori::QL.parse("dur:>=0"), 50).map(&.id).should_not contain(pending)
     end
   end
