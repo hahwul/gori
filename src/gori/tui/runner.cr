@@ -1756,9 +1756,9 @@ module Gori::Tui
       focus_pane(subtabs_shown? ? :subtabs : :body)
     end
 
-    # Switch the active tab. `focus` is where focus lands: :body for explicit
-    # "jump to tab" (number keys) which drills into content, :menu for a tab-bar
-    # mouse click which selects the tab without descending into the body.
+    # Switch the active tab. `focus` is where focus lands: :menu for a tab "select"
+    # gesture (tab-bar click, number-key jump) which lands on the bar without descending
+    # into the body, :body for the named "Go to …" palette jumps which drill into content.
     def focus_tab(tab : Symbol, focus : Symbol = :body) : Nil
       if @active_tab == :project
         project_controller.commit
@@ -1781,9 +1781,11 @@ module Gori::Tui
 
     # Positional number-key target: focus the Nth (1-based) VISIBLE tab — the order shown
     # on the bar. Out-of-range n (fewer tabs visible than the digit) is a no-op.
+    # Lands on the tab bar (TABS level), like a tab-bar click: a number jump selects the
+    # tab, it does not drill into the body.
     def focus_visible_tab(n : Int32) : Nil
       if t = effective_tabs[n - 1]?
-        focus_tab(t[0])
+        focus_tab(t[0], focus: :menu)
       end
     end
 
