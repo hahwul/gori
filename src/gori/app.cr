@@ -117,10 +117,17 @@ module Gori
 
     private def capture_printer(session : Session, format : Symbol, max : Int32?) : Nil
       printed = 0
+      seen = Set(Int64).new
       loop do
         event = session.flow_events.receive
         next unless event.kind == :updated # one line per completed/errored flow
+        # A streaming flow (WebSocket, HTTP/2, SSE) emits an :updated PER message /
+        # frame on the SAME id. Print + count it ONCE (its first update), else it
+        # prints duplicate rows and its own messages trip --max, tearing the live
+        # connection down mid-stream.
+        next if seen.includes?(event.id)
         if row = session.store.flow_row(event.id)
+          seen << event.id
           # Stream the SAME row rendering `gori run history` prints, so capture and
           # history output never drift (text = human-readable; json = stable contract).
           puts(format == :json ? CLI::Output.flow_row_json(row) : CLI::Output.flow_row_text(row))
