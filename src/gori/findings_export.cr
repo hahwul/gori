@@ -20,7 +20,7 @@ module Gori
             io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
             io << "- **Severity:** " << f.severity.label << "\n"
             io << "- **Status:** " << f.status.label << "\n"
-            io << "- **Host:** " << (f.host || "—") << "\n"
+            io << "- **Host:** " << (f.host.try { |h| one_line(h) } || "—") << "\n"
             if fid = f.flow_id
               io << "- **Flow:** "
               if flow

@@ -69,5 +69,18 @@ describe Gori::Findings::Export do
         live.should contain("## [high] pwn ## FAKE TITLE HEADING") # one real heading line
       end
     end
+
+    it "collapses the host field so a fence/newline can't open a runaway block" do
+      with_store do |store|
+        store.insert_finding("clean title", Gori::Store::Severity::Low,
+          "evil.test\n```\n## INJECTED VIA HOST", nil)
+        md = Gori::Findings::Export.markdown(store.findings, store, "proj")
+        # host collapses to one line: the ``` is inline (not its own fence line) and
+        # the "## INJECTED" never becomes a heading.
+        md.lines.count { |l| l.strip == "```" }.should eq(0)
+        md.lines.any? { |l| l.starts_with?("## INJECTED") }.should be_false
+        md.should contain("- **Host:** evil.test ``` ## INJECTED VIA HOST")
+      end
+    end
   end
 end
