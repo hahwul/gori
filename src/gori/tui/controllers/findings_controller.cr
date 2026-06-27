@@ -33,7 +33,7 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      @findings.detail_open? ? "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · ←/esc back" \
+      @findings.detail_open? ? "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · space cmds · ←/esc back" \
                              : "↑/↓ move · ↵ open · n new · d delete · x export · space cmds · esc tabs"
     end
 

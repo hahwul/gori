@@ -184,6 +184,22 @@ private class FakeContext < ExecContext
     @calls << :scope_toggle_lens
   end
 
+  def scope_add_rule : Nil
+    @calls << :scope_add_rule
+  end
+
+  def scope_edit_rule : Nil
+    @calls << :scope_edit_rule
+  end
+
+  def scope_delete_rule : Nil
+    @calls << :scope_delete_rule
+  end
+
+  def scope_rule_selected? : Bool
+    true
+  end
+
   def rules_open : Nil
     @calls << :rules_open
   end

@@ -264,10 +264,6 @@ module Gori::Tui
       rule.pattern
     end
 
-    def scope_toggle : Nil
-      @scope.toggle
-    end
-
     private def current_rule : Scope::Rule?
       @scope.rules[@sel]?
     end

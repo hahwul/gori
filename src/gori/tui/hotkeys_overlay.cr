@@ -30,6 +30,7 @@ module Gori::Tui
       Verb::Scope::FindingsDetail => "FINDING DETAIL",
       Verb::Scope::Intercept      => "INTERCEPT",
       Verb::Scope::Comparer       => "COMPARER",
+      Verb::Scope::Project        => "PROJECT SCOPE",
       Verb::Scope::PaletteOpen    => "PALETTE",
     }
 
