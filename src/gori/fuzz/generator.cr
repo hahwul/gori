@@ -138,8 +138,12 @@ module Gori::Fuzz
     end
 
     private def cluster_total : Int64?
+      return nil if @sets.empty?
+      # Use set_for(p) (with the set-0 fallback) exactly like each()/recurse() do —
+      # otherwise a run with fewer payload sets than positions reports an unknown
+      # ('?') total and demands --force, even though it's perfectly bounded.
       acc = 1_i64.as(Int64?)
-      (0...@template.position_count).each { |p| acc = mul(acc, @sets[p]?.try(&.size)) }
+      (0...@template.position_count).each { |p| acc = mul(acc, set_for(p).size) }
       acc
     end
 

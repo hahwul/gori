@@ -186,6 +186,16 @@ describe F::Generator do
     g = F::Generator.new(base, [huge, huge], F::Config.new(mode: F::Mode::ClusterBomb))
     g.total.should be_nil
   end
+
+  it "clusterbomb total honours the set-0 fallback when sets < positions" do
+    # 2 positions, ONE set (size 3): position 1 falls back to set 0, like each().
+    s1 = F::PayloadSet.new(F::InlineList.new(["x", "y", "z"]))
+    g = F::Generator.new(base, [s1], F::Config.new(mode: F::Mode::ClusterBomb))
+    g.total.should eq(9) # 3 × 3 (was nil/'?' before) — total must agree with each()
+    seen = 0
+    g.each { seen += 1 }
+    seen.should eq(9)
+  end
 end
 
 describe F::Matcher do
