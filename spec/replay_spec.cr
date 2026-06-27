@@ -38,6 +38,29 @@ describe Gori::Replay::Engine do
     result.ok?.should be_false
     result.error.should_not be_nil
   end
+
+  it "skips interim 1xx responses and returns the final status" do
+    # Origin sends 100 Continue then 103 Early Hints then the real 200.
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 100 Continue\r\n\r\n"
+        conn << "HTTP/1.1 103 Early Hints\r\nLink: </s.css>; rel=preload\r\n\r\n"
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndone"
+        conn.flush
+        conn.close
+      end
+    end
+
+    result = Gori::Replay::Engine.send("POST /u HTTP/1.1\r\nHost: 127.0.0.1\r\nExpect: 100-continue\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    result.ok?.should be_true
+    result.response.not_nil!.status.should eq(200) # not 100 / 103
+    String.new(result.body.not_nil!).should eq("done")
+  end
 end
 
 describe Gori::Replay::Diff do

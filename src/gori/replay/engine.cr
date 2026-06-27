@@ -48,6 +48,16 @@ module Gori
           return error("no response from #{host}:#{port}", started) unless head
 
           resp = Proxy::Codec::Http1.parse_response_head(head)
+          # Skip interim 1xx informational responses (RFC 9110 §15.2): a captured
+          # request carrying `Expect: 100-continue`, or an origin/CDN that emits
+          # 103 Early Hints, would otherwise return the 100/103 as the replay
+          # result. Read on until the final (>=200) status. 101 Switching Protocols
+          # is terminal (a protocol upgrade), so it is NOT skipped.
+          while resp.status >= 100 && resp.status < 200 && resp.status != 101
+            head = Proxy::Codec::Http1.read_head(upstream)
+            return error("upstream closed after interim 1xx from #{host}:#{port}", started) unless head
+            resp = Proxy::Codec::Http1.parse_response_head(head)
+          end
           framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
           body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len)
           Result.new(head, body, resp, elapsed(started), incomplete: !complete)
