@@ -11,7 +11,6 @@ require "../upstream"
 require "../pump"
 require "../ws/relay"
 require "../../flow_mapper"
-require "../../fuzz/content_length"
 
 module Gori::Proxy
   # Handles one client connection over an `IO` (a plaintext TCPSocket, or — after
@@ -20,6 +19,10 @@ module Gori::Proxy
   # loop, forwards them byte-faithfully, captures the request/response pair, and
   # streams the response back.
   class ClientConn
+    # Max consecutive interim 1xx responses to forward before giving up — a guard
+    # against a hostile upstream streaming an unbounded run of body-less 103s.
+    MAX_INTERIM = 64
+
     # `fixed_host`/`fixed_port` pin all requests to one origin (post-CONNECT TLS
     # tunnel); when nil the upstream is resolved per request from the target /
     # Host header (plaintext forward proxy). `tls_upstream` wraps the origin
@@ -163,17 +166,11 @@ module Gori::Proxy
         write_intercept_drop
         return false
       end
-      # forward (edited or original): re-parse the sent head for capture (P7).
-      # Recompute Content-Length to match the (possibly edited) body — like Burp's
-      # default. A human who grows/shrinks a held body would otherwise desync the
-      # origin, which reads only the stale CL's worth and truncates the rest.
-      # add_when_missing: true so adding a body to a request that had none (e.g. a
-      # GET) ALSO gets a Content-Length — otherwise the body is unframed: the origin
-      # drops it AND the bytes strand on the keep-alive upstream, prepended to the
-      # next reused request (smuggling). No-ops on chunked / already-correct, so an
-      # unedited forward stays byte-exact; byte-exact CL-mismatch smuggling tests go
-      # through replay/fuzz, not the editor.
-      sent_head, edited_body = split_message(Fuzz::ContentLength.sync(decision.bytes, add_when_missing: true))
+      # forward the decision bytes BYTE-EXACT (P7): re-parse the sent head for capture.
+      # The intercept editor owns the "update Content-Length" decision (it knows what
+      # was edited) — see InterceptView#forward_bytes; the proxy must not rewrite bytes
+      # the human chose to send (e.g. a deliberately CL-mismatched smuggling probe).
+      sent_head, edited_body = split_message(decision.bytes)
       sent_req = Codec::Http1.parse_request_head(sent_head)
       retryable = retryable_request?(req, edited_body.nil? || edited_body.empty?)
       upstream, reused, sent = acquire_and_send(host, port, retryable) { |up| write_request(up, sent_head, edited_body) }
@@ -252,6 +249,7 @@ module Gori::Proxy
       # request on this connection (response desync). 101 Switching Protocols is the
       # exception: it is terminal (the protocol upgrade), so it falls through to the
       # normal path (WebSocket handling below).
+      interim_seen = 0
       while interim_response?(resp)
         # RFC 9112 §6: a 1xx response MUST NOT carry content. An interim that declares
         # a body (Content-Length / Transfer-Encoding) is malformed AND a desync vector
@@ -263,8 +261,20 @@ module Gori::Proxy
           release_upstream
           return false
         end
-        @io.write(resp_head) # forward byte-exact (P6/P7); no rewrite on interim
-        @io.flush
+        # Cap consecutive 1xx (like Burp/nginx) so a hostile upstream streaming endless
+        # body-less 103s can't spin this fiber forever / flood the client (per-conn DoS).
+        interim_seen += 1
+        if interim_seen > MAX_INTERIM
+          @sink.on_response(FlowMapper.error_response(flow_id, "too many interim 1xx responses (>#{MAX_INTERIM})"))
+          release_upstream
+          return false
+        end
+        # RFC 9110 §15.2 / RFC 7231: a proxy MUST NOT forward a 1xx to an HTTP/1.0
+        # client (it can't parse it). Read past it for everyone; forward only to 1.1.
+        if req.version == "HTTP/1.1"
+          @io.write(resp_head) # forward byte-exact (P6/P7); no rewrite on interim
+          @io.flush
+        end
         resp_head = Codec::Http1.read_head(upstream)
         if resp_head.nil?
           @sink.on_response(FlowMapper.error_response(flow_id, "upstream closed after interim 1xx response"))
@@ -383,10 +393,11 @@ module Gori::Proxy
         release_upstream
         return false
       end
-      # Sync Content-Length to the (possibly edited) body so the client isn't fed a
-      # stale length (truncation) or an unframed body. No-ops on chunked / already-
-      # correct (P7-preserving for an unedited forward).
-      out_head, out_body = split_message(Fuzz::ContentLength.sync(decision.bytes, add_when_missing: true))
+      # Forward the decision bytes BYTE-EXACT (P7); the editor already synced
+      # Content-Length for an edited body (InterceptView#forward_bytes). Keeping the
+      # proxy byte-exact also preserves the head verbatim for a HEAD/304/204 response
+      # forwarded unedited (whose Content-Length describes the entity, not the bytes).
+      out_head, out_body = split_message(decision.bytes)
       sent_resp = Codec::Http1.parse_response_head(out_head)
       @io.write(out_head)
       @io.write(out_body) if out_body

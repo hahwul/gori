@@ -331,6 +331,65 @@ describe Gori::Proxy::Server do
     sink.responses.first.state.should eq(Gori::Store::FlowState::Error) # recorded as an error
   end
 
+  it "caps a flood of interim 1xx responses instead of spinning forever" do
+    done = Channel(Nil).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        200.times { conn << "HTTP/1.1 103 Early Hints\r\n\r\n"; conn.flush } # > MAX_INTERIM
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 5.seconds
+    client << "GET http://127.0.0.1:#{origin_port}/ HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nConnection: keep-alive\r\n\r\n"
+    client.flush
+    (client.gets_to_end rescue nil)
+    client.close
+
+    done.receive
+    proxy.stop
+    sink.responses.first.state.should eq(Gori::Store::FlowState::Error) # gave up, recorded an error
+  end
+
+  it "does not forward interim 1xx to an HTTP/1.0 client, but still delivers the final response" do
+    done = Channel(Nil).new(1)
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 100 Continue\r\n\r\n"
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi"
+        conn.flush
+        conn.close
+      end
+    rescue
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 3.seconds
+    client << "GET http://127.0.0.1:#{origin_port}/ HTTP/1.0\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    resp = (client.gets_to_end rescue "")
+    client.close
+
+    done.receive
+    proxy.stop
+    resp.should_not contain("100 Continue") # 1.0 client never sees the interim
+    resp.should contain("hi")               # but does get the final 200
+  end
+
   it "records an error flow when the upstream is unreachable" do
     done = Channel(Nil).new(1)
     sink = RecordingSink.new(done)
@@ -424,25 +483,30 @@ describe Gori::Proxy::Server do
     sink.requests.first.target.should eq("/held")
   end
 
-  it "recomputes Content-Length when a held request body is edited" do
+  it "forwards held bytes byte-exact, preserving a deliberately mismatched Content-Length (P7)" do
+    # The proxy must NOT rewrite the bytes the human chose to send — Content-Length
+    # sync is the editor's job (InterceptView#forward_bytes). A forwarded smuggling
+    # probe (CL: 3 but a 7-byte body) reaches the origin verbatim.
     done = Channel(Nil).new(1)
-    got_body = Channel(String).new(1)
+    got = Channel(String).new(1)
     origin = TCPServer.new("127.0.0.1", 0)
     origin_port = origin.local_address.port
     spawn do
       if conn = origin.accept?
         head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
-        clen = String.new(head).match(/Content-Length:\s*(\d+)/i).not_nil![1].to_i
+        m = String.new(head).match(/Content-Length:\s*(\d+)/i)
+        clen = m ? m[1].to_i : 0
         body = Bytes.new(clen)
-        conn.read_fully(body)
-        got_body.send(String.new(body))
+        conn.read_fully(body) if clen > 0
+        got.send("#{clen}:#{String.new(body)}")
         conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
         conn.flush
         conn.close
       end
+    rescue
     end
 
-    store_path = File.tempname("gori-iccl", ".db")
+    store_path = File.tempname("gori-icp7", ".db")
     store = Gori::Store.open(store_path)
     interceptor = Gori::Interceptor.new(Gori::Scope.load(store))
     interceptor.toggle
@@ -455,9 +519,7 @@ describe Gori::Proxy::Server do
       loop do
         interceptor.pending.each do |it|
           if it.kind.request?
-            # grow the body "ab" (CL 2) → "GROWN-BODY" (10) WITHOUT touching the header
-            edited = String.new(it.raw).sub("\r\n\r\nab", "\r\n\r\nGROWN-BODY")
-            interceptor.forward(it.id, edited.to_slice)
+            interceptor.forward(it.id, "POST /e HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nContent-Length: 3\r\n\r\nSMUGGLE".to_slice)
           else
             interceptor.forward(it.id)
           end
@@ -479,70 +541,8 @@ describe Gori::Proxy::Server do
     File.delete?("#{store_path}-wal")
     File.delete?("#{store_path}-shm")
 
-    # Origin received the FULL edited body (would be "GR" under the stale CL: 2).
-    got_body.receive.should eq("GROWN-BODY")
-    String.new(sink.requests.first.head).should contain("Content-Length: 10") # synced + captured
-  end
-
-  it "adds a Content-Length when a held GET gains a body (no unframed smuggling)" do
-    done = Channel(Nil).new(1)
-    got = Channel(String).new(1)
-    origin = TCPServer.new("127.0.0.1", 0)
-    origin_port = origin.local_address.port
-    spawn do
-      if conn = origin.accept?
-        head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
-        m = String.new(head).match(/Content-Length:\s*(\d+)/i)
-        clen = m ? m[1].to_i : 0
-        body = Bytes.new(clen)
-        conn.read_fully(body) if clen > 0
-        got.send("#{clen}:#{String.new(body)}")
-        conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
-        conn.flush
-        conn.close
-      end
-    end
-
-    store_path = File.tempname("gori-icadd", ".db")
-    store = Gori::Store.open(store_path)
-    interceptor = Gori::Interceptor.new(Gori::Scope.load(store))
-    interceptor.toggle
-
-    sink = RecordingSink.new(done)
-    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, interceptor: interceptor)
-    proxy.start
-
-    spawn do
-      loop do
-        interceptor.pending.each do |it|
-          if it.kind.request?
-            # add a body to a GET that had none + no Content-Length header
-            edited = String.new(it.raw).sub("\r\n\r\n", "\r\n\r\nADDED-BODY")
-            interceptor.forward(it.id, edited.to_slice)
-          else
-            interceptor.forward(it.id)
-          end
-        end
-        sleep 0.01.seconds
-      end
-    end
-
-    client = TCPSocket.new("127.0.0.1", proxy.port)
-    client << "GET http://127.0.0.1:#{origin_port}/echo HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
-    client.flush
-    client.gets_to_end
-    client.close
-
-    done.receive
-    proxy.stop
-    store.close
-    File.delete?(store_path)
-    File.delete?("#{store_path}-wal")
-    File.delete?("#{store_path}-shm")
-
-    # Origin saw the full added body, framed by a synthesized Content-Length — not
-    # dropped + left unframed on the upstream socket.
-    got.receive.should eq("10:ADDED-BODY")
+    # Origin saw CL: 3 and read exactly 3 bytes — the proxy did not "fix" the CL to 7.
+    got.receive.should eq("3:SMU")
   end
 
   it "evaluates the response intercept condition against the REWRITTEN request line" do

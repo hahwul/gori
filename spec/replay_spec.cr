@@ -61,6 +61,24 @@ describe Gori::Replay::Engine do
     result.response.not_nil!.status.should eq(200) # not 100 / 103
     String.new(result.body.not_nil!).should eq("done")
   end
+
+  it "gives up (no hang) after too many interim 1xx responses" do
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        200.times { conn << "HTTP/1.1 103 Early Hints\r\n\r\n"; conn.flush } # > MAX_INTERIM
+        conn.close
+      end
+    rescue
+    end
+
+    result = Gori::Replay::Engine.send("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+    result.ok?.should be_false
+    result.error.not_nil!.should contain("too many interim")
+  end
 end
 
 describe Gori::Replay::Diff do

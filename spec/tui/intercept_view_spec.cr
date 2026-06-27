@@ -99,6 +99,22 @@ describe Gori::Tui::InterceptView do
       String.new(view.forward_bytes(it)).should_not eq(raw)
     end
   end
+
+  it "recomputes Content-Length when an edited held body is forwarded (adds one to a GET)" do
+    tmp_interceptor do |ic|
+      hold_req(ic, "h", "/", "GET / HTTP/1.1\r\nHost: h\r\n\r\n") # no body, no Content-Length
+      view = InterceptView.new
+      view.reload(ic)
+      it = view.selected_item.not_nil!
+      view.toggle_edit
+      view.edit_move(99, 0) # down to the (empty) body line
+      "BODY".each_char { |c| view.edit_insert(c) }
+
+      out = String.new(view.forward_bytes(it))
+      out.should contain("Content-Length: 4") # synthesized so the added body is framed
+      out.should end_with("\r\n\r\nBODY")
+    end
+  end
 end
 
 describe "Intercept filter bar" do

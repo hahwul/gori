@@ -5,6 +5,7 @@ require "./highlight"
 require "./text_area"
 require "./url"
 require "../interceptor"
+require "../fuzz/content_length"
 
 module Gori::Tui
   # The Intercept tab: a queue of held requests/responses (P4 — the human decides
@@ -138,15 +139,18 @@ module Gori::Tui
       @editing = false
     end
 
-    # The forward payload: the edited bytes only when the editor holds THIS item AND
-    # it was actually modified — otherwise the original raw bytes byte-exact (P7).
-    # Merely OPENING the editor to view a held message must not mutate it: TextArea
-    # is a line editor (set_text splits on LF + rstrips CR; to_bytes rejoins with
-    # CRLF), so an un-dirty round-trip would rewrite bare LF/binary bodies. An actual
-    # edit still normalizes line endings — a documented text-editor limitation, same
-    # as the Replay editor; byte-exact tampering goes through replay/fuzz.
+    # The forward payload. An UNEDITED forward (editor never opened, or opened to view
+    # only) returns the original raw bytes BYTE-EXACT (P7) — so merely inspecting a
+    # held message can't mutate it, and a deliberately CL-mismatched smuggling probe
+    # forwards untouched. Only an ACTUAL edit returns the editor's bytes, with
+    # Content-Length recomputed to match the edited body (Burp's "update
+    # Content-Length", default on; add_when_missing: true so adding a body to a GET
+    # that had none still gets framed). The proxy itself stays byte-exact — the
+    # update-CL decision lives here, in the human's editor, not the wire path. (An edit
+    # still normalizes line endings — a text-editor limitation shared with Replay.)
     def forward_bytes(it : Interceptor::Item) : Bytes
-      @loaded_id == it.id && @editor_dirty ? @editor.to_bytes : it.raw
+      return it.raw unless @loaded_id == it.id && @editor_dirty
+      Fuzz::ContentLength.sync(@editor.to_bytes, add_when_missing: true)
     end
 
     def edit_insert(ch : Char) : Nil
