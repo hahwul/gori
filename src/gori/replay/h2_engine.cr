@@ -111,11 +111,18 @@ module Gori
         end_stream_pending = false # END_STREAM seen on a HEADERS frame whose block isn't closed yet
 
         until done
-          # A read error mid-response (connection reset, e.g. an origin that closed
-          # right after a non-END_STREAM DATA) is end-of-data, not a hard failure —
+          # An IO error mid-response (connection reset — e.g. an origin that closed
+          # right after a non-END_STREAM DATA) is end-of-data, not a hard failure:
           # treat it like a clean EOF and return what arrived, flagged incomplete
-          # (mirrors the h1 engine's premature-EOF handling).
-          frame = Frame.read(io) rescue nil
+          # (mirrors the h1 engine). A Gori::Error from Frame.read (oversized/corrupt
+          # frame — a real protocol violation) is NOT swallowed: it propagates to the
+          # outer rescue and surfaces as a failed replay, since the workbench exists to
+          # reveal exactly that.
+          frame = begin
+            Frame.read(io)
+          rescue IO::Error
+            nil
+          end
           break if frame.nil?
           case frame.frame_type
           when Frame::Type::Settings
