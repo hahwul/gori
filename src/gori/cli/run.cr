@@ -100,6 +100,7 @@ module Gori
           p.on("--max=N", "Stop after N completed flows") { |v| max = parse_count(v) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run capture: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run capture: missing value for #{f}" }
         end
         parser.parse(args)
 
@@ -130,6 +131,7 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json (JSON-Lines)") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
         parser.parse(args)
 
@@ -181,16 +183,20 @@ module Gori
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run show: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run show: missing value for #{f}" }
         end
         parser.parse(args)
         abort "gori run show: --request-only and --response-only are mutually exclusive" if req_only && resp_only
         id = take_flow_id(positional, "show")
 
         # Close the store before any abort (abort/exit skip ensure blocks); get_flow
-        # has already loaded the BLOBs we need.
+        # has already loaded the BLOBs we need. A WebSocket flow (101) also carries a
+        # ws_messages log — fetch it now while the store is open.
         store = open_store(resolve_read_project(project_name, db_path))
-        detail = begin
-          store.get_flow(id)
+        detail, ws_msgs = begin
+          d = store.get_flow(id)
+          msgs = d && d.row.status == 101 ? store.ws_messages(id) : [] of Store::WsMessage
+          {d, msgs}
         ensure
           store.close
         end
@@ -200,8 +206,8 @@ module Gori
         show_response = !req_only
         case format
         when :raw  then show_raw(detail, show_request, show_response)
-        when :json then puts show_json(detail, show_request, show_response)
-        else            show_text(detail, show_request, show_response)
+        when :json then puts show_json(detail, show_request, show_response, ws_msgs)
+        else            show_text(detail, show_request, show_response, ws_msgs)
         end
       end
 
@@ -223,7 +229,8 @@ module Gori
         STDOUT.flush
       end
 
-      private def self.show_text(detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
+      private def self.show_text(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                 ws_msgs : Array(Store::WsMessage)) : Nil
         if req
           puts "=== REQUEST (#{detail.http_version}) ==="
           print_message_text(detail.request_head, display_body(detail.request_head, detail.request_body))
@@ -241,10 +248,28 @@ module Gori
           elsif detail.error.nil?
             puts "(no response captured)"
           end
+          unless ws_msgs.empty?
+            puts ""
+            puts "=== WEBSOCKET MESSAGES (#{ws_msgs.size}) ==="
+            ws_msgs.each { |m| puts ws_message_text(m) }
+          end
         end
       end
 
-      private def self.show_json(detail : Store::FlowDetail, req : Bool, resp : Bool) : String
+      # "→ out" (client→server) / "← in" (server→client). Text frames print their
+      # (scrubbed) payload; binary frames print a size + short hex preview.
+      private def self.ws_message_text(m : Store::WsMessage) : String
+        arrow = m.direction == "out" ? "→" : "←"
+        if m.text?
+          "#{arrow} #{String.new(m.payload).scrub}"
+        else
+          preview = m.payload[0, {m.payload.size, 16}.min].hexstring
+          "#{arrow} [binary #{m.payload.size}B] #{preview}#{m.payload.size > 16 ? "…" : ""}"
+        end
+      end
+
+      private def self.show_json(detail : Store::FlowDetail, req : Bool, resp : Bool,
+                                 ws_msgs : Array(Store::WsMessage)) : String
         JSON.build do |j|
           j.object do
             j.field "flow" do
@@ -271,6 +296,21 @@ module Gori
                   j.field "body", scrub(resp_body)
                   j.field "body_decoded", resp_decoded
                   j.field "body_truncated", detail.response_body_truncated?
+                end
+              end
+              unless ws_msgs.empty?
+                j.field "ws_messages" do
+                  j.array do
+                    ws_msgs.each do |m|
+                      j.object do
+                        j.field "direction", m.direction
+                        j.field "opcode", m.opcode
+                        j.field "text", m.text?
+                        j.field "payload", m.text? ? String.new(m.payload).scrub : nil
+                        j.field "size", m.payload.size
+                      end
+                    end
+                  end
                 end
               end
             end
@@ -302,6 +342,7 @@ module Gori
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run replay: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run replay: missing value for #{f}" }
         end
         parser.parse(args)
         id = take_flow_id(positional, "replay")
@@ -319,6 +360,7 @@ module Gori
         override = target_override # copy the closured flag into a plain local so || narrows
         scheme, host, port = Replay::FlowRequest.parse_target(override || built.target)
         abort "gori run replay: could not determine a target host" if host.empty?
+        abort "gori run replay: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
         use_h2 = force_h2 || built.http2
         verify = !insecure
         result = use_h2 ? Replay::H2Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify) : Replay::Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
@@ -443,6 +485,7 @@ module Gori
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run fuzz: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run fuzz: missing value for #{f}" }
         end
         parser.parse(args)
 
@@ -569,6 +612,7 @@ module Gori
         target = override || default_target || abort("gori run fuzz: --target is required for --request/stdin")
         scheme, host, port = Replay::FlowRequest.parse_target(target)
         abort "gori run fuzz: could not determine a target host" if host.empty?
+        abort "gori run fuzz: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
         {scheme, host, port}
       end
 
@@ -661,6 +705,7 @@ module Gori
           p.on("--export=PATH", "Write to PATH instead of STDOUT") { |v| export_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run findings: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run findings: missing value for #{f}" }
         end
         parser.parse(args)
 
@@ -702,8 +747,10 @@ module Gori
       private def self.findings_text(findings : Array(Store::Finding)) : String
         String.build do |io|
           findings.each do |f|
-            io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << "]  " << f.title
-            io << "  (" << f.host << ')' if f.host
+            io << '#' << f.id << "  [" << f.severity.label << '/' << f.status.label << "]  " << Findings::Export.one_line(f.title)
+            if h = f.host
+              io << "  (" << Findings::Export.one_line(h) << ')'
+            end
             io << "  flow#" << f.flow_id if f.flow_id
             io << '\n'
           end
@@ -719,6 +766,7 @@ module Gori
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run projects: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run projects: missing value for #{f}" }
         end
         parser.parse(args)
 

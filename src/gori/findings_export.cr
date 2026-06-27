@@ -17,10 +17,10 @@ module Gori
           io << "_" << findings.size << " findings · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
           findings.each do |f|
             flow = f.flow_id.try { |fid| store.get_flow(fid) }
-            io << "\n## [" << f.severity.label << "] " << f.title << "\n\n"
+            io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
             io << "- **Severity:** " << f.severity.label << "\n"
             io << "- **Status:** " << f.status.label << "\n"
-            io << "- **Host:** " << (f.host || "—") << "\n"
+            io << "- **Host:** " << (f.host.try { |h| one_line(h) } || "—") << "\n"
             if fid = f.flow_id
               io << "- **Flow:** "
               if flow
@@ -59,28 +59,60 @@ module Gori
         end
       end
 
+      # Collapse control characters (CR/LF/tab/…) to a single space so a value with
+      # embedded newlines can't break the single-line structure it sits in — a
+      # Markdown heading here, a one-row line in the text export. Shared with
+      # `gori run findings --format text`.
+      def self.one_line(s : String) : String
+        s.gsub(/[[:cntrl:]]+/, " ").strip
+      end
+
       private def self.append_evidence(io : String::Builder, label : String, head : Bytes?, body : Bytes?) : Nil
         return if head.nil? || head.empty?
         cap = EVIDENCE_CAP
-        io << "\n### " << label << "\n\n```http\n"
-        # HEAD: headers are text but can carry stray non-UTF-8 (obs-text) bytes — scrub
-        # them so the report stays a valid UTF-8 file; cap it like the body. rstrip the
-        # header block's trailing CRLF CRLF so a single blank line (added below) sits
-        # between headers and body instead of a stack of empty lines.
-        hslice = head.size > cap ? head[0, cap] : head
-        io << String.new(hslice).scrub.rstrip
-        io << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
-        if body && !body.empty?
-          slice = body[0, {body.size, cap}.min]
-          text = String.new(slice)
-          if text.valid_encoding?
-            io << "\n\n" << text
-            io << "\n\n[… body truncated, #{body.size} bytes total …]" if body.size > cap
-          else
-            io << "\n\n[binary body omitted, #{body.size} bytes]"
+        # Build the embedded request/response text first, THEN pick a fence longer
+        # than any backtick run inside it. Bodies are fully attacker-controlled
+        # (proxied traffic), so a bare ``` line in a body would otherwise close the
+        # ```http fence early and inject live Markdown/HTML into the shared report.
+        content = String.build do |c|
+          # HEAD: headers are text but can carry stray non-UTF-8 (obs-text) bytes —
+          # scrub them so the report stays valid UTF-8; cap it like the body. rstrip
+          # the header block's trailing CRLF CRLF so a single blank line (added
+          # below) sits between headers and body instead of a stack of empty lines.
+          hslice = head.size > cap ? head[0, cap] : head
+          c << String.new(hslice).scrub.rstrip
+          c << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
+          if body && !body.empty?
+            slice = body[0, {body.size, cap}.min]
+            text = String.new(slice)
+            if text.valid_encoding?
+              c << "\n\n" << text
+              c << "\n\n[… body truncated, #{body.size} bytes total …]" if body.size > cap
+            else
+              c << "\n\n[binary body omitted, #{body.size} bytes]"
+            end
           end
         end
-        io << "\n```\n"
+        fence = "`" * fence_len(content)
+        io << "\n### " << label << "\n\n" << fence << "http\n"
+        io << content << "\n" << fence << "\n"
+      end
+
+      # A CommonMark fenced block is closed only by a line of >= as many backticks
+      # as the opener, so use one more than the longest backtick run in the content
+      # (minimum 3) — guaranteeing no embedded line can terminate it.
+      private def self.fence_len(content : String) : Int32
+        longest = 0
+        run = 0
+        content.each_char do |ch|
+          if ch == '`'
+            run += 1
+            longest = run if run > longest
+          else
+            run = 0
+          end
+        end
+        {3, longest + 1}.max
       end
     end
   end

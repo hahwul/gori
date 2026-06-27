@@ -40,7 +40,7 @@ module Gori::Proxy::Tls
         LibCrypto.x509_set_pubkey(x, pubkey.handle)
 
         add_ext(x, NID_BASIC_CONSTR, is_ca ? "critical,CA:TRUE" : "critical,CA:FALSE")
-        add_ext(x, NID_SUBJECT_ALT, "DNS:#{san_dns}") if san_dns && safe_san?(san_dns)
+        add_ext(x, NID_SUBJECT_ALT, san_value(san_dns)) if san_dns && safe_san?(san_dns)
 
         raise Gori::Error.new("X509_sign failed") if LibCrypto.x509_sign(x, signing_key.handle, LibCrypto.evp_sha256) == 0
         Cert.new(x)
@@ -58,6 +58,30 @@ module Gori::Proxy::Tls
     # that bogus host — the safe outcome) rather than minting an injected cert.
     private def self.safe_san?(host : String) : Bool
       !host.empty? && host.bytesize <= 253 && (host =~ /\A[A-Za-z0-9.\-*]+\z/) != nil
+    end
+
+    # An IP-literal CONNECT/SNI target must get an iPAddress SAN, not a dNSName:
+    # RFC 6125 / RFC 2818 clients (curl, browsers) verify a literal IP against an
+    # iPAddress SAN and reject a cert that only carries DNS:1.2.3.4 — which blocked
+    # MITM of any HTTPS target addressed by IP. The IPv4 character set is a subset
+    # of safe_san?'s, so this stays injection-safe.
+    private def self.san_value(host : String) : String
+      ipv4?(host) ? "IP:#{host}" : "DNS:#{host}"
+    end
+
+    # CANONICAL dotted-quad only. OpenSSL's IP-SAN parser (a2i_GENERAL_NAME) rejects
+    # zero-padded octets ("01.02.03.04"), so accepting them here would emit an
+    # IP:<host> SAN that fails X509V3_EXT_nconf_nid → the leaf mint aborts and the
+    # TLS MITM handshake tears down. A non-canonical IP falls through to a DNS SAN
+    # instead (harmless: it just won't verify for that odd literal), never a crash.
+    private def self.ipv4?(host : String) : Bool
+      octets = host.split('.')
+      return false unless octets.size == 4
+      octets.all? do |o|
+        next false if o.empty? || o.size > 3
+        next false if o.size > 1 && o[0] == '0' # no leading zeros
+        o.to_u8? != nil                         # 0..255
+      end
     end
 
     private def self.add_ext(x : LibCrypto::X509, nid : Int32, value : String) : Nil

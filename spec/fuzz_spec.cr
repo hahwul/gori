@@ -47,6 +47,24 @@ describe F::Template do
     F::Template.parse("a§§b").position_count.should eq(0)
     String.new(F::Template.parse("a§§b").render([] of String)).should eq("a§b")
     F::Template.parse("a§b").position_count.should eq(0) # unbalanced trailing § → literal
+    String.new(F::Template.parse("a§b").render([] of String)).should eq("a§b")
+  end
+
+  it "keeps the literal tail after a position when a trailing § is unbalanced (no truncation)" do
+    # x=§A§&y=§z : one position (A), then a stray trailing § that opens no pair.
+    t = F::Template.parse("x=§A§&y=§z")
+    t.position_count.should eq(1)
+    # render must keep '&y=§z' verbatim — it used to drop everything from the stray §.
+    String.new(t.render(["PP"])).should eq("x=PP&y=§z")
+  end
+
+  it "auto-mark leaves empty values unmarked instead of injecting a literal § (§§)" do
+    # Empty values across query / cookie / urlencoded body / JSON must not be wrapped.
+    F::Template.auto_mark("GET /?a=&b=2 HTTP/1.1\r\n\r\n").should eq("GET /?a=&b=§2§ HTTP/1.1\r\n\r\n")
+    body = "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"a\":\"\",\"b\":\"x\"}"
+    marked = F::Template.auto_mark(body)
+    marked.includes?("§§").should be_false                # no escaped-literal collision
+    F::Template.parse(marked).position_count.should eq(1) # only "b"
   end
 
   it "renders defaults back to the base request" do
@@ -113,6 +131,15 @@ describe F::ContentLength do
     synced[(synced.size - 4), 4].should eq(body) # last 4 bytes are the exact binary body
     String.new(synced[0, synced.index!(0x0d_u8)]).should eq("POST / HTTP/1.1")
   end
+
+  it "splits at the FIRST blank line: an LF-terminated head whose body holds a CRLFCRLF" do
+    # Head ends with LF LF; the body itself contains a \r\n\r\n. The boundary must be
+    # the head's LFLF (so CL counts the whole body), not the body's later CRLFCRLF.
+    req = "POST / HTTP/1.0\nContent-Length: 0\n\nA\r\n\r\nB".to_slice
+    synced = F::ContentLength.sync(req)
+    # body is "A\r\n\r\nB" = 6 bytes; the head's LF line ending is preserved.
+    String.new(synced).should eq("POST / HTTP/1.0\nContent-Length: 6\n\nA\r\n\r\nB")
+  end
 end
 
 describe F::PayloadSet do
@@ -167,6 +194,16 @@ describe F::Generator do
     huge = F::PayloadSet.new(F::NumberRange.new(0_i64, Int64::MAX, step: 1_i64))
     g = F::Generator.new(base, [huge, huge], F::Config.new(mode: F::Mode::ClusterBomb))
     g.total.should be_nil
+  end
+
+  it "clusterbomb total honours the set-0 fallback when sets < positions" do
+    # 2 positions, ONE set (size 3): position 1 falls back to set 0, like each().
+    s1 = F::PayloadSet.new(F::InlineList.new(["x", "y", "z"]))
+    g = F::Generator.new(base, [s1], F::Config.new(mode: F::Mode::ClusterBomb))
+    g.total.should eq(9) # 3 × 3 (was nil/'?' before) — total must agree with each()
+    seen = 0
+    g.each { seen += 1 }
+    seen.should eq(9)
   end
 end
 

@@ -39,19 +39,20 @@ module Gori::Fuzz
       io.to_slice
     end
 
-    # Locate the head/body separator: prefer CRLFCRLF, fall back to LFLF. Returns the
-    # separator's start index (nil if none), its width, and the head's line ending.
+    # Locate the head/body separator = the FIRST blank line, whether CRLFCRLF or
+    # LFLF. Returns its start index (nil if none), width, and line ending. A single
+    # left-to-right scan (not "all CRLFCRLF, then all LFLF") matters when the head is
+    # LF-terminated but the BODY contains a CRLFCRLF: scanning all CRLFCRLF first would
+    # find the body's and split at the wrong place. A well-formed CRLF head has no
+    # LFLF inside it, so this is unchanged for normal CRLF messages.
     private def self.boundary(bytes : Bytes) : {Int32?, Int32, String}
       i = 0
-      while i + 3 < bytes.size
-        if bytes[i] == 0x0d_u8 && bytes[i + 1] == 0x0a_u8 && bytes[i + 2] == 0x0d_u8 && bytes[i + 3] == 0x0a_u8
+      while i + 1 < bytes.size
+        return {i, 2, "\n"} if bytes[i] == 0x0a_u8 && bytes[i + 1] == 0x0a_u8 # LFLF
+        if i + 3 < bytes.size && bytes[i] == 0x0d_u8 && bytes[i + 1] == 0x0a_u8 &&
+           bytes[i + 2] == 0x0d_u8 && bytes[i + 3] == 0x0a_u8 # CRLFCRLF
           return {i, 4, "\r\n"}
         end
-        i += 1
-      end
-      i = 0
-      while i + 1 < bytes.size
-        return {i, 2, "\n"} if bytes[i] == 0x0a_u8 && bytes[i + 1] == 0x0a_u8
         i += 1
       end
       {nil, 0, "\r\n"}

@@ -122,6 +122,60 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
   end
 
+  it "mints an IP-literal leaf a client verifies by IP (iPAddress SAN, not DNS)" do
+    with_ca_dir do |dir|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+      server_ctx = ca.context_for("127.0.0.1")
+
+      client_ctx = OpenSSL::SSL::Context::Client.new
+      ca_cert = Gori::Proxy::Tls::Cert.read_pem(File.join(dir, "root.crt.pem"))
+      store = LibSSL.ssl_ctx_get_cert_store(client_ctx.to_unsafe)
+      LibCrypto.x509_store_add_cert(store, ca_cert.handle)
+
+      tcp_server = TCPServer.new("127.0.0.1", 0)
+      port = tcp_server.local_address.port
+      result = Channel(String).new
+
+      spawn do
+        conn = tcp_server.accept
+        ssl = OpenSSL::SSL::Socket::Server.new(conn, server_ctx, sync_close: true)
+        ssl.puts(ssl.gets)
+        ssl.flush
+        ssl.close
+      rescue ex
+        result.send("server-error: #{ex.message}")
+      end
+
+      spawn do
+        tcp = TCPSocket.new("127.0.0.1", port)
+        # hostname "127.0.0.1" → OpenSSL verifies the literal IP against the
+        # iPAddress SAN. A DNS:127.0.0.1 SAN (the old bug) fails this, exactly like
+        # curl rejected it with "subjectAltName does not match ipv4 address".
+        ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_ctx, sync_close: true, hostname: "127.0.0.1")
+        ssl.puts("ping")
+        ssl.flush
+        echo = ssl.gets
+        ssl.close
+        result.send("ok: #{echo}")
+      rescue ex
+        result.send("client-error: #{ex.class}: #{ex.message}")
+      end
+
+      result.receive.should eq("ok: ping")
+    end
+  end
+
+  it "does not abort the handshake for a non-canonical (zero-padded) IP authority" do
+    with_ca_dir do |dir|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+      # OpenSSL's IP-SAN parser rejects "01.02.03.04"; minting must fall back to a
+      # DNS SAN — context_for would raise Gori::Error out of CertBuilder.add_ext under
+      # the old lenient ipv4?, failing this test.
+      ctx = ca.context_for("01.02.03.04")
+      ctx.should be_a(OpenSSL::SSL::Context::Server)
+    end
+  end
+
   it "caches the context per host" do
     with_ca_dir do |dir|
       ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
@@ -139,8 +193,8 @@ describe Gori::Proxy::Tls::CertAuthority do
 
       ca.regenerate!
 
-      ca.ca_cert_pem.should_not eq(old_pem)         # a brand-new root identity
-      ca.spki_sha256_base64.should_not eq(old_spki) # new key → new SPKI pin
+      ca.ca_cert_pem.should_not eq(old_pem)            # a brand-new root identity
+      ca.spki_sha256_base64.should_not eq(old_spki)    # new key → new SPKI pin
       ca.context_for("a.test").should_not be(old_leaf) # stale leaf evicted
       # The swap is persisted: a reload reads the NEW root, not the old one.
       Gori::Proxy::Tls::CertAuthority.load_or_create(dir).ca_cert_pem.should eq(ca.ca_cert_pem)

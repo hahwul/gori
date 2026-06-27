@@ -76,6 +76,56 @@ private def start_h2_origin_truncated(status : Int32, partial : String) : Int32
   port
 end
 
+# A cleartext-h2 origin that ENFORCES flow control: it sends `body` as DATA frames
+# but never exceeds the available connection/stream window (both start at the 65535
+# default), blocking for the client's WINDOW_UPDATE frames to replenish. A client
+# that never sends WINDOW_UPDATE stalls past 65535 bytes (the bug this guards).
+private def start_h2_origin_flow_controlled(status : Int32, body : Bytes) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    Frame.read_preface(conn)
+    # drain to the request's END_STREAM (a body-less GET)
+    loop do
+      f = Frame.read(conn)
+      break if f.nil?
+      break if f.frame_type == Frame::Type::Headers && f.stream_id == 1 && f.end_stream?
+    end
+    conn.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32, Bytes.empty).to_bytes)
+    sb = HPACK::Encoder.new.encode([{":status", status.to_s}])
+    conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, sb).to_bytes)
+    conn.flush
+
+    conn_win = 65535
+    stream_win = 65535
+    offset = 0
+    begin
+      while offset < body.size
+        while conn_win <= 0 || stream_win <= 0
+          f = Frame.read(conn)
+          break if f.nil?
+          next unless f.frame_type == Frame::Type::WindowUpdate
+          inc = (IO::ByteFormat::BigEndian.decode(UInt32, f.payload) & 0x7fff_ffff).to_i
+          f.stream_id == 0 ? (conn_win += inc) : (stream_win += inc)
+        end
+        n = {16384, body.size - offset, conn_win, stream_win}.min
+        last = offset + n >= body.size
+        conn.write(Frame::Header.new(Frame::Type::Data.value, last ? Frame::END_STREAM : 0_u8, 1_u32, body[offset, n]).to_bytes)
+        conn.flush
+        conn_win -= n
+        stream_win -= n
+        offset += n
+      end
+      sleep 0.2.seconds
+    rescue
+    end
+    conn.close
+  end
+  port
+end
+
 describe Gori::Replay::H2Engine do
   it "replays a GET as real cleartext h2 and reassembles the response" do
     seen = Channel(String).new(1)
@@ -99,7 +149,7 @@ describe Gori::Replay::H2Engine do
     request = "GET /trunc HTTP/2\r\n\r\n".to_slice
     result = Gori::Replay::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
 
-    result.ok?.should be_true                            # a status + partial body did arrive
+    result.ok?.should be_true # a status + partial body did arrive
     result.response.not_nil!.status.should eq(200)
     String.new(result.body.not_nil!).should eq("partial") # what arrived is captured
     result.incomplete?.should be_true                     # but no END_STREAM — incomplete
@@ -122,5 +172,17 @@ describe Gori::Replay::H2Engine do
       scheme: "http", host: "127.0.0.1", port: 1, verify_upstream: false)
     result.ok?.should be_false
     result.error.should_not be_nil
+  end
+
+  it "credits flow-control windows so a response past the default window completes" do
+    body = Bytes.new(100_000) { |i| (65 + i % 26).to_u8 } # 100 KB > the 65535 window
+    port = start_h2_origin_flow_controlled(200, body)
+
+    result = Gori::Replay::H2Engine.send("GET / HTTP/2\r\nhost: 127.0.0.1\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    result.ok?.should be_true # would time out (incomplete) without WINDOW_UPDATE
+    result.response.not_nil!.status.should eq(200)
+    result.body.not_nil!.size.should eq(100_000)
   end
 end

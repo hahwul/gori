@@ -10,13 +10,14 @@ module Gori
   #   method:post path:/api OR flag:x   # OR of AND-groups
   #   -host:cdn  status:5xx  login      # negation, status class, free text
   #   body:token                        # scan request/response body bytes
-  #   size:>10000 dur:>=500 dur:<2s     # response bytes / latency (ms; ms|s suffix)
+  #   size:>10000 dur:>=500 dur:<2s     # total bytes (req+resp) / latency (ms; ms|s)
+  #   reqsize:>1000 respsize:<500       # request-only / response-only byte size
   #   header:set-cookie                 # substring over request/response head bytes
   #   body~secret\d+  host~^api\.       # `~` = regex (host path url header body)
   module QL
-    # `:` fields:  host path method scheme status size dur header body flag
+    # `:` fields:  host path method scheme status size reqsize respsize dur header body flag
     # `~` regex on: host path url header body   (+ bare words = free text).
-    # Comparison ops (<= >= < > =) apply to status/size/dur.
+    # Comparison ops (<= >= < > =) apply to status/size/reqsize/respsize/dur.
     struct Filter
       getter sql : String # safe to splice into "WHERE ..."; values are in `args`
       getter args : Array(DB::Any)
@@ -89,18 +90,30 @@ module Gori
     private def self.field_cond(field : String, value : String) : {String, Array(DB::Any)}?
       return nil if value.empty?
       case field
-      when "host"   then {"lower(host) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
-      when "path"   then {"lower(target) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
-      when "method" then {"upper(method) = ?", [value.upcase] of DB::Any}
-      when "scheme" then {"scheme = ?", [value.downcase] of DB::Any}
-      when "status" then status_cond(value)
-      when "size"   then numeric_cond("response_size", value)
-      when "dur"    then duration_cond(value)
-      when "header" then header_cond(value)
-      when "body"   then body_cond(value)
-      when "flag"   then {"0", [] of DB::Any} # tags not implemented yet → matches nothing
-      else               free_text(value)     # unknown field: treat the value as free text
+      when "host"                        then {"lower(host) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+      when "path"                        then {"lower(target) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
+      when "method"                      then {"upper(method) = ?", [value.upcase] of DB::Any}
+      when "scheme"                      then {"scheme = ?", [value.downcase] of DB::Any}
+      when "status"                      then status_cond(value)
+      when "size", "reqsize", "respsize" then size_cond(field, value)
+      when "dur"                         then duration_cond(value)
+      when "header"                      then header_cond(value)
+      when "body"                        then body_cond(value)
+      when "flag"                        then {"0", [] of DB::Any} # tags not implemented yet → matches nothing
+      else                                    free_text(value)     # unknown field: treat the value as free text
       end
+    end
+
+    # size: → the TOTAL bytes (request + response), so it matches the displayed/JSON
+    # `size`; reqsize:/respsize: target a single side. A NULL response_size (pending
+    # flow) never matches respsize:, while size:/reqsize: fall back on the request bytes.
+    private def self.size_cond(field : String, value : String) : {String, Array(DB::Any)}?
+      column = case field
+               when "reqsize"  then "request_size"
+               when "respsize" then "response_size"
+               else                 "(request_size + COALESCE(response_size, 0))"
+               end
+      numeric_cond(column, value)
     end
 
     # Body search uses the trigram FTS index over request/response body text —
@@ -153,10 +166,12 @@ module Gori
       {"status #{op} ?", [n] of DB::Any}
     end
 
-    # Numeric comparison on an INTEGER column (size: → response_size). A NULL column
-    # (a pending flow has no response_size) never satisfies `col <op> ?`, so such rows
-    # fall out of both the positive and the negated form — pending flows just don't
-    # match. Non-numeric values yield nil (the term is dropped, like a bad status:).
+    # Numeric comparison on an INTEGER column/expression. `size:` uses the total
+    # (request_size + COALESCE(response_size, 0)) so it matches the displayed/JSON
+    # `size`; `reqsize:`/`respsize:` target one side. A NULL column (e.g. respsize:
+    # on a pending flow) never satisfies `col <op> ?`, so such rows fall out of both
+    # the positive and negated form. Non-numeric values yield nil (the term is
+    # dropped, like a bad status:).
     private def self.numeric_cond(column : String, value : String) : {String, Array(DB::Any)}?
       op, rest = split_op(value)
       n = rest.to_i64?

@@ -19,6 +19,10 @@ module Gori::Proxy
   # loop, forwards them byte-faithfully, captures the request/response pair, and
   # streams the response back.
   class ClientConn
+    # Max consecutive interim 1xx responses to forward before giving up — a guard
+    # against a hostile upstream streaming an unbounded run of body-less 103s.
+    MAX_INTERIM = 64
+
     # `fixed_host`/`fixed_port` pin all requests to one origin (post-CONNECT TLS
     # tunnel); when nil the upstream is resolved per request from the target /
     # Host header (plaintext forward proxy). `tls_upstream` wraps the origin
@@ -162,7 +166,10 @@ module Gori::Proxy
         write_intercept_drop
         return false
       end
-      # forward (edited or original): re-parse the sent head for capture (P7).
+      # forward the decision bytes BYTE-EXACT (P7): re-parse the sent head for capture.
+      # The intercept editor owns the "update Content-Length" decision (it knows what
+      # was edited) — see InterceptView#forward_bytes; the proxy must not rewrite bytes
+      # the human chose to send (e.g. a deliberately CL-mismatched smuggling probe).
       sent_head, edited_body = split_message(decision.bytes)
       sent_req = Codec::Http1.parse_request_head(sent_head)
       retryable = retryable_request?(req, edited_body.nil? || edited_body.empty?)
@@ -232,8 +239,51 @@ module Gori::Proxy
         release_upstream
         return false
       end
-      ttfb = (Time.instant - started).total_microseconds.to_i64
       resp = Codec::Http1.parse_response_head(resp_head)
+
+      # Interim 1xx (RFC 9110 §15.2): an informational response (100 Continue,
+      # 103 Early Hints, …) is NOT the final response. A conformant proxy forwards
+      # it to the client verbatim and keeps reading until the final (>=200) status;
+      # otherwise the real response is stranded on the upstream socket — it gets
+      # wrongly recorded as THIS flow's response AND served to the next reused
+      # request on this connection (response desync). 101 Switching Protocols is the
+      # exception: it is terminal (the protocol upgrade), so it falls through to the
+      # normal path (WebSocket handling below).
+      interim_seen = 0
+      while interim_response?(resp)
+        # RFC 9112 §6: a 1xx response MUST NOT carry content. An interim that declares
+        # a body (Content-Length / Transfer-Encoding) is malformed AND a desync vector
+        # — its "body" can embed a fake final response while the real one is stranded
+        # for the next reused request. Refuse it: close the connection (don't parse a
+        # body as the next response, don't reuse the upstream).
+        if interim_has_body?(resp)
+          @sink.on_response(FlowMapper.error_response(flow_id, "malformed interim 1xx response (declared a body)"))
+          release_upstream
+          return false
+        end
+        # Cap consecutive 1xx (like Burp/nginx) so a hostile upstream streaming endless
+        # body-less 103s can't spin this fiber forever / flood the client (per-conn DoS).
+        interim_seen += 1
+        if interim_seen > MAX_INTERIM
+          @sink.on_response(FlowMapper.error_response(flow_id, "too many interim 1xx responses (>#{MAX_INTERIM})"))
+          release_upstream
+          return false
+        end
+        # RFC 9110 §15.2 / RFC 7231: a proxy MUST NOT forward a 1xx to an HTTP/1.0
+        # client (it can't parse it). Read past it for everyone; forward only to 1.1.
+        if req.version == "HTTP/1.1"
+          @io.write(resp_head) # forward byte-exact (P6/P7); no rewrite on interim
+          @io.flush
+        end
+        resp_head = Codec::Http1.read_head(upstream)
+        if resp_head.nil?
+          @sink.on_response(FlowMapper.error_response(flow_id, "upstream closed after interim 1xx response"))
+          release_upstream
+          return false
+        end
+        resp = Codec::Http1.parse_response_head(resp_head)
+      end
+      ttfb = (Time.instant - started).total_microseconds.to_i64
 
       # Match&Replace (response head). Framing/keep-alive/upgrade stay on the
       # ORIGINAL response so the upstream body is read correctly.
@@ -343,6 +393,10 @@ module Gori::Proxy
         release_upstream
         return false
       end
+      # Forward the decision bytes BYTE-EXACT (P7); the editor already synced
+      # Content-Length for an edited body (InterceptView#forward_bytes). Keeping the
+      # proxy byte-exact also preserves the head verbatim for a HEAD/304/204 response
+      # forwarded unedited (whose Content-Length describes the entity, not the bytes).
       out_head, out_body = split_message(decision.bytes)
       sent_resp = Codec::Http1.parse_response_head(out_head)
       @io.write(out_head)
@@ -379,6 +433,19 @@ module Gori::Proxy
 
     private def websocket_upgrade?(resp : Codec::RawResponse) : Bool
       resp.status == 101 && resp.headers.get?("Upgrade").try(&.downcase) == "websocket"
+    end
+
+    # An interim 1xx informational response (100 Continue / 102 / 103 Early Hints /
+    # …) — forwarded to the client, then skipped to read the final status. 101
+    # Switching Protocols is terminal (handled as an upgrade), so it is NOT interim.
+    private def interim_response?(resp : Codec::RawResponse) : Bool
+      resp.status >= 100 && resp.status < 200 && resp.status != 101
+    end
+
+    # A 1xx that illegally declares body framing (Content-Length / Transfer-Encoding)
+    # — malformed per RFC 9112 §6 and a response-smuggling vector.
+    private def interim_has_body?(resp : Codec::RawResponse) : Bool
+      !!(resp.headers.get?("Content-Length") || resp.headers.get?("Transfer-Encoding"))
     end
 
     # CONNECT host:port -> 200, then TLS MITM (if configured) or blind tunnel.

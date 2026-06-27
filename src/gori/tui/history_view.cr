@@ -35,7 +35,7 @@ module Gori::Tui
     # We load the MOST RECENT this-many (so a live tail keeps updating) and show an
     # "older not loaded" note; the raw frames remain whole in SQLite.
     DETAIL_LOG_CAP = 10_000
-    QL_FIELDS      = %w(host method status path scheme body header size dur flag)
+    QL_FIELDS      = %w(host method status path scheme body header size reqsize respsize dur flag)
     METHOD_VAL     = %w(GET POST PUT DELETE PATCH HEAD OPTIONS QUERY)
 
     getter rows : Array(Store::FlowRow)
@@ -65,8 +65,8 @@ module Gori::Tui
       @reveal = false                        # 'w' shows whitespace/CR/LF as glyphs (smuggling)
       @reveal_lines = nil.as(Array(String)?) # cached revealed lines, keyed on the pane bytes ptr
       @reveal_lines_src = Pointer(UInt8).null
-      @detail_hex = false                # 'x' toggles a raw hex dump of the current pane (req/resp)
-      @detail_hex_bytes = nil.as(Bytes?) # cached combined head+body for the current pane (hex source)
+      @detail_hex = false                      # 'x' toggles a raw hex dump of the current pane (req/resp)
+      @detail_hex_bytes = nil.as(Bytes?)       # cached combined head+body for the current pane (hex source)
       @pretty = Settings.pretty_bodies_default # 'p' pretty-prints bodies (display only); pushed from the runner
       # Windowed detail content, rebuilt only when the detail/pane changes (NOT on
       # scroll or every frame). The head/notes are pre-styled; the body is kept RAW
@@ -389,7 +389,17 @@ module Gori::Tui
     # ^F search: 0-based indices of the detail text lines containing `query` (case-
     # insensitive). Empty in hex mode (the hex view has no text lines).
     setter search_hl : String
-    setter reveal : Bool
+
+    # Reveal-whitespace renders on a separate path with a different (usually much
+    # shorter) line count than the normal/pretty view, so toggling it must reset
+    # the scroll offset — otherwise a stale offset left over from scrolling the
+    # longer view blanks the revealed pane (it has nothing to render that far down).
+    # Change-detected because the runner pushes this every frame.
+    def reveal=(on : Bool) : Nil
+      return if @reveal == on
+      @reveal = on
+      @detail_scroll = 0
+    end
 
     # Pretty toggle feeds `build_detail_view`, so a change must drop the windowed
     # cache (unlike reveal/hex, which render on separate paths). Change-detected

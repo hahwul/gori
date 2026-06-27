@@ -29,6 +29,8 @@ module Gori
     # Sends a request byte-exact to its origin and captures the response (P7).
     # Reuses the proxy's dialer/codec; no proxying — this is a direct send.
     module Engine
+      MAX_INTERIM = 64 # cap a run of interim 1xx responses (hostile-origin guard)
+
       def self.send(request : Bytes, *, scheme : String, host : String, port : Int32,
                     verify_upstream : Bool, sni : String? = nil,
                     timeout : Time::Span? = nil) : Result
@@ -48,6 +50,27 @@ module Gori
           return error("no response from #{host}:#{port}", started) unless head
 
           resp = Proxy::Codec::Http1.parse_response_head(head)
+          # Skip interim 1xx informational responses (RFC 9110 §15.2): a captured
+          # request carrying `Expect: 100-continue`, or an origin/CDN that emits
+          # 103 Early Hints, would otherwise return the 100/103 as the replay
+          # result. Read on until the final (>=200) status. 101 Switching Protocols
+          # is terminal (a protocol upgrade), so it is NOT skipped.
+          interim_seen = 0
+          while resp.status >= 100 && resp.status < 200 && resp.status != 101
+            # RFC 9112 §6: a 1xx MUST NOT carry content. One that declares a body
+            # (Content-Length / Transfer-Encoding) is malformed and a desync vector
+            # (its body can embed a fake final response) — refuse it.
+            if resp.headers.get?("Content-Length") || resp.headers.get?("Transfer-Encoding")
+              return error("malformed interim 1xx response (declared a body) from #{host}:#{port}", started)
+            end
+            # Cap the run so an origin streaming endless body-less 103s can't hang the
+            # replay/fuzz worker fiber indefinitely (there is no whole-request deadline).
+            interim_seen += 1
+            return error("too many interim 1xx responses from #{host}:#{port}", started) if interim_seen > MAX_INTERIM
+            head = Proxy::Codec::Http1.read_head(upstream)
+            return error("upstream closed after interim 1xx from #{host}:#{port}", started) unless head
+            resp = Proxy::Codec::Http1.parse_response_head(head)
+          end
           framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
           body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len)
           Result.new(head, body, resp, elapsed(started), incomplete: !complete)

@@ -5,6 +5,7 @@ require "./highlight"
 require "./text_area"
 require "./url"
 require "../interceptor"
+require "../fuzz/content_length"
 
 module Gori::Tui
   # The Intercept tab: a queue of held requests/responses (P4 — the human decides
@@ -39,6 +40,7 @@ module Gori::Tui
       @qcx = 0
       @preedit = ""
       @loaded_id = nil.as(Int64?) # which item the editor currently holds
+      @editor_dirty = false       # whether the held bytes were actually edited (vs just viewed)
       # Cached highlight of the selected held item's raw bytes (read-only detail
       # pane). Held bytes are immutable and item ids are monotonic, so the id is a
       # perfect cache key — recomputed only when the selection changes, not on
@@ -128,6 +130,7 @@ module Gori::Tui
       elsif it = selected_item
         @editor.set_text(String.new(it.raw))
         @loaded_id = it.id
+        @editor_dirty = false # freshly loaded — not yet modified
         @editing = true
       end
     end
@@ -136,22 +139,36 @@ module Gori::Tui
       @editing = false
     end
 
-    # The forward payload: edited bytes when the editor holds THIS item, else the
-    # original bytes (byte-exact passthrough, P7).
+    # The forward payload. An UNEDITED forward (editor never opened, or opened to view
+    # only) returns the original raw bytes BYTE-EXACT (P7) — so merely inspecting a
+    # held message can't mutate it, and a deliberately CL-mismatched smuggling probe
+    # forwards untouched. Only an ACTUAL edit returns the editor's bytes, with
+    # Content-Length recomputed to match the edited body (Burp's "update
+    # Content-Length", default on; add_when_missing: true so adding a body to a GET
+    # that had none still gets framed). The proxy itself stays byte-exact — the
+    # update-CL decision lives here, in the human's editor, not the wire path. (An edit
+    # still normalizes line endings — a text-editor limitation shared with Replay.)
     def forward_bytes(it : Interceptor::Item) : Bytes
-      @loaded_id == it.id ? @editor.to_bytes : it.raw
+      return it.raw unless @loaded_id == it.id && @editor_dirty
+      Fuzz::ContentLength.sync(@editor.to_bytes, add_when_missing: true)
     end
 
     def edit_insert(ch : Char) : Nil
-      @editor.insert(ch) if @editing
+      return unless @editing
+      @editor.insert(ch)
+      @editor_dirty = true
     end
 
     def edit_newline : Nil
-      @editor.insert_newline if @editing
+      return unless @editing
+      @editor.insert_newline
+      @editor_dirty = true
     end
 
     def edit_backspace : Nil
-      @editor.backspace if @editing
+      return unless @editing
+      @editor.backspace
+      @editor_dirty = true
     end
 
     def edit_move(dr : Int32, dc : Int32) : Nil
@@ -178,7 +195,9 @@ module Gori::Tui
     # Replace the held item's editable bytes (e.g. from the external editor); only
     # while editing — forward_bytes then sends the edited text.
     def replace_editor(text : String) : Nil
-      @editor.set_text(text) if @editing
+      return unless @editing
+      @editor.set_text(text)
+      @editor_dirty = true
     end
 
     # --- focus ring (driven by the Runner's Tab/Shift-Tab) ---
@@ -295,7 +314,8 @@ module Gori::Tui
         Frame.card(screen, body, "INTERCEPT", bg: Theme.bg, border: pane_border(focused))
         inner = body.inset(1, 1)
         screen.text(inner.x + 1, inner.y, "no held messages", Theme.muted)
-        screen.text(inner.x + 1, inner.y + 2, "turn intercept on (i) — held requests/responses appear here", Theme.muted)
+        hint = @enabled ? "intercept ON — in-scope requests/responses will appear here" : "turn intercept on (i) — held requests/responses appear here"
+        screen.text(inner.x + 1, inner.y + 2, hint, Theme.muted)
         return
       end
 
