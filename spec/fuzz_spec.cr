@@ -131,6 +131,15 @@ describe F::ContentLength do
     synced[(synced.size - 4), 4].should eq(body) # last 4 bytes are the exact binary body
     String.new(synced[0, synced.index!(0x0d_u8)]).should eq("POST / HTTP/1.1")
   end
+
+  it "splits at the FIRST blank line: an LF-terminated head whose body holds a CRLFCRLF" do
+    # Head ends with LF LF; the body itself contains a \r\n\r\n. The boundary must be
+    # the head's LFLF (so CL counts the whole body), not the body's later CRLFCRLF.
+    req = "POST / HTTP/1.0\nContent-Length: 0\n\nA\r\n\r\nB".to_slice
+    synced = F::ContentLength.sync(req)
+    # body is "A\r\n\r\nB" = 6 bytes; the head's LF line ending is preserved.
+    String.new(synced).should eq("POST / HTTP/1.0\nContent-Length: 6\n\nA\r\n\r\nB")
+  end
 end
 
 describe F::PayloadSet do
