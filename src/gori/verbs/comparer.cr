@@ -23,7 +23,7 @@ module Gori
       r.register Verb::Definition.new(
         "comparer.toggle-pane", "Compare requests/responses",
         "Toggle the diff between the two requests and the two responses",
-        Verb::Scope::Comparer, available: in_comparer) { |ctx| ctx.comparer_toggle_pane; nil }
+        Verb::Scope::Comparer, available: in_comparer, mnemonic: 't') { |ctx| ctx.comparer_toggle_pane; nil }
     end
   end
 end

@@ -45,10 +45,10 @@ module Gori
       # deliberately-distinct command surfaces:
       #   • Ctrl-P palette → for_scope(Global)  — gori-wide app control (settings,
       #     capture, scope/rules, tab nav, quit …).
-      #   • ":" command line → for_scope(current_scope) — only the FOCUSED area's
-      #     own actions (Body: replay/copy/open …, Replay: send/new, …).
-      # Keeping them disjoint is the whole point: app control never clutters ":",
-      # and area actions never clutter the palette. Per-verb available? still gates
+      #   • space menu → for_scope(current_scope) — only the FOCUSED area's own
+      #     actions (Body: replay/copy/open …, Replay: send/new, …).
+      # Keeping them disjoint is the whole point: app control never clutters the
+      # space menu, and area actions never clutter the palette. Per-verb available? gates
       # (e.g. history.copy only when current_tab == :history).
       def for_scope(scope : Scope, ctx : ExecContext, query : String = "") : Array(Definition)
         rank(self.select { |v| !v.hidden? && v.scope == scope && v.available?(ctx) }, query)

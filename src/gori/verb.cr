@@ -50,16 +50,36 @@ module Gori
       # Exposed for discoverability but not yet functional — the palette shows it
       # dimmed with a "soon" badge so users aren't surprised when it only toasts.
       getter? coming_soon : Bool
+      # The single key that fronts this verb in the bottom-right "space" action
+      # menu (helix leader). Optional: a verb already carrying a plain single-char
+      # chord (y / f / / …) gets its menu key from that for free (see #menu_key);
+      # this overrides for verbs whose only chord is ctrl/shift or none.
+      getter mnemonic : Char?
 
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
                      @available : ExecContext -> Bool = ->(_ctx : ExecContext) { true },
-                     @coming_soon : Bool = false,
+                     @coming_soon : Bool = false, @mnemonic : Char? = nil,
                      &@handler : ExecContext -> String?)
       end
 
       def available?(ctx : ExecContext) : Bool
         @available.call(ctx)
+      end
+
+      # The key the space menu shows + binds: an explicit mnemonic, else the first
+      # plain single-char chord (no ctrl/alt/shift), else nil (verb is excluded
+      # from the menu — it has no single-key handle). Hidden nav chords like
+      # "enter"/"left"/"space" are multi-char names, so they never qualify.
+      def menu_key : Char?
+        if m = @mnemonic
+          return m
+        end
+        @chords.each do |c|
+          next if c.ctrl || c.alt || c.shift
+          return c.key[0] if c.key.size == 1
+        end
+        nil
       end
 
       # Runs the verb. The SAME path is used by keybindings and the palette.

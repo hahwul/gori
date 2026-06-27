@@ -34,7 +34,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       @findings.detail_open? ? "[ ] sev · { } status · t title · e notes · o flow · r replay · d del · ←/esc back" \
-                             : "↑/↓ move · ↵ open · n new · d delete · x export · : cmds · esc tabs"
+                             : "↑/↓ move · ↵ open · n new · d delete · x export · space cmds · esc tabs"
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil

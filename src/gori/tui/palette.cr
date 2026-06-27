@@ -6,7 +6,7 @@ require "../verb"
 module Gori::Tui
   # The command palette overlay (Ctrl-P) — the GORI-WIDE app-control surface:
   # settings, capture, scope/rules, tab navigation, quit … (the Global-scope verbs).
-  # Area-specific actions live in the ":" command line (CommandLine) instead, so the
+  # Area-specific actions live in the space menu (SpaceMenu) instead, so the
   # two surfaces stay disjoint. Fuzzy-filters the registry; the chosen verb runs
   # through the SAME Verb::Definition#call path as a keybinding (P1 — no separate
   # code path). Pure input/state + rendering; the Runner owns open/close + execute.

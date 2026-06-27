@@ -37,7 +37,7 @@ module Gori::Tui
       elsif @intercept.querying?
         "type condition · ↵ apply · esc clear"
       else
-        "↑/↓ move · ↵/e edit · f fwd · d drop · F all · / filter · c catch · i on/off · : cmds · ↹ detail · esc tabs"
+        "↑/↓ move · ↵/e edit · f fwd · d drop · F all · / filter · c catch · i on/off · space cmds · ↹ detail · esc tabs"
       end
     end
 
@@ -54,8 +54,8 @@ module Gori::Tui
       key = ev.key
       if ev.ctrl? && key.lower_p?
         @host.open_palette
-      elsif ev.char == ':' && !ev.ctrl? && !ev.alt? && !@intercept.editing?
-        @host.open_command # ":" cmdline in the navigable queue (editing swallows ":" as a char)
+      elsif ev.key.space? && !ev.ctrl? && !ev.alt? && !@intercept.editing?
+        @host.open_space_menu # space menu in the navigable queue (editing swallows space as a char)
       elsif @intercept.editing?
         handle_edit_key(ev)
       else

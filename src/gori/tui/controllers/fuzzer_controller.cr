@@ -81,7 +81,7 @@ module Gori::Tui
       when :target   then "type URL · ↵/↓ template · ^R run · ↹ pane · esc tabs"
       when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ↹ pane"
       when :config   then "↑/↓ field · ←/→ change·type-tab · type edit · ⏎ add · Del rm · ↹ pane"
-      when :results  then "↑/↓ select · ↵ detail · o sort · m matched · ^R run · ^X stop · ↹ pane"
+      when :results  then "↑/↓ select · ↵ detail · o sort · m matched · ^R run · ^X stop · space cmds · ↹ pane"
       when :detail   then "↑/↓ scroll · ←/→ req/resp · esc back"
       else                "↹/esc tabs"
       end
@@ -108,6 +108,12 @@ module Gori::Tui
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
       return true if v.nil?
+      # space opens the action menu in the navigable results pane; the editor panes
+      # (target/template/config) take it as a literal char, so gate on :results.
+      if v.focus == :results && ev.key.space? && !ev.ctrl? && !ev.alt?
+        @host.open_space_menu
+        return true
+      end
       c = ev.char || ev.key.to_char
       unless dispatch_chord(chord_action(ev, c), v, c)
         ev.key.escape? ? handle_escape(v) : handle_pane_key(ev, v)

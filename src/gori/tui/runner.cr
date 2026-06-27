@@ -33,7 +33,7 @@ require "./flow_picker"
 require "./settings_view"
 require "./tabs_overlay"
 require "./palette"
-require "./command_line"
+require "./space_menu"
 require "../paths"
 require "../browser"
 require "../external_editor"
@@ -43,7 +43,6 @@ require "../scope"
 require "../rules"
 
 module Gori::Tui
-
   # The shell controller for ONE open project: owns view state, implements the
   # verb ExecContext (so verbs drive the UI), and runs the main loop —
   # poll(50ms) → drain new-flow events → render (diff). `run` returns :quit (exit
@@ -58,16 +57,16 @@ module Gori::Tui
       @rules_overlay = RulesOverlay.new(@session.rules)
       @finding_form = FindingForm.new
       @palette = PaletteState.new(@session.registry)
-      @command = CommandLine.new(@session.registry)
+      @space_menu = SpaceMenu.new(@session.registry)
       # Land on the home tab, but never on a hidden one (settings:tabs may hide Project,
       # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
       @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :comparer_pick | :settings | :tabs
-      # The ":" context command line (vim/helix-style). Orthogonal to @overlay so it
-      # floats over WHATEVER is underneath (the History list, an open detail, the
-      # Sitemap …) without disturbing that state; the scope is captured at open time.
-      @command_open = false
+      # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
+      # to @overlay so it floats over WHATEVER is underneath (the History list, an
+      # open detail …) without disturbing that state; the scope is captured at open.
+      @space_menu_open = false
       # The ^G "go to line" prompt — also orthogonal to @overlay (floats over an
       # editor or the detail view). @goto_target is the view captured at ^G time.
       @goto_open = false
@@ -111,11 +110,11 @@ module Gori::Tui
       # from @tabs (the controller registry built below).
       @tabs_overlay = TabsOverlay.new
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
-      @focus = :menu                  # default focus on the tab bar (TABS) on project entry; :body for content
-      @toast = nil.as(String?)        # transient action feedback; nil → show key hints
-      @outcome = :running             # :running | :quit | :back
-      @quit_armed = false             # first ^D/^C arms quit; second confirms (avoids accidental exit)
-      @resized = false                # set on a Resize event → next frame full-repaints
+      @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
+      @toast = nil.as(String?)         # transient action feedback; nil → show key hints
+      @outcome = :running              # :running | :quit | :back
+      @quit_armed = false              # first ^D/^C arms quit; second confirms (avoids accidental exit)
+      @resized = false                 # set on a Resize event → next frame full-repaints
 
       # Per-tab controllers (strangler-fig: tabs migrate into this registry one at a
       # time; an unmigrated tab is absent and still runs through the case ladders
@@ -235,7 +234,7 @@ module Gori::Tui
             drained += 1
           end
         end
-        dirty = true if drain_events          # always drains; true if anything arrived
+        dirty = true if drain_events # always drains; true if anything arrived
         if replay_controller.drain_results
           search_recompute # a ^F over a now-updated response keeps fresh hits
           dirty = true
@@ -336,9 +335,9 @@ module Gori::Tui
     end
 
     private def apply_preedit(text : String) : Nil
-      return @command.set_preedit(text) if @command_open # the ":" line wins (it's modal)
-      return if @goto_open                                # ^G is digits-only; swallow IME (don't leak to the editor)
-      if @search_open                                     # ^F find — IME composing text
+      return if @space_menu_open # the space menu has no text field — swallow IME while modal
+      return if @goto_open       # ^G is digits-only; swallow IME (don't leak to the editor)
+      if @search_open            # ^F find — IME composing text
         @search_preedit = text
         return
       end
@@ -385,11 +384,11 @@ module Gori::Tui
       end
       @quit_armed = false
 
-      @toast = nil # clear last action's feedback; a new action may set it again
-      return handle_command_key(ev) if @command_open # the ":" line is modal while up
-      return handle_goto_key(ev) if @goto_open       # the ^G line prompt is modal while up
-      return handle_search_key(ev) if @search_open   # the ^F find prompt is modal while up
-      return handle_rename_key(ev) if @rename_open   # the sub-tab rename prompt is modal while up
+      @toast = nil                                         # clear last action's feedback; a new action may set it again
+      return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
+      return handle_goto_key(ev) if @goto_open             # the ^G line prompt is modal while up
+      return handle_search_key(ev) if @search_open         # the ^F find prompt is modal while up
+      return handle_rename_key(ev) if @rename_open         # the sub-tab rename prompt is modal while up
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
       # multi-line view (editors move the cursor, read-only panes scroll). Modifier
       # keys, so they work inside text editors without conflicting with typing.
@@ -494,35 +493,34 @@ module Gori::Tui
       end
 
       # Migrated tabs: the controller claims body keys (true = handled). An unmigrated
-      # tab is absent from @tabs and falls through to ":" / the verb keymap below.
+      # tab is absent from @tabs and falls through to the verb keymap / space menu below.
       if @overlay == :none && @focus == :body && (c = @tabs[@active_tab]?)
         return if c.handle_body_key(ev)
-      end
-
-      # ":" opens the context command line for the focused area. Only reached here
-      # in NAVIGABLE contexts — text editors (Replay request/target, Notes, Project
-      # desc, the QL "/" bar, Findings notes, Intercept edit) swallow keys above, so
-      # ":" stays a literal char there. (The read-only Replay response pane returns
-      # before this point; it routes ":" from handle_replay_response.)
-      if ev.char == ':' && !ev.ctrl? && !ev.alt?
-        open_command
-        return
       end
 
       chord = Keybind.from_event(ev)
       return unless chord
       if id = @keymap.lookup(chord, current_scope)
-        if result = @session.registry[id].call(self)
-          @toast = result
-        end
+        @toast = @session.registry[id].call(self) || @toast
+        return
       end
+
+      # "space" opens the focused area's action menu (helix leader). Placed AFTER the
+      # scoped keymap so any area that already binds space wins — Sitemap's space
+      # toggles a tree node (sitemap.toggle), and Project's controller claims space
+      # for the scope-rule toggle above. Only reached in NAVIGABLE contexts: text
+      # editors (Replay request/target, Notes, Project desc, the QL "/" bar, Findings
+      # notes, Intercept edit) swallow keys upstream, so space stays a literal char
+      # there. (The read-only Replay response pane + the Intercept queue route space
+      # from their own handlers, which return before this point.)
+      open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
     end
 
     # --- mouse dispatch ------------------------------------------------------
     # Mouse coords are 1-based; Rect is 0-based → convert once (mx/my). We recompute
     # Layout.compute from the LIVE size (identical to render), so the click geometry
     # can't drift from what was drawn. The click path mirrors handle_key's precedence:
-    # the ":" command line → centered modal overlays → tab bar → sub-tab strip →
+    # the space menu → centered modal overlays → tab bar → sub-tab strip →
     # per-tab body. Wheel is routed separately. NOTE: enabling mouse takes over the
     # terminal's alternate-scroll (which used to arrive as ↑/↓ key bursts), so wheel
     # MUST be handled here or list scrolling silently dies.
@@ -547,7 +545,7 @@ module Gori::Tui
     # Right-click: rename a Replay/Fuzzer sub-tab chip (the one context menu we have).
     # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
-      return unless renameable_subtabs? && @overlay == :none && !@command_open && !@rename_open && subtabs_shown?
+      return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !@rename_open && subtabs_shown?
       sub_rect, _ = BodyChrome.carve_subtab_row(layout.body)
       return unless sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(sub_rect, subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
@@ -559,9 +557,9 @@ module Gori::Tui
     # body drill-in, so it falls through to the tab bar + body (the bar stays live,
     # like the keyboard). Centered modals capture every click (outside → dismiss).
     private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
-      return if @command_open && click_command(layout, mx, my)
+      return if @space_menu_open && click_space_menu(layout, mx, my)
       if @goto_open || @search_open || @rename_open
-        close_goto if @goto_open       # a click anywhere dismisses the bottom prompt (like esc)
+        close_goto if @goto_open # a click anywhere dismisses the bottom prompt (like esc)
         close_search if @search_open
         close_rename if @rename_open
         return
@@ -579,7 +577,7 @@ module Gori::Tui
     private def modal_overlay? : Bool
       case @overlay
       when :palette, :rules, :finding_new, :confirm, :browser, :comparer_pick, :settings, :tabs then true
-      else                                                                                          false
+      else                                                                                           false
       end
     end
 
@@ -631,16 +629,14 @@ module Gori::Tui
 
     # (click_project moved to ProjectController#handle_click)
 
-    # The ":" command line floats over everything: a click on a suggestion runs it,
-    # a click elsewhere dismisses the line. Always consumes the click (returns true).
-    private def click_command(layout : Layout, mx : Int32, my : Int32) : Bool
-      if idx = @command.row_at(layout.body, mx, my)
-        @command.set_selected(idx)
-        verb = @command.selected_verb
-        close_command
-        @toast = verb.call(self) || @toast if verb
+    # The space menu floats over everything: a click on an entry runs it, a click
+    # elsewhere dismisses it. Always consumes the click (returns true).
+    private def click_space_menu(layout : Layout, mx : Int32, my : Int32) : Bool
+      if idx = @space_menu.row_at(layout.body, mx, my)
+        @space_menu.set_selected(idx)
+        run_space_verb(@space_menu.selected_verb)
       else
-        close_command
+        close_space_menu
       end
       true
     end
@@ -748,7 +744,7 @@ module Gori::Tui
     # free-scroll panes (History detail, Replay response) scroll independently.
     private def handle_wheel(layout : Layout, mx : Int32, my : Int32, dir : Int32) : Nil
       step = dir * 3
-      return @command.move(step) if @command_open
+      return @space_menu.move(step) if @space_menu_open
       return wheel_overlay(step) if modal_overlay?
       return unless layout.body.contains?(mx, my)
       @tabs[@active_tab]?.try(&.handle_wheel(step)) # all body tabs are migrated; controller owns the wheel
@@ -773,7 +769,6 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
-
       when key.escape? then @overlay = :none
       when key.enter?  then (@toast = "rule needs a pattern — e.g. resp: Old => New" unless @rules_overlay.submit)
       when key.tab?    then @rules_overlay.toggle_selected
@@ -788,7 +783,6 @@ module Gori::Tui
           @rules_overlay.insert(c)
           @rules_overlay.set_preedit("") # commit any preedit
         end
-
       end
     end
 
@@ -797,7 +791,6 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
-
       when key.escape?    then @overlay = :none
       when key.enter?     then create_finding_from_form
       when key.tab?       then @finding_form.severity_cycle(1)
@@ -810,7 +803,6 @@ module Gori::Tui
           @finding_form.insert(c)
           @finding_form.set_preedit("") # commit any preedit
         end
-
       end
     end
 
@@ -821,8 +813,8 @@ module Gori::Tui
     private def handle_confirm_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       case
-      when key.escape?, key.n?                          then close_confirm
-      when key.y?                                       then run_confirm
+      when key.escape?, key.n?                            then close_confirm
+      when key.y?                                         then run_confirm
       when key.left?, key.right?, key.tab?, key.back_tab? then @confirm.try(&.move)
       when key.enter?
         (@confirm.try(&.confirm_selected?)) ? run_confirm : close_confirm
@@ -934,8 +926,8 @@ module Gori::Tui
                  else               msg
                  end
         @theme_restore = Settings.theme if @settings_view.section == :theme # saved → don't revert this on esc
-        reconcile_mouse                            # the EDITOR section holds the Mouse toggle — apply it live
-        @pretty = Settings.pretty_bodies_default # …and the Pretty-print-bodies toggle — apply it live too
+        reconcile_mouse                                                     # the EDITOR section holds the Mouse toggle — apply it live
+        @pretty = Settings.pretty_bodies_default                            # …and the Pretty-print-bodies toggle — apply it live too
       elsif key.up?
         @settings_view.move_field(-1)
         preview_theme # ↑/↓ moves the theme-list selection in the :theme section
@@ -1129,7 +1121,6 @@ module Gori::Tui
       @overlay = :none
     end
 
-
     private def handle_palette_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
@@ -1150,31 +1141,34 @@ module Gori::Tui
         @palette.append(c, self)
         @palette.set_preedit("") if @palette.responds_to?(:set_preedit)
       end
-
-
     end
 
-    # Keys for the ":" context command line — mirrors handle_palette_key; Tab/↓ move
-    # down the suggestions (clamped, like the palette) and the chosen verb runs scoped
-    # to where ":" was pressed (P1). esc cancels without running anything.
-    private def handle_command_key(ev : Termisu::Event::Key) : Nil
+    # Keys for the space action menu — mnemonic-first (helix leader): a printable key
+    # matching an entry's menu_key runs it; ↑/↓ (+ Tab) navigate and ↵ runs the
+    # highlighted one; esc or any unmapped key dismisses. The chosen verb runs scoped
+    # to where space was pressed (P1).
+    private def handle_space_menu_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       if key.escape?
-        close_command
-      elsif key.enter?
-        verb = @command.selected_verb
-        close_command
-        @toast = verb.call(self) || @toast if verb
+        close_space_menu
       elsif key.up? || key.back_tab?
-        @command.move(-1)
+        @space_menu.move(-1)
       elsif key.down? || key.tab?
-        @command.move(1)
-      elsif key.backspace?
-        @command.backspace(self)
-      elsif c && !ev.ctrl? && !ev.alt?
-        @command.append(c, self)
+        @space_menu.move(1)
+      elsif key.enter?
+        run_space_verb(@space_menu.selected_verb)
+      elsif (c = ev.char) && !ev.ctrl? && !ev.alt?
+        verb = @space_menu.verb_for(c)
+        verb ? run_space_verb(verb) : close_space_menu
+      else
+        close_space_menu # an unmapped leader key dismisses (helix feel)
       end
+    end
+
+    # Close the menu, then run the verb (if any) and surface its status toast.
+    private def run_space_verb(verb : Verb::Definition?) : Nil
+      close_space_menu
+      @toast = verb.call(self) || @toast if verb
     end
 
     # Which focused multi-line view ^G/^F jumps, or nil if the context has none. The
@@ -1186,7 +1180,7 @@ module Gori::Tui
     end
 
     # The ^G "go to line" prompt: digits only; Enter jumps the captured target, Esc
-    # cancels. A modal mini-input (mirrors handle_command_key) drawn over the status.
+    # cancels. A modal mini-input (mirrors handle_palette_key) drawn over the status.
     private def handle_goto_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
@@ -1238,10 +1232,10 @@ module Gori::Tui
       case @search_target
       when :replay_request  then replay_controller.current_view.try { |v| v.request_search_hl = q }
       when :replay_response then replay_controller.current_view.try { |v| v.response_search_hl = q }
-      when :notes                            then notes_controller.view.search_hl = q
-      when :project                          then project_controller.view.search_hl = q
-      when :detail                           then history_controller.view.search_hl = q
-      when :intercept                        then intercept_controller.view.search_hl = q
+      when :notes           then notes_controller.view.search_hl = q
+      when :project         then project_controller.view.search_hl = q
+      when :detail          then history_controller.view.search_hl = q
+      when :intercept       then intercept_controller.view.search_hl = q
       end
     end
 
@@ -1366,8 +1360,7 @@ module Gori::Tui
       @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
-      # The ":" command line floats over everything else (drawn last), anchored to
-      # the bottom: the input on the status row, the suggestion list stacked above.
+      # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
 
       # Sync terminal hardware cursor to the focused input caret (if any view
@@ -1387,10 +1380,10 @@ module Gori::Tui
       flush_screen
     end
 
-    # The bottom-anchored input prompts (drawn last, over the status row). All four
-    # are orthogonal to @overlay, so they float over whatever is underneath.
+    # The space menu (bottom-right popup) + the bottom-anchored input prompts, all
+    # drawn last and orthogonal to @overlay so they float over whatever's underneath.
     private def render_prompts(screen : Screen, layout : Layout) : Nil
-      @command.render(screen, layout.status, layout.body) if @command_open
+      @space_menu.render(screen, layout.body) if @space_menu_open
       render_goto_prompt(screen, layout.status) if @goto_open
       render_search_prompt(screen, layout.status) if @search_open
       render_rename_prompt(screen, layout.status) if @rename_open
@@ -1431,16 +1424,17 @@ module Gori::Tui
     # always knows which region the keys drive: an open overlay wins, else the
     # tab bar (TABS) vs the content pane (BODY).
     private def focus_label : String
+      return "SPACE" if @space_menu_open # orthogonal to @overlay — floats over it
       case @overlay
-      when :palette     then "PALETTE"
-      when :rules       then "RULES"
-      when :finding_new then "FINDING"
-      when :detail      then "DETAIL"
-      when :confirm     then "CONFIRM"
-      when :browser     then "BROWSER"
+      when :palette       then "PALETTE"
+      when :rules         then "RULES"
+      when :finding_new   then "FINDING"
+      when :detail        then "DETAIL"
+      when :confirm       then "CONFIRM"
+      when :browser       then "BROWSER"
       when :comparer_pick then "PICK FLOW"
-      when :settings    then "SETTINGS"
-      when :tabs        then "TAB BAR"
+      when :settings      then "SETTINGS"
+      when :tabs          then "TAB BAR"
       else
         case @focus
         when :menu    then "TABS"
@@ -1463,16 +1457,17 @@ module Gori::Tui
     # the active tab, and any open overlay (so the user always sees what the keys
     # under their fingers do right now).
     private def key_hints : String
+      return "press a key · ↑/↓ select · ↵ run · esc close" if @space_menu_open
       case @overlay
-      when :palette     then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when :rules       then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
-      when :finding_new then "type title · ↵ create · esc cancel"
-      when :confirm     then "←/→ choose · y confirm · n/esc cancel · ↵ select"
-      when :browser     then "↑/↓ select · ↵ open · esc cancel"
+      when :palette       then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
+      when :rules         then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
+      when :finding_new   then "type title · ↵ create · esc cancel"
+      when :confirm       then "←/→ choose · y confirm · n/esc cancel · ↵ select"
+      when :browser       then "↑/↓ select · ↵ open · esc cancel"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
-      when :tabs        then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
-      when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · ^G goto · ^F find · esc back"
+      when :settings      then "↑/↓ field · type to edit · ↵ save · esc close"
+      when :tabs          then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
+      when :detail        then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
@@ -1524,7 +1519,6 @@ module Gori::Tui
       findings_controller.commit
       convert_controller.commit
     end
-
 
     def status(message : String) : Nil
       @toast = message
@@ -1593,25 +1587,32 @@ module Gori::Tui
       @pretty
     end
 
-    # Open the ":" command line scoped to the CURRENT focus area. current_scope is
-    # read BEFORE flipping @command_open (which is orthogonal to @overlay) so the
-    # scope reflects where ":" was pressed — the History list → Body, an open detail
-    # → HistoryDetail, the Replay response → Replay, the tab bar → Sidebar.
-    def open_command : Nil
-      @command.open(current_scope, self) # captures the scope + populates results
-      # Don't open an empty modal: some focus areas (the tab bar, Sitemap, an open
-      # detail) have only hidden nav verbs, so for_scope is empty. Opening there would
-      # trap input behind an empty list — keep ":" a no-op (with a hint) instead.
-      if @command.results.empty?
+    # Open the space action menu scoped to the CURRENT focus area. current_scope is
+    # read BEFORE flipping @space_menu_open (which is orthogonal to @overlay) so the
+    # scope reflects where space was pressed — the History list → Body, an open
+    # detail → HistoryDetail, the Replay response → Replay, the tab bar → Sidebar.
+    def open_space_menu : Nil
+      @space_menu.open(current_scope, self) # captures the scope + populates entries
+      # Don't open an empty popup: some focus areas (the tab bar, an open detail)
+      # have only hidden nav verbs, so the entry list is empty. Opening there would
+      # trap input behind an empty box — keep space a no-op (with a hint) instead.
+      if @space_menu.entries.empty?
         @toast = "no commands for this area"
         return
       end
-      @command_open = true
+      # Need a body tall enough to draw the card (≥3 rows); below that the popup
+      # renders nothing yet would still capture input. Bail with a hint rather than
+      # trap the user behind an invisible modal (only hit at the minimum 40×8 size).
+      w, h = @backend.size
+      if Layout.compute(w, h).body.h < 3
+        @toast = "terminal too short for the menu"
+        return
+      end
+      @space_menu_open = true
     end
 
-    private def close_command : Nil
-      @command.set_preedit("") # don't carry a half-composed IME string into the next open
-      @command_open = false
+    private def close_space_menu : Nil
+      @space_menu_open = false
     end
 
     private def open_goto(target : Symbol) : Nil
@@ -1806,7 +1807,6 @@ module Gori::Tui
       # while in the body drops into the new tab's first pane.
       view_focus_first if @focus == :body
     end
-
 
     # --- unified focus ring (tab-bar ◂▸ body panes) --------------------------
 
@@ -2231,8 +2231,8 @@ module Gori::Tui
     def open_settings(section : Symbol) : Nil
       case section
       when :network, :editor, :theme
-        @settings_view.reload(section)            # :theme reloads custom themes — may reconcile the live palette
-        @resized = true if section == :theme      # so force a full repaint (an edited/removed active theme just changed)
+        @settings_view.reload(section)       # :theme reloads custom themes — may reconcile the live palette
+        @resized = true if section == :theme # so force a full repaint (an edited/removed active theme just changed)
         @overlay = :settings
         @theme_restore = section == :theme ? Settings.theme : nil # baseline for live-preview revert
       when :tabs

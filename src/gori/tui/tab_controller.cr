@@ -21,7 +21,7 @@ module Gori::Tui
     abstract def switch_tab(tab : Symbol) : Nil        # change the active tab (with save-on-leave + on_enter)
     abstract def goto_tab(tab : Symbol) : Nil          # raw: set active tab + body focus, no on_enter/view_focus_first (e.g. ^R → Replay)
     abstract def open_palette : Nil                    # open the command palette overlay
-    abstract def open_command : Nil                    # open the ":" context command line
+    abstract def open_space_menu : Nil                 # open the space action menu (bottom-right)
     # Destructive-action confirmation modal; `action` runs on confirm.
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, &action : -> Nil) : Nil
     abstract def session : Session                     # store / scope / proxy / registry / interceptor
@@ -77,7 +77,7 @@ module Gori::Tui
 
     # --- identity ---
     abstract def tab : Symbol                # the registry key (== Chrome::TABS symbol)
-    abstract def command_scope : Verb::Scope # the `:` command-line scope when this tab + body has focus
+    abstract def command_scope : Verb::Scope # the space-menu scope when this tab + body has focus
 
     # --- rendering --- (`focus` is the shell's @focus: :menu | :subtabs | :body)
     abstract def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
