@@ -216,6 +216,22 @@ private class FakeContext < ExecContext
     true
   end
 
+  def hostov_add_entry : Nil
+    @calls << :hostov_add_entry
+  end
+
+  def hostov_edit_entry : Nil
+    @calls << :hostov_edit_entry
+  end
+
+  def hostov_delete_entry : Nil
+    @calls << :hostov_delete_entry
+  end
+
+  def hostov_entry_selected? : Bool
+    true
+  end
+
   def rules_open : Nil
     @calls << :rules_open
   end

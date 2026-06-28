@@ -21,6 +21,7 @@ module Gori
       Comparer       # the Comparer tab has focus
       Convert        # the Convert tab has focus
       Project        # the Project tab's SCOPE rule list has focus
+      HostOverrides  # the Project tab's HOST OVERRIDES list has focus
       PaletteOpen    # the command palette overlay is up
     end
 

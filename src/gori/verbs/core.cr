@@ -65,6 +65,9 @@ module Gori
         "settings.tabs", "settings:tabs", "Customize the top tab bar — show/hide tabs and reorder them",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:tabs); nil }
       r.register Verb::Definition.new(
+        "settings.host-overrides", "settings:hostnames", "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials",
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hosts); nil }
+      r.register Verb::Definition.new(
         "settings.hotkeys", "settings:hotkeys", "Rebind keyboard shortcuts (press a key) + pick an OS default profile",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hotkeys); nil }
 

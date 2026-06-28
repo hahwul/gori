@@ -35,17 +35,19 @@ describe Gori::Store do
     end
   end
 
-  it "recreates sitemap_tags on open when a sibling-branch migration advanced the DB past V17" do
-    path = File.tempname("gori-aux", ".db")
+  it "upgrades a pre-sitemap_tags DB (V18 migration) and persists tags" do
+    path = File.tempname("gori-v18", ".db")
     begin
-      # Simulate the cross-branch V17 collision: drop our table but leave user_version at 17,
-      # as if a foreign same-numbered migration had advanced this shared DB.
+      # Simulate a DB last migrated before V18: drop sitemap_tags and roll user_version
+      # back to 17 (e.g. a project created on the hostname-overrides branch).
       store = Gori::Store.open(path)
       store.@db.exec("DROP TABLE sitemap_tags")
+      store.@db.exec("PRAGMA user_version = 17")
       store.close
 
-      # Reopen: migrate! is a no-op at v17, but ensure_aux! must recreate the table so tags persist.
+      # Reopen: the V18 migration must create sitemap_tags so tags persist again.
       store = Gori::Store.open(path)
+      store.@db.scalar("PRAGMA user_version").should eq(18)
       store.set_sitemap_tag("acme.test", "/api", "memo")
       store.sitemap_tags[{"acme.test", "/api"}]?.should eq("memo")
       store.close

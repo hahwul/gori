@@ -5,6 +5,7 @@ require "./text_area"
 require "../project"
 require "../store"
 require "../scope"
+require "../host_overrides"
 require "../settings"
 
 module Gori::Tui
@@ -29,7 +30,7 @@ module Gori::Tui
     # the Project tab body holds focus.
     getter pane : Symbol
 
-    def initialize(@scope : Scope, @proxy_url : String = "")
+    def initialize(@scope : Scope, @host_overrides : HostOverrides)
       @project = nil
       @flow_count = 0
       @findings_count = 0
@@ -40,7 +41,7 @@ module Gori::Tui
       @desc_area.follow_x = true # long description lines scroll horizontally to keep the cursor visible
       @desc_dirty = false
 
-      @pane = :scope            # :scope | :desc
+      @pane = :scope            # :scope | :overrides | :desc
       @sel = 0                  # selected rule row in the SCOPE list
       @adding = false           # the inline add/edit row is open
       @edit_id = nil.as(Int64?) # non-nil ⇒ the row is editing an existing rule
@@ -49,6 +50,15 @@ module Gori::Tui
       @add_preedit = ""         # IME preedit for the add-row
       @pend_kind = "include"    # add-row kind chip
       @pend_type = "host"       # add-row match_type chip
+
+      # HOST OVERRIDES pane: its own selection + inline add/edit row, fully independent
+      # of the SCOPE pane above it (single-line "IP host" entry, /etc/hosts order).
+      @ov_sel = 0
+      @ov_adding = false
+      @ov_edit_id = nil.as(Int64?) # non-nil ⇒ editing an existing override
+      @ov_input = ""               # add-row text ("IP host")
+      @ov_icx = 0                  # add-row cursor index
+      @ov_preedit = ""             # IME preedit for the add-row
     end
 
     # Snapshot stats from the live session (called on tab enter and initial run).
@@ -75,6 +85,8 @@ module Gori::Tui
     def set_preedit(text : String) : Nil
       if @pane == :scope && @adding
         @add_preedit = text
+      elsif @pane == :overrides && @ov_adding
+        @ov_preedit = text
       else
         @desc_area.set_preedit(text)
       end
@@ -84,8 +96,8 @@ module Gori::Tui
       @desc_area.text
     end
 
-    # --- focus ring (two panes: :scope ⇄ :desc, cycled by the Runner's Tab ring) ---
-    PANES = [:scope, :desc]
+    # --- focus ring (three panes: :scope → :overrides → :desc, cycled by the Tab ring) ---
+    PANES = [:scope, :overrides, :desc]
 
     def focus_first : Nil
       @pane = :scope
@@ -95,10 +107,12 @@ module Gori::Tui
       @pane = :desc
     end
 
-    # The 's' / scope.edit jump target: focus the SCOPE pane fresh (no half-open row).
+    # The 's' / scope.edit jump target: focus the SCOPE pane fresh (no half-open row in
+    # either list).
     def focus_scope : Nil
       @pane = :scope
       cancel_add
+      cancel_ov_add
     end
 
     # Step between panes; false when there's no further pane in `dir` (the Runner ring
@@ -116,38 +130,65 @@ module Gori::Tui
       @pane = pane if PANES.includes?(pane)
     end
 
-    # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
+    # --- geometry (ONE source of truth so render + every hit-test stay in lockstep) ---
 
-    # The pane symbol under (mx,my): :scope (left card), :desc (right card), or
-    # :overview (top band). Mirrors render's meta_h split + left/right card layout.
-    def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
-      return nil if rect.empty? || !rect.contains?(mx, my)
-      meta_h = {11, {rect.h * 2 // 5, 3}.max}.min
-      return :overview if my < rect.y + meta_h
-      content = Rect.new(rect.x, rect.y + meta_h, rect.w, {rect.h - meta_h, 0}.max)
-      return nil if content.h < 2 || content.w < 4
-      left_w = {(content.w - 1) // 2, 1}.max
-      return :scope if Rect.new(content.x, content.y, left_w, content.h).contains?(mx, my)
-      right = Rect.new(content.x + left_w + 1, content.y, {content.w - left_w - 1, 0}.max, content.h)
-      right.contains?(mx, my) ? :desc : nil
+    # Height of the top OVERVIEW band (capped to ~2/5 of the body, 3..11 rows).
+    private def overview_h(rect : Rect) : Int32
+      {11, {rect.h * 2 // 5, 3}.max}.min
     end
 
-    # Index of the scope-rule row clicked, or nil outside the populated list. Mirrors
-    # render_scope_list: card interior inset(1,1), the optional add-row offset, and
-    # scroll_for's windowing.
+    # The three body-pane rects below the OVERVIEW band: {SCOPE (top-left), HOST
+    # OVERRIDES (bottom-left), DESCRIPTION (full-height right)}, or nil when the body is
+    # too small to split. The left column is halved vertically; DESCRIPTION fills the
+    # right past a 1-col divider.
+    private def body_panes(rect : Rect) : {Rect, Rect, Rect}?
+      oh = overview_h(rect)
+      content = Rect.new(rect.x, rect.y + oh, rect.w, {rect.h - oh, 0}.max)
+      return nil if content.h < 2 || content.w < 4
+      left_w = {(content.w - 1) // 2, 1}.max
+      scope_h = {content.h // 2, 1}.max
+      scope_rect = Rect.new(content.x, content.y, left_w, scope_h)
+      ov_rect = Rect.new(content.x, content.y + scope_h, left_w, {content.h - scope_h, 0}.max)
+      right = Rect.new(content.x + left_w + 1, content.y, {content.w - left_w - 1, 0}.max, content.h)
+      {scope_rect, ov_rect, right}
+    end
+
+    # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
+
+    # The pane symbol under (mx,my): :scope, :overrides, :desc, or :overview (top band).
+    def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if rect.empty? || !rect.contains?(mx, my)
+      return :overview if my < rect.y + overview_h(rect)
+      return nil unless panes = body_panes(rect)
+      return :scope if panes[0].contains?(mx, my)
+      return :overrides if panes[1].contains?(mx, my)
+      panes[2].contains?(mx, my) ? :desc : nil
+    end
+
+    # Index of the scope-rule row clicked, or nil outside the populated list.
     def scope_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless pane_at(rect, mx, my) == :scope
-      meta_h = {11, {rect.h * 2 // 5, 3}.max}.min
-      content = Rect.new(rect.x, rect.y + meta_h, rect.w, {rect.h - meta_h, 0}.max)
-      left_w = {(content.w - 1) // 2, 1}.max
-      inner = Rect.new(content.x, content.y, left_w, content.h).inset(1, 1)
+      return nil unless panes = body_panes(rect)
+      row_at(panes[0].inset(1, 1), mx, my, @adding, @sel, @scope.rules.size)
+    end
+
+    # Index of the host-override row clicked, or nil outside the populated list. Uses the
+    # SAME ov_list_inner offset render does, so the example-hint row never drifts the click.
+    def ov_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless pane_at(rect, mx, my) == :overrides
+      return nil unless panes = body_panes(rect)
+      row_at(ov_list_inner(panes[1].inset(1, 1)), mx, my, @ov_adding, @ov_sel, @host_overrides.entries.size)
+    end
+
+    # Shared row hit-test for the SCOPE/HOST-OVERRIDES list interiors: account for the
+    # optional add-row offset and scroll_for's windowing. Mirrors render_*_list.
+    private def row_at(inner : Rect, mx : Int32, my : Int32, adding : Bool, sel : Int32, n : Int32) : Int32?
       return nil if inner.h <= 0 || !inner.contains?(mx, my)
-      y = @adding ? inner.y + 1 : inner.y
-      rows = @adding ? inner.h - 1 : inner.h
+      y = adding ? inner.y + 1 : inner.y
+      rows = adding ? inner.h - 1 : inner.h
       i = my - y
       return nil if i < 0 || i >= rows
-      n = @scope.rules.size
-      idx = scroll_for(@sel, n, rows) + i
+      idx = scroll_for(sel, n, rows) + i
       idx < n ? idx : nil
     end
 
@@ -158,16 +199,19 @@ module Gori::Tui
       @sel = idx.clamp(0, n - 1)
     end
 
+    # Mouse: select a host override by row index (clamped to the populated list).
+    def select_override(idx : Int32) : Nil
+      n = @host_overrides.entries.size
+      return if n == 0
+      @ov_sel = idx.clamp(0, n - 1)
+    end
+
     # Mouse: place the description-editor cursor at a click. `rect` is the body rect
-    # render() receives; re-derive the right (DESCRIPTION) card + its 1-cell inset
-    # exactly as render does, then map into the @desc_area editor.
+    # render() receives; re-derive the DESCRIPTION card + its 1-cell inset via body_panes
+    # (the same geometry render uses), then map into the @desc_area editor.
     def desc_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      meta_h = {11, {rect.h * 2 // 5, 3}.max}.min
-      content = Rect.new(rect.x, rect.y + meta_h, rect.w, {rect.h - meta_h, 0}.max)
-      return if content.h < 2 || content.w < 4
-      left_w = {(content.w - 1) // 2, 1}.max
-      right = Rect.new(content.x + left_w + 1, content.y, {content.w - left_w - 1, 0}.max, content.h)
-      @desc_area.click_to_cursor(right.inset(1, 1), mx, my)
+      return unless panes = body_panes(rect)
+      @desc_area.click_to_cursor(panes[2].inset(1, 1), mx, my)
     end
 
     # --- SCOPE pane editing (delegated from Runner#handle_project_scope_key) ---
@@ -185,6 +229,12 @@ module Gori::Tui
     # mirroring the DESCRIPTION editor's `at_top?`.
     def scope_at_top? : Bool
       @sel <= 0
+    end
+
+    # Selection on the last rule (or an empty list) → ↓ crosses down to the HOST
+    # OVERRIDES pane (the card directly below in the left column).
+    def scope_at_bottom? : Bool
+      @sel >= @scope.rules.size - 1
     end
 
     def scope_add_start : Nil
@@ -279,6 +329,104 @@ module Gori::Tui
       @sel = @sel.clamp(0, {@scope.rules.size - 1, 0}.max)
     end
 
+    # --- HOST OVERRIDES pane editing (delegated from the controller) — a DISTINCT pane
+    # from SCOPE; the inline row is a single "IP host" line (/etc/hosts order). ---
+    def ov_adding? : Bool
+      @ov_adding
+    end
+
+    def ov_select(d : Int32) : Nil
+      n = @host_overrides.entries.size
+      return if n == 0
+      @ov_sel = (@ov_sel + d).clamp(0, n - 1)
+    end
+
+    # On the first override (or an empty list) → ↑ pops focus to the tab bar.
+    def ov_at_top? : Bool
+      @ov_sel <= 0
+    end
+
+    def ov_add_start : Nil
+      @ov_adding = true
+      @ov_edit_id = nil
+      @ov_input = ""
+      @ov_icx = 0
+      @ov_preedit = ""
+    end
+
+    # Open the add-row pre-filled from the selected override (edit-in-place), "IP host".
+    def ov_edit_start : Nil
+      entry = current_override
+      return unless entry
+      @ov_adding = true
+      @ov_edit_id = entry.id
+      @ov_input = "#{entry.ip} #{entry.host}"
+      @ov_icx = @ov_input.size
+      @ov_preedit = ""
+    end
+
+    def cancel_ov_add : Nil
+      @ov_adding = false
+      @ov_edit_id = nil
+      @ov_input = ""
+      @ov_icx = 0
+      @ov_preedit = ""
+    end
+
+    def ov_input(ch : Char) : Nil
+      @ov_input = "#{@ov_input[0, @ov_icx]}#{ch}#{@ov_input[@ov_icx..]}"
+      @ov_icx += 1
+      @ov_preedit = ""
+    end
+
+    # Backspace the add-row; false when already empty (the controller then closes the row).
+    def ov_backspace : Bool
+      return false if @ov_icx == 0
+      @ov_input = "#{@ov_input[0, @ov_icx - 1]}#{@ov_input[@ov_icx..]}"
+      @ov_icx -= 1
+      true
+    end
+
+    def ov_move_cursor(d : Int32) : Nil
+      @ov_icx = (@ov_icx + d).clamp(0, @ov_input.size)
+    end
+
+    # Commit the add/edit row. Parses "IP host" (/etc/hosts order — IP first). Returns
+    # :ok | :empty | :invalid | :dup so the controller toasts.
+    def ov_commit : Symbol
+      text = @ov_input.strip
+      return :empty if text.empty?
+      parsed = HostOverrides.parse_line(text)
+      return :invalid unless parsed
+      host, ip = parsed
+      ok = if id = @ov_edit_id
+             @host_overrides.update(id, host, ip)
+           else
+             @host_overrides.add(host, ip)
+           end
+      return :dup unless ok
+      cancel_ov_add
+      clamp_ov_sel
+      :ok
+    end
+
+    # Removes the selected override, returning its host (for the toast) or nil.
+    def ov_delete : String?
+      entry = current_override
+      return nil unless entry
+      @host_overrides.remove(entry.id)
+      clamp_ov_sel
+      entry.host
+    end
+
+    private def current_override : HostOverrides::Entry?
+      @host_overrides.entries[@ov_sel]?
+    end
+
+    private def clamp_ov_sel : Nil
+      @ov_sel = @ov_sel.clamp(0, {@host_overrides.entries.size - 1, 0}.max)
+    end
+
     # Replace the description (e.g. from the external editor); marks dirty so save
     # persists it on the next tab-exit.
     def replace_desc(text : String) : Nil
@@ -342,24 +490,21 @@ module Gori::Tui
     end
 
     # Self-framed (like Replay/Intercept): an OVERVIEW card on top (read-only stats),
-    # then SCOPE (left) | DESCRIPTION (right) side-by-side cards — the two focusable
-    # panes. The focused pane's card lights gold.
+    # then SCOPE (top-left) over HOST OVERRIDES (bottom-left) and DESCRIPTION (right) —
+    # three focusable panes. The focused pane's card lights gold.
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       scope_focused = focused && @pane == :scope
+      ov_focused = focused && @pane == :overrides
       desc_focused = focused && @pane == :desc
 
-      # OVERVIEW card on top, full width — capped to ~2/5 height so the panes get the rest.
-      meta_h = {11, {rect.h * 2 // 5, 3}.max}.min
-      render_overview(screen, Rect.new(rect.x, rect.y, rect.w, meta_h))
-
-      content = Rect.new(rect.x, rect.y + meta_h, rect.w, {rect.h - meta_h, 0}.max)
-      return if content.h < 2 || content.w < 4
-      left_w = {(content.w - 1) // 2, 1}.max
-      left = Rect.new(content.x, content.y, left_w, content.h)
-      right = Rect.new(content.x + left_w + 1, content.y, {content.w - left_w - 1, 0}.max, content.h)
-      render_scope_card(screen, left, scope_focused)
-      render_desc_card(screen, right, desc_focused)
+      # OVERVIEW band on top, full width; below it SCOPE (top-left) over HOST OVERRIDES
+      # (bottom-left), with DESCRIPTION filling the right column.
+      render_overview(screen, Rect.new(rect.x, rect.y, rect.w, overview_h(rect)))
+      return unless panes = body_panes(rect)
+      render_scope_card(screen, panes[0], scope_focused)
+      render_overrides_card(screen, panes[1], ov_focused)
+      render_desc_card(screen, panes[2], desc_focused)
     end
 
     private def render_overview(screen : Screen, rect : Rect) : Nil
@@ -373,20 +518,13 @@ module Gori::Tui
       y = inner.y
       max_y = inner.bottom - 1
 
-      # Lead with the proxy address — the one thing a new user must know (point your
-      # client here). On first run (no flows yet) follow it with how to start, since
-      # the empty History/Sitemap tabs don't say.
-      unless @proxy_url.empty?
-        if y <= max_y
-          screen.text(inner.x + 1, y, "Proxy:", Theme.text_bright)
-          screen.text(vx, y, @proxy_url, Theme.accent, width: vw) if vw > 0
-          y += 1
-        end
-        if @flow_count == 0 && y <= max_y
-          screen.text(inner.x + 1, y, "▸ point your client here, then ^P: Open browser · Export CA certificate",
-            Theme.muted, width: {inner.right - inner.x - 1, 0}.max)
-          y += 1
-        end
+      # First run (no flows yet): a one-line signpost on how to start, since the empty
+      # History/Sitemap tabs don't say. The proxy address lives in the status bar /
+      # settings, so it isn't repeated here.
+      if @flow_count == 0 && y <= max_y
+        screen.text(inner.x + 1, y, "▸ first run — point your client at the proxy · ^P: Open browser · Export CA certificate",
+          Theme.muted, width: {inner.right - inner.x - 1, 0}.max)
+        y += 1
       end
 
       lines = [
@@ -476,6 +614,86 @@ module Gori::Tui
       x = screen.text(x, y, "] ", Theme.muted, Theme.bg)
       w = {inner.right - x, 3}.max
       screen.input_line(x, y, @input, @icx, @add_preedit, Theme.text_bright, Theme.bg, width: w)
+    end
+
+    # HOST OVERRIDES card: title + count chip riding the top border, then the entry list
+    # / inline add-row inside. A DISTINCT pane from SCOPE (own card, focus, action menu).
+    private def render_overrides_card(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "HOST OVERRIDES", bg: Theme.bg, border: Frame.pane_border(focused))
+      n = @host_overrides.size
+      meta = " #{n} "
+      mx = {rect.right - meta.size - 1, rect.x + 14}.max
+      screen.text(mx, rect.y, meta, n > 0 ? Theme.text_bright : Theme.muted, Theme.bg) if rect.w > meta.size + 16
+      render_overrides_list(screen, rect.inset(1, 1), focused)
+    end
+
+    # The override list (windowed around the selection) + the inline add/edit row, drawn
+    # inside the HOST OVERRIDES card's interior `inner`. Mirrors render_scope_list, but with
+    # a persistent format-example header on the first row (parity with the settings editor).
+    private def render_overrides_list(screen : Screen, inner : Rect, focused : Bool) : Nil
+      return if inner.h <= 0 || inner.w <= 0
+      # Always-visible format example so the "IP HOSTNAME" entry shape is clear at a glance
+      # (IP first so it survives truncation in a narrow pane).
+      screen.text(inner.x, inner.y, "IP HOSTNAME · e.g. 10.0.0.1 example.com", Theme.muted, width: inner.w)
+      list = ov_list_inner(inner)
+      return if list.h <= 0
+
+      entries = @host_overrides.entries
+      y = list.y
+      rows = list.h
+      if @ov_adding
+        render_ov_add_row(screen, list, y, focused)
+        y += 1
+        rows -= 1
+      end
+      return if rows <= 0
+
+      if entries.empty?
+        screen.text(list.x, y, "(no overrides — a to add)", Theme.muted) unless @ov_adding
+        return
+      end
+
+      scroll = scroll_for(@ov_sel, entries.size, rows)
+      shown = {rows, entries.size - scroll}.min
+      shown.times do |i|
+        idx = scroll + i
+        entry = entries[idx]
+        ry = y + i
+        selected = focused && idx == @ov_sel && !@ov_adding
+        bg = selected ? Theme.accent_bg : Theme.bg
+        if selected
+          screen.fill(Rect.new(list.x, ry, list.w, 1), bg)
+          screen.cell(list.x, ry, '▎', Theme.accent, bg)
+        end
+        render_ov_row(screen, list, ry, entry, selected, bg)
+      end
+    end
+
+    # The HOST OVERRIDES list area: the card interior minus the top example-hint row. ONE
+    # source of truth so render_overrides_list + ov_row_at share the exact same geometry.
+    private def ov_list_inner(inner : Rect) : Rect
+      Rect.new(inner.x, inner.y + 1, inner.w, {inner.h - 1, 0}.max)
+    end
+
+    private def render_ov_row(screen : Screen, inner : Rect, y : Int32, entry : HostOverrides::Entry, selected : Bool, bg : Color) : Nil
+      fg = selected ? Theme.text_bright : Theme.text
+      x = inner.x + 1
+      # IP column (accent) padded to ~40% of the pane, then "→ host" with the remainder.
+      ipw = {inner.w * 2 // 5, 7}.max
+      screen.text(x, y, entry.ip, Theme.accent, bg, width: ipw)
+      ax = x + ipw
+      screen.text(ax, y, "→ ", Theme.muted, bg) if inner.right > ax
+      hx = ax + 2
+      screen.text(hx, y, entry.host, fg, bg, width: {inner.right - hx, 1}.max) if inner.right > hx
+    end
+
+    # The inline "add"/"edit" row: a single "IP host" input (no chips — unlike SCOPE).
+    private def render_ov_add_row(screen : Screen, inner : Rect, y : Int32, focused : Bool) : Nil
+      x = inner.x + 1
+      x = screen.text(x, y, @ov_edit_id ? "edit " : "add ", Theme.accent, Theme.bg)
+      w = {inner.right - x, 3}.max
+      screen.input_line(x, y, @ov_input, @ov_icx, @ov_preedit, Theme.text_bright, Theme.bg, width: w)
     end
 
     private def render_desc_card(screen : Screen, rect : Rect, focused : Bool) : Nil

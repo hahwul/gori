@@ -91,6 +91,13 @@ module Gori
       abstract def scope_delete_rule : Nil     # remove the selected rule
       abstract def scope_rule_selected? : Bool # a scope rule is selected (gates edit/delete in the menu)
 
+      # hostname-override editing (Project tab HOST OVERRIDES pane — a DISTINCT pane
+      # from SCOPE; also drives its own "space" action menu)
+      abstract def hostov_add_entry : Nil        # open the inline add-row for a new IP→host override
+      abstract def hostov_edit_entry : Nil       # edit the selected override in place
+      abstract def hostov_delete_entry : Nil     # remove the selected override
+      abstract def hostov_entry_selected? : Bool # an override exists (gates edit/delete in the menu)
+
       # match&replace lens
       abstract def rules_open : Nil # open the match&replace overlay editor
 

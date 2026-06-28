@@ -1,6 +1,7 @@
 require "socket"
 require "openssl"
 require "../settings"
+require "../host_overrides"
 
 module Gori::Proxy
   # Dials origin servers and parses authorities. We open one upstream per flow and
@@ -17,12 +18,22 @@ module Gori::Proxy
     # either way, so callers (dial_tls / the request forwarder) are unaffected.
     def self.dial(host : String, port : Int32,
                   connect_timeout : Time::Span = CONNECT_TIMEOUT,
-                  io_timeout : Time::Span = IO_TIMEOUT) : TCPSocket?
+                  io_timeout : Time::Span = IO_TIMEOUT,
+                  *, overrides : Gori::HostOverrides? = nil) : TCPSocket?
+      target = connect_target(host, overrides)
       if proxy = Settings.upstream_proxy_addr
-        dial_via_proxy(proxy[0], proxy[1], host, port, connect_timeout, io_timeout)
+        dial_via_proxy(proxy[0], proxy[1], target, port, connect_timeout, io_timeout)
       else
-        direct_dial(host, port, connect_timeout, io_timeout)
+        direct_dial(target, port, connect_timeout, io_timeout)
       end
+    end
+
+    # The IP to actually dial for `host`: a project override (wins) → a global override
+    # (Settings, read live) → `host` unchanged. ONLY the TCP connect target changes —
+    # SNI, the certificate hostname, the Host header, and the upstream-reuse pool key
+    # all keep the ORIGINAL host (a /etc/hosts-style resolution override, nothing more).
+    private def self.connect_target(host : String, overrides : Gori::HostOverrides?) : String
+      overrides.try(&.connect_ip(host)) || Settings.host_override_ip(host) || host
     end
 
     private def self.direct_dial(host : String, port : Int32,
@@ -99,8 +110,9 @@ module Gori::Proxy
     # sends. nil → the dialed host is used (the usual case).
     def self.dial_tls(host : String, port : Int32, verify : Bool, alpn : String? = nil, sni : String? = nil,
                       connect_timeout : Time::Span = CONNECT_TIMEOUT,
-                      io_timeout : Time::Span = IO_TIMEOUT) : OpenSSL::SSL::Socket::Client?
-      tcp = dial(host, port, connect_timeout, io_timeout)
+                      io_timeout : Time::Span = IO_TIMEOUT,
+                      *, overrides : Gori::HostOverrides? = nil) : OpenSSL::SSL::Socket::Client?
+      tcp = dial(host, port, connect_timeout, io_timeout, overrides: overrides)
       return nil unless tcp
       ssl = OpenSSL::SSL::Socket::Client.new(tcp, context: client_context(verify, alpn), sync_close: true, hostname: sni || host)
       ssl.sync = true
