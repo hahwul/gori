@@ -156,6 +156,78 @@ describe Gori::Tui::ReplayView do
     end
   end
 
+  it "load_grpc keeps the framed body byte-exact and the head editable" do
+    replay_tmp_store do |store|
+      # one gRPC message: 1-byte flag + 4-byte len(3) + payload incl a non-UTF-8 0xFF
+      body = Bytes[0x00, 0x00, 0x00, 0x00, 0x03, 0xFF, 0x01, 0x02]
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/demo.Greeter/SayHello", http_version: "HTTP/2",
+        head: "POST /demo.Greeter/SayHello HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\nte: trailers\r\n\r\n".to_slice,
+        body: body))
+      detail = store.get_flow(id).not_nil!
+
+      view = ReplayView.new
+      view.load_grpc(detail)
+      view.grpc_mode?.should be_true
+      view.http2?.should be_true
+
+      sent = view.request_bytes
+      String.new(sent).should contain("content-type: application/grpc")
+      # the framed body is re-appended VERBATIM (a text round-trip would scrub 0xFF)
+      sent[(sent.size - body.size)..].should eq(body)
+      sent.includes?(0xFF_u8).should be_true
+    end
+  end
+
+  it "ws_out_messages yields one clean frame per line and labels the tab by the upgrade request" do
+    replay_tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
+        method: "GET", target: "/ws/chat", http_version: "HTTP/1.1",
+        head: "GET /ws/chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+      view = ReplayView.new
+      view.load_ws(store.get_flow(id).not_nil!, ["{\"a\":1}", "ping"])
+
+      msgs = view.ws_out_messages
+      msgs.size.should eq(2)
+      # the editor joins with CRLF, so a naive split would leave a trailing '\r' on
+      # every frame but the last — these must be clean.
+      String.new(msgs[0].payload).should eq("{\"a\":1}")
+      String.new(msgs[1].payload).should eq("ping")
+      # the sub-tab label is the upgrade request line, NOT the first message
+      view.summary.should eq("GET /ws/chat")
+    end
+  end
+
+  it "renders a gRPC response as deframed messages + grpc-status" do
+    replay_tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/svc/M", http_version: "HTTP/2",
+        head: "POST /svc/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
+        body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]))
+      view = ReplayView.new
+      view.load_grpc(store.get_flow(id).not_nil!)
+
+      # a framed "Hello!" response + grpc-status 0 trailer (as H2Engine synthesises it)
+      msg = "Hello!".to_slice
+      body = IO::Memory.new
+      body.write(Bytes[0x00, 0x00, 0x00, 0x00, msg.size.to_u8])
+      body.write(msg)
+      head = "HTTP/2 200 OK\r\ncontent-type: application/grpc\r\ngrpc-status: 0\r\ngrpc-message: OK\r\n\r\n"
+      resp = Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice)
+      view.apply(Gori::Replay::Result.new(head.to_slice, body.to_slice, resp, 5000_i64))
+
+      backend = MemoryBackend.new(160, 24)
+      view.render(Screen.new(backend), Rect.new(0, 0, 160, 24))
+      backend.contains?("GRPC RESPONSE").should be_true
+      backend.contains?("message #1").should be_true # deframed response message
+      backend.contains?("Hello!").should be_true     # ASCII in the hex preview
+      backend.contains?("grpc-status: 0 OK").should be_true
+    end
+  end
+
   it "restore re-opens a persisted tab and starts clean (not dirty)" do
     view = ReplayView.new
     view.restore("https://api.test", "POST /x HTTP/1.1\nHost: api.test\n\nbody", true, false)
@@ -301,7 +373,7 @@ describe Gori::Tui::ReplayView do
     view.toggle_sni_field # ^S → edit the SNI host
     view.editing_sni?.should be_true
     "evil.com".each_char { |c| view.target_insert(c) }
-    view.sni.should eq("evil.com")        # the SNI field took the input, not the URL
+    view.sni.should eq("evil.com")               # the SNI field took the input, not the URL
     view.target.should eq("https://example.com") # URL untouched
     view.sni_override.should eq("evil.com")
     view.dirty?.should be_true
@@ -323,10 +395,10 @@ describe Gori::Tui::ReplayView do
     view.editing_sni?.should be_false
     view.focus_first # …then back up to the target pane
 
-    view.editing_sni?.should be_false      # arrives on the URL field, not the stale SNI sub-field
-    view.target_insert('Z')                # a URL keystroke must edit the URL…
+    view.editing_sni?.should be_false # arrives on the URL field, not the stale SNI sub-field
+    view.target_insert('Z')           # a URL keystroke must edit the URL…
     view.target.should eq("https://example.comZ")
-    view.sni.should eq("evil.com")         # …and leave the SNI value untouched
+    view.sni.should eq("evil.com") # …and leave the SNI value untouched
   end
 
   it "a click on the TARGET card's bottom border does not enter the SNI sub-field" do
@@ -355,7 +427,7 @@ describe Gori::Tui::ReplayView do
     replay_tmp_store do |store|
       id = store.insert_replay("https://h/x", "GET /x HTTP/1.1", false, true, nil, 0, "evil.com")
       store.replays.first.sni.should eq("evil.com")
-      store.replays_meta.first.sni.should eq("evil.com") # syncs via the fast reconcile poll too
+      store.replays_meta.first.sni.should eq("evil.com")                          # syncs via the fast reconcile poll too
       store.update_replay(id, "https://h/x", "GET /x HTTP/1.1", false, true, nil) # clear
       store.replays.first.sni.should be_nil
     end

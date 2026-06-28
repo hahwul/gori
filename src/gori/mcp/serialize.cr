@@ -78,6 +78,38 @@ module Gori
           emit_body(j, "request_body", detail.request_head, detail.request_body, detail.request_body_truncated?)
           j.field "response_head", head_text(detail.response_head)
           emit_body(j, "response_body", detail.response_head, detail.response_body, detail.response_body_truncated?)
+          emit_sse_events(j, detail)
+        end
+      end
+
+      SSE_EVENTS_MAX =  500 # cap events serialised for an LLM client
+      SSE_DATA_MAX   = 4096 # cap each event's data (chars)
+
+      # When the response is a text/event-stream, emit a parsed `sse_events` array
+      # (a derived view over the decoded body — no table). Bounded for LLM use.
+      def self.emit_sse_events(j : JSON::Builder, detail : Store::FlowDetail) : Nil
+        events = Sse.from_response(detail.response_head, detail.response_body)
+        return if events.empty?
+        j.field "sse_events" do
+          j.object do
+            j.field "count", events.size
+            j.field "truncated", events.size > SSE_EVENTS_MAX
+            j.field "events" do
+              j.array do
+                events.first(SSE_EVENTS_MAX).each do |e|
+                  j.object do
+                    j.field "type", e.type
+                    j.field "id", e.id
+                    j.field "retry", e.retry
+                    data = e.data.scrub
+                    cut = data.size > SSE_DATA_MAX
+                    j.field "data", cut ? data[0, SSE_DATA_MAX] : data
+                    j.field "data_truncated", true if cut # signal the clip so the value isn't read as whole
+                  end
+                end
+              end
+            end
+          end
         end
       end
 

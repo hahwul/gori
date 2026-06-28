@@ -253,6 +253,27 @@ module Gori
             puts "=== WEBSOCKET MESSAGES (#{ws_msgs.size}) ==="
             ws_msgs.each { |m| puts ws_message_text(m) }
           end
+          if (events = sse_events_of(detail)) && !events.empty?
+            puts ""
+            puts "=== SSE EVENTS (#{events.size}) ==="
+            events.each_with_index { |e, i| puts sse_event_text(e, i) }
+          end
+        end
+      end
+
+      # Parsed SSE events when the response is a text/event-stream, else nil. Like
+      # the TUI EVENTS pane, this is a derived view over the decoded response body.
+      private def self.sse_events_of(detail : Store::FlowDetail) : Array(Sse::Event)
+        Sse.from_response(detail.response_head, detail.response_body)
+      end
+
+      private def self.sse_event_text(e : Sse::Event, idx : Int32) : String
+        String.build do |io|
+          io << "#" << (idx + 1)
+          io << " type=" << e.type if e.type
+          io << " id=" << e.id if e.id
+          io << " retry=" << e.retry if e.retry
+          e.data.each_line { |l| io << "\n  " << l.scrub }
         end
       end
 
@@ -308,6 +329,20 @@ module Gori
                         j.field "text", m.text?
                         j.field "payload", m.text? ? String.new(m.payload).scrub : nil
                         j.field "size", m.payload.size
+                      end
+                    end
+                  end
+                end
+              end
+              if (events = sse_events_of(detail)) && !events.empty?
+                j.field "sse_events" do
+                  j.array do
+                    events.each do |e|
+                      j.object do
+                        j.field "type", e.type
+                        j.field "data", e.data.scrub
+                        j.field "id", e.id
+                        j.field "retry", e.retry
                       end
                     end
                   end

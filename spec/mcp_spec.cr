@@ -178,6 +178,23 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "parses a text/event-stream response into sse_events" do
+      with_store do |store|
+        id = seed_flow(store, "ex.test", "GET", "/stream", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n",
+          resp_body: "data: hi\n\nevent: tick\nid: 7\ndata: x\n\n".to_slice, content_type: "text/event-stream")
+        call = %({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        sse = tool_payload(drive(store, call)[0])["sse_events"]
+        sse["count"].as_i.should eq(2)
+        sse["truncated"].as_bool.should be_false
+        events = sse["events"].as_a
+        events[0]["data"].as_s.should eq("hi")
+        events[1]["type"].as_s.should eq("tick")
+        events[1]["id"].as_s.should eq("7")
+        events[1]["data"].as_s.should eq("x")
+      end
+    end
+
     it "returns isError for an unknown flow id" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":9999}}})

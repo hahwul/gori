@@ -11,8 +11,10 @@ require "./search_hi"
 require "./reveal"
 require "./fmt"
 require "../store"
+require "../proxy/h2/grpc"
 require "../replay/engine"
 require "../replay/h2_engine"
+require "../replay/ws_engine"
 require "../replay/diff"
 
 module Gori::Tui
@@ -32,10 +34,10 @@ module Gori::Tui
       @name = nil
       @flow = nil.as(Store::FlowDetail?)
       @target = ""
-      @tcx = 0              # target (URL) cursor
-      @sni = ""             # custom TLS SNI host ("" = present the target host)
-      @scx = 0              # SNI cursor
-      @target_field = :url  # which field the TARGET pane edits: :url | :sni
+      @tcx = 0             # target (URL) cursor
+      @sni = ""            # custom TLS SNI host ("" = present the target host)
+      @scx = 0             # SNI cursor
+      @target_field = :url # which field the TARGET pane edits: :url | :sni
       @editor = TextArea.new
       @editor.gutter = true # line numbers in the request body (pairs with ^G)
       @search_hl = ""       # active ^F query → highlight in the response pane (request is via @editor)
@@ -52,17 +54,33 @@ module Gori::Tui
       @resp_view_cache = nil.as(RespView?)
       @resp_view_rev = Theme.revision # the theme the cached (colour-baked) response head was built under
       @diff_lines_cache = nil.as(Array(Replay::DiffLine)?)
-      @resp_hex = false                # 'x' toggles a raw hex dump of the response bytes
-      @resp_hex_bytes = nil.as(Bytes?) # cached combined head+body of the last result (hex source)
+      @resp_hex = false                        # 'x' toggles a raw hex dump of the response bytes
+      @resp_hex_bytes = nil.as(Bytes?)         # cached combined head+body of the last result (hex source)
       @pretty = Settings.pretty_bodies_default # 'p' pretty-prints the response body (display only); pushed from the runner
       @resp_pretty_applied = false             # whether Pretty actually reflowed the current response (drives the chip)
-      @req_hex_edit = nil.as(HexEdit?) # ^X: editable byte buffer for the REQUEST (authoritative while set)
-      @scroll_req = 0                  # scroll offset for the hex request editor
+      @req_hex_edit = nil.as(HexEdit?)         # ^X: editable byte buffer for the REQUEST (authoritative while set)
+      @scroll_req = 0                          # scroll offset for the hex request editor
       @focus = :request
       @resp_mode = :response # :response | :diff
       @scroll = 0
       @loaded = false
       @http2 = false
+      # WebSocket replay mode (a 101 flow): the request editor holds the editable
+      # outbound MESSAGES (one per line) and the response pane shows the TRANSCRIPT.
+      # Session-only — these tabs are never persisted/synced (db_id stays nil).
+      @ws_mode = false
+      @ws_upgrade = nil.as(Bytes?) # the captured upgrade-request bytes (handshake source)
+      @ws_result = nil.as(Replay::WsEngine::Result?)
+      @ws_lines_cache = nil.as(Array({String, Color})?)
+      @transcript_rev = Theme.revision # theme the colour-baked transcript cache was built under
+      # gRPC replay mode (an application/grpc h2 flow): the editor holds the editable
+      # request HEAD (metadata headers) and the framed message body is sent byte-exact
+      # from @grpc_body; the response pane shows a deframed gRPC transcript + status.
+      # Session-only like WS (db_id nil) — the binary body can't round-trip the text store.
+      @grpc_mode = false
+      @grpc_body = Bytes.empty # the pristine framed request message(s), sent verbatim
+      @grpc_msg_count = 0      # deframed message count of @grpc_body (immutable → computed once)
+      @grpc_lines_cache = nil.as(Array({String, Color})?)
       @inflight = false           # a replay round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
@@ -143,7 +161,15 @@ module Gori::Tui
     # prompt: far more recognizable than the source flow's internal numeric id, and
     # it tracks live as the request is edited.
     def summary(max : Int32 = 28) : String
-      line = (@editor.first_nonblank_line || "").strip
+      # For a WS tab the editor holds the MESSAGES, so derive the label from the upgrade
+      # request line ("GET /ws") instead of the first message. HTTP/gRPC tabs keep the
+      # editor's request/head line.
+      line =
+        if @ws_mode && (up = @ws_upgrade)
+          String.new(up).each_line.first?.try(&.strip) || ""
+        else
+          (@editor.first_nonblank_line || "").strip
+        end
       parts = line.split(' ')
       s = "#{parts[0]?} #{parts[1]?}".strip # METHOD + request-target (drop the HTTP/x.y)
       s = line if s.empty?
@@ -208,6 +234,126 @@ module Gori::Tui
       @dirty = false
       @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
       @scroll_req = 0
+    end
+
+    getter? ws_mode : Bool
+
+    # Load a captured WebSocket flow (101) for replay. The request editor is seeded
+    # with the recorded client→server TEXT messages (one per line, editable); the
+    # upgrade-request bytes are kept for the handshake. Binary outbound messages
+    # aren't representable as editable text, so they're omitted from the seed.
+    def load_ws(detail : Store::FlowDetail, out_messages : Array(String)) : Nil
+      @flow = detail
+      @ws_mode = true
+      @http2 = false # WebSocket is HTTP/1.1
+      @ws_upgrade = detail.request_head
+      @ws_result = nil
+      @ws_lines_cache = nil
+      @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
+      @tcx = @target.size
+      @sni = ""
+      @scx = 0
+      @target_field = :url
+      @editor.set_text(out_messages.join('\n'))
+      @original_lines = [] of String
+      @result = nil
+      @prev_result = nil
+      reset_result_caches
+      @focus = :request
+      @resp_mode = :response
+      @scroll = 0
+      @diffable = false
+      @loaded = true
+      @dirty = false
+      @req_hex_edit = nil
+      @scroll_req = 0
+    end
+
+    # The editable outbound messages, parsed from the editor — one TEXT frame per
+    # non-empty line. Uses @editor.text (LF-joined) NOT to_bytes (CRLF-joined), else
+    # every frame but the last would carry a spurious trailing '\r'. (A captured frame
+    # with an embedded newline can't be represented one-per-line — a known v1 limit.)
+    def ws_out_messages : Array(Replay::WsEngine::OutMsg)
+      @editor.text.split('\n').compact_map do |line|
+        line.empty? ? nil : Replay::WsEngine::OutMsg.new(1, line.to_slice)
+      end
+    end
+
+    def ws_upgrade_bytes : Bytes
+      @ws_upgrade || Bytes.empty
+    end
+
+    # Apply a finished WS replay transcript (the counterpart of #apply for HTTP).
+    def apply_ws(result : Replay::WsEngine::Result) : Nil
+      @ws_result = result
+      @ws_lines_cache = nil
+      @scroll = 0
+    end
+
+    getter? grpc_mode : Bool
+
+    # Load a captured gRPC flow (an application/grpc HTTP/2 call) for replay. The
+    # request HEAD is seeded into the editor (editable — metadata headers); the framed
+    # message body is kept byte-exact in @grpc_body and re-appended verbatim on send
+    # (protobuf is opaque without a .proto, so the body is resend-as-is, not text-
+    # editable). The response renders as a deframed gRPC transcript + grpc-status.
+    def load_grpc(detail : Store::FlowDetail) : Nil
+      @flow = detail
+      @grpc_mode = true
+      @ws_mode = false
+      @http2 = true # gRPC is HTTP/2
+      @grpc_body = detail.request_body || Bytes.empty
+      @grpc_msg_count = Proxy::H2::Grpc.messages(@grpc_body).size
+      @grpc_lines_cache = nil
+      @target = build_target(detail.row.scheme, detail.row.host, detail.row.port)
+      @tcx = @target.size
+      @sni = ""
+      @scx = 0
+      @target_field = :url
+      @editor.set_text(grpc_head_text(detail))
+      @original_lines = [] of String
+      @result = nil
+      @prev_result = nil
+      reset_result_caches
+      @focus = :request
+      @resp_mode = :response
+      @scroll = 0
+      @diffable = false
+      @loaded = true
+      @dirty = false
+      @req_hex_edit = nil
+      @scroll_req = 0
+    end
+
+    # The request HEAD as origin-form text (request line rewritten, headers), WITHOUT
+    # a trailing blank line — grpc_request_bytes re-adds the head terminator + body.
+    private def grpc_head_text(detail : Store::FlowDetail) : String
+      lines = String.new(detail.request_head).split('\n').map(&.rstrip('\r'))
+      return "" if lines.empty?
+      parts = lines[0].split(' ')
+      if parts.size == 3 && (parts[1].starts_with?("http://") || parts[1].starts_with?("https://"))
+        lines[0] = "#{parts[0]} #{to_origin(parts[1])} #{parts[2]}"
+      end
+      while !lines.empty? && lines.last.empty?
+        lines.pop
+      end
+      lines.join('\n')
+    end
+
+    # The replayable request bytes for a gRPC tab: the edited head + the canonical
+    # CRLFCRLF terminator (what H2Engine.split_head_body keys on) + the pristine
+    # framed body. Auto-Content-Length never applies (h2 frames by DATA/END_STREAM).
+    private def grpc_request_bytes : Bytes
+      raw = @editor.to_bytes
+      n = raw.size
+      while n > 0 && (raw[n - 1] == 0x0A_u8 || raw[n - 1] == 0x0D_u8) # trim trailing CR/LF
+        n -= 1
+      end
+      io = IO::Memory.new(n + @grpc_body.size + 4)
+      io.write(raw[0, n])
+      io << "\r\n\r\n"
+      io.write(@grpc_body)
+      io.to_slice
     end
 
     # Re-open a persisted tab (from the `replays` table) without a live FlowDetail.
@@ -292,6 +438,7 @@ module Gori::Tui
 
     def request_bytes : Bytes
       return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit # byte-exact; NO auto-CL in hex mode
+      return grpc_request_bytes if @grpc_mode                 # edited head + verbatim framed body
       raw = @editor.to_bytes
       @auto_content_length ? sync_content_length(raw) : raw
     end
@@ -656,6 +803,11 @@ module Gori::Tui
       hits = [] of Int32
       return hits if query.empty? || @resp_hex
       q = query.downcase
+      if @ws_mode || @grpc_mode # the transcript is the active "response" pane
+        transcript = @ws_mode ? ws_transcript_lines : grpc_transcript_lines
+        transcript.each_with_index { |row, i| hits << i if row[0].downcase.includes?(q) }
+        return hits
+      end
       if @resp_mode == :diff
         diff_lines.each_with_index { |d, i| hits << i if d.text.downcase.includes?(q) }
       else
@@ -726,10 +878,51 @@ module Gori::Tui
       end
     end
 
+    # Draws one mode chip (lit = active) at (x,y), returning the x past it.
+    private def chip(screen : Screen, x : Int32, y : Int32, label : String, lit : Bool) : Int32
+      screen.text(x, y, label, lit ? Theme.text_bright : Theme.muted, lit ? Theme.accent_bg : Theme.bg)
+    end
+
+    # The RESPONSE pane's top-border chrome: the response|diff|hex|pretty chips (hex
+    # lights instead of response/diff; pretty only when the styled body is on screen)
+    # and the right-aligned latency·size of the last send.
+    private def render_response_chrome(screen : Screen, rect : Rect) : Nil
+      resp_lit = !@resp_hex && @resp_mode == :response
+      diff_lit = !@resp_hex && @resp_mode == :diff
+      pretty_lit = resp_lit && !@reveal && resp_pretty_applied?
+      x = chip(screen, rect.x + 12, rect.y, " response ", resp_lit) + 1
+      x = chip(screen, x, rect.y, " diff ", diff_lit) + 1
+      x = chip(screen, x, rect.y, " hex ", @resp_hex)
+      chips_end = chip(screen, x + 1, rect.y, " pretty ", pretty_lit)
+      if result = @result
+        meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}" : Fmt.dur(result.duration_us)
+        meta_x = rect.right - meta.size - 1
+        screen.text(meta_x, rect.y, meta, Theme.muted, Theme.bg) if meta_x > chips_end + 1
+      end
+    end
+
+    private def render_request_label : String
+      return "MESSAGES" if @ws_mode
+      return "GRPC REQUEST" if @grpc_mode
+      @http2 ? "REQUEST (h2)" : "REQUEST"
+    end
+
     private def render_request(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      label = @http2 ? "REQUEST (h2)" : "REQUEST"
+      label = render_request_label
       Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused))
+      if @ws_mode || @grpc_mode # text editor for the head/messages; no CL/hex affordances
+        if @grpc_mode           # a badge: how many framed messages the verbatim body carries
+          n = @grpc_msg_count
+          badge = " body: #{n} msg#{n == 1 ? "" : "s"} · #{@grpc_body.size}b "
+          bx = {rect.right - badge.size - 1, rect.x + label.size + 4}.max
+          screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg) if bx > rect.x + label.size + 4
+        end
+        # gRPC's editor holds the HTTP head (→ request syntax); WS messages are plain
+        # text (often JSON), so no HTTP request/header colouring there.
+        @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: @grpc_mode ? :request : nil)
+        return
+      end
       if h = @req_hex_edit
         # HEX badge replaces the CL indicator (auto-CL is meaningless on raw bytes).
         badge = " HEX · CL:off "
@@ -749,33 +942,16 @@ module Gori::Tui
 
     private def render_response(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "RESPONSE", bg: Theme.bg, border: pane_border(focused))
-      # response | diff | hex toggle rides the top border, right of the title. When
-      # hex is on it lights instead of response/diff (x toggles it).
-      tx = rect.x + 12
-      tx = screen.text(tx, rect.y, " response ", !@resp_hex && @resp_mode == :response ? Theme.text_bright : Theme.muted,
-        !@resp_hex && @resp_mode == :response ? Theme.accent_bg : Theme.bg) + 1
-      tx = screen.text(tx, rect.y, " diff ", !@resp_hex && @resp_mode == :diff ? Theme.text_bright : Theme.muted,
-        !@resp_hex && @resp_mode == :diff ? Theme.accent_bg : Theme.bg) + 1
-      chips_end = screen.text(tx, rect.y, " hex ", @resp_hex ? Theme.text_bright : Theme.muted,
-        @resp_hex ? Theme.accent_bg : Theme.bg)
-      # pretty chip: lit only when the styled response body is actually on screen and
-      # Pretty reflowed it — i.e. NOT in hex/diff/reveal mode (each shows raw/other bytes).
-      pretty_lit = !@resp_hex && !@reveal && @resp_mode == :response && resp_pretty_applied?
-      chips_end = screen.text(chips_end + 1, rect.y, " pretty ",
-        pretty_lit ? Theme.text_bright : Theme.muted,
-        pretty_lit ? Theme.accent_bg : Theme.bg)
-
-      # Latency · size of the last send, right-aligned on the top border (the body
-      # already shows the status line, so duration + total wire bytes are the gap).
-      # Drawn only when it clears the mode chips, so a narrow pane drops it cleanly.
-      if result = @result
-        meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}"
-                          : Fmt.dur(result.duration_us)
-        meta_x = rect.right - meta.size - 1
-        screen.text(meta_x, rect.y, meta, Theme.muted, Theme.bg) if meta_x > chips_end + 1
+      if @ws_mode
+        render_transcript(screen, rect, focused, "TRANSCRIPT", ws_transcript_lines, @ws_result.try(&.duration_us))
+        return
       end
-
+      if @grpc_mode
+        render_transcript(screen, rect, focused, "GRPC RESPONSE", grpc_transcript_lines, @result.try(&.duration_us))
+        return
+      end
+      Frame.card(screen, rect, "RESPONSE", bg: Theme.bg, border: pane_border(focused))
+      render_response_chrome(screen, rect)
       body = rect.inset(1, 1)
       if @resp_hex
         (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to replay —", Theme.muted)
@@ -786,6 +962,127 @@ module Gori::Tui
       else
         render_response_body(screen, body)
       end
+    end
+
+    # Shared windowed renderer for the WS / gRPC transcript panes (a list of
+    # {text, colour} rows, scrolled by @scroll). `dur_us` rides the top border.
+    private def render_transcript(screen : Screen, rect : Rect, focused : Bool,
+                                  title : String, lines : Array({String, Color}), dur_us : Int64?) : Nil
+      Frame.card(screen, rect, title, bg: Theme.bg, border: pane_border(focused))
+      if d = dur_us
+        meta = Fmt.dur(d)
+        mx = rect.right - meta.size - 1
+        screen.text(mx, rect.y, meta, Theme.muted, Theme.bg) if mx > rect.x + title.size + 4
+      end
+      body = rect.inset(1, 1)
+      return if body.h <= 0
+      if lines.empty?
+        screen.text(body.x, body.y, "— not sent — press ^R to replay —", Theme.muted)
+        return
+      end
+      gw = {Gutter.width(lines.size), body.w}.min
+      cw = {body.w - gw, 0}.max
+      (0...body.h).each do |i|
+        li = @scroll + i
+        break if li >= lines.size
+        text, color = lines[li]
+        Gutter.draw(screen, body.x, body.y + i, li, gw)
+        screen.text(body.x + gw, body.y + i, text, color, width: cw)
+        SearchHi.mark(screen, body.x + gw, body.y + i, text, @search_hl, body.x + gw + cw) unless @search_hl.empty?
+      end
+    end
+
+    # The transcript as {text, colour} rows (cached; rebuilt only when a new result
+    # is applied). Multi-line payloads are split so each wire line is one row.
+    private def ws_transcript_lines : Array({String, Color})
+      drop_transcript_cache_on_theme_change
+      @ws_lines_cache ||= begin
+        rows = [] of {String, Color}
+        if r = @ws_result
+          r.messages.each do |m|
+            arrow = m.direction == "out" ? "→" : "←"
+            color = m.direction == "out" ? Theme.text : Theme.green
+            text = m.opcode == 2 ? "#{arrow} «binary #{m.payload.size}b»" : "#{arrow} #{String.new(m.payload).scrub}"
+            text.split('\n').each_with_index { |t, i| rows << {i.zero? ? t : "    #{t}", color} }
+          end
+          if err = r.error
+            rows << {"✗ #{err}", Theme.red}
+          else
+            sent = r.messages.count(&.direction.==("out"))
+            recv = r.messages.count(&.direction.==("in"))
+            foot = String.build do |io|
+              io << "✓ upgraded"
+              io << " · closed #{r.close_code}" if r.close_code
+              io << " · #{sent} sent, #{recv} received"
+            end
+            rows << {foot, Theme.muted}
+            if note = r.note
+              rows << {"⚠ #{note}", Theme.yellow}
+            end
+          end
+        end
+        rows
+      end
+    end
+
+    # The gRPC transcript as {text, colour} rows (cached): the request message count,
+    # the HTTP status, the deframed response messages (hex preview), and grpc-status.
+    private def grpc_transcript_lines : Array({String, Color})
+      drop_transcript_cache_on_theme_change
+      @grpc_lines_cache ||= begin
+        rows = [] of {String, Color}
+        result = @result
+        if result && !result.ok?
+          rows << {"✗ #{result.error}", Theme.red}
+        elsif result
+          reqn = @grpc_msg_count # already deframed once in load_grpc
+          rows << {"→ sent #{reqn} request message#{reqn == 1 ? "" : "s"} (#{@grpc_body.size}b)", Theme.muted}
+          st = result.response.try(&.status) || 0
+          rows << {"HTTP #{st}", st >= 400 ? Theme.red : Theme.text}
+          grpc_response_rows(result).each { |r| rows << r }
+          rows << grpc_status_row(result)
+        end
+        rows
+      end
+    end
+
+    private def grpc_response_rows(result : Replay::Result) : Array({String, Color})
+      rows = [] of {String, Color}
+      msgs = Proxy::H2::Grpc.messages(result.body || Bytes.empty)
+      if msgs.empty?
+        rows << {"← (no complete gRPC messages)", Theme.muted}
+      else
+        msgs.each_with_index do |m, i|
+          rows << {"← message ##{i + 1}  #{m.data.size}b#{m.compressed ? " (compressed)" : ""}", Theme.green}
+          grpc_hex_preview(m.data).each { |h| rows << {h, Theme.muted} }
+        end
+      end
+      rows
+    end
+
+    # grpc-status/grpc-message arrive as response trailers (absorbed into the synth
+    # head by H2Engine), so they're plain response headers here.
+    private def grpc_status_row(result : Replay::Result) : {String, Color}
+      resp = result.response
+      code = resp.try(&.headers.get?("grpc-status"))
+      return {"⚠ no grpc-status trailer", Theme.yellow} unless code
+      n = code.to_i?
+      ok = n == 0
+      name = n ? Proxy::H2::Grpc.status_name(n) : code
+      msg = resp.try(&.headers.get?("grpc-message"))
+      {"#{ok ? "✓" : "✗"} grpc-status: #{code} #{name}#{msg ? " · #{msg}" : ""}", ok ? Theme.green : Theme.red}
+    end
+
+    private def grpc_hex_preview(data : Bytes, max : Int32 = 32) : Array(String)
+      slice = data[0, {data.size, max}.min]
+      lines = [] of String
+      slice.each_slice(16) do |chunk|
+        hex = chunk.map(&.to_s(16).rjust(2, '0')).join(' ')
+        ascii = chunk.map { |b| 0x20 <= b <= 0x7e ? b.unsafe_chr : '.' }.join
+        lines << "    #{hex.ljust(48)} #{ascii}"
+      end
+      lines << "    … (#{data.size - max} more)" if data.size > max
+      lines
     end
 
     # Windowed render of revealed (whitespace-visible) response lines.
@@ -851,7 +1148,11 @@ module Gori::Tui
 
     # The visible line count of the active response view (drives the scroll bound).
     private def resp_line_count : Int32
-      if @resp_hex
+      if @ws_mode
+        {ws_transcript_lines.size, 1}.max
+      elsif @grpc_mode
+        {grpc_transcript_lines.size, 1}.max
+      elsif @resp_hex
         (bytes = resp_hex_bytes) ? HexView.rows(bytes.size) : 1
       elsif @resp_mode == :diff
         diff_lines.size
@@ -892,6 +1193,18 @@ module Gori::Tui
       @resp_view_cache = nil
       @diff_lines_cache = nil
       @resp_hex_bytes = nil
+      @ws_lines_cache = nil
+      @grpc_lines_cache = nil
+    end
+
+    # The transcript caches bake Theme colours into each row, so a runtime palette
+    # switch (Theme.revision bump) must drop them — mirrors resp_view's guard — else
+    # the transcript keeps the old theme's colours until the next send.
+    private def drop_transcript_cache_on_theme_change : Nil
+      return if @transcript_rev == Theme.revision
+      @ws_lines_cache = nil
+      @grpc_lines_cache = nil
+      @transcript_rev = Theme.revision
     end
 
     private def resp_view : RespView
