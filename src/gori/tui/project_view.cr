@@ -37,6 +37,7 @@ module Gori::Tui
       @total_captured = 0
       @created = nil
       @desc_area = TextArea.new
+      @desc_area.follow_x = true # long description lines scroll horizontally to keep the cursor visible
       @desc_dirty = false
 
       @pane = :scope            # :scope | :desc

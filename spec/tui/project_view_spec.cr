@@ -27,6 +27,14 @@ private def render_ta(ta : TextArea, h : Int32) : MemoryBackend
   b
 end
 
+# Render with a live caret into a `w`×3 grid and return the top row (for the
+# horizontal-scroll assertions).
+private def render_row0(ta : TextArea, w : Int32, highlight : Symbol? = nil) : String
+  b = MemoryBackend.new(w, 3)
+  ta.render(Screen.new(b), Rect.new(0, 0, w, 3), cursor: true, highlight: highlight)
+  b.row(0)
+end
+
 describe "TextArea#scroll_view" do
   lines = (1..20).map { |i| "row%02d" % i }.join("\n")
 
@@ -55,6 +63,54 @@ describe "TextArea#scroll_view" do
     render_ta(short, 10) # 3 lines fit in 10 rows
     short.scroll_view(5)
     render_ta(short, 10).row(0).includes?("a").should be_true
+  end
+end
+
+describe "TextArea horizontal scroll (follow_x)" do
+  long = "HEAD" + ("." * 52) + "TAIL" # one 60-column line, head/tail tagged
+
+  it "scrolls a long line sideways to keep the cursor visible, and resets when it fits" do
+    ta = TextArea.new(long)
+    ta.follow_x = true
+    row = render_row0(ta, 20)
+    row.includes?("HEAD").should be_true # caret at col 0 → window pinned to the start
+    row.includes?("TAIL").should be_false
+
+    ta.move(0, 1000) # caret to the end of the line
+    row = render_row0(ta, 20)
+    row.includes?("TAIL").should be_true  # tail scrolled into view next to the caret
+    row.includes?("HEAD").should be_false # head scrolled off the left edge
+
+    ta.move(0, -1000)                                    # caret back to the start
+    render_row0(ta, 20).includes?("HEAD").should be_true # window slid back to 0
+  end
+
+  it "leaves long lines clipped at the start when follow_x is off (default — other editors)" do
+    ta = TextArea.new(long) # follow_x defaults to false
+    ta.move(0, 1000)        # caret past the right edge
+    row = render_row0(ta, 20)
+    row.includes?("HEAD").should be_true  # no horizontal scroll → head stays put
+    row.includes?("TAIL").should be_false # legacy right-clip: tail is never reached
+  end
+
+  it "handles a wide-glyph (Hangul) line straddling the scroll boundary without drifting" do
+    wide = "시작" + ("가" * 26) + "끝" # 4 + 52 + 2 = 58 columns; the cut lands mid-가
+    ta = TextArea.new(wide)
+    ta.follow_x = true
+    ta.move(0, 1000)
+    row = render_row0(ta, 20)
+    row.includes?("끝").should be_true   # the trailing marker scrolled into view
+    row.includes?("시작").should be_false # the leading marker scrolled off
+  end
+
+  it "keeps the markdown overlay aligned with the scrolled cells" do
+    md = "# HEAD" + ("." * 50) + "TAIL" # heading line, 60 columns
+    ta = TextArea.new(md)
+    ta.follow_x = true
+    ta.move(0, 1000)
+    row = render_row0(ta, 20, highlight: :markdown)
+    row.includes?("TAIL").should be_true  # styled (sliced) overlay shows the tail
+    row.includes?("HEAD").should be_false # …and not the head
   end
 end
 
