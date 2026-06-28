@@ -15,7 +15,9 @@ module Gori::Tui
       @cy = 0
       @cx = 0
       @scroll = 0
-      @last_h = 0 # viewport height from the last render — lets scroll_view (wheel) clamp
+      @xscroll = 0      # leftmost visible display COLUMN (horizontal scroll); only moves when @follow_x is on
+      @last_h = 0       # viewport height from the last render — lets scroll_view (wheel) clamp
+      @follow_x = false # follow the cursor horizontally (long lines scroll into view); off ⇒ legacy right-clip
       @preedit = ""
       # Cached syntax-highlight overlay (1:1 with @lines), rebuilt only when the
       # buffer content changes — not on every render frame. @styled_kind tracks
@@ -39,6 +41,9 @@ module Gori::Tui
     setter search_hl : String
     setter reveal : Bool
     setter bg_regions : Array({Int32, Int32, Color})
+    # Enable horizontal cursor-following (the Project description); off everywhere
+    # else, so those editors keep @xscroll == 0 and their hot render path unchanged.
+    setter follow_x : Bool
     getter edits : Int32
 
     def set_text(text : String) : Nil
@@ -47,6 +52,7 @@ module Gori::Tui
       @cy = 0
       @cx = 0
       @scroll = 0
+      @xscroll = 0
       @preedit = ""
       @styled = nil
       @edits += 1
@@ -170,7 +176,9 @@ module Gori::Tui
       return if row < 0
       @cy = {@scroll + row, @lines.size - 1}.min
       gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0
-      @cx = Screen.column_for(@lines[@cy], mx - (rect.x + gw))
+      # + @xscroll: the click lands at display column (mx - content_x) WITHIN the
+      # visible window, which is @xscroll columns into the full line.
+      @cx = Screen.column_for(@lines[@cy], mx - (rect.x + gw) + @xscroll)
     end
 
     # Viewport scroll by `step` lines (the mouse wheel), INDEPENDENT of the cursor:
@@ -226,6 +234,7 @@ module Gori::Tui
       gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0 # never exceed the pane
       cx0 = rect.x + gw                                          # content start x (after the optional gutter)
       cw = {rect.w - gw, 0}.max                                  # content width
+      ensure_visible_x(cw)                                       # slide @xscroll so the caret stays on screen (no-op unless @follow_x)
       styled = highlight ? highlighted(highlight) : nil
       # Buffer char-offset of the first visible line — advanced per row so each line
       # knows its start for the bg-region overlay without an O(n²) rescan. Only the
@@ -238,7 +247,9 @@ module Gori::Tui
         break if li >= @lines.size
         Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: li == @cy) if @gutter
         line = @lines[li]
-        if @reveal
+        if @xscroll > 0
+          draw_scrolled(screen, cx0, rect.y + i, li, line, styled, cw)
+        elsif @reveal
           Highlight.draw(screen, cx0, rect.y + i, Reveal.styled(line, false, cw), width: cw)
         elsif styled && (sl = styled[li]?)
           Highlight.draw(screen, cx0, rect.y + i, sl, width: cw)
@@ -267,13 +278,18 @@ module Gori::Tui
         # no-ops when there are no regions or in reveal mode.
         paint_bg_regions(screen, cx0, rect.y + i, line_off, line, cw) unless li == @cy && !@preedit.empty?
         line_off += line.size + 1 # advance BEFORE the cursor `next` so it can't desync
-        SearchHi.mark(screen, cx0, rect.y + i, line, @search_hl, cx0 + cw) unless @search_hl.empty?
+        unless @search_hl.empty?
+          # Mark on the visible (left-sliced) text so the highlight columns line up
+          # with the cells we actually drew once horizontally scrolled.
+          st = @xscroll > 0 ? slice_left(line, @xscroll) : line
+          SearchHi.mark(screen, cx0, rect.y + i, st, @search_hl, cx0 + cw)
+        end
         next unless cursor && li == @cy
         prefix_w = Screen.display_width(line[0, @cx])
         preedit_w = Screen.display_width(@preedit)
-        cxs = cx0 + prefix_w + preedit_w
-        screen.cursor(cxs, rect.y + i) if cxs < cx0 + cw
-        if cxs < cx0 + cw
+        cxs = cx0 + prefix_w + preedit_w - @xscroll
+        if cxs >= cx0 && cxs < cx0 + cw
+          screen.cursor(cxs, rect.y + i)
           cgw = [Screen.display_width((@preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]).to_s), 1].max
           ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
           (0...cgw).each do |off|
@@ -321,6 +337,74 @@ module Gori::Tui
       @scroll = @cy if @cy < @scroll
       @scroll = @cy - h + 1 if @cy >= @scroll + h
       @scroll = 0 if @scroll < 0
+    end
+
+    # Horizontal companion to ensure_visible: slide @xscroll so the caret (cursor +
+    # any IME preedit) stays inside the visible column window. A line that fits whole
+    # resets to 0 (no needless side-scroll). No-op unless @follow_x, so every other
+    # editor keeps @xscroll == 0 and renders exactly as before.
+    private def ensure_visible_x(cw : Int32) : Nil
+      return unless @follow_x
+      return if cw <= 0
+      line = @lines[@cy]
+      pw = Screen.display_width(@preedit)
+      if Screen.display_width(line) + pw <= cw
+        @xscroll = 0
+        return
+      end
+      cx = @cx.clamp(0, line.size)
+      curx = Screen.display_width(line[0, cx]) + pw     # caret's display column in the full line
+      @xscroll = curx if curx < @xscroll                # caret left of the window → snap left
+      @xscroll = curx - cw + 1 if curx >= @xscroll + cw # caret past the right edge → snap right
+      @xscroll = 0 if @xscroll < 0
+    end
+
+    # The horizontally-scrolled per-line draw (only when @xscroll > 0): left-slice
+    # the line by @xscroll display columns so the caret's neighbourhood is visible,
+    # then reuse the normal drawers (which handle right truncation + the … ellipsis).
+    private def draw_scrolled(screen : Screen, cx0 : Int32, y : Int32, li : Int32,
+                              line : String, styled : Array(Highlight::Line)?, cw : Int32) : Nil
+      if @reveal
+        Highlight.draw(screen, cx0, y, Highlight.slice_left(Reveal.styled(line, false, cw + @xscroll), @xscroll), width: cw)
+      elsif styled && (sl = styled[li]?)
+        Highlight.draw(screen, cx0, y, Highlight.slice_left(sl, @xscroll), width: cw)
+      elsif li == @cy && !@preedit.empty?
+        cx = @cx.clamp(0, line.size)
+        spans = Highlight::Line.new
+        spans << Highlight::Span.new(line[0, cx], Theme.text) if cx > 0
+        spans << Highlight::Span.new(@preedit, Theme.text, Attribute::Underline) unless @preedit.empty?
+        suffix = line[cx..]
+        spans << Highlight::Span.new(suffix, Theme.text) unless suffix.empty?
+        Highlight.draw(screen, cx0, y, Highlight.slice_left(spans, @xscroll), width: cw)
+      else
+        screen.text(cx0, y, slice_left(line, @xscroll), Theme.text, width: cw)
+      end
+    end
+
+    # Drop the first `start_col` display columns of `s`. A wide glyph straddling the
+    # cut becomes leading spaces for its still-visible cells, so the remaining glyphs
+    # keep their columns. Identity when start_col <= 0.
+    private def slice_left(s : String, start_col : Int32) : String
+      return s if start_col <= 0
+      acc = 0
+      cutting = true
+      String.build do |io|
+        s.each_char do |ch|
+          if cutting
+            w = Screen.display_width(ch.to_s)
+            if acc + w <= start_col
+              acc += w
+              next
+            end
+            io << " " * (acc + w - start_col) if acc < start_col # straddling glyph → visible cells as spaces
+            io << ch if acc >= start_col                         # clean boundary keeps the glyph
+            acc += w
+            cutting = false
+          else
+            io << ch
+          end
+        end
+      end
     end
   end
 end

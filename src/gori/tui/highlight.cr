@@ -339,6 +339,48 @@ module Gori::Tui
       x + visual_col
     end
 
+    # Drop the first `start_col` display columns of a styled line, mirroring the
+    # TextArea string slicer: whole spans before the cut are skipped, the span the
+    # cut lands in is trimmed (a straddling wide glyph → leading spaces), and every
+    # following span is kept verbatim. Used by horizontally-scrolled editors so the
+    # styled overlay lines up with the cells actually drawn. Identity when col <= 0.
+    def self.slice_left(line : Line, start_col : Int32) : Line
+      return line if start_col <= 0
+      out = Line.new
+      acc = 0
+      cutting = true
+      line.each do |span|
+        unless cutting
+          out << span
+          next
+        end
+        sw = Screen.display_width(span.text)
+        if acc + sw <= start_col # whole span is left of the cut
+          acc += sw
+          next
+        end
+        kept = String.build do |io|
+          span.text.each_char do |ch|
+            if cutting
+              w = Screen.display_width(ch.to_s)
+              if acc + w <= start_col
+                acc += w
+                next
+              end
+              io << " " * (acc + w - start_col) if acc < start_col # straddling glyph → visible cells as spaces
+              io << ch if acc >= start_col                         # clean boundary keeps the glyph
+              acc += w
+              cutting = false
+            else
+              io << ch
+            end
+          end
+        end
+        out << Span.new(kept, span.fg, span.attr) unless kept.empty?
+      end
+      out
+    end
+
     # --- line builders -------------------------------------------------------
 
     private def self.start_line(raw : String, request : Bool) : Line
