@@ -36,6 +36,10 @@ private class FakeContext < ExecContext
     @calls << :open_palette
   end
 
+  def open_notifications : Nil
+    @calls << :open_notifications
+  end
+
   def close_overlay : Nil
     @calls << :close_overlay
   end
@@ -158,6 +162,22 @@ private class FakeContext < ExecContext
 
   def fuzz_automark : Nil
     @calls << :fuzz_automark
+  end
+
+  def mine_selected : Nil
+    @calls << :mine_selected
+  end
+
+  def mine_from_replay : Nil
+    @calls << :mine_from_replay
+  end
+
+  def mine_run : Nil
+    @calls << :mine_run
+  end
+
+  def mine_stop : Nil
+    @calls << :mine_stop
   end
 
   def sitemap_move(delta : Int32) : Nil

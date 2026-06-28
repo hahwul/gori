@@ -6,6 +6,8 @@ require "./geometry"
 require "./frame"
 require "./chrome"
 require "./theme"
+require "./jobs"
+require "./notifications"
 
 module Gori::Tui
   # The narrow facade a TabController is given to drive the shell's cross-cutting
@@ -24,14 +26,16 @@ module Gori::Tui
     abstract def open_space_menu : Nil                # open the space action menu (bottom-right)
     # Destructive-action confirmation modal; `action` runs on confirm.
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, &action : -> Nil) : Nil
-    abstract def session : Session   # store / scope / proxy / registry / interceptor
-    abstract def overlay : Symbol    # read the overlay state (e.g. History reads :detail)
-    abstract def active_tab : Symbol # read the active tab (Replay reconcile gates on it)
-    abstract def focus : Symbol      # read the focus model (:menu | :subtabs | :body)
-    abstract def reveal? : Bool      # global whitespace-reveal pref, pushed into views
-    abstract def toggle_reveal : Nil # flip the whitespace-reveal pref (^B from any view)
-    abstract def pretty? : Bool      # global pretty-print-bodies pref, pushed into views
-    abstract def toggle_pretty : Nil # flip the pretty-print pref (`p` from History/Replay)
+    abstract def session : Session             # store / scope / proxy / registry / interceptor
+    abstract def overlay : Symbol              # read the overlay state (e.g. History reads :detail)
+    abstract def active_tab : Symbol           # read the active tab (Replay reconcile gates on it)
+    abstract def focus : Symbol                # read the focus model (:menu | :subtabs | :body)
+    abstract def reveal? : Bool                # global whitespace-reveal pref, pushed into views
+    abstract def toggle_reveal : Nil           # flip the whitespace-reveal pref (^B from any view)
+    abstract def pretty? : Bool                # global pretty-print-bodies pref, pushed into views
+    abstract def toggle_pretty : Nil           # flip the pretty-print pref (`p` from History/Replay)
+    abstract def jobs : Jobs                   # shared background-job registry (bottom-bar activity)
+    abstract def notifications : Notifications # shared notification store (center + badge)
   end
 
   # Shared, state-free body chrome used by BOTH Runner and the per-tab
@@ -173,6 +177,11 @@ module Gori::Tui
 
     def locked? : Bool # a destructive op is gated (e.g. last note can't close)
       false
+    end
+
+    # Focus a specific session/sub-tab by its persisted id (notification "jump to
+    # result"). Default no-op; Replay/Fuzzer/Miner controllers override to reveal the row.
+    def reveal_session(id : Int64) : Nil
     end
   end
 end

@@ -48,9 +48,9 @@ describe Gori::Tui::SpaceMenu do
     menu.open(Gori::Verb::Scope::HistoryDetail, ctx) # detail drill-in is navigable now
 
     menu.entries.size.should be > 0
-    menu.entries.all?(&.scope.history_detail?).should be_true   # strictly scope-local
+    menu.entries.all?(&.scope.history_detail?).should be_true # strictly scope-local
     ids = menu.entries.map(&.id)
-    ids.should contain("detail.replay")    # flow action carried over from the list
+    ids.should contain("detail.replay")     # flow action carried over from the list
     ids.should contain("detail.toggle-hex") # a detail-only view toggle
     menu.verb_for('r').try(&.id).should eq("detail.replay")
     menu.verb_for('x').try(&.id).should eq("detail.toggle-hex")
@@ -133,8 +133,8 @@ describe Gori::Tui::SpaceMenu do
 
     backend = MemoryBackend.new(40, 8)
     menu.render(Screen.new(backend), Rect.new(0, 0, 40, 6)) # short body → only ~4 rows fit
-    backend.contains?(last).should be_true   # scrolled into view
-    backend.contains?(first).should be_false # the top entries scrolled off
+    backend.contains?(last).should be_true                  # scrolled into view
+    backend.contains?(first).should be_false                # the top entries scrolled off
   end
 
   # Per menu scope, the keyed entries must never collide, and any verb with NO chord
@@ -150,6 +150,7 @@ describe Gori::Tui::SpaceMenu do
       Gori::Verb::Scope::Comparer, Gori::Verb::Scope::Fuzzer, Gori::Verb::Scope::Intercept,
       Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::FindingsDetail,
       Gori::Verb::Scope::Project, Gori::Verb::Scope::Convert, Gori::Verb::Scope::Sitemap,
+      Gori::Verb::Scope::Miner,
     ]
     menu_scopes.each do |scope|
       verbs = registry.select { |v| v.scope == scope && !v.hidden? }

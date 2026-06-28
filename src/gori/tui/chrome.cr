@@ -13,6 +13,7 @@ module Gori::Tui
       {:intercept, "Intercept"},
       {:replay, "Replay"},
       {:fuzzer, "Fuzzer"},
+      {:miner, "Miner"},
       {:convert, "Convert"},
       {:comparer, "Comparer"},
       {:findings, "Findings"},
@@ -24,7 +25,7 @@ module Gori::Tui
     # Tabs hidden by default on a fresh install (re-enableable in settings:tabs). Agent
     # is a non-functional "coming soon" placeholder. Only affects reconcile's append
     # path — once the user saves, tab_prefs is explicit and this no longer applies.
-    DEFAULT_HIDDEN = [:agent]
+    DEFAULT_HIDDEN = [:agent, :miner]
 
     # Reconcile stored prefs against the canonical catalog → full ordered
     # {symbol, label, visible?}. Removed/unknown ids are dropped, duplicates collapse to
@@ -262,28 +263,68 @@ module Gori::Tui
     # upstream state chips (right). The badge — TABS / BODY / an overlay name —
     # is a lifted chip so the user always knows which region the keys drive.
     def self.render_status(screen : Screen, rect : Rect, *, focus : String, hints : String,
-                           capturing : Bool, insecure_upstream : Bool, write_failures : Int32 = 0) : Nil
+                           capturing : Bool, insecure_upstream : Bool, write_failures : Int32 = 0,
+                           activity : {String, Color}? = nil, unread : Int32 = 0) : Nil
       screen.fill(rect, Theme.panel)
       badge = " #{focus} "
       screen.text(rect.x, rect.y, badge, Theme.text_bright, Theme.elevated, Attribute::Bold)
       hint_x = rect.x + badge.size + 1
 
-      # A persistent capture-write failure (e.g. disk full) is louder than the
-      # normal on/off chip — the operator must know rows are being dropped.
-      capture_chip = if write_failures > 0
-                       {"capture:FAILING(#{write_failures})", Theme.red}
-                     else
-                       {capturing ? "capture:on" : "capture:off", capturing ? Theme.text : Theme.muted}
-                     end
-      chips = [
-        capture_chip,
-        # an insecure upstream is a security warning — the one allowed non-status colour.
-        insecure_upstream ? {"upstream:insecure", Theme.yellow} : {"upstream:verify", Theme.muted},
-      ]
+      chips = status_chips(capturing: capturing, insecure_upstream: insecure_upstream,
+        write_failures: write_failures, activity: activity, unread: unread).map { |(_, l, c)| {l, c} }
       hint_w = {rect.right - hint_x - chips_width(chips) - 2, 1}.max
       screen.text(hint_x, rect.y, hints, Theme.muted, Theme.panel, width: hint_w)
       # Floor the chips at the hint start so they can never overwrite the badge.
       render_chips(screen, rect, chips, min_x: hint_x)
+    end
+
+    # The right-aligned status chips, TAGGED so render and the click hit-test share one
+    # ordered source (the geometry can't drift). A background-activity chip (spinner +
+    # label) and a notification unread badge precede the capture/upstream chips.
+    private def self.status_chips(*, capturing : Bool, insecure_upstream : Bool, write_failures : Int32,
+                                  activity : {String, Color}?, unread : Int32) : Array({Symbol, String, Color})
+      chips = [] of {Symbol, String, Color}
+      chips << {:activity, activity[0], activity[1]} if activity
+      chips << {:notify, "notify:#{unread}", Theme.accent} if unread > 0
+      # A persistent capture-write failure (e.g. disk full) is louder than the
+      # normal on/off chip — the operator must know rows are being dropped.
+      chips << if write_failures > 0
+        {:capture, "capture:FAILING(#{write_failures})", Theme.red}
+      else
+        {:capture, capturing ? "capture:on" : "capture:off", capturing ? Theme.text : Theme.muted}
+      end
+      # an insecure upstream is a security warning — the one allowed non-status colour.
+      chips << (insecure_upstream ? {:upstream, "upstream:insecure", Theme.yellow} : {:upstream, "upstream:verify", Theme.muted})
+      chips
+    end
+
+    # The drawn rect of a tagged status chip (or nil if absent) — rebuilds the SAME chip
+    # list + layout render_status uses, so a click can't drift from the glyph. Used by
+    # the Runner to make the `notify:N` badge clickable.
+    # `min_x` MUST be the same floor render_status passes to render_chips (the hint start),
+    # or the hit-test rect drifts left of the drawn chip on a narrow row where the chips are
+    # floored. The Runner computes it identically from the focus badge.
+    def self.status_chip_rect(rect : Rect, tag : Symbol, *, capturing : Bool, insecure_upstream : Bool,
+                              write_failures : Int32, activity : {String, Color}?, unread : Int32,
+                              min_x : Int32) : Rect?
+      tagged = status_chips(capturing: capturing, insecure_upstream: insecure_upstream,
+        write_failures: write_failures, activity: activity, unread: unread)
+      idx = tagged.index { |(t, _, _)| t == tag }
+      return nil unless idx
+      chip_layout(rect, tagged.map { |(_, l, c)| {l, c} }, min_x)[idx]?
+    end
+
+    # The drawn rect of each chip, computed IDENTICALLY to render_chips' x-advance, so a
+    # hit-test maps to the same cells. ASCII chips → width == label size.
+    private def self.chip_layout(rect : Rect, chips : Array({String, Color}), min_x : Int32?) : Array(Rect)
+      rects = [] of Rect
+      x = {rect.right - chips_width(chips) - 1, min_x || rect.x}.max
+      chips.each_with_index do |(label, _), i|
+        rects << Rect.new(x, rect.y, label.size, 1)
+        x += label.size
+        x += 3 if i < chips.size - 1 # the " · " separator
+      end
+      rects
     end
   end
 end

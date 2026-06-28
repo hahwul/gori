@@ -6,6 +6,7 @@ require "../replay/engine"
 require "../replay/h2_engine"
 require "../replay/flow_request"
 require "../fuzz"
+require "../miner"
 require "./serialize"
 require "./request_builder"
 
@@ -32,8 +33,14 @@ module Gori
       FUZZ_MAX_CONCURRENCY =         100
       FUZZ_MAX_STORED      =      10_000
 
+      # Param-miner safety rails (same intent as the fuzz caps).
+      MINE_MAX_REQUESTS    = 100_000_i64
+      MINE_MAX_CONCURRENCY =         100
+      MINE_MAX_STORED      =      10_000
+
       def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool)
         @jobs = {} of String => FuzzJob
+        @mine_jobs = {} of String => MineJob
         @job_seq = 0
       end
 
@@ -59,6 +66,30 @@ module Gori
         property? truncated = false
 
         def initialize(@id : String, @total : Int64?, @engine : Fuzz::Engine)
+        end
+
+        def stop : Nil
+          @engine.stop
+        end
+      end
+
+      # A background param-mining run, polled by mine_status / mine_results. Like FuzzJob,
+      # only the runner fiber mutates these (single-threaded → no lock). `total` is the
+      # name count (the stable denominator); findings are capped at MINE_MAX_STORED.
+      class MineJob
+        getter id : String
+        getter total : Int64
+        property status : Symbol = :running # :running | :done | :stopped | :error
+        property names_done = 0_i64
+        property sent = 0_i64
+        property found = 0
+        property errors = 0_i64
+        property? baseline_stable = true
+        property error_msg : String? = nil
+        getter results = [] of Miner::Finding
+        property? truncated = false
+
+        def initialize(@id : String, @total : Int64, @engine : Miner::Engine)
         end
 
         def stop : Nil
@@ -174,6 +205,42 @@ module Gori
             tool j, "fuzz_stop", "Stop a running fuzz job (in-flight requests finish)." do |s|
               s.field "job_id", strprop("id from fuzz_start"), required: true
             end
+
+            tool j, "mine_start",
+              "Discover hidden/unlinked parameters a server accepts (Burp \"Param Miner\"). " \
+              "Stuffs a built-in wordlist of names into the request and bisects to isolate " \
+              "the ones that change the response. Returns a job_id immediately (poll with " \
+              "mine_status / mine_results; end with mine_stop). ACTIVE: sends many real " \
+              "outbound requests. Capped at #{MINE_MAX_REQUESTS} requests / #{MINE_MAX_CONCURRENCY} concurrency." do |s|
+              s.field "template", strprop("raw HTTP request to mine")
+              s.field "flow_id", intprop("seed the request from a captured flow id (instead of template)")
+              s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
+              s.field "locations", strprop("comma list of where to mine: query,form,json,headers,cookies (default: auto-detect)")
+              s.field "wordlist", strprop("path to an extra param-name wordlist (merged with the built-in list)")
+              s.field "bucket", intprop("names stuffed per request before bisection (per location)")
+              s.field "concurrency", intprop("parallel requests (default 10, max #{MINE_MAX_CONCURRENCY})")
+              s.field "rate", intprop("requests/sec cap (0 = unlimited)")
+              s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
+              s.field "retries", intprop("retries per request on a network error")
+              s.field "http2", boolprop("use real HTTP/2")
+              s.field "insecure", boolprop("skip upstream TLS verification")
+              s.field "max_requests", intprop("caller cap on total requests")
+            end
+
+            tool j, "mine_status", "Counts + state of a mine job (running|done|stopped|error)." do |s|
+              s.field "job_id", strprop("id from mine_start"), required: true
+            end
+
+            tool j, "mine_results",
+              "Paged discovered parameters for a mine job (name, location, evidence, confidence)." do |s|
+              s.field "job_id", strprop("id from mine_start"), required: true
+              s.field "offset", intprop("start row (default 0)")
+              s.field "limit", intprop("max rows (default 100, max 1000)")
+            end
+
+            tool j, "mine_stop", "Stop a running mine job (in-flight requests finish)." do |s|
+              s.field "job_id", strprop("id from mine_start"), required: true
+            end
           end
         end
       end
@@ -213,6 +280,10 @@ module Gori
         when "fuzz_status"    then gated { fuzz_status(h) }
         when "fuzz_results"   then gated { fuzz_results(h) }
         when "fuzz_stop"      then gated { fuzz_stop(h) }
+        when "mine_start"     then gated { mine_start(h) }
+        when "mine_status"    then gated { mine_status(h) }
+        when "mine_results"   then gated { mine_results(h) }
+        when "mine_stop"      then gated { mine_stop(h) }
         end
       end
 
@@ -464,6 +535,167 @@ module Gori
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
         @jobs[id]? || Result.new("no fuzz job #{id}", is_error: true)
+      end
+
+      # --- mine tools (gated, async job model) --------------------------------
+
+      private def mine_start(h) : Result
+        engine, origin, total = build_mine_job(h)
+        @job_seq += 1
+        id = "mn_#{@job_seq}"
+        mjob = MineJob.new(id, total, engine)
+        @mine_jobs[id] = mjob
+        Log.info { "mine_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} names=#{total}" }
+        spawn(name: "mcp-mine-#{id}") { run_mine_job(mjob, engine) }
+        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "names", total; j.field "status", "running" } })
+      rescue ex : FuzzArgError
+        Result.new(ex.message || "invalid mine arguments", is_error: true)
+      end
+
+      private def run_mine_job(mjob : MineJob, engine : Miner::Engine) : Nil
+        engine.run do |ev|
+          case ev
+          when Miner::BaselineEvent then mjob.baseline_stable = ev.stable
+          when Miner::ProgressEvent then apply_mine_progress(mjob, ev.progress)
+          when Miner::FindingEvent  then store_mine_finding(mjob, ev.finding)
+          when Miner::DoneEvent
+            apply_mine_progress(mjob, ev.progress)
+            mjob.status = ev.stopped ? :stopped : :done
+          when Miner::ErrorEvent
+            mjob.status = :error
+            mjob.error_msg = ev.message
+          end
+        end
+      end
+
+      private def apply_mine_progress(mjob : MineJob, p : Miner::Progress) : Nil
+        mjob.names_done = p.names_done
+        mjob.sent = p.sent
+        mjob.found = p.found
+        mjob.errors = p.errors
+      end
+
+      private def store_mine_finding(mjob : MineJob, f : Miner::Finding) : Nil
+        if mjob.results.size < MINE_MAX_STORED
+          mjob.results << f
+        else
+          mjob.truncated = true
+        end
+      end
+
+      private def mine_status(h) : Result
+        mjob = lookup_mine_job(h)
+        return mjob if mjob.is_a?(Result)
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "job_id", mjob.id
+            j.field "status", mjob.status.to_s
+            j.field "names_total", mjob.total
+            j.field "names_done", mjob.names_done
+            j.field "sent", mjob.sent
+            j.field "found", mjob.found
+            j.field "errors", mjob.errors
+            j.field "baseline_stable", mjob.baseline_stable?
+            j.field "results_truncated", mjob.truncated?
+            j.field "error", mjob.error_msg
+          end
+        end)
+      end
+
+      private def mine_results(h) : Result
+        mjob = lookup_mine_job(h)
+        return mjob if mjob.is_a?(Result)
+        offset = clamp_nonneg(int(h, "offset"))
+        limit = clamp(int(h, "limit"), 100, 1000)
+        page = mjob.results[offset, limit]? || [] of Miner::Finding
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field("findings") { j.array { page.each { |f| mine_finding_json(j, f) } } }
+            j.field "returned", page.size
+            j.field "offset", offset
+            j.field "total_available", mjob.results.size
+            j.field "complete", mjob.status != :running
+            j.field "results_truncated", mjob.truncated?
+          end
+        end)
+      end
+
+      private def mine_stop(h) : Result
+        mjob = lookup_mine_job(h)
+        return mjob if mjob.is_a?(Result)
+        mjob.stop
+        Result.new(JSON.build { |j| j.object { j.field "job_id", mjob.id; j.field "status", "stopping" } })
+      end
+
+      private def lookup_mine_job(h) : MineJob | Result
+        id = str(h, "job_id")
+        return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
+        @mine_jobs[id]? || Result.new("no mine job #{id}", is_error: true)
+      end
+
+      private def mine_finding_json(j : JSON::Builder, f : Miner::Finding) : Nil
+        j.object do
+          j.field "name", f.name
+          j.field "location", f.location.label
+          j.field "evidence", f.evidence.label
+          j.field "confidence", f.confidence.label
+          j.field "canary", f.canary
+          j.field "status", f.status
+          j.field "delta", f.delta
+        end
+      end
+
+      # Build a ready-to-run mining engine + its origin + name count. Raises FuzzArgError
+      # (clean message) on malformed input. Reuses the fuzz origin/timeout helpers.
+      private def build_mine_job(h) : {Miner::Engine, Fuzz::Origin, Int64}
+        bytes, default_target, src_h2 = mine_request_source(h)
+        use_h2 = (bool(h, "http2") || false) || src_h2
+        origin = fuzz_origin(h, default_target)
+        sender = Fuzz::Sender.new(origin, http2: use_h2,
+          verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
+        config = Miner::Config.new
+        config.locations = mine_locations(h, bytes)
+        raise FuzzArgError.new("no applicable locations for this request") if config.locations.empty?
+        config.concurrency = clamp(int(h, "concurrency"), 10, MINE_MAX_CONCURRENCY)
+        config.rps = int(h, "rate").try(&.to_f64)
+        config.timeout = fuzz_timeout(h)
+        config.retries = (int(h, "retries") || 1_i64).to_i
+        cap = int(h, "max_requests")
+        config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
+        config.user_wordlist = str(h, "wordlist").presence
+        if b = int(h, "bucket")
+          config.locations.each { |loc| config.bucket_size[loc] = b.to_i }
+        end
+        names = Miner::Wordlist.load(config.user_wordlist)
+        engine = Miner::Engine.new(bytes, use_h2, names, sender, config)
+        {engine, origin, engine.total_names}
+      rescue ex : File::Error
+        raise FuzzArgError.new("wordlist error: #{ex.message}")
+      end
+
+      private def mine_request_source(h) : {Bytes, String?, Bool}
+        if t = str(h, "template")
+          return {t.gsub(/\r?\n/, "\r\n").to_slice, nil, false} unless t.strip.empty?
+        end
+        if id = int(h, "flow_id")
+          detail = @store.get_flow(id)
+          raise FuzzArgError.new("no flow with id #{id}") unless detail
+          built = Replay::FlowRequest.build(detail)
+          return {built.bytes, built.target, built.http2}
+        end
+        raise FuzzArgError.new("provide a 'template' (raw request) or a 'flow_id'")
+      end
+
+      private def mine_locations(h, bytes : Bytes) : Array(Miner::Location)
+        raw = str(h, "locations")
+        if raw && !raw.strip.empty?
+          raw.split(',').compact_map do |tok|
+            next if tok.strip.empty?
+            Miner::Location.parse?(tok) || raise FuzzArgError.new("unknown location '#{tok}' (query|form|json|headers|cookies)")
+          end
+        else
+          Miner::Detect.detect(bytes).default
+        end
       end
 
       # Build a ready-to-run engine + its origin + total from the tool args. Raises

@@ -16,6 +16,7 @@ require "./controllers/findings_controller"
 require "./controllers/project_controller"
 require "./controllers/replay_controller"
 require "./controllers/fuzzer_controller"
+require "./controllers/miner_controller"
 require "./controllers/comparer_controller"
 require "./controllers/convert_controller"
 require "./history_view"
@@ -38,6 +39,9 @@ require "./hosts_overlay"
 require "./hotkeys_overlay"
 require "./palette"
 require "./space_menu"
+require "./jobs"
+require "./notifications"
+require "./notifications_overlay"
 require "../paths"
 require "../browser"
 require "../external_editor"
@@ -66,7 +70,7 @@ module Gori::Tui
       # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :settings | :tabs | :hosts | :hotkeys
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :settings | :tabs | :hosts | :hotkeys | :notifications | :mine_config
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -124,6 +128,16 @@ module Gori::Tui
       @hosts_overlay = HostsOverlay.new
       # The hotkey rebinder (palette → settings:hotkeys); @overlay is :hotkeys.
       @hotkeys_overlay = HotkeysOverlay.new(@session.registry)
+      # Shared background-job + notification layer (Miner is the first consumer). The
+      # registries are mutated only on the main fiber (controller drains); the spinner
+      # frame advances while a job is active so the bottom-bar chip animates.
+      @jobs = Jobs.new
+      @notifications = Notifications.new
+      @notifications_overlay = NotificationsOverlay.new(@notifications)
+      @spinner_frame = 0
+      # The Miner config popup (History/Replay → space → "Mine parameters"); @overlay is
+      # :mine_config while it's up. Built fresh each time it opens (holds the seed request).
+      @mine_config_overlay = nil.as(MineConfigOverlay?)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)         # transient action feedback; nil → show key hints
@@ -148,6 +162,7 @@ module Gori::Tui
         ProjectController.new(self),
         ReplayController.new(self),
         FuzzerController.new(self),
+        MinerController.new(self),
         ComparerController.new(self),
         ConvertController.new(self),
       ].each { |c| @tabs[c.tab] = c }
@@ -190,6 +205,10 @@ module Gori::Tui
       @tabs[:fuzzer].as(FuzzerController)
     end
 
+    private def miner_controller : MinerController
+      @tabs[:miner].as(MinerController)
+    end
+
     private def comparer_controller : ComparerController
       @tabs[:comparer].as(ComparerController)
     end
@@ -228,6 +247,7 @@ module Gori::Tui
       last_wf = @session.store.write_failures
       last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
       last_dv_poll = Time.instant
+      last_spin = Time.instant # advances the background-job spinner frame
       last_clock = clock_label # top-bar wall clock; re-render only when the minute rolls over
       loop do
         ev = @term.poll_event(50)
@@ -255,6 +275,7 @@ module Gori::Tui
           dirty = true
         end
         dirty = true if fuzzer_controller.drain_events
+        dirty = true if miner_controller.drain_events
         if (rev = @session.interceptor.revision) != last_rev
           last_rev = rev
           dirty = true
@@ -275,6 +296,14 @@ module Gori::Tui
             apply_external_change
             dirty = true
           end
+        end
+        # Animate the bottom-bar background-job spinner: while any job runs, advance the
+        # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
+        # CPU at zero when nothing is running.
+        if @jobs.any_active? && now - last_spin >= SPINNER_INTERVAL
+          last_spin = now
+          @spinner_frame &+= 1
+          dirty = true
         end
         # Debounced QL filter: fire the deferred search once typing has paused.
         dirty = true if history_controller.flush_query_reload_if_due(now)
@@ -297,6 +326,12 @@ module Gori::Tui
     # gori instance capturing into the same project DB). Cheap, but no need every
     # 50ms tick — ~sub-second freshness is plenty.
     DV_POLL_INTERVAL = 750.milliseconds
+
+    # How fast the bottom-bar background-job spinner advances (only while a job runs).
+    SPINNER_INTERVAL = 120.milliseconds
+
+    # Braille spinner frames (U+2800–U+28FF: EAW-Neutral width 1, no emoji/VS16).
+    SPINNER = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
 
     private def drain_events : Bool
       drained = false
@@ -438,6 +473,8 @@ module Gori::Tui
       return handle_tabs_key(ev) if @overlay == :tabs
       return handle_hosts_key(ev) if @overlay == :hosts
       return handle_hotkeys_key(ev) if @overlay == :hotkeys
+      return handle_notifications_key(ev) if @overlay == :notifications
+      return handle_mine_config_key(ev) if @overlay == :mine_config
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
@@ -605,6 +642,7 @@ module Gori::Tui
         handle_overlay_click(layout, mx, my)
         return
       end
+      return if click_status(layout.status, mx, my)
       return click_menu(layout.menu, mx, my) if layout.menu.contains?(mx, my)
       return if subtabs_shown? && click_subtab_strip(layout.body, mx, my)
       click_body(layout.body, mx, my) if layout.body.contains?(mx, my)
@@ -613,8 +651,8 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :settings, :tabs, :hotkeys then true
-      else                                                                                                                              false
+      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :settings, :tabs, :hotkeys, :notifications, :mine_config then true
+      else                                                                                                                                                            false
       end
     end
 
@@ -694,7 +732,45 @@ module Gori::Tui
       when :tabs          then click_tabs(area, mx, my)
       when :hosts         then click_hosts(area, mx, my)
       when :hotkeys       then click_hotkeys(area, mx, my)
+      when :notifications then click_notifications(area, mx, my)
+      when :mine_config   then click_mine_config(area, mx, my)
         # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
+      end
+    end
+
+    # Click the bottom-bar notification badge (`notify:N`) → open the center. Returns
+    # true when consumed. The chip rect is rebuilt from the same source render uses.
+    private def click_status(rect : Rect, mx : Int32, my : Int32) : Bool
+      return false unless rect.contains?(mx, my)
+      # Mirror render_status's chip floor (the hint start, right of the focus badge) so the
+      # clickable rect lands exactly on the drawn badge even on a narrow row.
+      hint_x = rect.x + " #{focus_label} ".size + 1
+      nrect = Chrome.status_chip_rect(rect, :notify,
+        capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,
+        write_failures: @session.store.write_failures, activity: activity_chip,
+        unread: @notifications.unread, min_x: hint_x)
+      return false unless nrect && nrect.contains?(mx, my)
+      open_notifications
+      true
+    end
+
+    private def click_notifications(area : Rect, mx : Int32, my : Int32) : Nil
+      box = @notifications_overlay.overlay_box(area)
+      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = @notifications_overlay.row_at(box, mx, my)
+        @notifications_overlay.set_selected(idx)
+        open_notification_goto
+      end
+    end
+
+    private def click_mine_config(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @mine_config_overlay
+      return unless ov
+      box = ov.overlay_box(area)
+      return close_mine_config if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = ov.row_at(box, mx, my)
+        ov.set_selected(idx)
+        ov.on_start_row? ? start_mining(ov) : ov.toggle
       end
     end
 
@@ -830,6 +906,49 @@ module Gori::Tui
       when :tabs          then @tabs_overlay.select_move(step)
       when :hosts         then @hosts_overlay.select_move(step)
       when :hotkeys       then @hotkeys_overlay.select_move(step)
+      when :notifications then @notifications_overlay.select_move(step)
+      when :mine_config   then @mine_config_overlay.try(&.move(step))
+      end
+    end
+
+    # Notification center: ↑/↓ select · ↵ jump to the result · c clear · ^P palette · esc.
+    private def handle_notifications_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char
+      if ev.ctrl? && key.lower_p?
+        @overlay = :none
+        open_palette
+      elsif key.escape?
+        @overlay = :none
+      elsif key.up?
+        @notifications_overlay.select_move(-1)
+      elsif key.down?
+        @notifications_overlay.select_move(1)
+      elsif key.enter?
+        open_notification_goto
+      elsif c == 'c'
+        @notifications.clear
+        @notifications_overlay.reset
+      end
+    end
+
+    # Miner config popup: ↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel.
+    private def handle_mine_config_key(ev : Termisu::Event::Key) : Nil
+      ov = @mine_config_overlay
+      return unless ov
+      key = ev.key
+      if key.escape?
+        close_mine_config
+      elsif key.up?
+        ov.move(-1)
+      elsif key.down?
+        ov.move(1)
+      elsif key.left?
+        ov.adjust(-1)
+      elsif key.right?
+        ov.adjust(1)
+      elsif key.enter? || key.space?
+        ov.on_start_row? ? start_mining(ov) : ov.toggle
       end
     end
 
@@ -1685,7 +1804,8 @@ module Gori::Tui
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: @toast || key_hints,
         capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,
-        write_failures: @session.store.write_failures)
+        write_failures: @session.store.write_failures,
+        activity: activity_chip, unread: @notifications.unread)
       @palette.render(screen, layout.body) if @overlay == :palette
       @rules_overlay.render(screen, layout.body) if @overlay == :rules
       @finding_form.render(screen, layout.body) if @overlay == :finding_new
@@ -1698,6 +1818,8 @@ module Gori::Tui
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
       @hosts_overlay.render(screen, layout.body) if @overlay == :hosts
       @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
+      @notifications_overlay.render(screen, layout.body) if @overlay == :notifications
+      @mine_config_overlay.try(&.render(screen, layout.body)) if @overlay == :mine_config
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
 
@@ -1753,6 +1875,12 @@ module Gori::Tui
       @session.rules.active? ? "rules:#{@session.rules.enabled_count}" : ""
     end
 
+    # The bottom-bar background-activity chip (spinner + label), or nil when no job runs.
+    private def activity_chip : {String, Color}?
+      return nil unless label = @jobs.activity_label
+      {"#{SPINNER[@spinner_frame % SPINNER.size]} #{label}", Theme.accent}
+    end
+
     private def intercept_label : String
       ic = @session.interceptor
       ic.enabled? ? "intercept:on(#{ic.pending_count})" : ""
@@ -1777,6 +1905,8 @@ module Gori::Tui
       when :tabs          then "TAB BAR"
       when :hosts         then "HOSTNAME OVERRIDES"
       when :hotkeys       then "HOTKEYS"
+      when :notifications then "NOTIFICATIONS"
+      when :mine_config   then "MINE PARAMS"
       else
         case @focus
         when :menu    then "TABS"
@@ -1813,6 +1943,8 @@ module Gori::Tui
       when :tabs          then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
       when :hosts         then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
+      when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
+      when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
       when :detail        then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
@@ -1867,6 +1999,7 @@ module Gori::Tui
       project_controller.commit
       replay_controller.save_current_replay
       fuzzer_controller.save_current
+      miner_controller.save_current
       findings_controller.commit
       convert_controller.commit
     end
@@ -1936,6 +2069,39 @@ module Gori::Tui
 
     def pretty? : Bool
       @pretty
+    end
+
+    # Shared background-job + notification stores (Host facade — controllers feed them
+    # from their per-frame drains; the bottom bar + center read them).
+    def jobs : Jobs
+      @jobs
+    end
+
+    def notifications : Notifications
+      @notifications
+    end
+
+    # Open the notification center (the app.notifications verb + the clickable bottom-bar
+    # badge). Marks everything read, clearing the unread badge.
+    def open_notifications : Nil
+      @overlay = :notifications
+      @notifications_overlay.reset
+      @notifications.mark_all_read
+    end
+
+    # Run the selected note's "jump to result" target, then close the center.
+    private def open_notification_goto : Nil
+      note = @notifications_overlay.selected_note
+      @overlay = :none
+      run_goto(note.goto) if note
+    end
+
+    private def run_goto(g : Jobs::Goto?) : Nil
+      return unless g
+      switch_tab(g.tab)
+      if sid = g.session_id
+        @tabs[g.tab]?.try(&.reveal_session(sid))
+      end
     end
 
     # Open the space action menu scoped to the CURRENT focus area. current_scope is
@@ -2121,6 +2287,7 @@ module Gori::Tui
       end
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       fuzzer_controller.save_current if @active_tab == :fuzzer
+      miner_controller.save_current if @active_tab == :miner
       convert_controller.commit if @active_tab == :convert # flush sub-tab edits/renames (dirty-guarded)
       notes_controller.save_notes if @active_tab == :notes # flush unsaved note edits (dirty-guarded)
       @active_tab = tab
@@ -2153,6 +2320,7 @@ module Gori::Tui
       end
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       fuzzer_controller.save_current if @active_tab == :fuzzer
+      miner_controller.save_current if @active_tab == :miner
       convert_controller.commit if @active_tab == :convert # flush sub-tab edits/renames (dirty-guarded)
       notes_controller.save_notes if @active_tab == :notes # flush unsaved note edits (dirty-guarded)
       # Cycle within the VISIBLE strip (skips hidden tabs); effective_tabs force-includes
@@ -2517,6 +2685,56 @@ module Gori::Tui
 
     def fuzz_automark : Nil
       (v = fuzzer_controller.current_view) && (@toast = v.auto_mark)
+    end
+
+    # --- Miner ExecContext / cross-tab mediators ---
+    # CROSS-TAB: open the config popup for History's selected flow (space → Mine params).
+    def mine_selected : Nil
+      id = history_controller.selected_flow_id
+      return (@toast = "select a flow first") unless id
+      open_mine_config(miner_controller.build_seed_from_flow(id))
+    end
+
+    # CROSS-TAB: open the config popup for the current Replay request.
+    def mine_from_replay : Nil
+      return unless v = replay_controller.current_view
+      open_mine_config(miner_controller.build_seed_from_request(v.target, v.request_text, v.http2?, v.sni_override))
+    end
+
+    def mine_run : Nil
+      miner_controller.mine_run
+    end
+
+    def mine_stop : Nil
+      miner_controller.mine_stop
+    end
+
+    private def open_mine_config(seed : MineSeed?) : Nil
+      unless seed
+        @toast = "cannot mine this request"
+        return
+      end
+      if seed.applicable.empty?
+        @toast = "no mineable locations for this request"
+        return
+      end
+      @mine_config_overlay = MineConfigOverlay.new(seed)
+      @overlay = :mine_config
+    end
+
+    # Confirm the config popup: kick off the BACKGROUND mine and stay where we are.
+    private def start_mining(ov : MineConfigOverlay) : Nil
+      unless ov.any_checked?
+        @toast = "select at least one location to mine"
+        return
+      end
+      miner_controller.start_session(ov.seed, ov.build_config)
+      close_mine_config
+    end
+
+    private def close_mine_config : Nil
+      @overlay = :none
+      @mine_config_overlay = nil
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is

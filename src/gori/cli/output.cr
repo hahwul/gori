@@ -1,6 +1,7 @@
 require "json"
 require "../store"
 require "../fuzz"
+require "../miner"
 
 module Gori
   module CLI
@@ -77,6 +78,38 @@ module Gori
           j.field "matched", r.matched?
           j.field "error", r.error
           j.field "extracted", r.extracted
+        end
+      end
+
+      # --- miner finding rows -------------------------------------------------
+
+      def self.mine_row_json(f : Miner::Finding) : String
+        JSON.build { |j| mine_finding_fields(j, f) }
+      end
+
+      def self.mine_array_json(findings : Array(Miner::Finding)) : String
+        JSON.build { |j| j.array { findings.each { |f| mine_finding_fields(j, f) } } }
+      end
+
+      def self.mine_finding_fields(j : JSON::Builder, f : Miner::Finding) : Nil
+        j.object do
+          j.field "name", f.name
+          j.field "location", f.location.label
+          j.field "evidence", f.evidence.label
+          j.field "confidence", f.confidence.label
+          j.field "canary", f.canary
+          j.field "status", f.status
+          j.field "delta", f.delta
+        end
+      end
+
+      # "[+] debug                 query    · length"
+      def self.mine_row_text(f : Miner::Finding) : String
+        String.build do |io|
+          io << (f.confidence.confirmed? ? "[+] " : "[?] ")
+          io << f.name.ljust(24)
+          io << "  " << f.location.label.ljust(8)
+          io << "· " << f.evidence.label
         end
       end
 
