@@ -3,6 +3,7 @@ require "./sink"
 require "./connect"
 require "./head_rewriter"
 require "../interceptor"
+require "../host_overrides"
 require "./conn/client_conn"
 
 module Gori::Proxy
@@ -22,6 +23,7 @@ module Gori::Proxy
 
     def initialize(@host : String, @port : Int32, @sink : FlowSink, @tls : TlsMitm? = nil,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
+                   @host_overrides : Gori::HostOverrides? = nil,
                    max_connections : Int32 = MAX_CONNECTIONS)
       @server = nil.as(TCPServer?)
       @running = false
@@ -110,7 +112,7 @@ module Gori::Proxy
       spawn do
         client.sync = true # immediate writes (P6)
         client.tcp_nodelay = true
-        ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor).run
+        ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor, host_overrides: @host_overrides).run
       rescue
         # Setup (setsockopt) can raise if the peer RST'd between accept and here;
         # ClientConn never took ownership, so close the accepted fd ourselves or

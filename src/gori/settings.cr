@@ -1,4 +1,5 @@
 require "json"
+require "socket"
 require "./paths"
 
 module Gori
@@ -18,21 +19,26 @@ module Gori
     # share ONE source of truth (no drift between "what we ship" and "what reset restores").
     DEFAULT_BIND_HOST       = "127.0.0.1"
     DEFAULT_BIND_PORT       = 8070
-    DEFAULT_UPSTREAM_PROXY   = ""
-    DEFAULT_EDITOR           = ""
-    DEFAULT_EDITOR_MARKDOWN  = true
-    DEFAULT_THEME            = "goridark"
-    DEFAULT_MOUSE            = true
-    DEFAULT_PRETTY_BODIES    = true
+    DEFAULT_UPSTREAM_PROXY  = ""
+    DEFAULT_EDITOR          = ""
+    DEFAULT_EDITOR_MARKDOWN = true
+    DEFAULT_THEME           = "goridark"
+    DEFAULT_MOUSE           = true
+    DEFAULT_PRETTY_BODIES   = true
 
     class_property bind_host : String = DEFAULT_BIND_HOST
     class_property bind_port : Int32 = DEFAULT_BIND_PORT
-    class_property upstream_proxy : String = DEFAULT_UPSTREAM_PROXY        # "host:port" HTTP proxy; "" = connect directly
-    class_property editor : String = DEFAULT_EDITOR                        # external editor for ^E; "" = $VISUAL/$EDITOR/vi
-    class_property editor_markdown : Bool = DEFAULT_EDITOR_MARKDOWN        # syntax-highlight markdown in Notes/Project
-    class_property theme : String = DEFAULT_THEME                          # TUI colour theme name (settings:theme); applied by Theme.apply
-    class_property mouse : Bool = DEFAULT_MOUSE                            # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
-    class_property pretty_bodies_default : Bool = DEFAULT_PRETTY_BODIES    # pretty-print JSON/XML/form/… bodies in History detail + Replay response (display only)
+    class_property upstream_proxy : String = DEFAULT_UPSTREAM_PROXY # "host:port" HTTP proxy; "" = connect directly
+    # Global hostname overrides (a process-wide /etc/hosts): ordered {host (lowercased),
+    # ip} pairs. Read LIVE by Upstream.dial (edits apply on the next flow); layered
+    # UNDER each project's own HostOverrides, which wins on a host collision. Edited via
+    # settings:network (the HostsOverlay).
+    class_property hostname_overrides : Array({String, String}) = [] of {String, String}
+    class_property editor : String = DEFAULT_EDITOR                     # external editor for ^E; "" = $VISUAL/$EDITOR/vi
+    class_property editor_markdown : Bool = DEFAULT_EDITOR_MARKDOWN     # syntax-highlight markdown in Notes/Project
+    class_property theme : String = DEFAULT_THEME                       # TUI colour theme name (settings:theme); applied by Theme.apply
+    class_property mouse : Bool = DEFAULT_MOUSE                         # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
+    class_property pretty_bodies_default : Bool = DEFAULT_PRETTY_BODIES # pretty-print JSON/XML/form/… bodies in History detail + Replay response (display only)
     # Top tab-bar layout: ordered {tab-id, visible?}. Empty = never customized → Chrome
     # reconciles to catalog defaults. Opaque String ids (Crystal has no runtime String→Symbol);
     # Chrome maps ids→catalog symbols. Only an EXPLICIT false hides a tab.
@@ -79,6 +85,7 @@ module Gori
         self.editor_markdown = load_bool(ed, "markdown", editor_markdown)
       end
       self.tab_prefs = parse_tab_prefs(root["tabs"]?)
+      self.hostname_overrides = parse_hostname_overrides(root["hostname_overrides"]?)
       parse_hotkeys(root["hotkeys"]?)
       if cv = root["convert"]?
         self.convert_input = cv["input"]?.try(&.as_s?) || convert_input
@@ -123,6 +130,35 @@ module Gori
         out << {name, spec}
       end
       out
+    end
+
+    # Tolerant hostname-override parse: a non-array (or absent) node keeps the current
+    # value; entries missing/blank "host" or "ip" are dropped. The host is lowercased so
+    # the live lookup (host_override_ip) and the project store stay consistent. Mirrors
+    # parse_convert_chains' robustness.
+    private def self.parse_hostname_overrides(node : JSON::Any?) : Array({String, String})
+      arr = node.try(&.as_a?)
+      return hostname_overrides unless arr
+      out = [] of {String, String}
+      arr.each do |e|
+        next unless o = e.as_h?
+        host = o["host"]?.try(&.as_s?)
+        ip = o["ip"]?.try(&.as_s?)
+        next if host.nil? || host.empty? || ip.nil? || ip.empty?
+        next unless valid_ip?(ip) # defense-in-depth: a hand-edited non-literal "ip" would re-resolve via DNS
+        out << {host.downcase, ip}
+      end
+      out
+    end
+
+    # True when `ip` is a real IPv4/IPv6 literal (not a hostname that TCPSocket would
+    # re-resolve). Mirrors HostOverrides.valid?'s IP check without coupling Settings to
+    # the proxy model.
+    private def self.valid_ip?(ip : String) : Bool
+      Socket::IPAddress.new(ip, 0)
+      true
+    rescue
+      false
     end
 
     # Tolerant tab-bar parse: a non-array (or absent) node keeps the current value;
@@ -217,6 +253,14 @@ module Gori
               end
             end
           end
+          # Omit when empty so an untouched install never writes "hostname_overrides": [].
+          unless hostname_overrides.empty?
+            j.field "hostname_overrides" do
+              j.array do
+                hostname_overrides.each { |(host, ip)| j.object { j.field "host", host; j.field "ip", ip } }
+              end
+            end
+          end
           # Omit when untouched (default profile + no overrides) so an untouched install
           # never writes a "hotkeys" block.
           unless keymap_overrides.empty? && keymap_os == "auto"
@@ -285,6 +329,17 @@ module Gori
       raw = "vi" if raw.empty?
       parts = raw.split # collapses whitespace runs, drops empties
       parts.empty? ? ["vi"] : parts
+    end
+
+    # The global override IP to dial for `host` (case-insensitive exact match), or nil
+    # when no global override applies. Read LIVE by Upstream.dial, so settings edits
+    # take effect on the next flow. A project-level HostOverrides entry is consulted
+    # FIRST and wins on a collision (see Proxy::Upstream.connect_target).
+    def self.host_override_ip(host : String) : String?
+      return nil if hostname_overrides.empty?
+      h = host.downcase
+      hostname_overrides.each { |(oh, ip)| return ip if oh == h }
+      nil
     end
 
     # Parse `upstream_proxy` into {host, port}, or nil when unset/blank. Accepts

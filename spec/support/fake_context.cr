@@ -113,6 +113,18 @@ class FakeExecContext < Gori::Verb::ExecContext
     @scope_has_rule
   end
 
+  property hostov_has_entry : Bool = false
+
+  def hostov_add_entry : Nil; end
+
+  def hostov_edit_entry : Nil; end
+
+  def hostov_delete_entry : Nil; end
+
+  def hostov_entry_selected? : Bool
+    @hostov_has_entry
+  end
+
   def rules_open : Nil; end
 
   def finding_create : Nil; end
