@@ -35,6 +35,29 @@ describe Gori::Store do
     end
   end
 
+  it "upgrades a pre-sitemap_tags DB (V18 migration) and persists tags" do
+    path = File.tempname("gori-v18", ".db")
+    begin
+      # Simulate a DB last migrated before V18: drop sitemap_tags and roll user_version
+      # back to 17 (e.g. a project created on the hostname-overrides branch).
+      store = Gori::Store.open(path)
+      store.@db.exec("DROP TABLE sitemap_tags")
+      store.@db.exec("PRAGMA user_version = 17")
+      store.close
+
+      # Reopen: the V18 migration must create sitemap_tags so tags persist again.
+      store = Gori::Store.open(path)
+      store.@db.scalar("PRAGMA user_version").should eq(18)
+      store.set_sitemap_tag("acme.test", "/api", "memo")
+      store.sitemap_tags[{"acme.test", "/api"}]?.should eq("memo")
+      store.close
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
   it "inserts a Pending flow and lists it newest-first with nil status" do
     with_store do |store|
       id1 = store.insert_flow(sample_request(target: "/first"))

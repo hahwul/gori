@@ -28,8 +28,8 @@ module Gori::Tui
       Verb::Scope::Sitemap
     end
 
-    def body_badge : Symbol # the QL filter bar captures text; else the navigable tree
-      @sitemap.querying? ? :editor : :body
+    def body_badge : Symbol # the QL filter bar / tag editor capture text; else the navigable tree
+      @sitemap.querying? || @sitemap.tagging? ? :editor : :body
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
@@ -52,12 +52,18 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
+      return "type a tag · ↵ save · esc cancel" if @sitemap.tagging?
       @sitemap.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
-                         : "↑/↓ move · / filter · ↵/→ expand · ← collapse · esc tabs"
+                         : "↑/↓ move · / filter · t tag · g group · ↵/→ expand · ← collapse · esc tabs"
     end
 
-    # Live IME composition only flows to the QL filter bar (the one text field).
+    # Live IME composition flows to whichever text field is open (the QL filter bar or
+    # the tag editor) — so Hangul composes live in both.
     def set_preedit(text : String) : Bool
+      if @sitemap.tagging?
+        @sitemap.set_tag_preedit(text)
+        return true
+      end
       return false unless @sitemap.querying?
       @sitemap.set_preedit(text)
       true
@@ -126,6 +132,56 @@ module Gori::Tui
     def sitemap_query : Nil
       @sitemap.start_query
       @host.status("filter: type a query · ↹ complete · ↵ apply · esc clear")
+    end
+
+    # --- tag editor (a text sub-mode; the shell routes its keys via handle_tag_key) ---
+    # `t` — open the tag editor for the selected node. A synthetic group fold node has
+    # no real path, so it can't be tagged — toast instead of opening an empty editor.
+    def sitemap_tag : Nil
+      if @sitemap.start_tag
+        @host.status("tag: type a memo · ↵ save · esc cancel")
+      else
+        @host.status("can't tag a [grouped] sequence — expand it and tag a value")
+      end
+    end
+
+    # Commits/cancels the tag editor. Enter persists the buffer to the (host, path) the
+    # editor targets, then reloads so the tag stamps onto the tree (and tag: filters see
+    # it). Esc discards. Returns true (swallows) while the editor is open.
+    def handle_tag_key(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      c = ev.char || key.to_char
+      case
+      when key.enter?  then commit_tag
+      when key.escape? then @sitemap.cancel_tag
+      when key.left?   then @sitemap.tag_move(-1)
+      when key.right?  then @sitemap.tag_move(1)
+      when key.backspace? then @sitemap.tag_backspace
+      else
+        if c && !ev.ctrl? && !ev.alt?
+          @sitemap.tag_insert(c)
+          @sitemap.set_tag_preedit("") # clear preedit on committed char
+        end
+      end
+      true
+    end
+
+    private def commit_tag : Nil
+      if target = @sitemap.tag_target
+        host, path = target
+        text = @sitemap.tag_buffer
+        @host.session.store.set_sitemap_tag(host, path, text)
+        @sitemap.apply_tag(text) # stamp in place — keeps the selection, no re-derive
+      else
+        @sitemap.cancel_tag
+      end
+    end
+
+    # `g` — fold/unfold numeric path-param sequences, then rebuild the tree.
+    def sitemap_toggle_grouping : Nil
+      @sitemap.toggle_grouping
+      reload
+      @host.status(@sitemap.grouping? ? "grouping sequences on" : "grouping sequences off")
     end
 
     # --- verbs (delegated from the Runner's ExecContext) ---

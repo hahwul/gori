@@ -446,6 +446,9 @@ module Gori::Tui
       if @active_tab == :sitemap && @overlay == :none && @focus == :body && sitemap_controller.view.querying?
         return if sitemap_controller.handle_query_key(ev)
       end
+      if @active_tab == :sitemap && @overlay == :none && @focus == :body && sitemap_controller.view.tagging?
+        return if sitemap_controller.handle_tag_key(ev)
+      end
       if @active_tab == :intercept && @overlay == :none && @focus == :body && intercept_controller.querying?
         return if intercept_controller.handle_query_key(ev)
       end
@@ -2379,6 +2382,14 @@ module Gori::Tui
 
     def sitemap_query : Nil
       sitemap_controller.sitemap_query
+    end
+
+    def sitemap_tag : Nil
+      sitemap_controller.sitemap_tag
+    end
+
+    def sitemap_toggle_grouping : Nil
+      sitemap_controller.sitemap_toggle_grouping
     end
 
     # --- History / detail ExecContext --- (delegated to HistoryController)

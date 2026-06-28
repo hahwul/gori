@@ -95,6 +95,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def sitemap_query : Nil; end
 
+  def sitemap_tag : Nil; end
+
+  def sitemap_toggle_grouping : Nil; end
+
   def scope_open : Nil; end
 
   def scope_add_host : Nil; end

@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 17
+      VERSION = 18
 
       V1 = [
         <<-SQL,
@@ -323,7 +323,23 @@ module Gori
         SQL
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17]
+      # Sitemap path tags: a free-text memo pinned to a (host, path) node in the Sitemap
+      # tree ("payment flow", "admin area"). Per-project, so it syncs across sessions
+      # sharing the DB (reconciled on the data_version poll like findings). UNIQUE(host,
+      # path) makes the write an upsert; an empty tag deletes the row.
+      V18 = [
+        <<-SQL,
+        CREATE TABLE sitemap_tags (
+          id   INTEGER PRIMARY KEY,
+          host TEXT NOT NULL,
+          path TEXT NOT NULL,
+          tag  TEXT NOT NULL,
+          UNIQUE(host, path)
+        )
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i
