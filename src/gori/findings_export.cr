@@ -83,10 +83,12 @@ module Gori
           c << String.new(hslice).scrub.rstrip
           c << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
           if body && !body.empty?
-            slice = body[0, {body.size, cap}.min]
-            text = String.new(slice)
-            if text.valid_encoding?
-              c << "\n\n" << text
+            # Decide text-vs-binary on the WHOLE body, not the truncated slice: cutting at
+            # `cap` bytes can split a UTF-8 codepoint, making the slice invalid even for a
+            # valid-UTF-8 body — which previously dropped it as "[binary body omitted]".
+            if String.new(body).valid_encoding?
+              slice = body[0, {body.size, cap}.min]
+              c << "\n\n" << String.new(slice).scrub # scrub the partial codepoint at the cut
               c << "\n\n[… body truncated, #{body.size} bytes total …]" if body.size > cap
             else
               c << "\n\n[binary body omitted, #{body.size} bytes]"

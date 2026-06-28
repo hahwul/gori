@@ -172,6 +172,9 @@ module Gori::Tui
         text = @sitemap.tag_buffer
         @host.session.store.set_sitemap_tag(host, path, text)
         @sitemap.apply_tag(text) # stamp in place — keeps the selection, no re-derive
+        # A `tag:` filter must re-evaluate against the changed tag (the in-place stamp
+        # doesn't re-filter), else the just-tagged node stays hidden / a cleared tag shown.
+        reload if @sitemap.filtering?
       else
         @sitemap.cancel_tag
       end

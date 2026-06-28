@@ -84,7 +84,8 @@ module Gori
       private def match_term(t : Term, f : Store::Finding) : Bool
         # An empty value (mid-type "status:" / "sev:>=") matches all, so the list
         # doesn't blank out until a value is typed — uniform across every field
-        # kind (host:/title: already do this via includes?("")).
+        # kind (host:/title: already do this via includes?("")). Negation is honoured:
+        # `status:` matches all, so its negation `-status:` matches none (spec-pinned).
         return !t.negate if t.text.empty?
         hit = case t.kind
               when :severity then match_severity(t, f.severity)
