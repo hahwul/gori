@@ -149,7 +149,7 @@ describe Gori::Tui::SpaceMenu do
       Gori::Verb::Scope::Body, Gori::Verb::Scope::Replay, Gori::Verb::Scope::Findings,
       Gori::Verb::Scope::Comparer, Gori::Verb::Scope::Fuzzer, Gori::Verb::Scope::Intercept,
       Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::FindingsDetail,
-      Gori::Verb::Scope::Project, Gori::Verb::Scope::Convert,
+      Gori::Verb::Scope::Project, Gori::Verb::Scope::Convert, Gori::Verb::Scope::Sitemap,
     ]
     menu_scopes.each do |scope|
       verbs = registry.select { |v| v.scope == scope && !v.hidden? }

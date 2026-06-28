@@ -21,6 +21,16 @@ module Gori::Tui
       # the render loop doesn't re-evaluate the (mutex-guarded) Scope every frame.
       property in_scope : Bool
       property endpoints : Int32 # # of captured endpoints (nodes with methods) under it
+      # Full URL path from the host root ("" on the host node, "/" for the bare root),
+      # stamped during `add`. Stable regardless of how grouping later reshapes the tree,
+      # so it's the durable key for a path tag.
+      property path : String
+      # Optional free-text memo pinned to this (host, path), stamped from the store each
+      # reload (V17). nil = untagged.
+      property tag : String?
+      # A synthetic `[1, 2, 3 … +N]` fold node: its children are real numeric siblings
+      # collapsed by `group_sequences`. Not a real path — never tagged, never keyed.
+      property grouped : Bool
 
       def initialize(@label : String)
         @children = [] of Node
@@ -28,6 +38,9 @@ module Gori::Tui
         @expanded = true
         @in_scope = false
         @endpoints = 0
+        @path = ""
+        @tag = nil
+        @grouped = false
       end
 
       def child(label : String) : Node
@@ -48,9 +61,14 @@ module Gori::Tui
     # tree/expand change in `collect`, not re-walked per frame.
     private record VisibleRow, node : Node, depth : Int32, guides : UInt64
 
-    # The QL fields meaningful for the endpoint tree (no `flag` — tags aren't
-    # produced yet). Mirrors History's set so the same `/` query language applies.
-    QL_FIELDS = %w(host path method status scheme body header size dur)
+    # The QL fields meaningful for the endpoint tree. Mirrors History's set so the same
+    # `/` query language applies, plus `tag:` — a Sitemap-local field (handled here, not
+    # in the shared QL) that filters the tree by a node's path memo.
+    QL_FIELDS = %w(host path method status scheme body header size dur tag)
+
+    # Pure-numeric siblings beyond this count under one parent fold into a single
+    # `[1, 2, 3 … +N]` group node (path-param explosion like /users/1,2,3…).
+    SEQUENCE_GROUP_THRESHOLD = 10
 
     def initialize
       @hosts = [] of Node
@@ -70,6 +88,15 @@ module Gori::Tui
       @querying = false
       @qcx = 0      # caret position within @query
       @preedit = "" # IME composition, drawn at the caret
+      # Numeric-sequence folding (Feature: path-param explosion). On by default; `g`
+      # toggles it for the rare case of wanting every literal id.
+      @grouping = true
+      # Tag editor — a one-line text sub-mode (mirrors the QL `/` bar) that edits the
+      # selected node's path memo. The controller persists @tag_buffer on commit.
+      @tagging = false
+      @tag_buffer = ""
+      @tag_cx = 0
+      @tag_preedit = ""
     end
 
     # Inject the Scope lens so the tree honours it AND the bar can show its state
@@ -79,15 +106,21 @@ module Gori::Tui
     end
 
     def reload(store : Store) : Nil
-      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(@query))
+      # `tag:`/`-tag:` are Sitemap-local (the shared QL has no tag column): split them
+      # out, hand the residual to QL.parse, and apply the tag filter to the built tree.
+      positives, negatives, residual = split_tag_terms(@query)
+      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(residual))
       @hosts = [] of Node
       store.sitemap_entries(combined).each do |(host, method, target)|
         add(host, normalize_path(target), method)
       end
-      # Stamp host-level scope state + endpoint counts once, so the render loop is a
-      # pure read (no per-frame Scope mutex hits). host_in_scope?/configured? evaluate
-      # the rules regardless of the ⇧S enabled flag, so targets are marked even with the
-      # lens off (all traffic shown).
+      stamp_tags(store.sitemap_tags)
+      filter_by_tags(positives, negatives)
+      @hosts.each { |h| group_sequences(h) } if @grouping
+      # Stamp host-level scope state + endpoint counts on the FINAL tree, so the render
+      # loop is a pure read (no per-frame Scope mutex hits). host_in_scope?/configured?
+      # evaluate the rules regardless of the ⇧S enabled flag, so targets are marked even
+      # with the lens off (all traffic shown).
       @scope_configured = @scope.try(&.configured?) == true
       @hosts.each do |h|
         h.in_scope = @scope_configured && (@scope.try(&.host_in_scope?(h.label)) == true)
@@ -97,6 +130,116 @@ module Gori::Tui
       @scroll = 0
       @visible_cache = nil
       @loaded = true
+    end
+
+    # --- tags: stamp / filter ------------------------------------------------
+
+    # Pin each node's memo from the (host, path) ⇒ tag map (one store read per reload).
+    private def stamp_tags(tags : Hash({String, String}, String)) : Nil
+      return if tags.empty?
+      @hosts.each { |h| stamp_node_tags(h, h.label, tags) }
+    end
+
+    private def stamp_node_tags(node : Node, host : String, tags : Hash({String, String}, String)) : Nil
+      node.tag = tags[{host, node.path}]?
+      node.children.each { |c| stamp_node_tags(c, host, tags) }
+    end
+
+    # Split `tag:`/`-tag:` tokens out of the query (whitespace-tokenised, matching
+    # QL.parse). Returns positive + negative keywords (lowercased) and the residual
+    # query for QL.parse.
+    private def split_tag_terms(query : String) : {Array(String), Array(String), String}
+      positives = [] of String
+      negatives = [] of String
+      residual = [] of String
+      query.split.each do |tok|
+        if (v = tag_token_value(tok, "tag:")) && !v.empty?
+          positives << v.downcase
+        elsif (v = tag_token_value(tok, "-tag:")) && !v.empty?
+          negatives << v.downcase
+        else
+          residual << tok
+        end
+      end
+      {positives, negatives, residual.join(' ')}
+    end
+
+    private def tag_token_value(tok : String, prefix : String) : String?
+      tok.downcase.starts_with?(prefix) ? tok[prefix.size..] : nil
+    end
+
+    # Prune the tree to tag matches: a node survives a positive term if it (or an
+    # ancestor) carries a matching tag, or any descendant does (so a tagged folder
+    # shows its subtree + the path to it). A negative term drops the matched subtree.
+    private def filter_by_tags(positives : Array(String), negatives : Array(String)) : Nil
+      @hosts.select! { |h| keep_for_tags?(h, positives, false) } unless positives.empty?
+      @hosts.select! { |h| !exclude_for_tags?(h, negatives) } unless negatives.empty?
+    end
+
+    # Returns true if `node` survives; prunes non-surviving children in place. `inside`
+    # = an ancestor already matched all positives ⇒ keep the whole subtree.
+    private def keep_for_tags?(node : Node, positives : Array(String), inside : Bool) : Bool
+      within = inside || tag_has_all?(node, positives)
+      kept_child = false
+      node.children.select! do |c|
+        keep = keep_for_tags?(c, positives, within)
+        kept_child ||= keep
+        keep
+      end
+      within || kept_child
+    end
+
+    # Returns true if `node`'s subtree should be dropped (it carries a negative tag);
+    # otherwise prunes any dropped descendants in place.
+    private def exclude_for_tags?(node : Node, negatives : Array(String)) : Bool
+      return true if tag_has_any?(node, negatives)
+      node.children.reject! { |c| exclude_for_tags?(c, negatives) }
+      false
+    end
+
+    private def tag_has_all?(node : Node, keywords : Array(String)) : Bool
+      t = node.tag
+      return false unless t
+      down = t.downcase
+      keywords.all? { |kw| down.includes?(kw) }
+    end
+
+    private def tag_has_any?(node : Node, keywords : Array(String)) : Bool
+      t = node.tag
+      return false unless t
+      down = t.downcase
+      keywords.any? { |kw| down.includes?(kw) }
+    end
+
+    # --- numeric-sequence grouping -------------------------------------------
+
+    # Fold a node's pure-numeric children into one collapsed `[1, 2, 3 … +N]` group when
+    # they exceed the threshold; non-numeric siblings stay put. Recurses first so nested
+    # sequences fold too. Sorting by (length, lexicographic) is numeric order without
+    # parsing (handles arbitrarily long ids, no overflow).
+    private def group_sequences(node : Node) : Nil
+      node.children.each { |c| group_sequences(c) }
+      numeric = node.children.select { |c| !c.grouped && numeric_label?(c.label) }
+      return if numeric.size <= SEQUENCE_GROUP_THRESHOLD
+      numeric.sort_by! { |c| {c.label.size, c.label} }
+      rest = node.children.select { |c| c.grouped || !numeric_label?(c.label) }
+      group = Node.new(group_label(numeric))
+      group.grouped = true
+      group.expanded = false
+      numeric.each { |c| group.children << c }
+      node.children.clear
+      node.children.concat(rest)
+      node.children << group
+    end
+
+    private def numeric_label?(label : String) : Bool
+      !label.empty? && label.each_char.all?(&.ascii_number?)
+    end
+
+    # "[1, 2, 3 … +47]" — the first three values then a remainder count.
+    private def group_label(nodes : Array(Node)) : String
+      head = nodes.first(3).map(&.label).join(", ")
+      nodes.size > 3 ? "[#{head} … +#{nodes.size - 3}]" : "[#{head}]"
     end
 
     # # of captured endpoints under a host node: descendant nodes carrying ≥1 method
@@ -130,6 +273,16 @@ module Gori::Tui
       return unless node && !node.leaf?
       node.expanded = true
       @visible_cache = nil
+    end
+
+    # Whether numeric-sequence folding is on (shown in the bar / used by the `g` toggle).
+    def grouping? : Bool
+      @grouping
+    end
+
+    # `g` — toggle numeric-sequence folding. The caller reloads to rebuild the tree.
+    def toggle_grouping : Nil
+      @grouping = !@grouping
     end
 
     # Collapses the selected node; returns false if there was nothing to collapse
@@ -226,6 +379,81 @@ module Gori::Tui
       {s, e}
     end
 
+    # --- tag editor (a one-line text sub-mode; mirrors the QL `/` bar) --------
+
+    def tagging? : Bool
+      @tagging
+    end
+
+    # Open the tag editor for the selected node, seeding its current memo. Returns
+    # false when the selection can't be tagged (a synthetic group node / empty tree),
+    # so the controller can toast instead.
+    def start_tag : Bool
+      node = selected_node
+      return false unless node && !node.grouped
+      @tagging = true
+      @tag_buffer = node.tag || ""
+      @tag_cx = @tag_buffer.size
+      @tag_preedit = ""
+      true
+    end
+
+    def cancel_tag : Nil
+      @tagging = false
+      @tag_buffer = ""
+      @tag_cx = 0
+      @tag_preedit = ""
+    end
+
+    # Apply the committed memo to the selected node in place (blank clears it) and exit
+    # the editor. No re-derive — the tree structure is unchanged, so the selection
+    # stays put and draw_row reads the fresh tag live.
+    def apply_tag(text : String) : Nil
+      node = selected_node
+      node.tag = text.blank? ? nil : text if node && !node.grouped
+      cancel_tag
+    end
+
+    def tag_buffer : String
+      @tag_buffer
+    end
+
+    def tag_insert(ch : Char) : Nil
+      @tag_buffer = "#{@tag_buffer[0, @tag_cx]}#{ch}#{@tag_buffer[@tag_cx..]}"
+      @tag_cx += 1
+    end
+
+    def tag_backspace : Nil
+      return if @tag_cx == 0
+      @tag_buffer = "#{@tag_buffer[0, @tag_cx - 1]}#{@tag_buffer[@tag_cx..]}"
+      @tag_cx -= 1
+    end
+
+    def tag_move(d : Int32) : Nil
+      @tag_cx = (@tag_cx + d).clamp(0, @tag_buffer.size)
+    end
+
+    def set_tag_preedit(text : String) : Nil
+      @tag_preedit = text
+    end
+
+    # The (host, path) the tag editor targets — the selected node's address (the host
+    # is the nearest depth-0 row above the selection). Nil when the selection isn't
+    # taggable (a group node / empty tree). The controller persists the buffer here.
+    def tag_target : {String, String}?
+      rows = visible_rows
+      return nil unless row = rows[@selected]?
+      return nil if row.node.grouped
+      host = row.node.label # fallback (selection IS a host row)
+      @selected.downto(0) do |i|
+        if rows[i].depth == 0
+          host = rows[i].node.label
+          break
+        end
+      end
+      {host, row.node.path}
+    end
+
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       render_ql_bar(screen, rect)
@@ -243,12 +471,26 @@ module Gori::Tui
 
       rect = tree
       rows = visible_rows
-      ensure_visible(rows.size, rect.h)
-      (0...rect.h).each do |i|
+      # Reserve the bottom row for the tag prompt while editing (the tree scrolls above it).
+      list_h = @tagging ? {rect.h - 1, 0}.max : rect.h
+      ensure_visible(rows.size, list_h)
+      (0...list_h).each do |i|
         ri = @scroll + i
         break if ri >= rows.size
         draw_row(screen, rect, rows[ri], rect.y + i, ri == @selected, focused)
       end
+      render_tag_prompt(screen, rect) if @tagging
+    end
+
+    # The in-body "tag › …" prompt on the bottom row while the tag editor is open.
+    private def render_tag_prompt(screen : Screen, rect : Rect) : Nil
+      y = rect.bottom - 1
+      screen.fill(Rect.new(rect.x, y, rect.w, 1), Theme.panel)
+      prefix = "tag › "
+      screen.text(rect.x + 1, y, prefix, Theme.accent, Theme.panel)
+      base = rect.x + 1 + prefix.size
+      screen.input_line(base, y, @tag_buffer, @tag_cx, @tag_preedit, Theme.text_bright,
+        bg: Theme.panel, width: {rect.w - prefix.size - 2, 0}.max)
     end
 
     # Draw one tree row: selection band + tree guides + marker + label + a right-aligned
@@ -267,7 +509,22 @@ module Gori::Tui
       marker, mcolor = node_marker(node, host && node.in_scope)
       screen.cell(mx, y, marker, mcolor, bg)
       lx = screen.text(mx + 2, y, node.label, label_color(host, node), bg)
+      lx = draw_tag(screen, rect, node, y, bg, lx)
       draw_cluster(screen, rect, node, host, y, bg, lx)
+    end
+
+    # Inline path memo after the label (" # note") in accent, truncated to leave a
+    # gap before the right edge. Returns the new label-end x so the right cluster sits
+    # clear of it (a long tag legitimately crowds out the chips — it's a deliberate note).
+    private def draw_tag(screen : Screen, rect : Rect, node : Node, y : Int32, bg : Color, label_end : Int32) : Int32
+      tag = node.tag
+      return label_end if tag.nil? || node.grouped
+      avail = rect.right - 1 - label_end
+      return label_end if avail < 5 # not worth a stub
+      text = " # #{tag}"
+      text = "#{text[0, avail - 1]}…" if text.size > avail
+      screen.text(label_end, y, text, Theme.accent, bg)
+      label_end + text.size
     end
 
     # Faint vertical guides at each ancestor level whose branch continues below this row.
@@ -281,6 +538,7 @@ module Gori::Tui
     # otherwise the depth tone (host bright, deeper nodes normal). `in_scope` is only ever
     # set on host nodes, so depth-0 alone decides the scope branch.
     private def label_color(host : Bool, node : Node) : Color
+      return Theme.accent if node.grouped # the synthetic [1, 2, 3 …] fold pops as accent
       if host && @scope_configured
         node.in_scope ? Theme.text_bright : Theme.muted
       else
@@ -288,11 +546,14 @@ module Gori::Tui
       end
     end
 
-    # The right-aligned cluster: an endpoint count on host rows, colored method chips on
-    # endpoint rows (hosts carry no methods, so the two never collide).
+    # The right-aligned cluster: a folded-value count on group rows, an endpoint count on
+    # host rows, colored method chips on endpoint rows (the three never collide — a node
+    # is at most one of group / host / endpoint).
     private def draw_cluster(screen : Screen, rect : Rect, node : Node, host : Bool, y : Int32, bg : Color, label_end : Int32) : Nil
-      if host
-        draw_count(screen, rect, y, bg, node.endpoints, label_end) if node.endpoints > 0
+      if node.grouped
+        draw_aside(screen, rect, y, bg, "#{node.children.size} values", label_end)
+      elsif host
+        draw_aside(screen, rect, y, bg, node.endpoints == 1 ? "1 path" : "#{node.endpoints} paths", label_end) if node.endpoints > 0
       elsif !node.methods.empty?
         draw_methods(screen, rect, y, bg, node.methods, label_end)
       end
@@ -311,10 +572,9 @@ module Gori::Tui
       end
     end
 
-    # Right-aligned endpoint count on a host row ("3 paths"). Omitted when it would
-    # collide with the host label.
-    private def draw_count(screen : Screen, rect : Rect, y : Int32, bg : Color, n : Int32, label_end : Int32) : Nil
-      txt = n == 1 ? "1 path" : "#{n} paths"
+    # Right-aligned muted aside ("3 paths" / "50 values"). Omitted when it would collide
+    # with the label/tag to its left.
+    private def draw_aside(screen : Screen, rect : Rect, y : Int32, bg : Color, txt : String, label_end : Int32) : Nil
       start = rect.right - txt.size - 1
       screen.text(start, y, txt, Theme.muted, bg) if start >= label_end + 1
     end
@@ -365,7 +625,7 @@ module Gori::Tui
         label = @query.blank? ? "(in-scope only)" : ": #{@query}"
         screen.text(rect.x + 1, rect.y, label, Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  path:  status:>=500  size:>10000  dur:>500  header:  body~regex", Theme.muted, width: left_w)
+        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  path:  status:>=500  size:>10000  dur:>500  header:  body~regex  tag:", Theme.muted, width: left_w)
       end
     end
 
@@ -436,7 +696,18 @@ module Gori::Tui
         node
       end
       segments = path.split('/').reject(&.empty?)
-      node = segments.empty? ? host_node.child("/") : segments.reduce(host_node) { |n, seg| n.child(seg) }
+      if segments.empty?
+        node = host_node.child("/")
+        node.path = "/"
+      else
+        acc = ""
+        node = host_node
+        segments.each do |seg|
+          acc = "#{acc}/#{seg}"
+          node = node.child(seg)
+          node.path = acc # idempotent on revisits; the durable tag key
+        end
+      end
       node.methods << method unless node.methods.includes?(method)
     end
 

@@ -180,6 +180,14 @@ private class FakeContext < ExecContext
     @calls << :sitemap_query
   end
 
+  def sitemap_tag : Nil
+    @calls << :sitemap_tag
+  end
+
+  def sitemap_toggle_grouping : Nil
+    @calls << :sitemap_toggle_grouping
+  end
+
   def scope_open : Nil
     @calls << :scope_open
   end

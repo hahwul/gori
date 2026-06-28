@@ -35,6 +35,27 @@ describe Gori::Store do
     end
   end
 
+  it "recreates sitemap_tags on open when a sibling-branch migration advanced the DB past V17" do
+    path = File.tempname("gori-aux", ".db")
+    begin
+      # Simulate the cross-branch V17 collision: drop our table but leave user_version at 17,
+      # as if a foreign same-numbered migration had advanced this shared DB.
+      store = Gori::Store.open(path)
+      store.@db.exec("DROP TABLE sitemap_tags")
+      store.close
+
+      # Reopen: migrate! is a no-op at v17, but ensure_aux! must recreate the table so tags persist.
+      store = Gori::Store.open(path)
+      store.set_sitemap_tag("acme.test", "/api", "memo")
+      store.sitemap_tags[{"acme.test", "/api"}]?.should eq("memo")
+      store.close
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
   it "inserts a Pending flow and lists it newest-first with nil status" do
     with_store do |store|
       id1 = store.insert_flow(sample_request(target: "/first"))

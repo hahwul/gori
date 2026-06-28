@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 16
+      VERSION = 17
 
       V1 = [
         <<-SQL,
@@ -308,7 +308,30 @@ module Gori
         "CREATE INDEX idx_fuzz_results_run ON fuzz_results (run_id, idx)",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16]
+      # Sitemap path tags: a free-text memo pinned to a (host, path) node in the
+      # Sitemap tree ("payment flow", "admin area"). Per-project, so it syncs across
+      # sessions sharing the DB (reconciled on the data_version poll like findings).
+      # UNIQUE(host, path) makes the write an upsert; an empty tag deletes the row.
+      #
+      # DDL defined once + IF NOT EXISTS so the V17 migration AND the version-independent
+      # ensure_aux! guard create it identically. WHY the guard: this branch and the
+      # hostname-overrides branch BOTH added a `V17` (sitemap_tags here, host_overrides
+      # there) before either merged. A project DB advanced to user_version 17 by the OTHER
+      # branch skips THIS migration (current already 17) and would never get sitemap_tags
+      # — so writes fail silently. ensure_aux! repairs that on every open.
+      SITEMAP_TAGS_DDL = <<-SQL
+        CREATE TABLE IF NOT EXISTS sitemap_tags (
+          id   INTEGER PRIMARY KEY,
+          host TEXT NOT NULL,
+          path TEXT NOT NULL,
+          tag  TEXT NOT NULL,
+          UNIQUE(host, path)
+        )
+        SQL
+
+      V17 = [SITEMAP_TAGS_DDL]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i
@@ -319,6 +342,13 @@ module Gori
             conn.exec("PRAGMA user_version = #{idx + 1}")
           end
         end
+      end
+
+      # Version-independent safety net for tables that may be missing because a DB was
+      # advanced past their migration number by a SIBLING branch's same-numbered migration
+      # (see SITEMAP_TAGS_DDL). Idempotent (IF NOT EXISTS), runs on every open after migrate!.
+      def self.ensure_aux!(db : DB::Database) : Nil
+        db.exec(SITEMAP_TAGS_DDL)
       end
     end
   end

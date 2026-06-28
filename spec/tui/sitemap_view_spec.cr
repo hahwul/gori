@@ -198,4 +198,82 @@ describe Gori::Tui::SitemapView do
       backend.contains?("│").should be_true
     end
   end
+
+  it "folds a long numeric sequence into a collapsed group; `g` unfolds it" do
+    tmp_store do |store|
+      (1001..1012).each { |i| capture(store, "acme.test", "GET", "/users/#{i}") } # 12 > threshold(10)
+
+      view = SitemapView.new
+      view.reload(store)
+      b = MemoryBackend.new(70, 24)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 24))
+      b.contains?("[1001, 1002, 1003").should be_true # the fold preview
+      b.contains?("12 values").should be_true         # the folded-count chip
+      b.contains?("1010").should be_false             # a folded value, hidden while collapsed
+
+      view.toggle_grouping
+      view.reload(store)
+      b2 = MemoryBackend.new(70, 24)
+      view.render(Screen.new(b2), Rect.new(0, 0, 70, 24))
+      b2.contains?("[1001").should be_false # no group node
+      b2.contains?("1010").should be_true   # every literal id back
+    end
+  end
+
+  it "leaves a short numeric sequence ungrouped" do
+    tmp_store do |store|
+      (1..5).each { |i| capture(store, "acme.test", "GET", "/a/#{i}") } # 5 <= threshold
+
+      view = SitemapView.new
+      view.reload(store)
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("[1, 2, 3").should be_false
+      b.contains?("5").should be_true # literal ids
+    end
+  end
+
+  it "stamps and renders a persisted path tag" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      store.set_sitemap_tag("acme.test", "/api", "payment flow")
+
+      view = SitemapView.new
+      view.reload(store)
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("# payment flow").should be_true
+    end
+  end
+
+  it "filters the tree by a tag: query (folder tag keeps its subtree)" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      capture(store, "acme.test", "GET", "/static/app.js")
+      store.set_sitemap_tag("acme.test", "/api", "payment")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.start_query
+      "tag:pay".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("acme.test").should be_true # ancestor of the match kept
+      b.contains?("users").should be_true     # the tagged folder's subtree kept
+      b.contains?("static").should be_false   # untagged sibling pruned
+    end
+  end
+
+  it "round-trips and clears a tag through the store" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      store.set_sitemap_tag("acme.test", "/api", "memo")
+      store.sitemap_tags[{"acme.test", "/api"}].should eq("memo")
+
+      store.set_sitemap_tag("acme.test", "/api", "") # blank clears
+      store.sitemap_tags.has_key?({"acme.test", "/api"}).should be_false
+    end
+  end
 end
