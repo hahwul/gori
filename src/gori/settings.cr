@@ -1,4 +1,5 @@
 require "json"
+require "socket"
 require "./paths"
 
 module Gori
@@ -144,9 +145,20 @@ module Gori
         host = o["host"]?.try(&.as_s?)
         ip = o["ip"]?.try(&.as_s?)
         next if host.nil? || host.empty? || ip.nil? || ip.empty?
+        next unless valid_ip?(ip) # defense-in-depth: a hand-edited non-literal "ip" would re-resolve via DNS
         out << {host.downcase, ip}
       end
       out
+    end
+
+    # True when `ip` is a real IPv4/IPv6 literal (not a hostname that TCPSocket would
+    # re-resolve). Mirrors HostOverrides.valid?'s IP check without coupling Settings to
+    # the proxy model.
+    private def self.valid_ip?(ip : String) : Bool
+      Socket::IPAddress.new(ip, 0)
+      true
+    rescue
+      false
     end
 
     # Tolerant tab-bar parse: a non-array (or absent) node keeps the current value;

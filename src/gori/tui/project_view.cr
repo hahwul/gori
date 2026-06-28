@@ -142,7 +142,8 @@ module Gori::Tui
     # too small to split. The left column is halved vertically; DESCRIPTION fills the
     # right past a 1-col divider.
     private def body_panes(rect : Rect) : {Rect, Rect, Rect}?
-      content = Rect.new(rect.x, rect.y + overview_h(rect), rect.w, {rect.h - overview_h(rect), 0}.max)
+      oh = overview_h(rect)
+      content = Rect.new(rect.x, rect.y + oh, rect.w, {rect.h - oh, 0}.max)
       return nil if content.h < 2 || content.w < 4
       left_w = {(content.w - 1) // 2, 1}.max
       scope_h = {content.h // 2, 1}.max
@@ -395,11 +396,9 @@ module Gori::Tui
     def ov_commit : Symbol
       text = @ov_input.strip
       return :empty if text.empty?
-      parts = text.split(/\s+/, 2)
-      return :invalid if parts.size < 2
-      ip = parts[0]
-      host = parts[1].strip
-      return :invalid unless HostOverrides.valid?(host, ip)
+      parsed = HostOverrides.parse_line(text)
+      return :invalid unless parsed
+      host, ip = parsed
       ok = if id = @ov_edit_id
              @host_overrides.update(id, host, ip)
            else

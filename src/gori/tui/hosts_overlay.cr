@@ -106,11 +106,9 @@ module Gori::Tui
     def commit : Symbol
       text = @input.strip
       return :empty if text.empty?
-      parts = text.split(/\s+/, 2)
-      return :invalid if parts.size < 2
-      ip = parts[0]
-      host = parts[1].strip.downcase
-      return :invalid unless HostOverrides.valid?(host, ip)
+      parsed = HostOverrides.parse_line(text)
+      return :invalid unless parsed
+      host, ip = parsed
       idx = @edit_index
       return :dup if @items.each_with_index.any? { |(h, _), i| h == host && i != idx }
       if idx

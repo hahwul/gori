@@ -107,6 +107,25 @@ describe Gori::HostOverrides do
       Gori::HostOverrides.valid?("", "10.0.0.1").should be_false
       Gori::HostOverrides.valid?("example.com", "").should be_false
     end
+
+    it "rejects a host with embedded whitespace or garbage (silent dead override)" do
+      Gori::HostOverrides.valid?("foo bar", "10.0.0.1").should be_false
+      Gori::HostOverrides.valid?("ex ample.com", "10.0.0.1").should be_false
+    end
+  end
+
+  describe ".parse_line" do
+    it "parses \"IP host\" (collapses whitespace, lowercases the host)" do
+      Gori::HostOverrides.parse_line("10.0.0.1 Example.COM").should eq({"example.com", "10.0.0.1"})
+      Gori::HostOverrides.parse_line("10.0.0.1   api.test").should eq({"api.test", "10.0.0.1"})
+    end
+
+    it "returns nil for a missing host, a bad IP, or a host with spaces" do
+      Gori::HostOverrides.parse_line("10.0.0.1").should be_nil            # no host
+      Gori::HostOverrides.parse_line("notanip example.com").should be_nil # ip not a literal
+      Gori::HostOverrides.parse_line("10.0.0.1 foo bar").should be_nil    # host has a space
+      Gori::HostOverrides.parse_line("   ").should be_nil
+    end
   end
 end
 
@@ -138,6 +157,25 @@ describe Gori::Settings do
       Gori::Settings.hostname_overrides = [] of {String, String}
       Gori::Settings.load
       Gori::Settings.hostname_overrides.should eq([{"a.test", "10.0.0.1"}, {"b.test", "10.0.0.2"}])
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.hostname_overrides = [] of {String, String}
+    end
+  end
+
+  it "drops a hand-edited entry whose ip is not a literal (no DNS re-resolution)" do
+    dir = File.tempname("gori-settings-hostov-badip")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      File.write(Gori::Settings.path,
+        %({"hostname_overrides":[{"host":"api.test","ip":"evil.example.com"},{"host":"ok.test","ip":"10.0.0.1"}]}))
+      Gori::Settings.hostname_overrides = [] of {String, String}
+      Gori::Settings.load
+      # The bogus "ip" (a hostname) is dropped; the literal-IP entry survives.
+      Gori::Settings.hostname_overrides.should eq([{"ok.test", "10.0.0.1"}])
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)

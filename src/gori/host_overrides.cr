@@ -46,6 +46,7 @@ module Gori
     # when no project override exists (the caller then falls back to the global set,
     # then to normal DNS). Mutex-guarded — the proxy reads while the TUI mutates.
     def connect_ip(host : String) : String?
+      return nil if @entries.empty? # fast path (the universal case): no overrides → skip the downcase + lock
       h = host.downcase
       @mutex.synchronize { @entries.find { |e| e.host == h }.try(&.ip) }
     end
@@ -85,15 +86,36 @@ module Gori
       end
     end
 
-    # A valid override is a non-empty host plus an IP that parses as a real IPv4/IPv6
+    # Permitted hostname shape: letters/digits/dot/hyphen/underscore, no spaces. Rejects
+    # garbage like "foo bar" that could never match a real request host (a silent dead
+    # override) without being so strict it blocks ordinary names.
+    HOST_RE = /\A[a-zA-Z0-9._-]+\z/
+
+    # A valid override is a hostname-shaped host plus an IP that parses as a real IPv4/IPv6
     # literal — rejecting a hostname-as-"IP" prevents a re-resolution loop (TCPSocket
     # would resolve it) and matches /etc/hosts, which only maps names to addresses.
     def self.valid?(host : String, ip : String) : Bool
-      return false if host.strip.empty? || ip.strip.empty?
-      Socket::IPAddress.new(ip.strip, 0)
+      host = host.strip
+      ip = ip.strip
+      return false if host.empty? || ip.empty?
+      return false unless host.matches?(HOST_RE)
+      Socket::IPAddress.new(ip, 0)
       true
     rescue
       false
+    end
+
+    # Parse a single-line "IP host" entry (/etc/hosts order — IP first) into {host
+    # (lowercased), ip}, or nil when it isn't a valid IP + hostname pair. ONE place so the
+    # Project pane (ov_commit) and the global settings editor (HostsOverlay#commit) parse
+    # and validate identically.
+    def self.parse_line(text : String) : {String, String}?
+      parts = text.strip.split(/\s+/, 2)
+      return nil if parts.size < 2
+      ip = parts[0]
+      host = parts[1].strip
+      return nil unless valid?(host, ip)
+      {host.downcase, ip}
     end
 
     private def reload_entries_unlocked : Nil
