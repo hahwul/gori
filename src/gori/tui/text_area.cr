@@ -15,6 +15,7 @@ module Gori::Tui
       @cy = 0
       @cx = 0
       @scroll = 0
+      @last_h = 0 # viewport height from the last render — lets scroll_view (wheel) clamp
       @preedit = ""
       # Cached syntax-highlight overlay (1:1 with @lines), rebuilt only when the
       # buffer content changes — not on every render frame. @styled_kind tracks
@@ -172,6 +173,19 @@ module Gori::Tui
       @cx = Screen.column_for(@lines[@cy], mx - (rect.x + gw))
     end
 
+    # Viewport scroll by `step` lines (the mouse wheel), INDEPENDENT of the cursor:
+    # shift the visible window, then pull the cursor into it so render's ensure_visible
+    # won't snap the view back to the old cursor line. Unlike move(), the window jumps
+    # immediately (no "wheel until the cursor reaches the edge" lag). No-op before the
+    # first render (height unknown) or when the buffer already fits.
+    def scroll_view(step : Int32) : Nil
+      return if @last_h <= 0 || @lines.size <= @last_h
+      max = @lines.size - @last_h
+      @scroll = (@scroll + step).clamp(0, max)
+      @cy = @cy.clamp(@scroll, {@scroll + @last_h - 1, @lines.size - 1}.min)
+      @cx = @cx.clamp(0, @lines[@cy].size)
+    end
+
     # Jump the cursor to 1-based line `n`, column 0 (out-of-range clamps to the
     # first/last line). render's ensure_visible scrolls it into view next frame.
     def goto_line(n : Int32) : Nil
@@ -207,6 +221,7 @@ module Gori::Tui
     # drawn last, on top — still lands on the right column.
     def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil) : Nil
       return if rect.empty?
+      @last_h = rect.h # remembered for scroll_view (wheel) clamping
       ensure_visible(rect.h)
       gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0 # never exceed the pane
       cx0 = rect.x + gw                                          # content start x (after the optional gutter)

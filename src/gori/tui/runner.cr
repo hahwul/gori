@@ -601,7 +601,7 @@ module Gori::Tui
     private def modal_overlay? : Bool
       case @overlay
       when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :settings, :tabs, :hotkeys then true
-      else                                                                                                    false
+      else                                                                                                              false
       end
     end
 
@@ -783,7 +783,9 @@ module Gori::Tui
       return @space_menu.move(step) if @space_menu_open
       return wheel_overlay(step) if modal_overlay?
       return unless layout.body.contains?(mx, my)
-      @tabs[@active_tab]?.try(&.handle_wheel(step)) # all body tabs are migrated; controller owns the wheel
+      # Pass the pointer + body rect so a multi-pane tab (Project) scrolls the pane
+      # under the cursor; single-target tabs ignore the coords (base delegates to handle_wheel).
+      @tabs[@active_tab]?.try(&.handle_wheel_at(step, mx, my, layout.body))
     end
 
     # Wheel inside a centered modal scrolls its list (no movement for the button modals).
@@ -1619,9 +1621,9 @@ module Gori::Tui
       when :browser       then "BROWSER"
       when :choice        then @choice_picker.try(&.title) || "CHOOSE"
       when :comparer_pick then "PICK FLOW"
-      when :settings    then "SETTINGS"
-      when :tabs        then "TAB BAR"
-      when :hotkeys     then "HOTKEYS"
+      when :settings      then "SETTINGS"
+      when :tabs          then "TAB BAR"
+      when :hotkeys       then "HOTKEYS"
       else
         case @focus
         when :menu    then "TABS"
@@ -1653,10 +1655,10 @@ module Gori::Tui
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
       when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when :settings    then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
-      when :tabs        then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
-      when :hotkeys     then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
-      when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
+      when :settings      then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
+      when :tabs          then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
+      when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
+      when :detail        then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
