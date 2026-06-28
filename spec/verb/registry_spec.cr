@@ -116,6 +116,14 @@ private class FakeContext < ExecContext
     @calls << :replay_send
   end
 
+  def replay_find_subtab : Nil
+    @calls << :replay_find_subtab
+  end
+
+  def replay_subtab_count : Int32
+    0
+  end
+
   def replay_toggle_hex : Nil
     @calls << :replay_toggle_hex
   end

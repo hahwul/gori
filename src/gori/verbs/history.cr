@@ -61,6 +61,14 @@ module Gori
         Verb::Scope::Replay, [Verb::Chord.new("n", ctrl: true)],
         available: in_replay, mnemonic: 'n') { |ctx| ctx.replay_new; nil }
 
+      # Search the open replay sub-tabs and jump to the chosen one — menu-only
+      # (no chord), shown only when there are ≥2 sessions to pick between.
+      r.register Verb::Definition.new(
+        "replay.find-subtab", "Search sub-tabs", "Filter the open replay sessions and jump to one",
+        Verb::Scope::Replay,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_subtab_count >= 2 },
+        mnemonic: 's') { |ctx| ctx.replay_find_subtab; nil }
+
       # Request-pane toggles — keymap-driven (Replay scope) so they're rebindable. The
       # Runner delegators carry the pane-gating + status messages.
       r.register Verb::Definition.new(
