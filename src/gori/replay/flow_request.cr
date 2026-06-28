@@ -20,11 +20,12 @@ module Gori
         row = detail.row
         head = detail.request_head
         body = detail.request_body
-        # The captured body is capped at CAPTURE_MAX (8 MiB). If it was truncated, the head's
-        # Content-Length over-promises and a faithful h1 replay BLOCKS the origin waiting for
-        # bytes that no longer exist. Byte-exactness is already lost at capture, so rewrite CL
-        # to the actual (truncated) length we will send so the replay completes.
-        head = rewrite_content_length(head, body.try(&.size) || 0) if detail.request_body_truncated?
+        # The captured body is capped at CAPTURE_MAX (8 MiB). If it was truncated, a faithful
+        # h1 replay would BLOCK the origin waiting for bytes that no longer exist (a
+        # Content-Length over-promising, or a chunked stream cut before its 0-chunk). Byte-
+        # exactness is already lost at the cap, so re-frame the head to a fixed Content-Length
+        # over the bytes we actually send, so the replay terminates instead of hanging.
+        head = resync_truncated_head(head, body.try(&.size) || 0) if detail.request_body_truncated?
         Built.new(
           target: build_target(row.scheme, row.host, row.port),
           bytes: origin_form_bytes(head, body),
@@ -32,15 +33,19 @@ module Gori
         )
       end
 
-      # Replace the Content-Length header value in an HTTP/1 head — used ONLY when the
-      # captured body was truncated (so the CL no longer matches what we can resend).
-      # Case-insensitive header-name match; preserves each line's CRLF/LF terminator.
-      private def self.rewrite_content_length(head : Bytes, length : Int32) : Bytes
+      # Make a TRUNCATED request self-framed so the replay can't hang. Used ONLY when the
+      # captured body was capped. Rewrites an existing Content-Length to the stored byte
+      # count, OR replaces a Transfer-Encoding (chunked — whose stored wire-form bytes were
+      # cut mid-stream) with a Content-Length over those bytes so the origin reads a complete
+      # body. Case-insensitive header-name match; preserves each line's CRLF/LF terminator.
+      private def self.resync_truncated_head(head : Bytes, length : Int32) : Bytes
         String.build do |io|
           String.new(head).each_line(chomp: false) do |line|
-            if line.lstrip[0, 15]?.try(&.downcase) == "content-length:"
-              eol = line.ends_with?("\r\n") ? "\r\n" : (line.ends_with?('\n') ? "\n" : "")
-              io << "Content-Length: " << length << eol
+            lname = line.lstrip
+            eol = line.ends_with?("\r\n") ? "\r\n" : (line.ends_with?('\n') ? "\n" : "")
+            if lname[0, 15]?.try(&.downcase) == "content-length:" ||
+               lname[0, 18]?.try(&.downcase) == "transfer-encoding:"
+              io << "Content-Length: " << length << eol # RFC 7230 forbids TE+CL, so only one fires
             else
               io << line
             end

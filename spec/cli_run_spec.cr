@@ -93,6 +93,16 @@ describe Gori::Replay::FlowRequest do
     String.new(built.bytes).should eq("POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nABC")
   end
 
+  it "re-frames a truncated CHUNKED request to Content-Length so it can't hang" do
+    # A chunked body cut at the cap (no terminating 0-chunk) would block the origin; replace
+    # Transfer-Encoding with a Content-Length over the stored bytes so the request terminates.
+    head = "POST /u HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n"
+    body = "5\r\nhello\r\n".to_slice # 10 bytes of wire-form chunk data (cut before the 0-chunk)
+    built = Gori::Replay::FlowRequest.build(
+      flow_detail("http", "h", 80, head, request_body: body, request_body_truncated: true))
+    String.new(built.bytes).should eq("POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\n5\r\nhello\r\n")
+  end
+
   it "preserves a bare-LF request-line terminator when rewriting (no mixed endings)" do
     head = "GET http://h/p HTTP/1.1\nHost: h\n\n" # LF-only, absolute-form
     built = Gori::Replay::FlowRequest.build(flow_detail("http", "h", 80, head))

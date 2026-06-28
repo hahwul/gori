@@ -190,8 +190,8 @@ module Gori
         decoder.decode(buf.to_slice).each do |(name, value)|
           if name == ":status"
             status = value.to_i? || status
-          elsif !name.starts_with?(':') && !forbidden_field?(name) && !forbidden_field?(value)
-            headers << {name, value}
+          elsif !name.starts_with?(':')
+            headers << {visualize_field(name), visualize_field(value)}
           end
         end
         buf.clear
@@ -204,10 +204,14 @@ module Gori
         100 <= status < 200
       end
 
-      # RFC 9113 §8.2.1 forbids CR/LF/NUL in h2 field names+values. A decoded value carrying
-      # one must not fold into a phantom line of the synthesized HTTP/1 head (header injection).
-      private def self.forbidden_field?(s : String) : Bool
-        s.includes?('\r') || s.includes?('\n') || s.includes?('\u0000')
+      # RFC 9113 §8.2.1 forbids CR/LF in an h2 field name/value. If a non-compliant origin
+      # smuggles one in, ESCAPE it (don't drop the header) so it can't fold into a phantom
+      # line of the synthesized HTTP/1 head while STILL SHOWING the tester the injection
+      # attempt — a malformed response header is a security finding, not noise to hide. gori
+      # is a security-testing proxy: it must surface bad bytes, not silently swallow them.
+      private def self.visualize_field(s : String) : String
+        return s unless s.includes?('\r') || s.includes?('\n')
+        s.gsub('\r', "\\r").gsub('\n', "\\n")
       end
 
       private def self.ack(io : IO, type : Frame::Type, payload : Bytes) : Nil

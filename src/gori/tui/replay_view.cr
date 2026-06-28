@@ -16,6 +16,7 @@ require "../replay/engine"
 require "../replay/h2_engine"
 require "../replay/ws_engine"
 require "../replay/diff"
+require "../replay/flow_request"
 
 module Gori::Tui
   # The Replay workbench (a tab). Layout: a target URL field on top, then a split
@@ -480,17 +481,10 @@ module Gori::Tui
     end
 
     # {scheme, host, port} parsed from the target field.
+    # Delegate to the engine's parser so the TUI field and `gori run`/the replay engine never
+    # disagree on host/port (they used to be byte-for-byte duplicate implementations).
     def parse_target : {String, String, Int32}
-      raw = @target.strip
-      raw = "http://#{raw}" unless raw.includes?("://")
-      uri = URI.parse(raw)
-      scheme = uri.scheme || "http"
-      host = uri.host || ""
-      host = host[1..-2] if host.starts_with?('[') && host.ends_with?(']') # bare IPv6 literal for dialing
-      port = uri.port || (scheme == "https" ? 443 : 80)
-      {scheme, host, port}
-    rescue
-      {"http", "", 0}
+      Replay::FlowRequest.parse_target(@target)
     end
 
     # The TARGET card grows to a second content row (4 high vs 3) whenever an SNI
@@ -1298,10 +1292,7 @@ module Gori::Tui
     end
 
     private def build_target(scheme : String, host : String, port : Int32) : String
-      default = scheme == "https" ? 443 : 80
-      # Bracket an IPv6 literal host (contains ':') so the URL parses back correctly.
-      h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
-      port == default ? "#{scheme}://#{h}" : "#{scheme}://#{h}:#{port}"
+      Replay::FlowRequest.build_target(scheme, host, port) # shared with the engine (was duplicated)
     end
 
     # Rewrites an absolute-form request-line ("GET http://h/p ...") to origin-form
