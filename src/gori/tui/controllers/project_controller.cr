@@ -81,6 +81,18 @@ module Gori::Tui
       true
     end
 
+    # A wheel notch scrolls the pane UNDER the pointer (not the focused one), so a long
+    # DESCRIPTION scrolls into view on a plain wheel-over — no click-to-focus first. The
+    # DESCRIPTION viewport-scrolls (cursor follows) instead of spilling past the card;
+    # the SCOPE rule list moves its selection (selection-follow, like the keyboard).
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      case @project_view.pane_at(rect, mx, my)
+      when :desc  then @project_view.desc_scroll(step)
+      when :scope then @project_view.scope_select(step)
+      end # :overview band / outside → nothing to scroll
+      true
+    end
+
     def set_preedit(text : String) : Bool
       @project_view.set_preedit(text)
       true

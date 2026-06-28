@@ -312,6 +312,12 @@ module Gori::Tui
       @desc_area.move(dr, dc)
     end
 
+    # Mouse wheel over the DESCRIPTION: scroll the viewport (cursor follows), so a long
+    # description scrolls into view instead of staying clipped past the card edge.
+    def desc_scroll(step : Int32) : Nil
+      @desc_area.scroll_view(step)
+    end
+
     def goto_line(n : Int32) : Nil
       @desc_area.goto_line(n)
     end

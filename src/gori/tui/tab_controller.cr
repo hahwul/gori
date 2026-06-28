@@ -15,23 +15,23 @@ module Gori::Tui
   # controllers can never re-couple via shared private state.
   module Host
     abstract def status(message : String) : Nil       # set the transient status/toast line
-    abstract def request_overlay(kind : Symbol) : Nil  # set @overlay (controllers can't write it directly)
-    abstract def request_focus(pane : Symbol) : Nil    # drive the focus model via focus_pane (:menu | :subtabs | :body)
-    abstract def focus_body : Nil                      # raw: focus the body WITHOUT resetting the pane (for clicks)
-    abstract def switch_tab(tab : Symbol) : Nil        # change the active tab (with save-on-leave + on_enter)
-    abstract def goto_tab(tab : Symbol) : Nil          # raw: set active tab + body focus, no on_enter/view_focus_first (e.g. ^R → Replay)
-    abstract def open_palette : Nil                    # open the command palette overlay
-    abstract def open_space_menu : Nil                 # open the space action menu (bottom-right)
+    abstract def request_overlay(kind : Symbol) : Nil # set @overlay (controllers can't write it directly)
+    abstract def request_focus(pane : Symbol) : Nil   # drive the focus model via focus_pane (:menu | :subtabs | :body)
+    abstract def focus_body : Nil                     # raw: focus the body WITHOUT resetting the pane (for clicks)
+    abstract def switch_tab(tab : Symbol) : Nil       # change the active tab (with save-on-leave + on_enter)
+    abstract def goto_tab(tab : Symbol) : Nil         # raw: set active tab + body focus, no on_enter/view_focus_first (e.g. ^R → Replay)
+    abstract def open_palette : Nil                   # open the command palette overlay
+    abstract def open_space_menu : Nil                # open the space action menu (bottom-right)
     # Destructive-action confirmation modal; `action` runs on confirm.
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, &action : -> Nil) : Nil
-    abstract def session : Session                     # store / scope / proxy / registry / interceptor
-    abstract def overlay : Symbol                      # read the overlay state (e.g. History reads :detail)
-    abstract def active_tab : Symbol                   # read the active tab (Replay reconcile gates on it)
-    abstract def focus : Symbol                         # read the focus model (:menu | :subtabs | :body)
-    abstract def reveal? : Bool                        # global whitespace-reveal pref, pushed into views
-    abstract def toggle_reveal : Nil                   # flip the whitespace-reveal pref (^B from any view)
-    abstract def pretty? : Bool                        # global pretty-print-bodies pref, pushed into views
-    abstract def toggle_pretty : Nil                   # flip the pretty-print pref (`p` from History/Replay)
+    abstract def session : Session   # store / scope / proxy / registry / interceptor
+    abstract def overlay : Symbol    # read the overlay state (e.g. History reads :detail)
+    abstract def active_tab : Symbol # read the active tab (Replay reconcile gates on it)
+    abstract def focus : Symbol      # read the focus model (:menu | :subtabs | :body)
+    abstract def reveal? : Bool      # global whitespace-reveal pref, pushed into views
+    abstract def toggle_reveal : Nil # flip the whitespace-reveal pref (^B from any view)
+    abstract def pretty? : Bool      # global pretty-print-bodies pref, pushed into views
+    abstract def toggle_pretty : Nil # flip the pretty-print pref (`p` from History/Replay)
   end
 
   # Shared, state-free body chrome used by BOTH Runner and the per-tab
@@ -96,6 +96,13 @@ module Gori::Tui
     # A scroll-wheel notch over the body (already ±3-scaled).
     def handle_wheel(step : Int32) : Bool
       false
+    end
+
+    # Same notch, but with the pointer position + body rect — lets a multi-pane tab
+    # (Project) scroll the pane UNDER the cursor instead of the focused one. Defaults
+    # to the coordinate-free handle_wheel, so single-target tabs need no change.
+    def handle_wheel_at(step : Int32, mx : Int32, my : Int32, rect : Rect) : Bool
+      handle_wheel(step)
     end
 
     # Live IME composition text for the focused body field. Return true if consumed.
