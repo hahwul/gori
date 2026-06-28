@@ -30,4 +30,23 @@ describe Gori::Tui::HelpView do
     after.contains?("OVERLAYS").should be_true # last section now on screen
     view.at_top?.should be_false
   end
+
+  it "renders the Links page with the GitHub repository URL" do
+    view = HelpView.new
+    backend = MemoryBackend.new(90, 20)
+    view.render_links(Screen.new(backend), Rect.new(0, 0, 90, 20))
+
+    backend.contains?("LINKS").should be_true
+    backend.contains?("GitHub").should be_true
+    backend.contains?(Gori::REPOSITORY_URL).should be_true
+  end
+
+  it "renders the About page with the centered version" do
+    view = HelpView.new
+    backend = MemoryBackend.new(90, 20)
+    view.render_version(Screen.new(backend), Rect.new(0, 0, 90, 20))
+
+    backend.contains?("gori").should be_true
+    backend.contains?("v#{Gori::VERSION}").should be_true
+  end
 end

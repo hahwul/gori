@@ -6,6 +6,10 @@
 module Gori
   VERSION = "0.1.0"
 
+  # Canonical project home — surfaced in the TUI Help → Links page (and reusable
+  # by the CLI/about screens). Kept beside VERSION as the project's identity.
+  REPOSITORY_URL = "https://github.com/hahwul/gori"
+
   # Single base error for the whole project. Subtype only when a `rescue`
   # actually needs to discriminate (P0 — don't build a hierarchy speculatively).
   class Error < Exception

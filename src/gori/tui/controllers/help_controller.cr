@@ -2,11 +2,18 @@ require "../tab_controller"
 require "../help_view"
 
 module Gori::Tui
-  # The Help tab: a read-only, static shortcut cheat-sheet. The simplest possible
-  # controller — it overrides only identity, render, scroll, and the body hint;
-  # everything else uses the TabController defaults. Serves as the pilot proving the
-  # registry + Host contract end-to-end.
+  # The Help tab: three read-only sub-tabs sharing one strip — Shortcuts (the
+  # scrollable cheat-sheet), Links (project URLs), About (version, later a logo).
+  # Unlike Replay/Notes the set is FIXED: no create/close/rename. The strip, focus
+  # routing, ←/→, ^1-9 and click hit-testing all come free from the runner's shared
+  # sub-tab machinery once we expose subtab_labels; we add only the page renderers.
   class HelpController < TabController
+    # The fixed sub-tab strip. Index 0 (Shortcuts) is the default landing page,
+    # preserving the tab's original behaviour.
+    PAGE_LABELS = ["Shortcuts", "Links", "About"]
+
+    @current : Int32 = 0
+
     def initialize(host : Host)
       super(host)
       @help = HelpView.new
@@ -20,35 +27,73 @@ module Gori::Tui
       Verb::Scope::Body
     end
 
-    def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      focused = focus == :body
-      BodyChrome.framed(screen, rect, focused) { |inner| @help.render(screen, inner, focused: focused) }
+    # --- fixed sub-tab strip (no new/close/rename) ---
+    def subtab_labels : Array(String)
+      PAGE_LABELS
     end
 
-    # Read-only scroll (↑/↓ or j/k). ↑ at the top pops to the tab bar; esc returns
-    # to it. Only the navigation keys are claimed (return true); EVERY other key
-    # must fall through (return false) so the space menu and the global keymap
-    # still see it — otherwise the body's own hint ("^P cmds") points at dead keys.
+    def subtab_index : Int32
+      @current
+    end
+
+    def move_subtab(dir : Int32) : Nil
+      @current = (@current + dir).clamp(0, PAGE_LABELS.size - 1)
+    end
+
+    def jump_subtab(idx : Int32) : Nil
+      @current = idx if 0 <= idx < PAGE_LABELS.size
+    end
+
+    def subtabs_fixed? : Bool # constant set, read-only body — no ^N/^W, no editing
+      true
+    end
+
+    def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
+      # Same chrome as Notes/Replay: the strip rides above the framed body (drawn
+      # by the shared BodyChrome, not the view). The set is always 3, so the strip
+      # is always shown.
+      sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
+      BodyChrome.render_subtab_strip(screen, sub_rect, PAGE_LABELS, @current, focus == :subtabs)
+      focused = focus == :body
+      BodyChrome.framed(screen, body_rect, focused) do |inner|
+        case @current
+        when 1 then @help.render_links(screen, inner)
+        when 2 then @help.render_version(screen, inner)
+        else        @help.render(screen, inner, focused: focused) # Shortcuts
+        end
+      end
+    end
+
+    # Read-only navigation. ←/→ switch pages (claimed so arrows never fall through
+    # to top-level tab switching — there's no caret to move here). ↑/↓ scroll only
+    # the Shortcuts page; ↑ at its top (or any non-scrolling page) steps up to the
+    # strip. esc pops to the tab bar. EVERY other key falls through (return false)
+    # so the space menu and the global keymap still see it.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       case
-      when key.up?, key.lower_k?   then @help.at_top? ? @host.request_focus(:menu) : @help.move(-1)
-      when key.down?, key.lower_j? then @help.move(1)
-      when key.escape?             then @host.request_focus(:menu)
-      else                              return false # ^P / space / q / global keys pass through
+      when key.escape?              then @host.request_focus(:menu)
+      when key.left?, key.lower_h?  then move_subtab(-1)
+      when key.right?, key.lower_l? then move_subtab(1)
+      when key.up?, key.lower_k?
+        (@current == 0 && !@help.at_top?) ? @help.move(-1) : @host.request_focus(:subtabs)
+      when key.down?, key.lower_j?
+        @help.move(1) if @current == 0
+      else
+        return false # ^P / space / q / global keys pass through
       end
       true
     end
 
     def handle_wheel(step : Int32) : Bool
-      @help.move(step)
+      @help.move(step) if @current == 0 # only the Shortcuts page scrolls
       true
     end
 
     def body_hint(focus : Symbol) : String
       # No "q projects": q (back to the picker) is tab-bar-only by design, so the
       # body must not advertise it as a key (esc/↹ to the bar first, then q).
-      "↑/↓ scroll · ↹/esc tabs · ^P cmds"
+      "↑/↓ scroll · ←/→ pages · ↹/esc tabs · ^P cmds"
     end
   end
 end

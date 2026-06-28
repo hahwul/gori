@@ -119,6 +119,12 @@ module Gori::Tui
     def jump_subtab(idx : Int32) : Nil
     end
 
+    # A FIXED strip (Help): the chip set is constant — no ^N/^W create/close and the
+    # body is read-only. The shell drops "new/close/edit" from the strip hint for it.
+    def subtabs_fixed? : Bool
+      false
+    end
+
     # --- status bar ---
     def body_badge : Symbol # :editor (captures text) | :body (navigable/read-only)
       :body

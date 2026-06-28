@@ -1222,13 +1222,16 @@ module Gori::Tui
       end
     end
 
-    # Sub-tab new/close/commit dispatched across the multi-session tabs.
+    # Sub-tab new/close/commit dispatched across the multi-session tabs. The active
+    # tab is matched explicitly (NOT an `else → notes`): tabs with a FIXED strip
+    # (Help) also expose subtab_labels, so a stray ^N/^W/^P-commit from their strip
+    # must no-op here, never leak into Notes.
     private def subtab_new : Nil
       case @active_tab
       when :replay  then replay_controller.replay_new
       when :fuzzer  then fuzzer_controller.fuzz_new
       when :convert then convert_controller.convert_new
-      else               notes_controller.notes_new
+      when :notes   then notes_controller.notes_new
       end
     end
 
@@ -1237,7 +1240,7 @@ module Gori::Tui
       when :replay  then replay_controller.request_close
       when :fuzzer  then fuzzer_controller.request_close
       when :convert then convert_controller.convert_close
-      else               notes_controller.notes_close
+      when :notes   then notes_controller.notes_close
       end
     end
 
@@ -1246,7 +1249,7 @@ module Gori::Tui
       when :replay  then replay_controller.save_current_replay
       when :fuzzer  then fuzzer_controller.save_current
       when :convert then convert_controller.commit
-      else               notes_controller.save_notes
+      when :notes   then notes_controller.save_notes
       end
     end
 
@@ -1661,6 +1664,11 @@ module Gori::Tui
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
         if @focus == :subtabs
+          # A fixed strip (Help) has no create/close and a read-only body — don't
+          # advertise ^N/^W/edit as live keys there.
+          if @tabs[@active_tab]?.try(&.subtabs_fixed?)
+            return "←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ↑/esc tabs"
+          end
           rn = renameable_subtabs? ? " · r rename" : ""
           return "←/→ switch sub-tab · ↓/↵ edit · ^1-9 jump · ^N new · ^W close#{rn} · ↑/esc tabs"
         end
