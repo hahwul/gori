@@ -57,6 +57,8 @@ module Gori
       abstract def replay_selected : Nil                   # load History's selection into Replay
       abstract def replay_new : Nil                        # open a blank, hand-authored replay request
       abstract def replay_send : Nil                       # resend the (edited) request to the target
+      abstract def replay_find_subtab : Nil                # open the sub-tab search picker (filter + jump)
+      abstract def replay_subtab_count : Int32             # open replay session count (gates the search menu entry)
       abstract def replay_toggle_hex : Nil                 # toggle byte-exact hex editing of the request pane
       abstract def replay_toggle_sni : Nil                 # toggle the SNI-override sub-field (target pane)
       abstract def replay_toggle_auto_content_length : Nil # recompute Content-Length on send

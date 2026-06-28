@@ -59,6 +59,14 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_send : Nil; end
 
+  def replay_find_subtab : Nil; end
+
+  property replay_tab_count : Int32 = 0
+
+  def replay_subtab_count : Int32
+    @replay_tab_count
+  end
+
   def replay_toggle_hex : Nil; end
 
   def replay_toggle_sni : Nil; end

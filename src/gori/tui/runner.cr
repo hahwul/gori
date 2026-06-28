@@ -31,6 +31,7 @@ require "./confirm_dialog"
 require "./browser_picker"
 require "./choice_picker"
 require "./flow_picker"
+require "./subtab_picker"
 require "./settings_view"
 require "./tabs_overlay"
 require "./hotkeys_overlay"
@@ -64,7 +65,7 @@ module Gori::Tui
       # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :settings | :tabs
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :settings | :tabs
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -111,6 +112,8 @@ module Gori::Tui
       @choice_picker = nil.as(ChoicePicker?)
       # The Comparer flow picker (a/b → choose flow A/B); @overlay is :comparer_pick.
       @flow_picker = nil.as(FlowPicker?)
+      # The Replay sub-tab search picker (space → s); @overlay is :replay_subtab.
+      @subtab_picker = nil.as(SubtabPicker?)
       # The settings editor (palette → settings:network); @overlay is :settings.
       @settings_view = SettingsView.new
       # The tab-bar customizer (palette → settings:tabs); @overlay is :tabs. Distinct
@@ -365,6 +368,7 @@ module Gori::Tui
       when :rules         then @rules_overlay.set_preedit(text)
       when :finding_new   then @finding_form.set_preedit(text)
       when :comparer_pick then @flow_picker.try(&.set_preedit(text))
+      when :replay_subtab then @subtab_picker.try(&.set_preedit(text))
       when :settings      then @settings_view.set_preedit(text)
       when :none          then apply_preedit_body(text)
       end
@@ -425,6 +429,7 @@ module Gori::Tui
       return handle_browser_key(ev) if @overlay == :browser
       return handle_choice_key(ev) if @overlay == :choice
       return handle_flow_picker_key(ev) if @overlay == :comparer_pick
+      return handle_subtab_picker_key(ev) if @overlay == :replay_subtab
       return handle_settings_key(ev) if @overlay == :settings
       return handle_tabs_key(ev) if @overlay == :tabs
       return handle_hotkeys_key(ev) if @overlay == :hotkeys
@@ -600,8 +605,8 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :settings, :tabs, :hotkeys then true
-      else                                                                                                              false
+      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :settings, :tabs, :hotkeys then true
+      else                                                                                                                              false
       end
     end
 
@@ -675,6 +680,7 @@ module Gori::Tui
       when :browser       then click_browser(area, mx, my)
       when :choice        then click_choice(area, mx, my)
       when :comparer_pick then click_flow_picker(area, mx, my)
+      when :replay_subtab then click_subtab_picker(area, mx, my)
       when :confirm       then click_confirm(area, mx, my)
       when :settings      then click_settings(area, mx, my)
       when :tabs          then click_tabs(area, mx, my)
@@ -796,6 +802,7 @@ module Gori::Tui
       when :browser       then @browser_picker.try(&.move(step))
       when :choice        then @choice_picker.try(&.move(step))
       when :comparer_pick then @flow_picker.try(&.move(step))
+      when :replay_subtab then @subtab_picker.try(&.move(step))
       when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs          then @tabs_overlay.select_move(step)
       when :hotkeys       then @hotkeys_overlay.select_move(step)
@@ -999,6 +1006,51 @@ module Gori::Tui
     private def close_flow_picker : Nil
       @overlay = :none
       @flow_picker = nil
+    end
+
+    # Replay sub-tab search (space → s): type to filter the open sessions, ↑/↓
+    # select, ↵ jump to the highlighted one, esc cancel.
+    private def handle_subtab_picker_key(ev : Termisu::Event::Key) : Nil
+      sp = @subtab_picker
+      return close_subtab_picker if sp.nil?
+      key = ev.key
+      case
+      when key.escape?    then close_subtab_picker
+      when key.up?        then sp.move(-1)
+      when key.down?      then sp.move(1)
+      when key.enter?     then commit_subtab_picker
+      when key.backspace? then sp.backspace
+      else
+        sp.query_char(ev.char.not_nil!) if ev.char
+      end
+    end
+
+    # Jump to the highlighted sub-tab and close. The picker hands back the absolute
+    # index; jump_subtab clamps + saves the outgoing tab, so a stale index (the
+    # cross-session reconcile reordered behind the modal) is a safe no-op.
+    private def commit_subtab_picker : Nil
+      sp = @subtab_picker
+      return close_subtab_picker if sp.nil?
+      if idx = sp.selected_index
+        replay_controller.jump_subtab(idx)
+        @focus = :body # land on the chosen session's content (we came from the response pane)
+      end
+      close_subtab_picker
+    end
+
+    private def click_subtab_picker(area : Rect, mx : Int32, my : Int32) : Nil
+      sp = @subtab_picker
+      box = sp.try(&.overlay_box(area))
+      return close_subtab_picker if sp.nil? || box.nil? || dismiss_zone?(box, mx, my)
+      if idx = sp.row_at(box, mx, my)
+        sp.set_selected(idx)
+        commit_subtab_picker
+      end
+    end
+
+    private def close_subtab_picker : Nil
+      @overlay = :none
+      @subtab_picker = nil
     end
 
     # Settings editor (palette → settings:network): ↑/↓ pick a field, type to edit,
@@ -1547,6 +1599,7 @@ module Gori::Tui
       @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
       @choice_picker.try(&.render(screen, layout.body)) if @overlay == :choice
       @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
+      @subtab_picker.try(&.render(screen, layout.body)) if @overlay == :replay_subtab
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
       @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
@@ -1624,6 +1677,7 @@ module Gori::Tui
       when :browser       then "BROWSER"
       when :choice        then @choice_picker.try(&.title) || "CHOOSE"
       when :comparer_pick then "PICK FLOW"
+      when :replay_subtab then "FIND SUB-TAB"
       when :settings      then "SETTINGS"
       when :tabs          then "TAB BAR"
       when :hotkeys       then "HOTKEYS"
@@ -1658,6 +1712,7 @@ module Gori::Tui
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
       when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
+      when :replay_subtab then "type to filter · ↑/↓ select · ↵ jump · esc cancel"
       when :settings      then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
       when :tabs          then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
@@ -2280,6 +2335,19 @@ module Gori::Tui
 
     def replay_send : Nil
       replay_controller.replay_send
+    end
+
+    # Open the Replay sub-tab search picker (space → s). Snapshots the open
+    # sessions; the picker filters them in memory and jumps on ↵.
+    def replay_find_subtab : Nil
+      rows = replay_controller.subtab_search_rows
+      return @toast = "no other replay open to search" if rows.size < 2
+      @subtab_picker = SubtabPicker.new("FIND SUB-TAB", rows)
+      @overlay = :replay_subtab
+    end
+
+    def replay_subtab_count : Int32
+      replay_controller.count
     end
 
     def replay_toggle_hex : Nil

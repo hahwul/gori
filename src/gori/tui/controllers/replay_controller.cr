@@ -1,5 +1,6 @@
 require "../tab_controller"
 require "../replay_view"
+require "../subtab_picker"
 require "../../store"
 require "../../replay/engine"
 require "../../replay/h2_engine"
@@ -69,6 +70,16 @@ module Gori::Tui
 
     def subtab_labels : Array(String)
       @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.view.label(18)}" }
+    end
+
+    # Rows for the sub-tab search picker (space → s): the chip label plus a dim,
+    # searchable request line (method/path + target URL) so a session is findable
+    # by host/path even when a custom name hides its summary.
+    def subtab_search_rows : Array(SubtabPicker::Row)
+      @replays.map_with_index do |tab, i|
+        v = tab.view
+        SubtabPicker::Row.new(i, v.label(40), "#{v.summary(60)} #{v.target}".strip)
+      end
     end
 
     def subtab_index : Int32
