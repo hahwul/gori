@@ -166,7 +166,16 @@ module Gori::Proxy::Codec
       # delimited, as before).
       tokens = values.flat_map(&.split(',')).map(&.strip).reject(&.empty?)
       return nil if tokens.empty?
-      nums = tokens.map { |t| t.to_i64? || raise Gori::Error.new("invalid Content-Length #{t.inspect}") }
+      # RFC 7230 §3.3.3: Content-Length is 1*DIGIT. `to_i64?` alone would accept a leading
+      # '+' (the `n < 0` guard below only rejects '-'), so `Content-Length: +5` would frame
+      # a 5-byte body that a stricter peer rejects/reinterprets — a CL desync primitive.
+      # Mirror parse_chunk_size's pure-digit guard and reject any non-digit token.
+      nums = tokens.map do |t|
+        unless t.each_char.all?(&.ascii_number?)
+          raise Gori::Error.new("invalid Content-Length #{t.inspect}")
+        end
+        t.to_i64? || raise Gori::Error.new("invalid Content-Length #{t.inspect}")
+      end
       raise Gori::Error.new("conflicting Content-Length values") if nums.uniq.size > 1
       n = nums.first
       raise Gori::Error.new("negative Content-Length #{n}") if n < 0
@@ -204,7 +213,12 @@ module Gori::Proxy::Codec
     private def self.copy_chunked(src : IO, dst : IO, tee : IO) : Bool
       loop do
         size_line = read_crlf_line(src)
-        return false if size_line.nil? # EOF mid-stream — truncated
+        # EOF before any byte → truncated mid-stream. A line that hit MAX_LINE_BYTES WITHOUT an
+        # LF is also unterminated: parse_chunk_size could still read a valid-looking size from the
+        # partial (all-'0' → 0 terminating chunk; '5;<oversized ext>' → 5), leaving the rest of the
+        # line on the wire to desync the next message. A real chunk-size line always ends in LF.
+        return false if size_line.nil?
+        return false unless size_line[size_line.size - 1] == 0x0a_u8
         emit(dst, tee, size_line)
         size = parse_chunk_size(size_line)
         # A malformed / out-of-range chunk size is NOT a terminating chunk: bailing
@@ -219,7 +233,12 @@ module Gori::Proxy::Codec
           trailer_total = 0_i64
           loop do
             trailer = read_crlf_line(src)
-            break if trailer.nil? # clean EOF after the 0-chunk — tolerate (as before)
+            # Clean EOF after the 0-chunk → tolerate (as before). But an unterminated (LF-less,
+            # cap-truncated) trailer line is a framing error: forwarding it and keeping the
+            # connection alive would leak the line remainder onto the wire to misframe the next
+            # message — abort and close instead.
+            break if trailer.nil?
+            return false unless trailer[trailer.size - 1] == 0x0a_u8
             emit(dst, tee, trailer)
             trailer_total += trailer.size
             return false if trailer_total > MAX_TRAILER_BYTES

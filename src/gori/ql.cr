@@ -221,15 +221,25 @@ module Gori
     # REGEXP callback, so we validate up front and emit a never-matches clause instead
     # (like flag:). For case-insensitive matching use an inline (?i) flag.
     private def self.regex_cond(field : String, value : String, term : String) : {String, Array(DB::Any)}?
-      return nil if value.empty?
-      return {"0", [] of DB::Any} unless valid_regex?(value)
+      # A non-regex field name means `~` wasn't a regex operator here (e.g. `foo~bar`):
+      # fall back to a literal free-text search of the WHOLE token. This must happen BEFORE
+      # the validity guard — otherwise `foo~[` (an unterminated char class) would compile to
+      # the never-match clause instead of free-texting "foo~[".
       case field
-      when "host"   then {"host REGEXP ?", [value] of DB::Any}
-      when "path"   then {"target REGEXP ?", [value] of DB::Any}
-      when "url"    then {"(scheme || '://' || host || target) REGEXP ?", [value] of DB::Any}
-      when "header" then header_regex_cond(value)
-      when "body"   then body_regex_cond(value)
-      else               free_text(term)
+      when "host", "path", "url", "header", "body"
+        return nil if value.empty?
+        # An invalid pattern would raise inside the SQLite REGEXP callback, so validate up
+        # front and emit a never-matches clause instead (like flag:).
+        return {"0", [] of DB::Any} unless valid_regex?(value)
+        case field
+        when "host"   then {"host REGEXP ?", [value] of DB::Any}
+        when "path"   then {"target REGEXP ?", [value] of DB::Any}
+        when "url"    then {"(scheme || '://' || host || target) REGEXP ?", [value] of DB::Any}
+        when "header" then header_regex_cond(value)
+        else               body_regex_cond(value)
+        end
+      else
+        free_text(term)
       end
     end
 
