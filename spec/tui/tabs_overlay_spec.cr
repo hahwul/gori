@@ -28,4 +28,14 @@ describe TabsOverlay do
     box = o.overlay_box(Rect.new(0, 0, 60, 40)).not_nil!
     o.row_at(box, box.x + 5, box.y + 2).should eq(0) # no scroll → first row is index 0
   end
+
+  it "reverts the working copy to the factory default order and visibility" do
+    default = Chrome.reconcile([] of {String, Bool}).map { |(s, _, v)| {s.to_s, v} }
+    o = TabsOverlay.new
+    o.set_selected(0)
+    o.move_selected(1) # reorder away from the default
+    o.to_prefs.should_not eq(default)
+    o.reset_to_defaults
+    o.to_prefs.should eq(default) # back to the canonical catalog order/visibility
+  end
 end

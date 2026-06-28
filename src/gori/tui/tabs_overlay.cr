@@ -27,6 +27,14 @@ module Gori::Tui
       @selected = 0
     end
 
+    # Revert the working copy to the factory default order/visibility — the canonical
+    # catalog with only DEFAULT_HIDDEN hidden, ignoring persisted prefs. Edits the
+    # working copy only (like every other key here); the live bar reverts on ↵.
+    def reset_to_defaults : Nil
+      @items = Chrome.reconcile([] of {String, Bool})
+      @selected = @selected.clamp(0, {@items.size - 1, 0}.max)
+    end
+
     def select_move(d : Int32) : Nil
       @selected = (@selected + d).clamp(0, {@items.size - 1, 0}.max)
     end
