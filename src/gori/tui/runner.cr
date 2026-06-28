@@ -34,6 +34,7 @@ require "./flow_picker"
 require "./subtab_picker"
 require "./settings_view"
 require "./tabs_overlay"
+require "./hosts_overlay"
 require "./hotkeys_overlay"
 require "./palette"
 require "./space_menu"
@@ -65,7 +66,7 @@ module Gori::Tui
       # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :settings | :tabs
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :settings | :tabs | :hosts | :hotkeys
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -119,6 +120,8 @@ module Gori::Tui
       # The tab-bar customizer (palette → settings:tabs); @overlay is :tabs. Distinct
       # from @tabs (the controller registry built below).
       @tabs_overlay = TabsOverlay.new
+      # The global hostname-overrides editor (settings → "Hostname overrides"); @overlay is :hosts.
+      @hosts_overlay = HostsOverlay.new
       # The hotkey rebinder (palette → settings:hotkeys); @overlay is :hotkeys.
       @hotkeys_overlay = HotkeysOverlay.new(@session.registry)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
@@ -370,6 +373,7 @@ module Gori::Tui
       when :comparer_pick then @flow_picker.try(&.set_preedit(text))
       when :replay_subtab then @subtab_picker.try(&.set_preedit(text))
       when :settings      then @settings_view.set_preedit(text)
+      when :hosts         then @hosts_overlay.set_preedit(text)
       when :none          then apply_preedit_body(text)
       end
     end
@@ -432,6 +436,7 @@ module Gori::Tui
       return handle_subtab_picker_key(ev) if @overlay == :replay_subtab
       return handle_settings_key(ev) if @overlay == :settings
       return handle_tabs_key(ev) if @overlay == :tabs
+      return handle_hosts_key(ev) if @overlay == :hosts
       return handle_hotkeys_key(ev) if @overlay == :hotkeys
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
@@ -684,6 +689,7 @@ module Gori::Tui
       when :confirm       then click_confirm(area, mx, my)
       when :settings      then click_settings(area, mx, my)
       when :tabs          then click_tabs(area, mx, my)
+      when :hosts         then click_hosts(area, mx, my)
       when :hotkeys       then click_hotkeys(area, mx, my)
         # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
@@ -734,7 +740,11 @@ module Gori::Tui
       return cancel_settings if dismiss_zone?(box, mx, my)
       if idx = @settings_view.field_at(box, mx, my)
         @settings_view.set_field(idx)
-        preview_theme # clicking a theme row live-previews it (no-op outside :theme)
+        if opener = @settings_view.focused_opener
+          open_settings(opener) # an action row → open its sub-editor on click (mouse parity with ↵)
+        else
+          preview_theme # clicking a theme row live-previews it (no-op outside :theme)
+        end
       end
     end
 
@@ -745,6 +755,16 @@ module Gori::Tui
       return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
       if idx = @tabs_overlay.row_at(box, mx, my)
         @tabs_overlay.set_selected(idx)
+      end
+    end
+
+    # Hostname-overrides editor: a click outside dismisses (esc); a row click selects it
+    # (add/edit/delete stay keyboard-driven).
+    private def click_hosts(area : Rect, mx : Int32, my : Int32) : Nil
+      box = @hosts_overlay.overlay_box(area)
+      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = @hosts_overlay.row_at(box, mx, my)
+        @hosts_overlay.set_selected(idx)
       end
     end
 
@@ -805,6 +825,7 @@ module Gori::Tui
       when :replay_subtab then @subtab_picker.try(&.move(step))
       when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs          then @tabs_overlay.select_move(step)
+      when :hosts         then @hosts_overlay.select_move(step)
       when :hotkeys       then @hotkeys_overlay.select_move(step)
       end
     end
@@ -1064,6 +1085,12 @@ module Gori::Tui
       elsif key.escape?
         cancel_settings # revert any live theme preview, close
       elsif key.enter?
+        if opener = @settings_view.focused_opener
+          # An action row (e.g. "Hostname overrides") — open its sub-editor instead of
+          # saving the section. The sub-editor persists on its own.
+          open_settings(opener)
+          return
+        end
         # :network rebinds the live proxy; :theme swaps the palette + repaints; the
         # rest just persist (the value is read live or only matters next session).
         msg = @settings_view.save
@@ -1169,6 +1196,70 @@ module Gori::Tui
       # The layout is applied to the live session regardless (like theme/network); only the
       # disk write can fail, so say so honestly rather than implying nothing happened.
       @toast = ok ? "tabs saved" : "tabs applied — could not save to #{Settings.path}"
+    end
+
+    # The global hostname-overrides editor (settings → "Hostname overrides"). Persisted on
+    # every mutation (the live proxy reads Settings.host_override_ip on the next flow), so
+    # esc just closes. a add · ↵/e edit · d delete · esc close. ^P jumps back to the palette.
+    private def handle_hosts_key(ev : Termisu::Event::Key) : Nil
+      if @hosts_overlay.adding?
+        handle_hosts_add_key(ev)
+        return
+      end
+      key = ev.key
+      c = ev.char || key.to_char
+      if ev.ctrl? && key.lower_p?
+        @overlay = :none
+        open_palette
+      elsif key.escape?
+        @overlay = :none
+      elsif key.up?
+        @hosts_overlay.select_move(-1)
+      elsif key.down?
+        @hosts_overlay.select_move(1)
+      elsif key.enter? || c == 'e'
+        @hosts_overlay.edit_start
+      elsif c == 'a'
+        @hosts_overlay.add_start
+      elsif c == 'd'
+        if host = @hosts_overlay.delete_selected
+          save_hosts
+          @toast = "removed host override: #{host}"
+        end
+      end
+    end
+
+    # The inline add/edit row: type "IP host", ↵ commits, ⌫ on an empty input cancels,
+    # esc cancels.
+    private def handle_hosts_add_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        @hosts_overlay.cancel_add
+      elsif key.enter?
+        case @hosts_overlay.commit
+        when :empty   then @toast = "host override: empty"
+        when :invalid then @toast = %(host override: need "IP host" — a valid IP + a hostname)
+        when :dup     then @toast = "host override: host already mapped"
+        when :ok
+          save_hosts
+          @toast = "host override saved — #{@hosts_overlay.to_overrides.size} total"
+        end
+      elsif key.left?
+        @hosts_overlay.move_cursor(-1)
+      elsif key.right?
+        @hosts_overlay.move_cursor(1)
+      elsif key.backspace?
+        @hosts_overlay.cancel_add unless @hosts_overlay.backspace
+      elsif c && !ev.ctrl? && !ev.alt?
+        @hosts_overlay.input(c)
+        @hosts_overlay.set_preedit("")
+      end
+    end
+
+    private def save_hosts : Nil
+      Settings.hostname_overrides = @hosts_overlay.to_overrides.dup
+      Settings.save
     end
 
     # The hotkey rebinder (settings:hotkeys). Working copy: ↵ saves+applies, esc discards.
@@ -1602,6 +1693,7 @@ module Gori::Tui
       @subtab_picker.try(&.render(screen, layout.body)) if @overlay == :replay_subtab
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
+      @hosts_overlay.render(screen, layout.body) if @overlay == :hosts
       @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
@@ -1680,6 +1772,7 @@ module Gori::Tui
       when :replay_subtab then "FIND SUB-TAB"
       when :settings      then "SETTINGS"
       when :tabs          then "TAB BAR"
+      when :hosts         then "HOSTNAME OVERRIDES"
       when :hotkeys       then "HOTKEYS"
       else
         case @focus
@@ -1715,6 +1808,7 @@ module Gori::Tui
       when :replay_subtab then "type to filter · ↑/↓ select · ↵ jump · esc cancel"
       when :settings      then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
       when :tabs          then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
+      when :hosts         then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :detail        then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
       else
@@ -2251,6 +2345,22 @@ module Gori::Tui
       @scope.size > 0
     end
 
+    def hostov_add_entry : Nil
+      project_controller.hostov_add_entry
+    end
+
+    def hostov_edit_entry : Nil
+      project_controller.hostov_edit_entry
+    end
+
+    def hostov_delete_entry : Nil
+      project_controller.hostov_delete_entry
+    end
+
+    def hostov_entry_selected? : Bool
+      @session.host_overrides.size > 0
+    end
+
     def sitemap_move(delta : Int32) : Nil
       sitemap_controller.sitemap_move(delta)
     end
@@ -2592,6 +2702,9 @@ module Gori::Tui
       when :tabs
         @tabs_overlay.reset # rebuild the working copy from persisted config
         @overlay = :tabs
+      when :hosts
+        @hosts_overlay.reset # rebuild the working copy from persisted overrides
+        @overlay = :hosts
       when :hotkeys
         @hotkeys_overlay.reset # rebuild the working copy from persisted overrides
         @overlay = :hotkeys

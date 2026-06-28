@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 16
+      VERSION = 17
 
       V1 = [
         <<-SQL,
@@ -308,7 +308,22 @@ module Gori
         "CREATE INDEX idx_fuzz_results_run ON fuzz_results (run_id, idx)",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16]
+      # Project-level hostname overrides (a per-project /etc/hosts): map a host to the
+      # IP the proxy should DIAL for it, while SNI/cert/Host header keep the original
+      # host. `host` is stored lowercased and UNIQUE (one IP per host — re-adding the
+      # same host is rejected; edit the row to change its IP). Read on the proxy hot
+      # path (Upstream.dial) via the Mutex-guarded HostOverrides model.
+      V17 = [
+        <<-SQL,
+        CREATE TABLE host_overrides (
+          id   INTEGER PRIMARY KEY,
+          host TEXT NOT NULL UNIQUE,
+          ip   TEXT NOT NULL
+        )
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

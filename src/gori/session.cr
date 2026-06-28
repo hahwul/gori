@@ -4,6 +4,7 @@ require "./capture_lock"
 require "./store"
 require "./rules"
 require "./scope"
+require "./host_overrides"
 require "./interceptor"
 require "./proxy/server"
 require "./proxy/tls/cert_authority"
@@ -25,6 +26,7 @@ module Gori
     getter flow_events : Channel(Store::FlowEvent)
     getter rules : Rules
     getter scope : Scope
+    getter host_overrides : HostOverrides
     getter interceptor : Interceptor
     # Why the live proxy isn't listening (e.g. "port in use"), or nil when capture
     # is up. The project still opens for History/Replay/Sitemap/etc. — only live
@@ -39,13 +41,14 @@ module Gori
       begin
         lock = nil.as(CaptureLock?)
         sink = Proxy::StoreSink.new(store)
-        rules = Rules.load(store)            # shared: proxy reads, TUI edits (Mutex-guarded)
-        scope = Scope.load(store)            # shared by the TUI lens AND intercept gating
-        interceptor = Interceptor.new(scope) # shared: proxy fibers hold, TUI decides
+        rules = Rules.load(store)                  # shared: proxy reads, TUI edits (Mutex-guarded)
+        scope = Scope.load(store)                  # shared by the TUI lens AND intercept gating
+        host_overrides = HostOverrides.load(store) # per-project /etc/hosts; proxy reads, TUI edits (Mutex-guarded)
+        interceptor = Interceptor.new(scope)       # shared: proxy fibers hold, TUI decides
         tunnel = Proxy::Tls::Tunnel.new(ca, verify_upstream: !config.insecure_upstream?,
-          rewriter: rules, interceptor: interceptor)
+          rewriter: rules, interceptor: interceptor, host_overrides: host_overrides)
         proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
-          rewriter: rules, interceptor: interceptor)
+          rewriter: rules, interceptor: interceptor, host_overrides: host_overrides)
         # Per-PROJECT capture lock decides whether THIS instance captures. A 2nd
         # instance of the SAME project can't acquire it → VIEW-ONLY (no 2nd port; it
         # live-refreshes off the shared DB). A DIFFERENT project has its own lock, so
@@ -76,7 +79,7 @@ module Gori
             lock = nil
             ex.message || "could not open the project capture lock"
           end
-        new(config, ca, registry, project, store, proxy, events, rules, scope, interceptor, bind_error, lock)
+        new(config, ca, registry, project, store, proxy, events, rules, scope, host_overrides, interceptor, bind_error, lock)
       rescue ex
         # A store/rules/scope failure (NOT the bind, which is handled above) would
         # otherwise leak the store's writer fiber + db fd, the events channel, and the
@@ -89,7 +92,7 @@ module Gori
     end
 
     def initialize(@config, @ca, @registry, @project, @store, @proxy, @flow_events,
-                   @rules, @scope, @interceptor, @bind_error : String? = nil,
+                   @rules, @scope, @host_overrides, @interceptor, @bind_error : String? = nil,
                    @capture_lock : CaptureLock? = nil)
     end
 

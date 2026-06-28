@@ -5,6 +5,7 @@ require "../../interceptor"
 require "../conn/client_conn"
 require "../upstream"
 require "../h2/relay"
+require "../../host_overrides"
 require "./cert_authority"
 
 module Gori::Proxy::Tls
@@ -16,7 +17,8 @@ module Gori::Proxy::Tls
   class Tunnel < Proxy::TlsMitm
     def initialize(@ca : CertAuthority, @verify_upstream : Bool = true,
                    @rewriter : Proxy::HeadRewriter? = nil,
-                   @interceptor : Gori::Interceptor? = nil)
+                   @interceptor : Gori::Interceptor? = nil,
+                   @host_overrides : Gori::HostOverrides? = nil)
     end
 
     def intercept(host : String, port : Int32, client : IO, sink : Proxy::FlowSink) : Nil
@@ -49,6 +51,7 @@ module Gori::Proxy::Tls
           fixed_host: host, fixed_port: port,
           tls_upstream: true, verify_upstream: @verify_upstream,
           rewriter: @rewriter, interceptor: @interceptor,
+          host_overrides: @host_overrides,
         ).run
       end
     rescue
@@ -62,7 +65,7 @@ module Gori::Proxy::Tls
     # v1 does not translate h2↔h1 — the connection is dropped (the human sees no
     # flow rather than a corrupted one, P7).
     private def intercept_h2(host : String, port : Int32, client_tls : IO, sink : Proxy::FlowSink) : Nil
-      upstream = Proxy::Upstream.dial_tls(host, port, verify: @verify_upstream, alpn: "h2")
+      upstream = Proxy::Upstream.dial_tls(host, port, verify: @verify_upstream, alpn: "h2", overrides: @host_overrides)
       if upstream && upstream.alpn_protocol == "h2"
         upstream.sync = true
         Proxy::H2::Relay.run(client_tls, upstream, host, port, sink)

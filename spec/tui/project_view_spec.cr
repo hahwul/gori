@@ -117,7 +117,7 @@ end
 describe "ProjectView DESCRIPTION scrolling" do
   it "scrolls a long description into view inside its card, staying on the page" do
     tmp_store do |store|
-      view = ProjectView.new(Gori::Scope.load(store), "http://127.0.0.1:8080")
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       view.replace_desc((1..40).map { |i| "desc%02d" % i }.join("\n"))
       view.focus_pane(:desc)
       rect = Rect.new(0, 0, 120, 30)
@@ -138,17 +138,18 @@ describe "ProjectView DESCRIPTION scrolling" do
 end
 
 describe "ProjectView#pane_at" do
-  it "splits the body into the overview band + SCOPE / DESCRIPTION cards (the wheel hit-test)" do
+  it "splits the body into the overview band + SCOPE/HOST-OVERRIDES (left) / DESCRIPTION (right) cards" do
     tmp_store do |store|
-      view = ProjectView.new(Gori::Scope.load(store), "")
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       rect = Rect.new(0, 0, 120, 30)
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: false)
 
-      view.pane_at(rect, rect.x + 1, rect.y).should eq(:overview)    # top band
-      content_y = rect.y + 12                                        # below the capped overview (meta_h == 11)
-      view.pane_at(rect, rect.x + 1, content_y).should eq(:scope)    # left card
-      view.pane_at(rect, rect.right - 2, content_y).should eq(:desc) # right card
-      view.pane_at(Rect.new(0, 0, 0, 0), 0, 0).should be_nil         # empty rect → nothing
+      view.pane_at(rect, rect.x + 1, rect.y).should eq(:overview)       # top band
+      content_y = rect.y + 12                                           # below the capped overview (meta_h == 11)
+      view.pane_at(rect, rect.x + 1, content_y).should eq(:scope)       # top-left card
+      view.pane_at(rect, rect.x + 1, rect.y + 24).should eq(:overrides) # bottom-left card
+      view.pane_at(rect, rect.right - 2, content_y).should eq(:desc)    # right card
+      view.pane_at(Rect.new(0, 0, 0, 0), 0, 0).should be_nil            # empty rect → nothing
     end
   end
 end

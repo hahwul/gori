@@ -16,13 +16,16 @@ module Gori::Tui
   # on save (Theme.apply + a full repaint).
   class SettingsView
     # `bool` fields are on/off toggles (value kept as "on"/"off"); a field with
-    # `choices` cycles among those values (←/→/space); the rest are free-text lines.
-    record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil
+    # `choices` cycles among those values (←/→/space); an `opener` field is an action row
+    # whose ↵ opens the named sub-overlay (e.g. :hosts) and whose value column is
+    # display-only; the rest are free-text lines.
+    record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil, opener : Symbol? = nil
 
     NETWORK_FIELDS = [
       Field.new("Bind IP", "proxy listen address"),
       Field.new("Bind Port", "proxy listen port (0-65535)"),
       Field.new("Upstream proxy", "host:port — blank = connect directly"),
+      Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
     EDITOR_FIELDS = [
       Field.new("External editor", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
@@ -68,7 +71,7 @@ module Gori::Tui
       @values = case section
                 when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
                 when :theme  then [Theme.canonical(Settings.theme)]
-                else              [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
+                else              [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -86,7 +89,7 @@ module Gori::Tui
       @values = case @section
                 when :editor then [Settings::DEFAULT_EDITOR, Settings::DEFAULT_EDITOR_MARKDOWN ? "on" : "off", Settings::DEFAULT_MOUSE ? "on" : "off", Settings::DEFAULT_PRETTY_BODIES ? "on" : "off"]
                 when :theme  then [Theme.canonical(Settings::DEFAULT_THEME)]
-                else              [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY]
+                else              [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -111,7 +114,8 @@ module Gori::Tui
     end
 
     def insert(ch : Char) : Nil
-      if bool_field? # a toggle field swallows typing; space flips it
+      return if opener_field? # an action row — typing does nothing (↵ opens its overlay)
+      if bool_field?          # a toggle field swallows typing; space flips it
         toggle if ch == ' '
         return
       end
@@ -128,7 +132,7 @@ module Gori::Tui
     end
 
     def backspace : Nil
-      return if bool_field? || choice_field? || @cursor == 0
+      return if bool_field? || choice_field? || opener_field? || @cursor == 0
       v = @values[@focused]
       c = @cursor.clamp(0, v.size)
       @values[@focused] = "#{v[0, c - 1]}#{v[c..]}"
@@ -157,6 +161,22 @@ module Gori::Tui
 
     private def choice_field? : Bool
       !fields[@focused].choices.nil?
+    end
+
+    private def opener_field? : Bool
+      !fields[@focused].opener.nil?
+    end
+
+    # The sub-overlay the focused action row opens (↵), or nil for an ordinary field. The
+    # Runner consults this on ↵ to open the editor (e.g. :hosts) instead of saving.
+    def focused_opener : Symbol?
+      fields[@focused].opener
+    end
+
+    # The display value for the "Hostname overrides" action row — a live count + an ↵ cue.
+    private def hostnames_summary : String
+      n = Settings.hostname_overrides.size
+      n == 0 ? "none — ↵ to add" : "#{n} entr#{n == 1 ? "y" : "ies"} — ↵ to edit"
     end
 
     private def toggle : Nil
@@ -218,7 +238,7 @@ module Gori::Tui
       Settings.bind_host = @values[0].strip
       Settings.bind_port = port
       Settings.upstream_proxy = up
-      @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy]
+      @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, hostnames_summary]
       persist
     end
 
@@ -330,7 +350,9 @@ module Gori::Tui
     # (focused), the hint (empty + unfocused), or the plain value.
     private def render_field_value(screen : Screen, field : Field, value : String,
                                    vx : Int32, ry : Int32, vw : Int32, focused : Bool, bg : Color) : Nil
-      if choices = field.choices
+      if field.opener # an action row: show its summary (display-only), accent to signal ↵ opens it
+        screen.text(vx, ry, value, focused ? Theme.text_bright : Theme.accent, bg, width: vw)
+      elsif choices = field.choices
         # List the options left-to-right; the active one is emphasised (◉ + bright).
         cx = vx
         left = vw

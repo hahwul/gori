@@ -4,6 +4,7 @@ require "../codec/body"
 require "../sink"
 require "../head_rewriter"
 require "../../interceptor"
+require "../../host_overrides"
 require "../prefix_io"
 require "../h2/relay"
 require "../connect"
@@ -30,7 +31,8 @@ module Gori::Proxy
     def initialize(@io : IO, @scheme : String, @sink : FlowSink, @tls : TlsMitm? = nil,
                    @fixed_host : String? = nil, @fixed_port : Int32 = 0,
                    @tls_upstream : Bool = false, @verify_upstream : Bool = true,
-                   @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil)
+                   @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
+                   @host_overrides : Gori::HostOverrides? = nil)
       # Per-connection upstream reuse (see `acquire_upstream`). One live origin
       # connection kept across this client's keep-alive requests.
       @upstream = nil.as(IO?)
@@ -422,7 +424,7 @@ module Gori::Proxy
     # CONNECT authority, so we dial it plaintext and run the same h2 relay (no
     # :authority routing / HPACK coupling needed). The origin must speak h2c.
     private def intercept_h2c(host : String, port : Int32, client : IO) : Nil
-      upstream = Upstream.dial(host, port)
+      upstream = Upstream.dial(host, port, overrides: @host_overrides)
       return unless upstream
       begin
         H2::Relay.run(client, upstream, host, port, @sink)
@@ -466,7 +468,7 @@ module Gori::Proxy
           tls.intercept(host, port, stream, @sink)
         end
       else
-        upstream = Upstream.dial(host, port)
+        upstream = Upstream.dial(host, port, overrides: @host_overrides)
         unless upstream
           write_gateway_error
           return false
@@ -490,9 +492,9 @@ module Gori::Proxy
     # origin-form for the upstream; the captured truth keeps the original bytes.
     private def open_upstream(host : String, port : Int32) : IO?
       if @tls_upstream
-        Upstream.dial_tls(host, port, verify: @verify_upstream)
+        Upstream.dial_tls(host, port, verify: @verify_upstream, overrides: @host_overrides)
       else
-        Upstream.dial(host, port)
+        Upstream.dial(host, port, overrides: @host_overrides)
       end
     end
 
