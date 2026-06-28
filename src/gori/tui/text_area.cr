@@ -122,6 +122,34 @@ module Gori::Tui
       @edits += 1
     end
 
+    # Home / End: jump the cursor to the start / end of the current line. Pure navigation
+    # (no buffer change), so @styled/@edits are untouched — mirrors `move`.
+    def home : Nil
+      @cx = 0
+    end
+
+    def end_of_line : Nil
+      @cx = @lines[@cy].size
+    end
+
+    # Forward delete: remove the char under the cursor, or join the next line when at EOL.
+    # A buffer mutation, so it invalidates the highlight cache and bumps @edits (like backspace).
+    def delete : Nil
+      line = @lines[@cy]
+      cx = @cx.clamp(0, line.size)
+      if cx < line.size
+        @lines[@cy] = "#{line[0, cx]}#{line[cx + 1..]}"
+      elsif @cy < @lines.size - 1
+        @lines[@cy] = line + @lines[@cy + 1]
+        @lines.delete_at(@cy + 1)
+      else
+        return # end of buffer — nothing to delete, don't dirty
+      end
+      @cx = cx
+      @styled = nil
+      @edits += 1
+    end
+
     def move(dr : Int32, dc : Int32) : Nil
       if dr != 0
         @cy = (@cy + dr).clamp(0, @lines.size - 1)

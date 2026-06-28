@@ -29,7 +29,10 @@ module Gori
       # matches ReplayView#build_target so the parsed {scheme,host,port} round-trips.
       def self.build_target(scheme : String, host : String, port : Int32) : String
         default = scheme == "https" ? 443 : 80
-        port == default ? "#{scheme}://#{host}" : "#{scheme}://#{host}:#{port}"
+        # An IPv6 literal host (contains ':') must be bracketed in a URL, else both the
+        # `:port` suffix below and URI.parse in parse_target split it wrong (host → "").
+        h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
+        port == default ? "#{scheme}://#{h}" : "#{scheme}://#{h}:#{port}"
       end
 
       # {scheme, host, port} parsed back out of a target string (the inverse of
@@ -39,11 +42,17 @@ module Gori
         raw = "http://#{raw}" unless raw.includes?("://")
         uri = URI.parse(raw)
         scheme = uri.scheme || "http"
-        host = uri.host || ""
+        host = strip_ipv6_brackets(uri.host || "")
         port = uri.port || (scheme == "https" ? 443 : 80)
         {scheme, host, port}
       rescue
         {"http", "", 0}
+      end
+
+      # URI.parse keeps the [] around an IPv6 literal host; strip them so the bare address
+      # is what we dial/round-trip (TCPSocket wants "::1", not "[::1]").
+      private def self.strip_ipv6_brackets(host : String) : String
+        host.starts_with?('[') && host.ends_with?(']') ? host[1..-2] : host
       end
 
       # Rewrite the request-line to origin-form when it's absolute-form, keeping the

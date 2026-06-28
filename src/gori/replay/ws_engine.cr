@@ -24,7 +24,8 @@ module Gori
       MAX_RECV_MESSAGES = 1000                # cap captured server messages (anti-flood)
       MAX_RECV_BYTES    = 8_i64 * 1024 * 1024 # cap total captured server payload bytes
       MAX_DRAIN_FRAMES  = 100_000             # hard ceiling on frames processed (ping/empty-fragment flood)
-      MAX_CONTROL_BYTES =     125             # RFC 6455 §5.5: control-frame payload limit (caps Pong echo)
+      DRAIN_DEADLINE    = 60.seconds          # wall-clock ceiling: a sub-idle ping/fragment cadence can't pin a tab for hours
+      MAX_CONTROL_BYTES = 125                 # RFC 6455 §5.5: control-frame payload limit (caps Pong echo)
 
       # An outbound message to replay (opcode 1=text, 2=binary).
       record OutMsg, opcode : Int32, payload : Bytes
@@ -111,10 +112,14 @@ module Gori
         recv_bytes = 0_i64
         recv_count = 0
         frames = 0
+        started = Time.instant
         loop do
           # Count EVERY frame, not just completed messages: an origin flooding pings or
           # empty/non-fin fragments faster than `idle` trips neither the data caps nor
           # the read timeout, so this frame ceiling is what guarantees termination.
+          # A wall-clock deadline also caps total drain time: a steady sub-idle ping cadence
+          # stays under MAX_DRAIN_FRAMES yet could otherwise pin the tab "inflight" for hours.
+          break if Time.instant - started > DRAIN_DEADLINE
           frame = begin
             Proxy::WS.read_frame(io)
           rescue IO::Error

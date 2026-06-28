@@ -592,6 +592,9 @@ module Gori::Tui
       when key.down?      then view.edit_move(1, 0)
       when key.left?      then view.edit_move(0, -1)
       when key.right?     then view.edit_move(0, 1)
+      when key.home?      then view.edit_home
+      when key.end?       then view.edit_end
+      when key.delete?    then view.edit_delete
       else
         if c && !ev.ctrl? && !ev.alt?
           view.edit_insert(c)
@@ -622,19 +625,11 @@ module Gori::Tui
     private def edit_replay_target(ev : Termisu::Event::Key, view : ReplayView) : Nil
       return edit_replay_sni(ev, view) if view.editing_sni? # ^S sub-field of the TARGET pane
       key = ev.key
-      c = ev.char || key.to_char
       case
-      when key.enter?     then view.pane_advance(1)                                       # ↵ confirms URL → Request (^R sends, not ↵)
-      when key.up?        then @host.request_focus(@replays.size >= 2 ? :subtabs : :menu) # target is the top pane → ↑ pops up
-      when key.down?      then view.pane_advance(1)                                        # ↓ → drop into the Request pane below
-      when key.backspace? then view.target_backspace
-      when key.left?      then view.target_move(-1)
-      when key.right?     then view.target_move(1)
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          view.target_insert(c)
-          view.set_preedit("")
-        end
+      when key.enter? then view.pane_advance(1)                                       # ↵ confirms URL → Request (^R sends, not ↵)
+      when key.up?    then @host.request_focus(@replays.size >= 2 ? :subtabs : :menu) # target is the top pane → ↑ pops up
+      when key.down?  then view.pane_advance(1)                                        # ↓ → drop into the Request pane below
+      else                 edit_target_common(ev, view)
       end
     end
 
@@ -643,14 +638,26 @@ module Gori::Tui
     # advancing panes, and ↓ still drops into the Request pane below.
     private def edit_replay_sni(ev : Termisu::Event::Key, view : ReplayView) : Nil
       key = ev.key
-      c = ev.char || key.to_char
       case
       when key.enter?, key.up? then view.exit_sni_field
       when key.down?           then view.pane_advance(1)
-      when key.backspace?      then view.target_backspace
-      when key.left?           then view.target_move(-1)
-      when key.right?          then view.target_move(1)
+      else                          edit_target_common(ev, view)
+      end
+    end
+
+    # Shared single-line editing for the TARGET / SNI fields (both route through the view's
+    # target_* mutators): caret nav (←/→/Home/End), delete/backspace, and literal insert.
+    private def edit_target_common(ev : Termisu::Event::Key, view : ReplayView) : Nil
+      key = ev.key
+      case
+      when key.backspace? then view.target_backspace
+      when key.left?      then view.target_move(-1)
+      when key.right?     then view.target_move(1)
+      when key.home?      then view.target_home
+      when key.end?       then view.target_end
+      when key.delete?    then view.target_delete
       else
+        c = ev.char || key.to_char
         if c && !ev.ctrl? && !ev.alt?
           view.target_insert(c)
           view.set_preedit("")

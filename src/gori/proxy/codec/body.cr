@@ -54,6 +54,18 @@ module Gori::Proxy::Codec
     end
   end
 
+  # A write-only sink that discards everything (no buffering). Used as `Body.stream`'s
+  # `tee` when the caller only needs the `dst` copy (e.g. `read_complete`), so the body
+  # isn't accumulated a second time.
+  class DiscardIO < IO
+    def write(slice : Bytes) : Nil
+    end
+
+    def read(slice : Bytes) : Int32
+      raise NotImplementedError.new("DiscardIO is write-only")
+    end
+  end
+
   module Body
     BUFSIZE = 64 * 1024
 
@@ -128,7 +140,10 @@ module Gori::Proxy::Codec
     def self.read_complete(src : IO, framing : BodyFraming, length : Int64) : {Bytes?, Bool}
       return {nil, true} if framing.none?
       capture = IO::Memory.new
-      complete = stream(src, capture, framing, length, IO::Memory.new) # tee discarded
+      # The body is already buffered once in `capture`; tee into a discard sink rather than
+      # a second IO::Memory so a large response isn't held in memory TWICE (the old
+      # `IO::Memory.new` tee doubled peak RAM on every replay/read_complete).
+      complete = stream(src, capture, framing, length, DiscardIO.new)
       {capture.to_slice.dup, complete}
     end
 

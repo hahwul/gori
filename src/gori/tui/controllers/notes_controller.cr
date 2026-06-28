@@ -70,6 +70,12 @@ module Gori::Tui
         @notes.move(0, -1)
       elsif key.right?
         @notes.move(0, 1)
+      elsif key.home?
+        @notes.home
+      elsif key.end?
+        @notes.end_of_line
+      elsif key.delete?
+        @notes.delete
       else
         if c && !ev.ctrl? && !ev.alt?
           @notes.insert(c)

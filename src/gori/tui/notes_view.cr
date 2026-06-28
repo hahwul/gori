@@ -117,6 +117,21 @@ module Gori::Tui
       current.area.move(dr, dc)
     end
 
+    # Home/End: caret to line start/end — pure navigation, does not dirty.
+    def home : Nil
+      current.area.home
+    end
+
+    def end_of_line : Nil
+      current.area.end_of_line
+    end
+
+    # Forward-delete the char under the caret — a content edit.
+    def delete : Nil
+      current.area.delete
+      @dirty = true
+    end
+
     # Mouse: place the cursor at a click. `rect` is the framed interior the runner
     # passes to render; re-apply render's 1-col side inset so the editor geometry matches.
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil

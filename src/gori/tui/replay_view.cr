@@ -486,6 +486,7 @@ module Gori::Tui
       uri = URI.parse(raw)
       scheme = uri.scheme || "http"
       host = uri.host || ""
+      host = host[1..-2] if host.starts_with?('[') && host.ends_with?(']') # bare IPv6 literal for dialing
       port = uri.port || (scheme == "https" ? 443 : 80)
       {scheme, host, port}
     rescue
@@ -649,6 +650,24 @@ module Gori::Tui
     def edit_move(dr : Int32, dc : Int32) : Nil
       return unless @focus == :request
       @editor.move(dr, dc)
+      # Cursor navigation is NOT a content edit: leave @dirty alone. Marking it here made
+      # pure arrow-key movement persist the tab (V11) and, worse, latch sync-clobber
+      # protection so a live cross-session update could no longer refresh the tab.
+    end
+
+    # Home/End: pure navigation (caret to line start/end) → does NOT dirty, like edit_move.
+    def edit_home : Nil
+      @editor.home if @focus == :request
+    end
+
+    def edit_end : Nil
+      @editor.end_of_line if @focus == :request
+    end
+
+    # Forward-delete: a content edit → dirties (matches edit_backspace).
+    def edit_delete : Nil
+      return unless @focus == :request
+      @editor.delete
       @dirty = true
     end
 
@@ -668,8 +687,10 @@ module Gori::Tui
     # Whitespace reveal toggle — response renders from raw bytes; the request editor
     # shows within-line whitespace too.
     def reveal=(on : Bool) : Nil
+      return if @reveal == on # the controller pushes this every frame; guard so @scroll isn't zeroed each render
       @reveal = on
       @editor.reveal = on
+      @scroll = 0 # reveal renders the response from RAW bytes → a different line count; reset like pretty=/x/d
     end
 
     # Pretty toggle feeds `resp_view`, so a change drops only the response-view cache
@@ -753,6 +774,28 @@ module Gori::Tui
         @scx = (@scx + d).clamp(0, @sni.size)
       else
         @tcx = (@tcx + d).clamp(0, @target.size)
+      end
+      # Cursor navigation is not a content edit — do NOT dirty (caret is never persisted),
+      # mirroring edit_move/goto_request_line/hex_move.
+    end
+
+    # Home/End on the single-line target/SNI field — pure caret moves, no dirty.
+    def target_home : Nil
+      @target_field == :sni ? (@scx = 0) : (@tcx = 0)
+    end
+
+    def target_end : Nil
+      @target_field == :sni ? (@scx = @sni.size) : (@tcx = @target.size)
+    end
+
+    # Forward-delete the char under the caret on the target/SNI field — a content edit.
+    def target_delete : Nil
+      if @target_field == :sni
+        return if @scx >= @sni.size
+        @sni = "#{@sni[0, @scx]}#{@sni[@scx + 1..]}"
+      else
+        return if @tcx >= @target.size
+        @target = "#{@target[0, @tcx]}#{@target[@tcx + 1..]}"
       end
       @dirty = true
     end
@@ -1256,7 +1299,9 @@ module Gori::Tui
 
     private def build_target(scheme : String, host : String, port : Int32) : String
       default = scheme == "https" ? 443 : 80
-      port == default ? "#{scheme}://#{host}" : "#{scheme}://#{host}:#{port}"
+      # Bracket an IPv6 literal host (contains ':') so the URL parses back correctly.
+      h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
+      port == default ? "#{scheme}://#{h}" : "#{scheme}://#{h}:#{port}"
     end
 
     # Rewrites an absolute-form request-line ("GET http://h/p ...") to origin-form
