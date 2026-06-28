@@ -35,19 +35,21 @@ describe Gori::Store do
     end
   end
 
-  it "upgrades a pre-sitemap_tags DB (V18 migration) and persists tags" do
+  it "upgrades a pre-sitemap_tags DB (V18+ migrations) and persists tags" do
     path = File.tempname("gori-v18", ".db")
     begin
-      # Simulate a DB last migrated before V18: drop sitemap_tags and roll user_version
-      # back to 17 (e.g. a project created on the hostname-overrides branch).
+      # Simulate a DB last migrated before V18: drop the post-V17 tables and roll
+      # user_version back to 17 (e.g. a project created on the hostname-overrides branch).
       store = Gori::Store.open(path)
-      store.@db.exec("DROP TABLE sitemap_tags")
+      store.@db.exec("DROP TABLE sitemap_tags")   # V18
+      store.@db.exec("DROP TABLE miner_sessions") # V19
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 
-      # Reopen: the V18 migration must create sitemap_tags so tags persist again.
+      # Reopen: the V18 migration must recreate sitemap_tags so tags persist again, and
+      # the migration runner climbs to the current schema version.
       store = Gori::Store.open(path)
-      store.@db.scalar("PRAGMA user_version").should eq(18)
+      store.@db.scalar("PRAGMA user_version").should eq(Gori::Store::Schema::VERSION)
       store.set_sitemap_tag("acme.test", "/api", "memo")
       store.sitemap_tags[{"acme.test", "/api"}]?.should eq("memo")
       store.close

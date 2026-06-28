@@ -13,6 +13,7 @@ module Gori
 
       # overlays
       abstract def open_palette : Nil
+      abstract def open_notifications : Nil # open the notification center (background-job results)
       abstract def close_overlay : Nil
 
       # the currently focused tab (so verbs can gate by context, P4)
@@ -70,6 +71,12 @@ module Gori
       abstract def fuzz_stop : Nil        # stop the running fuzz
       abstract def fuzz_new : Nil         # open a blank fuzz session
       abstract def fuzz_automark : Nil    # auto-mark every request parameter
+
+      # param miner (cross-tab seeds open a config popup, then mining runs in background)
+      abstract def mine_selected : Nil    # mine History's selected flow (opens the config popup)
+      abstract def mine_from_replay : Nil # mine the current Replay request
+      abstract def mine_run : Nil         # re-run mining for the focused Miner session
+      abstract def mine_stop : Nil        # stop the running mine
 
       # sitemap tree
       abstract def sitemap_move(delta : Int32) : Nil

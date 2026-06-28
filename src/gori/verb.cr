@@ -14,6 +14,7 @@ module Gori
       HistoryDetail  # a flow's detail view is open
       Replay         # the Replay tab has focus
       Fuzzer         # the Fuzzer tab has focus
+      Miner          # the Miner (param-mining) tab has focus
       Sitemap        # the Sitemap tab has focus
       Findings       # the Findings list has focus
       FindingsDetail # a finding's detail is open

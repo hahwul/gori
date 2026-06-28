@@ -26,6 +26,13 @@ module Gori
         "app.palette", "Command palette", "Open the command palette", Verb::Scope::Global,
         [Verb::Chord.new("p", ctrl: true)], category: Verb::Category::System) { |ctx| ctx.open_palette; nil }
 
+      # The notification center (background-job results, alerts). Chordless to dodge the
+      # reserved-key set; the clickable bottom-bar `notify:N` badge is the mouse path,
+      # and it's rebindable via settings:hotkeys.
+      r.register Verb::Definition.new(
+        "app.notifications", "Notifications", "Open the notification center (background-job results)",
+        Verb::Scope::Global, [] of Verb::Chord, category: Verb::Category::System) { |ctx| ctx.open_notifications; nil }
+
       r.register Verb::Definition.new(
         "capture.toggle", "Toggle capture", "Start/stop capturing traffic", Verb::Scope::Global,
         [Verb::Chord.new("c")]) { |ctx| ctx.toggle_capture; nil }

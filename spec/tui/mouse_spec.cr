@@ -36,7 +36,7 @@ end
 
 describe "Chrome.menu_segments" do
   it "lays out every tab left-to-right, non-overlapping, on a wide row" do
-    rect = Rect.new(2, 1, 120, 1)
+    rect = Rect.new(2, 1, 140, 1)
     segs = Chrome.menu_segments(rect, :project)
     segs.size.should eq(Chrome::TABS.size) # all tabs fit on a wide row
     segs.map(&.first).should eq(Chrome::TABS.map(&.first))
@@ -109,8 +109,8 @@ describe "SitemapView#row_at / #marker_hit?" do
 
       # not querying → the tree starts at rect.y + 1 (the QL filter bar takes row 0)
       view.row_at(rect, 5, rect.y + 1).should eq(0)           # first tree row = host node
-      view.row_at(rect, 5, rect.y).should be_nil             # the QL bar row, above the tree
-      view.row_at(rect, 5, rect.y + 19).should be_nil        # past the populated rows
+      view.row_at(rect, 5, rect.y).should be_nil              # the QL bar row, above the tree
+      view.row_at(rect, 5, rect.y + 19).should be_nil         # past the populated rows
       view.row_at(rect, rect.right, rect.y + 1).should be_nil # past the right frame column (mx bound)
 
       view.marker_hit?(rect, rect.x + 1, 0).should be_true  # host marker at depth 0 → x+1

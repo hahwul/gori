@@ -200,6 +200,32 @@ module Gori
         [Verb::Chord.new("a", ctrl: true)], available: in_fuzzer, mnemonic: 'm') { |ctx| ctx.fuzz_automark; nil }
     end
 
+    # Param-miner verbs: the cross-tab "Mine parameters" entry (space menu in History,
+    # History detail, and Replay) opens a small config popup, then mining runs in the
+    # BACKGROUND (the UI stays put). run/stop act on the focused Miner session.
+    def self.register_miner(r : Verb::Registry) : Nil
+      history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
+      in_miner = ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner }
+      in_replay = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay }
+
+      r.register Verb::Definition.new(
+        "history.mine", "Mine parameters", "Discover hidden parameters for the selected flow",
+        Verb::Scope::Body, available: history_selected, mnemonic: 'm') { |ctx| ctx.mine_selected; nil }
+      r.register Verb::Definition.new(
+        "detail.mine", "Mine parameters", "Discover hidden parameters for this flow",
+        Verb::Scope::HistoryDetail, mnemonic: 'm') { |ctx| ctx.close_detail; ctx.mine_selected; nil }
+      r.register Verb::Definition.new(
+        "replay.mine", "Mine parameters", "Discover hidden parameters for this replay request",
+        Verb::Scope::Replay, available: in_replay, mnemonic: 'm') { |ctx| ctx.mine_from_replay; nil }
+
+      r.register Verb::Definition.new(
+        "mine.run", "Run mining", "Re-run parameter mining for this session", Verb::Scope::Miner,
+        [Verb::Chord.new("r", ctrl: true)], available: in_miner, mnemonic: 'r') { |ctx| ctx.mine_run; nil }
+      r.register Verb::Definition.new(
+        "mine.stop", "Stop mining", "Stop the running mine", Verb::Scope::Miner,
+        [Verb::Chord.new("x", ctrl: true)], available: in_miner, mnemonic: 's') { |ctx| ctx.mine_stop; nil }
+    end
+
     # Builds a registry with every built-in verb registered.
     def self.registry : Verb::Registry
       r = Verb::Registry.new
@@ -208,6 +234,7 @@ module Gori
       register_sitemap(r)
       register_findings(r)
       register_fuzz(r)
+      register_miner(r)
       register_comparer(r)
       register_convert(r)
       register_host_overrides(r)

@@ -13,6 +13,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def open_palette : Nil; end
 
+  def open_notifications : Nil; end
+
   def close_overlay : Nil; end
 
   def focus_pane(pane : Symbol) : Nil; end
@@ -84,6 +86,14 @@ class FakeExecContext < Gori::Verb::ExecContext
   def fuzz_new : Nil; end
 
   def fuzz_automark : Nil; end
+
+  def mine_selected : Nil; end
+
+  def mine_from_replay : Nil; end
+
+  def mine_run : Nil; end
+
+  def mine_stop : Nil; end
 
   def sitemap_move(delta : Int32) : Nil; end
 

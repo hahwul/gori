@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 18
+      VERSION = 19
 
       V1 = [
         <<-SQL,
@@ -339,7 +339,31 @@ module Gori
         SQL
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18]
+      # Param-miner sessions: a persisted mining session (sub-tab under the Miner tab).
+      # Mirrors fuzz_sessions, but stores the byte-exact `request` (BLOB) to re-run rather
+      # than an editable template, and there is no runs/results table — mining results stay
+      # in-memory per session (like Replay responses before V11). `config` is opaque JSON
+      # managed by the frontend (locations, bucket sizes, concurrency, …).
+      V19 = [
+        <<-SQL,
+        CREATE TABLE miner_sessions (
+          id         INTEGER PRIMARY KEY,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          target     TEXT    NOT NULL,
+          request    BLOB    NOT NULL,
+          http2      INTEGER NOT NULL DEFAULT 0,
+          sni        TEXT,
+          config     TEXT    NOT NULL DEFAULT '',
+          flow_id    INTEGER,
+          position   INTEGER NOT NULL DEFAULT 0,
+          name       TEXT
+        )
+        SQL
+        "CREATE INDEX idx_miner_sessions_position ON miner_sessions (position, id)",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i
