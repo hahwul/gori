@@ -157,5 +157,46 @@ module Gori::Tui
       max = {@rows.size - h, 0}.max
       @scroll = @scroll.clamp(0, max)
     end
+
+    # --- the "Links" sub-tab page ---------------------------------------------
+    # A small {label, url} table so more rows (issue tracker, docs, …) drop in
+    # here later without touching the renderer.
+    LINKS = [
+      {"GitHub", Gori::REPOSITORY_URL},
+    ]
+
+    # Static (no scroll): a "LINKS" head + one row per link, reusing the same
+    # two-column key/desc layout idiom as draw_row so it lines up with Shortcuts.
+    def render_links(screen : Screen, rect : Rect) : Nil
+      return if rect.empty?
+      screen.text(rect.x + 1, rect.y, "LINKS", Theme.accent, attr: Attribute::Bold, width: {rect.w - 2, 1}.max)
+      LINKS.each_with_index do |(label, url), i|
+        y = rect.y + 2 + i
+        break if y >= rect.bottom
+        screen.text(rect.x + 2, y, label, Theme.text_bright, width: {KEY_W, {rect.w - 3, 1}.max}.min)
+        dx = rect.x + 2 + KEY_W
+        screen.text(dx, y, url, Theme.muted, width: {rect.right - dx - 1, 1}.max) if dx < rect.right - 1
+      end
+    end
+
+    # --- the "About" sub-tab page ---------------------------------------------
+    # Static, centered name + version. Future: an ASCII logo will sit above the
+    # version line (this block is the slot for it).
+    def render_version(screen : Screen, rect : Rect) : Nil
+      return if rect.empty?
+      lines = ["gori", "v#{Gori::VERSION}"]
+      top = rect.y + {(rect.h - lines.size) // 2, 0}.max
+      lines.each_with_index do |line, i|
+        centered(screen, rect, top + i, line, i == 0 ? Theme.accent : Theme.text_bright,
+          attr: i == 0 ? Attribute::Bold : Attribute::None)
+      end
+    end
+
+    # Horizontally center `text` on row `y` within `rect` (mirrors ProjectPicker).
+    private def centered(screen : Screen, rect : Rect, y : Int32, text : String, fg : Color,
+                         attr : Attribute = Attribute::None) : Nil
+      x = rect.x + {(rect.w - text.size) // 2, 0}.max
+      screen.text(x, y, text, fg, Theme.bg, attr: attr)
+    end
   end
 end
