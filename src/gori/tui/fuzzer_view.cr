@@ -790,6 +790,21 @@ module Gori::Tui
       @editor.move(dr, dc)
     end
 
+    # Home/End: caret to line start/end — pure navigation, no dirty.
+    def template_home : Nil
+      @editor.home
+    end
+
+    def template_end : Nil
+      @editor.end_of_line
+    end
+
+    # Forward-delete the char under the caret — a content edit.
+    def template_delete : Nil
+      @editor.delete
+      @dirty = true
+    end
+
     # --- config serialization ------------------------------------------------
     def config_json : String
       commit_buffers # fold edited buffers into @config/@matcher before serializing
@@ -1054,17 +1069,40 @@ module Gori::Tui
         return y + 1
       end
       avail = {limit - y, 1}.max
-      shown = @sets.size <= avail ? @sets.size : {avail - 1, 0}.max
-      @sets.first(shown).each_with_index do |s, i|
+      return render_sets_all(screen, inner, y, focused, pp) if @sets.size <= avail
+      render_sets_windowed(screen, inner, y, focused, avail, pp)
+    end
+
+    # Every set fits — render them all (no scroll).
+    private def render_sets_all(screen, inner : Rect, y : Int32, focused : Bool, pp : Bool) : Int32
+      @cfg_scroll = 0
+      @sets.each_with_index do |s, i|
         sel = focused && current_field == :set && current_set_index == i
         render_set_row(screen, inner, y, s, i, sel, pp)
         y += 1
       end
-      if shown < @sets.size
-        screen.text(inner.x + 1, y, "… +#{@sets.size - shown} more", Theme.muted, Theme.bg)
+      y
+    end
+
+    # The list exceeds the pane: window it around the focused set (the unused @cfg_scroll
+    # meant selection/delete could operate on a row scrolled off-screen). One row is
+    # reserved for an "above/below" overflow indicator.
+    private def render_sets_windowed(screen, inner : Rect, y : Int32, focused : Bool, avail : Int32, pp : Bool) : Int32
+      visible = {avail - 1, 1}.max
+      idx = current_set_index
+      @cfg_scroll = idx if idx < @cfg_scroll
+      @cfg_scroll = idx - visible + 1 if idx >= @cfg_scroll + visible
+      @cfg_scroll = @cfg_scroll.clamp(0, {@sets.size - visible, 0}.max)
+      stop = {@cfg_scroll + visible, @sets.size}.min
+      (@cfg_scroll...stop).each do |i|
+        sel = focused && current_field == :set && current_set_index == i
+        render_set_row(screen, inner, y, @sets[i], i, sel, pp)
         y += 1
       end
-      y
+      above, below = @cfg_scroll, @sets.size - stop
+      hint = above > 0 && below > 0 ? "… #{above} above · #{below} below" : (above > 0 ? "… #{above} above" : "… +#{below} more")
+      screen.text(inner.x + 1, y, hint, Theme.muted, Theme.bg)
+      y + 1
     end
 
     # One Sets row. In per-position modes (pp) it carries a marker-coloured swatch + →N
@@ -1351,6 +1389,8 @@ module Gori::Tui
       screen.text(tx, rect.y, " response ", @detail_pane == :response ? Theme.text_bright : Theme.muted, @detail_pane == :response ? Theme.accent_bg : Theme.bg)
       inner = rect.inset(1, 1)
       lines = @detail_pane == :request ? detail_request_lines(r) : detail_response_lines(r)
+      # Clamp so ↓/wheel can't scroll past the last line into a blank void (keeps ≥1 row).
+      @detail_scroll = @detail_scroll.clamp(0, {lines.size - 1, 0}.max)
       (0...inner.h).each do |i|
         li = @detail_scroll + i
         break if li >= lines.size

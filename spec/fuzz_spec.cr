@@ -184,6 +184,13 @@ describe F::PayloadSet do
     upper.should eq(["X-AB"])
   end
 
+  it "stops at an Int64::MAX boundary without overflowing the run" do
+    vals = [] of String
+    # to == Int64::MAX: the terminal `@cur + @step` used to overflow → OverflowError aborts.
+    F::PayloadSet.new(F::NumberRange.new(Int64::MAX - 2, Int64::MAX, step: 1_i64)).each { |v| vals << v }
+    vals.should eq([(Int64::MAX - 2).to_s, (Int64::MAX - 1).to_s, Int64::MAX.to_s])
+  end
+
   it "counts brute-force size and enumerates the odometer" do
     bf = F::BruteForce.new("12", 1, 2)
     bf.size.should eq(6) # 2 + 4

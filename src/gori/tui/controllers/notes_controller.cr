@@ -98,7 +98,10 @@ module Gori::Tui
     end
 
     def on_enter : Nil
-      reload
+      # NEVER reload over UNSAVED edits: reload replaces the buffer from disk and resets
+      # @dirty, so re-entering Notes after leaving via Tab/mouse (gestures that don't flush
+      # the editor) would silently discard the in-memory edits. Only refresh a clean buffer.
+      reload unless @notes.dirty?
     end
 
     def commit : Nil

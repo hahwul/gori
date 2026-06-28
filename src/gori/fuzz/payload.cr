@@ -126,13 +126,23 @@ module Gori::Fuzz
     end
 
     private class NumberIterator < SetIterator
+      @done = false
+
       def initialize(@cur : Int64, @to : Int64, @step : Int64, @base : Symbol, @pad : Int32)
       end
 
       def next_value : String?
+        return nil if @done
         return nil if (@step > 0 && @cur > @to) || (@step < 0 && @cur < @to)
         v = format(@cur)
-        @cur += @step
+        # A range ending at Int64::MAX/MIN would overflow on `@cur + @step` and abort the
+        # run. Use a wrapping add and detect the wrap (sum moved the wrong way) → stop.
+        nxt = @cur &+ @step
+        if (@step > 0 && nxt < @cur) || (@step < 0 && nxt > @cur)
+          @done = true
+        else
+          @cur = nxt
+        end
         v
       end
 

@@ -229,6 +229,9 @@ module Gori::Tui
       when key.down?      then v.template_move(1, 0)
       when key.left?      then v.template_move(0, -1)
       when key.right?     then v.template_move(0, 1)
+      when key.home?      then v.template_home
+      when key.end?       then v.template_end
+      when key.delete?    then v.template_delete
       else
         printable(ev).try { |ch| v.template_insert(ch) }
       end
