@@ -72,6 +72,30 @@ describe Gori::Proxy::WS do
     end
   end
 
+  describe ".encode" do
+    it "builds an unmasked server text frame (short length)" do
+      Gori::Proxy::WS.encode(Gori::Proxy::WS::OP_TEXT, "yo".to_slice, mask: false).should eq(UNMASKED_YO)
+    end
+
+    it "round-trips a masked client frame through read_frame" do
+      wire = Gori::Proxy::WS.encode(Gori::Proxy::WS::OP_TEXT, "hi".to_slice, mask: true)
+      (wire[1] & 0x80_u8).should eq(0x80_u8) # mask bit set
+      frame = Gori::Proxy::WS.read_frame(IO::Memory.new(wire)).not_nil!
+      frame.fin?.should be_true
+      frame.opcode.should eq(Gori::Proxy::WS::OP_TEXT)
+      String.new(frame.payload).should eq("hi")
+    end
+
+    it "round-trips a 200-byte payload (extended 16-bit length)" do
+      payload = Bytes.new(200) { |i| (i % 251).to_u8 }
+      wire = Gori::Proxy::WS.encode(Gori::Proxy::WS::OP_BIN, payload, mask: true)
+      (wire[1] & 0x7f_u8).should eq(126_u8) # 16-bit length marker
+      frame = Gori::Proxy::WS.read_frame(IO::Memory.new(wire)).not_nil!
+      frame.opcode.should eq(Gori::Proxy::WS::OP_BIN)
+      frame.payload.should eq(payload)
+    end
+  end
+
   describe Gori::Proxy::WS::Relay do
     it "relays frames both directions byte-exact and captures messages" do
       cs_r, cs_w = IO.pipe # client → server

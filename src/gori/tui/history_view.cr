@@ -59,6 +59,7 @@ module Gori::Tui
       @detail_frames = nil.as(Array(Store::H2Frame)?)
       @detail_ws_total = 0 # full message count (≥ loaded; drives the "older not loaded" note)
       @detail_frames_total = 0
+      @detail_sse = false # response is a text/event-stream → offer the EVENTS pane
       @detail_scroll = 0
       @detail_pane = :request
       @search_hl = ""                        # active ^F query → highlight in the detail body
@@ -324,6 +325,7 @@ module Gori::Tui
       @detail_ws = nil
       @detail_frames_total = 0
       @detail_ws_total = 0
+      @detail_sse = false
       @detail_hex_bytes = nil
     end
 
@@ -345,11 +347,26 @@ module Gori::Tui
         @detail_frames = nil
         @detail_frames_total = 0
       end
+      # SSE events are a derived view (parsed from the stored response body at
+      # render time — no table), so here we only flag whether to offer the pane.
+      @detail_sse = !!(detail && sse_response?(detail))
+    end
+
+    # The response is a Server-Sent Events stream (drives the EVENTS pane). Scans
+    # the response head like grpc_body? — content-type may carry a charset param.
+    private def sse_response?(detail : Store::FlowDetail) : Bool
+      Sse.event_stream?(detail.response_head)
+    end
+
+    # The synthetic log panes (FRAMES / EVENTS) render as text and have no raw-byte
+    # hex view, unlike REQUEST/RESPONSE.
+    private def log_pane? : Bool
+      @detail_pane == :frames || @detail_pane == :events
     end
 
     # 'x' toggles a raw hex dump of the current pane (request/response bytes).
     def toggle_detail_hex : Nil
-      return if @detail_pane == :frames # frames has no raw-bytes hex; don't strand a hidden flag
+      return if log_pane? # frames/events have no raw-bytes hex; don't strand a hidden flag
       @detail_hex = !@detail_hex
       @detail_scroll = 0 # row-based offset differs from the line-based one
     end
@@ -426,7 +443,7 @@ module Gori::Tui
       hits = [] of Int32
       # FRAMES has no hex view, so it renders as text even when @detail_hex is set —
       # match the render/goto predicate so search agrees (not a bare @detail_hex).
-      return hits if query.empty? || (@detail_hex && @detail_pane != :frames)
+      return hits if query.empty? || (@detail_hex && !log_pane?)
       q = query.downcase
       dv = detail_view
       (0...dv.total).each { |i| hits << i if dv.line_text(i).downcase.includes?(q) }
@@ -446,7 +463,7 @@ module Gori::Tui
     # Whether the current pane supports the hex view (raw request/response bytes;
     # the FRAMES pane is a synthetic log, not raw bytes).
     private def detail_hex?(detail : Store::FlowDetail) : Bool
-      @detail_hex && @detail_pane != :frames
+      @detail_hex && !log_pane?
     end
 
     # Combined head+body bytes for the current pane (the hex source), cached — built
@@ -476,7 +493,10 @@ module Gori::Tui
     # The detail sub-panes, in order: REQUEST → RESPONSE → FRAMES (the frames pane
     # exists only for an intercepted h2 flow). ←/→ walk this chain; Tab cycles it.
     private def detail_panes : Array(Symbol)
-      @detail_frames ? [:request, :response, :frames] : [:request, :response]
+      panes = [:request, :response]
+      panes << :events if @detail_sse # parsed SSE events (text/event-stream response)
+      panes << :frames if @detail_frames
+      panes
     end
 
     # The chip label for a detail pane (the response pane shows WS messages for a
@@ -484,6 +504,7 @@ module Gori::Tui
     private def detail_pane_label(pane : Symbol) : String
       case pane
       when :frames   then "FRAMES (h2)"
+      when :events   then "EVENTS (sse)"
       when :response then @detail_ws ? "MESSAGES" : "RESPONSE"
       else                "REQUEST"
       end
@@ -855,6 +876,16 @@ module Gori::Tui
         head = log_head(ws_lines(msgs), @detail_ws_total, msgs.size, "messages")
         return DetailView.new(head, [] of String, :text, EMPTY_LINES)
       end
+      if @detail_pane == :events
+        # Derived view: decode (de-chunk/inflate) the response body, then split it
+        # into SSE events at render time — no table, like the gRPC framing pane.
+        decoded, _ = Proxy::Codec::ContentDecode.decode(detail.response_head, detail.response_body)
+        events = Sse.events(decoded || detail.response_body || Bytes.empty)
+        dropped = {events.size - DETAIL_LOG_CAP, 0}.max # older events not shown (windowed)
+        shown = dropped > 0 ? events[dropped..] : events
+        head = log_head(sse_lines(shown, dropped), events.size, shown.size, "events")
+        return DetailView.new(head, [] of String, :text, EMPTY_LINES)
+      end
       request = @detail_pane == :request
       # A failed/pending flow has no response bytes — surface WHY (like Replay does)
       # instead of a blank pane.
@@ -979,6 +1010,26 @@ module Gori::Tui
         arrow = m.direction == "out" ? "→" : "←"
         m.text? ? "#{arrow} #{String.new(m.payload)}" : "#{arrow} «binary #{m.payload.size}b»"
       end
+    end
+
+    # Renders parsed SSE events: a header line per event (type/id/retry when set)
+    # then its data, indented. The whole stream is server→client, so no arrows.
+    # `base` is the count of older events the window dropped, so the visible numbers
+    # stay continuous with the "showing latest N of M" note (no restart at #1).
+    private def sse_lines(events : Array(Sse::Event), base : Int32 = 0) : Array(String)
+      return ["(no events)"] if events.empty?
+      lines = [] of String
+      events.each_with_index do |e, i|
+        meta = String.build do |io|
+          io << "▸ event ##{base + i + 1}"
+          io << "  type=" << e.type if e.type
+          io << "  id=" << e.id if e.id
+          io << "  retry=" << e.retry if e.retry
+        end
+        lines << meta
+        e.data.split('\n').each { |dl| lines << "    #{dl}" }
+      end
+      lines
     end
   end
 end

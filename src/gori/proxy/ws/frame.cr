@@ -85,4 +85,35 @@ module Gori::Proxy::WS
 
     Frame.new(fin, opcode, payload, buf)
   end
+
+  # Encodes one frame for sending. Client→server frames MUST be masked (RFC 6455
+  # §5.3) with a fresh random 32-bit key; server→client frames are unmasked. Used
+  # by the WS replay engine (the live relay only forwards `raw` bytes verbatim, so
+  # it never needs to build a frame). Control frames (close/ping/pong) carry ≤125
+  # bytes and so always take the short length path.
+  def self.encode(opcode : UInt8, payload : Bytes, *, mask : Bool = true, fin : Bool = true) : Bytes
+    n = payload.size
+    io = IO::Memory.new(n + 14)
+    io.write_byte((fin ? 0x80_u8 : 0_u8) | (opcode & 0x0f_u8))
+    mb = mask ? 0x80_u8 : 0_u8
+    if n < 126
+      io.write_byte(mb | n.to_u8)
+    elsif n <= 0xFFFF
+      io.write_byte(mb | 126_u8)
+      io.write_byte((n >> 8).to_u8!)
+      io.write_byte(n.to_u8!)
+    else
+      io.write_byte(mb | 127_u8)
+      len = n.to_u64
+      (0..7).each { |i| io.write_byte((len >> (56 - i * 8)).to_u8!) }
+    end
+    if mask
+      key = Random::Secure.random_bytes(4)
+      io.write(key)
+      n.times { |i| io.write_byte(payload[i] ^ key[i & 3]) }
+    else
+      io.write(payload)
+    end
+    io.to_slice
+  end
 end

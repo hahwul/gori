@@ -45,4 +45,11 @@ describe Gori::Proxy::H2::Grpc do
     m.compressed.should be_true
     m.data.should eq(Bytes[0xab, 0xcd])
   end
+
+  it "names known status codes and falls back for unknown ones" do
+    Grpc.status_name(0).should eq("OK")
+    Grpc.status_name(7).should eq("PERMISSION_DENIED")
+    Grpc.status_name(16).should eq("UNAUTHENTICATED")
+    Grpc.status_name(99).should eq("CODE99")
+  end
 end
