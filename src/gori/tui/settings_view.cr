@@ -78,6 +78,22 @@ module Gori::Tui
       @theme_scroll = 0 # render scrolls to the selected theme on the first frame
     end
 
+    # Revert the working copy of the CURRENT section to its factory defaults (the values a
+    # fresh install ships with — Settings::DEFAULT_*). Like every other edit here it touches
+    # the working copy only: it applies on save (↵) and is discarded on esc. The caller
+    # live-previews the restored default theme in the :theme section.
+    def reset_to_defaults : Nil
+      @values = case @section
+                when :editor then [Settings::DEFAULT_EDITOR, Settings::DEFAULT_EDITOR_MARKDOWN ? "on" : "off", Settings::DEFAULT_MOUSE ? "on" : "off", Settings::DEFAULT_PRETTY_BODIES ? "on" : "off"]
+                when :theme  then [Theme.canonical(Settings::DEFAULT_THEME)]
+                else              [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY]
+                end
+      @focused = 0
+      @cursor = @values[0].size
+      @preedit = ""
+      @status = nil
+    end
+
     # ↑/↓: move between fields — except in the THEME section, whose single field IS a
     # vertical list, so up/down move the theme selection (render keeps it on screen).
     def move_field(delta : Int32) : Nil
@@ -411,7 +427,7 @@ module Gori::Tui
       else
         screen.text(box.x + 3, note_y, fields[@focused].hint, Theme.muted, Theme.panel)
       end
-      hint = @section == :theme ? "↑/↓ select · ↵ apply · esc close" : "↑/↓ field · ↵ save · esc close"
+      hint = @section == :theme ? "↑/↓ select · ↵ apply · ^R reset · esc close" : "↑/↓ field · ↵ save · ^R reset · esc close"
       screen.text(box.right - hint.size - 2, note_y, hint, Theme.muted, Theme.panel)
     end
   end

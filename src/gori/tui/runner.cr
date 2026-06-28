@@ -1035,6 +1035,18 @@ module Gori::Tui
         preview_theme
       elsif key.backspace?
         @settings_view.backspace
+      elsif ev.ctrl? && key.lower_r?
+        # ^R (not a bare letter — those are typed into the focused field) reverts the
+        # section to its factory defaults, gated behind a confirm like the tab-bar reset.
+        section = @settings_view.section
+        confirm("RESET SETTINGS",
+          "Reset the #{section.to_s.upcase} settings to their\n" \
+          "default values? Unsaved edits here are replaced.",
+          confirm_label: "reset", danger: true, return_to: :settings) do
+          @settings_view.reset_to_defaults
+          preview_theme # :theme live-previews the restored default theme
+          @toast = "#{section} settings reset to defaults — ↵ to save"
+        end
       elsif c && !ev.ctrl? && !ev.alt?
         @settings_view.insert(c)
         @settings_view.set_preedit("")
@@ -1641,7 +1653,7 @@ module Gori::Tui
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
       when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
+      when :settings    then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
       when :tabs        then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
       when :hotkeys     then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
