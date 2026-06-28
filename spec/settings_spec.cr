@@ -30,6 +30,15 @@ describe Gori::Settings do
     ensure
       Gori::Settings.upstream_proxy = ""
     end
+
+    it "parses a bracketed IPv6 literal, with and without a port" do
+      Gori::Settings.upstream_proxy = "[::1]"
+      Gori::Settings.upstream_proxy_addr.should eq({"::1", 8080})
+      Gori::Settings.upstream_proxy = "[2001:db8::1]:3128"
+      Gori::Settings.upstream_proxy_addr.should eq({"2001:db8::1", 3128})
+    ensure
+      Gori::Settings.upstream_proxy = ""
+    end
   end
 
   it "persists and reloads the network settings as JSON" do
