@@ -86,6 +86,12 @@ module Gori::Tui
         @intercept.edit_move(0, -1)
       elsif key.right?
         @intercept.edit_move(0, 1)
+      elsif key.home?
+        @intercept.edit_home
+      elsif key.end?
+        @intercept.edit_end
+      elsif key.delete?
+        @intercept.edit_delete
       elsif c && !ev.ctrl? && !ev.alt?
         @intercept.edit_insert(c)
       end
@@ -96,18 +102,29 @@ module Gori::Tui
     # those are now Intercept-scope verbs so they're rebindable. The queue is a navigable
     # list (not a text field), so deferring unhandled keys is safe; the held-bytes editor
     # and condition bar keep swallowing `c`/`/` as literal text (separate handlers).
+    # ⇧F = "forward all". Most terminals deliver a typed capital as the char 'F' with NO
+    # shift modifier (only Kitty's protocol sets shift), so accept both (cf. Keybind's
+    # `c.ascii_uppercase?` normalisation) — else ⇧F is a dead key on a plain terminal.
+    private def forward_all_key?(ev : Termisu::Event::Key) : Bool
+      (ev.key.lower_f? && ev.shift?) || (ev.char || ev.key.to_char) == 'F'
+    end
+
     private def handle_queue_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
+      # A modified chord (^F, alt+…) must NOT trigger a queue action — bare `key.lower_f?`
+      # matches Ctrl+F too, which would IRREVERSIBLY forward the selected held message.
+      # Defer modified chords to the central keymap (shift is kept for ⇧F forward-all).
+      return false if ev.ctrl? || ev.alt?
       case
-      when key.escape?               then @host.request_focus(:menu)
-      when key.lower_j?, key.down?   then @intercept.move(1)
-      when key.lower_k?, key.up?     then @intercept.at_top? ? @host.request_focus(:menu) : @intercept.move(-1)
-      when key.enter?, key.lower_e?  then @intercept.toggle_edit
-      when key.lower_f? && ev.shift? then intercept_forward_all
-      when key.lower_f?              then intercept_forward
-      when key.lower_d?              then intercept_drop
-      when key.lower_i?              then intercept_toggle
-      else                                return false
+      when key.escape?              then @host.request_focus(:menu)
+      when key.lower_j?, key.down?  then @intercept.move(1)
+      when key.lower_k?, key.up?    then @intercept.at_top? ? @host.request_focus(:menu) : @intercept.move(-1)
+      when key.enter?, key.lower_e? then @intercept.toggle_edit
+      when forward_all_key?(ev)     then intercept_forward_all
+      when key.lower_f?             then intercept_forward
+      when key.lower_d?             then intercept_drop
+      when key.lower_i?             then intercept_toggle
+      else                               return false
       end
       true
     end

@@ -125,7 +125,9 @@ module Gori::Proxy
       end
 
       # Non-hold path: stream the request body byte-for-byte (P6), unchanged.
-      retryable = retryable_request?(req, req_framing.none?)
+      # Replay-safety keys on the ACTUALLY-SENT method (sent_req): an M&R rule that rewrites
+      # the request line GET→POST must not leave a non-idempotent request marked retryable.
+      retryable = retryable_request?(sent_req, req_framing.none?)
       req_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
       req_complete = true
       upstream, reused, sent = acquire_and_send(host, port, retryable) do |up|
@@ -159,7 +161,14 @@ module Gori::Proxy
                                     host : String, port : Int32, scheme : String,
                                     created_at : Int64, started : Time::Instant,
                                     req_framing : Codec::BodyFraming, req_len : Int64) : Bool
-      buffered = Codec::Body.read(@io, req_framing, req_len)
+      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
+      unless body_complete
+        # The client cut its request body short — there's nothing whole to hold/forward, and
+        # forwarding a short body under the original Content-Length would desync the upstream
+        # (mirrors the non-hold path's req_complete guard). Record + close instead of holding.
+        record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
+        return false
+      end
       decision = ic.hold_request(build_message(sent_head, buffered),
         method: sent_req.method, target: sent_req.target,
         host: host, port: port, scheme: scheme)
@@ -174,7 +183,10 @@ module Gori::Proxy
       # the human chose to send (e.g. a deliberately CL-mismatched smuggling probe).
       sent_head, edited_body = split_message(decision.bytes)
       sent_req = Codec::Http1.parse_request_head(sent_head)
-      retryable = retryable_request?(req, edited_body.nil? || edited_body.empty?)
+      # Key replay-safety on the EDITED request: if the human changed the method (e.g.
+      # GET→POST), retryability must follow the method actually being sent, not the
+      # original — else a now-non-idempotent request could be replayed on a stale-conn retry.
+      retryable = retryable_request?(sent_req, edited_body.nil? || edited_body.empty?)
       upstream, reused, sent = acquire_and_send(host, port, retryable) { |up| write_request(up, sent_head, edited_body) }
       unless upstream && sent
         release_upstream
@@ -382,7 +394,9 @@ module Gori::Proxy
       # truncated/misframed body must NOT leave the upstream parked — its stray
       # unread bytes would become the next reused request's response (desync).
       buf = IO::Memory.new
-      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, IO::Memory.new)
+      # tee into a discard sink, not a second IO::Memory — the body is already buffered in
+      # `buf`; a throwaway IO::Memory would hold the whole response a second time.
+      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
       body = resp_framing.none? ? nil : buf.to_slice.dup
       decision = ic.hold_response(build_message(sent_resp_head, body),
         flow_id: flow_id, method: req.method, target: "#{resp.status} #{resp.reason}",
@@ -411,6 +425,10 @@ module Gori::Proxy
       # Reuse the upstream iff we read the WHOLE body cleanly AND the origin kept
       # its side alive. The CLIENT keep-alive (return value) uses the edited resp.
       update_upstream_reuse(resp_complete && origin_keep_alive?(req, resp, resp_framing))
+      # A truncated upstream body was forwarded short — close the client connection so it
+      # sees end-of-response instead of blocking for the missing bytes while we read its
+      # next keep-alive request (mirrors the non-held path's resp_complete guard).
+      return false unless resp_complete
       keep_alive?(req, sent_resp, Codec::Body.response_framing(sent_resp, req.method)[0])
     end
 
