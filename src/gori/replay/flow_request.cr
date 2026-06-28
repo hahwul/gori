@@ -18,11 +18,34 @@ module Gori
 
       def self.build(detail : Store::FlowDetail) : Built
         row = detail.row
+        head = detail.request_head
+        body = detail.request_body
+        # The captured body is capped at CAPTURE_MAX (8 MiB). If it was truncated, the head's
+        # Content-Length over-promises and a faithful h1 replay BLOCKS the origin waiting for
+        # bytes that no longer exist. Byte-exactness is already lost at capture, so rewrite CL
+        # to the actual (truncated) length we will send so the replay completes.
+        head = rewrite_content_length(head, body.try(&.size) || 0) if detail.request_body_truncated?
         Built.new(
           target: build_target(row.scheme, row.host, row.port),
-          bytes: origin_form_bytes(detail.request_head, detail.request_body),
+          bytes: origin_form_bytes(head, body),
           http2: detail.http_version == "HTTP/2",
         )
+      end
+
+      # Replace the Content-Length header value in an HTTP/1 head — used ONLY when the
+      # captured body was truncated (so the CL no longer matches what we can resend).
+      # Case-insensitive header-name match; preserves each line's CRLF/LF terminator.
+      private def self.rewrite_content_length(head : Bytes, length : Int32) : Bytes
+        String.build do |io|
+          String.new(head).each_line(chomp: false) do |line|
+            if line.lstrip[0, 15]?.try(&.downcase) == "content-length:"
+              eol = line.ends_with?("\r\n") ? "\r\n" : (line.ends_with?('\n') ? "\n" : "")
+              io << "Content-Length: " << length << eol
+            else
+              io << line
+            end
+          end
+        end.to_slice
       end
 
       # "scheme://host[:port]", omitting the port when it's the scheme default —

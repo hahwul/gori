@@ -5,12 +5,14 @@ require "json"
 # initializers) — enough to exercise the pure reconstruction/formatting code.
 private def flow_detail(scheme : String, host : String, port : Int32, request_head : String,
                         request_body : Bytes? = nil, http_version = "HTTP/1.1",
-                        target = "/", response_head : String? = nil, response_body : String? = nil)
+                        target = "/", response_head : String? = nil, response_body : String? = nil,
+                        request_body_truncated = false)
   row = Gori::Store::FlowRow.new(
     id: 7_i64, created_at: 0_i64, scheme: scheme, method: "GET", host: host, port: port,
     target: target, status: 200, size: 0_i64, state: Gori::Store::FlowState::Complete)
   Gori::Store::FlowDetail.new(row, http_version, request_head.to_slice, request_body,
-    response_head.try(&.to_slice), response_body.try(&.to_slice))
+    response_head.try(&.to_slice), response_body.try(&.to_slice),
+    request_body_truncated: request_body_truncated)
 end
 
 private def flow_row(*, target : String, host : String, status : Int32?, state : Gori::Store::FlowState)
@@ -72,6 +74,23 @@ describe Gori::Replay::FlowRequest do
     body = Bytes[0x0A, 0x41, 0x0A]
     built = Gori::Replay::FlowRequest.build(flow_detail("http", "h", 80, head, request_body: body))
     String.new(built.bytes).should eq("POST /p HTTP/1.1\r\nHost: h\r\n\r\n\nA\n")
+  end
+
+  it "re-syncs Content-Length to the stored body when the capture was truncated" do
+    # Head over-promises CL: 9999 but only 3 bytes survived the 8 MiB cap — replaying the
+    # original CL would hang the origin. build() rewrites CL to the actual length.
+    head = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 9999\r\nX-T: 1\r\n\r\n"
+    body = Bytes[0x41, 0x42, 0x43] # "ABC"
+    built = Gori::Replay::FlowRequest.build(
+      flow_detail("http", "h", 80, head, request_body: body, request_body_truncated: true))
+    String.new(built.bytes).should eq("POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nX-T: 1\r\n\r\nABC")
+  end
+
+  it "leaves Content-Length untouched when the body was NOT truncated" do
+    head = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\n"
+    body = Bytes[0x41, 0x42, 0x43]
+    built = Gori::Replay::FlowRequest.build(flow_detail("http", "h", 80, head, request_body: body))
+    String.new(built.bytes).should eq("POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nABC")
   end
 
   it "preserves a bare-LF request-line terminator when rewriting (no mixed endings)" do

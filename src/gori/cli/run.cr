@@ -121,19 +121,25 @@ module Gori
         query : String? = nil
         limit = 50
         format = :text
+        positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run history [options]   (alias: ls)"
+          p.banner = "Usage: gori run history [QL query] [options]   (alias: ls)"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v) }
           p.on("--format=FMT", "Output: text (default) | json (JSON-Lines)") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
         parser.parse(args)
+        # Accept a positional QL too ("gori run history status:404"), mirroring the TUI's `/`
+        # bar — otherwise a positional query was silently dropped and EVERY flow dumped.
+        # An explicit --query wins. Multiple terms join with spaces (QL ANDs them).
+        query ||= positional.join(' ') unless positional.empty?
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
@@ -390,6 +396,13 @@ module Gori
           store.close
         end
         abort "gori run replay: no flow ##{id}" unless detail
+
+        # The captured request body was capped at 8 MiB; FlowRequest.build re-syncs the
+        # Content-Length to the stored bytes so the request stays well-formed, but warn that
+        # the resent body differs from what the origin originally received.
+        if detail.request_body_truncated?
+          STDERR.puts "gori run replay: request body was truncated at the 8 MiB capture cap — resending the stored (shorter) body with a corrected Content-Length"
+        end
 
         built = Replay::FlowRequest.build(detail)
         override = target_override # copy the closured flag into a plain local so || narrows
