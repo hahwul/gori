@@ -18,18 +18,49 @@ module Gori
 
       def self.build(detail : Store::FlowDetail) : Built
         row = detail.row
+        head = detail.request_head
+        body = detail.request_body
+        # The captured body is capped at CAPTURE_MAX (8 MiB). If it was truncated, a faithful
+        # h1 replay would BLOCK the origin waiting for bytes that no longer exist (a
+        # Content-Length over-promising, or a chunked stream cut before its 0-chunk). Byte-
+        # exactness is already lost at the cap, so re-frame the head to a fixed Content-Length
+        # over the bytes we actually send, so the replay terminates instead of hanging.
+        head = resync_truncated_head(head, body.try(&.size) || 0) if detail.request_body_truncated?
         Built.new(
           target: build_target(row.scheme, row.host, row.port),
-          bytes: origin_form_bytes(detail.request_head, detail.request_body),
+          bytes: origin_form_bytes(head, body),
           http2: detail.http_version == "HTTP/2",
         )
+      end
+
+      # Make a TRUNCATED request self-framed so the replay can't hang. Used ONLY when the
+      # captured body was capped. Rewrites an existing Content-Length to the stored byte
+      # count, OR replaces a Transfer-Encoding (chunked — whose stored wire-form bytes were
+      # cut mid-stream) with a Content-Length over those bytes so the origin reads a complete
+      # body. Case-insensitive header-name match; preserves each line's CRLF/LF terminator.
+      private def self.resync_truncated_head(head : Bytes, length : Int32) : Bytes
+        String.build do |io|
+          String.new(head).each_line(chomp: false) do |line|
+            lname = line.lstrip
+            eol = line.ends_with?("\r\n") ? "\r\n" : (line.ends_with?('\n') ? "\n" : "")
+            if lname[0, 15]?.try(&.downcase) == "content-length:" ||
+               lname[0, 18]?.try(&.downcase) == "transfer-encoding:"
+              io << "Content-Length: " << length << eol # RFC 7230 forbids TE+CL, so only one fires
+            else
+              io << line
+            end
+          end
+        end.to_slice
       end
 
       # "scheme://host[:port]", omitting the port when it's the scheme default —
       # matches ReplayView#build_target so the parsed {scheme,host,port} round-trips.
       def self.build_target(scheme : String, host : String, port : Int32) : String
         default = scheme == "https" ? 443 : 80
-        port == default ? "#{scheme}://#{host}" : "#{scheme}://#{host}:#{port}"
+        # An IPv6 literal host (contains ':') must be bracketed in a URL, else both the
+        # `:port` suffix below and URI.parse in parse_target split it wrong (host → "").
+        h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
+        port == default ? "#{scheme}://#{h}" : "#{scheme}://#{h}:#{port}"
       end
 
       # {scheme, host, port} parsed back out of a target string (the inverse of
@@ -39,11 +70,17 @@ module Gori
         raw = "http://#{raw}" unless raw.includes?("://")
         uri = URI.parse(raw)
         scheme = uri.scheme || "http"
-        host = uri.host || ""
+        host = strip_ipv6_brackets(uri.host || "")
         port = uri.port || (scheme == "https" ? 443 : 80)
         {scheme, host, port}
       rescue
         {"http", "", 0}
+      end
+
+      # URI.parse keeps the [] around an IPv6 literal host; strip them so the bare address
+      # is what we dial/round-trip (TCPSocket wants "::1", not "[::1]").
+      private def self.strip_ipv6_brackets(host : String) : String
+        host.starts_with?('[') && host.ends_with?(']') ? host[1..-2] : host
       end
 
       # Rewrite the request-line to origin-form when it's absolute-form, keeping the

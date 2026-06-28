@@ -2097,6 +2097,7 @@ module Gori::Tui
       replay_controller.save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
       fuzzer_controller.save_current if @active_tab == :fuzzer && @focus == :body && pane != :body
       convert_controller.commit if @active_tab == :convert && @focus == :body && pane != :body
+      notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
       @focus = pane
       @overlay = :none
       view_focus_first if pane == :body
@@ -2121,6 +2122,7 @@ module Gori::Tui
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       fuzzer_controller.save_current if @active_tab == :fuzzer
       convert_controller.commit if @active_tab == :convert # flush sub-tab edits/renames (dirty-guarded)
+      notes_controller.save_notes if @active_tab == :notes # flush unsaved note edits (dirty-guarded)
       @active_tab = tab
       @focus = focus
       @overlay = :none
@@ -2152,6 +2154,7 @@ module Gori::Tui
       replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
       fuzzer_controller.save_current if @active_tab == :fuzzer
       convert_controller.commit if @active_tab == :convert # flush sub-tab edits/renames (dirty-guarded)
+      notes_controller.save_notes if @active_tab == :notes # flush unsaved note edits (dirty-guarded)
       # Cycle within the VISIBLE strip (skips hidden tabs); effective_tabs force-includes
       # the active tab so the index is always found and never falls back to 0.
       tabs = effective_tabs

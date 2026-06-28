@@ -219,9 +219,16 @@ module Gori
     # not crash the TUI); returns whether it succeeded.
     def self.save : Bool
       Paths.ensure_dirs
-      File.write(path, serialize)
+      # Atomic write: a torn File.write (crash / two instances / disk-full) would leave a
+      # half-written settings.json that load()'s blanket rescue silently resets to factory
+      # defaults — losing theme, hotkeys, hostname overrides, tab prefs, convert sessions.
+      # Stage to a sibling temp then rename (atomic on POSIX), mirroring cert_authority.
+      tmp = "#{path}.tmp"
+      File.write(tmp, serialize)
+      File.rename(tmp, path)
       true
     rescue
+      File.delete?("#{path}.tmp") rescue nil
       false
     end
 

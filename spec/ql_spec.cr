@@ -152,6 +152,15 @@ describe Gori::QL do
     f.sql.should eq("(0)")
     f.args.should be_empty
   end
+
+  it "free-texts a ~ token on a non-regex field instead of never-matching" do
+    # `foo` is not a regex field, so `~` is not a regex operator here: the whole token
+    # must fall back to a free-text LIKE search, NOT compile to the never-match clause
+    # (the validity guard only applies to real regex fields).
+    f = Gori::QL.parse("foo~[")
+    f.sql.should eq("((lower(method) LIKE ? OR lower(host) LIKE ? OR lower(target) LIKE ?))")
+    f.args.should eq(["%foo~[%", "%foo~[%", "%foo~[%"])
+  end
 end
 
 describe "Gori::Store#search (QL)" do

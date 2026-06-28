@@ -70,6 +70,12 @@ module Gori::Tui
         @notes.move(0, -1)
       elsif key.right?
         @notes.move(0, 1)
+      elsif key.home?
+        @notes.home
+      elsif key.end?
+        @notes.end_of_line
+      elsif key.delete?
+        @notes.delete
       else
         if c && !ev.ctrl? && !ev.alt?
           @notes.insert(c)
@@ -92,7 +98,10 @@ module Gori::Tui
     end
 
     def on_enter : Nil
-      reload
+      # NEVER reload over UNSAVED edits: reload replaces the buffer from disk and resets
+      # @dirty, so re-entering Notes after leaving via Tab/mouse (gestures that don't flush
+      # the editor) would silently discard the in-memory edits. Only refresh a clean buffer.
+      reload unless @notes.dirty?
     end
 
     def commit : Nil

@@ -97,6 +97,11 @@ module Gori::Tui
       @tag_buffer = ""
       @tag_cx = 0
       @tag_preedit = ""
+      # The (host, path) the open editor targets, PINNED at start_tag — a mid-edit external
+      # reload resets @selected to 0, so a selection-based lookup at commit would tag the
+      # wrong (usually top host) node. Pinning keeps the tag landing on the intended node.
+      @tag_host = ""
+      @tag_path = ""
     end
 
     # Inject the Scope lens so the tree honours it AND the bar can show its state
@@ -391,6 +396,9 @@ module Gori::Tui
     def start_tag : Bool
       node = selected_node
       return false unless node && !node.grouped
+      target = resolve_target # selection-based (host, path) — captured NOW, before any reload
+      return false unless target
+      @tag_host, @tag_path = target
       @tagging = true
       @tag_buffer = node.tag || ""
       @tag_cx = @tag_buffer.size
@@ -409,8 +417,12 @@ module Gori::Tui
     # the editor. No re-derive — the tree structure is unchanged, so the selection
     # stays put and draw_row reads the fresh tag live.
     def apply_tag(text : String) : Nil
-      node = selected_node
-      node.tag = text.blank? ? nil : text if node && !node.grouped
+      # Stamp the live node in place ONLY while the selection still points at the pinned
+      # target (no external reload retargeted @selected); otherwise the persisted tag is
+      # picked up by the next reload, so skip rather than stamp the WRONG node.
+      if resolve_target == tag_target && (node = selected_node) && !node.grouped
+        node.tag = text.blank? ? nil : text
+      end
       cancel_tag
     end
 
@@ -440,7 +452,15 @@ module Gori::Tui
     # The (host, path) the tag editor targets — the selected node's address (the host
     # is the nearest depth-0 row above the selection). Nil when the selection isn't
     # taggable (a group node / empty tree). The controller persists the buffer here.
+    # The PINNED (host, path) the open tag editor targets (captured at start_tag); nil
+    # when not tagging. Commit persists to this so a mid-edit reload can't retarget it.
     def tag_target : {String, String}?
+      @tagging ? {@tag_host, @tag_path} : nil
+    end
+
+    # Selection-based (host, path) for the row currently under the cursor — the LIVE
+    # target, used to seed the pin at start_tag and to detect a reload in apply_tag.
+    private def resolve_target : {String, String}?
       rows = visible_rows
       return nil unless row = rows[@selected]?
       return nil if row.node.grouped

@@ -114,6 +114,13 @@ describe Gori::Proxy::Codec::Body do
       expect_raises(Gori::Error) { Body.request_framing(req) }
     end
 
+    it "rejects a Content-Length with a leading + sign (CL desync)" do
+      # RFC 7230 §3.3.3: Content-Length is 1*DIGIT. `+5` must be rejected (not framed as 5)
+      # — a stricter downstream peer would interpret it differently, a smuggling primitive.
+      req = Http1.parse_request_head("POST / HTTP/1.1\r\nContent-Length: +5\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
     it "rejects Transfer-Encoding + Content-Length coexistence (CL.TE/TE.CL smuggling)" do
       req = Http1.parse_request_head("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\n".to_slice)
       expect_raises(Gori::Error) { Body.request_framing(req) }
@@ -133,6 +140,17 @@ describe Gori::Proxy::Codec::Body do
   describe ".stream" do
     it "aborts a chunked body on a malformed chunk size (no fabricated terminator → desync)" do
       src = IO::Memory.new("zz\r\ndata") # "zz" is not valid hex
+      dst = IO::Memory.new
+      Body.stream(src, dst, BodyFraming::Chunked, 0_i64, IO::Memory.new).should be_false
+    end
+
+    it "aborts a chunked body whose size line overruns the cap without an LF (desync)" do
+      # A chunk-size line of >MAX_LINE_BYTES hex digits and no terminating LF: read_crlf_line
+      # caps at 64 KiB and used to hand the partial to parse_chunk_size, which read an all-'0'
+      # prefix as a 0-length terminating chunk — completing the body while the line remainder
+      # stayed on the wire to misframe the next keep-alive message. An unterminated size line
+      # must abort (→ close) instead.
+      src = IO::Memory.new("#{"0" * (65 * 1024)}\r\n\r\nNEXT")
       dst = IO::Memory.new
       Body.stream(src, dst, BodyFraming::Chunked, 0_i64, IO::Memory.new).should be_false
     end
@@ -180,7 +198,7 @@ describe Gori::Proxy::Codec::Body do
       src = IO::Memory.new(wire)
       dst = IO::Memory.new
       Body.stream(src, dst, BodyFraming::Chunked, 0_i64, IO::Memory.new).should be_true
-      dst.to_s.should eq("0\r\nA\n\r\n")  # forwarded through the genuine blank line
+      dst.to_s.should eq("0\r\nA\n\r\n") # forwarded through the genuine blank line
       src.gets_to_end.should eq("NEXT")  # next message starts clean — no orphaned CRLF
     end
 

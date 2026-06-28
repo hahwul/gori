@@ -175,6 +175,22 @@ module Gori::Tui
       @editor.move(dr, dc) if @editing
     end
 
+    # Home/End: caret to line start/end — pure navigation, doesn't change the bytes.
+    def edit_home : Nil
+      @editor.home if @editing
+    end
+
+    def edit_end : Nil
+      @editor.end_of_line if @editing
+    end
+
+    # Forward-delete the char under the caret — a content edit.
+    def edit_delete : Nil
+      return unless @editing
+      @editor.delete
+      @editor_dirty = true
+    end
+
     # ^G go-to-line / ^F search in the held-message editor (only while editing).
     def edit_goto_line(n : Int32) : Nil
       @editor.goto_line(n) if @editing

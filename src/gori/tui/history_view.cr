@@ -445,6 +445,14 @@ module Gori::Tui
       # match the render/goto predicate so search agrees (not a bare @detail_hex).
       return hits if query.empty? || (@detail_hex && !log_pane?)
       q = query.downcase
+      # Reveal-whitespace renders on its OWN line space (raw head+body bytes) with its own
+      # scroll bounds (detail_scroll_max). Search must scan reveal_lines so the hit indices
+      # match what goto_detail_line scrolls to — mirroring the hex exclusion above (the
+      # decoded/pretty detail_view has a different line count, so its indices would scroll wrong).
+      if @reveal && (rl = reveal_lines)
+        rl.each_with_index { |ln, i| hits << i if ln.downcase.includes?(q) }
+        return hits
+      end
       dv = detail_view
       (0...dv.total).each { |i| hits << i if dv.line_text(i).downcase.includes?(q) }
       hits

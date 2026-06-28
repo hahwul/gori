@@ -59,7 +59,10 @@ module Gori::Proxy
                                     io_timeout : Time::Span = IO_TIMEOUT) : TCPSocket?
       sock = direct_dial(proxy_host, proxy_port, connect_timeout, io_timeout)
       return nil unless sock
-      sock << "CONNECT #{host}:#{port} HTTP/1.1\r\nHost: #{host}:#{port}\r\n\r\n"
+      # An IPv6 literal host must be bracketed in the CONNECT request-target / Host header
+      # ("CONNECT [::1]:443"), else the upstream proxy sees a malformed authority.
+      authority = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]:#{port}" : "#{host}:#{port}"
+      sock << "CONNECT #{authority} HTTP/1.1\r\nHost: #{authority}\r\n\r\n"
       sock.flush
       return sock if connect_established?(sock)
       sock.close rescue nil

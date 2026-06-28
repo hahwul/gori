@@ -280,8 +280,13 @@ module Gori::Tui
       list_h = {rect.bottom - top, 0}.max
 
       if @findings.empty?
-        msg = filtering? ? "no findings match · esc clears the filter" \
-                         : "no findings yet · Shift+F on a History flow, or n here"
+        msg = if !filtering?
+                "no findings yet · Shift+F on a History flow, or n here"
+              elsif querying?
+                "no findings match · esc clears the filter" # esc cancels the open query bar
+              else
+                "no findings match · / to edit the filter" # a committed filter: esc goes to tabs, not clear
+              end
         screen.text(rect.x + 1, top, msg, Theme.muted)
         return
       end

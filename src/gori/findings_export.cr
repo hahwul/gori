@@ -83,10 +83,13 @@ module Gori
           c << String.new(hslice).scrub.rstrip
           c << "\n\n[… headers truncated, #{head.size} bytes total …]" if head.size > cap
           if body && !body.empty?
-            slice = body[0, {body.size, cap}.min]
-            text = String.new(slice)
-            if text.valid_encoding?
-              c << "\n\n" << text
+            # Decide text-vs-binary on the readable PREFIX (≤ cap), not the whole body: a body
+            # that is valid text up to the cap but has a stray byte deeper still shows its
+            # readable prefix. But back the cut off to a UTF-8 codepoint boundary first, so a
+            # multi-byte char split at exactly `cap` isn't misread as binary.
+            slice = body.size > cap ? trim_to_codepoint_boundary(body[0, cap]) : body
+            if String.new(slice).valid_encoding?
+              c << "\n\n" << String.new(slice)
               c << "\n\n[… body truncated, #{body.size} bytes total …]" if body.size > cap
             else
               c << "\n\n[binary body omitted, #{body.size} bytes]"
@@ -96,6 +99,18 @@ module Gori
         fence = "`" * fence_len(content)
         io << "\n### " << label << "\n\n" << fence << "http\n"
         io << content << "\n" << fence << "\n"
+      end
+
+      # Drop a UTF-8 sequence the `cap` cut left incomplete: walk back over trailing
+      # continuation bytes (10xxxxxx), then over the lead byte (11xxxxxx) they belonged to.
+      # Leaves the slice ending on a whole codepoint so a split char isn't read as binary.
+      private def self.trim_to_codepoint_boundary(slice : Bytes) : Bytes
+        n = slice.size
+        while n > 0 && (slice[n - 1] & 0xC0) == 0x80 # continuation byte
+          n -= 1
+        end
+        n -= 1 if n > 0 && (slice[n - 1] & 0xC0) == 0xC0 # the lead byte whose tail was cut
+        slice[0, n]
       end
 
       # A CommonMark fenced block is closed only by a line of >= as many backticks

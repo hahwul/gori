@@ -35,7 +35,12 @@ module Gori
     # Build the dispatch keymap from the registry under the persisted OS profile + user
     # overrides. Replaces the bare Verb::Keymap.build at its call sites.
     def self.build_keymap(registry : Verb::Registry) : Verb::Keymap
-      Verb::Keymap.build(registry, Verb::OsProfile.resolve(Settings.keymap_os), chord_overrides)
+      # Drop overrides for verbs the editor would never let you rebind (hidden nav
+      # primitives, fixed ids, multi-chord nav-alias verbs) — a hand-edited settings.json
+      # could otherwise install one and collapse a verb's structural chords (e.g. enter/
+      # arrows on body.open), the exact case the editor's rebindable? gate prevents.
+      overrides = chord_overrides.select { |id, _| (v = registry[id]?) && rebindable?(v) }
+      Verb::Keymap.build(registry, Verb::OsProfile.resolve(Settings.keymap_os), overrides)
     end
 
     # The persisted user overrides, parsed from Settings' label strings into Chords. A

@@ -359,10 +359,21 @@ module Gori::Tui
         s.input.at_top? ? (commit; @host.request_focus(:menu)) : s.input.move(-1, 0)
       when key.down?
         s.input.at_bottom? ? (s.pane = :chain) : s.input.move(1, 0)
-      when key.left?
-        s.input.move(0, -1)
-      when key.right?
-        s.input.move(0, 1)
+      else
+        edit_input_caret(ev, s, c) # ←/→/Home/End/Delete + literal insert
+      end
+    end
+
+    # The within-line caret keys + literal insert for the INPUT editor (split out of
+    # edit_input so its ↑/↓ pane-transition logic stays under the complexity budget).
+    private def edit_input_caret(ev : Termisu::Event::Key, s, c : Char?) : Nil
+      key = ev.key
+      case
+      when key.left?   then s.input.move(0, -1)
+      when key.right?  then s.input.move(0, 1)
+      when key.home?   then s.input.home
+      when key.end?    then s.input.end_of_line
+      when key.delete? then s.input.delete; touch
       else
         if c && !ev.ctrl? && !ev.alt?
           s.input.insert(c)

@@ -263,11 +263,14 @@ module Gori::Fuzz
     end
 
     private def pace(interval : Time::Span?) : Nil
-      return unless interval
-      now = Time.instant
-      target = @last_dispatch + interval
-      sleep(target - now) if now < target
-      @last_dispatch = Time.instant
+      if interval
+        now = Time.instant
+        target = @last_dispatch + interval
+        sleep(target - now) if now < target
+        @last_dispatch = Time.instant
+      end
+      # Jitter applies on its own — don't gate it behind a base rate, which silently
+      # dropped jitter unless rps/throttle was also set.
       sleep(rand(@config.jitter_ms).milliseconds) if @config.jitter_ms > 0
     end
 

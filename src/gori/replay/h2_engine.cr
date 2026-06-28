@@ -75,7 +75,12 @@ module Gori
 
       private def self.write_request(io : IO, headers : Array({String, String}), body : Bytes?) : Nil
         io.write(Frame::PREFACE)
-        io.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32, Bytes.empty).to_bytes)
+        # SETTINGS_ENABLE_PUSH=0 (id 0x2): a one-shot replay never wants server push, and
+        # pushed DATA on a non-1 stream would consume the connection flow-control window
+        # without being credited back (the DATA loop only credits stream 1), stalling a
+        # large response. Disabling push at the source avoids the whole class.
+        no_push = Bytes[0x00_u8, 0x02_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8]
+        io.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32, no_push).to_bytes)
         block = HPACK::Encoder.new.encode(headers)
         end_stream = body.nil? || body.empty?
         flags = Frame::END_HEADERS | (end_stream ? Frame::END_STREAM : 0_u8)
@@ -146,6 +151,7 @@ module Gori
             if frame.end_headers?
               status = absorb(header_buf, decoder, headers, status)
               done = clean_eos = true if end_stream_pending
+              headers.clear if !end_stream_pending && interim?(status)
             end
           when Frame::Type::Continuation
             next unless frame.stream_id == 1
@@ -154,6 +160,7 @@ module Gori
             if frame.end_headers?
               status = absorb(header_buf, decoder, headers, status)
               done = clean_eos = true if end_stream_pending
+              headers.clear if !end_stream_pending && interim?(status)
             end
           when Frame::Type::Data
             next unless frame.stream_id == 1
@@ -184,11 +191,27 @@ module Gori
           if name == ":status"
             status = value.to_i? || status
           elsif !name.starts_with?(':')
-            headers << {name, value}
+            headers << {visualize_field(name), visualize_field(value)}
           end
         end
         buf.clear
         status
+      end
+
+      # An interim (informational) response: its header fields precede — and are not part
+      # of — the final response (RFC 9110 §15.2), so they're dropped, not merged.
+      private def self.interim?(status : Int32) : Bool
+        100 <= status < 200
+      end
+
+      # RFC 9113 §8.2.1 forbids CR/LF in an h2 field name/value. If a non-compliant origin
+      # smuggles one in, ESCAPE it (don't drop the header) so it can't fold into a phantom
+      # line of the synthesized HTTP/1 head while STILL SHOWING the tester the injection
+      # attempt — a malformed response header is a security finding, not noise to hide. gori
+      # is a security-testing proxy: it must surface bad bytes, not silently swallow them.
+      private def self.visualize_field(s : String) : String
+        return s unless s.includes?('\r') || s.includes?('\n')
+        s.gsub('\r', "\\r").gsub('\n', "\\n")
       end
 
       private def self.ack(io : IO, type : Frame::Type, payload : Bytes) : Nil

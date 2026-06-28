@@ -277,11 +277,19 @@ module Gori
     # Resolves which project DB `gori mcp` serves: explicit --db wins, then a named
     # --project, then the most-recently-used project, then the default headless db.
     private def self.resolve_mcp_db(db : String?, project : String?) : String
-      return db if db && !db.empty? # an empty --db= falls through to project/MRU (Crystal: "" is truthy)
+      if d = db
+        unless d.empty? # an empty --db= falls through to project/MRU (Crystal: "" is truthy)
+          # Validate like `gori run` does — else SQLite silently CREATEs a fresh empty DB on a
+          # typo'd path and the client queries an empty dataset believing it's the real capture.
+          abort "gori mcp: --db is not a readable file: #{d}" unless File.file?(d)
+          return d
+        end
+      end
       Paths.ensure_dirs
       registry = ProjectRegistry.new(Paths.projects_dir)
       if name = project
-        proj = registry.list.find { |p| p.name == name }
+        # Case-insensitive, matching `gori run` (project slugs are always lowercased).
+        proj = registry.list.find { |p| p.name.downcase == name.downcase }
         abort "gori mcp: no such project: #{name}" unless proj
         return proj.db_path
       end
