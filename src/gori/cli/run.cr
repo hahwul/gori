@@ -263,11 +263,8 @@ module Gori
 
       # Parsed SSE events when the response is a text/event-stream, else nil. Like
       # the TUI EVENTS pane, this is a derived view over the decoded response body.
-      private def self.sse_events_of(detail : Store::FlowDetail) : Array(Sse::Event)?
-        rh = detail.response_head
-        return nil unless Sse.event_stream?(rh)
-        decoded, _ = Proxy::Codec::ContentDecode.decode(rh, detail.response_body)
-        Sse.events(decoded || detail.response_body || Bytes.empty)
+      private def self.sse_events_of(detail : Store::FlowDetail) : Array(Sse::Event)
+        Sse.from_response(detail.response_head, detail.response_body)
       end
 
       private def self.sse_event_text(e : Sse::Event, idx : Int32) : String

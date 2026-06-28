@@ -161,7 +161,15 @@ module Gori::Tui
     # prompt: far more recognizable than the source flow's internal numeric id, and
     # it tracks live as the request is edited.
     def summary(max : Int32 = 28) : String
-      line = (@editor.first_nonblank_line || "").strip
+      # For a WS tab the editor holds the MESSAGES, so derive the label from the upgrade
+      # request line ("GET /ws") instead of the first message. HTTP/gRPC tabs keep the
+      # editor's request/head line.
+      line =
+        if @ws_mode && (up = @ws_upgrade)
+          String.new(up).each_line.first?.try(&.strip) || ""
+        else
+          (@editor.first_nonblank_line || "").strip
+        end
       parts = line.split(' ')
       s = "#{parts[0]?} #{parts[1]?}".strip # METHOD + request-target (drop the HTTP/x.y)
       s = line if s.empty?
@@ -262,9 +270,11 @@ module Gori::Tui
     end
 
     # The editable outbound messages, parsed from the editor — one TEXT frame per
-    # non-empty line. Used by the controller's WS send path (not request_bytes).
+    # non-empty line. Uses @editor.text (LF-joined) NOT to_bytes (CRLF-joined), else
+    # every frame but the last would carry a spurious trailing '\r'. (A captured frame
+    # with an embedded newline can't be represented one-per-line — a known v1 limit.)
     def ws_out_messages : Array(Replay::WsEngine::OutMsg)
-      String.new(@editor.to_bytes).split('\n').compact_map do |line|
+      @editor.text.split('\n').compact_map do |line|
         line.empty? ? nil : Replay::WsEngine::OutMsg.new(1, line.to_slice)
       end
     end
@@ -908,7 +918,9 @@ module Gori::Tui
           bx = {rect.right - badge.size - 1, rect.x + label.size + 4}.max
           screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg) if bx > rect.x + label.size + 4
         end
-        @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
+        # gRPC's editor holds the HTTP head (→ request syntax); WS messages are plain
+        # text (often JSON), so no HTTP request/header colouring there.
+        @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: @grpc_mode ? :request : nil)
         return
       end
       if h = @req_hex_edit
@@ -1023,7 +1035,7 @@ module Gori::Tui
         if result && !result.ok?
           rows << {"✗ #{result.error}", Theme.red}
         elsif result
-          reqn = Proxy::H2::Grpc.messages(@grpc_body).size
+          reqn = @grpc_msg_count # already deframed once in load_grpc
           rows << {"→ sent #{reqn} request message#{reqn == 1 ? "" : "s"} (#{@grpc_body.size}b)", Theme.muted}
           st = result.response.try(&.status) || 0
           rows << {"HTTP #{st}", st >= 400 ? Theme.red : Theme.text}

@@ -180,6 +180,26 @@ describe Gori::Tui::ReplayView do
     end
   end
 
+  it "ws_out_messages yields one clean frame per line and labels the tab by the upgrade request" do
+    replay_tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
+        method: "GET", target: "/ws/chat", http_version: "HTTP/1.1",
+        head: "GET /ws/chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+      view = ReplayView.new
+      view.load_ws(store.get_flow(id).not_nil!, ["{\"a\":1}", "ping"])
+
+      msgs = view.ws_out_messages
+      msgs.size.should eq(2)
+      # the editor joins with CRLF, so a naive split would leave a trailing '\r' on
+      # every frame but the last — these must be clean.
+      String.new(msgs[0].payload).should eq("{\"a\":1}")
+      String.new(msgs[1].payload).should eq("ping")
+      # the sub-tab label is the upgrade request line, NOT the first message
+      view.summary.should eq("GET /ws/chat")
+    end
+  end
+
   it "renders a gRPC response as deframed messages + grpc-status" do
     replay_tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -202,8 +222,8 @@ describe Gori::Tui::ReplayView do
       backend = MemoryBackend.new(160, 24)
       view.render(Screen.new(backend), Rect.new(0, 0, 160, 24))
       backend.contains?("GRPC RESPONSE").should be_true
-      backend.contains?("message #1").should be_true   # deframed response message
-      backend.contains?("Hello!").should be_true        # ASCII in the hex preview
+      backend.contains?("message #1").should be_true # deframed response message
+      backend.contains?("Hello!").should be_true     # ASCII in the hex preview
       backend.contains?("grpc-status: 0 OK").should be_true
     end
   end

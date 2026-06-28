@@ -87,14 +87,15 @@ module Gori
           end
           upstream.flush
 
-          # Narrow the read bound: a drain gap of `idle` now ends it. (Both socket
-          # types respond; responds_to? keeps the union's IO type happy.)
-          upstream.read_timeout = idle if upstream.responds_to?(:read_timeout=)
-          close_code = drain(upstream, messages)
+          # The FIRST inbound read keeps the generous handshake bound (a slow first
+          # reply isn't a dead server); drain narrows to `idle` once frames flow.
+          close_code = drain(upstream, messages, idle)
           send_close(upstream)
           Result.new(head, messages, elapsed(started), note: note,
             close_code: close_code, upgraded: true)
         rescue ex
+          # A failure BEFORE/at the upgrade is a real error; once upgraded, drain swallows
+          # mid-exchange IO errors itself, so reaching here means the handshake failed.
           err(ex.message || "ws replay error", started)
         ensure
           upstream.close rescue nil
@@ -104,7 +105,7 @@ module Gori
       # Read inbound frames until the server sends Close, goes idle (read timeout),
       # or a cap trips. Reassembles fragmented data messages; answers Ping with a
       # Pong. Returns the close status code if the server framed one.
-      private def self.drain(io : IO, messages : Array(Message)) : Int32?
+      private def self.drain(io : IO, messages : Array(Message), idle : Time::Span) : Int32?
         assembling = IO::Memory.new
         msg_opcode = Proxy::WS::OP_TEXT
         recv_bytes = 0_i64
@@ -116,12 +117,15 @@ module Gori
           # the read timeout, so this frame ceiling is what guarantees termination.
           frame = begin
             Proxy::WS.read_frame(io)
-          rescue IO::TimeoutError
-            break # server idle for `idle` → done
+          rescue IO::Error
+            break # idle timeout, RST, or broken pipe — end the drain, keep what we have
           end
           break if frame.nil? # EOF / truncated
           frames += 1
           break if frames > MAX_DRAIN_FRAMES
+          # After the first frame, narrow the per-read bound to `idle` so a silent gap
+          # ends the drain promptly (the first read kept the generous handshake bound).
+          narrow_read_timeout(io, idle) if frames == 1
 
           if frame.data?
             msg_opcode = frame.opcode if frame.opcode != Proxy::WS::OP_CONT
@@ -133,7 +137,7 @@ module Gori
               recv_count += 1
               messages << Message.new("in", msg_opcode.to_i, payload)
               assembling = IO::Memory.new
-              break if recv_count >= MAX_RECV_MESSAGES || recv_bytes >= MAX_RECV_BYTES
+              break if recv_caps_hit?(recv_count, recv_bytes)
             end
           elsif frame.opcode == Proxy::WS::OP_PING
             send_pong(io, frame.payload)
@@ -144,12 +148,23 @@ module Gori
         nil
       end
 
+      private def self.recv_caps_hit?(count : Int32, bytes : Int64) : Bool
+        count >= MAX_RECV_MESSAGES || bytes >= MAX_RECV_BYTES
+      end
+
+      # Both socket types respond; responds_to? keeps the union's IO type happy.
+      private def self.narrow_read_timeout(io : IO, idle : Time::Span) : Nil
+        io.read_timeout = idle if io.responds_to?(:read_timeout=)
+      end
+
       # Echo a Ping as a masked Pong, but never amplify: a control frame's payload is
       # ≤125 bytes (RFC 6455 §5.5), so clamp a hostile oversized ping before reflecting.
       private def self.send_pong(io : IO, ping_payload : Bytes) : Nil
         pong = ping_payload.size > MAX_CONTROL_BYTES ? ping_payload[0, MAX_CONTROL_BYTES] : ping_payload
         io.write(Proxy::WS.encode(Proxy::WS::OP_PONG, pong, mask: true))
         io.flush
+      rescue
+        # peer gone mid-drain — ignore; the next read ends the drain gracefully
       end
 
       # 2-byte big-endian status code at the start of a Close payload, if present.

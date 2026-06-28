@@ -877,10 +877,9 @@ module Gori::Tui
         return DetailView.new(head, [] of String, :text, EMPTY_LINES)
       end
       if @detail_pane == :events
-        # Derived view: decode (de-chunk/inflate) the response body, then split it
-        # into SSE events at render time — no table, like the gRPC framing pane.
-        decoded, _ = Proxy::Codec::ContentDecode.decode(detail.response_head, detail.response_body)
-        events = Sse.events(decoded || detail.response_body || Bytes.empty)
+        # Derived view: content-decode + split into SSE events at render time — no
+        # table, like the gRPC framing pane (shared with `gori run show` / MCP).
+        events = Sse.from_response(detail.response_head, detail.response_body)
         dropped = {events.size - DETAIL_LOG_CAP, 0}.max # older events not shown (windowed)
         shown = dropped > 0 ? events[dropped..] : events
         head = log_head(sse_lines(shown, dropped), events.size, shown.size, "events")
@@ -1027,9 +1026,15 @@ module Gori::Tui
           io << "  retry=" << e.retry if e.retry
         end
         lines << meta
-        e.data.split('\n').each { |dl| lines << "    #{dl}" }
+        # Cap a single event's data lines so one pathological multi-MB event can't
+        # materialise a giant row array (the event COUNT is windowed separately).
+        dls = e.data.split('\n')
+        dls.first(EVENT_DATA_LINE_CAP).each { |dl| lines << "    #{dl}" }
+        lines << "    … (#{dls.size - EVENT_DATA_LINE_CAP} more lines)" if dls.size > EVENT_DATA_LINE_CAP
       end
       lines
     end
+
+    EVENT_DATA_LINE_CAP = 1000 # max rendered data lines per SSE event
   end
 end

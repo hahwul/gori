@@ -78,6 +78,12 @@ describe Gori::Sse do
       parse("").should be_empty
     end
 
+    it "ignores a leading UTF-8 BOM (WHATWG preprocessing)" do
+      e = parse("#{0xFEFF.chr}event: tick\ndata: hi\n\n")[0]
+      e.type.should eq("tick") # BOM didn't mangle the first field name
+      e.data.should eq("hi")
+    end
+
     it "treats an empty event type as the default (nil), not type=\"\"" do
       parse("event:\ndata: x\n\n")[0].type.should be_nil
       parse("event: \ndata: y\n\n")[0].type.should be_nil

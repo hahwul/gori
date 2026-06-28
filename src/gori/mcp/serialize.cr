@@ -88,10 +88,7 @@ module Gori
       # When the response is a text/event-stream, emit a parsed `sse_events` array
       # (a derived view over the decoded body — no table). Bounded for LLM use.
       def self.emit_sse_events(j : JSON::Builder, detail : Store::FlowDetail) : Nil
-        rh = detail.response_head
-        return unless Sse.event_stream?(rh)
-        decoded, _ = Proxy::Codec::ContentDecode.decode(rh, detail.response_body)
-        events = Sse.events(decoded || detail.response_body || Bytes.empty)
+        events = Sse.from_response(detail.response_head, detail.response_body)
         return if events.empty?
         j.field "sse_events" do
           j.object do

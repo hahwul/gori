@@ -1,3 +1,5 @@
+require "./proxy/codec/content_decode"
+
 module Gori
   # Parses a Server-Sent Events (`text/event-stream`) body into discrete events.
   # This is a DISPLAY-time projection over an already content-decoded body — the
@@ -44,6 +46,16 @@ module Gori
       false
     end
 
+    # The events of an event-stream RESPONSE: content-decode (de-chunk/inflate) the
+    # body, then parse. The single helper all three surfaces (History, `gori run
+    # show`, MCP) call so the decode→parse incantation isn't triplicated. Returns
+    # [] when the response isn't a text/event-stream.
+    def self.from_response(head : Bytes?, body : Bytes?) : Array(Event)
+      return [] of Event unless event_stream?(head)
+      decoded, _ = Proxy::Codec::ContentDecode.decode(head, body)
+      events(decoded || body || Bytes.empty)
+    end
+
     # Splits an event-stream body into events. Tolerant: a trailing block without
     # its terminating blank line (a capture cut mid-stream) is still emitted, so a
     # truncated stream shows its last partial event rather than dropping it.
@@ -51,8 +63,10 @@ module Gori
       events = [] of Event
       return events if body.empty?
       # SSE is UTF-8; invalid bytes become U+FFFD (display-only, never re-sent).
-      # Normalise all three line terminators to LF so a single split suffices.
-      text = String.new(body).gsub("\r\n", "\n").gsub('\r', '\n')
+      # Normalise all three line terminators to LF so a single split suffices, and
+      # drop one leading BOM (U+FEFF) — WHATWG preprocessing — so the first field name
+      # isn't mangled (a BOM-prefixed stream would otherwise lose its first event).
+      text = String.new(body).gsub("\r\n", "\n").gsub('\r', '\n').lchop(0xFEFF.chr)
 
       last_id = nil.as(String?) # stream-level: persists across blocks (per spec)
       data = [] of String       # data lines accumulated for the current block
