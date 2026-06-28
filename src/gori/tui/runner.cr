@@ -98,9 +98,12 @@ module Gori::Tui
       # seeded from the persisted default, propagated to History/Replay each frame.
       @pretty = Settings.pretty_bodies_default
       # A destructive-action guard (delete project / close a sub-tab). When set,
-      # @overlay is :confirm; accepting runs @confirm_action.
+      # @overlay is :confirm; accepting runs @confirm_action. @confirm_return is the
+      # overlay to restore on close — :none for palette-launched confirms, or the parent
+      # overlay (e.g. :tabs) when the confirm is raised from inside another modal.
       @confirm = nil.as(ConfirmDialog?)
       @confirm_action = nil.as(Proc(Nil)?)
+      @confirm_return = :none
       # The "open browser" picker (palette → browser.open); @overlay is :browser
       # while it's up.
       @browser_picker = nil.as(BrowserPicker?)
@@ -857,12 +860,15 @@ module Gori::Tui
     end
 
     # Open the confirmation modal for a destructive action; `action` runs only if
-    # the user accepts. Defaults to a red "danger" confirm button.
+    # the user accepts. Defaults to a red "danger" confirm button. `return_to` is the
+    # overlay restored on close — leave it :none for a palette-launched confirm, or pass
+    # the parent modal (e.g. :tabs) when raising the confirm from inside another overlay.
     def confirm(title : String, message : String, *, confirm_label : String = "delete",
-                danger : Bool = true, &action : -> Nil) : Nil
+                danger : Bool = true, return_to : Symbol = :none, &action : -> Nil) : Nil
       @confirm = ConfirmDialog.new(title, message, confirm_label: confirm_label,
         cancel_label: "cancel", danger: danger)
       @confirm_action = action
+      @confirm_return = return_to
       @overlay = :confirm
     end
 
@@ -873,9 +879,10 @@ module Gori::Tui
     end
 
     private def close_confirm : Nil
-      @overlay = :none
+      @overlay = @confirm_return
       @confirm = nil
       @confirm_action = nil
+      @confirm_return = :none
     end
 
     # "Open browser" overlay: ↑/↓ pick, ↵ launch the selected browser, esc cancel.
@@ -1028,6 +1035,18 @@ module Gori::Tui
         preview_theme
       elsif key.backspace?
         @settings_view.backspace
+      elsif ev.ctrl? && key.lower_r?
+        # ^R (not a bare letter — those are typed into the focused field) reverts the
+        # section to its factory defaults, gated behind a confirm like the tab-bar reset.
+        section = @settings_view.section
+        confirm("RESET SETTINGS",
+          "Reset the #{section.to_s.upcase} settings to their\n" \
+          "default values? Unsaved edits here are replaced.",
+          confirm_label: "reset", danger: true, return_to: :settings) do
+          @settings_view.reset_to_defaults
+          preview_theme # :theme live-previews the restored default theme
+          @toast = "#{section} settings reset to defaults — ↵ to save"
+        end
       elsif c && !ev.ctrl? && !ev.alt?
         @settings_view.insert(c)
         @settings_view.set_preedit("")
@@ -1037,7 +1056,8 @@ module Gori::Tui
 
     # The tab-bar customizer (settings:tabs). Working copy: ↵ saves+applies, esc discards.
     # ↑/↓ (and k/j) move the selection; K/J reorder the selected tab; space toggles
-    # show/hide (refused for the last visible tab). ^P jumps back to the palette.
+    # show/hide (refused for the last visible tab); r reverts to the factory default
+    # order/visibility. ^P jumps back to the palette.
     private def handle_tabs_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if ev.ctrl? && key.lower_p?
@@ -1061,6 +1081,14 @@ module Gori::Tui
         c == 'K' ? @tabs_overlay.move_selected(-1) : @tabs_overlay.select_move(-1)
       elsif (c = ev.char) && (c == 'J' || c == 'j')
         c == 'J' ? @tabs_overlay.move_selected(1) : @tabs_overlay.select_move(1)
+      elsif (c = ev.char) && (c == 'r' || c == 'R')
+        confirm("RESET TAB BAR",
+          "Reset the tab bar to its default order and\n" \
+          "visibility? Your current arrangement is replaced.",
+          confirm_label: "reset", danger: true, return_to: :tabs) do
+          @tabs_overlay.reset_to_defaults
+          @toast = "tabs reset to defaults — ↵ to save"
+        end
       end
     end
 
@@ -1625,8 +1653,8 @@ module Gori::Tui
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
       when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when :settings    then "↑/↓ field · type to edit · ↵ save · esc close"
-      when :tabs        then "↑/↓ select · space show/hide · K/J reorder · ↵ save · esc cancel"
+      when :settings    then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
+      when :tabs        then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
       when :hotkeys     then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :detail      then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
       else

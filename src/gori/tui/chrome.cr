@@ -3,20 +3,20 @@ module Gori::Tui
   # Stateless renderers — they take the current state and draw it (immediate mode).
   module Chrome
     # The canonical tab catalog: identity + sidebar label, in default display order.
-    # Project is the default home tab (leftmost); History is the raw log (next). The
+    # Project is the default home tab (leftmost); Sitemap is the structured map (next). The
     # EFFECTIVE order/visibility is user config (settings:tabs) — see reconcile below;
     # this constant is only the catalog every config is reconciled against.
     TABS = [
       {:project, "Project"},
+      {:sitemap, "Sitemap"},
       {:history, "History"},
       {:intercept, "Intercept"},
-      {:sitemap, "Sitemap"},
       {:replay, "Replay"},
       {:fuzzer, "Fuzzer"},
+      {:convert, "Convert"},
       {:comparer, "Comparer"},
       {:findings, "Findings"},
       {:notes, "Notes"},
-      {:convert, "Convert"},
       {:agent, "Agent"},
       {:help, "Help"},
     ]

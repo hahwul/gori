@@ -59,12 +59,12 @@ describe "Chrome.visible_tabs" do
     vis.index(:agent).not_nil!.should be < vis.index(:help).not_nil!
   end
 
-  it "force-includes the hidden Convert tab between Notes and Help" do
-    # Convert is hidden by default; the palette "Go to Convert" jump relies on force:.
+  it "places the default-visible Convert tab between Fuzzer and Comparer" do
+    # Convert is visible by default and sits mid-strip; force: is a no-op for it.
     vis = Chrome.visible_tabs([] of {String, Bool}, force: :convert).map(&.first)
     vis.includes?(:convert).should be_true
-    vis.index(:convert).not_nil!.should be > vis.index(:notes).not_nil!
-    vis.index(:convert).not_nil!.should be < vis.index(:help).not_nil!
+    vis.index(:convert).not_nil!.should be > vis.index(:fuzzer).not_nil!
+    vis.index(:convert).not_nil!.should be < vis.index(:comparer).not_nil!
   end
 
   it "is a no-op for force: when the active tab is already visible" do

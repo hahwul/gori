@@ -13,14 +13,26 @@ module Gori
   # `bind_port` are applied by App on the next project open (the live proxy keeps
   # its current bind).
   module Settings
-    class_property bind_host : String = "127.0.0.1"
-    class_property bind_port : Int32 = 8070
-    class_property upstream_proxy : String = ""        # "host:port" HTTP proxy; "" = connect directly
-    class_property editor : String = ""                # external editor for ^E; "" = $VISUAL/$EDITOR/vi
-    class_property editor_markdown : Bool = true       # syntax-highlight markdown in Notes/Project
-    class_property theme : String = "goridark"         # TUI colour theme name (settings:theme); applied by Theme.apply
-    class_property mouse : Bool = true                 # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
-    class_property pretty_bodies_default : Bool = true # pretty-print JSON/XML/form/… bodies in History detail + Replay response (display only)
+    # Factory defaults — the values a fresh install ships with. Declared as constants so
+    # the settings editor's reset-to-defaults action and the property initializers below
+    # share ONE source of truth (no drift between "what we ship" and "what reset restores").
+    DEFAULT_BIND_HOST       = "127.0.0.1"
+    DEFAULT_BIND_PORT       = 8070
+    DEFAULT_UPSTREAM_PROXY   = ""
+    DEFAULT_EDITOR           = ""
+    DEFAULT_EDITOR_MARKDOWN  = true
+    DEFAULT_THEME            = "goridark"
+    DEFAULT_MOUSE            = true
+    DEFAULT_PRETTY_BODIES    = true
+
+    class_property bind_host : String = DEFAULT_BIND_HOST
+    class_property bind_port : Int32 = DEFAULT_BIND_PORT
+    class_property upstream_proxy : String = DEFAULT_UPSTREAM_PROXY        # "host:port" HTTP proxy; "" = connect directly
+    class_property editor : String = DEFAULT_EDITOR                        # external editor for ^E; "" = $VISUAL/$EDITOR/vi
+    class_property editor_markdown : Bool = DEFAULT_EDITOR_MARKDOWN        # syntax-highlight markdown in Notes/Project
+    class_property theme : String = DEFAULT_THEME                          # TUI colour theme name (settings:theme); applied by Theme.apply
+    class_property mouse : Bool = DEFAULT_MOUSE                            # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
+    class_property pretty_bodies_default : Bool = DEFAULT_PRETTY_BODIES    # pretty-print JSON/XML/form/… bodies in History detail + Replay response (display only)
     # Top tab-bar layout: ordered {tab-id, visible?}. Empty = never customized → Chrome
     # reconciles to catalog defaults. Opaque String ids (Crystal has no runtime String→Symbol);
     # Chrome maps ids→catalog symbols. Only an EXPLICIT false hides a tab.
