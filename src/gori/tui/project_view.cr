@@ -180,6 +180,12 @@ module Gori::Tui
       @sel = (@sel + d).clamp(0, n - 1)
     end
 
+    # Selection on the first rule (or an empty list) → ↑ pops focus to the tab bar,
+    # mirroring the DESCRIPTION editor's `at_top?`.
+    def scope_at_top? : Bool
+      @sel <= 0
+    end
+
     def scope_add_start : Nil
       @adding = true
       @edit_id = nil

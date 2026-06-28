@@ -176,7 +176,12 @@ module Gori::Tui
         save
         @host.request_focus(:menu)
       elsif key.up?
-        @project_view.scope_select(-1)
+        if @project_view.scope_at_top? # ↑ on the first rule pops up to the tab bar
+          save
+          @host.request_focus(:menu)
+        else
+          @project_view.scope_select(-1)
+        end
       elsif key.down?
         @project_view.scope_select(1)
       elsif key.right?
