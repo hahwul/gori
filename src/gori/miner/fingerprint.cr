@@ -10,7 +10,15 @@ module Gori::Miner
   record Probe,
     metrics : Fuzz::Metrics,
     body_text : String,
-    head_text : String
+    head_text : String do
+    # Whether `needle` appears verbatim in the decoded body or head text. The ONE place
+    # reflection membership is decided — both decide() (candidate detection) and the
+    # Baseline echo-API control call this, so the suppression control can't drift from
+    # the detection it gates.
+    def reflects?(needle : String) : Bool
+      body_text.includes?(needle) || head_text.includes?(needle)
+    end
+  end
 
   module Fingerprint
     def self.probe(raw : Replay::Result) : Probe

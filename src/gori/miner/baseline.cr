@@ -92,7 +92,7 @@ module Gori::Miner
                (p.metrics.length - base.metrics.length).abs > ltol ||
                (p.metrics.words - base.metrics.words).abs > wtol ||
                (p.metrics.lines - base.metrics.lines).abs > lntol
-      echoes = bogus.any? { |(_, value)| p.body_text.includes?(value) || p.head_text.includes?(value) }
+      echoes = bogus.any? { |(_, value)| p.reflects?(value) }
       {reacts, echoes}
     end
 
@@ -100,7 +100,7 @@ module Gori::Miner
                                  reflects_all : Hash(Location, Bool)) : String?
       notes = [] of String
       notes << "baseline status varies (#{statuses.join("/")})" unless stable
-      notes << "endpoint echoes any input — reflection findings disabled" if reflects_all.any? { |_, v| v }
+      notes << "endpoint echoes input at some locations — reflection findings disabled there" if reflects_all.any? { |_, v| v }
       return nil if notes.empty?
       "#{notes.join("; ")} — findings tentative"
     end
@@ -120,7 +120,7 @@ module Gori::Miner
     # candidate would "reflect", so it carries no discovery signal — only noise.
     unless report.reflects_all[location]?
       canaries_inv.each do |canary, name|
-        reflected[canary] = name if probe.body_text.includes?(canary) || probe.head_text.includes?(canary)
+        reflected[canary] = name if probe.reflects?(canary)
       end
     end
     kind = DiffKind::None

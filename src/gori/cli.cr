@@ -225,16 +225,10 @@ module Gori
       Settings.load
       Tui::Theme.load_custom           # register user themes before the theme step
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame
-      # The wizard drives /dev/tty directly (not STDIN/STDOUT — those may be redirected
-      # while a real terminal is still present), so guard on /dev/tty itself: Termisu.new
-      # opens it and raises with no controlling terminal (CI / a detached or background
-      # job), where the wizard would otherwise stall. Turn that into a clear message.
-      term =
-        begin
-          Termisu.new
-        rescue IO::Error
-          abort "gori wizard: requires an interactive terminal (no /dev/tty) — run it directly, not under CI or a detached/background job"
-        end
+      # The wizard drives /dev/tty directly (not STDIN/STDOUT, which may be redirected
+      # while a real terminal is still present), so the guard lives at the shared
+      # Tui.open_terminal construction point (same as App#run_tui).
+      term = Tui.open_terminal("run the wizard directly, not under CI or a detached/background job")
       term.enable_enhanced_keyboard       # Kitty disambiguation for IME/Unicode (mirrors App#run_tui)
       term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav
       begin

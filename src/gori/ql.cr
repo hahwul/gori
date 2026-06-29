@@ -225,8 +225,8 @@ module Gori
     # function Scope's regex rules use, backed by Crystal Regex) over a text field —
     # host/path/url/header/body. Any other field falls back to a literal free-text
     # search of the whole token. An invalid pattern would raise inside the SQLite
-    # REGEXP callback, so we validate up front and emit a never-matches clause instead
-    # (like flag:). For case-insensitive matching use an inline (?i) flag.
+    # REGEXP callback, so we validate up front and emit a never-matches clause instead.
+    # For case-insensitive matching use an inline (?i) flag.
     private def self.regex_cond(field : String, value : String, term : String) : {String, Array(DB::Any)}?
       # A non-regex field name means `~` wasn't a regex operator here (e.g. `foo~bar`):
       # fall back to a literal free-text search of the WHOLE token. This must happen BEFORE
@@ -236,7 +236,7 @@ module Gori
       when "host", "path", "url", "header", "body"
         return nil if value.empty?
         # An invalid pattern would raise inside the SQLite REGEXP callback, so validate up
-        # front and emit a never-matches clause instead (like flag:).
+        # front and emit a never-matches clause instead.
         return {"0", [] of DB::Any} unless valid_regex?(value)
         case field
         when "host"   then {"host REGEXP ?", [value] of DB::Any}
