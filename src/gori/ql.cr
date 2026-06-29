@@ -7,7 +7,7 @@ module Gori
   # injection-safe). The analysis surface; QL is how you find things (P8: pull).
   #
   #   host:acme status:>=500            # AND of terms
-  #   method:post path:/api OR flag:x   # OR of AND-groups
+  #   method:post path:/api OR status:5xx # OR of AND-groups
   #   -host:cdn  status:5xx  login      # negation, status class, free text
   #   body:token                        # scan request/response body bytes
   #   size:>10000 dur:>=500 dur:<2s     # total bytes (req+resp) / latency (ms; ms|s)
@@ -15,7 +15,7 @@ module Gori
   #   header:set-cookie                 # substring over request/response head bytes
   #   body~secret\d+  host~^api\.       # `~` = regex (host path url header body)
   module QL
-    # `:` fields:  host path method scheme status size reqsize respsize dur header body flag
+    # `:` fields:  host path method scheme status size reqsize respsize dur header body
     # `~` regex on: host path url header body   (+ bare words = free text).
     # Comparison ops (<= >= < > =) apply to status/size/reqsize/respsize/dur.
     struct Filter
@@ -77,7 +77,7 @@ module Gori
         if sep && sep > 0
           field = term[0...sep].downcase
           value = term[(sep + 1)..]
-          ti == sep ? regex_cond(field, value, term) : field_cond(field, value)
+          ti == sep ? regex_cond(field, value, term) : field_cond(field, value, term)
         else
           free_text(term)
         end
@@ -87,7 +87,7 @@ module Gori
       {negate ? "NOT (#{cond})" : cond, args}
     end
 
-    private def self.field_cond(field : String, value : String) : {String, Array(DB::Any)}?
+    private def self.field_cond(field : String, value : String, term : String) : {String, Array(DB::Any)}?
       return nil if value.empty?
       case field
       when "host"                        then {"lower(host) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
@@ -99,8 +99,15 @@ module Gori
       when "dur"                         then duration_cond(value)
       when "header"                      then header_cond(value)
       when "body"                        then body_cond(value)
-      when "flag"                        then {"0", [] of DB::Any} # tags not implemented yet → matches nothing
-      else                                    free_text(value)     # unknown field: treat the value as free text
+      else
+        # Unknown field — a typo (`hosst:x`) or a literal colon in a value (`time:12:00`):
+        # free-text the WHOLE token (prefix included), not just the part after the ':'. This
+        # mirrors regex_cond's fallback, searches what the user actually typed, and makes a
+        # typo'd field self-evident (it matches nothing real) instead of silently searching
+        # only the value. NOTE: `flag:` lands here too — gori has no flow-flag store yet
+        # (Store#flags_for is a stub), so there is nothing to match; it free-texts like any
+        # other unknown field rather than advertising an unimplemented filter.
+        free_text(term)
       end
     end
 
