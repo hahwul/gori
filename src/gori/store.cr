@@ -1,5 +1,6 @@
 require "db"
 require "sqlite3"
+require "json"
 require "./store/models"
 require "./store/safe_regexp"
 require "./store/schema"
@@ -84,12 +85,18 @@ module Gori
     FTS_INDEX_MAX = 64 * 1024
 
     @events : Channel(FlowEvent)?
+    # Second post-commit notification channel feeding the Prism analyzer. Separate from
+    # `@events` because a Crystal Channel is single-consumer — the TUI history refresh and
+    # Prism can't share one. Same best-effort drop-on-full semantics (see #publish).
+    @prism_events : Channel(FlowEvent)?
 
     # Opens (and migrates) the database. `events`, when given, receives
     # best-effort post-commit notifications for the live TUI; pass nil in
-    # headless mode (no consumer => nothing to publish). `retention_flows` caps
+    # headless mode (no consumer => nothing to publish). `prism_events` is the parallel
+    # feed for the Prism analyzer (nil when Prism isn't running). `retention_flows` caps
     # the kept history (0 = unlimited).
     def self.open(path : String, events : Channel(FlowEvent)? = nil,
+                  prism_events : Channel(FlowEvent)? = nil,
                   retention_flows : Int32 = RETENTION_DEFAULT) : Store
       url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000"
       db = DB.open(url)
@@ -97,7 +104,7 @@ module Gori
       # body can't crash a `body~`/`header~` scan or a regex scope rule). See SafeRegexp.
       SafeRegexp.install(db)
       Schema.migrate!(db)
-      new(db, events, retention_flows)
+      new(db, events, prism_events, retention_flows)
     end
 
     # Count of write batches that failed (e.g. disk full) — surfaced in the TUI
@@ -114,6 +121,7 @@ module Gori
     end
 
     def initialize(@db : DB::Database, @events : Channel(FlowEvent)? = nil,
+                   @prism_events : Channel(FlowEvent)? = nil,
                    @retention_flows : Int32 = RETENTION_DEFAULT,
                    @prune_interval : Int32 = PRUNE_INTERVAL)
       @writes = Channel(WriteOp).new(1024) # widened: h2 frames now queue fire-and-forget
@@ -296,6 +304,133 @@ module Gori
 
     def count_findings : Int32
       @db.scalar("SELECT COUNT(*) FROM findings").as(Int64).to_i
+    end
+
+    # --- prism scan issues (V20) ---------------------------------------------
+
+    # Cap on distinct affected URLs kept per grouped issue (newest accumulate; once full,
+    # further hits still bump hit_count but the URL list stops growing).
+    PRISM_AFFECTED_CAP = 50
+
+    PRISM_COLS = "id, code, category, host, title, severity, status, hit_count, affected, " \
+                 "sample_flow_id, evidence, first_seen, last_seen"
+
+    # Group-merge upsert keyed by (code, host): a read-modify-write run INSIDE the writer
+    # closure (atomic — the writer is the only writer), which a plain ON CONFLICT can't do
+    # because it must dedup+cap the affected-URL JSON and raise severity to the max seen.
+    def upsert_prism_issue(d : Prism::Detection) : Nil
+      ts = now_us
+      exec_task ->(c : DB::Connection) {
+        existing = c.query_one?(
+          "SELECT id, affected, severity FROM prism_issues WHERE code = ? AND host = ?",
+          d.code, d.host, as: {Int64, String, Int32})
+        if existing
+          id, aff_json, sev = existing
+          urls = parse_affected(aff_json)
+          urls << d.url if !urls.includes?(d.url) && urls.size < PRISM_AFFECTED_CAP
+          new_sev = sev > d.severity.value ? sev : d.severity.value
+          c.exec("UPDATE prism_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
+                 "evidence = COALESCE(evidence, ?), last_seen = ? WHERE id = ?",
+            urls.to_json, new_sev, d.evidence, ts, id)
+        else
+          c.exec("INSERT INTO prism_issues (code, category, host, title, severity, status, hit_count, " \
+                 "affected, sample_flow_id, evidence, first_seen, last_seen) VALUES (?,?,?,?,?,0,1,?,?,?,?,?)",
+            d.code, d.category, d.host, d.title, d.severity.value,
+            [d.url].to_json, d.flow_id, d.evidence, ts, ts)
+        end
+        nil
+      }
+    end
+
+    def prism_issues(category : String? = nil, host : String? = nil,
+                     min_severity : Severity? = nil) : Array(PrismIssue)
+      conds = [] of String
+      args = [] of DB::Any
+      if c = category
+        conds << "category = ?"; args << c
+      end
+      if h = host
+        conds << "host = ?"; args << h
+      end
+      if ms = min_severity
+        conds << "severity >= ?"; args << ms.value
+      end
+      where = conds.empty? ? "" : " WHERE #{conds.join(" AND ")}"
+      list = [] of PrismIssue
+      @db.query("SELECT #{PRISM_COLS} FROM prism_issues#{where} ORDER BY severity DESC, last_seen DESC",
+        args: args) do |rs|
+        rs.each { list << read_prism_issue(rs) }
+      end
+      list
+    rescue
+      [] of PrismIssue # never crash the run loop over a read
+    end
+
+    def get_prism_issue(id : Int64) : PrismIssue?
+      @db.query("SELECT #{PRISM_COLS} FROM prism_issues WHERE id = ?", id) do |rs|
+        return read_prism_issue(rs) if rs.move_next
+      end
+      nil
+    end
+
+    def update_prism_issue_status(id : Int64, status : Status) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE prism_issues SET status = ?, last_seen = ? WHERE id = ?", status.value, now_us, id)
+        nil
+      }
+    end
+
+    def delete_prism_issue(id : Int64) : Nil
+      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM prism_issues WHERE id = ?", id); nil }
+    end
+
+    def clear_prism_issues : Nil
+      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM prism_issues"); nil }
+    end
+
+    def count_prism_issues : Int32
+      @db.scalar("SELECT COUNT(*) FROM prism_issues").as(Int64).to_i
+    rescue
+      0
+    end
+
+    # Per-project Prism MODE, stored in the generic settings table (key "prism_mode").
+    def prism_mode : Prism::Mode
+      Prism::Mode.from_setting(setting(Prism::MODE_SETTING_KEY))
+    end
+
+    def set_prism_mode(mode : Prism::Mode) : Nil
+      set_setting(Prism::MODE_SETTING_KEY, mode.label)
+    end
+
+    # Distinct (tech code, evidence) rows — the raw material for the project's
+    # "representative technologies" summary (Prism.tech_summary maps them to labels).
+    def prism_tech_rows : Array({String, String?})
+      rows = [] of {String, String?}
+      @db.query("SELECT DISTINCT code, evidence FROM prism_issues WHERE category = 'tech' ORDER BY code") do |rs|
+        rs.each { rows << {rs.read(String), rs.read(String?)} }
+      end
+      rows
+    rescue
+      [] of {String, String?}
+    end
+
+    def prism_tech_summary : Array(String)
+      Prism.tech_summary(prism_tech_rows)
+    end
+
+    private def read_prism_issue(rs : DB::ResultSet) : PrismIssue
+      PrismIssue.new(
+        rs.read(Int64), rs.read(String), rs.read(String), rs.read(String), rs.read(String),
+        Severity.new(rs.read(Int32)), Status.new(rs.read(Int32)), rs.read(Int64),
+        parse_affected(rs.read(String)), rs.read(Int64?), rs.read(String?),
+        rs.read(Int64), rs.read(Int64))
+    end
+
+    private def parse_affected(json : String) : Array(String)
+      Array(String).from_json(json)
+    rescue
+      [] of String
     end
 
     # --- match&replace rules (in-flight head rewrite lens) -------------------
@@ -1085,14 +1220,22 @@ module Gori
     # full, drop (its periodic re-query of the authoritative projection covers
     # the gap, P5). Never stalls the writer/data path (P6).
     private def publish(event : FlowEvent) : Nil
-      return unless events = @events
-      select
-      when events.send(event)
-      else
-        # dropped; authoritative state still in SQLite
+      if events = @events
+        select
+        when events.send(event)
+        else
+          # dropped; authoritative state still in SQLite
+        end
+      end
+      if prism = @prism_events
+        select
+        when prism.send(event)
+        else
+          # Prism analyzer behind / not running — drop (it re-reads via get_flow anyway)
+        end
       end
     rescue Channel::ClosedError
-      # consumer (TUI) closed during shutdown — the writer must not die over it
+      # a consumer (TUI / Prism) closed during shutdown — the writer must not die over it
     end
   end
 end

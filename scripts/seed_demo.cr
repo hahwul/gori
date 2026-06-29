@@ -484,6 +484,18 @@ NOTES
 store.add_scope_rule("include", "host", "shop.demo.test")
 store.add_scope_rule("include", "host", "api.demo.test")
 
+# --- Prism passive scan: run the analyzer over every seeded flow so the Prism tab
+# opens populated (and the Project tab shows the detected technologies). This mirrors
+# what the live Prism::Analyzer does on captured traffic — no extra requests. MODE is
+# left at the safe default (Passive); active reflected-param probing needs live traffic.
+store.recent_flows(1000).each do |row|
+  if detail = store.get_flow(row.id)
+    Prism::Passive.analyze(detail).each { |d| store.upsert_prism_issue(d) }
+  end
+end
+store.set_prism_mode(Prism::Mode::Passive)
+puts "• prism: #{store.count_prism_issues} passive issues; tech=#{store.prism_tech_summary.join(", ")}"
+
 store.close
 puts "• notes + 2 scope patterns written"
 puts "\n✓ demo project ready — launch ./bin/gori and pick 'demo'."

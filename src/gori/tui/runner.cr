@@ -13,6 +13,7 @@ require "./controllers/intercept_controller"
 require "./controllers/notes_controller"
 require "./controllers/history_controller"
 require "./controllers/findings_controller"
+require "./controllers/prism_controller"
 require "./controllers/project_controller"
 require "./controllers/replay_controller"
 require "./controllers/fuzzer_controller"
@@ -159,6 +160,7 @@ module Gori::Tui
         NotesController.new(self),
         HistoryController.new(self),
         FindingsController.new(self),
+        PrismController.new(self),
         ProjectController.new(self),
         ReplayController.new(self),
         FuzzerController.new(self),
@@ -191,6 +193,10 @@ module Gori::Tui
 
     private def findings_controller : FindingsController
       @tabs[:findings].as(FindingsController)
+    end
+
+    private def prism_controller : PrismController
+      @tabs[:prism].as(PrismController)
     end
 
     private def project_controller : ProjectController
@@ -339,6 +345,9 @@ module Gori::Tui
         history_controller.view.on_event(event, @session.store)
         drained = true
       end
+      # Prism analyzer events (issues persisted / reflections found) — coalesced to one
+      # list reload per tick inside the controller; drives a redraw when anything landed.
+      drained = true if prism_controller.drain_events
       # Coalesce a filtered-view reload to once per drain (on_event only flagged it).
       history_controller.view.flush_filter(@session.store)
       drained
@@ -491,6 +500,9 @@ module Gori::Tui
       end
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.querying?
         return if findings_controller.handle_query_key(ev)
+      end
+      if @active_tab == :prism && @overlay == :none && @focus == :body && prism_controller.view.querying?
+        return if prism_controller.handle_query_key(ev)
       end
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.editing_notes?
         return if findings_controller.handle_notes_key(ev)
@@ -1088,15 +1100,26 @@ module Gori::Tui
     private def apply_choice : Nil
       p = @choice_picker
       return close_choice_picker unless p
-      if f = findings_controller.view.detail_finding
-        store = @session.store
-        case p.kind
-        when :severity then store.update_finding(f.id, severity: Store::Severity.new(p.selected_value))
-        when :status   then store.update_finding(f.id, status: Store::Status.new(p.selected_value))
-        end
-        findings_controller.view.resync(store)
+      case p.kind
+      when :severity, :status then apply_finding_choice(p)
+      when :prism_mode
+        @session.prism.set_mode(Prism::Mode.new(p.selected_value))
+        prism_controller.view.reload(@session.store)
+        @toast = "Prism mode: #{@session.prism.mode.title}"
+      when :prism_status
+        prism_controller.apply_status(Store::Status.new(p.selected_value))
       end
       close_choice_picker
+    end
+
+    private def apply_finding_choice(p : ChoicePicker) : Nil
+      return unless f = findings_controller.view.detail_finding
+      store = @session.store
+      case p.kind
+      when :severity then store.update_finding(f.id, severity: Store::Severity.new(p.selected_value))
+      when :status   then store.update_finding(f.id, status: Store::Status.new(p.selected_value))
+      end
+      findings_controller.view.resync(store)
     end
 
     private def close_choice_picker : Nil
@@ -2468,6 +2491,77 @@ module Gori::Tui
 
     def findings_export(format : Symbol) : Nil
       findings_controller.findings_export(format)
+    end
+
+    # --- prism ExecContext ---
+
+    def prism_move(delta : Int32) : Nil
+      prism_controller.prism_move(delta)
+    end
+
+    def prism_open : Nil
+      prism_controller.prism_open
+    end
+
+    def prism_close : Nil
+      prism_controller.prism_close
+    end
+
+    def prism_query : Nil
+      prism_controller.view.start_query
+    end
+
+    def prism_clear : Nil
+      prism_controller.prism_clear
+    end
+
+    def prism_delete : Nil
+      prism_controller.prism_delete
+    end
+
+    # Open the MODE picker (a shell overlay); apply_choice applies it to the analyzer.
+    def prism_set_mode : Nil
+      @choice_picker = ChoicePicker.for_prism_mode(@session.prism.mode.value)
+      @overlay = :choice
+    end
+
+    def prism_set_status : Nil
+      return unless i = prism_controller.view.detail_issue
+      @choice_picker = ChoicePicker.for_prism_status(i.status.value)
+      @overlay = :choice
+    end
+
+    # Jump from an issue to its sample flow's request/response in History. CROSS-TAB
+    # mediator (mirrors finding_open_flow).
+    def prism_open_flow : Nil
+      return unless i = prism_controller.view.detail_issue
+      return (@toast = "this issue has no sample flow") unless fid = i.sample_flow_id
+      if history_controller.view.open_detail_id(fid, @session.store)
+        @active_tab = :history
+        @focus = :body
+        @overlay = :detail
+      else
+        @toast = "evidence no longer captured (pruned)"
+      end
+    end
+
+    # Send an issue's sample flow to Replay to re-test it (mirrors finding_replay_flow).
+    def prism_replay_flow : Nil
+      return unless i = prism_controller.view.detail_issue
+      return (@toast = "this issue has no sample flow") unless fid = i.sample_flow_id
+      if @session.store.get_flow(fid)
+        replay_flow(fid)
+      else
+        @toast = "evidence no longer captured (pruned)"
+      end
+    end
+
+    # Promote a machine-found Prism issue to a human-confirmed Finding (the bridge to the
+    # Findings report). Reuses Store#insert_finding; the issue's severity/host/sample flow carry over.
+    def prism_promote : Nil
+      return unless i = prism_controller.view.detail_issue
+      @session.store.insert_finding(i.title, i.severity, i.host, i.sample_flow_id)
+      @toast = "promoted to finding — see the Findings tab"
     end
 
     # 's' / scope.edit: the Scope editor lives in the Project tab now, so jump there

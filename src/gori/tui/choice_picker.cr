@@ -42,6 +42,27 @@ module Gori::Tui
       ], current, :status)
     end
 
+    # Prism scan MODE picker (kind :prism_mode — the Runner applies it to the analyzer).
+    # Values match Prism::Mode (Off=0, Passive=1, Active=2).
+    def self.for_prism_mode(current : Int32) : ChoicePicker
+      new("SET PRISM MODE", [
+        Choice.new("OFF — no scanning", 'o', Theme.muted, 0),
+        Choice.new("PASSIVE — observe only", 'p', Theme.accent, 1),
+        Choice.new("ACTIVE — passive + reflected-param probes (in-scope)", 'a', Theme.orange, 2),
+      ], current, :prism_mode)
+    end
+
+    # The same triage-status choices, but kind :prism_status so the Runner applies it to the
+    # open Prism issue rather than a Finding.
+    def self.for_prism_status(current : Int32) : ChoicePicker
+      new("SET STATUS", [
+        Choice.new("open", 'o', Theme.accent, 0),
+        Choice.new("confirmed", 'c', Theme.red, 1),
+        Choice.new("false-positive", 'f', Theme.muted, 2),
+        Choice.new("resolved", 'r', Theme.green, 3),
+      ], current, :prism_status)
+    end
+
     def move(delta : Int32) : Nil
       return if @choices.empty?
       @selected = (@selected + delta).clamp(0, @choices.size - 1)

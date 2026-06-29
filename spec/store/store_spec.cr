@@ -43,6 +43,7 @@ describe Gori::Store do
       store = Gori::Store.open(path)
       store.@db.exec("DROP TABLE sitemap_tags")   # V18
       store.@db.exec("DROP TABLE miner_sessions") # V19
+      store.@db.exec("DROP TABLE prism_issues")   # V20
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 

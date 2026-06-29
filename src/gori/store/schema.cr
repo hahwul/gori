@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 19
+      VERSION = 20
 
       V1 = [
         <<-SQL,
@@ -363,7 +363,36 @@ module Gori
         "CREATE INDEX idx_miner_sessions_position ON miner_sessions (position, id)",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19]
+      # Prism passive/active scan issues, GROUPED by (code, host): one row per distinct
+      # issue type per host, with the affected URLs accumulated in `affected` (JSON, capped)
+      # and `hit_count` counting every observation. `category` is the lens used by both the
+      # Prism filter and the project-level technology summary (category='tech'). Per-project,
+      # so it syncs across sessions sharing the DB (reconciled on the data_version poll, like
+      # findings/sitemap_tags). The Prism MODE itself lives in the generic `settings` table
+      # (key "prism_mode"), not here.
+      V20 = [
+        <<-SQL,
+        CREATE TABLE prism_issues (
+          id             INTEGER PRIMARY KEY,
+          code           TEXT    NOT NULL,
+          category       TEXT    NOT NULL,
+          host           TEXT    NOT NULL,
+          title          TEXT    NOT NULL,
+          severity       INTEGER NOT NULL,
+          status         INTEGER NOT NULL DEFAULT 0,
+          hit_count      INTEGER NOT NULL DEFAULT 1,
+          affected       TEXT    NOT NULL DEFAULT '[]',
+          sample_flow_id INTEGER,
+          evidence       TEXT,
+          first_seen     INTEGER NOT NULL,
+          last_seen      INTEGER NOT NULL,
+          UNIQUE(code, host)
+        )
+        SQL
+        "CREATE INDEX idx_prism_issues_cat ON prism_issues (category, host)",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

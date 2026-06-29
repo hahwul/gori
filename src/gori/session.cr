@@ -6,6 +6,7 @@ require "./rules"
 require "./scope"
 require "./host_overrides"
 require "./interceptor"
+require "./prism"
 require "./proxy/server"
 require "./proxy/tls/cert_authority"
 require "./proxy/tls/tunnel"
@@ -24,6 +25,9 @@ module Gori
     getter store : Store
     getter proxy : Proxy::Server
     getter flow_events : Channel(Store::FlowEvent)
+    # The passive/active scanner. Subscribes to the store's parallel prism_events feed and
+    # writes grouped issues; runs for both the TUI and headless capture.
+    getter prism : Prism::Analyzer
     getter rules : Rules
     getter scope : Scope
     getter host_overrides : HostOverrides
@@ -37,7 +41,9 @@ module Gori
                   registry : Verb::Registry, project : Project,
                   bind_fallback : Bool = false) : Session
       events = Channel(Store::FlowEvent).new(1024)
-      store = Store.open(project.db_path, events)
+      prism_events = Channel(Store::FlowEvent).new(256)
+      store = Store.open(project.db_path, events, prism_events)
+      prism = nil.as(Prism::Analyzer?)
       begin
         lock = nil.as(CaptureLock?)
         sink = Proxy::StoreSink.new(store)
@@ -45,6 +51,10 @@ module Gori
         scope = Scope.load(store)                  # shared by the TUI lens AND intercept gating
         host_overrides = HostOverrides.load(store) # per-project /etc/hosts; proxy reads, TUI edits (Mutex-guarded)
         interceptor = Interceptor.new(scope)       # shared: proxy fibers hold, TUI decides
+        # Passive/active scanner: reads the parallel prism_events feed, gates active probes on
+        # the shared Scope. Starts now (idle until flows arrive); runs headless too.
+        prism = Prism::Analyzer.new(store, scope, prism_events, store.prism_mode, !config.insecure_upstream?)
+        prism.start
         tunnel = Proxy::Tls::Tunnel.new(ca, verify_upstream: !config.insecure_upstream?,
           rewriter: rules, interceptor: interceptor, host_overrides: host_overrides)
         proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
@@ -79,19 +89,21 @@ module Gori
             lock = nil
             ex.message || "could not open the project capture lock"
           end
-        new(config, ca, registry, project, store, proxy, events, rules, scope, host_overrides, interceptor, bind_error, lock)
+        new(config, ca, registry, project, store, proxy, events, prism, rules, scope, host_overrides, interceptor, bind_error, lock)
       rescue ex
         # A store/rules/scope failure (NOT the bind, which is handled above) would
-        # otherwise leak the store's writer fiber + db fd, the events channel, and the
-        # lock fd. Tear them down, then re-raise for the caller.
+        # otherwise leak the store's writer fiber + db fd, the events channels, the Prism
+        # fibers, and the lock fd. Tear them down, then re-raise for the caller.
         lock.try(&.close) rescue nil
+        prism.try(&.stop) rescue nil
         store.close rescue nil
         events.close rescue nil
+        prism_events.close rescue nil
         raise ex
       end
     end
 
-    def initialize(@config, @ca, @registry, @project, @store, @proxy, @flow_events,
+    def initialize(@config, @ca, @registry, @project, @store, @proxy, @flow_events, @prism,
                    @rules, @scope, @host_overrides, @interceptor, @bind_error : String? = nil,
                    @capture_lock : CaptureLock? = nil)
     end
@@ -129,10 +141,13 @@ module Gori
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
       @capture_lock.try(&.close) # release the flock so a later open of this project can capture
+      # Stop Prism FIRST so its active workers wind down and its passive fiber stops issuing
+      # get_flow against a live DB; this also closes the prism_events channel it consumes.
+      @prism.stop
       # Drain + stop the store BEFORE closing the events channel: the writer
       # publishes post-commit events while draining, and a closed channel would
       # otherwise make it raise mid-drain. (publish() also tolerates a closed
-      # channel as defense-in-depth.)
+      # channel as defense-in-depth — incl. the now-closed prism_events.)
       @store.close
       @flow_events.close
       @project.cleanup
