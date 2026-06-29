@@ -75,6 +75,27 @@ describe Gori::Tui::PaletteState do
     backend.contains?("soon").should be_true # the placeholder badge
   end
 
+  it "registers a Global 'Go to' jump for every catalog tab so each is palette-reachable" do
+    r = Gori::Verbs.registry
+    # The named tab jumps are the only by-command way to reach a tab hidden in
+    # settings:tabs — so every entry in the canonical catalog (incl. the default-hidden
+    # Fuzzer/Miner/Agent) must have one, or it becomes unreachable from the palette.
+    Gori::Tui::Chrome::TABS.each do |(tab, label)|
+      verb = r["tab.#{tab}"]?
+      verb.should_not be_nil
+      verb.not_nil!.title.should eq("Go to #{label}")
+      verb.not_nil!.scope.should eq(Gori::Verb::Scope::Global)
+    end
+  end
+
+  it "surfaces the Fuzzer tab jump when the palette is filtered by 'fuzz'" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+    "fuzz".each_char { |c| palette.append(c, ctx) }
+    palette.results.map(&.id).should contain("tab.fuzzer")
+  end
+
   it "categorizes Global verbs so the palette can group them by kind" do
     r = Gori::Verbs.registry
     r["tab.history"].category.should eq(Gori::Verb::Category::Navigation)

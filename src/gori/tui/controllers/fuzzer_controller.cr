@@ -112,7 +112,11 @@ module Gori::Tui
     # --- input ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
-      return true if v.nil?
+      # No session yet (empty tab placeholder): there's nothing to edit or navigate, so
+      # defer EVERY key to the central handler rather than swallowing it. Otherwise the
+      # empty Fuzzer tab is an input dead-end — ^P (palette), escape (back to the bar),
+      # digit jumps and space all get eaten. ^N (new session) is intercepted upstream.
+      return false if v.nil?
       # space opens the action menu in the navigable results pane; the editor panes
       # (target/template/config) take it as a literal char, so gate on :results.
       if v.focus == :results && ev.key.space? && !ev.ctrl? && !ev.alt?
