@@ -18,10 +18,12 @@ module Gori::Miner
     reflected : Hash(String, String), # canary => name (echoed canaries)
     kind : DiffKind                   # strongest metric diff, else None
 
-  # Calibrates a stable baseline + a per-location "does it react to ANY unknown param?"
-  # control — the two false-positive killers. Tolerance bands absorb timestamps / CSRF
-  # tokens; a location that reacts to bogus params has its metric findings suppressed
-  # (reflection still counts there).
+  # Calibrates a stable baseline + two per-location controls — the false-positive killers.
+  # Tolerance bands absorb timestamps / CSRF tokens. (1) A location that reacts metrically
+  # to bogus params has its metric findings suppressed (`reflection_only`). (2) A location
+  # that ECHOES bogus values back (an echo API like httpbin/get) has its REFLECTION findings
+  # suppressed (`reflects_all`) — otherwise every random candidate "reflects" and floods the
+  # results with false positives.
   class Baseline
     record Report,
       status : Int32?,
@@ -33,6 +35,7 @@ module Gori::Miner
       base_lines : Int32,
       stable : Bool,
       reflection_only : Hash(Location, Bool),
+      reflects_all : Hash(Location, Bool),
       warning : String?
 
     def initialize(@backend : Fuzz::Backend, @base : Bytes, @config : Config)
@@ -57,35 +60,54 @@ module Gori::Miner
 
       statuses = probes.compact_map(&.metrics.status).uniq!
       stable = statuses.size <= 1
-      warning = stable ? nil : "baseline status varies (#{statuses.join("/")}) — findings tentative"
 
       reflection_only = Hash(Location, Bool).new
+      reflects_all = Hash(Location, Bool).new
       locations.each do |loc|
-        reflection_only[loc] = control_reacts?(loc, base, length_tol, words_tol, lines_tol)
+        reacts, echoes = control_signals(loc, base, length_tol, words_tol, lines_tol)
+        reflection_only[loc] = reacts
+        reflects_all[loc] = echoes
       end
 
       Report.new(base.metrics.status, length_tol, words_tol, lines_tol,
         base.metrics.length, base.metrics.words, base.metrics.lines,
-        stable, reflection_only, warning)
+        stable, reflection_only, reflects_all, baseline_warning(stable, statuses, reflects_all))
     end
 
-    # Inject a bucket of random non-existent names; if the response moves beyond
-    # tolerance, the app reacts to ANY unknown param at this location.
-    private def control_reacts?(loc : Location, base : Probe,
-                                ltol : Int64, wtol : Int32, lntol : Int32) : Bool
+    # Inject a bucket of random non-existent names ONCE per location. Returns
+    # {metric_reacts, reflects_all}:
+    #   metric_reacts — the response moved beyond tolerance, so the app reacts to ANY
+    #     unknown param here → its metric-diff findings are noise (suppressed in `decide`).
+    #   reflects_all  — the bogus VALUES were echoed back, so the endpoint reflects ANY
+    #     input (an echo API, e.g. httpbin/get) → reflection is not a discovery signal
+    #     here and its reflection findings must be suppressed too, else every candidate
+    #     "reflects" and the run floods with false positives.
+    private def control_signals(loc : Location, base : Probe,
+                                ltol : Int64, wtol : Int32, lntol : Int32) : {Bool, Bool}
       bogus = Array.new(8) { {Canary.bogus_name, Canary.fresh} }
       raw = @backend.send(Inject.apply(@base, loc, bogus, @config.add_content_length_when_missing?))
-      return false unless raw.error.nil?
+      return {false, false} unless raw.error.nil?
       p = Fingerprint.probe(raw)
-      return true if p.metrics.status != base.metrics.status
-      return true if (p.metrics.length - base.metrics.length).abs > ltol
-      return true if (p.metrics.words - base.metrics.words).abs > wtol
-      return true if (p.metrics.lines - base.metrics.lines).abs > lntol
-      false
+      reacts = p.metrics.status != base.metrics.status ||
+               (p.metrics.length - base.metrics.length).abs > ltol ||
+               (p.metrics.words - base.metrics.words).abs > wtol ||
+               (p.metrics.lines - base.metrics.lines).abs > lntol
+      echoes = bogus.any? { |(_, value)| p.body_text.includes?(value) || p.head_text.includes?(value) }
+      {reacts, echoes}
+    end
+
+    private def baseline_warning(stable : Bool, statuses : Array(Int32),
+                                 reflects_all : Hash(Location, Bool)) : String?
+      notes = [] of String
+      notes << "baseline status varies (#{statuses.join("/")})" unless stable
+      notes << "endpoint echoes any input — reflection findings disabled" if reflects_all.any? { |_, v| v }
+      return nil if notes.empty?
+      "#{notes.join("; ")} — findings tentative"
     end
 
     private def unreachable : Report
-      Report.new(nil, 0_i64, 0, 0, 0_i64, 0, 0, false, Hash(Location, Bool).new, "baseline unreachable")
+      Report.new(nil, 0_i64, 0, 0, 0_i64, 0, 0, false,
+        Hash(Location, Bool).new, Hash(Location, Bool).new, "baseline unreachable")
     end
   end
 
@@ -94,8 +116,12 @@ module Gori::Miner
   def self.decide(report : Baseline::Report, probe : Probe,
                   canaries_inv : Hash(String, String), location : Location) : Decision
     reflected = Hash(String, String).new
-    canaries_inv.each do |canary, name|
-      reflected[canary] = name if probe.body_text.includes?(canary) || probe.head_text.includes?(canary)
+    # Skip reflection detection on an echo endpoint (reflects ANY input): there every
+    # candidate would "reflect", so it carries no discovery signal — only noise.
+    unless report.reflects_all[location]?
+      canaries_inv.each do |canary, name|
+        reflected[canary] = name if probe.body_text.includes?(canary) || probe.head_text.includes?(canary)
+      end
     end
     kind = DiffKind::None
     unless report.reflection_only[location]?

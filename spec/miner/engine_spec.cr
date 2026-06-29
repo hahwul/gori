@@ -7,21 +7,27 @@ private alias F = Gori::Fuzz
 # of each request; if a "magic" param is present it changes the response accordingly:
 #   - REFLECT params echo their (canary) value in the body.
 #   - GROW params append extra bytes to the body (a metric/length signal, no reflection).
+#   - ECHO mode reflects EVERY param value back (an echo API like httpbin/get), the
+#     reflect-all false-positive trap the miner must recognise and suppress.
 # Everything else returns a stable baseline body.
 private class HiddenParamBackend < F::Backend
   getter origin : F::Origin
   getter sent : Int32 = 0
 
   def initialize(@origin : F::Origin, @reflect : Array(String) = [] of String,
-                 @grow : Array(String) = [] of String)
+                 @grow : Array(String) = [] of String, @echo : Bool = false)
   end
 
   def send(bytes : Bytes) : Gori::Replay::Result
     @sent += 1
     params = query_params(bytes)
     body = "BASELINE BODY CONTENT"
-    @reflect.each { |name| (v = params[name]?) && (body += " reflected=#{v}") }
-    @grow.each { |name| params.has_key?(name) && (body += " XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX") }
+    if @echo
+      params.each { |k, v| body += " #{k}=#{v}" } # echo API: reflects ANY input value
+    else
+      @reflect.each { |name| (v = params[name]?) && (body += " reflected=#{v}") }
+      @grow.each { |name| params.has_key?(name) && (body += " XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX") }
+    end
     ok(body)
   end
 
@@ -97,6 +103,25 @@ describe Gori::Miner::Engine do
     names = ["alpha", "beta", "gamma", "delta", "epsilon"]
     findings = mine(backend, names, cfg)
     findings.should be_empty
+  end
+
+  it "suppresses reflection false positives on an echo endpoint (reflects any input)" do
+    # An echo API reflects EVERY param, so naive reflection detection would report all
+    # candidates. The reflect-all control must recognise this and yield no findings.
+    backend = HiddenParamBackend.new(F::Origin.new("http", "h", 80), echo: true)
+    names = ["alpha", "beta", "gamma", "secret", "delta", "epsilon", "zeta", "eta"]
+    findings = mine(backend, names, cfg)
+    findings.should be_empty
+  end
+
+  it "warns via the baseline event when the endpoint echoes any input" do
+    backend = HiddenParamBackend.new(F::Origin.new("http", "h", 80), echo: true)
+    base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+    engine = M::Engine.new(base, http2: false, names: ["a", "b"], backend: backend, config: cfg)
+    warning = nil.as(String?)
+    engine.run { |ev| warning = ev.warning if ev.is_a?(M::BaselineEvent) }
+    warning.should_not be_nil
+    warning.not_nil!.should contain("echoes")
   end
 
   it "emits a Done event and a baseline event" do
