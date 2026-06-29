@@ -96,7 +96,10 @@ module Gori::Tui
     # --- input ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
-      return true if v.nil?
+      # No session yet (empty tab placeholder): defer EVERY key to the central handler
+      # instead of swallowing it, so the empty Miner tab isn't an input dead-end (^P
+      # palette, escape, digit jumps, space all stay live). New runs start upstream.
+      return false if v.nil?
       if v.focus == :results && ev.key.space? && !ev.ctrl? && !ev.alt?
         @host.open_space_menu
         return true
