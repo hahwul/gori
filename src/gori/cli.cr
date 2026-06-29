@@ -270,6 +270,10 @@ module Gori
 
       resolved = resolve_mcp_db(db_path, project)
       Log.info { "mcp: serving #{resolved} (actions=#{!read_only})" }
+      # Make the implicit fallback visible (STDERR only — STDOUT is the JSON-RPC stream):
+      # with no --db/--project the most-recently-used project (or the default db) is served,
+      # which can silently be an empty database an AI client then queries as if it were real.
+      Log.warn { "mcp: no --db/--project given — defaulting to #{resolved}" } if db_path.nil? && project.nil?
 
       # Opening a non-SQLite / unreadable file raises deep in the driver; turn that
       # into a clean error instead of an unhandled backtrace (parity with `gori run`).
@@ -279,6 +283,7 @@ module Gori
         rescue ex : DB::Error | SQLite3::Exception
           abort "gori mcp: cannot open database #{resolved}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
         end
+      Log.warn { "mcp: #{resolved} has no captured flows (empty database)" } if store.count.zero?
       begin
         server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream)
         server.run # blocks until STDIN EOF (client closed)
