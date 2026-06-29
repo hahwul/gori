@@ -160,6 +160,13 @@ module Gori
         return
       end
 
+      # --edit hands the terminal to $EDITOR/vi, which reads stdin directly. Without an
+      # interactive TTY (pipe/redirect/CI/background job) the editor would hang waiting
+      # for input it can never get, so refuse and point at the non-interactive path.
+      unless STDIN.tty? && STDOUT.tty?
+        abort "gori settings --edit: requires an interactive terminal; run 'gori settings' to print the path, then edit it directly"
+      end
+
       cmd = Settings.editor_command
       status = Process.run(cmd[0], cmd[1..] + [path],
         input: Process::Redirect::Inherit, output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
@@ -211,6 +218,12 @@ module Gori
         puts "  Interactive setup wizard: proxy bind address, TUI theme, AI provider."
         puts "  Runs automatically on first launch; use this to re-run it anytime."
         return
+      end
+      # The wizard drives the terminal directly (raw mode + enhanced keyboard). With no
+      # interactive TTY — a pipe, redirect, CI, or a background job — Termisu would block
+      # on /dev/tty (or fail opaquely), so refuse up front with a clear message instead.
+      unless STDIN.tty? && STDOUT.tty?
+        abort "gori wizard: requires an interactive terminal — run it directly, not piped, redirected, or under CI/a background job"
       end
       Paths.ensure_dirs
       Settings.load
