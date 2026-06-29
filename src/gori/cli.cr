@@ -19,7 +19,7 @@ module Gori
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
   # - `gori wizard`                 → interactive first-run setup wizard (bind/theme/AI)
-  # - `gori update`                 → placeholder for future work
+  # - `gori update`                 → print how to update gori (no built-in self-update yet)
   #
   # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
   # via the tui path for backward compatibility.
@@ -76,7 +76,7 @@ module Gori
       puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
       puts "  wizard    Interactive setup wizard (bind, theme, AI) — also runs on first launch"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
-      puts "  update    [placeholder] Self-update"
+      puts "  update    Show how to update gori to the latest version"
       puts ""
       puts "See 'gori <command> --help' for more."
       puts "Flags like --version and --help work at the top level too."
@@ -312,11 +312,19 @@ module Gori
     private def self.run_update(args : Array(String)) : Nil
       if args.any? { |a| ["-h", "--help"].includes?(a) }
         puts "Usage: gori update"
-        puts "  (placeholder) Will check for and apply updates."
+        puts "  Show how to update gori to the latest version."
         return
       end
-      puts "gori update: not implemented yet."
-      puts "If installed via Homebrew: brew upgrade gori"
+      # No built-in self-update yet (no release/download pipeline). Rather than print a
+      # dead "not implemented" line, give the user the real ways to get a newer build.
+      puts "gori #{VERSION}"
+      puts ""
+      puts "gori has no built-in self-update yet. To update:"
+      puts ""
+      puts "  • From source:  git pull && shards install \\"
+      puts "                  && crystal build src/main.cr -o bin/gori --release"
+      puts "  • Releases:     #{REPOSITORY_URL}/releases"
+      puts "  • Homebrew:     brew upgrade gori   (once a formula is published)"
     end
   end
 end
