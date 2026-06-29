@@ -160,11 +160,13 @@ module Gori
         return
       end
 
-      # --edit hands the terminal to $EDITOR/vi, which reads stdin directly. Without an
-      # interactive TTY (pipe/redirect/CI/background job) the editor would hang waiting
-      # for input it can never get, so refuse and point at the non-interactive path.
-      unless STDIN.tty? && STDOUT.tty?
-        abort "gori settings --edit: requires an interactive terminal; run 'gori settings' to print the path, then edit it directly"
+      # --edit spawns $EDITOR/vi with inherited stdio. A terminal editor reading from a
+      # non-tty stdin (pipe/redirect/CI/background job) hangs waiting for input it can
+      # never get, so require an interactive stdin. Guard on STDIN only: a GUI editor
+      # (`code -w`, `subl -w`) needs no tty, and stdout may legitimately be redirected,
+      # so don't over-restrict those — point at the non-interactive path otherwise.
+      unless STDIN.tty?
+        abort "gori settings --edit: stdin is not an interactive terminal; run 'gori settings' to print the path, then edit it directly"
       end
 
       cmd = Settings.editor_command
@@ -219,17 +221,20 @@ module Gori
         puts "  Runs automatically on first launch; use this to re-run it anytime."
         return
       end
-      # The wizard drives the terminal directly (raw mode + enhanced keyboard). With no
-      # interactive TTY — a pipe, redirect, CI, or a background job — Termisu would block
-      # on /dev/tty (or fail opaquely), so refuse up front with a clear message instead.
-      unless STDIN.tty? && STDOUT.tty?
-        abort "gori wizard: requires an interactive terminal — run it directly, not piped, redirected, or under CI/a background job"
-      end
       Paths.ensure_dirs
       Settings.load
       Tui::Theme.load_custom           # register user themes before the theme step
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame
-      term = Termisu.new
+      # The wizard drives /dev/tty directly (not STDIN/STDOUT — those may be redirected
+      # while a real terminal is still present), so guard on /dev/tty itself: Termisu.new
+      # opens it and raises with no controlling terminal (CI / a detached or background
+      # job), where the wizard would otherwise stall. Turn that into a clear message.
+      term =
+        begin
+          Termisu.new
+        rescue IO::Error
+          abort "gori wizard: requires an interactive terminal (no /dev/tty) — run it directly, not under CI or a detached/background job"
+        end
       term.enable_enhanced_keyboard       # Kitty disambiguation for IME/Unicode (mirrors App#run_tui)
       term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav
       begin
