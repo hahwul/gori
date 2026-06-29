@@ -17,13 +17,23 @@ describe "Chrome.reconcile" do
     out.find { |(s, _, _)| s == :project }.not_nil![2].should be_true
   end
 
-  it "honors a stored order and visibility, appending catalog tabs absent from prefs" do
+  it "honors a stored order and visibility, inserting absent catalog tabs at their position" do
     out = Chrome.reconcile([{"help", true}, {"project", false}])
     out[0][0].should eq(:help)    # stored order respected
     out[1][0].should eq(:project)
     out[1][2].should be_false     # explicit hide survives
-    out.map(&.first).includes?(:history).should be_true # appended (was absent from prefs)
-    out.find { |(s, _, _)| s == :history }.not_nil![2].should be_true # appended visible
+    out.map(&.first).includes?(:history).should be_true # inserted (was absent from prefs)
+    out.find { |(s, _, _)| s == :history }.not_nil![2].should be_true # inserted visible
+  end
+
+  it "slots a newly-added catalog tab at its catalog-relative position (Prism left of Findings)" do
+    # An older config saved before Prism existed: the catalog order minus :prism. Reconcile
+    # must place Prism where the catalog puts it (immediately left of Findings), not at the end.
+    prefs = Chrome::TABS.reject { |(s, _)| s == :prism }
+      .map { |(s, _)| {s.to_s, !Chrome::DEFAULT_HIDDEN.includes?(s)} }
+    order = Chrome.reconcile(prefs).map(&.first)
+    order.index(:prism).not_nil!.should eq(order.index(:findings).not_nil! - 1)
+    order.index(:prism).not_nil!.should be > order.index(:comparer).not_nil!
   end
 
   it "drops unknown ids and collapses duplicates to the first occurrence" do

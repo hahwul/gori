@@ -16,6 +16,7 @@ module Gori::Tui
       {:miner, "Miner"},
       {:convert, "Convert"},
       {:comparer, "Comparer"},
+      {:prism, "Prism"},
       {:findings, "Findings"},
       {:notes, "Notes"},
       {:agent, "Agent"},
@@ -29,24 +30,34 @@ module Gori::Tui
 
     # Reconcile stored prefs against the canonical catalog → full ordered
     # {symbol, label, visible?}. Removed/unknown ids are dropped, duplicates collapse to
-    # first occurrence, and catalog tabs absent from prefs are APPENDED with their default
-    # visibility (a tab added in a newer build is never hidden by an older config).
-    # Guarantees ≥1 visible (a hand-edited all-hidden config reveals the first entry).
+    # first occurrence, and catalog tabs absent from prefs are INSERTED at their
+    # catalog-relative position (next to their catalog neighbours, not dumped at the end)
+    # with their default visibility — so a tab added in a newer build (e.g. Prism, left of
+    # Findings) lands where the catalog puts it even for an existing config, and is never
+    # hidden by an older one. Guarantees ≥1 visible (a hand-edited all-hidden config reveals #1).
     def self.reconcile(prefs : Array({String, Bool})) : Array({Symbol, String, Bool})
       label_of = {} of Symbol => String
       by_str = {} of String => Symbol
-      TABS.each { |(sym, label)| label_of[sym] = label; by_str[sym.to_s] = sym }
+      cat_idx = {} of Symbol => Int32
+      TABS.each_with_index { |(sym, label), i| label_of[sym] = label; by_str[sym.to_s] = sym; cat_idx[sym] = i }
 
       out = [] of {Symbol, String, Bool}
-      seen = [] of Symbol # ≤9 elems; avoids requiring "set"
+      seen = [] of Symbol # ≤catalog-size elems; avoids requiring "set"
       prefs.each do |(id, vis)|
         next unless sym = by_str[id]? # removed/unknown id → drop
         next if seen.includes?(sym)   # duplicate → first wins
         seen << sym
         out << {sym, label_of[sym], vis}
       end
-      TABS.each do |(sym, label)| # forward-compat: append missing catalog tabs
-        out << {sym, label, !DEFAULT_HIDDEN.includes?(sym)} unless seen.includes?(sym)
+      # forward-compat: slot each missing catalog tab after the last present tab that
+      # precedes it in the catalog (walking TABS in catalog order keeps inserts stable).
+      TABS.each do |(sym, label)|
+        next if seen.includes?(sym)
+        seen << sym
+        ci = cat_idx[sym]
+        pos = 0
+        out.each_with_index { |(s, _, _), i| pos = i + 1 if cat_idx[s] < ci }
+        out.insert(pos, {sym, label, !DEFAULT_HIDDEN.includes?(sym)})
       end
       if out.none? { |(_, _, v)| v } # all-hidden (hand-edited json) → reveal #1
         f = out.first

@@ -1,0 +1,443 @@
+require "./screen"
+require "./theme"
+require "./frame"
+require "../store"
+require "../prism"
+require "../prism_query"
+
+module Gori::Tui
+  # The Prism tab: a passive/active scan-issue list (already grouped by code+host at the
+  # store) + a per-issue detail (affected URLs, remediation, sample evidence), topped by a
+  # MODE band (OFF / PASSIVE / ACTIVE) and a detected-technologies summary. Mirrors
+  # FindingsView structurally; the issues ARE the groups (the DB upserts one row per
+  # (code, host)), so there's no in-view folding.
+  class PrismView
+    QUERY_FIELDS = Prism::Filter::FIELDS
+
+    getter query : String
+    getter mode : Prism::Mode
+
+    def initialize
+      @all = [] of Store::PrismIssue
+      @issues = [] of Store::PrismIssue
+      @counts = StaticArray(Int32, 5).new(0) # severity tallies (Info..Critical) over @all
+      @tech = [] of String
+      @mode = Prism::Mode::Passive
+      @selected = 0
+      @scroll = 0
+      @detail = nil.as(Store::PrismIssue?)
+      @detail_flow = nil.as(Store::FlowRow?)
+      @detail_scroll = 0
+      @query = ""
+      @qcx = 0
+      @preedit_q = ""
+      @querying = false
+    end
+
+    def reload(store : Store) : Nil
+      @all = store.prism_issues
+      @mode = store.prism_mode
+      @tech = store.prism_tech_summary
+      recount
+      apply_filter
+      refresh_detail(store)
+    end
+
+    private def recount : Nil
+      @counts = StaticArray(Int32, 5).new(0)
+      @all.each { |i| @counts[i.severity.value] += 1 }
+    end
+
+    private def apply_filter : Nil
+      @issues = Prism::Filter.parse(@query).apply(@all)
+      @selected = @selected.clamp(0, {@issues.size - 1, 0}.max)
+    end
+
+    # Re-fetch the open detail (its status/affected may have changed) and its sample flow.
+    private def refresh_detail(store : Store) : Nil
+      if d = @detail
+        @detail = store.get_prism_issue(d.id)
+        @detail_flow = @detail.try(&.sample_flow_id).try { |fid| store.flow_row(fid) }
+      end
+    end
+
+    def move(delta : Int32) : Nil
+      return if @issues.empty?
+      @selected = (@selected + delta).clamp(0, @issues.size - 1)
+    end
+
+    def select_index(idx : Int32) : Nil
+      return if @issues.empty?
+      @selected = idx.clamp(0, @issues.size - 1)
+    end
+
+    def selected_index : Int32
+      @selected
+    end
+
+    def at_top? : Bool
+      @selected == 0
+    end
+
+    def detail_open? : Bool
+      !@detail.nil?
+    end
+
+    # No issues at all (the raw list) — gates "clear all".
+    def empty? : Bool
+      @all.empty?
+    end
+
+    def detail_issue : Store::PrismIssue?
+      @detail
+    end
+
+    # The issue an action targets: the open detail, else the list selection.
+    def target_issue : Store::PrismIssue?
+      @detail || @issues[@selected]?
+    end
+
+    def querying? : Bool
+      @querying
+    end
+
+    def filtering? : Bool
+      !@query.blank?
+    end
+
+    # Click hit-test: the MODE band (y), filter bar (y+1), header (y+2), divider (y+3),
+    # rows from y+4 — one row deeper than Findings because of the MODE band.
+    def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil if mx < rect.x || mx >= rect.right
+      top = rect.y + 4
+      list_h = {rect.bottom - top, 0}.max
+      i = my - top
+      return nil if i < 0 || i >= list_h
+      idx = @scroll + i
+      idx < @issues.size ? idx : nil
+    end
+
+    # --- `/` filter bar (live, in memory — mirrors FindingsView) --------------
+
+    def start_query : Nil
+      @querying = true
+      @qcx = @query.size
+    end
+
+    def stop_query : Nil
+      @querying = false
+    end
+
+    def cancel_query : Nil
+      @querying = false
+      @query = ""
+      @qcx = 0
+      @preedit_q = ""
+      apply_filter
+    end
+
+    def query_insert(ch : Char) : Nil
+      @query = "#{@query[0, @qcx]}#{ch}#{@query[@qcx..]}"
+      @qcx += 1
+      apply_filter
+    end
+
+    def query_backspace : Nil
+      return if @qcx == 0
+      @query = "#{@query[0, @qcx - 1]}#{@query[@qcx..]}"
+      @qcx -= 1
+      apply_filter
+    end
+
+    def query_move(d : Int32) : Nil
+      @qcx = (@qcx + d).clamp(0, @query.size)
+    end
+
+    def query_set_preedit(text : String) : Nil
+      @preedit_q = text
+    end
+
+    def query_complete : Bool
+      token = @query[0, @qcx][/\S*\z/]
+      return false if token.empty? || token.includes?(':')
+      if field = QUERY_FIELDS.find(&.starts_with?(token.downcase))
+        @query = "#{@query[0, @qcx - token.size]}#{field}#{@query[@qcx..]}"
+        @qcx += field.size - token.size
+        return true
+      end
+      false
+    end
+
+    # --- detail / mutations ---------------------------------------------------
+
+    def open_detail(store : Store) : Bool
+      issue = @issues[@selected]?
+      return false unless issue
+      @detail = issue
+      @detail_flow = issue.sample_flow_id.try { |fid| store.flow_row(fid) }
+      @detail_scroll = 0
+      true
+    end
+
+    def close_detail : Nil
+      @detail = nil
+      @detail_scroll = 0
+    end
+
+    def scroll_detail(delta : Int32) : Nil
+      @detail_scroll = {@detail_scroll + delta, 0}.max
+    end
+
+    def set_status(store : Store, status : Store::Status) : Nil
+      return unless issue = target_issue
+      store.update_prism_issue_status(issue.id, status)
+      reload(store)
+    end
+
+    def delete(store : Store) : Nil
+      if issue = @detail
+        store.delete_prism_issue(issue.id)
+        close_detail
+      elsif issue = @issues[@selected]?
+        store.delete_prism_issue(issue.id)
+      end
+      reload(store)
+    end
+
+    def clear(store : Store) : Nil
+      store.clear_prism_issues
+      close_detail
+      reload(store)
+    end
+
+    # --- rendering ------------------------------------------------------------
+
+    def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
+      return if rect.empty?
+      @detail ? render_detail(screen, rect, focused) : render_list(screen, rect, focused)
+    end
+
+    private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
+      render_mode_band(screen, rect)
+      render_filter_bar(screen, rect, rect.y + 1)
+      screen.text(rect.x + 1, rect.y + 2, "SEV", Theme.muted)
+      screen.text(rect.x + 7, rect.y + 2, "CAT", Theme.muted)
+      screen.text(rect.x + 14, rect.y + 2, "TITLE", Theme.muted)
+      Frame.inner_divider(screen, rect, rect.y + 3, border: Frame.pane_border(focused))
+      top = rect.y + 4
+      list_h = {rect.bottom - top, 0}.max
+      return render_empty(screen, rect, top) if @issues.empty?
+
+      ensure_visible(list_h)
+      (0...list_h).each do |i|
+        idx = @scroll + i
+        break if idx >= @issues.size
+        draw_row(screen, rect, @issues[idx], top + i, idx == @selected, focused)
+      end
+    end
+
+    private def draw_row(screen : Screen, rect : Rect, issue : Store::PrismIssue,
+                         y : Int32, selected : Bool, focused : Bool) : Nil
+      bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
+      if selected
+        screen.fill(Rect.new(rect.x, y, rect.w, 1), bg)
+        screen.cell(rect.x, y, '▎', Theme.accent, bg)
+      end
+      screen.text(rect.x + 1, y, severity_badge(issue.severity), severity_color(issue.severity), bg, Attribute::Bold)
+      screen.text(rect.x + 7, y, cat_tag(issue.category), Theme.muted, bg, width: 6)
+      # Right-to-left cluster: status · host · ×N(affected).
+      rx = rect.right - 1
+      st = status_tag(issue.status)
+      screen.text(rx - st.size, y, st, status_color(issue.status), bg)
+      rx -= st.size + 1
+      if !issue.host.empty?
+        screen.text({rx - issue.host.size, rect.x}.max, y, issue.host, Theme.muted, bg)
+        rx -= issue.host.size + 1
+      end
+      if issue.affected.size > 1
+        cnt = "×#{issue.affected.size}"
+        screen.text({rx - cnt.size, rect.x}.max, y, cnt, Theme.muted, bg)
+        rx -= cnt.size + 1
+      end
+      title_x = rect.x + 14
+      tw = {rx - title_x, 0}.max
+      screen.text(title_x, y, issue.title, selected ? Theme.text_bright : Theme.text, bg, width: tw)
+    end
+
+    private def render_empty(screen : Screen, rect : Rect, top : Int32) : Nil
+      msg = if @mode.off?
+              "scanning is OFF · press m (or space → set mode) to enable passive scanning"
+            elsif filtering?
+              @querying ? "no issues match · esc clears the filter" : "no issues match · / to edit the filter"
+            else
+              "no issues yet · capture in-scope traffic and Prism flags issues passively"
+            end
+      screen.text(rect.x + 1, top, msg, Theme.muted)
+    end
+
+    # Row 0: a filled MODE chip + detected-tech summary + right-aligned severity tallies.
+    private def render_mode_band(screen : Screen, rect : Rect) : Nil
+      x = chip(screen, rect.x + 1, rect.y, " #{@mode.title} ", mode_color(@mode)) + 1
+      unless @tech.empty?
+        screen.text(x, rect.y, @tech.join(" "), Theme.green, width: {rect.right - x - 14, 0}.max)
+      end
+      render_tallies(screen, rect)
+    end
+
+    private def render_tallies(screen : Screen, rect : Rect) : Nil
+      labels = {4 => "C", 3 => "H", 2 => "M", 1 => "L", 0 => "I"}
+      parts = [] of {String, Color}
+      labels.each do |val, lab|
+        n = @counts[val]
+        parts << {"#{lab}:#{n}", severity_color(Store::Severity.new(val))} if n > 0
+      end
+      return if parts.empty?
+      total = parts.sum { |(s, _)| s.size + 1 } - 1
+      rx = rect.right - 1 - total
+      parts.each do |(s, color)|
+        rx = screen.text(rx, rect.y, s, color)
+        rx = screen.text(rx, rect.y, " ", Theme.muted)
+      end
+    end
+
+    private def render_filter_bar(screen : Screen, rect : Rect, y : Int32) : Nil
+      if @querying
+        prefix = "filter › "
+        screen.text(rect.x + 1, y, prefix, Theme.accent)
+        base = rect.x + 1 + prefix.size
+        screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max)
+        return
+      end
+      rx = rect.right - 1
+      if filtering?
+        count = @issues.size.to_s
+        screen.text({rx - count.size, rect.x}.max, y, count, Theme.muted)
+        rx -= count.size + 2
+      end
+      left_w = {rx - (rect.x + 1), 0}.max
+      if filtering?
+        screen.text(rect.x + 1, y, ": #{@query}", Theme.text, width: left_w)
+      else
+        screen.text(rect.x + 1, y, "/ filter  ·  severity:  status:open  category:tech  host:", Theme.muted, width: left_w)
+      end
+    end
+
+    private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
+      issue = @detail || return
+      w = {rect.w - 2, 0}.max
+      code_label = "##{issue.code}"
+      screen.text(rect.right - code_label.size - 1, rect.y, code_label, Theme.muted)
+      screen.cell(rect.x + 1, rect.y, '●', severity_color(issue.severity))
+      title_w = {(rect.right - code_label.size - 2) - (rect.x + 3), 0}.max
+      screen.text(rect.x + 3, rect.y, issue.title, Theme.text_bright, width: title_w, attr: Attribute::Bold)
+
+      cx = rect.x + 1
+      cx = chip(screen, cx, rect.y + 1, " #{severity_badge(issue.severity)} ", severity_color(issue.severity))
+      cx = chip(screen, cx + 1, rect.y + 1, " #{issue.status.label} ", status_color(issue.status))
+      chip(screen, cx + 1, rect.y + 1, " #{issue.category} ", Theme.muted)
+
+      hint = Prism.remediation(issue.code)
+      screen.text(rect.x + 1, rect.y + 2, hint, Theme.muted, width: w) unless hint.empty?
+      evidence = if issue.evidence
+                   "detail   #{issue.evidence}"
+                 else
+                   "detail   (see affected URLs)"
+                 end
+      screen.text(rect.x + 1, rect.y + 3, evidence, Theme.muted, width: w)
+      ev = if flow = @detail_flow
+             "evidence #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
+           elsif fid = issue.sample_flow_id
+             "evidence flow ##{fid} (no longer captured)"
+           else
+             "evidence (none)"
+           end
+      screen.text(rect.x + 1, rect.y + 4, ev, Theme.muted, width: w)
+
+      y = rect.y + 5
+      Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
+      head = "AFFECTED URLS (#{issue.affected.size})  ·  seen ×#{issue.hit_count}"
+      screen.text(rect.x + 1, y + 1, head, Theme.accent, attr: Attribute::Bold)
+      list_y = y + 2
+      avail = {rect.bottom - list_y, 0}.max
+      @detail_scroll = @detail_scroll.clamp(0, {issue.affected.size - avail, 0}.max)
+      (0...avail).each do |i|
+        idx = @detail_scroll + i
+        break if idx >= issue.affected.size
+        screen.text(rect.x + 1, list_y + i, issue.affected[idx], Theme.text, width: w)
+      end
+    end
+
+    private def chip(screen : Screen, x : Int32, y : Int32, label : String, color : Color) : Int32
+      screen.text(x, y, label, Theme.bg, color, Attribute::Bold)
+    end
+
+    private def cat_tag(category : String) : String
+      case category
+      when Prism::Category::HEADERS  then "header"
+      when Prism::Category::COOKIES  then "cookie"
+      when Prism::Category::TECH     then "tech"
+      when Prism::Category::INFOLEAK then "leak"
+      when Prism::Category::CORS     then "cors"
+      when Prism::Category::ACTIVE   then "active"
+      else                                category
+      end
+    end
+
+    private def mode_color(m : Prism::Mode) : Color
+      case m
+      in Prism::Mode::Off     then Theme.muted
+      in Prism::Mode::Passive then Theme.accent
+      in Prism::Mode::Active  then Theme.orange
+      end
+    end
+
+    private def flow_location(f : Store::FlowRow) : String
+      f.target.starts_with?("http") ? f.target : "#{f.host}#{f.target}"
+    end
+
+    private def status_tag(s : Store::Status) : String
+      case s
+      when .confirmed?      then "conf"
+      when .false_positive? then "fp"
+      when .resolved?       then "done"
+      else                       "open"
+      end
+    end
+
+    private def status_color(s : Store::Status) : Color
+      case s
+      when .confirmed?      then Theme.red
+      when .false_positive? then Theme.muted
+      when .resolved?       then Theme.green
+      else                       Theme.accent
+      end
+    end
+
+    private def severity_badge(s : Store::Severity) : String
+      case s
+      when .critical? then "CRIT"
+      when .high?     then "HIGH"
+      when .medium?   then "MED"
+      when .low?      then "LOW"
+      else                 "INFO"
+      end
+    end
+
+    private def severity_color(s : Store::Severity) : Color
+      case s
+      when .critical? then Theme.red
+      when .high?     then Theme.orange
+      when .medium?   then Theme.yellow
+      when .low?      then Theme.accent
+      else                 Theme.muted
+      end
+    end
+
+    private def ensure_visible(h : Int32) : Nil
+      return if h <= 0
+      @scroll = @selected if @selected < @scroll
+      @scroll = @selected - h + 1 if @selected >= @scroll + h
+      @scroll = 0 if @scroll < 0
+    end
+  end
+end

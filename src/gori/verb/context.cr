@@ -126,6 +126,19 @@ module Gori
       abstract def finding_replay_flow : Nil              # send the linked flow to Replay
       abstract def findings_export(format : Symbol) : Nil # :markdown | :json → project dir
 
+      # prism (passive/active scan issues — grouped by code+host)
+      abstract def prism_move(delta : Int32) : Nil
+      abstract def prism_open : Nil        # open the selected issue's detail
+      abstract def prism_close : Nil       # back to the list
+      abstract def prism_query : Nil       # focus the `/` filter bar
+      abstract def prism_set_mode : Nil    # open the OFF/Passive/Active picker
+      abstract def prism_clear : Nil       # delete all issues (after a confirm)
+      abstract def prism_delete : Nil      # delete the open/selected issue (after a confirm)
+      abstract def prism_set_status : Nil  # open the triage-status picker for the open issue
+      abstract def prism_open_flow : Nil   # open the issue's sample flow in History
+      abstract def prism_replay_flow : Nil # send the issue's sample flow to Replay
+      abstract def prism_promote : Nil     # create a Finding from the open issue
+
       # intercept (hold-and-decide; P4)
       abstract def intercept_toggle : Nil          # toggle the hold queue on/off
       abstract def intercept_forward : Nil         # forward the selected held message (edited bytes)

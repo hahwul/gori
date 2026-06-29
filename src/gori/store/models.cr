@@ -170,6 +170,32 @@ module Gori
       end
     end
 
+    # A grouped Prism scan issue (V20): one row per distinct (code, host). Machine-found
+    # (by the passive/active analyzer), as opposed to the human-confirmed `Finding`. The
+    # affected URLs accumulate in `affected` (capped) while `hit_count` counts every
+    # observation; `severity` rises to the max seen. Reuses the shared Severity/Status
+    # enums; `status` lets a group be triaged (confirmed / false-positive / resolved) or
+    # promoted to a Finding. `category` drives the filter lens and the project tech summary.
+    struct PrismIssue
+      getter id : Int64
+      getter code : String
+      getter category : String
+      getter host : String
+      getter title : String
+      getter severity : Severity
+      getter status : Status
+      getter hit_count : Int64
+      getter affected : Array(String) # distinct affected URLs (parsed from JSON, capped)
+      getter sample_flow_id : Int64?  # a representative source flow (may be pruned → nil)
+      getter evidence : String?       # short snippet/header value/param name — NEVER a secret value
+      getter first_seen : Int64       # unix micros
+      getter last_seen : Int64
+
+      def initialize(@id, @code, @category, @host, @title, @severity, @status, @hit_count,
+                     @affected, @sample_flow_id, @evidence, @first_seen, @last_seen)
+      end
+    end
+
     # Which side of a flow a Match&Replace rule rewrites. Stored as the lowercase
     # member name ("request"/"response").
     enum RuleTarget

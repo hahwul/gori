@@ -320,6 +320,50 @@ private class FakeContext < ExecContext
     @calls << :findings_export
   end
 
+  def prism_move(delta : Int32) : Nil
+    @calls << :prism_move
+  end
+
+  def prism_open : Nil
+    @calls << :prism_open
+  end
+
+  def prism_close : Nil
+    @calls << :prism_close
+  end
+
+  def prism_query : Nil
+    @calls << :prism_query
+  end
+
+  def prism_set_mode : Nil
+    @calls << :prism_set_mode
+  end
+
+  def prism_clear : Nil
+    @calls << :prism_clear
+  end
+
+  def prism_delete : Nil
+    @calls << :prism_delete
+  end
+
+  def prism_set_status : Nil
+    @calls << :prism_set_status
+  end
+
+  def prism_open_flow : Nil
+    @calls << :prism_open_flow
+  end
+
+  def prism_replay_flow : Nil
+    @calls << :prism_replay_flow
+  end
+
+  def prism_promote : Nil
+    @calls << :prism_promote
+  end
+
   def toggle_capture : Nil
     @calls << :toggle_capture
   end

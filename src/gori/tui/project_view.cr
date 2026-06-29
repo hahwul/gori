@@ -34,6 +34,7 @@ module Gori::Tui
       @project = nil
       @flow_count = 0
       @findings_count = 0
+      @prism_tech = [] of String # Prism-detected representative technologies (project facts)
       @db_size = 0
       @total_captured = 0
       @created = nil
@@ -68,6 +69,7 @@ module Gori::Tui
       @project = project
       @flow_count = store.count
       @findings_count = store.count_findings
+      @prism_tech = store.prism_tech_summary
       @db_size = project.db_size
       @total_captured = store.total_size
       earliest = store.earliest_created_at
@@ -535,6 +537,7 @@ module Gori::Tui
         {"Flows", @flow_count.to_s},
         {"Captured", human_size(@total_captured)},
         {"Findings", @findings_count.to_s},
+        {"Technologies", @prism_tech.empty? ? "—" : @prism_tech.join(", ")},
       ]
       lines.each do |(label, value)|
         break if y > max_y

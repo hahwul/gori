@@ -173,6 +173,28 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def findings_export(format : Symbol) : Nil; end
 
+  def prism_move(delta : Int32) : Nil; end
+
+  def prism_open : Nil; end
+
+  def prism_close : Nil; end
+
+  def prism_query : Nil; end
+
+  def prism_set_mode : Nil; end
+
+  def prism_clear : Nil; end
+
+  def prism_delete : Nil; end
+
+  def prism_set_status : Nil; end
+
+  def prism_open_flow : Nil; end
+
+  def prism_replay_flow : Nil; end
+
+  def prism_promote : Nil; end
+
   def toggle_capture : Nil; end
 
   def intercept_toggle : Nil; end
