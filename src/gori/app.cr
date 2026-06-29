@@ -45,7 +45,10 @@ module Gori
       Tui::Theme.load_custom           # register user themes from <GORI_HOME>/themes/*.json
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame (picker included)
       projects = ProjectRegistry.new(Paths.projects_dir)
-      term = Termisu.new
+      # /dev/tty guard at the shared construction point: covers both this TUI and the
+      # first-run wizard auto-launched below, so a no-tty run (CI/detached) gets a clean
+      # message instead of a raw backtrace.
+      term = Tui.open_terminal("run it directly, not under CI or a detached/background job, or use --headless for non-interactive capture")
       term.enable_enhanced_keyboard       # Kitty 17u (disambig + report_text) for better IME/Unicode; avoids report_all_keys(31u) which can split Hangul jamo. Committed text via raw UTF-8 bytes (IME composed syllables) + CSI for specials; Preedit via 0-code CSI if terminal provides.
       term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav; one enable covers both the picker and the runner (same term). Runner reconciles live on settings save; term.close disables on exit.
 

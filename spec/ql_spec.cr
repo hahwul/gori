@@ -63,6 +63,23 @@ describe Gori::QL do
     f.args.should eq(["%login%", "%login%", "%login%"])
   end
 
+  it "free-texts the WHOLE token for an unknown/typo'd field (keeps the prefix)" do
+    # `hosst:acme` is a typo of `host:`. The fallback must search the full token, not
+    # just the value after the ':', so the prefix isn't silently dropped (and a typo
+    # surfaces as a no-match rather than masquerading as a successful host filter).
+    f = Gori::QL.parse("hosst:acme.test")
+    f.sql.should eq("((lower(method) LIKE ? OR lower(host) LIKE ? OR lower(target) LIKE ?))")
+    f.args.should eq(["%hosst:acme.test%", "%hosst:acme.test%", "%hosst:acme.test%"])
+  end
+
+  it "free-texts flag: as an unknown field (no flow-flag store yet)" do
+    # gori has no per-flow flag store (Store#flags_for is a stub), so `flag:` is not a
+    # real field: it free-texts the whole token like any other unknown field rather
+    # than compiling to a silent never-match that looks like a working-but-empty filter.
+    f = Gori::QL.parse("flag:reflected")
+    f.args.should eq(["%flag:reflected%", "%flag:reflected%", "%flag:reflected%"])
+  end
+
   it "matches everything for an empty query" do
     Gori::QL.parse("   ").sql.should eq("1")
   end
@@ -180,6 +197,8 @@ describe "Gori::Store#search (QL)" do
       post_login.size.should eq(1)
       post_login.first.target.should eq("/login")
 
+      # flag: is not a real field (no flow-flag store): it free-texts the whole token,
+      # which matches none of these flows' method/host/target.
       none = store.search(Gori::QL.parse("flag:reflected"), 50)
       none.should be_empty
     end

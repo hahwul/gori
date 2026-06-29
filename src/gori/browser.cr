@@ -138,7 +138,9 @@ module Gori
       if certutil = Process.find_executable("certutil")
         import_firefox_ca(certutil, profile, spec.ca_cert_path) ? "CA imported, proxy set" : "proxy set (CA import failed)"
       else
-        "proxy set — install certutil (nss) to auto-trust the CA"
+        # No certutil → the CA can't be injected into Firefox's NSS store, so HTTPS sites
+        # will show SEC_ERROR/cert warnings. Say so, not just "install certutil".
+        "proxy set — HTTPS will show cert errors; install certutil (nss) to auto-trust the CA"
       end
     end
 

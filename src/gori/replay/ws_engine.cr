@@ -12,10 +12,18 @@ module Gori
     # H2Engine (one request → one buffered response), this does the HTTP/1.1
     # upgrade handshake, then a scripted exchange: send each outbound message as a
     # masked client frame, then drain inbound frames until the server sends Close
-    # or goes idle. One-shot and sequential — it does NOT interleave per-message
-    # request/response, and it strips permessage-deflate from the handshake (so a
-    # session originally captured WITH compression replays its stored payloads
-    # uncompressed; edit the messages, or expect garbage for compressed binaries).
+    # or goes idle.
+    #
+    # Two deliberate limitations of this simplified replay:
+    #  - Sequential, not interleaved: ALL recorded client→server messages are sent
+    #    first, then the server's responses are drained. A protocol that depends on
+    #    per-message request/response interleaving will not replay faithfully.
+    #  - No permessage-deflate: the handshake omits the extension, AND the live
+    #    capture relay stores frame payloads verbatim without decompressing them. So
+    #    a session captured over a compressed connection holds COMPRESSED bytes;
+    #    replaying them to a server that isn't negotiating deflate sends undecodable
+    #    input (and compressed server frames likewise can't be read). To replay such
+    #    a session, capture it with compression disabled in the browser.
     module WsEngine
       GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" # RFC 6455 §1.3 accept magic
 

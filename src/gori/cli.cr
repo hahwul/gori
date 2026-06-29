@@ -19,7 +19,7 @@ module Gori
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
   # - `gori wizard`                 → interactive first-run setup wizard (bind/theme/AI)
-  # - `gori update`                 → placeholder for future work
+  # - `gori update`                 → print how to update gori (no built-in self-update yet)
   #
   # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
   # via the tui path for backward compatibility.
@@ -76,7 +76,7 @@ module Gori
       puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
       puts "  wizard    Interactive setup wizard (bind, theme, AI) — also runs on first launch"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
-      puts "  update    [placeholder] Self-update"
+      puts "  update    Show how to update gori to the latest version"
       puts ""
       puts "See 'gori <command> --help' for more."
       puts "Flags like --version and --help work at the top level too."
@@ -160,6 +160,15 @@ module Gori
         return
       end
 
+      # --edit spawns $EDITOR/vi with inherited stdio. A terminal editor reading from a
+      # non-tty stdin (pipe/redirect/CI/background job) hangs waiting for input it can
+      # never get, so require an interactive stdin. Guard on STDIN only: a GUI editor
+      # (`code -w`, `subl -w`) needs no tty, and stdout may legitimately be redirected,
+      # so don't over-restrict those — point at the non-interactive path otherwise.
+      unless STDIN.tty?
+        abort "gori settings --edit: stdin is not an interactive terminal; run 'gori settings' to print the path, then edit it directly"
+      end
+
       cmd = Settings.editor_command
       status = Process.run(cmd[0], cmd[1..] + [path],
         input: Process::Redirect::Inherit, output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
@@ -216,7 +225,10 @@ module Gori
       Settings.load
       Tui::Theme.load_custom           # register user themes before the theme step
       Tui::Theme.apply(Settings.theme) # honour the persisted theme from the first frame
-      term = Termisu.new
+      # The wizard drives /dev/tty directly (not STDIN/STDOUT, which may be redirected
+      # while a real terminal is still present), so the guard lives at the shared
+      # Tui.open_terminal construction point (same as App#run_tui).
+      term = Tui.open_terminal("run the wizard directly, not under CI or a detached/background job")
       term.enable_enhanced_keyboard       # Kitty disambiguation for IME/Unicode (mirrors App#run_tui)
       term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav
       begin
@@ -257,6 +269,10 @@ module Gori
 
       resolved = resolve_mcp_db(db_path, project)
       Log.info { "mcp: serving #{resolved} (actions=#{!read_only})" }
+      # Make the implicit fallback visible (STDERR only — STDOUT is the JSON-RPC stream):
+      # with no --db/--project the most-recently-used project (or the default db) is served,
+      # which can silently be an empty database an AI client then queries as if it were real.
+      Log.warn { "mcp: no --db/--project given — defaulting to #{resolved}" } if db_path.nil? && project.nil?
 
       # Opening a non-SQLite / unreadable file raises deep in the driver; turn that
       # into a clean error instead of an unhandled backtrace (parity with `gori run`).
@@ -266,6 +282,7 @@ module Gori
         rescue ex : DB::Error | SQLite3::Exception
           abort "gori mcp: cannot open database #{resolved}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
         end
+      Log.warn { "mcp: #{resolved} has no captured flows (empty database)" } if store.count.zero?
       begin
         server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream)
         server.run # blocks until STDIN EOF (client closed)
@@ -299,11 +316,19 @@ module Gori
     private def self.run_update(args : Array(String)) : Nil
       if args.any? { |a| ["-h", "--help"].includes?(a) }
         puts "Usage: gori update"
-        puts "  (placeholder) Will check for and apply updates."
+        puts "  Show how to update gori to the latest version."
         return
       end
-      puts "gori update: not implemented yet."
-      puts "If installed via Homebrew: brew upgrade gori"
+      # No built-in self-update yet (no release/download pipeline). Rather than print a
+      # dead "not implemented" line, give the user the real ways to get a newer build.
+      puts "gori #{VERSION}"
+      puts ""
+      puts "gori has no built-in self-update yet. To update:"
+      puts ""
+      puts "  • From source:  git pull && shards install \\"
+      puts "                  && crystal build src/main.cr -o bin/gori --release"
+      puts "  • Releases:     #{REPOSITORY_URL}/releases"
+      puts "  • Homebrew:     brew upgrade gori   (once a formula is published)"
     end
   end
 end
