@@ -64,6 +64,12 @@ module Gori::Tui
       @current_idx
     end
 
+    # Show the strip from the FIRST fuzzer (not ≥2): a single session still labels its
+    # chip and exposes the strip's space-menu. Empty → no strip.
+    def subtab_strip_shown? : Bool
+      !@fuzzers.empty?
+    end
+
     def view_at(idx : Int32) : FuzzerView?
       (0 <= idx < @fuzzers.size) ? @fuzzers[idx].view : nil
     end
@@ -96,7 +102,7 @@ module Gori::Tui
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
       body_rect = rect
-      if @fuzzers.size >= 2
+      if subtab_strip_shown?
         sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
         BodyChrome.render_subtab_strip(screen, sub_rect, subtab_labels, @current_idx, focus == :subtabs)
       end
@@ -215,7 +221,7 @@ module Gori::Tui
       key = ev.key
       case
       when key.enter?, key.down? then v.pane_advance(1)
-      when key.up?               then @host.request_focus(@fuzzers.size >= 2 ? :subtabs : :menu)
+      when key.up?               then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
       when key.backspace?        then v.target_backspace
       when key.left?             then v.target_move(-1)
       when key.right?            then v.target_move(1)
@@ -242,7 +248,7 @@ module Gori::Tui
     end
 
     private def template_up(v : FuzzerView) : Nil
-      v.at_top? ? @host.request_focus(@fuzzers.size >= 2 ? :subtabs : :menu) : v.template_move(-1, 0)
+      v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.template_move(-1, 0)
     end
 
     private def edit_config(ev : Termisu::Event::Key, v : FuzzerView) : Nil
@@ -261,14 +267,14 @@ module Gori::Tui
     end
 
     private def config_up(v : FuzzerView) : Nil
-      v.at_top? ? @host.request_focus(@fuzzers.size >= 2 ? :subtabs : :menu) : v.form_move(-1)
+      v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.form_move(-1)
     end
 
     private def handle_results(ev : Termisu::Event::Key, v : FuzzerView) : Nil
       key = ev.key
       case
       when key.enter?   then v.open_detail
-      when key.up?      then v.at_top? ? @host.request_focus(@fuzzers.size >= 2 ? :subtabs : :menu) : v.results_move(-1)
+      when key.up?      then v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.results_move(-1)
       when key.down?    then v.results_move(1)
       when key.lower_o? then @host.status(v.cycle_sort)
       when key.lower_m? then @host.status(v.toggle_matched_only)
@@ -286,7 +292,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      body = @fuzzers.size >= 2 ? BodyChrome.carve_subtab_row(rect)[1] : rect
+      body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
       return true unless v = current_view
       if pane = v.pane_at(body, mx, my)
         save_current
