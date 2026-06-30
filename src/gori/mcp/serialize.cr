@@ -182,10 +182,6 @@ module Gori
               j.field "encoding", "text"
               j.field "size", bytes.size
               j.field "truncated", cut || wire_truncated
-              # `truncated` stays true for either cause (back-compat); `wire_truncated`
-              # disambiguates a capture-time cut (data gone at source, not just the
-              # display cap) so the caller knows whether more is recoverable.
-              j.field "wire_truncated", true if wire_truncated
               # byte_slice can sever a multi-byte codepoint at the cap → scrub the
               # partial tail so the JSON line stays valid UTF-8.
               j.field "text", cut ? s.byte_slice(0, MAX_TEXT).scrub : s
@@ -196,12 +192,12 @@ module Gori
               j.field "binary", true
               j.field "size", bytes.size
               j.field "truncated", cut || wire_truncated
-              # `truncated` stays true for either cause (back-compat); `wire_truncated`
-              # disambiguates a capture-time cut (data gone at source, not just the
-              # display cap) so the caller knows whether more is recoverable.
-              j.field "wire_truncated", true if wire_truncated
               j.field "base64", Base64.strict_encode(slice)
             end
+            # `truncated` (above) is true for either cause (back-compat); `wire_truncated`
+            # disambiguates a capture-time cut (data gone at source, not just the display
+            # cap) so the caller knows whether more is recoverable. Branch-independent.
+            j.field "wire_truncated", true if wire_truncated
             j.field "note", note if note
           end
         end

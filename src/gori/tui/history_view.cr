@@ -610,11 +610,12 @@ module Gori::Tui
         # Mirror Findings/Prism: a recovery hint under the message. The QL-clear
         # cue only applies to a real query (not a Scope-lens-only empty set, which
         # ⇧S toggles off), so branch on @querying / @query before filtering?.
+        # Branch on a real `/` query FIRST (querying-aware hint): a blank-query empty
+        # set is caused by the Scope lens or no traffic, where "esc clears the filter"
+        # would mislead (⇧S clears the lens). Mirrors sitemap_view's ordering.
         msg, hint =
-          if @querying
-            {"no flows match", "esc clears the filter"}
-          elsif !@query.blank?
-            {"no flows match", "/ to edit the filter"}
+          if !@query.blank?
+            {"no flows match", @querying ? "esc clears the filter" : "/ to edit the filter"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             {"no flows in scope", "⇧S clears the scope lens"}
           else

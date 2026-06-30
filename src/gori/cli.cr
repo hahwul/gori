@@ -176,10 +176,11 @@ module Gori
     end
 
     private def self.run_export(args : Array(String)) : Nil
-      # Only the generic usage when there's no subcommand (bare or a leading flag);
-      # `gori export ca-cert --help` must fall through to the ca-cert parser, which
-      # documents --ca-dir and its own -h/--help.
-      if args.empty? || args[0].starts_with?("-")
+      # Generic usage only for a bare invocation or a top-level help flag. An unknown
+      # dash-prefixed first arg (e.g. `--bogus`) must still fall through to the else
+      # below (error + exit 1), and `gori export ca-cert --help` must reach the
+      # ca-cert parser (which documents --ca-dir and its own -h/--help).
+      if args.empty? || args[0] == "-h" || args[0] == "--help"
         print_export_usage(STDOUT)
         return
       end

@@ -31,7 +31,11 @@ module Gori::Tui
     # Returns the number of bytes actually placed on the clipboard (≤ MAX_CLIP), so
     # callers can compare against the source size and report when the copy was clipped.
     def self.copy(data : String, io : IO = STDOUT) : Int32
-      data = data[0, MAX_CLIP] if data.size > MAX_CLIP # bound the tty write
+      # Clip by BYTES (not chars): MAX_CLIP bounds the OSC 52 tty write, and the
+      # returned count is a byte count the caller compares to the source byte size.
+      # `byte_slice` may sever a trailing multi-byte codepoint, but the sequence is
+      # base64-encoded from the raw bytes, so that's harmless for a clipboard cap.
+      data = data.byte_slice(0, MAX_CLIP) if data.bytesize > MAX_CLIP
       io.print(osc52(data, tmux: !ENV["TMUX"]?.nil?))
       io.flush
       data.bytesize

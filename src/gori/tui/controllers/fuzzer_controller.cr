@@ -390,7 +390,13 @@ module Gori::Tui
       case ev
       when Fuzz::ProgressEvent
         v.apply_progress(ev.progress)
-        @host.jobs.progress(v.job_id, ev.progress.sent.to_i, ev.progress.total.try(&.to_i), "#{ev.progress.matched} hit")
+        # Fuzz totals are Int64 and can exceed Int32::MAX (cluster-bomb / brute / huge
+        # ranges); Jobs.progress takes Int32, and Int64#to_i is checked (raises
+        # OverflowError on the run-loop fiber). Clamp to the Int32 ceiling for display.
+        @host.jobs.progress(v.job_id,
+          ev.progress.sent.clamp(0_i64, Int32::MAX.to_i64).to_i32,
+          ev.progress.total.try(&.clamp(0_i64, Int32::MAX.to_i64).to_i32),
+          "#{ev.progress.matched} hit")
       when Fuzz::ResultEvent then v.append_result(ev.result)
       when Fuzz::DoneEvent
         v.finish_run

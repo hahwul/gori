@@ -23,4 +23,18 @@ describe Gori::Tui::Clipboard do
     Gori::Tui::Clipboard.copy("xyz", io)
     io.to_s.should contain(Base64.strict_encode("xyz"))
   end
+
+  it "returns the byte count actually placed on the clipboard" do
+    # "héllo" is 6 bytes (é = 2 bytes) but 5 chars — the return is bytes.
+    Gori::Tui::Clipboard.copy("héllo", IO::Memory.new).should eq(6)
+  end
+
+  it "clips to MAX_CLIP BYTES, not chars, for multi-byte payloads" do
+    # 30k chars × 3 bytes = 90k bytes: over the 64KB byte cap but under it by char
+    # count, so a char-based clip would overshoot the cap. The return must be the cap.
+    big = "한" * 30_000
+    big.size.should be < Gori::Tui::Clipboard::MAX_CLIP     # under cap by chars
+    big.bytesize.should be > Gori::Tui::Clipboard::MAX_CLIP # over cap by bytes
+    Gori::Tui::Clipboard.copy(big, IO::Memory.new).should eq(Gori::Tui::Clipboard::MAX_CLIP)
+  end
 end

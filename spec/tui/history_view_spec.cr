@@ -376,6 +376,27 @@ describe Gori::Tui::HistoryView do
       backend.fg_at(hx, hy).should eq(Theme.syn_header)
     end
   end
+
+  it "shows the scope-lens empty hint (not the filter hint) when querying with a blank query" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/a", 200) # captured on host h.test
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "other.test") # excludes the h.test flow → in-scope set empty
+      scope.enable
+      view = HistoryView.new
+      view.set_scope(scope)
+      view.reload(store)
+      view.rows.empty?.should be_true
+      view.start_query # filter bar open, query still blank
+
+      backend = MemoryBackend.new(80, 12)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 80, 12))
+      rows = (0...12).map { |y| backend.row(y) }.join("\n")
+      rows.should contain("no flows in scope")
+      rows.should contain("⇧S clears the scope lens")
+      rows.should_not contain("esc clears the filter") # would be misleading — esc won't unfilter
+    end
+  end
 end
 
 describe Gori::Tui::Keybind do
