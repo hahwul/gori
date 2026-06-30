@@ -2,6 +2,7 @@ require "json"
 require "../store"
 require "../fuzz"
 require "../miner"
+require "../sitemap"
 require "../prism/group"
 require "../notes"
 
@@ -217,6 +218,112 @@ module Gori
           j.field "bytes", text.bytesize
           j.field "current", current
           j.field "text", text if with_text
+        end
+      end
+
+      # --- sitemap tree -------------------------------------------------------
+
+      # The host → path endpoint tree as an indented `tree(1)`-style listing. Each
+      # host is a root (with its endpoint count); children draw ├─/└─ guides. An
+      # endpoint node shows its method set, a folded numeric run its value count, and
+      # a path tag is appended as "# memo". Hosts are separated by a blank line. Empty
+      # input → "" (the caller prints an empty-state to STDERR instead).
+      def self.sitemap_text(hosts : Array(Sitemap::Node)) : String
+        String.build do |io|
+          hosts.each_with_index do |host, i|
+            io << '\n' if i > 0
+            io << host.label
+            io << "  (" << sitemap_path_count(host.endpoints) << ')' if host.endpoints > 0
+            io << '\n'
+            sitemap_text_children(host, "", io)
+          end
+        end
+      end
+
+      private def self.sitemap_text_children(node : Sitemap::Node, prefix : String, io : IO) : Nil
+        last = node.children.size - 1
+        node.children.each_with_index do |child, i|
+          io << prefix << (i == last ? "└─ " : "├─ ")
+          sitemap_node_label(child, io)
+          io << '\n'
+          # A folded numeric group renders collapsed (its values stay in the chip),
+          # matching the TUI default; descend into every other node.
+          sitemap_text_children(child, prefix + (i == last ? "   " : "│  "), io) unless child.grouped
+        end
+      end
+
+      private def self.sitemap_node_label(node : Sitemap::Node, io : IO) : Nil
+        io << node.label
+        if node.grouped
+          io << "  (" << node.children.size << " values)"
+        elsif !node.methods.empty?
+          io << "  [" << node.methods.join(' ') << ']'
+        end
+        if t = node.tag
+          io << "  # " << t
+        end
+      end
+
+      private def self.sitemap_path_count(n : Int32) : String
+        n == 1 ? "1 path" : "#{n} paths"
+      end
+
+      # Flat endpoint listing — one line per (host, path) with its comma-joined method
+      # set, e.g. "GET,POST  acme.test/api/users". Pipe/grep-friendly; numeric folding
+      # is irrelevant here (every endpoint is listed, even folded ones). Empty → "".
+      def self.sitemap_paths(hosts : Array(Sitemap::Node)) : String
+        String.build do |io|
+          hosts.each { |host| sitemap_host_paths(host, host.label, io) }
+        end
+      end
+
+      private def self.sitemap_host_paths(node : Sitemap::Node, host : String, io : IO) : Nil
+        io << node.methods.join(',') << "  " << host << node.path << '\n' unless node.methods.empty?
+        node.children.each { |c| sitemap_host_paths(c, host, io) }
+      end
+
+      # The endpoint tree as JSON: an array of host objects, each `{host, endpoints,
+      # tag?, children}`. A child node is `{label, path, methods?, grouped?, tag?,
+      # children?}`. The stable, documented machine contract. Unlike the text tree
+      # (which renders a folded `grouped` node collapsed), JSON keeps the fold's
+      # children nested under it — the complete tree, with `grouped:true` as the hint
+      # so a consumer can collapse them itself.
+      def self.sitemap_json(hosts : Array(Sitemap::Node)) : String
+        JSON.build do |j|
+          j.array { hosts.each { |h| sitemap_host_json(j, h) } }
+        end
+      end
+
+      private def self.sitemap_host_json(j : JSON::Builder, host : Sitemap::Node) : Nil
+        j.object do
+          j.field "host", host.label
+          j.field "endpoints", host.endpoints
+          if t = host.tag
+            j.field "tag", t
+          end
+          sitemap_children_json(j, host)
+        end
+      end
+
+      private def self.sitemap_node_json(j : JSON::Builder, node : Sitemap::Node) : Nil
+        j.object do
+          j.field "label", node.label
+          j.field "path", node.path
+          unless node.methods.empty?
+            j.field("methods") { j.array { node.methods.each { |m| j.string(m) } } }
+          end
+          j.field "grouped", true if node.grouped
+          if t = node.tag
+            j.field "tag", t
+          end
+          sitemap_children_json(j, node)
+        end
+      end
+
+      private def self.sitemap_children_json(j : JSON::Builder, node : Sitemap::Node) : Nil
+        return if node.children.empty?
+        j.field "children" do
+          j.array { node.children.each { |c| sitemap_node_json(j, c) } }
         end
       end
 
