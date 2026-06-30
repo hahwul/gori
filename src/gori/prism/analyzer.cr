@@ -22,7 +22,7 @@ module Gori
 
       getter events : Channel(Event)
 
-      private record ActiveTask, plan : Active::Plan, detail : Store::FlowDetail
+      private record ActiveTask, rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail
 
       def initialize(@store : Store, @scope : Scope, @input : Channel(Store::FlowEvent),
                      @mode : Mode, @verify_upstream : Bool)
@@ -51,11 +51,13 @@ module Gori
         spawn(name: "gori-prism-active") { active_loop }
       end
 
-      # Winds the analyzer down BEFORE the store/channels close: stop accepting active work
-      # and close the active queue so its worker exits. The passive fiber exits when the
-      # input (prism_events) channel is closed by Session#close.
+      # Winds the analyzer down BEFORE the store/channels close: stop accepting active work,
+      # close the active queue so its worker exits, and close the input feed so the passive
+      # fiber unblocks and exits (this analyzer is the channel's only consumer; the store's
+      # publish side is non-blocking and guards against the close). Idempotent.
       def stop : Nil
         @stopped = true
+        @input.close
         @active_jobs.close
       rescue Channel::ClosedError
       end
@@ -70,16 +72,21 @@ module Gori
           next unless @mode.scanning?
           next unless ev.kind == :updated # analyze when the response side exists
           next if @analyzed.includes?(ev.id)
-          detail = @store.get_flow(ev.id)
-          next unless detail
-          @analyzed << ev.id
-          trim(@analyzed, ANALYZED_CAP)
-          process(detail)
+          begin
+            detail = @store.get_flow(ev.id)
+            next unless detail
+            @analyzed << ev.id
+            trim(@analyzed, ANALYZED_CAP)
+            process(detail)
+          rescue DB::Error | SQLite3::Exception
+            # A transient store error (e.g. SQLITE_BUSY) must NOT kill the scanner for the rest
+            # of the session — skip this flow and keep draining. On real shutdown the input
+            # channel is closed, so the next receive? returns nil and the loop exits cleanly.
+            next
+          end
         end
       rescue Channel::ClosedError
         # input closed during shutdown — exit quietly
-      rescue DB::Error | SQLite3::Exception
-        # store closing under a buffered event — clean shutdown, stop the fiber
       end
 
       private def process(detail : Store::FlowDetail) : Nil
@@ -90,7 +97,7 @@ module Gori
         end
         maybe_enqueue_active(detail)
       rescue ex : DB::Error | SQLite3::Exception
-        raise ex # shutdown — let passive_loop's rescue exit
+        raise ex # bubble to passive_loop's per-flow rescue (skip this flow, keep scanning)
       rescue
         # a single flow's analysis blew up — skip it, keep scanning the rest
       end
@@ -103,17 +110,23 @@ module Gori
         # Active probes ONLY configured+enabled in-scope hosts (in_scope_url? is permissive
         # when scope is inactive, so gate on active? first) — the user's "in-scope only" rule.
         return unless @scope.active? && @scope.in_scope_url?(url, row.host)
-        plan = Active.plan(detail)
+        Active::RULES.each { |rule| enqueue_probe(rule, detail) }
+      rescue Channel::ClosedError
+      end
+
+      private def enqueue_probe(rule : Active::Rule, detail : Store::FlowDetail) : Nil
+        plan = rule.plan(detail)
         return unless plan
         return if @active_seen.includes?(plan.dedup_key)
-        @active_seen << plan.dedup_key
-        trim(@active_seen, ACTIVE_SEEN_CAP)
         select
-        when @active_jobs.send(ActiveTask.new(plan, detail))
+        when @active_jobs.send(ActiveTask.new(rule, plan, detail))
+          # Record the dedup key ONLY once the task is actually queued, so a target dropped on
+          # a full queue is re-probed when its next flow arrives (not suppressed forever).
+          @active_seen << plan.dedup_key
+          trim(@active_seen, ACTIVE_SEEN_CAP)
         else
-          # queue full — drop (dedup key already recorded; a lightweight scan tolerates gaps)
+          # queue full — drop without recording; the next matching flow re-attempts.
         end
-      rescue Channel::ClosedError
       end
 
       # --- active fiber -----------------------------------------------------------------
@@ -128,12 +141,13 @@ module Gori
       end
 
       private def run_active(task : ActiveTask) : Nil
+        return if @stopped # don't fire outbound probes while winding down
         row = task.detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
         http2 = task.detail.http_version.starts_with?("HTTP/2")
         sender = Fuzz::Sender.new(origin, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT)
         result = sender.send(task.plan.request)
-        detections = Active.detections(task.plan, result, task.detail)
+        detections = task.rule.detections(task.plan, result, task.detail)
         return if detections.empty?
         detections.each { |d| @store.upsert_prism_issue(d) }
         summary = detections.first.evidence
