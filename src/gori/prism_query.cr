@@ -74,7 +74,9 @@ module Gori
       end
 
       private def match_term(t : Term, i : Store::PrismIssue) : Bool
-        return !t.negate if t.text.empty?
+        # An incomplete term (e.g. mid-typing `host:` or `-host:`) filters nothing — match all.
+        # (Previously a NEGATED empty term matched nothing and blanked the whole list.)
+        return true if t.text.empty?
         hit = case t.kind
               when :severity then match_severity(t, i.severity)
               when :status   then match_status(t.text, i.status)

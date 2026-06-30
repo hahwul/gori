@@ -37,10 +37,15 @@ module Gori
       "cookie_no_secure"               => "Add the Secure attribute so the cookie is only sent over HTTPS.",
       "cookie_no_httponly"             => "Add HttpOnly so client-side script cannot read the cookie.",
       "cookie_no_samesite"             => "Add SameSite=Lax/Strict to reduce CSRF exposure.",
+      "cookie_samesite_none_insecure"  => "SameSite=None requires the Secure attribute; add Secure or use SameSite=Lax/Strict.",
       "secret_in_url"                  => "Move credentials/tokens out of the URL (they leak via logs, history, and Referer) into headers or the body.",
       "cors_wildcard"                  => "Avoid Access-Control-Allow-Origin: * for credentialed/sensitive endpoints; echo a vetted allowlisted origin instead.",
+      "cors_null_origin"               => "Never allow the null origin; it is sent by sandboxed iframes and redirects and is trivially forgeable.",
+      "cors_reflected_origin"          => "Don't blindly reflect the Origin with Allow-Credentials: true; validate it against a strict allowlist.",
       "private_ip_leak"                => "Strip internal hostnames/IPs from responses; they aid network reconnaissance.",
       "error_stack_leak"               => "Return generic errors to clients; log stack traces server-side only.",
+      "secret_in_body"                 => "Rotate the exposed credential and remove it from the response; never ship keys/tokens to clients.",
+      "mixed_content"                  => "Load all sub-resources over HTTPS; active http:// scripts/iframes on an HTTPS page are blocked and insecure.",
       "reflected_param"                => "Context-encode reflected input; this parameter echoes attacker-controlled data and may enable XSS.",
     } of String => String
 

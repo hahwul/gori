@@ -1,0 +1,88 @@
+require "./rule"
+
+module Gori
+  module Prism
+    module Passive
+      # Response-body disclosures (category "infoleak", except mixed-content under "headers"):
+      # private IPs, server error/stack traces, leaked credentials, and active mixed content.
+      # Response-gated; scans the shared, decoded `ctx.body_text`.
+      class BodyLeaks < Rule
+        # Private-IP ranges with valid 0-255 octets, required to stand alone (not embedded in a
+        # longer dotted/word token). The leading/trailing guards keep multi-segment version
+        # strings such as "10.1.2.3.4" or "v10.1.2.3" out of the match.
+        PRIVATE_IP = /(?<![\w.])(?:10(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){2}|192\.168(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){2}|127\.0\.0\.1)(?![\w.])/
+
+        # Server-side error / stack-trace signatures, each tightened to a specific frame or
+        # exception shape so generic prose (a bare ".rb:" or "at System." in docs / a source
+        # viewer) does not match. {pattern, evidence label}.
+        ERROR_SIGNATURES = [
+          {/Traceback \(most recent call last\)/, "Python traceback"},
+          {/\.(?:rb|py|php):\d+(?::in )?/, "source file:line frame"},
+          {/\bat [\w.$]+\([\w]+\.java:\d+\)/, "Java stack frame"},
+          {/(?:\n|\A)\s+at [\w.$<>]+ \([^)]*:\d+:\d+\)/, "Node.js stack frame"},
+          {/\bORA-\d{5}\b/, "Oracle error"},
+          {/\bSQLSTATE\[/, "SQL error"},
+          {/\bjava\.lang\.[A-Z]\w+(?:Error|Exception)\b/, "Java exception"},
+          {/\borg\.springframework\.[\w.]{4,}/, "Spring framework trace"},
+          {/\bSystem\.[A-Z]\w+Exception\b/, ".NET exception"},
+          {/\b(?:NoMethodError|NameError|ActiveRecord::)\b/, "Ruby/Rails error"},
+          {/(?:\n|\A)Stack trace:\s*(?:\n|#\d)/, "stack trace"},
+        ]
+
+        # High-confidence credential shapes leaked in a response body (anchored to keep FP low).
+        # The evidence is the credential TYPE — NEVER the matched value. {pattern, label}.
+        SECRET_PATTERNS = [
+          {/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/, "AWS access key id"},
+          {/\bAIza[0-9A-Za-z_\-]{35}\b/, "Google API key"},
+          {/\bgh[pousr]_[0-9A-Za-z]{36}\b/, "GitHub token"},
+          {/\bglpat-[0-9A-Za-z_\-]{20}\b/, "GitLab token"},
+          {/\bxox[baprs]-[0-9A-Za-z\-]{10,}/, "Slack token"},
+          {/-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/, "private key block"},
+        ]
+
+        # An active sub-resource (script/iframe) loaded over plain http on an https page —
+        # genuine active mixed content (browsers block it; it signals an insecure dependency).
+        MIXED_ACTIVE = /<(?:script|iframe)\b[^>]*\bsrc\s*=\s*["']?http:\/\//i
+
+        def check(ctx : Context, acc : Array(Detection)) : Nil
+          return unless ctx.response
+          return unless texty?(ctx.content_type)
+          text = ctx.body_text
+          return if text.nil? || text.empty?
+          # Private-IP scan skips script/style payloads, where dotted version strings dominate
+          # and produce the bulk of the false positives.
+          if !scripty?(ctx.content_type) && (m = PRIVATE_IP.match(text))
+            acc << leak(ctx, "private_ip_leak", "Private IP address disclosed", Store::Severity::Low, m[0])
+          end
+          if hit = ERROR_SIGNATURES.find { |(pat, _)| pat.matches?(text) }
+            acc << leak(ctx, "error_stack_leak", "Error/stack trace disclosed", Store::Severity::Medium, hit[1])
+          end
+          if hit = SECRET_PATTERNS.find { |(pat, _)| pat.matches?(text) }
+            acc << leak(ctx, "secret_in_body", "Credential/secret disclosed in response body", Store::Severity::High, hit[1])
+          end
+          if ctx.html? && ctx.scheme == "https" && MIXED_ACTIVE.matches?(text)
+            acc << Detection.new("mixed_content", Category::HEADERS, ctx.host, ctx.url,
+              "Active mixed content (http:// sub-resource on an HTTPS page)", Store::Severity::Low, nil, ctx.fid)
+          end
+        end
+
+        private def leak(ctx : Context, code : String, title : String, sev : Store::Severity, evidence : String?) : Detection
+          Detection.new(code, Category::INFOLEAK, ctx.host, ctx.url, title, sev, evidence, ctx.fid)
+        end
+
+        private def texty?(ctype : String?) : Bool
+          return true if ctype.nil? # unknown — be permissive (the scan is cheap)
+          low = ctype.downcase
+          low.includes?("text/") || low.includes?("json") || low.includes?("xml") ||
+            low.includes?("javascript") || low.includes?("html") || low.includes?("urlencoded")
+        end
+
+        private def scripty?(ctype : String?) : Bool
+          return false if ctype.nil?
+          low = ctype.downcase
+          low.includes?("javascript") || low.includes?("ecmascript") || low.includes?("css")
+        end
+      end
+    end
+  end
+end
