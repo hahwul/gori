@@ -1366,8 +1366,8 @@ module Gori::Tui
         @hosts_overlay.add_start
       elsif c == 'd'
         if host = @hosts_overlay.delete_selected
-          save_hosts
-          @toast = "removed host override: #{host}"
+          ok = save_hosts
+          @toast = ok ? "removed host override: #{host}" : "removed #{host} — could not save to #{Settings.path}"
         end
       end
     end
@@ -1385,8 +1385,8 @@ module Gori::Tui
         when :invalid then @toast = %(host override: need "IP host" — a valid IP + a hostname)
         when :dup     then @toast = "host override: host already mapped"
         when :ok
-          save_hosts
-          @toast = "host override saved — #{@hosts_overlay.to_overrides.size} total"
+          ok = save_hosts
+          @toast = ok ? "host override saved — #{@hosts_overlay.to_overrides.size} total" : "host override applied — could not save to #{Settings.path}"
         end
       elsif key.left?
         @hosts_overlay.move_cursor(-1)
@@ -1400,7 +1400,9 @@ module Gori::Tui
       end
     end
 
-    private def save_hosts : Nil
+    # Returns Settings.save's success so callers can branch the toast (saved vs
+    # applied-but-not-persisted), like save_tabs/save_hotkeys.
+    private def save_hosts : Bool
       Settings.hostname_overrides = @hosts_overlay.to_overrides.dup
       Settings.save
     end

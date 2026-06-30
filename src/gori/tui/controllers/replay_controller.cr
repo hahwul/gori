@@ -308,7 +308,7 @@ module Gori::Tui
         if (id = tab.db_id) && result.ok?
           @host.session.store.update_replay_response(id, result.head, result.body, result.error, result.duration_us)
         end
-        @host.status(result.ok? ? "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms"
+        @host.status(result.ok? ? "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}"
                                  : "replay error: #{result.error}")
         applied = true
       end
@@ -483,7 +483,7 @@ module Gori::Tui
       end
       scheme, host, port = view.parse_target
       if host.empty?
-        @host.status("replay: invalid target")
+        @host.status("replay: invalid target — use scheme://host[:port]/path")
         return
       end
       if view.ws_mode?

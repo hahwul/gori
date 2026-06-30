@@ -173,6 +173,7 @@ module Gori
       STDERR.puts "  root CA: #{@ca.ca_cert_path}"
       STDERR.puts "  trust the CA above, then point your client's HTTP+HTTPS proxy at #{proxy.host}:#{proxy.port}"
       STDERR.puts "  db: #{session.project.db_path}"
+      STDERR.puts "  press Ctrl-C to stop"
     end
 
     private def install_signal_traps : Nil

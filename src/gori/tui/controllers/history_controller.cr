@@ -180,8 +180,10 @@ module Gori::Tui
       io = IO::Memory.new
       io.write(detail.request_head)
       io.write(detail.request_body.not_nil!) if detail.request_body
-      Clipboard.copy(String.new(io.to_slice))
-      @host.status("copied #{detail.row.method} #{Url.origin_path(detail.row.target)} to clipboard (#{io.size}b)")
+      written = Clipboard.copy(String.new(io.to_slice))
+      msg = "copied #{detail.row.method} #{Url.origin_path(detail.row.target)} to clipboard (#{written}b)"
+      msg += " — clipped from #{io.size}b (64KB cap)" if written < io.size
+      @host.status(msg)
     end
 
     def history_query : Nil

@@ -92,15 +92,15 @@ module Gori
         max : Int32? = nil
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run capture [options]"
+          p.banner = "Usage: gori run capture [options]\n\nRun the proxy and stream captured flows to STDOUT until Ctrl-C (or --for / --max)."
           p.on("-lHOST", "--listen=HOST", "Listen address (default #{listen})") { |v| listen = v }
           p.on("-pPORT", "--port=PORT", "Listen port (default #{port})") { |v| port = parse_port(v) }
           p.on("--project=NAME", "Capture into project NAME (created if missing; default 'default')") { |v| project_name = v }
           p.on("--db=PATH", "Capture into an explicit SQLite db file") { |v| db_path = v }
-          p.on("--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
+          p.on("--format=FMT", "Output: text (default) | json (JSON-Lines)") { |v| format = parse_format(v, [:text, :json]) }
           p.on("--for=DURATION", "Stop after DURATION (e.g. 30s, 5m, 1h)") { |v| every = parse_duration(v) }
-          p.on("--max=N", "Stop after N completed flows") { |v| max = parse_count(v) }
+          p.on("--max=N", "Stop after N completed flows") { |v| max = parse_count(v, "--max") }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run capture: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run capture: missing value for #{f}" }
@@ -131,7 +131,7 @@ module Gori
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
-          p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v) }
+          p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit") }
           p.on("--format=FMT", "Output: text (default) | json (JSON-Lines)") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -380,7 +380,7 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept") { |v| target_override = v }
           p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { force_h2 = true }
-          p.on("--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
+          p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -431,6 +431,8 @@ module Gori
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}"
           if d = diff
             print_diff(d)
+            n = Replay::Diff.change_count(d)
+            STDERR.puts(n == 0 ? "no differences" : "#{n} line#{n == 1 ? "" : "s"} changed")
           else
             print_message_text(result.head, new_body)
           end
@@ -504,7 +506,7 @@ module Gori
           p.on("-wPATH", "--wordlist=PATH", "Payload set: a wordlist file (repeatable; order → positions)") { |v| sources << Fuzz::WordlistFile.new(v) }
           p.on("--payloads=LIST", "Payload set: inline comma list (a,b,c)") { |v| sources << Fuzz::InlineList.new(v.split(',')) }
           p.on("--numbers=SPEC", "Payload set: FROM-TO[:STEP] (e.g. 1-100 or 0-255:5)") { |v| sources << parse_numbers(v) }
-          p.on("--null=N", "Payload set: N empty payloads") { |v| sources << Fuzz::NullPayloads.new(parse_count(v)) }
+          p.on("--null=N", "Payload set: N empty payloads") { |v| sources << Fuzz::NullPayloads.new(parse_count(v, "--null")) }
           p.on("--brute=SPEC", "Payload set: CHARSET:MIN-MAX (e.g. abc:1-3)") { |v| sources << parse_brute(v) }
           p.on("--prefix=STR", "Processing: prepend STR to each payload") { |v| processors << Fuzz::Prefix.new(v) }
           p.on("--suffix=STR", "Processing: append STR to each payload") { |v| processors << Fuzz::Suffix.new(v) }
@@ -512,11 +514,11 @@ module Gori
           p.on("--case=KIND", "Processing: upper | lower") { |v| processors << Fuzz::Case.new(parse_case(v)) }
           p.on("--hash=ALGO", "Processing: md5 | sha1 | sha256") { |v| processors << Fuzz::Hasher.new(parse_hash(v)) }
           p.on("--regex-replace=SPEC", "Processing: /pattern/replacement/") { |v| processors << parse_regex_replace(v) }
-          p.on("--concurrency=N", "Parallel requests (default 20)") { |v| concurrency = parse_count(v) }
+          p.on("--concurrency=N", "Parallel requests (default 20)") { |v| concurrency = parse_count(v, "--concurrency") }
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }
-          p.on("--throttle=MS", "Fixed delay between requests (ms)") { |v| throttle = parse_nonneg(v) }
-          p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v).seconds }
-          p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v) }
+          p.on("--throttle=MS", "Fixed delay between requests (ms)") { |v| throttle = parse_nonneg(v, "--throttle") }
+          p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
+          p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
           p.on("--follow-redirects", "Follow same-origin redirects") { follow = true }
           p.on("--mc=SPEC", "Match status (e.g. 200,302,500-599,2xx)") { |v| matcher.match_status = v }
           p.on("--fc=SPEC", "Filter out status") { |v| matcher.filter_status = v }
@@ -631,12 +633,13 @@ module Gori
       end
 
       private def self.fuzz_progress(ev : Fuzz::ProgressEvent, total : Int64?) : Nil
+        return unless STDERR.tty? # the \r-redrawn meter only makes sense on a terminal
         STDERR.print "\r[fuzz] #{ev.progress.sent}/#{total || "?"} · #{ev.progress.matched} hits"
         STDERR.flush
       end
 
       private def self.fuzz_done(ev : Fuzz::DoneEvent, emitted : Int32) : Nil
-        STDERR.print "\r"
+        STDERR.print "\r" if STDERR.tty? # clear the in-place meter (none was drawn when piped)
         STDERR.puts "done · #{ev.progress.sent} sent · #{emitted} shown · #{ev.progress.errors} errors#{ev.stopped ? " (stopped)" : ""}"
       end
 
@@ -702,13 +705,13 @@ module Gori
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
           p.on("--locations=LIST", "Where to mine: query,form,json,headers,cookies (default: auto-detect)") { |v| locations = parse_mine_locations(v) }
           p.on("--wordlist=PATH", "Extra param-name wordlist (merged with the built-in list)") { |v| wordlist = v }
-          p.on("--bucket=N", "Names stuffed per request before bisection (per location)") { |v| bucket = parse_count(v) }
-          p.on("--concurrency=N", "Parallel requests (default 10)") { |v| concurrency = parse_count(v) }
+          p.on("--bucket=N", "Names stuffed per request before bisection (per location)") { |v| bucket = parse_count(v, "--bucket") }
+          p.on("--concurrency=N", "Parallel requests (default 10)") { |v| concurrency = parse_count(v, "--concurrency") }
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }
-          p.on("--throttle=MS", "Fixed delay between requests (ms)") { |v| throttle = parse_nonneg(v) }
-          p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v).seconds }
-          p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v) }
-          p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v).to_i64 }
+          p.on("--throttle=MS", "Fixed delay between requests (ms)") { |v| throttle = parse_nonneg(v, "--throttle") }
+          p.on("--timeout=SEC", "Per-request connect + idle timeout (seconds)") { |v| timeout = parse_count(v, "--timeout").seconds }
+          p.on("--retries=N", "Retries on a network error") { |v| retries = parse_nonneg(v, "--retries") }
+          p.on("--max-requests=N", "Hard cap on total requests sent") { |v| max_requests = parse_count(v, "--max-requests").to_i64 }
           p.on("--format=FMT", "Output: text (default) | json | jsonl") { |v| format = parse_format(v, [:text, :json, :jsonl]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -821,13 +824,14 @@ module Gori
       end
 
       private def self.mine_progress(ev : Miner::ProgressEvent, total : Int64) : Nil
+        return unless STDERR.tty? # the \r-redrawn meter only makes sense on a terminal
         p = ev.progress
         STDERR.print "\r[mine] #{p.names_done}/#{total} names · #{p.found} found · #{p.sent} sent"
         STDERR.flush
       end
 
       private def self.mine_done(ev : Miner::DoneEvent, found : Int32) : Nil
-        STDERR.print "\r"
+        STDERR.print "\r" if STDERR.tty? # clear the in-place meter (none was drawn when piped)
         STDERR.puts "done · #{found} found · #{ev.progress.sent} sent · #{ev.progress.errors} errors#{ev.stopped ? " (stopped)" : ""}"
       end
 
@@ -890,9 +894,9 @@ module Gori
         n == 0 ? nil : n
       end
 
-      private def self.parse_nonneg(v : String) : Int32
+      private def self.parse_nonneg(v : String, flag : String? = nil) : Int32
         n = v.to_i?
-        abort "gori run: invalid count '#{v}' (expected a non-negative integer)" unless n && n >= 0
+        abort "gori run: invalid #{flag || "count"} '#{v}' (expected a non-negative integer)" unless n && n >= 0
         n
       end
 
@@ -995,6 +999,7 @@ module Gori
                   j.field "db_path", pr.db_path
                   j.field "db_size", pr.db_size
                   j.field "last_modified", pr.last_modified.try(&.to_unix)
+                  j.field "time", pr.last_modified.try(&.to_local.to_s("%Y-%m-%dT%H:%M:%S%:z"))
                 end
               end
             end
@@ -1062,9 +1067,9 @@ module Gori
         n
       end
 
-      private def self.parse_count(v : String) : Int32
+      private def self.parse_count(v : String, flag : String? = nil) : Int32
         n = v.to_i?
-        abort "gori run: invalid count '#{v}' (expected a positive integer)" unless n && n > 0
+        abort "gori run: invalid #{flag || "count"} '#{v}' (expected a positive integer)" unless n && n > 0
         n
       end
 

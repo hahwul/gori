@@ -163,8 +163,10 @@ module Gori
       end
 
       # Emits a `field_name` field carrying a decoded-body summary. nil/empty body
-      # → JSON null. Otherwise an object: {encoding, size, truncated, text|base64,
-      # note?}. `wire_truncated` reflects gori's capture cap on the stored bytes.
+      # → JSON null. Otherwise an object: {encoding, size, truncated, wire_truncated?,
+      # text|base64, note?}. `truncated` is true when the returned text/base64 was cut
+      # (display cap OR capture cap); `wire_truncated` is emitted only when the stored
+      # bytes themselves were cut at gori's capture cap (so the data is gone at source).
       def self.emit_body(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?, wire_truncated : Bool) : Nil
         if body.nil? || body.empty?
           j.field field_name, nil
@@ -192,6 +194,10 @@ module Gori
               j.field "truncated", cut || wire_truncated
               j.field "base64", Base64.strict_encode(slice)
             end
+            # `truncated` (above) is true for either cause (back-compat); `wire_truncated`
+            # disambiguates a capture-time cut (data gone at source, not just the display
+            # cap) so the caller knows whether more is recoverable. Branch-independent.
+            j.field "wire_truncated", true if wire_truncated
             j.field "note", note if note
           end
         end

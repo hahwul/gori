@@ -38,7 +38,7 @@ module Gori
                     timeout : Time::Span? = nil) : Result
         started = Time.instant
         upstream = open(scheme, host, port, verify_upstream, sni, timeout)
-        return failure("h2 connect failed (no h2 negotiated): #{host}:#{port}", started) unless upstream
+        return failure(connect_error(scheme, host, port, verify_upstream), started) unless upstream
         begin
           headers, body = parse_request(request, scheme, host, port)
           write_request(upstream, headers, body)
@@ -305,6 +305,18 @@ module Gori
 
       private def self.failure(message : String, started : Time::Instant) : Result
         Result.new(Bytes.new(0), nil, nil, elapsed(started), message)
+      end
+
+      # A nil socket here means no usable HTTP/2 connection — could be unreachable,
+      # an origin that doesn't offer h2 over ALPN, or (for verified https) a cert that
+      # failed verification. Spell that out instead of a bare "connect failed".
+      private def self.connect_error(scheme : String, host : String, port : Int32, verify : Bool) : String
+        base = "h2 connect failed (no h2 negotiated): #{host}:#{port}"
+        if scheme == "https" && verify
+          "#{base} — host unreachable, the origin doesn't offer HTTP/2 via ALPN, or its TLS certificate failed verification"
+        else
+          "#{base} — host unreachable or the origin doesn't offer HTTP/2 (h2c) here"
+        end
       end
 
       private def self.elapsed(started : Time::Instant) : Int64

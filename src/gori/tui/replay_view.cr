@@ -935,6 +935,13 @@ module Gori::Tui
         meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}" : Fmt.dur(result.duration_us)
         meta_x = rect.right - meta.size - 1
         screen.text(meta_x, rect.y, meta, Theme.muted, Theme.bg) if meta_x > chips_end + 1
+        # A persistent amber marker when the response was cut short (the body the
+        # origin sent is incomplete) — the transient send toast scrolls away.
+        if result.incomplete?
+          warn = "⚠ incomplete"
+          warn_x = meta_x - warn.size - 2
+          screen.text(warn_x, rect.y, warn, Theme.yellow, Theme.bg) if warn_x > chips_end + 1
+        end
       end
     end
 

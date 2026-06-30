@@ -35,7 +35,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if @prism.detail_open?
-        "o flow · r replay · p promote · c dismiss · d delete · ←/esc back"
+        "o flow · r replay · p promote · c dismiss · d delete · space cmds · ←/esc back"
       elsif @prism.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @prism.mode.off?
@@ -182,13 +182,15 @@ module Gori::Tui
     def prism_dismiss : Nil
       return unless @prism.target_issue
       st = @prism.toggle_dismiss(@host.session.store)
-      @host.notifications.push(:success, st.try(&.open?) ? "issue re-opened" : "issue dismissed")
+      # A synchronous user action → transient toast (the list updates in place too),
+      # matching the rest of the app; the notification center is for async events.
+      @host.status(st.try(&.open?) ? "issue re-opened" : "issue dismissed")
     end
 
     # `a`: flip the open-only ⇄ show-closed lens.
     def prism_toggle_closed : Nil
       showing = @prism.toggle_show_closed
-      @host.notifications.push(:info, showing ? "showing closed issues" : "showing open issues only")
+      @host.status(showing ? "showing closed issues" : "showing open issues only")
     end
 
     # Space-menu bulk actions: mute every OPEN issue sharing the targeted issue's code / host
@@ -197,7 +199,7 @@ module Gori::Tui
       return unless i = @prism.target_issue
       @host.confirm("DISMISS GROUP", "Dismiss all open \"#{i.code}\" issues?", confirm_label: "dismiss", danger: false) do
         n = @prism.dismiss_by_code(@host.session.store)
-        @host.notifications.push(:success, "dismissed #{n} \"#{i.code}\" issue#{n == 1 ? "" : "s"}")
+        @host.status("dismissed #{n} \"#{i.code}\" issue#{n == 1 ? "" : "s"}")
       end
     end
 
@@ -205,7 +207,7 @@ module Gori::Tui
       return unless i = @prism.target_issue
       @host.confirm("DISMISS GROUP", "Dismiss all open issues on #{i.host}?", confirm_label: "dismiss", danger: false) do
         n = @prism.dismiss_by_host(@host.session.store)
-        @host.notifications.push(:success, "dismissed #{n} issue#{n == 1 ? "" : "s"} on #{i.host}")
+        @host.status("dismissed #{n} issue#{n == 1 ? "" : "s"} on #{i.host}")
       end
     end
   end

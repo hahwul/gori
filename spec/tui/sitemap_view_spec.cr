@@ -99,7 +99,7 @@ describe Gori::Tui::SitemapView do
     end
   end
 
-  it "renders the filter bar: scope chip + hint, then the query prompt" do
+  it "renders the filter bar: scope chip + hint, then the filter prompt" do
     tmp_store do |store|
       capture(store, "acme.test", "GET", "/")
       view = SitemapView.new
@@ -114,7 +114,7 @@ describe Gori::Tui::SitemapView do
       "host:acme".each_char { |c| view.query_insert(c) }
       b1 = MemoryBackend.new(70, 20)
       view.render(Screen.new(b1), Rect.new(0, 0, 70, 20))
-      b1.contains?("query").should be_true
+      b1.contains?("filter ›").should be_true # active editing prompt (unified with Findings/Prism)
       b1.contains?("host:acme").should be_true
     end
   end

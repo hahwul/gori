@@ -213,7 +213,7 @@ module Gori::Tui
     # --- engine ---
     def build_engine(verify : Bool) : {Miner::Engine?, String?}
       scheme, host, port = Replay::FlowRequest.parse_target(@target)
-      return {nil, "invalid target"} if host.empty?
+      return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       return {nil, "no locations selected"} if @config.locations.empty?
       names = Miner::Wordlist.load(@config.user_wordlist)
       return {nil, "wordlist is empty"} if names.empty?
@@ -316,7 +316,15 @@ module Gori::Tui
       Frame.card(screen, rect, "FINDINGS (#{@results.size})", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
       inner = rect.inset(1, 1)
       if @results.empty?
-        msg = @running ? "mining… discovered parameters appear here" : "no hidden parameters found"
+        # Distinguish never-run from a completed run that found nothing, using the
+        # same signal the status line does (names_total > 0 ⇒ a run happened).
+        msg = if @running
+                "mining… discovered parameters appear here"
+              elsif @progress.names_total > 0
+                "no hidden parameters found"
+              else
+                "no run yet — ^R to mine"
+              end
         screen.text(inner.x + 1, inner.y, msg, Theme.muted, Theme.bg)
         return
       end

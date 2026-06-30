@@ -45,6 +45,7 @@ module Gori::Tui
     getter? dirty : Bool
     getter? running : Bool
     property name : String?
+    property job_id : Int32 # bottom-bar/notification job handle (0 = no active job)
     getter config : Fuzz::Config
     getter matcher : Fuzz::Matcher
 
@@ -100,6 +101,7 @@ module Gori::Tui
       @dist_cache_w = -1
       @progress = nil.as(Fuzz::Progress?)
       @run_total = nil.as(Int64?)
+      @job_id = 0
       @stop_requested = false
       @detail_scroll = 0
       @detail_pane = :response
@@ -660,7 +662,7 @@ module Gori::Tui
       return {nil, "mark a position first — ^A params · ^K word"} if template.position_count == 0
       return {nil, "add a payload set — ^O config · pick a type · ⏎ add"} if @sets.empty?
       scheme, host, port = Replay::FlowRequest.parse_target(@target)
-      return {nil, "invalid target"} if host.empty?
+      return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       sets = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)) }
       gen_sets = @config.mode.per_position? ? sets : [sets.first]
       generator = Fuzz::Generator.new(template, gen_sets, @config)

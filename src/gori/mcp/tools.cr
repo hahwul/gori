@@ -105,7 +105,8 @@ module Gori
             "filters (e.g. 'host:example.com status:>=500 size:>10000 dur:>500', " \
             "'header:set-cookie', 'body~secret\\d+' — `~` is regex, dur is ms); " \
             "empty query returns the most recent. Returns light rows (no bodies); " \
-            "use get_flow for full detail." do |s|
+            "use get_flow for full detail. Paginate by passing the oldest id seen as " \
+            "`before_id` (rows are newest-first); a page shorter than `limit` means no older rows." do |s|
             s.field "query", strprop("gori QL filter; empty = most recent")
             s.field "limit", intprop("max rows (default 50, max 500)")
             s.field "before_id", intprop("cursor: only flows with id < this (pagination; ignored when query is set)")
@@ -169,7 +170,8 @@ module Gori
               "Start a fuzz/intruder run against an origin and return a job_id " \
               "immediately (poll with fuzz_status / fuzz_results; end with fuzz_stop). " \
               "ACTIVE: sends many real outbound requests from this host. Mark payload " \
-              "positions with §…§ in `template`, or pass `flow_id` + auto:true. Capped " \
+              "positions with §…§ in `template`, or pass `flow_id` + auto:true, then " \
+              "provide payload sets via `payloads`. Capped " \
               "at #{FUZZ_MAX_REQUESTS} requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
               s.field "template", strprop("raw HTTP request with §…§ position markers")
               s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
@@ -184,8 +186,8 @@ module Gori
               s.field "rate", intprop("requests/sec cap (0 = unlimited)")
               s.field "timeout_ms", intprop("per-request connect + idle (read/write) timeout in milliseconds")
               s.field "retries", intprop("retries per request on a network error")
-              s.field "http2", boolprop("use real HTTP/2")
-              s.field "insecure", boolprop("skip upstream TLS verification")
+              s.field "http2", boolprop("use real HTTP/2 (default false)")
+              s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "max_requests", intprop("caller cap on total requests")
             end
 
@@ -195,11 +197,12 @@ module Gori
 
             tool j, "fuzz_results",
               "Paged matched results for a fuzz job (metrics only — status/length/words/" \
-              "extracted; no raw bodies. Use get_flow/send_request for full detail)." do |s|
+              "extracted; no raw bodies and no per-result flow id). To inspect a hit, " \
+              "re-issue it with send_request, substituting the payload into your template." do |s|
               s.field "job_id", strprop("id from fuzz_start"), required: true
               s.field "offset", intprop("start row (default 0)")
               s.field "limit", intprop("max rows (default 100, max 1000)")
-              s.field "matched_only", boolprop("only matched rows (results are matched-only already)")
+              s.field "matched_only", boolprop("no-op: fuzz results are stored matched-only, so this never changes the page")
             end
 
             tool j, "fuzz_stop", "Stop a running fuzz job (in-flight requests finish)." do |s|
@@ -222,8 +225,8 @@ module Gori
               s.field "rate", intprop("requests/sec cap (0 = unlimited)")
               s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
               s.field "retries", intprop("retries per request on a network error")
-              s.field "http2", boolprop("use real HTTP/2")
-              s.field "insecure", boolprop("skip upstream TLS verification")
+              s.field "http2", boolprop("use real HTTP/2 (default false)")
+              s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "max_requests", intprop("caller cap on total requests")
             end
 
@@ -232,7 +235,7 @@ module Gori
             end
 
             tool j, "mine_results",
-              "Paged discovered parameters for a mine job (name, location, evidence, confidence)." do |s|
+              "Paged discovered parameters for a mine job (name, location, evidence, confidence, canary, status, delta)." do |s|
               s.field "job_id", strprop("id from mine_start"), required: true
               s.field "offset", intprop("start row (default 0)")
               s.field "limit", intprop("max rows (default 100, max 1000)")
@@ -377,6 +380,11 @@ module Gori
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} -> #{result.ok? ? "ok" : result.error}" }
         return Result.new("send failed: #{result.error}", is_error: true) unless result.ok?
         Result.new(Serialize.replay_result_json(result))
+      rescue ex : Gori::Error
+        # Bad input (missing/invalid url, illegal header, …) — return a clean
+        # actionable message instead of letting call()'s generic "tool error:"
+        # wrapper swallow it, matching fuzz_start's FuzzArgError handling.
+        Result.new(ex.message || "invalid request arguments", is_error: true)
       end
 
       private def create_finding(h) : Result

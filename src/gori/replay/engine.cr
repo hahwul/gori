@@ -41,7 +41,7 @@ module Gori
         ct = timeout || Proxy::Upstream::CONNECT_TIMEOUT
         it = timeout || Proxy::Upstream::IO_TIMEOUT
         upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it)
-        return error("connect failed: #{host}:#{port}", started) unless upstream
+        return error(connect_error(scheme, host, port, verify_upstream), started) unless upstream
 
         begin
           upstream.write(request)
@@ -83,6 +83,18 @@ module Gori
 
       private def self.error(message : String, started : Time::Instant) : Result
         Result.new(Bytes.new(0), nil, nil, elapsed(started), message)
+      end
+
+      # The dialer collapses DNS failure / connection refused / timeout / TLS-verify
+      # rejection into a single nil socket, so spell out the likely causes — and, for
+      # verified https, that a self-signed/expired cert is a common one — rather than
+      # leaving the user with a bare "connect failed".
+      private def self.connect_error(scheme : String, host : String, port : Int32, verify : Bool) : String
+        if scheme == "https" && verify
+          "connect failed: #{host}:#{port} — host unreachable (DNS/refused/timeout) or the origin's TLS certificate failed verification (e.g. self-signed/expired)"
+        else
+          "connect failed: #{host}:#{port} — host unreachable (DNS/refused/timeout)"
+        end
       end
 
       private def self.elapsed(started : Time::Instant) : Int64

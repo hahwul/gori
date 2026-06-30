@@ -27,10 +27,18 @@ module Gori::Tui
     # Emits the sequence to the terminal. In TUI mode STDOUT is the controlling
     # tty (same device termisu draws to); OSC 52 is state-neutral, so it does not
     # disturb the cell grid — the next diff render repaints normally.
-    def self.copy(data : String, io : IO = STDOUT) : Nil
-      data = data[0, MAX_CLIP] if data.size > MAX_CLIP # bound the tty write
+    #
+    # Returns the number of bytes actually placed on the clipboard (≤ MAX_CLIP), so
+    # callers can compare against the source size and report when the copy was clipped.
+    def self.copy(data : String, io : IO = STDOUT) : Int32
+      # Clip by BYTES (not chars): MAX_CLIP bounds the OSC 52 tty write, and the
+      # returned count is a byte count the caller compares to the source byte size.
+      # `byte_slice` may sever a trailing multi-byte codepoint, but the sequence is
+      # base64-encoded from the raw bytes, so that's harmless for a clipboard cap.
+      data = data.byte_slice(0, MAX_CLIP) if data.bytesize > MAX_CLIP
       io.print(osc52(data, tmux: !ENV["TMUX"]?.nil?))
       io.flush
+      data.bytesize
     end
   end
 end

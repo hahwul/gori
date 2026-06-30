@@ -78,7 +78,10 @@ module Gori::Tui
     # Renders a centered overlay box within `area`.
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return if box.empty?
+      if box.empty?
+        screen.text(area.x + 1, area.y, "command palette needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        return
+      end
       w = box.w
       Frame.card(screen, box, "COMMANDS", border: Theme.border_focus)
 
@@ -90,6 +93,10 @@ module Gori::Tui
 
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top
+      if @results.empty?
+        screen.text(box.x + 3, list_top, "no commands match", Theme.muted, Theme.panel)
+        return
+      end
       ensure_visible(list_h)
       (0...list_h).each do |i|
         idx = @scroll + i

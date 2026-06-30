@@ -14,6 +14,7 @@ module Gori::Tui
   class RulesOverlay
     def initialize(@rules : Rules)
       @selected = 0
+      @scroll = 0
       @input = ""
       @icx = 0
       @preedit = ""
@@ -21,6 +22,7 @@ module Gori::Tui
 
     def reset : Nil
       @selected = 0
+      @scroll = 0
       @input = ""
       @icx = 0
       @preedit = ""
@@ -108,7 +110,10 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return unless box
+      unless box
+        screen.text(area.x + 1, area.y, "Match & Replace editor needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        return
+      end
       w = box.w
       Frame.card(screen, box, "MATCH & REPLACE", border: Theme.border_focus)
 
@@ -128,11 +133,24 @@ module Gori::Tui
       if rules.empty?
         screen.text(box.x + 3, list_top, "(none — e.g.  resp: Old => New )", Theme.muted, Theme.panel)
       else
+        ensure_visible(list_h)
         (0...list_h).each do |i|
-          break if i >= rules.size
-          render_rule_row(screen, box, rules[i], list_top + i, w, i == @selected)
+          idx = @scroll + i
+          break if idx >= rules.size
+          render_rule_row(screen, box, rules[idx], list_top + i, w, idx == @selected)
         end
       end
+    end
+
+    # Scroll the list so the selected rule stays on screen (sibling-overlay idiom).
+    private def ensure_visible(list_h : Int32) : Nil
+      return if list_h <= 0
+      if @selected < @scroll
+        @scroll = @selected
+      elsif @selected >= @scroll + list_h
+        @scroll = @selected - list_h + 1
+      end
+      @scroll = @scroll.clamp(0, {@rules.rules.size - list_h, 0}.max)
     end
 
     # One row in the rule list: selection bar, enabled `✓`/`·`, REQ/RES tag, rule.
@@ -156,7 +174,8 @@ module Gori::Tui
       list_top = box.y + 3
       i = my - list_top
       return nil if i < 0 || i >= box.bottom - 1 - list_top
-      i < @rules.rules.size ? i : nil
+      idx = @scroll + i
+      idx < @rules.rules.size ? idx : nil
     end
 
     # Clamp the selection to a populated row (matches select_move's bounds).
