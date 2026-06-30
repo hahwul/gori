@@ -483,9 +483,18 @@ module Gori::Tui
       return if tree.h <= 0
 
       unless @loaded && !@hosts.empty?
-        msg = filtering? ? "no endpoints match" : "no traffic captured yet"
+        # A recovery hint mirrors Findings/Prism. The QL-clear cue only applies to a
+        # real `/` query — a Scope-lens-only empty set isn't cleared with esc//.
+        msg, hint =
+          if !@query.blank?
+            {"no endpoints match", querying? ? "esc clears the filter" : "/ to edit the filter"}
+          elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
+            {"no endpoints in scope", nil}
+          else
+            {"no traffic captured yet", "browse through the proxy, then return here"}
+          end
         screen.text(tree.x + 1, tree.y, msg, Theme.muted)
-        screen.text(tree.x + 1, tree.y + 2, "browse through the proxy, then return here", Theme.muted) unless filtering?
+        screen.text(tree.x + 1, tree.y + 2, hint, Theme.muted) if hint && tree.h > 2
         return
       end
 
@@ -619,7 +628,7 @@ module Gori::Tui
 
     private def render_ql_bar(screen : Screen, rect : Rect) : Nil
       if @querying
-        prefix = "query › "
+        prefix = "filter › "
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2)

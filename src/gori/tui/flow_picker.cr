@@ -96,7 +96,10 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return unless box
+      unless box
+        screen.text(area.x + 1, area.y, "flow picker needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        return
+      end
       Frame.card(screen, box, "PICK FLOW #{@target.to_s.upcase}", border: Theme.border_focus)
 
       if @query.empty? && @preedit.empty?

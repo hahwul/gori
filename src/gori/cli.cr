@@ -176,10 +176,11 @@ module Gori
     end
 
     private def self.run_export(args : Array(String)) : Nil
-      if args.empty? || args.any? { |a| ["-h", "--help"].includes?(a) }
-        puts "Usage: gori export <subcommand>"
-        puts "Subcommands:"
-        puts "  ca-cert   Print path to the root CA certificate (for client trust)"
+      # Only the generic usage when there's no subcommand (bare or a leading flag);
+      # `gori export ca-cert --help` must fall through to the ca-cert parser, which
+      # documents --ca-dir and its own -h/--help.
+      if args.empty? || args[0].starts_with?("-")
+        print_export_usage(STDOUT)
         return
       end
 
@@ -189,7 +190,7 @@ module Gori
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori export ca-cert [options]"
           p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
-          p.on("-h", "--help") { puts p; exit 0 }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
           p.missing_option { |flag| abort "missing value for #{flag}" }
         end
@@ -197,8 +198,16 @@ module Gori
         Paths.ensure_dirs
         puts Proxy::Tls::CertAuthority.load_or_create(ca_dir).ca_cert_path
       else
-        abort "unknown export subcommand: #{args[0]}"
+        STDERR.puts "unknown export subcommand: #{args[0]}"
+        print_export_usage(STDERR)
+        exit 1
       end
+    end
+
+    private def self.print_export_usage(io : IO) : Nil
+      io.puts "Usage: gori export <subcommand>"
+      io.puts "Subcommands:"
+      io.puts "  ca-cert   Print path to the root CA certificate (for client trust)"
     end
 
     # Handler for `gori run` (the non-interactive CLI mode). Named run_run to match

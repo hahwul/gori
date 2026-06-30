@@ -607,8 +607,21 @@ module Gori::Tui
       ensure_visible(list_h)
 
       if @rows.empty?
-        msg = filtering? ? "no flows match" : "waiting for traffic…"
+        # Mirror Findings/Prism: a recovery hint under the message. The QL-clear
+        # cue only applies to a real query (not a Scope-lens-only empty set, which
+        # ⇧S toggles off), so branch on @querying / @query before filtering?.
+        msg, hint =
+          if @querying
+            {"no flows match", "esc clears the filter"}
+          elsif !@query.blank?
+            {"no flows match", "/ to edit the filter"}
+          elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
+            {"no flows in scope", "⇧S clears the scope lens"}
+          else
+            {"waiting for traffic…", "browse through the proxy, then return here"}
+          end
         screen.text(time_x, list_top, msg, Theme.muted)
+        screen.text(time_x, list_top + 2, hint, Theme.muted) if list_h > 2
         return
       end
 
@@ -759,7 +772,7 @@ module Gori::Tui
 
     private def render_ql_bar(screen : Screen, rect : Rect) : Nil
       if @querying
-        prefix = "query › "
+        prefix = "filter › "
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2)

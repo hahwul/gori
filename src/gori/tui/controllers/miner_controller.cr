@@ -328,6 +328,11 @@ module Gori::Tui
         @host.status("already mining — ^X to stop")
         return
       end
+      # Flush any trailing Done/Error from a just-finished run before start_run rebinds
+      # job_id: the engine sends its terminal event BEFORE the fiber's `ensure` flips
+      # running? false, so a re-run landing in that window would otherwise settle the
+      # stale event against the NEW job (premature/wrong "done", orphaned spinner).
+      drain_events
       start_run(v)
     end
 

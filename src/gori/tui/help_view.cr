@@ -17,6 +17,7 @@ module Gori::Tui
         {"^P", "command palette"},
         {"space", "focus-area action menu"},
         {"c", "toggle capture"},
+        {"s · m", "scope lens · Match & Replace rules"},
         {"^B", "reveal whitespace (·→␍␊)"},
         {"^D / ^C ×2", "quit gori"},
         {"q", "back to projects (on the tab bar)"},
@@ -34,7 +35,7 @@ module Gori::Tui
         {"click tab", "switch to it"},
         {"click row", "select · click again opens"},
         {"click pane", "focus · in an editor, place the caret"},
-        {"sub-tab chip", "switch · right-click renames (Replay/Fuzzer)"},
+        {"sub-tab chip", "switch · right-click renames (Replay/Fuzzer/Convert)"},
         {"wheel", "scroll / move the selection"},
         {"click outside", "close a popup"},
       ]},
@@ -53,6 +54,7 @@ module Gori::Tui
         {"r", "rename the sub-tab (on the strip)"},
         {"^X", "hex-edit the request"},
         {"^S", "SNI override (on the target)"},
+        {"^L", "toggle auto Content-Length"},
         {"↹", "cycle target → request → response"},
         {"x · d · p", "response: hex · diff · pretty"},
       ]},
@@ -80,8 +82,9 @@ module Gori::Tui
         {"^B", "reveal whitespace"},
       ]},
       {"OTHER TABS", [
-        {"Sitemap", "↑/↓ move · / filter · ↵/→ expand · ← collapse"},
+        {"Sitemap", "↑/↓ · / filter · ↵/→ expand · t tag · g group · ⇧S scope"},
         {"Findings", "/ filter · ↵ open · n new · space triage · x export"},
+        {"Prism", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · space cmds"},
         {"Notes", "type to edit · ^N new · ^1-9 switch"},
         {"Project", "scope rules + the description editor"},
         {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition"},
@@ -99,7 +102,7 @@ module Gori::Tui
       {"OVERLAYS", [
         {"palette / settings", "↑/↓ · ↵ · esc"},
         {"confirm", "←/→ choose · y / n · ↵"},
-        {"settings: mouse", "toggle mouse support on/off"},
+        {"settings:editor", "toggle mouse support (Mouse field)"},
       ]},
     ]
 

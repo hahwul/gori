@@ -175,6 +175,7 @@ module Gori::Tui
         # A `tag:` filter must re-evaluate against the changed tag (the in-place stamp
         # doesn't re-filter), else the just-tagged node stays hidden / a cleared tag shown.
         reload if @sitemap.filtering?
+        @host.status(text.empty? ? "tag cleared" : "tagged: #{text}")
       else
         @sitemap.cancel_tag
       end

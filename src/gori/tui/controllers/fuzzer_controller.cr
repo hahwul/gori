@@ -388,14 +388,42 @@ module Gori::Tui
 
     private def apply_event(v : FuzzerView, ev : Fuzz::Event) : Nil
       case ev
-      when Fuzz::ProgressEvent then v.apply_progress(ev.progress)
-      when Fuzz::ResultEvent   then v.append_result(ev.result)
+      when Fuzz::ProgressEvent
+        v.apply_progress(ev.progress)
+        @host.jobs.progress(v.job_id, ev.progress.sent.to_i, ev.progress.total.try(&.to_i), "#{ev.progress.matched} hit")
+      when Fuzz::ResultEvent then v.append_result(ev.result)
       when Fuzz::DoneEvent
         v.finish_run
-        @host.status("fuzz done · #{v.matched_count}/#{v.result_count} matched#{ev.stopped ? " (stopped)" : ""}")
+        finish_job(v, ev)
       when Fuzz::ErrorEvent
         v.finish_run
+        # Persist the failure in the bottom bar + notification center so it survives the
+        # next keystroke (a transient toast alone is cleared on the very next key).
+        @host.jobs.finish(v.job_id, :error, ev.message)
+        @host.notifications.push(:error, "Fuzzer: #{ev.message} on #{v.summary}", goto_for(v))
         @host.status("fuzz error: #{ev.message}")
+      end
+    end
+
+    private def finish_job(v : FuzzerView, ev : Fuzz::DoneEvent) : Nil
+      n = v.matched_count
+      @host.jobs.finish(v.job_id, :done, "#{n} hit")
+      level = n > 0 ? :success : :info
+      msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent on #{v.summary}#{ev.stopped ? " (stopped)" : ""}"
+      @host.notifications.push(level, msg, goto_for(v))
+      @host.status(msg)
+    end
+
+    private def goto_for(v : FuzzerView) : Jobs::Goto?
+      tab = @fuzzers.find(&.view.same?(v))
+      (tab && (id = tab.db_id)) ? Jobs::Goto.new(:fuzzer, id) : nil
+    end
+
+    # Focus a fuzz sub-tab by persisted id (notification "jump to result").
+    def reveal_session(id : Int64) : Nil
+      if idx = @fuzzers.index { |t| t.db_id == id }
+        @current_idx = idx
+        @host.focus_body
       end
     end
 
@@ -406,6 +434,12 @@ module Gori::Tui
         @host.status("fuzz running — ^X to stop")
         return
       end
+      # Flush any trailing Done/Error from a just-finished run before we rebind
+      # job_id below. The engine sends its terminal event onto @fuzz_events BEFORE
+      # the fiber's `ensure` flips running? false, so a ^R landing in that window
+      # would otherwise apply the stale event to the NEW run's job (premature/wrong
+      # "done", orphaned bottom-bar spinner). Draining now settles the old job first.
+      drain_events
       engine, err = v.build_engine(!@host.session.config.insecure_upstream?)
       unless engine
         @host.status(err || "cannot run")
@@ -429,6 +463,7 @@ module Gori::Tui
     private def start_run(v : FuzzerView, engine : Fuzz::Engine, total : Int64?) : Nil
       save_current
       v.begin_run(total)
+      v.job_id = @host.jobs.start(:fuzz, v.summary, goto: goto_for(v))
       events = @fuzz_events
       calibrate = v.config.auto_calibrate?
       spawn(name: "gori-fuzz") do
@@ -504,6 +539,10 @@ module Gori::Tui
       return if @current_idx < 0 || @current_idx >= @fuzzers.size
       tab = @fuzzers[@current_idx]
       tab.view.request_stop # halt a running sweep before detaching its view (the run fiber polls this)
+      # Finish the job NOW: once the view leaves @fuzzers, drain_events drops its remaining
+      # events (incl. Done), so jobs.finish would never run and the bottom-bar spinner would
+      # animate forever (mirrors MinerController#close_tab).
+      @host.jobs.finish(tab.view.job_id, :stopped, "closed") if tab.view.running?
       if id = tab.db_id
         @host.session.store.delete_fuzz_session(id)
       end

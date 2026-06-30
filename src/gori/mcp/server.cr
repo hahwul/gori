@@ -29,6 +29,7 @@ module Gori
 
       def initialize(@store : Store, *, allow_actions : Bool, verify_upstream : Bool,
                      @input : IO = STDIN, @output : IO = STDOUT)
+        @allow_actions = allow_actions
         @tools = Tools.new(@store, allow_actions, verify_upstream)
         @initialized = false
       end
@@ -102,7 +103,23 @@ module Gori
                 j.field "version", Gori::VERSION
               end
             end
+            j.field "instructions", instructions_text
           end
+        end
+      end
+
+      # Surfaced at the handshake so the client/model knows up front what this server
+      # exposes — in particular whether the (otherwise simply absent) action tools are
+      # disabled by read-only mode, rather than discovering it only on a rejected call.
+      private def instructions_text : String
+        base = "gori MCP exposes the active project's captured HTTP traffic " \
+               "(history, flows, sitemap, scope, findings)."
+        if @allow_actions
+          "#{base} Action tools are enabled: send_request, fuzz_*, mine_*, and " \
+          "create/update_finding make real outbound requests or mutate findings."
+        else
+          "#{base} Read-only mode: action tools (send_request, fuzz_*, mine_*, " \
+          "create/update_finding) are disabled — restart without --read-only to enable them."
         end
       end
 

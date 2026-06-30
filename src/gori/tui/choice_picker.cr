@@ -97,7 +97,10 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return unless box
+      unless box
+        screen.text(area.x + 1, area.y, "picker needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        return
+      end
       Frame.card(screen, box, @title, border: Theme.border_focus)
       @choices.each_with_index do |ch, i|
         ry = box.y + 1 + i

@@ -54,7 +54,10 @@ module Gori::Tui
     # Centered list card over `area` (the body rect).
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return unless box
+      unless box
+        screen.text(area.x + 1, area.y, "browser picker needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
+        return
+      end
       w = box.w
       Frame.card(screen, box, "OPEN BROWSER", border: Theme.border_focus)
       screen.text(box.x + 2, box.y + 1, "pre-trusted · proxy auto-set", Theme.muted, Theme.panel)
