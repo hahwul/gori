@@ -79,7 +79,20 @@ module Gori
           j.field "response_head", head_text(detail.response_head)
           emit_body(j, "response_body", detail.response_head, detail.response_body, detail.response_body_truncated?)
           emit_sse_events(j, detail)
+          emit_decoded(j, detail)
         end
+      end
+
+      DECODE_TEXT_MAX = 16384 # cap each decoded text field serialised for an LLM client
+
+      # Decoded-protocol projections (SAML / JWT / GraphQL / form params), bounded for
+      # LLM use. Shares one emitter with `gori run show --format json` (DecodedView) so
+      # the two surfaces never diverge; here every side is scanned and clipped.
+      def self.emit_decoded(j : JSON::Builder, detail : Store::FlowDetail) : Nil
+        DecodedView.emit_json(j, target: detail.row.target,
+          req_head: detail.request_head, req_body: detail.request_body,
+          resp_head: detail.response_head, resp_body: detail.response_body,
+          clip: DECODE_TEXT_MAX)
       end
 
       SSE_EVENTS_MAX =  500 # cap events serialised for an LLM client

@@ -113,6 +113,7 @@ module Gori::Tui
         return v.focus == :response ? "↑/↓ scroll · ^F find · ^R replay · ↹ pane · esc tabs" \
                                     : "edit head/metadata · ^R replay · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
       end
+      return decode_hint(v) if v.decode_mode? && v.focus == :request # split: ENVELOPE + DECODED payload
       case v.focus
       when :target   then v.editing_sni? ? "type SNI host · ^S/↵/esc back to URL · ^R send" \
                                           : "type URL · ^S SNI · ↵/↓ request · ^R send · ↹ pane · esc tabs"
@@ -189,6 +190,18 @@ module Gori::Tui
       true
     end
 
+    # The split-decode request hint: which sub-pane is being edited + how to switch.
+    private def decode_hint(v : ReplayView) : String
+      sub = if v.req_pane != :decoded
+              "edit request envelope"
+            elsif v.decode_kind? == :saml
+              "edit SAML XML"
+            else
+              "edit GraphQL query/vars"
+            end
+      "#{sub} · ^T switch envelope/decoded · ^R send (re-encodes) · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
+    end
+
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
     # A gRPC request flow: an HTTP/2 call whose request content-type is application/grpc.
     private def grpc_flow?(detail : Store::FlowDetail) : Bool
@@ -196,9 +209,42 @@ module Gori::Tui
         String.new(detail.request_head).downcase.includes?("content-type: application/grpc")
     end
 
+    # A SAML message the REQUEST carries (POST form body or Redirect query) — the only
+    # bindings a replay re-sends in SAML mode. A response-only SAML (an IdP auto-POST
+    # form) replays as an ordinary request, so it's excluded here.
+    private def saml_request_doc(detail : Store::FlowDetail) : Saml::Doc?
+      doc = Saml.from_flow(detail.row.target, detail.request_head, detail.request_body,
+        detail.response_head, detail.response_body)
+      doc if doc && doc.location != :response
+    end
+
+    # The GraphQL operation a request carries (POST JSON body or GET ?query=), or nil —
+    # drives the split GraphQL replay (envelope + readable query/variables).
+    private def graphql_op(detail : Store::FlowDetail) : Graphql::Op?
+      Graphql.from_flow(detail.row.target, detail.request_head, detail.request_body)
+    end
+
+    # Toggle the active request sub-pane (^T) in a split-decode tab: envelope ⇄ decoded.
+    def replay_toggle_decoded : Nil
+      view = current_view
+      return @host.status("no replay open") unless view
+      return @host.status("not a decode flow — ^T switches the envelope/decoded split for SAML/GraphQL") unless view.decode_mode?
+      @host.request_focus(:body)
+      view.focus_pane(:request)
+      pane = view.toggle_req_pane
+      @host.status(pane == :decoded ? "editing the decoded payload — edits re-encode into the request on ^R send" : "editing the request envelope (headers · target · params)")
+    end
+
     def replay_toggle_hex : Nil
-      if (view = current_view) && (view.ws_mode? || view.grpc_mode?)
-        @host.status("hex edit not available here — #{view.ws_mode? ? "edit WS messages as text" : "the gRPC body is sent verbatim; edit the head as text"}")
+      if (view = current_view) && (view.ws_mode? || view.grpc_mode? || view.decode_mode?)
+        msg = if view.ws_mode?
+                "edit WS messages as text"
+              elsif view.grpc_mode?
+                "the gRPC body is sent verbatim; edit the head as text"
+              else
+                "edit the envelope as text + the decoded payload below; it is re-encoded on send"
+              end
+        @host.status("hex edit not available here — #{msg}")
       elsif (view = current_view) && view.focus == :request
         on = view.toggle_request_hex
         @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
@@ -435,6 +481,19 @@ module Gori::Tui
         view.load_grpc(detail)
         @replays << ReplayTab.new(view, id, nil)
         @host.status("grpc replay: #{view.summary} — edit head/metadata · ^R send · esc back")
+      elsif saml_doc = saml_request_doc(detail)
+        # SAML: split — full request envelope + the decoded XML payload (re-encoded into
+        # the param on send). Session-only (db_id nil): the binding/param reconstruction
+        # context isn't persistable through the text replays store.
+        view.load_saml(detail, saml_doc)
+        @replays << ReplayTab.new(view, id, nil)
+        @host.status("saml replay: #{view.summary} — envelope + decoded XML · ^T switch · ^R send · esc back")
+      elsif gql = graphql_op(detail)
+        # GraphQL: split — full request envelope + the query/variables payload (re-encoded
+        # into the JSON body on send). Session-only (db_id nil) like the others.
+        view.load_graphql(detail, gql)
+        @replays << ReplayTab.new(view, id, nil)
+        @host.status("graphql replay: #{view.summary} — envelope + query/vars · ^T switch · ^R send · esc back")
       else
         view.load(detail)
         @replays << ReplayTab.new(view, id, persist_new_replay(view, id))

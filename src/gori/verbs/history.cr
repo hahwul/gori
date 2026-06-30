@@ -76,6 +76,10 @@ module Gori
         Verb::Scope::Replay, [Verb::Chord.new("x", ctrl: true)],
         available: in_replay) { |ctx| ctx.replay_toggle_hex; nil }
       r.register Verb::Definition.new(
+        "replay.toggle-decoded", "Switch envelope/decoded", "For a SAML/GraphQL flow: switch between the request envelope and the decoded payload",
+        Verb::Scope::Replay, [Verb::Chord.new("t", ctrl: true)],
+        available: in_replay) { |ctx| ctx.replay_toggle_decoded; nil }
+      r.register Verb::Definition.new(
         "replay.toggle-sni", "Toggle SNI override", "Override the TLS SNI on the target pane (dialed host unchanged)",
         Verb::Scope::Replay, [Verb::Chord.new("s", ctrl: true)],
         available: in_replay) { |ctx| ctx.replay_toggle_sni; nil }

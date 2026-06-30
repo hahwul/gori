@@ -2753,6 +2753,10 @@ module Gori::Tui
       replay_controller.replay_toggle_hex
     end
 
+    def replay_toggle_decoded : Nil
+      replay_controller.replay_toggle_decoded
+    end
+
     def replay_toggle_sni : Nil
       replay_controller.replay_toggle_sni
     end

@@ -60,6 +60,13 @@ module Gori::Tui
       @detail_ws_total = 0 # full message count (≥ loaded; drives the "older not loaded" note)
       @detail_frames_total = 0
       @detail_sse = false # response is a text/event-stream → offer the EVENTS pane
+      # Decoded protocol projections, parsed once per opened flow (no DB table) — each
+      # drives an optional detail pane like EVENTS. nil/empty ⇒ the pane isn't offered.
+      @detail_saml = nil.as(Saml::Doc?)              # SAMLRequest/Response → SAML pane
+      @detail_jwts = [] of Jwt::Found                # located JWTs → JWT pane
+      @detail_graphql = nil.as(Graphql::Op?)         # GraphQL operation → GRAPHQL pane
+      @detail_form = nil.as(Array(FormData::Field)?) # form/multipart params → PARAMS pane
+      @decoded_id = nil.as(Int64?)                   # flow the decoded panes above were parsed from (skip re-decode)
       @detail_scroll = 0
       @detail_pane = :request
       @search_hl = ""                        # active ^F query → highlight in the detail body
@@ -326,6 +333,11 @@ module Gori::Tui
       @detail_frames_total = 0
       @detail_ws_total = 0
       @detail_sse = false
+      @detail_saml = nil
+      @detail_jwts = [] of Jwt::Found
+      @detail_graphql = nil
+      @detail_form = nil
+      @decoded_id = nil
       @detail_hex_bytes = nil
     end
 
@@ -350,6 +362,7 @@ module Gori::Tui
       # SSE events are a derived view (parsed from the stored response body at
       # render time — no table), so here we only flag whether to offer the pane.
       @detail_sse = !!(detail && sse_response?(detail))
+      decode_protocols(detail)
     end
 
     # The response is a Server-Sent Events stream (drives the EVENTS pane). Scans
@@ -358,10 +371,39 @@ module Gori::Tui
       Sse.event_stream?(detail.response_head)
     end
 
-    # The synthetic log panes (FRAMES / EVENTS) render as text and have no raw-byte
-    # hex view, unlike REQUEST/RESPONSE.
+    # Parse the optional decoded-protocol panes (SAML / JWT / GraphQL / PARAMS) ONCE
+    # per opened flow — derived from the stored bytes, no table. Each result is cached
+    # in an ivar; a nil/empty one means that pane isn't offered (see detail_panes).
+    private def decode_protocols(detail : Store::FlowDetail?) : Nil
+      unless detail
+        @detail_saml, @detail_jwts, @detail_graphql, @detail_form = nil, [] of Jwt::Found, nil, nil
+        @decoded_id = nil
+        return
+      end
+      # A Complete, non-101 flow's bytes are immutable, so re-decoding the SAME flow on a
+      # refresh poll (which still re-runs for h2 flows, to pick up frames) just re-scans
+      # unchanged — possibly multi-MiB — bodies. Skip it; a pending/streaming flow's bytes
+      # still grow, so it re-decodes each poll (id stays nil-guarded until Complete).
+      if @decoded_id == detail.row.id && detail.row.state.complete? && detail.row.status != 101
+        return
+      end
+      tgt = detail.row.target
+      rh, rb = detail.request_head, detail.request_body
+      sh, sb = detail.response_head, detail.response_body
+      @detail_saml = Saml.from_flow(tgt, rh, rb, sh, sb)
+      @detail_jwts = Jwt.from_flow(tgt, rh, rb, sh, sb)
+      @detail_graphql = Graphql.from_flow(tgt, rh, rb)
+      @detail_form = FormData.from_flow(tgt, rh, rb)
+      @decoded_id = detail.row.state.complete? ? detail.row.id : nil
+    end
+
+    # The synthetic log panes (FRAMES / EVENTS) and the decoded-protocol panes render
+    # as text and have no raw-byte hex view, unlike REQUEST/RESPONSE.
     private def log_pane? : Bool
-      @detail_pane == :frames || @detail_pane == :events
+      case @detail_pane
+      when :frames, :events, :saml, :jwt, :graphql, :params then true
+      else                                                       false
+      end
     end
 
     # 'x' toggles a raw hex dump of the current pane (request/response bytes).
@@ -498,11 +540,16 @@ module Gori::Tui
       io.to_slice
     end
 
-    # The detail sub-panes, in order: REQUEST → RESPONSE → FRAMES (the frames pane
-    # exists only for an intercepted h2 flow). ←/→ walk this chain; Tab cycles it.
+    # The detail sub-panes, in order: REQUEST → RESPONSE → decoded-protocol panes
+    # (SAML/JWT/GRAPHQL/PARAMS, each present only when the flow carries one) → EVENTS
+    # (sse) → FRAMES (intercepted h2). ←/→ walk this chain; Tab cycles it.
     private def detail_panes : Array(Symbol)
       panes = [:request, :response]
-      panes << :events if @detail_sse # parsed SSE events (text/event-stream response)
+      panes << :saml if @detail_saml           # decoded SAML XML (request/response)
+      panes << :jwt unless @detail_jwts.empty? # located + decoded JWT(s)
+      panes << :graphql if @detail_graphql     # parsed GraphQL operation
+      panes << :params if @detail_form         # decoded form/multipart params
+      panes << :events if @detail_sse          # parsed SSE events (text/event-stream response)
       panes << :frames if @detail_frames
       panes
     end
@@ -513,6 +560,10 @@ module Gori::Tui
       case pane
       when :frames   then "FRAMES (h2)"
       when :events   then "EVENTS (sse)"
+      when :saml     then "SAML"
+      when :jwt      then @detail_jwts.size > 1 ? "JWT (#{@detail_jwts.size})" : "JWT"
+      when :graphql  then "GRAPHQL"
+      when :params   then "PARAMS"
       when :response then @detail_ws ? "MESSAGES" : "RESPONSE"
       else                "REQUEST"
       end
@@ -907,6 +958,11 @@ module Gori::Tui
         head = log_head(sse_lines(shown, dropped), events.size, shown.size, "events")
         return DetailView.new(head, [] of String, :text, EMPTY_LINES)
       end
+      # Decoded-protocol panes (SAML/JWT/GRAPHQL/PARAMS) — derived projections styled
+      # eagerly (bounded; shared with `gori run show` / MCP).
+      if dv = decoded_pane_view
+        return dv
+      end
       request = @detail_pane == :request
       # A failed/pending flow has no response bytes — surface WHY (like Replay does)
       # instead of a blank pane.
@@ -1058,5 +1114,94 @@ module Gori::Tui
     end
 
     EVENT_DATA_LINE_CAP = 1000 # max rendered data lines per SSE event
+
+    # --- decoded-protocol panes (SAML / JWT / GRAPHQL / PARAMS) --------------
+
+    # The DetailView for the active decoded-protocol pane, or nil when the active pane
+    # isn't one (each ivar was populated in decode_protocols, so the pane was offered).
+    private def decoded_pane_view : DetailView?
+      lines =
+        case @detail_pane
+        when :saml    then (doc = @detail_saml) ? saml_detail_lines(doc) : nil
+        when :jwt     then @detail_jwts.empty? ? nil : jwt_detail_lines(@detail_jwts)
+        when :graphql then (op = @detail_graphql) ? graphql_detail_lines(op) : nil
+        when :params  then (f = @detail_form) ? form_detail_lines(f) : nil
+        end
+      lines ? DetailView.new(lines, [] of String, :text, EMPTY_LINES) : nil
+    end
+
+    # Max styled lines a decoded-protocol pane renders, so a pathological document
+    # can't materialise a giant line array (the decoders cap their inputs too).
+    DERIVED_LINE_CAP = 20_000
+
+    # A "▸ …" accent header line introducing a decoded-protocol section.
+    private def derived_header(text : String) : Highlight::Line
+      [Highlight::Span.new("▸ #{text}", Theme.accent)] of Highlight::Span
+    end
+
+    # Append `raw`'s lines to `lines`, styled per `kind`, stopping at DERIVED_LINE_CAP.
+    private def append_styled(lines : Array(Highlight::Line), raw : String, kind : Symbol) : Nil
+      raw.split('\n').each do |ln|
+        if lines.size >= DERIVED_LINE_CAP
+          lines << [Highlight::Span.new("… (truncated)", Theme.yellow)] of Highlight::Span
+          break
+        end
+        lines << Highlight.body_styled(ln, kind)
+      end
+    end
+
+    private def saml_detail_lines(doc : Saml::Doc) : Array(Highlight::Line)
+      lines = [derived_header(Saml.summary(doc))]
+      lines << Highlight::Line.new
+      append_styled(lines, Saml.pretty_xml(doc.xml), :xml)
+      lines
+    end
+
+    private def jwt_detail_lines(found : Array(Jwt::Found)) : Array(Highlight::Line)
+      lines = [] of Highlight::Line
+      found.each_with_index do |f, i|
+        lines << Highlight::Line.new if i > 0
+        brief = f.brief
+        lines << derived_header(brief ? "#{f.location} · #{brief}" : f.location)
+        lines << [Highlight::Span.new(token_preview(f.token), Theme.muted)] of Highlight::Span
+        lines << Highlight::Line.new
+        append_styled(lines, f.decoded, :json)
+      end
+      lines
+    end
+
+    # A JWT can be hundreds of chars; show a head…tail preview so the raw token is
+    # available (to read/copy) without dominating the pane.
+    private def token_preview(tok : String) : String
+      tok.size > 64 ? "#{tok[0, 40]}…#{tok[-12, 12]}" : tok
+    end
+
+    private def graphql_detail_lines(op : Graphql::Op) : Array(Highlight::Line)
+      lines = [] of Highlight::Line
+      append_styled(lines, Graphql.display(op), :text)
+      lines
+    end
+
+    private def form_detail_lines(fields : Array(FormData::Field)) : Array(Highlight::Line)
+      lines = [derived_header("#{fields.size} field#{fields.size == 1 ? "" : "s"}")]
+      lines << Highlight::Line.new
+      fields.each do |f|
+        break if lines.size >= DERIVED_LINE_CAP
+        lines << form_field_line(f)
+      end
+      lines
+    end
+
+    # One "name = value" row; a `?` tags a query-string param, and a multipart
+    # file/binary part shows its note in place of an inline value.
+    private def form_field_line(f : FormData::Field) : Highlight::Line
+      tag = f.source == :query ? "?" : " "
+      note = f.note
+      [
+        Highlight::Span.new("#{tag} #{f.name}", Theme.syn_string),
+        Highlight::Span.new(" = ", Theme.muted),
+        Highlight::Span.new(note ? "(#{note})" : f.value, note ? Theme.yellow : Theme.text),
+      ] of Highlight::Span
+    end
   end
 end
