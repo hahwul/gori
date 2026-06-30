@@ -1,10 +1,9 @@
-require "uri"
 require "./screen"
 require "./theme"
 require "../store"
 require "../ql"
 require "../scope"
-require "../sitemap"
+require "../sitemap" # the host→path tree model + builder (URI normalisation lives there now)
 
 module Gori::Tui
   # The Sitemap tab: a literal host → path tree built from captured flows (no ID

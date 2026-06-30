@@ -357,7 +357,6 @@ describe Gori::CLI::Output do
 
     Gori::CLI::Output.sitemap_json([] of Gori::Sitemap::Node).should eq("[]")
   end
-
 end
 
 describe Gori::Notes do

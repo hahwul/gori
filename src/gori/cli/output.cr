@@ -284,7 +284,10 @@ module Gori
 
       # The endpoint tree as JSON: an array of host objects, each `{host, endpoints,
       # tag?, children}`. A child node is `{label, path, methods?, grouped?, tag?,
-      # children?}`. The stable, documented machine contract.
+      # children?}`. The stable, documented machine contract. Unlike the text tree
+      # (which renders a folded `grouped` node collapsed), JSON keeps the fold's
+      # children nested under it — the complete tree, with `grouped:true` as the hint
+      # so a consumer can collapse them itself.
       def self.sitemap_json(hosts : Array(Sitemap::Node)) : String
         JSON.build do |j|
           j.array { hosts.each { |h| sitemap_host_json(j, h) } }

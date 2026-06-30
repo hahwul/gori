@@ -58,7 +58,7 @@ module Gori
         when "replay"            then cmd_replay(args[1..])
         when "fuzz"              then cmd_fuzz(args[1..])
         when "mine"              then cmd_mine(args[1..])
-        else dispatch_subcommand2(sub, args[1..])
+        else                          dispatch_subcommand2(sub, args[1..])
         end
       end
 
@@ -1193,9 +1193,12 @@ module Gori
         filter
       end
 
-      # Build + post-process the tree from the open store: host-level scope filter,
-      # numeric folding, then endpoint counts. Mirrors SitemapView#reload's order so the
-      # CLI report matches the interactive tab.
+      # Build + post-process the tree from the open store in the SAME ORDER as
+      # SitemapView#reload (build → tags → scope → fold → counts). The scope step
+      # differs by design: --in-scope filters whole hosts via Scope#host_in_scope?,
+      # which evaluates the rules regardless of the TUI's persisted ⇧S enabled flag
+      # (an explicit --in-scope is the opt-in). That host-level gate is coarser than
+      # the TUI lens's per-flow SQL filter and conservative on url-level includes.
       private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,
                                        in_scope : Bool, group : Bool) : Array(Sitemap::Node)
         hosts = Sitemap.build(store.sitemap_entries(filter, limit))
