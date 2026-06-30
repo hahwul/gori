@@ -309,6 +309,55 @@ describe Gori::CLI::Output do
     with_text = JSON.parse(Gori::CLI::Output.notes_array_json(doc, with_text: true)).as_a
     with_text[1]["text"].as_s.should eq("two")
   end
+  it "renders the sitemap as an indented tree with counts, methods, and a path tag" do
+    hosts = Gori::Sitemap.build([
+      {"acme.test", "GET", "/"},
+      {"acme.test", "POST", "/api/orders"},
+      {"acme.test", "GET", "/api/users"},
+    ])
+    Gori::Sitemap.stamp_tags!(hosts, { {"acme.test", "/api"} => "payment flow" })
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+    txt = Gori::CLI::Output.sitemap_text(hosts)
+    txt.should contain("acme.test  (3 paths)")
+    txt.should contain("├─ ") # tree guide
+    txt.should contain("orders  [POST]")
+    txt.should contain("api  # payment flow") # tag on the folder node, no methods
+  end
+
+  it "collapses a folded numeric group in the text tree with a value count" do
+    hosts = Gori::Sitemap.build((1001..1012).map { |i| {"h", "GET", "/p/#{i}"} })
+    hosts.each { |h| Gori::Sitemap.group_sequences!(h) }
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+    txt = Gori::CLI::Output.sitemap_text(hosts)
+    txt.should contain("[1001, 1002, 1003 … +9]  (12 values)")
+    txt.should_not contain("1010") # a folded child is hidden in the collapsed text tree
+  end
+
+  it "lists every endpoint flat in the paths format (numeric folding irrelevant)" do
+    hosts = Gori::Sitemap.build([
+      {"acme.test", "GET", "/api/users"},
+      {"acme.test", "POST", "/api/users"},
+    ])
+    Gori::CLI::Output.sitemap_paths(hosts).should eq("GET,POST  acme.test/api/users\n")
+  end
+
+  it "emits the sitemap as JSON with host/endpoint/children fields and an empty array when blank" do
+    hosts = Gori::Sitemap.build([{"acme.test", "GET", "/api/users"}])
+    Gori::Sitemap.stamp_tags!(hosts, { {"acme.test", "/api"} => "memo" })
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+    json = JSON.parse(Gori::CLI::Output.sitemap_json(hosts)).as_a
+    json.size.should eq(1)
+    json[0]["host"].as_s.should eq("acme.test")
+    json[0]["endpoints"].as_i.should eq(1)
+    api = json[0]["children"].as_a.find! { |c| c["label"].as_s == "api" }
+    api["tag"].as_s.should eq("memo")
+    users = api["children"].as_a.find! { |c| c["label"].as_s == "users" }
+    users["path"].as_s.should eq("/api/users")
+    users["methods"].as_a.map(&.as_s).should eq(["GET"])
+
+    Gori::CLI::Output.sitemap_json([] of Gori::Sitemap::Node).should eq("[]")
+  end
+
 end
 
 describe Gori::Notes do
