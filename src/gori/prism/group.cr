@@ -32,30 +32,28 @@ module Gori
     # severity (desc), then host, then code for a stable, scannable order.
     def self.group(detections : Array(Detection)) : Array(Group)
       cap = Store::PRISM_AFFECTED_CAP
-      order = [] of {String, String} # first-seen group keys, to keep grouping deterministic
       acc = {} of {String, String} => Group
       detections.each do |d|
         key = {d.code, d.host}
         if g = acc[key]?
           urls = g.affected
-          urls << d.url if !urls.includes?(d.url) && urls.size < cap
+          # size check first so a full list short-circuits the O(n) includes? scan.
+          urls << d.url if urls.size < cap && !urls.includes?(d.url)
           sev = g.severity.value >= d.severity.value ? g.severity : d.severity
           acc[key] = Group.new(g.code, g.category, g.host, g.title, sev, g.hit_count + 1,
             urls, g.evidence || d.evidence, g.sample_flow_id)
         else
-          order << key
           acc[key] = Group.new(d.code, d.category, d.host, d.title, d.severity, 1,
             [d.url], d.evidence, d.flow_id)
         end
       end
-      groups = order.map { |k| acc[k] }
-      groups.sort! do |a, b|
+      # Hash#values is insertion order, but the result is fully ordered by the sort below.
+      acc.values.sort! do |a, b|
         by_sev = b.severity.value <=> a.severity.value
         next by_sev unless by_sev.zero?
         by_host = a.host <=> b.host
         by_host.zero? ? a.code <=> b.code : by_host
       end
-      groups
     end
   end
 end

@@ -918,9 +918,12 @@ module Gori
 
       # --- prism (passive scan) ----------------------------------------------
 
+      # The categories a PASSIVE scan can emit. Prism::Category::ACTIVE is intentionally absent —
+      # active/reflected-param detections come only from the request-sending Active scanner, which
+      # this command doesn't run, so accepting `--category active` would be a guaranteed-empty filter.
       PRISM_CATEGORIES = [
         Prism::Category::HEADERS, Prism::Category::COOKIES, Prism::Category::TECH,
-        Prism::Category::INFOLEAK, Prism::Category::CORS, Prism::Category::ACTIVE,
+        Prism::Category::INFOLEAK, Prism::Category::CORS,
       ]
 
       private def self.cmd_prism(args : Array(String)) : Nil
@@ -953,7 +956,7 @@ module Gori
         # explicit --query wins. Multiple terms join with spaces (QL ANDs them).
         query ||= positional.join(' ') unless positional.empty?
 
-        filter = nil.as(QL::Filter?)
+        filter : QL::Filter? = nil
         if q = query
           parsed = QL.parse(q)
           # A query that compiles to NOTHING (e.g. `status:>=foo`) becomes the match-all EMPTY
@@ -978,34 +981,43 @@ module Gori
         if cat = category
           groups = groups.select { |g| g.category == cat }
         end
+        report_prism(groups, scanned, format, query, min_sev, category)
+      end
 
+      private def self.report_prism(groups : Array(Prism::Group), scanned : Int32, format : Symbol,
+                                    query : String?, min_sev : Store::Severity?, category : String?) : Nil
         STDERR.puts "scanned #{scanned} flow#{scanned == 1 ? "" : "s"} · #{groups.size} issue#{groups.size == 1 ? "" : "s"}"
         if format == :json
           puts CLI::Output.prism_array_json(groups)
         elsif groups.empty?
-          STDERR.puts "no issues#{query ? " in flows matching #{query.inspect}" : ""}"
+          scope = query ? " in flows matching #{query.inspect}" : ""
+          # Distinguish "nothing found" from "filters removed everything" — else an empty result
+          # under --severity/--category looks like the QL query itself matched no flows.
+          STDERR.puts((min_sev || category) ? "no issues match the --severity/--category filter#{scope}" : "no issues#{scope}")
         else
           groups.each { |g| puts CLI::Output.prism_group_text(g) }
         end
       end
 
-      # Flow IDs to scan, oldest-first so grouping matches live-capture order (which decides the
-      # first-seen evidence/sample flow). Reuses the proven search/recent_flows query paths.
+      # Flow IDs to scan, oldest-first (ascending id) — a stable, deterministic grouping order.
+      # Reuses the proven search/recent_flows query paths.
       private def self.prism_scan_ids(store : Store, filter : QL::Filter?) : Array(Int64)
         rows = filter ? store.search(filter, Int32::MAX) : store.recent_flows(Int32::MAX)
         rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
       end
 
-      # Passively analyze each flow, tagging every detection with its source flow id (passive
-      # detections carry none) so the grouped sample_flow_id points at a real flow. Streams one
-      # FlowDetail at a time (each holds the full BLOBs) and shows a progress meter on a tty.
+      # Passively analyze each flow THAT HAS A CAPTURED RESPONSE — mirroring the live analyzer,
+      # which only scans on the `:updated` event (a response or WS upgrade exists), never on a
+      # bare request. Skipping response-less flows (connect/TLS failures, still-pending) keeps
+      # headless counts equal to the TUI Prism tab; otherwise request-only rules (secret_in_url,
+      # some tech) would flag flows the live path never sees. Passive detections already carry
+      # their source flow_id (ctx.fid). Streams one FlowDetail at a time (full BLOBs); tty meter.
       private def self.scan_flows(store : Store, ids : Array(Int64)) : Array(Prism::Detection)
         detections = [] of Prism::Detection
         progress = STDERR.tty?
         ids.each_with_index do |id, i|
           detail = store.get_flow(id)
-          next unless detail
-          Prism::Passive.analyze(detail).each { |d| detections << d.copy_with(flow_id: id) }
+          detections.concat(Prism::Passive.analyze(detail)) if detail && detail.response_head
           if progress && (i & 0x3F) == 0
             STDERR.print "\r[prism] scanned #{i + 1}/#{ids.size} flows"
             STDERR.flush
