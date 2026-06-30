@@ -4,6 +4,7 @@
 # headless `gori run capture`.
 require "./prism/mode"
 require "./prism/issue"
+require "./prism/group"
 require "./prism/event"
 require "./prism/passive"
 require "./prism/active"
