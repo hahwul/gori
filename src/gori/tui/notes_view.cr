@@ -29,11 +29,12 @@ module Gori::Tui
         @area = TextArea.new(text)
       end
 
-      # Sub-tab label: the first non-blank line (trimmed/truncated), else a
-      # positional fallback so empty notes are still addressable.
+      # Sub-tab label: the note's title (first non-blank line, trimmed) truncated
+      # to the chip width, else a positional fallback so empty notes are still
+      # addressable. The title rule itself lives in `Notes.title` — the single
+      # source of truth the CLI listing reads too, so labels can't drift.
       def label(idx : Int32) : String
-        if line = @area.first_nonblank_line
-          t = line.strip
+        if t = Notes.title(@area.text)
           t.size > 15 ? "#{t[0, 14]}…" : t
         else
           "note #{idx + 1}"
