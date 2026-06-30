@@ -1106,8 +1106,6 @@ module Gori::Tui
         @session.prism.set_mode(Prism::Mode.new(p.selected_value))
         prism_controller.view.reload(@session.store)
         @toast = "Prism mode: #{@session.prism.mode.title}"
-      when :prism_status
-        prism_controller.apply_status(Store::Status.new(p.selected_value))
       end
       close_choice_picker
     end
@@ -2525,10 +2523,20 @@ module Gori::Tui
       @overlay = :choice
     end
 
-    def prism_set_status : Nil
-      return unless i = prism_controller.view.detail_issue
-      @choice_picker = ChoicePicker.for_prism_status(i.status.value)
-      @overlay = :choice
+    def prism_dismiss : Nil
+      prism_controller.prism_dismiss
+    end
+
+    def prism_toggle_closed : Nil
+      prism_controller.prism_toggle_closed
+    end
+
+    def prism_dismiss_code : Nil
+      prism_controller.prism_dismiss_code
+    end
+
+    def prism_dismiss_host : Nil
+      prism_controller.prism_dismiss_host
     end
 
     # Jump from an issue to its sample flow's request/response in History. CROSS-TAB
@@ -2561,6 +2569,10 @@ module Gori::Tui
     def prism_promote : Nil
       return unless i = prism_controller.view.detail_issue
       @session.store.insert_finding(i.title, i.severity, i.host, i.sample_flow_id)
+      # Mark the source confirmed (= "promoted to a Finding") so it leaves the default
+      # open-only lens instead of lingering as unreviewed noise; still reachable via `a`.
+      @session.store.update_prism_issue_status(i.id, Store::Status::Confirmed)
+      prism_controller.view.reload(@session.store)
       @toast = "promoted to finding — see the Findings tab"
     end
 

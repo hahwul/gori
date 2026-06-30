@@ -32,25 +32,43 @@ module Gori::Tui
       @qcx = 0
       @preedit_q = ""
       @querying = false
+      @show_closed = false # default lens: open issues only (triaged ones drop out of view)
     end
 
     def reload(store : Store) : Nil
       @all = store.prism_issues
       @mode = store.prism_mode
       @tech = store.prism_tech_summary
-      recount
       apply_filter
       refresh_detail(store)
     end
 
-    private def recount : Nil
+    private def recount(base : Array(Store::PrismIssue)) : Nil
       @counts = StaticArray(Int32, 5).new(0)
-      @all.each { |i| @counts[i.severity.value] += 1 }
+      base.each { |i| @counts[i.severity.value] += 1 }
     end
 
+    # The default lens shows only OPEN issues; triaged (dismissed/confirmed/resolved) rows
+    # drop out so muting noise actually clears the view. An explicit status: term in the
+    # filter, or the show-closed toggle, opts back into the full set. The severity tallies
+    # follow the same base (pre-text-filter) so dismissing visibly lowers them.
     private def apply_filter : Nil
-      @issues = Prism::Filter.parse(@query).apply(@all)
+      filter = Prism::Filter.parse(@query)
+      base = (@show_closed || filter.has_status_term?) ? @all : @all.select(&.status.open?)
+      recount(base)
+      @issues = filter.apply(base)
       @selected = @selected.clamp(0, {@issues.size - 1, 0}.max)
+    end
+
+    def show_closed? : Bool
+      @show_closed
+    end
+
+    # `a`: flip between the default open-only lens and the full set (incl. triaged rows).
+    def toggle_show_closed : Bool
+      @show_closed = !@show_closed
+      apply_filter
+      @show_closed
     end
 
     # Re-fetch the open detail (its status/affected may have changed) and its sample flow.
@@ -188,10 +206,34 @@ module Gori::Tui
       @detail_scroll = {@detail_scroll + delta, 0}.max
     end
 
-    def set_status(store : Store, status : Store::Status) : Nil
-      return unless issue = target_issue
-      store.update_prism_issue_status(issue.id, status)
+    # `c`: one-key dismiss for the targeted issue. open → false-positive (mute), anything
+    # already triaged → back to open (un-mute). Dismiss is the high-value triage action for
+    # a passive scanner; the full open/confirmed/fp/resolved picker was over-built for
+    # machine-found issues (promote handles "this is real → Finding"). Returns the new state.
+    def toggle_dismiss(store : Store) : Store::Status?
+      return nil unless issue = target_issue
+      next_status = issue.status.open? ? Store::Status::FalsePositive : Store::Status::Open
+      store.update_prism_issue_status(issue.id, next_status)
       reload(store)
+      next_status
+    end
+
+    # Bulk-mute every OPEN issue sharing the targeted issue's code / host. Returns how many
+    # rows were affected (counted in memory; the store UPDATE is fire-and-forget).
+    def dismiss_by_code(store : Store) : Int32
+      return 0 unless issue = target_issue
+      n = @all.count { |i| i.code == issue.code && i.status.open? }
+      store.dismiss_prism_by_code(issue.code)
+      reload(store)
+      n
+    end
+
+    def dismiss_by_host(store : Store) : Int32
+      return 0 unless issue = target_issue
+      n = @all.count { |i| i.host == issue.host && i.status.open? }
+      store.dismiss_prism_by_host(issue.host)
+      reload(store)
+      n
     end
 
     def delete(store : Store) : Nil
@@ -247,9 +289,14 @@ module Gori::Tui
       screen.text(rect.x + 7, y, cat_tag(issue.category), Theme.muted, bg, width: 6)
       # Right-to-left cluster: status · host · ×N(affected).
       rx = rect.right - 1
-      st = status_tag(issue.status)
-      screen.text(rx - st.size, y, st, status_color(issue.status), bg)
-      rx -= st.size + 1
+      # The "open" tag is redundant in the default open-only lens (every visible row is
+      # open); show a status tag only once non-open rows can appear (show-closed / status:
+      # filter), or when the row itself is non-open.
+      if @show_closed || !issue.status.open?
+        st = status_tag(issue.status)
+        screen.text(rx - st.size, y, st, status_color(issue.status), bg)
+        rx -= st.size + 1
+      end
       if !issue.host.empty?
         screen.text({rx - issue.host.size, rect.x}.max, y, issue.host, Theme.muted, bg)
         rx -= issue.host.size + 1
@@ -269,6 +316,8 @@ module Gori::Tui
               "scanning is OFF · press m (or space → set mode) to enable passive scanning"
             elsif filtering?
               @querying ? "no issues match · esc clears the filter" : "no issues match · / to edit the filter"
+            elsif !@all.empty? && !@show_closed
+              "no open issues · all #{@all.size} triaged · press a to show closed"
             else
               "no issues yet · capture in-scope traffic and Prism flags issues passively"
             end
@@ -355,7 +404,7 @@ module Gori::Tui
 
       y = rect.y + 5
       Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
-      head = "AFFECTED URLS (#{issue.affected.size})  ·  seen ×#{issue.hit_count}"
+      head = "AFFECTED URLS (#{issue.affected.size})  ·  seen ×#{Fmt.count(issue.hit_count)}"
       screen.text(rect.x + 1, y + 1, head, Theme.accent, attr: Attribute::Bold)
       list_y = y + 2
       avail = {rect.bottom - list_y, 0}.max

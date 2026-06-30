@@ -52,17 +52,6 @@ module Gori::Tui
       ], current, :prism_mode)
     end
 
-    # The same triage-status choices, but kind :prism_status so the Runner applies it to the
-    # open Prism issue rather than a Finding.
-    def self.for_prism_status(current : Int32) : ChoicePicker
-      new("SET STATUS", [
-        Choice.new("open", 'o', Theme.accent, 0),
-        Choice.new("confirmed", 'c', Theme.red, 1),
-        Choice.new("false-positive", 'f', Theme.muted, 2),
-        Choice.new("resolved", 'r', Theme.green, 3),
-      ], current, :prism_status)
-    end
-
     def move(delta : Int32) : Nil
       return if @choices.empty?
       @selected = (@selected + delta).clamp(0, @choices.size - 1)
