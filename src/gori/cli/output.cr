@@ -2,6 +2,7 @@ require "json"
 require "../store"
 require "../fuzz"
 require "../miner"
+require "../prism/group"
 
 module Gori
   module CLI
@@ -110,6 +111,51 @@ module Gori
           io << f.name.ljust(24)
           io << "  " << f.location.label.ljust(8)
           io << "· " << f.evidence.label
+        end
+      end
+
+      # --- prism scan issues --------------------------------------------------
+
+      def self.prism_group_json(g : Prism::Group) : String
+        JSON.build { |j| prism_group_fields(j, g) }
+      end
+
+      def self.prism_array_json(groups : Array(Prism::Group)) : String
+        JSON.build { |j| j.array { groups.each { |g| prism_group_fields(j, g) } } }
+      end
+
+      def self.prism_group_fields(j : JSON::Builder, g : Prism::Group) : Nil
+        j.object do
+          j.field "code", g.code
+          j.field "category", g.category
+          j.field "host", g.host
+          j.field "title", g.title
+          j.field "severity", g.severity.label
+          j.field "hit_count", g.hit_count
+          j.field("affected") { j.array { g.affected.each { |u| j.string(u) } } }
+          j.field "affected_count", g.affected.size
+          j.field "evidence", g.evidence
+          j.field "sample_flow_id", g.sample_flow_id
+          j.field "remediation", Prism.remediation(g.code)
+        end
+      end
+
+      # "[high]      secret_in_url             api.test   ×3   token"
+      # plus an indented representative affected URL ("(+N more)" when capped).
+      def self.prism_group_text(g : Prism::Group) : String
+        String.build do |io|
+          io << "[#{g.severity.label}]".ljust(11)
+          io << g.code.ljust(28)
+          io << "  " << g.host
+          io << "  ×" << g.hit_count
+          if ev = g.evidence
+            io << "  " << ev
+          end
+          if first = g.affected.first?
+            io << "\n    " << first
+            more = g.affected.size - 1
+            io << " (+#{more} more)" if more > 0
+          end
         end
       end
 

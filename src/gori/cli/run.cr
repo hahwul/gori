@@ -15,6 +15,8 @@ require "../replay/flow_request"
 require "../replay/diff"
 require "../fuzz"
 require "../miner"
+require "../prism/passive"
+require "../prism/group"
 require "../findings_export"
 require "./output"
 
@@ -28,6 +30,16 @@ module Gori
     # capturing instance (SQLite WAL).
     module Run
       def self.dispatch(args : Array(String)) : Nil
+        dispatch_subcommand(args)
+      rescue ex : IO::Error
+        # `gori run … | head` (or any reader that closes early) breaks the STDOUT
+        # pipe; a well-behaved Unix filter exits quietly on EPIPE rather than
+        # dumping an IO::Error backtrace. Re-raise anything that isn't a broken pipe.
+        raise ex unless ex.os_error == Errno::EPIPE
+        exit 0
+      end
+
+      private def self.dispatch_subcommand(args : Array(String)) : Nil
         if args.empty?
           print_help
           return
@@ -41,6 +53,7 @@ module Gori
         when "replay"        then cmd_replay(rest)
         when "fuzz"          then cmd_fuzz(rest)
         when "mine"          then cmd_mine(rest)
+        when "prism"         then cmd_prism(rest)
         when "findings"      then cmd_findings(rest)
         when "projects"      then cmd_projects(rest)
         when "-h", "--help"  then print_help
@@ -49,12 +62,6 @@ module Gori
           print_help
           exit 1
         end
-      rescue ex : IO::Error
-        # `gori run … | head` (or any reader that closes early) breaks the STDOUT
-        # pipe; a well-behaved Unix filter exits quietly on EPIPE rather than
-        # dumping an IO::Error backtrace. Re-raise anything that isn't a broken pipe.
-        raise ex unless ex.os_error == Errno::EPIPE
-        exit 0
       end
 
       private def self.print_help : Nil
@@ -70,6 +77,7 @@ module Gori
           replay <id>        Re-send a captured flow to its origin (optionally diff it)
           fuzz [<id>]        Fuzz/intrude a request: mark §…§ positions, sweep payloads
           mine [<id>]        Discover hidden parameters (query/body/json/header/cookie)
+          prism [QL]         Passively scan captured flows for issues (zero requests)
           findings           List or export findings (text, json, markdown)
           projects           List known projects
 
@@ -906,6 +914,114 @@ module Gori
         parts = v[1..].split(delim)
         abort "gori run fuzz: --regex-replace must be #{delim}pattern#{delim}replacement#{delim}" if parts.size < 2
         Fuzz::RegexReplace.new(parse_regex(parts[0]), parts[1])
+      end
+
+      # --- prism (passive scan) ----------------------------------------------
+
+      PRISM_CATEGORIES = [
+        Prism::Category::HEADERS, Prism::Category::COOKIES, Prism::Category::TECH,
+        Prism::Category::INFOLEAK, Prism::Category::CORS, Prism::Category::ACTIVE,
+      ]
+
+      private def self.cmd_prism(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        query : String? = nil
+        min_sev : Store::Severity? = nil
+        category : String? = nil
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run prism [QL query] [options]\n\n" \
+                     "Passively scan captured flows (zero outbound requests) and report grouped\n" \
+                     "issues — the headless equivalent of the TUI Prism tab. Active/reflected-param\n" \
+                     "checks send requests and are intentionally excluded (use the TUI or fuzz/mine)."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }
+          p.on("--severity=LEVEL", "Only show issues at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
+          p.on("--category=CAT", "Only show issues in CAT (#{PRISM_CATEGORIES.join("|")})") { |v| category = parse_prism_category(v) }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run prism: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run prism: missing value for #{f}" }
+        end
+        parser.parse(args)
+        # A positional QL is accepted too ("gori run prism status:>=500"), mirroring history; an
+        # explicit --query wins. Multiple terms join with spaces (QL ANDs them).
+        query ||= positional.join(' ') unless positional.empty?
+
+        filter = nil.as(QL::Filter?)
+        if q = query
+          parsed = QL.parse(q)
+          # A query that compiles to NOTHING (e.g. `status:>=foo`) becomes the match-all EMPTY
+          # filter — here that would scan every flow, the opposite of what was asked. Refuse it.
+          if !q.strip.empty? && parsed == QL::EMPTY
+            abort "gori run prism: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
+          end
+          filter = parsed
+        end
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        groups, scanned = begin
+          ids = prism_scan_ids(store, filter)
+          {Prism.group(scan_flows(store, ids)), ids.size}
+        ensure
+          store.close
+        end
+
+        if ms = min_sev
+          groups = groups.select { |g| g.severity.value >= ms.value }
+        end
+        if cat = category
+          groups = groups.select { |g| g.category == cat }
+        end
+
+        STDERR.puts "scanned #{scanned} flow#{scanned == 1 ? "" : "s"} · #{groups.size} issue#{groups.size == 1 ? "" : "s"}"
+        if format == :json
+          puts CLI::Output.prism_array_json(groups)
+        elsif groups.empty?
+          STDERR.puts "no issues#{query ? " in flows matching #{query.inspect}" : ""}"
+        else
+          groups.each { |g| puts CLI::Output.prism_group_text(g) }
+        end
+      end
+
+      # Flow IDs to scan, oldest-first so grouping matches live-capture order (which decides the
+      # first-seen evidence/sample flow). Reuses the proven search/recent_flows query paths.
+      private def self.prism_scan_ids(store : Store, filter : QL::Filter?) : Array(Int64)
+        rows = filter ? store.search(filter, Int32::MAX) : store.recent_flows(Int32::MAX)
+        rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
+      end
+
+      # Passively analyze each flow, tagging every detection with its source flow id (passive
+      # detections carry none) so the grouped sample_flow_id points at a real flow. Streams one
+      # FlowDetail at a time (each holds the full BLOBs) and shows a progress meter on a tty.
+      private def self.scan_flows(store : Store, ids : Array(Int64)) : Array(Prism::Detection)
+        detections = [] of Prism::Detection
+        progress = STDERR.tty?
+        ids.each_with_index do |id, i|
+          detail = store.get_flow(id)
+          next unless detail
+          Prism::Passive.analyze(detail).each { |d| detections << d.copy_with(flow_id: id) }
+          if progress && (i & 0x3F) == 0
+            STDERR.print "\r[prism] scanned #{i + 1}/#{ids.size} flows"
+            STDERR.flush
+          end
+        end
+        STDERR.print "\r\e[K" if progress # clear the in-place meter before the summary line
+        detections
+      end
+
+      private def self.parse_severity(v : String) : Store::Severity
+        Store::Severity.parse?(v) || abort "gori run prism: invalid --severity '#{v}' (info|low|medium|high|critical)"
+      end
+
+      private def self.parse_prism_category(v : String) : String
+        d = v.downcase
+        PRISM_CATEGORIES.includes?(d) ? d : abort("gori run prism: invalid --category '#{v}' (#{PRISM_CATEGORIES.join("|")})")
       end
 
       # --- findings ----------------------------------------------------------
