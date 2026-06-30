@@ -1,0 +1,87 @@
+alias b := build
+alias d := dev
+alias t := test
+alias vc := version-check
+alias vu := version-update
+alias bm := benchmark
+# alias ds := docs-serve
+
+# List available tasks.
+default:
+    @just --list
+
+# Build gori binary, then run the TUI (debug build; fast incremental compile).
+[group('build')]
+dev: build
+    ./bin/gori
+
+# Build gori binary (debug; outputs to bin/gori).
+[group('build')]
+build:
+    shards build
+
+# Run all tests.
+[group('development')]
+test:
+    crystal spec
+
+# Check code format and lint without changing files.
+[group('development')]
+check:
+    crystal tool format --check
+    lib/ameba/bin/ameba.cr
+
+# Auto-format code and fix lint issues.
+[group('development')]
+fix:
+    crystal tool format
+    lib/ameba/bin/ameba.cr --fix
+
+# Check that the version in shard.yml and src/gori.cr agree.
+[group('version')]
+version-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    shard_ver=$(grep '^version:' shard.yml | head -1 | sed 's/version:[[:space:]]*//')
+    code_ver=$(grep 'VERSION = ' src/gori.cr | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    echo "shard.yml:   $shard_ver"
+    echo "src/gori.cr: $code_ver"
+    if [ "$shard_ver" != "$code_ver" ]; then
+        echo "✗ version mismatch" >&2
+        exit 1
+    fi
+    echo "✓ versions match"
+
+# Show the current version, then prompt for a new one (blank keeps it).
+[group('version')]
+version-update:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    current=$(grep '^version:' shard.yml | head -1 | sed 's/version:[[:space:]]*//')
+    echo "Current version: $current"
+    read -r -p "New version (blank to keep): " target
+    if [ -z "$target" ]; then
+        echo "No change."
+        exit 0
+    fi
+    perl -i -pe 's/^version:\s*\S+/version: '"$target"'/' shard.yml
+    perl -i -pe 's/(VERSION = ")[^"]*(")/${1}'"$target"'${2}/' src/gori.cr
+    echo "✓ version: $current -> $target"
+
+# Build (release) and run the end-to-end proxy benchmark harness.
+[group('benchmark')]
+benchmark:
+    crystal build bench/proxy_bench.cr -o bin/proxy_bench --release
+    ./bin/proxy_bench
+
+# Seed the local "demo" project with a varied dataset for the TUI to explore.
+[group('demo')]
+seed-demo:
+    crystal run scripts/seed_demo.cr
+
+# Serve the docs site locally.
+# TODO: docs aren't set up yet. Once a `docs/` site exists, mirror the
+# hwaro/noir convention (built with hwaro) and uncomment this recipe + alias.
+# [group('documents')]
+# docs-serve:
+#     hwaro serve -i docs --base-url="http://localhost:3000"
