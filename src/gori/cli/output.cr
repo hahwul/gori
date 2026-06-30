@@ -3,6 +3,7 @@ require "../store"
 require "../fuzz"
 require "../miner"
 require "../prism/group"
+require "../notes"
 
 module Gori
   module CLI
@@ -170,6 +171,52 @@ module Gori
           io << "  " << human_us(r.duration_us)
           io << "  ⟦" << r.extracted << '⟧' if r.extracted
           io << "  " << r.error if r.error
+        end
+      end
+
+      # --- notes --------------------------------------------------------------
+
+      # Title shown in listings: the note's first non-blank line, or a positional
+      # fallback for a blank note (mirrors the TUI sub-tab's "note N").
+      def self.note_label(idx : Int32, text : String) : String
+        Notes.title(text) || "note #{idx + 1}"
+      end
+
+      # "* 1  title  (12 lines, 340B)" — 1-based index, '*' marks the active note.
+      def self.note_row_text(idx : Int32, text : String, current : Bool) : String
+        lines = Notes.line_count(text)
+        String.build do |io|
+          io << (current ? '*' : ' ') << ' '
+          io << (idx + 1) << "  " << note_label(idx, text)
+          io << "  (" << lines << (lines == 1 ? " line, " : " lines, ") << human_size(text.bytesize.to_i64) << ')'
+        end
+      end
+
+      # The whole note set as a JSON array. `with_text` adds each note's full body
+      # (the `--all` view); without it the array is a summary (the listing view).
+      def self.notes_array_json(doc : Notes::Doc, with_text : Bool) : String
+        JSON.build do |j|
+          j.array do
+            doc.texts.each_with_index do |text, i|
+              note_object_fields(j, i, text, current: doc.cur == i, with_text: with_text)
+            end
+          end
+        end
+      end
+
+      # One note as a standalone JSON object (the `show <n>` view).
+      def self.note_object_json(idx : Int32, text : String, current : Bool, with_text : Bool) : String
+        JSON.build { |j| note_object_fields(j, idx, text, current: current, with_text: with_text) }
+      end
+
+      def self.note_object_fields(j : JSON::Builder, idx : Int32, text : String, current : Bool, with_text : Bool) : Nil
+        j.object do
+          j.field "index", idx + 1
+          j.field "title", Notes.title(text)
+          j.field "lines", Notes.line_count(text)
+          j.field "bytes", text.bytesize
+          j.field "current", current
+          j.field "text", text if with_text
         end
       end
 

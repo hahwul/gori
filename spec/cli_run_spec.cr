@@ -269,4 +269,113 @@ describe Gori::CLI::Output do
     txt.should contain("https://api.test/a")
     txt.should contain("(+2 more)") # 3 affected − 1 shown
   end
+
+  it "formats a note listing row: 1-based index, title, '*' for the active note" do
+    row = Gori::CLI::Output.note_row_text(1, "scope\nmore", current: true)
+    row.should contain("* 2")                                                           # 0-based 1 → shown as #2
+    row.should contain("scope")                                                         # title = first non-blank line
+    row.should contain("(2 lines, ")                                                    # plural
+    Gori::CLI::Output.note_row_text(0, "x", current: false).should contain(" 1")        # no '*'
+    Gori::CLI::Output.note_row_text(0, "x", current: false).should contain("(1 line, ") # singular
+  end
+
+  it "falls back to 'note N' in a row for a blank note" do
+    Gori::CLI::Output.note_row_text(2, "   \n\t", current: false).should contain("note 3")
+  end
+
+  it "emits a single-note JSON object with the documented fields (text only when asked)" do
+    full = JSON.parse(Gori::CLI::Output.note_object_json(0, "Title\nbody", current: true, with_text: true))
+    full["index"].as_i.should eq(1)
+    full["title"].as_s.should eq("Title")
+    full["lines"].as_i.should eq(2)
+    full["bytes"].as_i.should eq("Title\nbody".bytesize)
+    full["current"].as_bool.should be_true
+    full["text"].as_s.should eq("Title\nbody")
+
+    summary = JSON.parse(Gori::CLI::Output.note_object_json(0, "Title\nbody", current: false, with_text: false))
+    summary["text"]?.should be_nil # summary omits the body
+    summary["title"].as_s.should eq("Title")
+  end
+
+  it "emits the whole note set as a JSON array, marking the active note" do
+    doc = Gori::Notes::Doc.new(1, ["one", "two"])
+    arr = JSON.parse(Gori::CLI::Output.notes_array_json(doc, with_text: false)).as_a
+    arr.size.should eq(2)
+    arr[0]["index"].as_i.should eq(1)
+    arr[0]["current"].as_bool.should be_false
+    arr[1]["current"].as_bool.should be_true # cur == 1
+    arr[0]["text"]?.should be_nil            # summary array
+
+    with_text = JSON.parse(Gori::CLI::Output.notes_array_json(doc, with_text: true)).as_a
+    with_text[1]["text"].as_s.should eq("two")
+  end
+end
+
+describe Gori::Notes do
+  # Doc is a record (struct) → value equality, so whole-Doc comparison avoids
+  # unwrapping the nilable parse result (and keeps the spec ameba-clean).
+  it "parses a well-formed document set" do
+    Gori::Notes.parse(%({"cur":1,"notes":["a","b"]})).should eq(Gori::Notes::Doc.new(1, ["a", "b"]))
+  end
+
+  it "defaults cur to 0 and coerces non-string note entries to empty strings" do
+    Gori::Notes.parse(%({"notes":[1,"x",null]})).should eq(Gori::Notes::Doc.new(0, ["", "x", ""]))
+  end
+
+  it "treats an empty notes array as a (non-nil) empty set" do
+    Gori::Notes.parse(%({"cur":0,"notes":[]})).should eq(Gori::Notes::Doc.new(0, [] of String))
+  end
+
+  it "exposes size/empty? on a Doc" do
+    Gori::Notes::Doc.new(0, ["a", "b"]).size.should eq(2)
+    Gori::Notes::Doc.new(0, ["a", "b"]).empty?.should be_false
+    Gori::Notes::Doc.new(0, [] of String).empty?.should be_true
+  end
+
+  it "returns nil for malformed JSON or a missing notes key (so callers fall back)" do
+    Gori::Notes.parse("not json {{{").should be_nil
+    Gori::Notes.parse(%({"cur":0})).should be_nil
+  end
+
+  it "round-trips through serialize/parse" do
+    raw = Gori::Notes.serialize(2, ["alpha", "beta\ngamma", ""])
+    Gori::Notes.parse(raw).should eq(Gori::Notes::Doc.new(2, ["alpha", "beta\ngamma", ""]))
+  end
+
+  it "loads the JSON set, the legacy single note, and prefers the JSON set over legacy" do
+    with_store do |store|
+      Gori::Notes.load(store).empty?.should be_true # nothing stored yet
+
+      store.set_setting("notes", "legacy body")
+      legacy = Gori::Notes.load(store)
+      legacy.texts.should eq(["legacy body"]) # migrated single note
+
+      store.set_setting("notes.docs", %({"cur":0,"notes":["fresh"]}))
+      Gori::Notes.load(store).texts.should eq(["fresh"]) # JSON set wins
+    end
+  end
+
+  it "falls back through malformed JSON to the legacy key, then to empty" do
+    with_store do |store|
+      store.set_setting("notes.docs", "not json {{{")
+      Gori::Notes.load(store).empty?.should be_true # malformed + no legacy → empty
+
+      store.set_setting("notes", "kept")
+      Gori::Notes.load(store).texts.should eq(["kept"]) # malformed docs → legacy
+    end
+  end
+
+  it "derives a title from the first non-blank line (trimmed, CRLF-tolerant); nil when blank" do
+    Gori::Notes.title("  hello world  ").should eq("hello world")
+    Gori::Notes.title("\n\n  second\nthird").should eq("second") # leading blank lines skipped
+    Gori::Notes.title("done\r\nmore").should eq("done")          # trailing CR trimmed
+    Gori::Notes.title("").should be_nil
+    Gori::Notes.title("   \n\t ").should be_nil # all whitespace
+  end
+
+  it "counts editor lines (an empty note is one line)" do
+    Gori::Notes.line_count("").should eq(1)
+    Gori::Notes.line_count("a\nb").should eq(2)
+    Gori::Notes.line_count("a\n").should eq(2) # trailing newline → a second (empty) line
+  end
 end

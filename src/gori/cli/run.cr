@@ -17,6 +17,7 @@ require "../fuzz"
 require "../miner"
 require "../prism/passive"
 require "../prism/group"
+require "../notes"
 require "../findings_export"
 require "./output"
 
@@ -35,28 +36,29 @@ module Gori
         # `gori run … | head` (or any reader that closes early) breaks the STDOUT
         # pipe; a well-behaved Unix filter exits quietly on EPIPE rather than
         # dumping an IO::Error backtrace. Re-raise anything that isn't a broken pipe.
+        # (Kept as a thin wrapper so the subcommand `case` stays under the
+        # cyclomatic-complexity bar — see dispatch_subcommand.)
         raise ex unless ex.os_error == Errno::EPIPE
         exit 0
       end
 
       private def self.dispatch_subcommand(args : Array(String)) : Nil
-        if args.empty?
-          print_help
-          return
-        end
-
-        rest = args[1..]
-        case args[0]
-        when "capture"       then cmd_capture(rest)
-        when "history", "ls" then cmd_history(rest)
-        when "show"          then cmd_show(rest)
-        when "replay"        then cmd_replay(rest)
-        when "fuzz"          then cmd_fuzz(rest)
-        when "mine"          then cmd_mine(rest)
-        when "prism"         then cmd_prism(rest)
-        when "findings"      then cmd_findings(rest)
-        when "projects"      then cmd_projects(rest)
-        when "-h", "--help"  then print_help
+        # No args / -h / --help all print help. `args[1..]` is only reached in the named
+        # branches, where args[0] matched a subcommand string (so args is non-empty and the
+        # tail slice is safe). Folding the empty case into this `when` keeps the dispatch
+        # under the cyclomatic-complexity bar as subcommands are added.
+        case args.first?
+        when nil, "-h", "--help" then print_help
+        when "capture"           then cmd_capture(args[1..])
+        when "history", "ls"     then cmd_history(args[1..])
+        when "show"              then cmd_show(args[1..])
+        when "replay"            then cmd_replay(args[1..])
+        when "fuzz"              then cmd_fuzz(args[1..])
+        when "mine"              then cmd_mine(args[1..])
+        when "prism"             then cmd_prism(args[1..])
+        when "notes"             then cmd_notes(args[1..])
+        when "findings"          then cmd_findings(args[1..])
+        when "projects"          then cmd_projects(args[1..])
         else
           STDERR.puts "gori run: unknown subcommand '#{args[0]}'"
           print_help
@@ -78,6 +80,7 @@ module Gori
           fuzz [<id>]        Fuzz/intrude a request: mark §…§ positions, sweep payloads
           mine [<id>]        Discover hidden parameters (query/body/json/header/cookie)
           prism [QL]         Passively scan captured flows for issues (zero requests)
+          notes [<n>]        Read the project's notes (list, show one, or --all)
           findings           List or export findings (text, json, markdown)
           projects           List known projects
 
@@ -1034,6 +1037,90 @@ module Gori
       private def self.parse_prism_category(v : String) : String
         d = v.downcase
         PRISM_CATEGORIES.includes?(d) ? d : abort("gori run prism: invalid --category '#{v}' (#{PRISM_CATEGORIES.join("|")})")
+      end
+
+      # --- notes -------------------------------------------------------------
+
+      private def self.cmd_notes(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        format = :text
+        all = false
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run notes [<n>] [options]\n\nList the project's notes; with <n> (1-based) print that note in full, or --all to print them all."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--all", "Print every note in full instead of the one-line list") { all = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run notes: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run notes: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        abort "gori run notes: too many arguments (expected at most one note number)" if positional.size > 1
+        index = parse_note_index(positional.first?)
+        abort "gori run notes: <n> and --all are mutually exclusive" if index && all
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        doc = begin
+          Notes.load(store)
+        ensure
+          store.close
+        end
+
+        if n = index
+          abort "gori run notes: no note ##{n} (this project has #{doc.size} note#{doc.size == 1 ? "" : "s"})" unless n <= doc.size
+          show_note(doc, n - 1, format)
+        elsif all
+          show_all_notes(doc, format)
+        else
+          list_notes(doc, format)
+        end
+      end
+
+      private def self.parse_note_index(arg : String?) : Int32?
+        return nil unless arg
+        n = arg.to_i?
+        abort "gori run notes: invalid note number '#{arg}' (expected a positive integer)" unless n && n > 0
+        n
+      end
+
+      # Print one note (`idx` 0-based) in full: its exact text, or a full JSON object.
+      private def self.show_note(doc : Notes::Doc, idx : Int32, format : Symbol) : Nil
+        text = doc.texts[idx]
+        if format == :json
+          puts CLI::Output.note_object_json(idx, text, current: doc.cur == idx, with_text: true)
+        else
+          STDOUT.puts text
+        end
+      end
+
+      private def self.show_all_notes(doc : Notes::Doc, format : Symbol) : Nil
+        if format == :json
+          puts CLI::Output.notes_array_json(doc, with_text: true)
+        elsif doc.empty?
+          STDERR.puts "no notes"
+        else
+          doc.texts.each_with_index do |text, i|
+            puts "" if i > 0
+            puts "=== note #{i + 1}: #{CLI::Output.note_label(i, text)}#{doc.cur == i ? " *" : ""} ==="
+            STDOUT.puts text
+          end
+        end
+      end
+
+      private def self.list_notes(doc : Notes::Doc, format : Symbol) : Nil
+        if format == :json
+          puts CLI::Output.notes_array_json(doc, with_text: false)
+        elsif doc.empty?
+          STDERR.puts "no notes"
+        else
+          doc.texts.each_with_index { |text, i| puts CLI::Output.note_row_text(i, text, current: doc.cur == i) }
+        end
       end
 
       # --- findings ----------------------------------------------------------
