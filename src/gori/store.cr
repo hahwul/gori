@@ -380,6 +380,27 @@ module Gori
       }
     end
 
+    # Bulk-mute every OPEN issue sharing this code (or host) — mark false-positive so the
+    # whole group leaves the default open-only view and stays muted across re-hits. A plain
+    # delete can't durably mute: `upsert_prism_issue` resurrects the row as `open` on the
+    # next matching observation. Already-triaged rows (confirmed/fp/resolved) are left as-is.
+    def dismiss_prism_by_code(code : String) : Nil
+      bulk_dismiss_prism("code = ?", code)
+    end
+
+    def dismiss_prism_by_host(host : String) : Nil
+      bulk_dismiss_prism("host = ?", host)
+    end
+
+    # `clause` is a fixed internal predicate ("code = ?" / "host = ?"), never user text.
+    private def bulk_dismiss_prism(clause : String, arg : DB::Any) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE prism_issues SET status = ?, last_seen = ? WHERE #{clause} AND status = ?",
+          Status::FalsePositive.value, now_us, arg, Status::Open.value)
+        nil
+      }
+    end
+
     def delete_prism_issue(id : Int64) : Nil
       exec_task ->(c : DB::Connection) { c.exec("DELETE FROM prism_issues WHERE id = ?", id); nil }
     end

@@ -23,6 +23,19 @@ module Gori::Tui
       v < 10 ? "#{v.round(1)}#{suffix}" : "#{v.round.to_i}#{suffix}"
     end
 
+    # Compact occurrence count (1.2k / 3.4M / 5.0B) for tallies that can grow
+    # unbounded (e.g. Prism hit_count). Plain integer below 1000; same rounding
+    # convention as `size` so a value just under a boundary rolls up to the next
+    # unit instead of showing a misleading "1000k".
+    def self.count(n : Int64) : String
+      return n.to_s if n < 1000
+      k = n / 1000.0
+      return unit(k, "k") if k.round < 1000
+      m = n / 1_000_000.0
+      return unit(m, "M") if m.round < 1000
+      unit(n / 1_000_000_000.0, "B")
+    end
+
     # Compact request→response latency (ms/s/m/h), bounded to ≤6 cols. "—" until the
     # response lands; a minute/hour tier keeps very slow flows from overflowing.
     def self.dur(us : Int64?) : String

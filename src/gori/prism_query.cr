@@ -38,6 +38,13 @@ module Gori
         @terms.empty?
       end
 
+      # True when the query explicitly constrains status (status:/st:, possibly negated),
+      # so the list view skips its default open-only restriction and honours the user's
+      # explicit choice of statuses instead.
+      def has_status_term? : Bool
+        @terms.any? { |t| t.kind == :status }
+      end
+
       def apply(issues : Array(Store::PrismIssue)) : Array(Store::PrismIssue)
         return issues if @terms.empty?
         issues.select { |i| matches?(i) }

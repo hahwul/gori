@@ -400,4 +400,39 @@ describe "Gori::Prism::Filter (incomplete terms)" do
     # a complete negated term still filters
     Gori::Prism::Filter.parse("-code:csp").apply(issues).map(&.code).should eq(["missing_hsts"])
   end
+
+  it "reports whether the query explicitly constrains status (drives the open-only lens)" do
+    Gori::Prism::Filter.parse("host:api").has_status_term?.should be_false
+    Gori::Prism::Filter.parse("").has_status_term?.should be_false
+    Gori::Prism::Filter.parse("status:fp host:api").has_status_term?.should be_true
+    Gori::Prism::Filter.parse("-st:open").has_status_term?.should be_true
+  end
+end
+
+describe "Store bulk Prism dismiss" do
+  it "mutes only OPEN issues matching the code/host, leaving already-triaged rows untouched" do
+    with_store do |store|
+      det = ->(code : String, host : String, url : String) do
+        Gori::Prism::Detection.new(code, "headers", host, url, "t", Gori::Store::Severity::Low)
+      end
+      store.upsert_prism_issue(det.call("missing_hsts", "a.test", "https://a.test/"))
+      store.upsert_prism_issue(det.call("missing_csp", "a.test", "https://a.test/"))
+      store.upsert_prism_issue(det.call("missing_hsts", "b.test", "https://b.test/"))
+
+      # Promote one to confirmed: a bulk dismiss must NOT clobber an already-triaged row.
+      hsts_a = store.prism_issues.find { |i| i.code == "missing_hsts" && i.host == "a.test" }.not_nil!
+      store.update_prism_issue_status(hsts_a.id, Gori::Store::Status::Confirmed)
+
+      store.dismiss_prism_by_code("missing_hsts")
+      by_key = store.prism_issues.to_h { |i| {"#{i.code}@#{i.host}", i.status} }
+      by_key["missing_hsts@a.test"].should eq(Gori::Store::Status::Confirmed)     # triaged → untouched
+      by_key["missing_hsts@b.test"].should eq(Gori::Store::Status::FalsePositive) # open → muted
+      by_key["missing_csp@a.test"].should eq(Gori::Store::Status::Open)           # other code → untouched
+
+      store.dismiss_prism_by_host("a.test")
+      after = store.prism_issues.to_h { |i| {"#{i.code}@#{i.host}", i.status} }
+      after["missing_csp@a.test"].should eq(Gori::Store::Status::FalsePositive) # open on host → muted
+      after["missing_hsts@a.test"].should eq(Gori::Store::Status::Confirmed)    # still untouched
+    end
+  end
 end

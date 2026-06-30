@@ -348,8 +348,20 @@ private class FakeContext < ExecContext
     @calls << :prism_delete
   end
 
-  def prism_set_status : Nil
-    @calls << :prism_set_status
+  def prism_dismiss : Nil
+    @calls << :prism_dismiss
+  end
+
+  def prism_toggle_closed : Nil
+    @calls << :prism_toggle_closed
+  end
+
+  def prism_dismiss_code : Nil
+    @calls << :prism_dismiss_code
+  end
+
+  def prism_dismiss_host : Nil
+    @calls << :prism_dismiss_host
   end
 
   def prism_open_flow : Nil

@@ -187,7 +187,13 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def prism_delete : Nil; end
 
-  def prism_set_status : Nil; end
+  def prism_dismiss : Nil; end
+
+  def prism_toggle_closed : Nil; end
+
+  def prism_dismiss_code : Nil; end
+
+  def prism_dismiss_host : Nil; end
 
   def prism_open_flow : Nil; end
 

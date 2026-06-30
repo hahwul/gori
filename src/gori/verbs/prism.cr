@@ -32,6 +32,26 @@ module Gori
         "prism.mode", "Set mode", "Choose the scan mode (off / passive / passive+active)",
         Verb::Scope::Prism, [Verb::Chord.new("m")]) { |ctx| ctx.prism_set_mode; nil }
 
+      # `c`: one-key dismiss for the selected row (open ⇄ false-positive). The high-value
+      # triage action; mutes recurring noise so it drops out of the default open-only lens.
+      r.register Verb::Definition.new(
+        "prism.dismiss-selected", "Dismiss issue", "Toggle dismiss (false-positive ⇄ open) on the selected issue",
+        Verb::Scope::Prism, [Verb::Chord.new("c")]) { |ctx| ctx.prism_dismiss; nil }
+
+      r.register Verb::Definition.new(
+        "prism.toggle-closed", "Show closed", "Toggle between open-only and all issues (incl. dismissed)",
+        Verb::Scope::Prism, [Verb::Chord.new("a")]) { |ctx| ctx.prism_toggle_closed; nil }
+
+      # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
+      # code, or a whole host, in one confirmed action.
+      r.register Verb::Definition.new(
+        "prism.dismiss-code", "Dismiss all with this code", "Mute every open issue sharing the selected issue's check code",
+        Verb::Scope::Prism, mnemonic: 'r') { |ctx| ctx.prism_dismiss_code; nil }
+
+      r.register Verb::Definition.new(
+        "prism.dismiss-host", "Dismiss all on this host", "Mute every open issue on the selected issue's host",
+        Verb::Scope::Prism, mnemonic: 'h') { |ctx| ctx.prism_dismiss_host; nil }
+
       r.register Verb::Definition.new(
         "prism.clear", "Clear issues", "Delete all Prism issues for this project", Verb::Scope::Prism,
         [Verb::Chord.new("x")]) { |ctx| ctx.prism_clear; nil }
@@ -58,8 +78,8 @@ module Gori
         [Verb::Chord.new("p")]) { |ctx| ctx.prism_promote; nil }
 
       r.register Verb::Definition.new(
-        "prism.set-status", "Set status", "Pick this issue's triage status",
-        Verb::Scope::PrismDetail, [Verb::Chord.new("c")]) { |ctx| ctx.prism_set_status; nil }
+        "prism.dismiss", "Dismiss issue", "Toggle dismiss (false-positive ⇄ open) on this issue",
+        Verb::Scope::PrismDetail, [Verb::Chord.new("c")]) { |ctx| ctx.prism_dismiss; nil }
 
       r.register Verb::Definition.new(
         "prism.delete", "Delete issue", "Delete this issue", Verb::Scope::PrismDetail,

@@ -35,13 +35,13 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if @prism.detail_open?
-        "o flow · r replay · p promote · c status · d delete · ←/esc back"
+        "o flow · r replay · p promote · c dismiss · d delete · ←/esc back"
       elsif @prism.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @prism.mode.off?
         "m enable scanning · / filter · space cmds · esc tabs"
       else
-        "↑/↓ move · ↵ open · / filter · m mode · space cmds · esc tabs"
+        "↑/↓ move · ↵ open · c dismiss · m mode · / filter · space cmds"
       end
     end
 
@@ -178,9 +178,35 @@ module Gori::Tui
       end
     end
 
-    # Applied by the Runner's ChoicePicker (:prism_status).
-    def apply_status(status : Store::Status) : Nil
-      @prism.set_status(@host.session.store, status)
+    # `c`: toggle dismiss (open ↔ false-positive) on the open/selected issue.
+    def prism_dismiss : Nil
+      return unless @prism.target_issue
+      st = @prism.toggle_dismiss(@host.session.store)
+      @host.notifications.push(:success, st.try(&.open?) ? "issue re-opened" : "issue dismissed")
+    end
+
+    # `a`: flip the open-only ⇄ show-closed lens.
+    def prism_toggle_closed : Nil
+      showing = @prism.toggle_show_closed
+      @host.notifications.push(:info, showing ? "showing closed issues" : "showing open issues only")
+    end
+
+    # Space-menu bulk actions: mute every OPEN issue sharing the targeted issue's code / host
+    # (a confirm guards the mass mutation; it's reversible via show-closed + c).
+    def prism_dismiss_code : Nil
+      return unless i = @prism.target_issue
+      @host.confirm("DISMISS GROUP", "Dismiss all open \"#{i.code}\" issues?", confirm_label: "dismiss", danger: false) do
+        n = @prism.dismiss_by_code(@host.session.store)
+        @host.notifications.push(:success, "dismissed #{n} \"#{i.code}\" issue#{n == 1 ? "" : "s"}")
+      end
+    end
+
+    def prism_dismiss_host : Nil
+      return unless i = @prism.target_issue
+      @host.confirm("DISMISS GROUP", "Dismiss all open issues on #{i.host}?", confirm_label: "dismiss", danger: false) do
+        n = @prism.dismiss_by_host(@host.session.store)
+        @host.notifications.push(:success, "dismissed #{n} issue#{n == 1 ? "" : "s"} on #{i.host}")
+      end
     end
   end
 end
