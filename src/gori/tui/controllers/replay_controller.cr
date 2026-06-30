@@ -89,6 +89,13 @@ module Gori::Tui
       @current_replay_idx
     end
 
+    # Show the strip from the FIRST session (not ≥2): a single replay still labels its
+    # chip and exposes the strip's space-menu (the editor body swallows space). Empty →
+    # no strip (the "no replays" placeholder takes the full body).
+    def subtab_strip_shown? : Bool
+      !@replays.empty?
+    end
+
     def body_badge : Symbol # request (incl. hex) + target URL are editable; response is read-only
       (v = current_view) ? ((v.focus == :request || v.focus == :target) ? :editor : :body) : :body
     end
@@ -129,7 +136,7 @@ module Gori::Tui
       body_focused = focus == :body
       current_replay_tab.try { |t| t.view.reveal = @host.reveal?; t.view.pretty = @host.pretty? }
       body_rect = rect
-      if @replays.size >= 2
+      if subtab_strip_shown?
         sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
         BodyChrome.render_subtab_strip(screen, sub_rect, subtab_labels, @current_replay_idx, focus == :subtabs)
       end
@@ -220,7 +227,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      body = @replays.size >= 2 ? BodyChrome.carve_subtab_row(rect)[1] : rect
+      body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
       return true unless v = current_view
       if pane = v.pane_at(body, mx, my)
         save_current_replay
@@ -627,7 +634,7 @@ module Gori::Tui
       key = ev.key
       case
       when key.enter? then view.pane_advance(1)                                       # ↵ confirms URL → Request (^R sends, not ↵)
-      when key.up?    then @host.request_focus(@replays.size >= 2 ? :subtabs : :menu) # target is the top pane → ↑ pops up
+      when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) # target is the top pane → ↑ pops up
       when key.down?  then view.pane_advance(1)                                        # ↓ → drop into the Request pane below
       else                 edit_target_common(ev, view)
       end

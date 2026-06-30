@@ -123,6 +123,15 @@ module Gori::Tui
       0
     end
 
+    # Whether the sub-tab strip is drawn AND `:subtabs` is a focusable pane. Default:
+    # only with ≥2 chips — a lone chip has nowhere to switch to, so the row is better
+    # spent on the body. Replay/Fuzzer override to show a single chip too, so the active
+    # session is always labelled and the strip's space-menu is reachable with one open
+    # tab. The Runner reads this (not a raw count) so render + focus + click stay in sync.
+    def subtab_strip_shown? : Bool
+      (subtab_labels.try(&.size) || 0) >= 2
+    end
+
     # Move the active sub-tab by ±1 (strip ←/→), or jump to an absolute index (^1-9).
     def move_subtab(dir : Int32) : Nil
     end

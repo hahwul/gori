@@ -349,6 +349,17 @@ module Gori::Tui
       )
     end
 
+    # A readable ink for text drawn directly ON a saturated fill — e.g. the focused
+    # sub-tab's focus_gold pill. Picks near-black or near-white by the fill's perceived
+    # luminance (Rec. 601 luma, cheap + good enough for a fg/bg pick) so the label stays
+    # legible whether the fill is a light gold (GORIDARK/ESPRESSO) or a darker one
+    # (GORIDAY/LATTE) — and across custom palettes, which can set any focus_gold.
+    def self.ink_on(fill : Color) : Color
+      r, g, b = fill.to_rgb_components
+      luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+      luma > 0.6 ? Color.from_hex("#111111") : Color.from_hex("#fafafa")
+    end
+
     def self.method_color(method : String) : Color
       case method.upcase
       when "GET", "HEAD", "QUERY"           then green # QUERY is safe + idempotent like GET (RFC 10008)

@@ -1470,12 +1470,11 @@ module Gori::Tui
       @toast = ok ? "hotkeys saved" : "hotkeys applied — could not save to #{Settings.path}"
     end
 
-    # The Notes tab is a live editor (like Replay): typing edits the document
-    # directly. Esc / Ctrl-P / Ctrl-C leave editing and persist first.
-    # A navigable sub-tab strip exists (≥2 chips) — gates entry into :subtabs. Replay
-    # draws its strip at size>0 but a lone chip has nowhere to switch to.
+    # A navigable sub-tab strip is showing — gates entry into :subtabs (and the strip
+    # click/rename paths). Each controller decides its own threshold (Notes/Convert ≥2;
+    # Replay/Fuzzer ≥1 so a single session is still labelled + space-menu reachable).
     private def subtabs_shown? : Bool
-      (@tabs[@active_tab]?.try(&.subtab_labels).try(&.size) || 0) >= 2 # Replay/Fuzzer/Notes/Convert expose a strip
+      @tabs[@active_tab]?.try(&.subtab_strip_shown?) || false
     end
 
     # The focusable sub-tab strip for Replay/Fuzzer/Notes/Convert (@focus == :subtabs). Mirrors the

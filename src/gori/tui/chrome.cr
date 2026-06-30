@@ -181,8 +181,11 @@ module Gori::Tui
     # ACTIVE one is always visible — advance the window start until [start..active]
     # fits, instead of breaking at the first overflow and hiding the active tab off
     # the right edge. `‹` / `›` markers flag tabs hidden off either edge. Each label
-    # is drawn as a " label " segment; the active one is a filled bright/bold band
-    # (focus → ACCENT_BG, else SELECTION_DIM). Mirrors render_menu's windowing.
+    # is drawn as a " label " segment. The active chip, when the strip HOLDS FOCUS, is a
+    # solid FOCUS_GOLD pill (the same gold that outlines a focused body pane — so "gold =
+    # focus is here" reads one level down too, and clearly beats the old near-identical
+    # ACCENT_BG/SELECTION_DIM bands); at rest it settles to a dim SELECTION_DIM band.
+    # Mirrors render_menu's windowing.
     def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
                               active : Int32, focused : Bool, *, bg : Color = Theme.panel) : Nil
       return if rect.empty? || labels.empty?
@@ -191,8 +194,8 @@ module Gori::Tui
       segs, start, last = strip_layout(rect, labels, active)
       segs.each do |(i, label, seg)|
         if i == active
-          abg = focused ? Theme.accent_bg : Theme.selection_dim
-          afg = focused ? Theme.text_bright : Theme.text
+          abg = focused ? Theme.focus_gold : Theme.selection_dim
+          afg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text
           screen.fill(seg, abg)
           screen.text(seg.x + 1, seg.y, label, afg, abg, attr: Attribute::Bold)
         else
