@@ -173,6 +173,18 @@ module Gori::Tui
       (h = @req_hex_edit) ? String.new(h.to_bytes) : @editor.text # lossy snapshot in hex mode
     end
 
+    # The buffer the external editor (^E) round-trips: the ACTIVE request sub-pane — the
+    # envelope, or the decoded payload when it's the split's active pane (so you can edit
+    # a big SAML XML / GraphQL query in $EDITOR). Non-decode tabs = the envelope, as before.
+    def edit_buffer_text : String
+      (h = @req_hex_edit) ? String.new(h.to_bytes) : req_editor.text
+    end
+
+    def replace_edit_buffer(text : String) : Nil
+      req_editor.set_text(text)
+      mark_req_edit
+    end
+
     # A short, human label for this replay — "METHOD /path" from the request line,
     # truncated to `max`. Used by the sub-tab strip, the open toast, and the close
     # prompt: far more recognizable than the source flow's internal numeric id, and
@@ -407,34 +419,85 @@ module Gori::Tui
     # ^T: toggle the active request sub-pane (envelope ⇄ decoded). No-op outside a
     # split-decode tab. Returns the new active pane (the controller surfaces a hint).
     def toggle_req_pane : Symbol
-      return @req_pane unless @decode_kind
-      @req_pane = @req_pane == :envelope ? :decoded : :envelope
+      switch_req_pane(@req_pane == :envelope ? :decoded : :envelope)
+      @req_pane
     end
 
-    # The replayable bytes for a split-decode tab. When the decoded payload is UNCHANGED
-    # the envelope is sent as captured (byte-faithful); when edited, the payload is
-    # re-encoded back into the (possibly envelope-edited) request + Content-Length
-    # resynced — so header/other-param edits survive alongside the payload edit.
-    private def decoded_request_bytes : Bytes
-      raw = @editor.to_bytes
-      return @auto_content_length ? sync_content_length(raw) : raw unless @decoded_dirty
+    # Flush any pending decoded-pane edit into the envelope — so a consumer reading the
+    # envelope as the request (fuzz/mine cross-tab) sees the latest payload edit even if
+    # the user hasn't switched panes yet. No-op outside a decode tab / when unchanged.
+    def flush_decoded_edits : Nil
+      commit_decoded
+    end
+
+    # Change the active sub-pane, keeping the two in sync at the boundary: leaving the
+    # DECODED pane COMMITS the edited payload into the envelope (so the envelope reflects
+    # it); entering DECODED RE-DECODES the envelope's current param (so it reflects any
+    # envelope edits). No-op outside a decode tab / when the pane is unchanged.
+    private def switch_req_pane(to : Symbol) : Nil
+      return unless @decode_kind
+      return if to == @req_pane
+      to == :envelope ? commit_decoded : refresh_decoded
+      @req_pane = to
+    end
+
+    # Re-encode the (edited) decoded payload back into the envelope — SAML param via
+    # replace_param, GraphQL body via recompose — and resync Content-Length, so the
+    # ENVELOPE is always the authoritative wire request. Only when the payload changed.
+    private def commit_decoded : Nil
+      return unless @decode_kind && @decoded_dirty
+      @editor.set_text(sync_cl_text(splice_decoded_into(@editor.text)))
+      @decoded_dirty = false
+    end
+
+    # Re-decode the envelope's current param into the DECODED pane (and re-sync the SAML
+    # param/binding), so an envelope-side edit shows up decoded. Leaves DECODED untouched
+    # when the envelope no longer decodes (a mid-edit break shouldn't clobber it).
+    private def refresh_decoded : Nil
+      tgt, head, body = envelope_parts
       case @decode_kind
-      when :saml    then saml_splice(raw)
-      when :graphql then graphql_splice(raw)
-      else               raw
+      when :saml
+        if doc = Saml.from_flow(tgt, head, body, nil, nil)
+          @saml_param, @saml_binding = doc.param, doc.binding
+          @saml_location = doc.location == :query ? :query : :body
+          @decoded.set_text(doc.xml) if doc.xml != @decoded.text
+        end
+      when :graphql
+        if op = Graphql.from_flow(tgt, head, body)
+          text = Graphql.display(op)
+          @decoded.set_text(text) if text != @decoded.text
+        end
       end
     end
 
-    private def saml_splice(raw : Bytes) : Bytes
+    # The envelope editor split into {request-target, head bytes, body bytes} for
+    # re-decoding — head/body divide at the first blank line (the editor holds LF).
+    private def envelope_parts : {String, Bytes, Bytes?}
+      env = @editor.text
+      sep = env.index("\n\n")
+      head = sep ? env[0, sep] : env
+      body = sep ? env[(sep + 2)..] : ""
+      target = (head.each_line.first? || "").split(' ')[1]? || "/"
+      {target, head.to_slice, body.empty? ? nil : body.to_slice}
+    end
+
+    private def splice_decoded_into(env : String) : String
+      case @decode_kind
+      when :saml    then saml_splice_text(env)
+      when :graphql then graphql_splice_text(env)
+      else               env
+      end
+    end
+
+    private def saml_splice_text(env : String) : String
       value = Saml.encode_value(@decoded.text, @saml_binding)
-      text = String.new(raw)
       if @saml_location == :query # Redirect: rewrite the request-line query (no body)
-        nl = text.index("\r\n") || text.bytesize
-        "#{saml_query_line(text[0, nl], value)}#{text[nl..]}".to_slice
-      else # POST: replace the body param, keep the rest, resync CL
-        sep = text.index("\r\n\r\n") || return raw
-        body = Saml.replace_param(text[(sep + 4)..], @saml_param, value)
-        sync_content_length("#{text[0, sep]}\r\n\r\n#{body}".to_slice)
+        lines = env.split('\n')
+        lines[0] = saml_query_line(lines[0], value) if lines[0]?
+        lines.join('\n')
+      else # POST: replace the body param, keep the rest
+        sep = env.index("\n\n") || return env
+        "#{env[0, sep]}\n\n#{Saml.replace_param(env[(sep + 2)..], @saml_param, value)}"
       end
     end
 
@@ -451,11 +514,28 @@ module Gori::Tui
       "#{rl[0, sp1]} #{path}?#{query} #{rl[(sp2 + 1)..]}"
     end
 
-    private def graphql_splice(raw : Bytes) : Bytes
-      text = String.new(raw)
-      sep = text.index("\r\n\r\n") || return raw
-      body = Graphql.recompose(text[(sep + 4)..], @decoded.text)
-      sync_content_length("#{text[0, sep]}\r\n\r\n#{body}".to_slice)
+    private def graphql_splice_text(env : String) : String
+      sep = env.index("\n\n") || return env
+      "#{env[0, sep]}\n\n#{Graphql.recompose(env[(sep + 2)..], @decoded.text)}"
+    end
+
+    # Rewrite the Content-Length header (if present) to the envelope body's byte size —
+    # the LF-joined body has no embedded newlines (form/JSON), so it matches the wire.
+    private def sync_cl_text(env : String) : String
+      sep = env.index("\n\n") || return env
+      body = env[(sep + 2)..]
+      lines = env[0, sep].split('\n')
+      idx = lines.index(&.lstrip.downcase.starts_with?("content-length:")) || return env
+      lines[idx] = "Content-Length: #{body.bytesize}"
+      "#{lines.join('\n')}\n\n#{body}"
+    end
+
+    # The replayable bytes for a split-decode tab: commit any pending decoded edit into
+    # the envelope, then send the envelope (the authoritative request) with CL synced.
+    private def decoded_request_bytes : Bytes
+      commit_decoded
+      raw = @editor.to_bytes
+      @auto_content_length ? sync_content_length(raw) : raw
     end
 
     # The request HEAD as origin-form text (request line rewritten, headers), WITHOUT
@@ -705,13 +785,13 @@ module Gori::Tui
       return if content.h <= 0
       half = {(content.w - 1) // 2, 1}.max
       col = Rect.new(content.x, content.y, half, content.h)
-      if @decode_kind # split: click selects the envelope or decoded sub-pane + places its caret
+      if @decode_kind # split: click selects the envelope or decoded sub-pane (syncing) + places its caret
         env, dec = decode_split(col)
         if my >= dec.y
-          @req_pane = :decoded
+          switch_req_pane(:decoded)
           @decoded.click_to_cursor(dec.inset(1, 1), mx, my)
         else
-          @req_pane = :envelope
+          switch_req_pane(:envelope)
           @editor.click_to_cursor(env.inset(1, 1), mx, my)
         end
         return
@@ -752,11 +832,20 @@ module Gori::Tui
 
     # Top boundary of the focused pane — the Runner pops focus to the tab bar when
     # ↑ is pressed here (natural upward flow): the single-line target always, the
-    # request editor at its first line, the response when scrolled to the top.
+    # request editor at its first line, the response when scrolled to the top. In a
+    # split-decode tab, ↑ at the top of the DECODED sub-pane crosses UP to the ENVELOPE
+    # (handled in edit_move), NOT to the tab bar — so it reports false here.
     def at_top? : Bool
       case @focus
-      when :target   then true
-      when :request  then (h = @req_hex_edit) ? h.at_top? : req_editor.at_top?
+      when :target then true
+      when :request
+        if h = @req_hex_edit
+          h.at_top?
+        elsif @decode_kind && @req_pane == :decoded
+          false
+        else
+          @editor.at_top?
+        end
       when :response then @scroll == 0
       else                false
       end
@@ -806,6 +895,22 @@ module Gori::Tui
 
     def edit_move(dr : Int32, dc : Int32) : Nil
       return unless @focus == :request
+      # In a split-decode tab, a vertical step off the end of one sub-pane crosses into
+      # the other (↓ off the ENVELOPE bottom → DECODED top; ↑ off the DECODED top →
+      # ENVELOPE bottom), syncing the two at the boundary — so the split feels like one
+      # continuous column. (↑ off the ENVELOPE top pops to the tab bar via at_top?.)
+      if @decode_kind && dc == 0
+        if dr > 0 && @req_pane == :envelope && @editor.at_bottom?
+          switch_req_pane(:decoded)
+          @decoded.goto_line(1)
+          return
+        end
+        if dr < 0 && @req_pane == :decoded && @decoded.at_top?
+          switch_req_pane(:envelope)
+          @editor.goto_line(Int32::MAX) # clamps to the last line
+          return
+        end
+      end
       req_editor.move(dr, dc)
       # Cursor navigation is NOT a content edit: leave @dirty alone. Marking it here made
       # pure arrow-key movement persist the tab (V11) and, worse, latch sync-clobber
