@@ -114,8 +114,9 @@ if existing = registry.list.find { |p| p.name == "demo" }
 end
 
 project = registry.create("demo",
-  "Demo target for exploring gori's TUI — a fictional shop + JSON API. " \
-  "Captured browsing of shop.demo.test / api.demo.test / cdn.demo.test with a few planted findings.")
+  "Demo target for exploring gori's TUI — a fictional shop + JSON API, plus a real, " \
+  "replayable capture of www.hahwul.com. Captured browsing of shop.demo.test / " \
+  "api.demo.test / cdn.demo.test / www.hahwul.com with a few planted findings.")
 store = S.open(project.db_path)
 puts "• created project 'demo' at #{project.db_path}"
 
@@ -217,6 +218,23 @@ add_flow(store, t.call(41), host: "shop.demo.test", target: "/missing-page",
 ids[:err500] = add_flow(store, t.call(44), host: "api.demo.test", target: "/v1/debug",
   status: 500, reason: "Internal Server Error", ctype: "text/html; charset=utf-8",
   resp_body: "<h1>RuntimeError at /v1/debug</h1><pre>NoMethodError: undefined method 'each' for nil\n  app/controllers/debug_controller.rb:14\n  rack (3.0.8) lib/rack/handler.rb:88\nDemoFramework 4.2.1</pre>")
+
+# Rate limiting: same products listing, second page, throttled.
+add_flow(store, t.call(45), host: "api.demo.test", target: "/v1/products?page=2",
+  status: 429, reason: "Too Many Requests", ctype: "application/json",
+  resp_headers: {"Retry-After" => "30"},
+  resp_body: %({"error":"rate limit exceeded"}))
+
+# Stale marketing link, redirects to the current promo page.
+add_flow(store, t.call(46), host: "shop.demo.test", target: "/old-promo",
+  status: 301, reason: "Moved Permanently",
+  resp_headers: {"Location" => "/promo"})
+
+add_flow(store, t.call(47), host: "api.demo.test", target: "/v1/profile/notifications", method: "PATCH",
+  req_headers: {"Authorization" => "Bearer eyJhbGciOiJIUzI1NiJ9.demo.token"},
+  req_body: %({"emailAlerts":false}),
+  status: 200, reason: "OK", ctype: "application/json",
+  resp_body: %({"emailAlerts":false}))
 
 puts "• inserted #{ids.size} keyed + several more flows"
 
@@ -410,6 +428,135 @@ raw_flow(store, t.call(62), host: "shop.demo.test", method: "POST", target: "/sa
 
 puts "• inserted protocol showcase: websocket(#{ws_msgs.size} msgs) + grpc + sse + 3×graphql + saml"
 
+# --- Real target: www.hahwul.com (live — Replay ^R genuinely hits it) ------
+# Every flow below reflects an actual response captured from the real
+# https://www.hahwul.com (GitHub Pages behind Fastly/Varnish) — titles, status
+# codes and headers are accurate, bodies are trimmed. Unlike the fictional
+# hosts above, sending one of these from Replay really goes out over the
+# network and comes back with a live response: good for trying Replay/Diff/
+# Prism against genuine traffic instead of only synthetic data.
+gh_req_head = ->(method : String, target : String) {
+  String.build do |b|
+    b << method << ' ' << target << " HTTP/2\r\n"
+    b << "host: www.hahwul.com\r\n"
+    b << "user-agent: gori-demo/1.0\r\n"
+    b << "accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n\r\n"
+  end
+}
+gh_resp_head = ->(status : Int32, reason : String, ctype : String, size : Int32, etag : String, cache : String) {
+  String.build do |b|
+    b << "HTTP/2 " << status << ' ' << reason << "\r\n"
+    b << "server: GitHub.com\r\n"
+    b << "content-type: " << ctype << "\r\n"
+    b << "content-length: " << size << "\r\n"
+    b << "last-modified: Tue, 30 Jun 2026 14:14:45 GMT\r\n"
+    b << "etag: \"" << etag << "\"\r\n"
+    b << "access-control-allow-origin: *\r\n"
+    b << "cache-control: max-age=600\r\n"
+    b << "vary: Accept-Encoding\r\n"
+    b << "via: 1.1 varnish\r\n"
+    b << "x-cache: " << cache << "\r\n"
+    b << "x-served-by: cache-icn1450039-ICN\r\n\r\n"
+  end
+}
+
+hahwul_robots = "User-agent: *\nAllow: /\n\nSitemap: https://www.hahwul.com/sitemap.xml\n"
+raw_flow(store, t.call(65), host: "www.hahwul.com", method: "GET", target: "/robots.txt",
+  http: "HTTP/2", req_head: gh_req_head.call("GET", "/robots.txt"),
+  status: 200, reason: "OK", ctype: "text/plain; charset=utf-8",
+  resp_head: gh_resp_head.call(200, "OK", "text/plain; charset=utf-8", hahwul_robots.bytesize, "6a43cf48-44", "HIT"),
+  resp_body: hahwul_robots.to_slice, dur_us: 165_000_i64)
+
+hahwul_sitemap = <<-XML
+  <?xml version="1.0" encoding="UTF-8"?>
+  <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://www.hahwul.com/</loc></url>
+    <url><loc>https://www.hahwul.com/posts/2026/rust-and-crystal/</loc><lastmod>2026-06-30</lastmod></url>
+    <url><loc>https://www.hahwul.com/posts/2026/10years/</loc><lastmod>2026-02-22</lastmod></url>
+    <url><loc>https://www.hahwul.com/posts/2026/traveling-with-hermes-in-japan/</loc><lastmod>2026-04-19</lastmod></url>
+    <url><loc>https://www.hahwul.com/notes/claude-code/remove-co-authored-by/</loc></url>
+    <url><loc>https://www.hahwul.com/about/</loc></url>
+  </urlset>
+  XML
+raw_flow(store, t.call(68), host: "www.hahwul.com", method: "GET", target: "/sitemap.xml",
+  http: "HTTP/2", req_head: gh_req_head.call("GET", "/sitemap.xml"),
+  status: 200, reason: "OK", ctype: "application/xml",
+  resp_head: gh_resp_head.call(200, "OK", "application/xml", hahwul_sitemap.bytesize, "6a43cf50-f19e", "MISS"),
+  resp_body: hahwul_sitemap.to_slice, dur_us: 210_000_i64)
+
+hahwul_home = html.call("Home | HAHWUL",
+  "<h1>HAHWUL</h1><p>Offensive Security Engineer, Developer and H4cker.</p>" \
+  "<nav><a href=/posts/>Posts</a> <a href=/notes/>Notes</a> <a href=/projects/>Projects</a> <a href=/about/>About</a></nav>")
+raw_flow(store, t.call(71), host: "www.hahwul.com", method: "GET", target: "/",
+  http: "HTTP/2", req_head: gh_req_head.call("GET", "/"),
+  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
+  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_home.bytesize, "6a43cf55-3b80", "HIT"),
+  resp_body: hahwul_home.to_slice, dur_us: 145_000_i64)
+
+hahwul_css = <<-CSS
+  /* =============================================================================
+     Design Tokens
+     Editorial · Monotone Dark · Pretendard-driven
+     ============================================================================= */
+  :root {
+      --bg-primary: #0b0b0c;
+      --bg-secondary: #131315;
+      --bg-tertiary: #1c1c1f;
+  }
+  CSS
+raw_flow(store, t.call(74), host: "www.hahwul.com", method: "GET", target: "/assets/css/01-reset.css?v=8e9d1251",
+  http: "HTTP/2", req_head: gh_req_head.call("GET", "/assets/css/01-reset.css?v=8e9d1251"),
+  status: 200, reason: "OK", ctype: "text/css; charset=utf-8",
+  resp_head: gh_resp_head.call(200, "OK", "text/css; charset=utf-8", hahwul_css.bytesize, "6a43cf48-1573", "MISS"),
+  resp_body: hahwul_css.to_slice, dur_us: 98_000_i64)
+
+hahwul_posts = html.call("Posts | HAHWUL",
+  "<h1>Posts</h1><ul>" \
+  "<li><a href=/posts/2026/rust-and-crystal/>Rust and Crystal: My Two Main Languages</a></li>" \
+  "<li><a href=/posts/2026/10years/>10 years</a></li>" \
+  "<li><a href=/posts/2026/traveling-with-hermes-in-japan/>Traveling with Hermes in Japan</a></li>" \
+  "</ul>")
+raw_flow(store, t.call(77), host: "www.hahwul.com", method: "GET", target: "/posts/",
+  http: "HTTP/2", req_head: gh_req_head.call("GET", "/posts/"),
+  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
+  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_posts.bytesize, "6a43cf52-3b64", "HIT"),
+  resp_body: hahwul_posts.to_slice, dur_us: 132_000_i64)
+
+hahwul_post = html.call("Rust and Crystal: My Two Main Languages | HAHWUL",
+  "<h1>Rust and Crystal: My Two Main Languages</h1><p>Balancing Popularity and Quiet Power</p>")
+raw_flow(store, t.call(80), host: "www.hahwul.com", method: "GET", target: "/posts/2026/rust-and-crystal/",
+  http: "HTTP/2", req_head: gh_req_head.call("GET", "/posts/2026/rust-and-crystal/"),
+  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
+  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_post.bytesize, "6a43cf55-5069", "HIT"),
+  resp_body: hahwul_post.to_slice, dur_us: 118_000_i64)
+
+hahwul_note = html.call("Remove co-authored-by when committing | HAHWUL",
+  "<h1>Remove co-authored-by when committing</h1>" \
+  "<p>Claude Code에서 커밋 시 co-authored-by를 남기지 않도록 설정하는 방법</p>")
+raw_flow(store, t.call(83), host: "www.hahwul.com", method: "GET", target: "/notes/claude-code/remove-co-authored-by/",
+  http: "HTTP/2", req_head: gh_req_head.call("GET", "/notes/claude-code/remove-co-authored-by/"),
+  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
+  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_note.bytesize, "6a43cf57-3e94", "MISS"),
+  resp_body: hahwul_note.to_slice, dur_us: 140_000_i64)
+
+hahwul_about = html.call("About | HAHWUL",
+  "<h1>About</h1><p>Offensive Security Engineer, Developer and H4cker.</p>")
+raw_flow(store, t.call(86), host: "www.hahwul.com", method: "GET", target: "/about/",
+  http: "HTTP/2", req_head: gh_req_head.call("GET", "/about/"),
+  status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
+  resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_about.bytesize, "6a43cf55-561b", "HIT"),
+  resp_body: hahwul_about.to_slice, dur_us: 121_000_i64)
+
+hahwul_404 = html.call("404 Not Found | HAHWUL",
+  "<h1>404</h1><p>The page you are looking for does not exist.</p>")
+raw_flow(store, t.call(89), host: "www.hahwul.com", method: "GET", target: "/this-page-does-not-exist",
+  http: "HTTP/2", req_head: gh_req_head.call("GET", "/this-page-does-not-exist"),
+  status: 404, reason: "Not Found", ctype: "text/html; charset=utf-8",
+  resp_head: gh_resp_head.call(404, "Not Found", "text/html; charset=utf-8", hahwul_404.bytesize, "6a43cf47-36ef", "HIT"),
+  resp_body: hahwul_404.to_slice, dur_us: 108_000_i64)
+
+puts "• inserted 9 real, replayable flows against www.hahwul.com"
+
 # --- Findings (a few planted vulns, linked to the flows above) -------------
 f1 = store.insert_finding("Reflected XSS in /search `q` parameter", S::Severity::High,
   "shop.demo.test", ids[:xss])
@@ -476,6 +623,14 @@ store.set_setting("notes", <<-NOTES)
 - **SAML** POST /saml/acs — SAMLResponse is url-encoded base64 XML.
   Decode in the Convert tab: url-decode → base64-decode (→ XML assertion for alice@demo.test).
 
+## Live target (real, replayable)
+- **www.hahwul.com** is a real, live site (unlike the shop/api hosts above) — every
+  captured flow is a genuine response, so Replay (^R) actually re-sends it over the
+  network and gets a live response back. Good for trying Replay/Diff/Prism against
+  real traffic instead of only synthetic data.
+- Recon flow: /robots.txt -> /sitemap.xml -> / -> a css asset -> /posts/ -> an
+  article -> a note -> /about/, plus one guessed path that 404s.
+
 ## Notes
 Token is the same JWT across requests — replayable in Replay (^R).
 NOTES
@@ -483,6 +638,7 @@ NOTES
 # --- Scope (seed patterns, left OFF so History shows everything) ------------
 store.add_scope_rule("include", "host", "shop.demo.test")
 store.add_scope_rule("include", "host", "api.demo.test")
+store.add_scope_rule("include", "host", "www.hahwul.com")
 
 # --- Prism passive scan: run the analyzer over every seeded flow so the Prism tab
 # opens populated (and the Project tab shows the detected technologies). This mirrors
@@ -497,5 +653,5 @@ store.set_prism_mode(Prism::Mode::Passive)
 puts "• prism: #{store.count_prism_issues} passive issues; tech=#{store.prism_tech_summary.join(", ")}"
 
 store.close
-puts "• notes + 2 scope patterns written"
+puts "• notes + 3 scope patterns written"
 puts "\n✓ demo project ready — launch ./bin/gori and pick 'demo'."
