@@ -62,6 +62,32 @@ describe Gori::Tui::ConvertView do
     b.contains?("myhash").should be_true
   end
 
+  it "hscroll_output scrolls a long OUTPUT line sideways into view (shift+←/→)" do
+    view = ConvertView.new
+    long_line = "HEAD" + ("." * 150) + "TAIL"
+    # `result` (the OUTPUT content) is independent of the `input:` TextArea (the INPUT
+    # card's own display) — keep INPUT short/unrelated so its unscrolled echo of the
+    # long line's head can't be mistaken for the OUTPUT card's (scrollable) content.
+    result = Gori::Convert.run(REG, long_line.to_slice, "")
+    rect = Rect.new(0, 0, 80, 30)
+    render_args = {
+      input: TextArea.new("unrelated"), chain: "", chain_cx: 0, chain_pre: "",
+      result: result, pane: :output, focused: true, popup: ChainComplete.new,
+      prompt: nil, prompt_buf: "",
+    }
+
+    backend = MemoryBackend.new(80, 30)
+    view.render(Screen.new(backend), rect, **render_args)
+    backend.contains?("HEAD").should be_true
+    backend.contains?("TAIL").should be_false # off the right edge, clipped
+
+    40.times { view.hscroll_output(1) } # scroll well past the line's width
+    backend2 = MemoryBackend.new(80, 30)
+    view.render(Screen.new(backend2), rect, **render_args)
+    backend2.contains?("TAIL").should be_true
+    backend2.contains?("HEAD").should be_false # scrolled off the left edge
+  end
+
   it "lights only the focused section's card border gold (per-pane focus)" do
     # Each section is its own card now (not a divided single frame), so focusing
     # INPUT must gild only the INPUT card — the read-only PIPELINE/OUTPUT cards

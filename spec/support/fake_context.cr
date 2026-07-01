@@ -45,6 +45,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def scroll_detail(delta : Int32) : Nil; end
 
+  def hscroll_detail(delta : Int32) : Nil; end
+
   def toggle_detail_pane : Nil; end
 
   def move_detail_pane(dir : Int32) : Nil; end
@@ -166,6 +168,8 @@ class FakeExecContext < Gori::Verb::ExecContext
   def finding_set_status : Nil; end
 
   def finding_edit_notes : Nil; end
+
+  def finding_hscroll(delta : Int32) : Nil; end
 
   def finding_edit_title : Nil; end
 

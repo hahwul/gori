@@ -75,6 +75,16 @@ module Gori
         "finding.edit-notes", "Edit notes", "Edit the finding notes inline", Verb::Scope::FindingsDetail,
         [Verb::Chord.new("e"), Verb::Chord.new("enter")]) { |ctx| ctx.finding_edit_notes; nil }
 
+      # Shift+←/→ scroll a long notes line sideways. `finding.close` (registered
+      # above) owns plain ← — a distinct chord (shift: true), so no collision.
+      r.register Verb::Definition.new(
+        "finding.hscroll-right", "Scroll notes right", "Scroll a long notes line right", Verb::Scope::FindingsDetail,
+        [Verb::Chord.new("right", shift: true)], hidden: true) { |ctx| ctx.finding_hscroll(1); nil }
+
+      r.register Verb::Definition.new(
+        "finding.hscroll-left", "Scroll notes left", "Scroll a long notes line left", Verb::Scope::FindingsDetail,
+        [Verb::Chord.new("left", shift: true)], hidden: true) { |ctx| ctx.finding_hscroll(-1); nil }
+
       r.register Verb::Definition.new(
         "finding.delete", "Delete finding", "Delete this finding", Verb::Scope::FindingsDetail,
         [Verb::Chord.new("d")]) { |ctx| ctx.findings_delete; nil }

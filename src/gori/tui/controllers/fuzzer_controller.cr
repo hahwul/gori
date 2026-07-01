@@ -88,7 +88,7 @@ module Gori::Tui
       when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ^N new · ↹ pane"
       when :config   then config_hint(v)
       when :results  then "↑/↓ select · ↵ detail · o sort · m matched · ^R run · ^X stop · space cmds · ↹ pane"
-      when :detail   then "↑/↓ scroll · ←/→ req/resp · esc back"
+      when :detail   then "↑/↓ scroll · ←/→ req/resp · ⇧←/→ h-scroll · esc back"
       else                "↹/esc tabs"
       end
     end
@@ -285,9 +285,11 @@ module Gori::Tui
     private def handle_detail(ev : Termisu::Event::Key, v : FuzzerView) : Nil
       key = ev.key
       case
-      when key.up?               then v.detail_scroll(-1)
-      when key.down?             then v.detail_scroll(1)
-      when key.left?, key.right? then v.detail_toggle_pane
+      when key.up?                 then v.detail_scroll(-1)
+      when key.down?               then v.detail_scroll(1)
+      when key.left? && ev.shift?  then v.hscroll_detail(-1)
+      when key.right? && ev.shift? then v.hscroll_detail(1)
+      when key.left?, key.right?   then v.detail_toggle_pane
       end
     end
 

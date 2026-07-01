@@ -432,4 +432,24 @@ describe Gori::Tui::ReplayView do
       store.replays.first.sni.should be_nil
     end
   end
+
+  it "hscroll scrolls a long response body line sideways into view (shift+←/→)" do
+    view = ReplayView.new
+    view.load_blank
+    long_line = "HEAD" + ("." * 60) + "TAIL"
+    ok = Gori::Replay::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, long_line.to_slice, nil, 1000_i64)
+    view.apply(ok)
+
+    rect = Rect.new(0, 0, 100, 20)
+    backend = MemoryBackend.new(100, 20)
+    view.render(Screen.new(backend), rect)
+    backend.contains?("HEAD").should be_true
+    backend.contains?("TAIL").should be_false # off the right edge, clipped
+
+    20.times { view.hscroll(1) } # scroll well past the line's width
+    backend2 = MemoryBackend.new(100, 20)
+    view.render(Screen.new(backend2), rect)
+    backend2.contains?("TAIL").should be_true
+    backend2.contains?("HEAD").should be_false # scrolled off the left edge
+  end
 end

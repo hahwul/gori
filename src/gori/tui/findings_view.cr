@@ -20,8 +20,10 @@ module Gori::Tui
       @detail = nil.as(Store::Finding?)
       @detail_flow = nil.as(Store::FlowRow?)
       @detail_scroll = 0
+      @notes_xscroll = 0 # horizontal scroll offset for the read-only notes preview
       @editing_notes = false
       @notes = TextArea.new
+      @notes.follow_x = true # long note lines scroll horizontally to keep the cursor visible
       @loaded = false
       # The `/` filter bar (mirrors History's QL bar but matches in memory).
       @query = ""
@@ -169,8 +171,16 @@ module Gori::Tui
       @detail = finding
       @detail_flow = finding.flow_id.try { |fid| store.flow_row(fid) }
       @detail_scroll = 0
+      @notes_xscroll = 0
       @editing_notes = false
       true
+    end
+
+    # Nudge the read-only notes preview sideways (shift+←/→). No-op while editing —
+    # the TextArea editor's own follow_x already handles that case.
+    def hscroll_notes(delta : Int32) : Nil
+      return if @editing_notes
+      @notes_xscroll = {@notes_xscroll + delta * 4, 0}.max
     end
 
     def close_detail : Nil
@@ -386,9 +396,12 @@ module Gori::Tui
       if @editing_notes
         @notes.render(screen, notes_rect, cursor: focused)
       else
-        finding.notes.split('\n').each_with_index do |note_line, i|
-          break if notes_y + i >= rect.bottom
-          screen.text(notes_rect.x, notes_rect.y + i, note_line, Theme.text, width: notes_rect.w)
+        visible_h = {rect.bottom - notes_y, 0}.max
+        rows = finding.notes.split('\n').first(visible_h)
+        @notes_xscroll = @notes_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width(l) } || 0) - notes_rect.w, 0}.max)
+        rows.each_with_index do |note_line, i|
+          shown = @notes_xscroll > 0 ? Highlight.slice_left_text(note_line, @notes_xscroll) : note_line
+          screen.text(notes_rect.x, notes_rect.y + i, shown, Theme.text, width: notes_rect.w)
         end
       end
     end

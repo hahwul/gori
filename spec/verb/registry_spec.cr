@@ -88,6 +88,10 @@ private class FakeContext < ExecContext
     @calls << :scroll_detail
   end
 
+  def hscroll_detail(delta : Int32) : Nil
+    @calls << :hscroll_detail
+  end
+
   def toggle_detail_pane : Nil
     @calls << :toggle_detail_pane
   end
@@ -306,6 +310,10 @@ private class FakeContext < ExecContext
 
   def finding_edit_notes : Nil
     @calls << :finding_edit_notes
+  end
+
+  def finding_hscroll(delta : Int32) : Nil
+    @calls << :finding_hscroll
   end
 
   def finding_edit_title : Nil

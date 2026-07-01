@@ -195,6 +195,10 @@ module Gori::Tui
       @history.scroll_detail(delta)
     end
 
+    def hscroll_detail(delta : Int32) : Nil
+      @history.hscroll_detail(delta)
+    end
+
     def toggle_detail_pane : Nil
       @history.toggle_pane
     end

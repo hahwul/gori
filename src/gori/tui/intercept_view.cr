@@ -28,7 +28,8 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @editor = TextArea.new
-      @editor.gutter = true # line numbers in the held-message editor (pairs with ^G)
+      @editor.gutter = true   # line numbers in the held-message editor (pairs with ^G)
+      @editor.follow_x = true # long lines (headers, URLs) scroll horizontally to keep the cursor visible
       @editing = false
       # Filter bar: the catch direction + on/off mirror the Interceptor (captured on
       # reload, rendered as chips); the condition query is a local edit buffer pushed
@@ -48,6 +49,7 @@ module Gori::Tui
       @detail_win = nil.as(Highlight::Windowed?)
       @detail_win_id = nil.as(Int64?)
       @detail_win_rev = Theme.revision # the theme the cached (colour-baked) head was built under
+      @detail_xscroll = 0              # horizontal scroll offset for the read-only held-item preview
     end
 
     # Fresh snapshot (cheap; called on enter AND every frame via the 50ms loop).
@@ -427,11 +429,22 @@ module Gori::Tui
       else
         win = detail_window_for(it)
         total = win.total
-        (0...inner.h).each do |i|
-          break if i >= total
-          Highlight.draw(screen, inner.x, inner.y + i, win.line_at(i), width: inner.w) # styles only the visible line
+        # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
+        # mirrors ReplayView#render_response_body / HistoryView#render_detail.
+        rows = (0...inner.h).compact_map { |i| i < total ? win.line_at(i) : nil }
+        @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width(l) } || 0) - inner.w, 0}.max)
+        rows.each_with_index do |styled, i|
+          shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
+          Highlight.draw(screen, inner.x, inner.y + i, shown, width: inner.w)
         end
       end
+    end
+
+    # Nudge the read-only held-item preview sideways (shift+←/→). No-op while
+    # editing — the TextArea editor's own follow_x already handles that case.
+    def hscroll_detail(delta : Int32) : Nil
+      return if @editing
+      @detail_xscroll = {@detail_xscroll + delta * 4, 0}.max
     end
 
     # Windowed view of the held item's raw bytes, cached by item id (held bytes
@@ -441,6 +454,7 @@ module Gori::Tui
     private def detail_window_for(it : Interceptor::Item) : Highlight::Windowed
       cached = @detail_win
       return cached if cached && @detail_win_id == it.id && @detail_win_rev == Theme.revision
+      @detail_xscroll = 0 if @detail_win_id != it.id # a newly-previewed item resets the scroll
       @detail_win_id = it.id
       @detail_win_rev = Theme.revision
       @detail_win = Highlight.from_lines_windowed(String.new(it.raw).split('\n').map(&.rstrip('\r')), it.kind.request?)

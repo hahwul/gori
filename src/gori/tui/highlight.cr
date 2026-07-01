@@ -381,6 +381,38 @@ module Gori::Tui
       out
     end
 
+    # The plain-string counterpart of `slice_left` — same straddling-glyph handling,
+    # for the read-only panes that draw raw `String` lines (no syntax overlay) rather
+    # than a styled `Line`. Identity when start_col <= 0.
+    def self.slice_left_text(s : String, start_col : Int32) : String
+      return s if start_col <= 0
+      acc = 0
+      cutting = true
+      String.build do |io|
+        s.each_char do |ch|
+          if cutting
+            w = Screen.display_width(ch.to_s)
+            if acc + w <= start_col
+              acc += w
+              next
+            end
+            io << " " * (acc + w - start_col) if acc < start_col # straddling glyph → visible cells as spaces
+            io << ch if acc >= start_col                         # clean boundary keeps the glyph
+            acc += w
+            cutting = false
+          else
+            io << ch
+          end
+        end
+      end
+    end
+
+    # Total display width of a styled line (sum of its spans) — used to clamp a
+    # horizontal scroll offset against the widest currently-visible row.
+    def self.line_width(line : Line) : Int32
+      line.sum { |span| Screen.display_width(span.text) }
+    end
+
     # --- line builders -------------------------------------------------------
 
     private def self.start_line(raw : String, request : Bool) : Line

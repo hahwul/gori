@@ -333,20 +333,25 @@ module Gori::Tui
     # Screen.display_width as the base draw, so an ambiguous-width glyph can't drift the
     # tint off the cells). Multi-line regions clamp to [0, line.size): first line tints
     # col→EOL, fully-covered lines 0→size, last line BOL→col; the '\n' offset has no cell.
+    # Region columns are computed against the FULL (unscrolled) line, then shifted left by
+    # @xscroll and clipped to the visible window — a no-op when @xscroll == 0 (the common
+    # case, since only the Fuzzer template sets bg_regions and it doesn't enable follow_x).
     private def paint_bg_regions(screen : Screen, cx0 : Int32, y : Int32, off0 : Int32,
                                  line : String, cw : Int32) : Nil
       return if @bg_regions.empty? || @reveal # opt-in; reveal rewrites the glyphs
       line_end = off0 + line.size
-      max_x = cx0 + cw
       @bg_regions.each do |(a, b, color)|
         next if b <= off0 || a >= line_end # region doesn't touch this line
         la = (a - off0).clamp(0, line.size)
         lb = (b - off0).clamp(0, line.size)
         next if la >= lb
-        col = cx0 + Screen.display_width(line[0, la])
-        next unless col < max_x
-        seg = line[la, lb - la]
-        screen.text(col, y, seg, Theme.marker_fg, color, width: {max_x - col, 0}.max)
+        start_col = Screen.display_width(line[0, la]) - @xscroll
+        end_col = Screen.display_width(line[0, lb]) - @xscroll
+        draw_from = {start_col, 0}.max
+        draw_to = {end_col, cw}.min
+        next if draw_from >= draw_to
+        seg = slice_left(line[la, lb - la], draw_from - start_col)
+        screen.text(cx0 + draw_from, y, seg, Theme.marker_fg, color, width: draw_to - draw_from)
       end
     end
 
@@ -413,26 +418,7 @@ module Gori::Tui
     # cut becomes leading spaces for its still-visible cells, so the remaining glyphs
     # keep their columns. Identity when start_col <= 0.
     private def slice_left(s : String, start_col : Int32) : String
-      return s if start_col <= 0
-      acc = 0
-      cutting = true
-      String.build do |io|
-        s.each_char do |ch|
-          if cutting
-            w = Screen.display_width(ch.to_s)
-            if acc + w <= start_col
-              acc += w
-              next
-            end
-            io << " " * (acc + w - start_col) if acc < start_col # straddling glyph → visible cells as spaces
-            io << ch if acc >= start_col                         # clean boundary keeps the glyph
-            acc += w
-            cutting = false
-          else
-            io << ch
-          end
-        end
-      end
+      Highlight.slice_left_text(s, start_col)
     end
   end
 end
