@@ -102,8 +102,9 @@ module Gori::Tui
     end
 
     # A horizontal tab menu (row 1) styled as a segmented control. The active tab
-    # is a solid filled segment with bold bright text (ACCENT when the menu has
-    # focus, so the user sees where keys land); inactive tabs are muted. The
+    # is a solid FOCUS_GOLD pill when the menu holds focus (mirroring the Replay/
+    # Notes sub-tab strip, so "gold = focus is here" reads the same one level up);
+    # at rest it settles to a dim SELECTION_DIM band. Inactive tabs are muted. The
     # held-intercept count rides inline as a `(N)` badge.
     def self.render_menu(screen : Screen, rect : Rect, *, active_tab : Symbol, focused : Bool,
                          tabs : Array({Symbol, String}) = TABS,
@@ -115,10 +116,8 @@ module Gori::Tui
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.panel) if start > 0 # earlier tabs hidden
       segs.each do |(sym, label, seg)|
         if sym == active_tab
-          # focus brightens the active segment (ACCENT) so the user sees the menu
-          # is live; when the body holds focus it stays bold but settles to TEXT.
-          bg = focused ? Theme.accent_bg : Theme.selection_dim
-          fg = focused ? Theme.accent : Theme.text
+          bg = focused ? Theme.focus_gold : Theme.selection_dim
+          fg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text
           screen.fill(seg, bg)
           screen.text(seg.x + 1, seg.y, label, fg, bg, Attribute::Bold)
         else

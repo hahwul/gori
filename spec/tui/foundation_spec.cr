@@ -72,17 +72,19 @@ describe Gori::Tui::Chrome do
     backend.contains?("Sitemap").should be_true
     backend.contains?("(3)").should be_true        # held-message badge on Intercept (the only tab-bar count)
     backend.contains?("Findings(").should be_false # findings/replay/notes carry no count badge
-    # active segment ` Project ` (now first tab) starts at col 2 (rect.x+1 fill, +1 pad); bright accent.
-    backend.fg_at(2, 1).should eq(Theme.accent)
+    # active segment ` Project ` (now first tab) starts at col 2 (rect.x+1 fill, +1 pad); FOCUS_GOLD pill.
+    backend.fg_at(2, 1).should eq(Theme.ink_on(Theme.focus_gold))
+    backend.bg_at(2, 1).should eq(Theme.focus_gold)
     backend.fg_at(12, 1).should eq(Theme.muted) # an inactive label (History) is muted
   end
 
-  it "settles the active segment to bold TEXT (no accent) when the menu is unfocused" do
+  it "settles the active segment to bold TEXT (no gold pill) when the menu is unfocused" do
     backend = MemoryBackend.new(90, 2)
     Chrome.render_menu(Screen.new(backend), Rect.new(0, 1, 90, 1),
       active_tab: :project, focused: false)
     backend.fg_at(2, 1).should eq(Theme.text) # active but body-focused: present, not lit
-    backend.fg_at(2, 1).should_not eq(Theme.accent)
+    backend.bg_at(2, 1).should eq(Theme.selection_dim)
+    backend.bg_at(2, 1).should_not eq(Theme.focus_gold)
   end
 
   it "windows the tab strip so the active tab stays visible when the row is too narrow" do
