@@ -1471,8 +1471,8 @@ module Gori::Tui
     end
 
     # A navigable sub-tab strip is showing — gates entry into :subtabs (and the strip
-    # click/rename paths). Each controller decides its own threshold (Notes/Convert ≥2;
-    # Replay/Fuzzer ≥1 so a single session is still labelled + space-menu reachable).
+    # click/rename paths). Each controller decides its own threshold (Convert ≥2;
+    # Replay/Fuzzer/Notes ≥1 so a single session is still labelled + space-menu reachable).
     private def subtabs_shown? : Bool
       @tabs[@active_tab]?.try(&.subtab_strip_shown?) || false
     end
