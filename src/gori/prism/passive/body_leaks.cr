@@ -19,6 +19,9 @@ module Gori
         # or a `Type: message` / newline-`at` disclosure does. {pattern, evidence label}.
         ERROR_SIGNATURES = [
           {/Traceback \(most recent call last\)/, "Python traceback"},
+          # A real CPython frame (`File "x.py", line N`) — the exact shape, so a bare
+          # "app.py:42" path reference (the old colon form's false positive) stays out.
+          {/File "[^"]*\.py", line \d+/, "Python stack frame"},
           # Ruby backtrace frame: the `:in ` distinguishes a real frame from a config path.
           {/\.rb:\d+:in /, "Ruby backtrace frame"},
           {/\bat [\w.$]+\([\w]+\.java:\d+\)/, "Java stack frame"},
@@ -30,10 +33,15 @@ module Gori
           {/\bjava\.lang\.[A-Z]\w+(?:Error|Exception)(?::|\r?\n\s*at )/, "Java exception"},
           {/\bat org\.springframework\.[\w.]{4,}/, "Spring framework trace"},
           {/\bSystem\.[A-Z]\w+Exception(?::|\r?\n\s*at )/, ".NET exception"},
-          # Rails: an actual error class (not the ubiquitous ActiveRecord::Base/Migration).
-          {/\bActiveRecord::[A-Z]\w*(?:Error|NotFound|Invalid|NotSaved|NotUnique)\b/, "Rails error"},
+          # Rails: any ActiveRecord class, but only when error-shaped (`: message` / newline-
+          # `at`), so a real error (RecordNotFound, Rollback, StatementInvalid, …) is caught
+          # while the ubiquitous doc mention "ActiveRecord::Base guide" is not.
+          {/\bActiveRecord::[A-Z]\w+(?::|\r?\n\s*at )/, "Rails error"},
           {/\b(?:NoMethodError|NameError|NoMatchingPatternError)(?::| \()/, "Ruby error"},
           {/PHP (?:Fatal error|Parse error|Warning|Notice):/, "PHP error"},
+          # A real PHP stack/trace frame ("… /var/www/app.php(42): …") — the paren+line form
+          # a path reference lacks; keeps the FP-prone bare "app.php:42" colon form out.
+          {/\.php\(\d+\)/, "PHP stack frame"},
           {/(?:\n|\A)Stack trace:\s*(?:\n|#\d)/, "stack trace"},
         ]
 

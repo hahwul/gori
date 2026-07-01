@@ -386,7 +386,7 @@ module Gori::Tui
       # Record the binding (POST body vs GET ?query=) so the re-encode targets the right place —
       # mirrors @saml_location. Without it a GET GraphQL edit would splice into a phantom body
       # while the origin reads the stale URL query (the decoded edit would never reach it).
-      @graphql_location = Graphql.location(detail.row.target, detail.request_body)
+      @graphql_location = Graphql.location(detail.request_body)
       seed_decode(detail, :graphql, Graphql.display(op))
     end
 

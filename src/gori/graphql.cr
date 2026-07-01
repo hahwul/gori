@@ -90,7 +90,7 @@ module Gori
       lines.each_with_index do |l, i|
         next unless l.strip == "# variables"
         trailing = lines[(i + 1)..].join('\n').strip
-        vi = i unless trailing.empty? || !json?(trailing)
+        vi = i if !trailing.empty? && json?(trailing)
       end
       vars = vi ? lines[(vi + 1)..].join('\n').strip : nil
       body = vi ? lines[0...vi] : lines
@@ -139,8 +139,9 @@ module Gori
     end
 
     # Where a flow carries its op: :body (a POST JSON body that parses as GraphQL) or
-    # :query (a GET `?query=…`). Drives which side the Replay re-encode targets.
-    def location(target : String, req_body : Bytes?) : Symbol
+    # :query (a GET `?query=…`). Drives which side the Replay re-encode targets. Decided
+    # solely by whether the request body is a GraphQL JSON document.
+    def location(req_body : Bytes?) : Symbol
       if (b = req_body) && !b.empty? && b.size <= MAX_BODY && from_json(String.new(b))
         :body
       else

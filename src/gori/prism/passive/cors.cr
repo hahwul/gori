@@ -33,10 +33,13 @@ module Gori
         # The request Origin is a DIFFERENT origin (scheme, host, OR port) from the page.
         # CORS same-origin requires all three equal; comparing host alone (the old check)
         # missed a credentialed reflection of a cross-SCHEME (http↔https) or cross-PORT
-        # same-host origin, which is genuinely exploitable. Unparseable → treat as cross.
+        # same-host origin, which is genuinely exploitable. Unparsable → treat as cross.
         private def cross_origin?(origin : String, ctx : Context) : Bool
-          m = origin.strip.downcase.match(%r{\A(https?)://([^/:]+)(?::(\d+))?\z}) || return true
-          scheme, host = m[1], m[2]
+          # Host is a bracketed IPv6 literal ([::1]) OR a normal reg-name/IPv4; either with an
+          # optional port. Strip the IPv6 brackets to compare against the bare stored host.
+          m = origin.strip.downcase.match(%r{\A(https?)://(\[[^\]]+\]|[^/:]+)(?::(\d+))?\z}) || return true
+          scheme = m[1]
+          host = m[2].lchop('[').rchop(']')
           port = m[3]?.try(&.to_i?) || (scheme == "https" ? 443 : 80)
           !(scheme == ctx.scheme.downcase && host == ctx.host.downcase && port == ctx.row.port)
         end
