@@ -71,6 +71,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_toggle_hex : Nil; end
 
+  def replay_toggle_decoded : Nil; end
+
   def replay_toggle_sni : Nil; end
 
   def replay_toggle_auto_content_length : Nil; end

@@ -293,6 +293,7 @@ module Gori
             events.each_with_index { |e, i| puts sse_event_text(e, i) }
           end
         end
+        print_decoded_text(detail, req, resp)
       end
 
       # Parsed SSE events when the response is a text/event-stream, else nil. Like
@@ -309,6 +310,51 @@ module Gori
           io << " retry=" << e.retry if e.retry
           e.data.each_line { |l| io << "\n  " << l.scrub }
         end
+      end
+
+      # Decoded-protocol sections (SAML / JWT / GraphQL / form params) — derived views
+      # over the stored bytes, mirroring the History decoded panes. Printed after the
+      # request/response so `gori run show` surfaces the same decodes as the TUI. Scans
+      # only the side(s) the `req`/`resp` flags include (so --request-only doesn't leak
+      # a response-side token); the query is request-side, so it's gated under `req`.
+      private def self.print_decoded_text(detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
+        tgt = req ? detail.row.target : ""
+        rh, rb = req ? detail.request_head : nil, req ? detail.request_body : nil
+        sh, sb = resp ? detail.response_head : nil, resp ? detail.response_body : nil
+        if doc = Saml.from_flow(tgt, rh, rb, sh, sb)
+          puts ""
+          puts "=== SAML (#{Saml.summary(doc)}) ==="
+          puts Saml.pretty_xml(doc.xml).scrub
+        end
+        jwts = Jwt.from_flow(tgt, rh, rb, sh, sb)
+        unless jwts.empty?
+          puts ""
+          puts "=== JWT (#{jwts.size}) ==="
+          jwts.each do |f|
+            puts "▸ #{f.location}#{(b = f.brief) ? " · #{b}" : ""}"
+            puts f.decoded.scrub
+          end
+        end
+        if op = Graphql.from_flow(tgt, rh, rb)
+          puts ""
+          puts "=== GRAPHQL ==="
+          puts Graphql.display(op).scrub
+        end
+        if fields = FormData.from_flow(tgt, rh, rb)
+          puts ""
+          puts "=== PARAMS (#{fields.size}) ==="
+          fields.each { |f| puts "#{f.source == :query ? "?" : " "} #{f.name} = #{(n = f.note) ? "(#{n})" : f.value}".scrub }
+        end
+      end
+
+      # The JSON counterpart of print_decoded_text — emits `saml` / `jwt` / `graphql` /
+      # `form_params` onto the open flow object via the shared DecodedView emitter (so
+      # CLI and MCP stay in lockstep). Scans only the req/resp-included side(s); unclipped
+      # (a script can read whole values, unlike the LLM-bounded MCP path).
+      private def self.emit_decoded_json(j : JSON::Builder, detail : Store::FlowDetail, req : Bool, resp : Bool) : Nil
+        DecodedView.emit_json(j, target: req ? detail.row.target : "",
+          req_head: req ? detail.request_head : nil, req_body: req ? detail.request_body : nil,
+          resp_head: resp ? detail.response_head : nil, resp_body: resp ? detail.response_body : nil)
       end
 
       # "→ out" (client→server) / "← in" (server→client). Text frames print their
@@ -332,6 +378,7 @@ module Gori
             end
             j.field "http_version", detail.http_version
             j.field "error", detail.error
+            emit_decoded_json(j, detail, req, resp)
             if req
               req_body, req_decoded = decode_body(detail.request_head, detail.request_body)
               j.field "request" do

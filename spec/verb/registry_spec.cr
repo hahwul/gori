@@ -132,6 +132,10 @@ private class FakeContext < ExecContext
     @calls << :replay_toggle_hex
   end
 
+  def replay_toggle_decoded : Nil
+    @calls << :replay_toggle_decoded
+  end
+
   def replay_toggle_sni : Nil
     @calls << :replay_toggle_sni
   end
@@ -574,9 +578,11 @@ describe Gori::Verb do
       reg = Gori::Verbs.registry
       ctx = FakeContext.new
       reg["replay.toggle-hex"].call(ctx)
+      reg["replay.toggle-decoded"].call(ctx)
       reg["replay.toggle-sni"].call(ctx)
       reg["replay.toggle-auto-content-length"].call(ctx)
       ctx.calls.should contain(:replay_toggle_hex)
+      ctx.calls.should contain(:replay_toggle_decoded)
       ctx.calls.should contain(:replay_toggle_sni)
       ctx.calls.should contain(:replay_toggle_auto_content_length)
     end

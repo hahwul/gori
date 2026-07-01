@@ -561,8 +561,8 @@ module Gori::Tui
       # below, so claim it inline here. Each target is gated to where it's editable.
       if @overlay == :none && @focus == :body && ev.ctrl? && ev.key.lower_e?
         if @active_tab == :replay && (v = replay_controller.current_view) && v.focus == :request
-          v.toggle_request_hex if v.request_hex? # commit + drop the hex buffer (external editor is text)
-          run_external_editor(v.request_text, :request) { |t| v.replace_request(t) }
+          v.toggle_request_hex if v.request_hex?                                             # commit + drop the hex buffer (external editor is text)
+          run_external_editor(v.edit_buffer_text, :request) { |t| v.replace_edit_buffer(t) } # active sub-pane (envelope/decoded)
           return
         elsif @active_tab == :notes
           run_external_editor(notes_controller.view.current_text, :notes) { |t| notes_controller.view.replace_current(t) }
@@ -1019,7 +1019,7 @@ module Gori::Tui
       when key.y?                                         then run_confirm
       when key.left?, key.right?, key.tab?, key.back_tab? then @confirm.try(&.move)
       when key.enter?
-        (@confirm.try(&.confirm_selected?)) ? run_confirm : close_confirm
+        @confirm.try(&.confirm_selected?) ? run_confirm : close_confirm
       end
     end
 
@@ -1705,8 +1705,8 @@ module Gori::Tui
     # with "" on close). Routes like jump_line; replay covers both panes.
     private def set_search_hl(q : String) : Nil
       case @search_target
-      when :replay_request  then replay_controller.current_view.try { |v| v.request_search_hl = q }
-      when :replay_response then replay_controller.current_view.try { |v| v.response_search_hl = q }
+      when :replay_request  then replay_controller.current_view.try(&.request_search_hl=(q))
+      when :replay_response then replay_controller.current_view.try(&.response_search_hl=(q))
       when :notes           then notes_controller.view.search_hl = q
       when :project         then project_controller.view.search_hl = q
       when :detail          then history_controller.view.search_hl = q
@@ -2753,6 +2753,10 @@ module Gori::Tui
       replay_controller.replay_toggle_hex
     end
 
+    def replay_toggle_decoded : Nil
+      replay_controller.replay_toggle_decoded
+    end
+
     def replay_toggle_sni : Nil
       replay_controller.replay_toggle_sni
     end
@@ -2775,6 +2779,7 @@ module Gori::Tui
     # CROSS-TAB: turn the current Replay request into a Fuzzer template.
     def fuzz_from_replay : Nil
       return unless v = replay_controller.current_view
+      v.flush_decoded_edits # a split-decode tab: fold a pending payload edit into the envelope first
       fuzzer_controller.fuzz_from_request(v.target, v.request_text, v.http2?, v.sni_override)
     end
 
@@ -2805,6 +2810,7 @@ module Gori::Tui
     # CROSS-TAB: open the config popup for the current Replay request.
     def mine_from_replay : Nil
       return unless v = replay_controller.current_view
+      v.flush_decoded_edits # fold a pending split-decode payload edit into the envelope first
       open_mine_config(miner_controller.build_seed_from_request(v.target, v.request_text, v.http2?, v.sni_override))
     end
 
