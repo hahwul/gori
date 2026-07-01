@@ -8,6 +8,8 @@ require "../store"
 require "../project"
 require "../project_registry"
 require "../ql"
+require "../scope"
+require "../sitemap"
 require "../proxy/codec/content_decode"
 require "../replay/engine"
 require "../replay/h2_engine"
@@ -15,6 +17,9 @@ require "../replay/flow_request"
 require "../replay/diff"
 require "../fuzz"
 require "../miner"
+require "../prism/passive"
+require "../prism/group"
+require "../notes"
 require "../findings_export"
 require "./output"
 
@@ -28,33 +33,50 @@ module Gori
     # capturing instance (SQLite WAL).
     module Run
       def self.dispatch(args : Array(String)) : Nil
-        if args.empty?
-          print_help
-          return
-        end
-
-        rest = args[1..]
-        case args[0]
-        when "capture"       then cmd_capture(rest)
-        when "history", "ls" then cmd_history(rest)
-        when "show"          then cmd_show(rest)
-        when "replay"        then cmd_replay(rest)
-        when "fuzz"          then cmd_fuzz(rest)
-        when "mine"          then cmd_mine(rest)
-        when "findings"      then cmd_findings(rest)
-        when "projects"      then cmd_projects(rest)
-        when "-h", "--help"  then print_help
-        else
-          STDERR.puts "gori run: unknown subcommand '#{args[0]}'"
-          print_help
-          exit 1
-        end
+        dispatch_subcommand(args)
       rescue ex : IO::Error
         # `gori run … | head` (or any reader that closes early) breaks the STDOUT
         # pipe; a well-behaved Unix filter exits quietly on EPIPE rather than
         # dumping an IO::Error backtrace. Re-raise anything that isn't a broken pipe.
+        # (Kept as a thin wrapper so the subcommand `case` stays under the
+        # cyclomatic-complexity bar — see dispatch_subcommand.)
         raise ex unless ex.os_error == Errno::EPIPE
         exit 0
+      end
+
+      private def self.dispatch_subcommand(args : Array(String)) : Nil
+        # No args / -h / --help all print help. `args[1..]` is only reached in the named
+        # branches, where args[0] matched a subcommand string (so args is non-empty and the
+        # tail slice is safe). Folding the empty case into this `when` keeps the dispatch
+        # under the cyclomatic-complexity bar; the rest of the subcommands live in
+        # dispatch_subcommand2 for the same reason (one `case` would overflow the bar).
+        case sub = args.first?
+        when nil, "-h", "--help" then print_help
+        when "capture"           then cmd_capture(args[1..])
+        when "history", "ls"     then cmd_history(args[1..])
+        when "show"              then cmd_show(args[1..])
+        when "replay"            then cmd_replay(args[1..])
+        when "fuzz"              then cmd_fuzz(args[1..])
+        when "mine"              then cmd_mine(args[1..])
+        else                          dispatch_subcommand2(sub, args[1..])
+        end
+      end
+
+      # The second half of the subcommand `case` (split from dispatch_subcommand so each
+      # method stays under the cyclomatic-complexity bar). `sub` is non-nil here — the
+      # empty/-h/--help case is handled above.
+      private def self.dispatch_subcommand2(sub : String?, rest : Array(String)) : Nil
+        case sub
+        when "prism"    then cmd_prism(rest)
+        when "sitemap"  then cmd_sitemap(rest)
+        when "notes"    then cmd_notes(rest)
+        when "findings" then cmd_findings(rest)
+        when "projects" then cmd_projects(rest)
+        else
+          STDERR.puts "gori run: unknown subcommand '#{sub}'"
+          print_help
+          exit 1
+        end
       end
 
       private def self.print_help : Nil
@@ -70,6 +92,9 @@ module Gori
           replay <id>        Re-send a captured flow to its origin (optionally diff it)
           fuzz [<id>]        Fuzz/intrude a request: mark §…§ positions, sweep payloads
           mine [<id>]        Discover hidden parameters (query/body/json/header/cookie)
+          sitemap            Print the host → path endpoint tree (text, json, paths)
+          prism [QL]         Passively scan captured flows for issues (zero requests)
+          notes [<n>]        Read the project's notes (list, show one, or --all)
           findings           List or export findings (text, json, markdown)
           projects           List known projects
 
@@ -955,6 +980,300 @@ module Gori
         Fuzz::RegexReplace.new(parse_regex(parts[0]), parts[1])
       end
 
+      # --- prism (passive scan) ----------------------------------------------
+
+      # The categories a PASSIVE scan can emit. Prism::Category::ACTIVE is intentionally absent —
+      # active/reflected-param detections come only from the request-sending Active scanner, which
+      # this command doesn't run, so accepting `--category active` would be a guaranteed-empty filter.
+      PRISM_CATEGORIES = [
+        Prism::Category::HEADERS, Prism::Category::COOKIES, Prism::Category::TECH,
+        Prism::Category::INFOLEAK, Prism::Category::CORS,
+      ]
+
+      private def self.cmd_prism(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        query : String? = nil
+        min_sev : Store::Severity? = nil
+        category : String? = nil
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run prism [QL query] [options]\n\n" \
+                     "Passively scan captured flows (zero outbound requests) and report grouped\n" \
+                     "issues — the headless equivalent of the TUI Prism tab. Active/reflected-param\n" \
+                     "checks send requests and are intentionally excluded (use the TUI or fuzz/mine)."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }
+          p.on("--severity=LEVEL", "Only show issues at/above LEVEL (info|low|medium|high|critical)") { |v| min_sev = parse_severity(v) }
+          p.on("--category=CAT", "Only show issues in CAT (#{PRISM_CATEGORIES.join("|")})") { |v| category = parse_prism_category(v) }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run prism: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run prism: missing value for #{f}" }
+        end
+        parser.parse(args)
+        # A positional QL is accepted too ("gori run prism status:>=500"), mirroring history; an
+        # explicit --query wins. Multiple terms join with spaces (QL ANDs them).
+        query ||= positional.join(' ') unless positional.empty?
+
+        filter : QL::Filter? = nil
+        if q = query
+          parsed = QL.parse(q)
+          # A query that compiles to NOTHING (e.g. `status:>=foo`) becomes the match-all EMPTY
+          # filter — here that would scan every flow, the opposite of what was asked. Refuse it.
+          if !q.strip.empty? && parsed == QL::EMPTY
+            abort "gori run prism: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
+          end
+          filter = parsed
+        end
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        groups, scanned = begin
+          ids = prism_scan_ids(store, filter)
+          {Prism.group(scan_flows(store, ids)), ids.size}
+        ensure
+          store.close
+        end
+
+        if ms = min_sev
+          groups = groups.select { |g| g.severity.value >= ms.value }
+        end
+        if cat = category
+          groups = groups.select { |g| g.category == cat }
+        end
+        report_prism(groups, scanned, format, query, min_sev, category)
+      end
+
+      private def self.report_prism(groups : Array(Prism::Group), scanned : Int32, format : Symbol,
+                                    query : String?, min_sev : Store::Severity?, category : String?) : Nil
+        STDERR.puts "scanned #{scanned} flow#{scanned == 1 ? "" : "s"} · #{groups.size} issue#{groups.size == 1 ? "" : "s"}"
+        if format == :json
+          puts CLI::Output.prism_array_json(groups)
+        elsif groups.empty?
+          scope = query ? " in flows matching #{query.inspect}" : ""
+          # Distinguish "nothing found" from "filters removed everything" — else an empty result
+          # under --severity/--category looks like the QL query itself matched no flows.
+          STDERR.puts((min_sev || category) ? "no issues match the --severity/--category filter#{scope}" : "no issues#{scope}")
+        else
+          groups.each { |g| puts CLI::Output.prism_group_text(g) }
+        end
+      end
+
+      # Flow IDs to scan, oldest-first (ascending id) — a stable, deterministic grouping order.
+      # Reuses the proven search/recent_flows query paths.
+      private def self.prism_scan_ids(store : Store, filter : QL::Filter?) : Array(Int64)
+        rows = filter ? store.search(filter, Int32::MAX) : store.recent_flows(Int32::MAX)
+        rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
+      end
+
+      # Passively analyze each flow THAT HAS A CAPTURED RESPONSE — mirroring the live analyzer,
+      # which only scans on the `:updated` event (a response or WS upgrade exists), never on a
+      # bare request. Skipping response-less flows (connect/TLS failures, still-pending) keeps
+      # headless counts equal to the TUI Prism tab; otherwise request-only rules (secret_in_url,
+      # some tech) would flag flows the live path never sees. Passive detections already carry
+      # their source flow_id (ctx.fid). Streams one FlowDetail at a time (full BLOBs); tty meter.
+      private def self.scan_flows(store : Store, ids : Array(Int64)) : Array(Prism::Detection)
+        detections = [] of Prism::Detection
+        progress = STDERR.tty?
+        ids.each_with_index do |id, i|
+          detail = store.get_flow(id)
+          detections.concat(Prism::Passive.analyze(detail)) if detail && detail.response_head
+          if progress && (i & 0x3F) == 0
+            STDERR.print "\r[prism] scanned #{i + 1}/#{ids.size} flows"
+            STDERR.flush
+          end
+        end
+        STDERR.print "\r\e[K" if progress # clear the in-place meter before the summary line
+        detections
+      end
+
+      private def self.parse_severity(v : String) : Store::Severity
+        Store::Severity.parse?(v) || abort "gori run prism: invalid --severity '#{v}' (info|low|medium|high|critical)"
+      end
+
+      private def self.parse_prism_category(v : String) : String
+        d = v.downcase
+        PRISM_CATEGORIES.includes?(d) ? d : abort("gori run prism: invalid --category '#{v}' (#{PRISM_CATEGORIES.join("|")})")
+      end
+
+      # --- notes -------------------------------------------------------------
+
+      private def self.cmd_notes(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        format = :text
+        all = false
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run notes [<n>] [options]\n\nList the project's notes; with <n> (1-based) print that note in full, or --all to print them all."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--all", "Print every note in full instead of the one-line list") { all = true }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run notes: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run notes: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        abort "gori run notes: too many arguments (expected at most one note number)" if positional.size > 1
+        index = parse_note_index(positional.first?)
+        abort "gori run notes: <n> and --all are mutually exclusive" if index && all
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        doc = begin
+          Notes.load(store)
+        ensure
+          store.close
+        end
+
+        if n = index
+          abort "gori run notes: no note ##{n} (this project has #{doc.size} note#{doc.size == 1 ? "" : "s"})" unless n <= doc.size
+          show_note(doc, n - 1, format)
+        elsif all
+          show_all_notes(doc, format)
+        else
+          list_notes(doc, format)
+        end
+      end
+
+      private def self.parse_note_index(arg : String?) : Int32?
+        return nil unless arg
+        n = arg.to_i?
+        abort "gori run notes: invalid note number '#{arg}' (expected a positive integer)" unless n && n > 0
+        n
+      end
+
+      # Print one note (`idx` 0-based) in full: its exact text, or a full JSON object.
+      private def self.show_note(doc : Notes::Doc, idx : Int32, format : Symbol) : Nil
+        text = doc.texts[idx]
+        if format == :json
+          puts CLI::Output.note_object_json(idx, text, current: doc.cur == idx, with_text: true)
+        else
+          STDOUT.puts text
+        end
+      end
+
+      private def self.show_all_notes(doc : Notes::Doc, format : Symbol) : Nil
+        if format == :json
+          puts CLI::Output.notes_array_json(doc, with_text: true)
+        elsif doc.empty?
+          STDERR.puts "no notes"
+        else
+          doc.texts.each_with_index do |text, i|
+            puts "" if i > 0
+            puts "=== note #{i + 1}: #{CLI::Output.note_label(i, text)}#{doc.cur == i ? " *" : ""} ==="
+            STDOUT.puts text
+          end
+        end
+      end
+
+      private def self.list_notes(doc : Notes::Doc, format : Symbol) : Nil
+        if format == :json
+          puts CLI::Output.notes_array_json(doc, with_text: false)
+        elsif doc.empty?
+          STDERR.puts "no notes"
+        else
+          doc.texts.each_with_index { |text, i| puts CLI::Output.note_row_text(i, text, current: doc.cur == i) }
+        end
+      end
+
+      # --- sitemap -----------------------------------------------------------
+
+      private def self.cmd_sitemap(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        query : String? = nil
+        limit = Store::SITEMAP_MAX
+        in_scope = false
+        group = true
+        format = :text
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run sitemap [QL query] [options]\n\nPrint the deduplicated host → path endpoint tree built from the captured flows."
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("-qQL", "--query=QL", "Filter endpoints with a QL query (host: method: path: status: scheme: …)") { |v| query = v }
+          p.on("-nN", "--limit=N", "Max distinct endpoints to scan (default #{Store::SITEMAP_MAX})") { |v| limit = parse_count(v, "--limit") }
+          p.on("--in-scope", "Only hosts in the project's configured scope") { in_scope = true }
+          p.on("--no-group", "Don't fold long numeric path-segment runs (/users/1,2,3…)") { group = false }
+          p.on("--format=FMT", "Output: text (default tree) | json | paths") { |v| format = parse_format(v, [:text, :json, :paths]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run sitemap: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run sitemap: missing value for #{f}" }
+        end
+        parser.parse(args)
+        # Accept a positional QL too ("gori run sitemap host:api"), mirroring history's
+        # `/` bar; an explicit --query wins. Multiple terms join with spaces (QL ANDs).
+        query ||= positional.join(' ') unless positional.empty?
+
+        # Parse/validate the QL BEFORE opening the store: abort skips ensure blocks, so a
+        # bad query must not leave a store handle open.
+        filter = sitemap_filter(query)
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        hosts = begin
+          collect_sitemap(store, filter, limit, in_scope, group)
+        ensure
+          store.close
+        end
+
+        emit_sitemap(hosts, format)
+      end
+
+      # QL.parse + the same un-compilable-query rejection as history (a non-blank query
+      # collapsing to EMPTY would silently dump every endpoint).
+      private def self.sitemap_filter(query : String?) : QL::Filter
+        return QL::EMPTY unless q = query
+        filter = QL.parse(q)
+        if !q.strip.empty? && filter == QL::EMPTY
+          abort "gori run sitemap: query #{q.inspect} did not match any field (check syntax, e.g. host:example.com method:POST path:/api status:>=500)"
+        end
+        filter
+      end
+
+      # Build + post-process the tree from the open store in the SAME ORDER as
+      # SitemapView#reload (build → tags → scope → fold → counts). The scope step
+      # differs by design: --in-scope filters whole hosts via Scope#host_in_scope?,
+      # which evaluates the rules regardless of the TUI's persisted ⇧S enabled flag
+      # (an explicit --in-scope is the opt-in). That host-level gate is coarser than
+      # the TUI lens's per-flow SQL filter and conservative on url-level includes.
+      private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,
+                                       in_scope : Bool, group : Bool) : Array(Sitemap::Node)
+        hosts = Sitemap.build(store.sitemap_entries(filter, limit))
+        Sitemap.stamp_tags!(hosts, store.sitemap_tags)
+        if in_scope
+          scope = Scope.load(store)
+          STDERR.puts "gori run sitemap: --in-scope, but no scope rules are configured — nothing is in scope" unless scope.configured?
+          hosts.select! { |h| scope.host_in_scope?(h.label) }
+        end
+        hosts.each { |h| Sitemap.group_sequences!(h) } if group
+        hosts.each { |h| h.endpoints = Sitemap.endpoint_count(h) }
+        hosts
+      end
+
+      # Results → STDOUT; the empty-state note → STDERR (STDOUT-purity). JSON always
+      # emits a (possibly empty) array so scripts get valid JSON either way.
+      private def self.emit_sitemap(hosts : Array(Sitemap::Node), format : Symbol) : Nil
+        if format == :json
+          puts CLI::Output.sitemap_json(hosts)
+        elsif hosts.empty?
+          STDERR.puts "no endpoints (capture some traffic, or relax --in-scope / the query)"
+        elsif format == :paths
+          print CLI::Output.sitemap_paths(hosts)
+        else
+          print CLI::Output.sitemap_text(hosts)
+        end
+      end
+
       # --- findings ----------------------------------------------------------
 
       private def self.cmd_findings(args : Array(String)) : Nil
@@ -1142,6 +1461,7 @@ module Gori
               when "json"           then :json
               when "jsonl"          then :jsonl
               when "raw"            then :raw
+              when "paths"          then :paths
               when "markdown", "md" then :markdown
               else                       abort "gori run: unknown --format '#{v}'"
               end

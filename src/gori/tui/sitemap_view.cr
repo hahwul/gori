@@ -1,9 +1,9 @@
-require "uri"
 require "./screen"
 require "./theme"
 require "../store"
 require "../ql"
 require "../scope"
+require "../sitemap" # the host→path tree model + builder (URI normalisation lives there now)
 
 module Gori::Tui
   # The Sitemap tab: a literal host → path tree built from captured flows (no ID
@@ -11,50 +11,10 @@ module Gori::Tui
   # answer "what does this app do". Navigate with ↑/↓, expand/collapse with
   # →/←/Enter.
   class SitemapView
-    # One tree node: a host (depth 0) or a path segment.
-    class Node
-      getter label : String
-      getter children : Array(Node)
-      property methods : Array(String)
-      property expanded : Bool
-      # Scope state, meaningful only on host (depth-0) nodes — stamped by `reload` so
-      # the render loop doesn't re-evaluate the (mutex-guarded) Scope every frame.
-      property in_scope : Bool
-      property endpoints : Int32 # # of captured endpoints (nodes with methods) under it
-      # Full URL path from the host root ("" on the host node, "/" for the bare root),
-      # stamped during `add`. Stable regardless of how grouping later reshapes the tree,
-      # so it's the durable key for a path tag.
-      property path : String
-      # Optional free-text memo pinned to this (host, path), stamped from the store each
-      # reload (V17). nil = untagged.
-      property tag : String?
-      # A synthetic `[1, 2, 3 … +N]` fold node: its children are real numeric siblings
-      # collapsed by `group_sequences`. Not a real path — never tagged, never keyed.
-      property grouped : Bool
-
-      def initialize(@label : String)
-        @children = [] of Node
-        @methods = [] of String
-        @expanded = true
-        @in_scope = false
-        @endpoints = 0
-        @path = ""
-        @tag = nil
-        @grouped = false
-      end
-
-      def child(label : String) : Node
-        @children.find { |c| c.label == label } || begin
-          node = Node.new(label)
-          @children << node
-          node
-        end
-      end
-
-      def leaf? : Bool
-        @children.empty?
-      end
-    end
+    # The tree node + pure builder live in `Gori::Sitemap` (shared with the headless
+    # `gori run sitemap`); this view layers scope markers, path-tag editing, and
+    # rendering on top. The alias keeps the rest of this file reading as `Node`.
+    alias Node = Gori::Sitemap::Node
 
     # A flattened tree row. `guides` is a bitmask: bit L set ⇒ a vertical `│` tree-guide
     # is drawn at ancestor level L (its branch continues below this row). Built once per
@@ -65,10 +25,6 @@ module Gori::Tui
     # `/` query language applies, plus `tag:` — a Sitemap-local field (handled here, not
     # in the shared QL) that filters the tree by a node's path memo.
     QL_FIELDS = %w(host path method status scheme body header size dur tag)
-
-    # Pure-numeric siblings beyond this count under one parent fold into a single
-    # `[1, 2, 3 … +N]` group node (path-param explosion like /users/1,2,3…).
-    SEQUENCE_GROUP_THRESHOLD = 10
 
     def initialize
       @hosts = [] of Node
@@ -115,13 +71,10 @@ module Gori::Tui
       # out, hand the residual to QL.parse, and apply the tag filter to the built tree.
       positives, negatives, residual = split_tag_terms(@query)
       combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(residual))
-      @hosts = [] of Node
-      store.sitemap_entries(combined).each do |(host, method, target)|
-        add(host, normalize_path(target), method)
-      end
-      stamp_tags(store.sitemap_tags)
+      @hosts = Sitemap.build(store.sitemap_entries(combined))
+      Sitemap.stamp_tags!(@hosts, store.sitemap_tags)
       filter_by_tags(positives, negatives)
-      @hosts.each { |h| group_sequences(h) } if @grouping
+      @hosts.each { |h| Sitemap.group_sequences!(h) } if @grouping
       # Stamp host-level scope state + endpoint counts on the FINAL tree, so the render
       # loop is a pure read (no per-frame Scope mutex hits). host_in_scope?/configured?
       # evaluate the rules regardless of the ⇧S enabled flag, so targets are marked even
@@ -129,7 +82,7 @@ module Gori::Tui
       @scope_configured = @scope.try(&.configured?) == true
       @hosts.each do |h|
         h.in_scope = @scope_configured && (@scope.try(&.host_in_scope?(h.label)) == true)
-        h.endpoints = endpoint_count(h)
+        h.endpoints = Sitemap.endpoint_count(h)
       end
       @selected = 0
       @scroll = 0
@@ -137,18 +90,7 @@ module Gori::Tui
       @loaded = true
     end
 
-    # --- tags: stamp / filter ------------------------------------------------
-
-    # Pin each node's memo from the (host, path) ⇒ tag map (one store read per reload).
-    private def stamp_tags(tags : Hash({String, String}, String)) : Nil
-      return if tags.empty?
-      @hosts.each { |h| stamp_node_tags(h, h.label, tags) }
-    end
-
-    private def stamp_node_tags(node : Node, host : String, tags : Hash({String, String}, String)) : Nil
-      node.tag = tags[{host, node.path}]?
-      node.children.each { |c| stamp_node_tags(c, host, tags) }
-    end
+    # --- tags: filter (stamping lives in Gori::Sitemap.stamp_tags!) ----------
 
     # Split `tag:`/`-tag:` tokens out of the query (whitespace-tokenised, matching
     # QL.parse). Returns positive + negative keywords (lowercased) and the residual
@@ -214,45 +156,6 @@ module Gori::Tui
       return false unless t
       down = t.downcase
       keywords.any? { |kw| down.includes?(kw) }
-    end
-
-    # --- numeric-sequence grouping -------------------------------------------
-
-    # Fold a node's pure-numeric children into one collapsed `[1, 2, 3 … +N]` group when
-    # they exceed the threshold; non-numeric siblings stay put. Recurses first so nested
-    # sequences fold too. Sorting by (length, lexicographic) is numeric order without
-    # parsing (handles arbitrarily long ids, no overflow).
-    private def group_sequences(node : Node) : Nil
-      node.children.each { |c| group_sequences(c) }
-      numeric = node.children.select { |c| !c.grouped && numeric_label?(c.label) }
-      return if numeric.size <= SEQUENCE_GROUP_THRESHOLD
-      numeric.sort_by! { |c| {c.label.size, c.label} }
-      rest = node.children.select { |c| c.grouped || !numeric_label?(c.label) }
-      group = Node.new(group_label(numeric))
-      group.grouped = true
-      group.expanded = false
-      numeric.each { |c| group.children << c }
-      node.children.clear
-      node.children.concat(rest)
-      node.children << group
-    end
-
-    private def numeric_label?(label : String) : Bool
-      !label.empty? && label.each_char.all?(&.ascii_number?)
-    end
-
-    # "[1, 2, 3 … +47]" — the first three values then a remainder count.
-    private def group_label(nodes : Array(Node)) : String
-      head = nodes.first(3).map(&.label).join(", ")
-      nodes.size > 3 ? "[#{head} … +#{nodes.size - 3}]" : "[#{head}]"
-    end
-
-    # # of captured endpoints under a host node: descendant nodes carrying ≥1 method
-    # (= distinct (host, path) pairs, incl. folder-with-methods nodes like /api/users).
-    private def endpoint_count(node : Node) : Int32
-      n = node.methods.empty? ? 0 : 1
-      node.children.each { |c| n += endpoint_count(c) }
-      n
     end
 
     def move(delta : Int32) : Nil
@@ -716,38 +619,6 @@ module Gori::Tui
       child_guides = has_next ? (guides | (1_u64 << depth)) : guides
       last = node.children.size - 1
       node.children.each_with_index { |child, i| collect(child, depth + 1, child_guides, i < last, rows) }
-    end
-
-    private def add(host : String, path : String, method : String) : Nil
-      host_node = @hosts.find { |h| h.label == host } || begin
-        node = Node.new(host)
-        @hosts << node
-        node
-      end
-      segments = path.split('/').reject(&.empty?)
-      if segments.empty?
-        node = host_node.child("/")
-        node.path = "/"
-      else
-        acc = ""
-        node = host_node
-        segments.each do |seg|
-          acc = "#{acc}/#{seg}"
-          node = node.child(seg)
-          node.path = acc # idempotent on revisits; the durable tag key
-        end
-      end
-      node.methods << method unless node.methods.includes?(method)
-    end
-
-    private def normalize_path(target : String) : String
-      return target unless target.starts_with?("http://") || target.starts_with?("https://")
-      uri = URI.parse(target)
-      path = uri.path
-      path = "/" if path.empty?
-      uri.query ? "#{path}?#{uri.query}" : path
-    rescue
-      target
     end
 
     private def ensure_visible(total : Int32, h : Int32) : Nil

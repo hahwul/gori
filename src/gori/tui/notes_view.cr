@@ -1,8 +1,8 @@
-require "json"
 require "./screen"
 require "./theme"
 require "./text_area"
 require "../store"
+require "../notes"
 require "../settings"
 
 module Gori::Tui
@@ -18,8 +18,7 @@ module Gori::Tui
   # is absent) that legacy value is migrated into the first note; the new JSON
   # key is written on the next save (the legacy key is left untouched, harmless).
   class NotesView
-    DOCS_KEY   = "notes.docs" # JSON {"cur":Int32, "notes":[String, ...]}
-    LEGACY_KEY = "notes"      # pre-multi single plain-text note
+    DOCS_KEY = Notes::DOCS_KEY # JSON {"cur":Int32, "notes":[String, ...]}
 
     # One note document: a title is derived from its first non-blank line, so
     # there's no separate rename mode — the tab label tracks what you type.
@@ -30,11 +29,12 @@ module Gori::Tui
         @area = TextArea.new(text)
       end
 
-      # Sub-tab label: the first non-blank line (trimmed/truncated), else a
-      # positional fallback so empty notes are still addressable.
+      # Sub-tab label: the note's title (first non-blank line, trimmed) truncated
+      # to the chip width, else a positional fallback so empty notes are still
+      # addressable. The title rule itself lives in `Notes.title` — the single
+      # source of truth the CLI listing reads too, so labels can't drift.
       def label(idx : Int32) : String
-        if line = @area.first_nonblank_line
-          t = line.strip
+        if t = Notes.title(@area.text)
           t.size > 15 ? "#{t[0, 14]}…" : t
         else
           "note #{idx + 1}"
@@ -212,43 +212,17 @@ module Gori::Tui
       @notes[@current.clamp(0, @notes.size - 1)]
     end
 
-    # Read the persisted notes: prefer the JSON set, fall back to the legacy
-    # single-note plain text, else nothing (reload then seeds one empty note).
+    # Read the persisted notes via the shared `Notes` reader (JSON set, with the
+    # legacy single-note fallback). `cur` becomes the active sub-tab; `reload`
+    # clamps it after this and seeds one empty note when the set is empty.
     private def load_notes(store : Store) : Array(Note)
-      if raw = store.setting(DOCS_KEY)
-        if notes = parse_docs(raw)
-          return notes
-        end
-      end
-      legacy = store.setting(LEGACY_KEY)
-      @current = 0
-      return [Note.new(legacy)] if legacy && !legacy.empty?
-      [] of Note
-    end
-
-    # Parse the JSON document set; nil on malformed data so the caller falls back
-    # (defensive — the KV value could be hand-edited or written by a future build).
-    private def parse_docs(raw : String) : Array(Note)?
-      doc = JSON.parse(raw)
-      arr = doc["notes"]?.try(&.as_a?)
-      return nil unless arr
-      @current = doc["cur"]?.try(&.as_i?) || 0
-      arr.map { |v| Note.new(v.as_s? || "") }
-    rescue JSON::ParseException
-      nil
+      doc = Notes.load(store)
+      @current = doc.cur
+      doc.texts.map { |t| Note.new(t) }
     end
 
     private def serialize : String
-      JSON.build do |j|
-        j.object do
-          j.field "cur", @current
-          j.field "notes" do
-            j.array do
-              @notes.each { |n| j.string(n.area.text) }
-            end
-          end
-        end
-      end
+      Notes.serialize(@current, @notes.map(&.area.text))
     end
   end
 end

@@ -242,4 +242,188 @@ describe Gori::CLI::Output do
     Gori::CLI::Output.human_size(5_368_709_120_i64).should eq("5.0GB")     # 5 GiB
     Gori::CLI::Output.human_size(2_199_023_255_552_i64).should eq("2.0TB") # 2 TiB
   end
+
+  it "serialises a prism group to JSON with the documented fields (incl. remediation)" do
+    g = Gori::Prism::Group.new("secret_in_url", "infoleak", "api.test", "Secret in URL",
+      Gori::Store::Severity::High, 3, ["https://api.test/a", "https://api.test/b"], "token", 7_i64)
+    parsed = JSON.parse(Gori::CLI::Output.prism_group_json(g))
+    parsed["code"].as_s.should eq("secret_in_url")
+    parsed["category"].as_s.should eq("infoleak")
+    parsed["severity"].as_s.should eq("high")
+    parsed["hit_count"].as_i.should eq(3)
+    parsed["affected"].as_a.size.should eq(2)
+    parsed["affected_count"].as_i.should eq(2)
+    parsed["evidence"].as_s.should eq("token")
+    parsed["sample_flow_id"].as_i.should eq(7)
+    parsed["remediation"].as_s.should_not be_empty
+  end
+
+  it "renders prism text with the severity tag, ×hit_count, and a representative affected URL" do
+    g = Gori::Prism::Group.new("missing_csp", "headers", "api.test", "Missing CSP",
+      Gori::Store::Severity::Medium, 4,
+      ["https://api.test/a", "https://api.test/b", "https://api.test/c"], nil, nil)
+    txt = Gori::CLI::Output.prism_group_text(g)
+    txt.should contain("[medium]")
+    txt.should contain("missing_csp")
+    txt.should contain("×4")
+    txt.should contain("https://api.test/a")
+    txt.should contain("(+2 more)") # 3 affected − 1 shown
+  end
+
+  it "formats a note listing row: 1-based index, title, '*' for the active note" do
+    row = Gori::CLI::Output.note_row_text(1, "scope\nmore", current: true)
+    row.should contain("* 2")                                                           # 0-based 1 → shown as #2
+    row.should contain("scope")                                                         # title = first non-blank line
+    row.should contain("(2 lines, ")                                                    # plural
+    Gori::CLI::Output.note_row_text(0, "x", current: false).should contain(" 1")        # no '*'
+    Gori::CLI::Output.note_row_text(0, "x", current: false).should contain("(1 line, ") # singular
+  end
+
+  it "falls back to 'note N' in a row for a blank note" do
+    Gori::CLI::Output.note_row_text(2, "   \n\t", current: false).should contain("note 3")
+  end
+
+  it "emits a single-note JSON object with the documented fields (text only when asked)" do
+    full = JSON.parse(Gori::CLI::Output.note_object_json(0, "Title\nbody", current: true, with_text: true))
+    full["index"].as_i.should eq(1)
+    full["title"].as_s.should eq("Title")
+    full["lines"].as_i.should eq(2)
+    full["bytes"].as_i.should eq("Title\nbody".bytesize)
+    full["current"].as_bool.should be_true
+    full["text"].as_s.should eq("Title\nbody")
+
+    summary = JSON.parse(Gori::CLI::Output.note_object_json(0, "Title\nbody", current: false, with_text: false))
+    summary["text"]?.should be_nil # summary omits the body
+    summary["title"].as_s.should eq("Title")
+  end
+
+  it "emits the whole note set as a JSON array, marking the active note" do
+    doc = Gori::Notes::Doc.new(1, ["one", "two"])
+    arr = JSON.parse(Gori::CLI::Output.notes_array_json(doc, with_text: false)).as_a
+    arr.size.should eq(2)
+    arr[0]["index"].as_i.should eq(1)
+    arr[0]["current"].as_bool.should be_false
+    arr[1]["current"].as_bool.should be_true # cur == 1
+    arr[0]["text"]?.should be_nil            # summary array
+
+    with_text = JSON.parse(Gori::CLI::Output.notes_array_json(doc, with_text: true)).as_a
+    with_text[1]["text"].as_s.should eq("two")
+  end
+  it "renders the sitemap as an indented tree with counts, methods, and a path tag" do
+    hosts = Gori::Sitemap.build([
+      {"acme.test", "GET", "/"},
+      {"acme.test", "POST", "/api/orders"},
+      {"acme.test", "GET", "/api/users"},
+    ])
+    Gori::Sitemap.stamp_tags!(hosts, { {"acme.test", "/api"} => "payment flow" })
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+    txt = Gori::CLI::Output.sitemap_text(hosts)
+    txt.should contain("acme.test  (3 paths)")
+    txt.should contain("├─ ") # tree guide
+    txt.should contain("orders  [POST]")
+    txt.should contain("api  # payment flow") # tag on the folder node, no methods
+  end
+
+  it "collapses a folded numeric group in the text tree with a value count" do
+    hosts = Gori::Sitemap.build((1001..1012).map { |i| {"h", "GET", "/p/#{i}"} })
+    hosts.each { |h| Gori::Sitemap.group_sequences!(h) }
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+    txt = Gori::CLI::Output.sitemap_text(hosts)
+    txt.should contain("[1001, 1002, 1003 … +9]  (12 values)")
+    txt.should_not contain("1010") # a folded child is hidden in the collapsed text tree
+  end
+
+  it "lists every endpoint flat in the paths format (numeric folding irrelevant)" do
+    hosts = Gori::Sitemap.build([
+      {"acme.test", "GET", "/api/users"},
+      {"acme.test", "POST", "/api/users"},
+    ])
+    Gori::CLI::Output.sitemap_paths(hosts).should eq("GET,POST  acme.test/api/users\n")
+  end
+
+  it "emits the sitemap as JSON with host/endpoint/children fields and an empty array when blank" do
+    hosts = Gori::Sitemap.build([{"acme.test", "GET", "/api/users"}])
+    Gori::Sitemap.stamp_tags!(hosts, { {"acme.test", "/api"} => "memo" })
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+    json = JSON.parse(Gori::CLI::Output.sitemap_json(hosts)).as_a
+    json.size.should eq(1)
+    json[0]["host"].as_s.should eq("acme.test")
+    json[0]["endpoints"].as_i.should eq(1)
+    api = json[0]["children"].as_a.find! { |c| c["label"].as_s == "api" }
+    api["tag"].as_s.should eq("memo")
+    users = api["children"].as_a.find! { |c| c["label"].as_s == "users" }
+    users["path"].as_s.should eq("/api/users")
+    users["methods"].as_a.map(&.as_s).should eq(["GET"])
+
+    Gori::CLI::Output.sitemap_json([] of Gori::Sitemap::Node).should eq("[]")
+  end
+end
+
+describe Gori::Notes do
+  # Doc is a record (struct) → value equality, so whole-Doc comparison avoids
+  # unwrapping the nilable parse result (and keeps the spec ameba-clean).
+  it "parses a well-formed document set" do
+    Gori::Notes.parse(%({"cur":1,"notes":["a","b"]})).should eq(Gori::Notes::Doc.new(1, ["a", "b"]))
+  end
+
+  it "defaults cur to 0 and coerces non-string note entries to empty strings" do
+    Gori::Notes.parse(%({"notes":[1,"x",null]})).should eq(Gori::Notes::Doc.new(0, ["", "x", ""]))
+  end
+
+  it "treats an empty notes array as a (non-nil) empty set" do
+    Gori::Notes.parse(%({"cur":0,"notes":[]})).should eq(Gori::Notes::Doc.new(0, [] of String))
+  end
+
+  it "exposes size/empty? on a Doc" do
+    Gori::Notes::Doc.new(0, ["a", "b"]).size.should eq(2)
+    Gori::Notes::Doc.new(0, ["a", "b"]).empty?.should be_false
+    Gori::Notes::Doc.new(0, [] of String).empty?.should be_true
+  end
+
+  it "returns nil for malformed JSON or a missing notes key (so callers fall back)" do
+    Gori::Notes.parse("not json {{{").should be_nil
+    Gori::Notes.parse(%({"cur":0})).should be_nil
+  end
+
+  it "round-trips through serialize/parse" do
+    raw = Gori::Notes.serialize(2, ["alpha", "beta\ngamma", ""])
+    Gori::Notes.parse(raw).should eq(Gori::Notes::Doc.new(2, ["alpha", "beta\ngamma", ""]))
+  end
+
+  it "loads the JSON set, the legacy single note, and prefers the JSON set over legacy" do
+    with_store do |store|
+      Gori::Notes.load(store).empty?.should be_true # nothing stored yet
+
+      store.set_setting("notes", "legacy body")
+      legacy = Gori::Notes.load(store)
+      legacy.texts.should eq(["legacy body"]) # migrated single note
+
+      store.set_setting("notes.docs", %({"cur":0,"notes":["fresh"]}))
+      Gori::Notes.load(store).texts.should eq(["fresh"]) # JSON set wins
+    end
+  end
+
+  it "falls back through malformed JSON to the legacy key, then to empty" do
+    with_store do |store|
+      store.set_setting("notes.docs", "not json {{{")
+      Gori::Notes.load(store).empty?.should be_true # malformed + no legacy → empty
+
+      store.set_setting("notes", "kept")
+      Gori::Notes.load(store).texts.should eq(["kept"]) # malformed docs → legacy
+    end
+  end
+
+  it "derives a title from the first non-blank line (trimmed, CRLF-tolerant); nil when blank" do
+    Gori::Notes.title("  hello world  ").should eq("hello world")
+    Gori::Notes.title("\n\n  second\nthird").should eq("second") # leading blank lines skipped
+    Gori::Notes.title("done\r\nmore").should eq("done")          # trailing CR trimmed
+    Gori::Notes.title("").should be_nil
+    Gori::Notes.title("   \n\t ").should be_nil # all whitespace
+  end
+
+  it "counts editor lines (an empty note is one line)" do
+    Gori::Notes.line_count("").should eq(1)
+    Gori::Notes.line_count("a\nb").should eq(2)
+    Gori::Notes.line_count("a\n").should eq(2) # trailing newline → a second (empty) line
+  end
 end

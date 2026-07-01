@@ -409,6 +409,68 @@ describe "Gori::Prism::Filter (incomplete terms)" do
   end
 end
 
+describe Gori::Prism do
+  describe ".group" do
+    it "folds detections exactly like Store#upsert_prism_issue (severity/hit_count/affected/evidence)" do
+      with_store do |store|
+        det = ->(code : String, host : String, url : String, s : Gori::Store::Severity, ev : String?) do
+          Gori::Prism::Detection.new(code, "headers", host, url, "t", s, ev)
+        end
+        low = Gori::Store::Severity::Low
+        medium = Gori::Store::Severity::Medium
+        dets = [
+          det.call("missing_csp", "a.test", "https://a.test/1", low, nil),
+          det.call("missing_csp", "a.test", "https://a.test/2", medium, "x"), # severity rises, url accumulates
+          det.call("missing_csp", "a.test", "https://a.test/1", low, "y"),    # dup url (no add); evidence already set
+          det.call("missing_hsts", "b.test", "https://b.test/1", low, nil),
+        ]
+        dets.each { |d| store.upsert_prism_issue(d) }
+        stored = store.prism_issues.to_h { |i| {"#{i.code}@#{i.host}", i} }
+        grouped = Gori::Prism.group(dets).to_h { |g| {"#{g.code}@#{g.host}", g} }
+
+        grouped.size.should eq(stored.size)
+        grouped.each do |key, g|
+          s = stored[key]
+          g.severity.should eq(s.severity)
+          g.hit_count.to_i64.should eq(s.hit_count)
+          g.affected.sort.should eq(s.affected.sort)
+          g.evidence.should eq(s.evidence) # first non-nil wins (COALESCE)
+        end
+
+        csp = grouped["missing_csp@a.test"]
+        csp.severity.should eq(medium)                                   # max seen
+        csp.hit_count.should eq(3)                                       # every observation
+        csp.affected.should eq(["https://a.test/1", "https://a.test/2"]) # de-duplicated
+        csp.evidence.should eq("x")                                      # first non-nil, not "y"
+      end
+    end
+
+    it "sorts by severity desc and caps the affected list at PRISM_AFFECTED_CAP (hit_count still climbs)" do
+      cap = Gori::Store::PRISM_AFFECTED_CAP
+      dets = [] of Gori::Prism::Detection
+      (cap + 10).times do |i|
+        dets << Gori::Prism::Detection.new("missing_csp", "headers", "a.test",
+          "https://a.test/#{i}", "t", Gori::Store::Severity::Low)
+      end
+      dets << Gori::Prism::Detection.new("secret_in_body", "infoleak", "a.test",
+        "https://a.test/x", "t", Gori::Store::Severity::High)
+      groups = Gori::Prism.group(dets)
+      groups.first.code.should eq("secret_in_body") # High sorts above Low
+      csp = groups.find!(&.code.==("missing_csp"))
+      csp.hit_count.should eq(cap + 10) # every observation counted
+      csp.affected.size.should eq(cap)  # but the URL list is capped
+    end
+
+    it "tags the same code on different hosts as separate groups" do
+      dets = [
+        Gori::Prism::Detection.new("missing_hsts", "headers", "a.test", "https://a.test/", "t", Gori::Store::Severity::Low),
+        Gori::Prism::Detection.new("missing_hsts", "headers", "b.test", "https://b.test/", "t", Gori::Store::Severity::Low),
+      ]
+      Gori::Prism.group(dets).map(&.host).sort!.should eq(["a.test", "b.test"])
+    end
+  end
+end
+
 describe "Store bulk Prism dismiss" do
   it "mutes only OPEN issues matching the code/host, leaving already-triaged rows untouched" do
     with_store do |store|
