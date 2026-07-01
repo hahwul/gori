@@ -23,6 +23,7 @@ module Gori::Tui
     @prefer : Convert::RenderAs? = nil # nil = auto
     @prefer_idx : Int32 = 0
     @out_scroll : Int32 = 0
+    @out_xscroll : Int32 = 0 # horizontal scroll offset for the OUTPUT card (shift+←/→)
     @last_step_count : Int32 = 0
     # Cached OUTPUT lines, rebuilt only when the chain recomputes or the display mode
     # changes (NOT every frame) — encoding/splitting a near-MAX_OUT (32 MiB) output on
@@ -159,10 +160,11 @@ module Gori::Tui
       lines = output_lines(result)
       @out_scroll = @out_scroll.clamp(0, {lines.size - rect.h, 0}.max)
       fg = result.output.nil? ? Theme.red : Theme.text
-      (0...rect.h).each do |i|
-        line = lines[@out_scroll + i]?
-        break unless line
-        screen.text(rect.x, rect.y + i, line, fg, Theme.bg, width: rect.w)
+      rows = (0...rect.h).compact_map { |i| lines[@out_scroll + i]? }
+      @out_xscroll = @out_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width(l) } || 0) - rect.w, 0}.max)
+      rows.each_with_index do |line, i|
+        shown = @out_xscroll > 0 ? Highlight.slice_left_text(line, @out_xscroll) : line
+        screen.text(rect.x, rect.y + i, shown, fg, Theme.bg, width: rect.w)
       end
     end
 
@@ -238,6 +240,12 @@ module Gori::Tui
       @out_scroll += step
     end
 
+    # Horizontal companion to `scroll_output` (shift+←/→). Floored at 0 here; render
+    # clamps the upper bound to the widest row actually on screen.
+    def hscroll_output(step : Int32) : Nil
+      @out_xscroll = {@out_xscroll + step * 4, 0}.max
+    end
+
     # Whether the OUTPUT is scrolled to the top — ↑ here pops focus up to CHAIN
     # (render clamps @out_scroll on every frame, so this reads the true top).
     def output_at_top? : Bool
@@ -248,6 +256,7 @@ module Gori::Tui
     # the cached output lines (the content changed).
     def reset_output_scroll : Nil
       @out_scroll = 0
+      @out_xscroll = 0
       @out_dirty = true
     end
   end

@@ -59,6 +59,7 @@ module Gori::Tui
       @http2 = false
       @editor = TextArea.new
       @editor.gutter = true
+      @editor.follow_x = true # long lines (headers, URLs, §-marked params) scroll horizontally to keep the cursor visible
       @config = Fuzz::Config.new(keep_bodies: :matched)
       @sets = [] of SetSpec
       @matcher = Fuzz::Matcher.new(keep_bodies: :matched)
@@ -104,6 +105,7 @@ module Gori::Tui
       @job_id = 0
       @stop_requested = false
       @detail_scroll = 0
+      @detail_xscroll = 0 # horizontal scroll offset for the RESULT detail (shift+←/→)
       @detail_pane = :response
       @focus = :template
       @loaded = false
@@ -726,6 +728,7 @@ module Gori::Tui
       return if sorted_results.empty?
       @focus = :detail
       @detail_scroll = 0
+      @detail_xscroll = 0
       @detail_pane = :response
     end
 
@@ -733,9 +736,16 @@ module Gori::Tui
       @detail_scroll = {@detail_scroll + d, 0}.max
     end
 
+    # Horizontal companion to `detail_scroll` (shift+←/→). Floored at 0 here; the
+    # render loop clamps the upper bound to the widest row actually on screen.
+    def hscroll_detail(delta : Int32) : Nil
+      @detail_xscroll = {@detail_xscroll + delta * 4, 0}.max
+    end
+
     def detail_toggle_pane : Nil
       @detail_pane = @detail_pane == :response ? :request : :response
       @detail_scroll = 0
+      @detail_xscroll = 0
     end
 
     def selected_result : Fuzz::Result?
@@ -1393,10 +1403,11 @@ module Gori::Tui
       lines = @detail_pane == :request ? detail_request_lines(r) : detail_response_lines(r)
       # Clamp so ↓/wheel can't scroll past the last line into a blank void (keeps ≥1 row).
       @detail_scroll = @detail_scroll.clamp(0, {lines.size - 1, 0}.max)
-      (0...inner.h).each do |i|
-        li = @detail_scroll + i
-        break if li >= lines.size
-        screen.text(inner.x, inner.y + i, lines[li], Theme.text, Theme.bg, width: inner.w)
+      rows = (0...inner.h).compact_map { |i| lines[@detail_scroll + i]? }
+      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width(l) } || 0) - inner.w, 0}.max)
+      rows.each_with_index do |line, i|
+        shown = @detail_xscroll > 0 ? Highlight.slice_left_text(line, @detail_xscroll) : line
+        screen.text(inner.x, inner.y + i, shown, Theme.text, Theme.bg, width: inner.w)
       end
     end
 

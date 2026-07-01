@@ -42,6 +42,9 @@ module Gori
 
       # detail view
       abstract def scroll_detail(delta : Int32) : Nil
+      # Horizontal companion to scroll_detail (shift+←/→) — scrolls a long
+      # request/response/decoded line sideways instead of right-clipping it.
+      abstract def hscroll_detail(delta : Int32) : Nil
       abstract def toggle_detail_pane : Nil
       # Walk the detail panes (REQ→RES→FRAMES) by `dir` (+1 right, −1 left); left
       # past REQUEST returns to the History list.
@@ -122,6 +125,9 @@ module Gori
       abstract def finding_set_severity : Nil            # open the severity colour picker
       abstract def finding_set_status : Nil              # open the triage-status colour picker
       abstract def finding_edit_notes : Nil
+      # Horizontal scroll (shift+←/→) for the read-only notes preview (no-op while
+      # editing — the notes TextArea's own follow_x handles that case).
+      abstract def finding_hscroll(delta : Int32) : Nil
       abstract def finding_edit_title : Nil               # rename + set severity via the form overlay
       abstract def finding_open_flow : Nil                # open the linked flow's detail in History
       abstract def finding_replay_flow : Nil              # send the linked flow to Replay

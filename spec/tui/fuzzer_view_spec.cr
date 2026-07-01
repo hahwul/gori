@@ -112,6 +112,27 @@ describe Gori::Tui::FuzzerView do
       backend.contains?("DIST").should be_false
     end
   end
+
+  it "hscroll_detail scrolls a long RESULT response line sideways into view (shift+←/→)" do
+    view = loaded_fuzzer
+    long_line = "HEAD" + ("." * 100) + "TAIL"
+    r = Gori::Fuzz::Result.new(0_i64, ["p0"], nil, 200, 1200_i64, 40, 5, 1000_i64, nil, false, false, nil,
+      "HTTP/1.1 200 OK\r\n\r\n".to_slice, long_line.to_slice)
+    view.append_result(r)
+    view.open_detail
+
+    rect = Rect.new(0, 0, 80, 20)
+    backend = MemoryBackend.new(80, 20)
+    view.render(Screen.new(backend), rect)
+    backend.contains?("HEAD").should be_true
+    backend.contains?("TAIL").should be_false # off the right edge, clipped
+
+    20.times { view.hscroll_detail(1) } # scroll well past the line's width
+    backend2 = MemoryBackend.new(80, 20)
+    view.render(Screen.new(backend2), rect)
+    backend2.contains?("TAIL").should be_true
+    backend2.contains?("HEAD").should be_false # scrolled off the left edge
+  end
 end
 
 describe Gori::Tui::PathComplete do

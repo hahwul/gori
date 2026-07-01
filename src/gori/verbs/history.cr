@@ -114,6 +114,17 @@ module Gori
         "detail.up", "Scroll detail up", "Scroll the detail view up", Verb::Scope::HistoryDetail,
         [Verb::Chord.new("k"), Verb::Chord.new("up")], hidden: true) { |ctx| ctx.scroll_detail(-1); nil }
 
+      # Shift+←/→ scroll a long line sideways instead of walking panes (plain ←/→,
+      # registered above as detail.next-pane/detail.prev-pane) — distinct chords
+      # (shift: true), so they coexist without collision.
+      r.register Verb::Definition.new(
+        "detail.hscroll-right", "Scroll detail right", "Scroll a long line right", Verb::Scope::HistoryDetail,
+        [Verb::Chord.new("right", shift: true)], hidden: true) { |ctx| ctx.hscroll_detail(1); nil }
+
+      r.register Verb::Definition.new(
+        "detail.hscroll-left", "Scroll detail left", "Scroll a long line left", Verb::Scope::HistoryDetail,
+        [Verb::Chord.new("left", shift: true)], hidden: true) { |ctx| ctx.hscroll_detail(-1); nil }
+
       r.register Verb::Definition.new(
         "detail.toggle-pane", "Switch pane (cycle)", "Cycle REQ → RES → FRAMES",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("tab")], hidden: true) { |ctx| ctx.toggle_detail_pane; nil }

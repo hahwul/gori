@@ -72,6 +72,29 @@ describe Gori::Tui::FindingsView do
     end
   end
 
+  it "hscroll_notes scrolls a long notes line sideways into view (shift+←/→)" do
+    tmp_store do |store|
+      id = store.insert_finding("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
+      store.update_finding(id, notes: "HEAD" + ("." * 80) + "TAIL")
+      view = FindingsView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.editing_notes?.should be_false # read-only preview — hscroll_notes applies here
+
+      rect = Rect.new(0, 0, 80, 12)
+      backend = MemoryBackend.new(80, 12)
+      view.render(Screen.new(backend), rect, focused: true)
+      backend.contains?("HEAD").should be_true
+      backend.contains?("TAIL").should be_false # off the right edge, clipped
+
+      20.times { view.hscroll_notes(1) } # scroll well past the line's width
+      backend2 = MemoryBackend.new(80, 12)
+      view.render(Screen.new(backend2), rect, focused: true)
+      backend2.contains?("TAIL").should be_true
+      backend2.contains?("HEAD").should be_false # scrolled off the left edge
+    end
+  end
+
   it "opens a detail, changes severity, and edits + saves notes" do
     tmp_store do |store|
       id = store.insert_finding("XSS", Gori::Store::Severity::Medium, "acme.test", nil)

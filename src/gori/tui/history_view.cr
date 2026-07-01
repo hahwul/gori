@@ -68,6 +68,7 @@ module Gori::Tui
       @detail_form = nil.as(Array(FormData::Field)?) # form/multipart params → PARAMS pane
       @decoded_id = nil.as(Int64?)                   # flow the decoded panes above were parsed from (skip re-decode)
       @detail_scroll = 0
+      @detail_xscroll = 0 # horizontal scroll offset for the detail body (shift+←/→)
       @detail_pane = :request
       @search_hl = ""                        # active ^F query → highlight in the detail body
       @reveal = false                        # 'w' shows whitespace/CR/LF as glyphs (smuggling)
@@ -318,6 +319,7 @@ module Gori::Tui
       # (DETAIL_LOG_CAP) with the full count kept for the "older not loaded" note.
       load_detail_logs(store)
       @detail_scroll = 0
+      @detail_xscroll = 0
       @detail_pane = :request
       @detail_cache = nil
       @detail_hex = false # hex is a deliberate per-open peek — don't carry it into the next flow
@@ -411,6 +413,7 @@ module Gori::Tui
       return if log_pane? # frames/events have no raw-bytes hex; don't strand a hidden flag
       @detail_hex = !@detail_hex
       @detail_scroll = 0 # row-based offset differs from the line-based one
+      @detail_xscroll = 0
     end
 
     # Re-fetch the currently-open detail from the store (e.g. a peer instance filled
@@ -439,6 +442,12 @@ module Gori::Tui
       @detail_scroll = (@detail_scroll + delta).clamp(0, detail_scroll_max)
     end
 
+    # Horizontal companion to `scroll_detail` (shift+←/→). Floored at 0 here; the
+    # render loop clamps the upper bound to the widest row actually on screen.
+    def hscroll_detail(delta : Int32) : Nil
+      @detail_xscroll = {@detail_xscroll + delta * 4, 0}.max
+    end
+
     # ^G go-to-line in the detail view: scroll so 1-based line `n` is at the top
     # (interpreted in the active pane/mode — request/response/frames/hex row).
     def goto_detail_line(n : Int32) : Nil
@@ -458,6 +467,7 @@ module Gori::Tui
       return if @reveal == on
       @reveal = on
       @detail_scroll = 0
+      @detail_xscroll = 0
     end
 
     # Pretty toggle feeds `build_detail_view`, so a change must drop the windowed
@@ -468,6 +478,7 @@ module Gori::Tui
       @pretty = on
       @detail_cache = nil
       @detail_scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like hex/pane toggles)
+      @detail_xscroll = 0
     end
 
     # Revealed (whitespace-visible) lines of the current pane, cached + rebuilt only
@@ -572,6 +583,7 @@ module Gori::Tui
     private def set_detail_pane(pane : Symbol) : Nil
       @detail_pane = pane
       @detail_scroll = 0
+      @detail_xscroll = 0
       @detail_cache = nil     # pane switch changes the content
       @detail_hex_bytes = nil # …and the hex source bytes
     end
@@ -781,7 +793,7 @@ module Gori::Tui
       mode = hex ? "HEX" : (ws ? "RAW" : (applied ? "PRETTY" : "RAW"))
       ptog = applied ? "p:raw" : "p:pretty"
       mode_hint = hex ? "#{mode} · x:text" : (ws ? "#{mode} · b:raw" : "#{mode} · x:hex · b:ws · #{ptog}")
-      screen.text(x + 1, rect.y, "↑/↓ scroll · #{mode_hint} · esc back", Theme.muted)
+      screen.text(x + 1, rect.y, "↑/↓ scroll · ⇧←/→ h-scroll · #{mode_hint} · esc back", Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
@@ -794,16 +806,29 @@ module Gori::Tui
         return
       end
 
+      render_detail_body(screen, body)
+    end
+
+    # The normal (non-hex, non-reveal) detail body: request/response/decoded-pane text,
+    # windowed + horizontally scrollable. Split out of render_detail to keep that
+    # dispatch's cyclomatic complexity under ameba's threshold.
+    private def render_detail_body(screen : Screen, body : Rect) : Nil
       dv = detail_view
       total = dv.total
       gw = {Gutter.width(total), body.w}.min
       cw = {body.w - gw, 0}.max
-      (0...body.h).each do |i|
+      # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
+      # never re-styles just to measure width (mirrors ReplayView#render_response_body).
+      rows = (0...body.h).compact_map { |i| (li = @detail_scroll + i) < total ? dv.line_at(li) : nil }
+      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width(l) } || 0) - cw, 0}.max)
+      rows.each_with_index do |styled, i|
         li = @detail_scroll + i
-        break if li >= total
         Gutter.draw(screen, body.x, body.y + i, li, gw)
-        Highlight.draw(screen, body.x + gw, body.y + i, dv.line_at(li), width: cw) # styles only this visible line
-        SearchHi.mark(screen, body.x + gw, body.y + i, dv.line_text(li), @search_hl, body.x + gw + cw) unless @search_hl.empty?
+        shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
+        Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
+        text = dv.line_text(li)
+        st = @detail_xscroll > 0 ? Highlight.slice_left_text(text, @detail_xscroll) : text
+        SearchHi.mark(screen, body.x + gw, body.y + i, st, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
     end
 
@@ -813,12 +838,17 @@ module Gori::Tui
       total = lines.size
       gw = {Gutter.width(total), body.w}.min
       cw = {body.w - gw, 0}.max
+      widest = (0...body.h).compact_map { |i| lines[@detail_scroll + i]? }.max_of? { |l| Screen.display_width(l) } || 0
+      @detail_xscroll = @detail_xscroll.clamp(0, {widest - cw, 0}.max)
       (0...body.h).each do |i|
         li = @detail_scroll + i
         break if li >= total
         Gutter.draw(screen, body.x, body.y + i, li, gw)
-        Highlight.draw(screen, body.x + gw, body.y + i, Reveal.styled(lines[li], li < total - 1, cw), width: cw)
-        SearchHi.mark(screen, body.x + gw, body.y + i, lines[li], @search_hl, body.x + gw + cw) unless @search_hl.empty?
+        styled = Reveal.styled(lines[li], li < total - 1, cw + @detail_xscroll)
+        styled = Highlight.slice_left(styled, @detail_xscroll) if @detail_xscroll > 0
+        Highlight.draw(screen, body.x + gw, body.y + i, styled, width: cw)
+        st = @detail_xscroll > 0 ? Highlight.slice_left_text(lines[li], @detail_xscroll) : lines[li]
+        SearchHi.mark(screen, body.x + gw, body.y + i, st, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
     end
 

@@ -37,7 +37,7 @@ module Gori::Tui
       elsif @intercept.querying?
         "type condition · ↵ apply · esc clear"
       else
-        "↑/↓ move · ↵/e edit · f fwd · d drop · F all · / filter · c catch · i on/off · space cmds · ↹ detail · esc tabs"
+        "↑/↓ move · ⇧←/→ h-scroll · ↵/e edit · f fwd · d drop · F all · / filter · c catch · i on/off · space cmds · ↹ detail · esc tabs"
       end
     end
 
@@ -62,7 +62,9 @@ module Gori::Tui
         handle_edit_key(ev)
         true
       else
-        handle_queue_key(ev) # false for c / / (and other unhandled keys) → defer to the keymap
+        # shift+←/→ (h-scroll the preview) checked here rather than inside
+        # handle_queue_key — that dispatch is already at ameba's complexity ceiling.
+        queue_key_hscroll(ev) || handle_queue_key(ev) # false for c / / (and other unhandled keys) → defer to the keymap
       end
     end
 
@@ -127,6 +129,22 @@ module Gori::Tui
       else                               return false
       end
       true
+    end
+
+    # Shift+←/→ horizontal scroll for the read-only held-item preview — kept OUT of
+    # handle_queue_key (called from handle_body_key instead), since that dispatch is
+    # already at ameba's complexity ceiling.
+    private def queue_key_hscroll(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if key.left? && ev.shift?
+        @intercept.hscroll_detail(-1)
+        true
+      elsif key.right? && ev.shift?
+        @intercept.hscroll_detail(1)
+        true
+      else
+        false
+      end
     end
 
     # --- catch-condition filter bar (a text sub-mode; the shell claims it before the

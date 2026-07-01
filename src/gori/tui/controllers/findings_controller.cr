@@ -35,7 +35,7 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       if @findings.detail_open?
         @findings.editing_notes? ? "esc save · ^W discard" \
-                                 : "e notes · o flow · r replay · space triage/cmds · ←/esc back"
+                                 : "e notes · o flow · r replay · space triage/cmds · ⇧←/→ h-scroll · ←/esc back"
       elsif @findings.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       else
@@ -179,6 +179,10 @@ module Gori::Tui
 
     def finding_edit_notes : Nil
       @findings.start_notes_edit
+    end
+
+    def finding_hscroll(delta : Int32) : Nil
+      @findings.hscroll_notes(delta)
     end
 
     # Write all findings to the project dir as Markdown (the report) or JSON.

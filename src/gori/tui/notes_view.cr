@@ -27,6 +27,7 @@ module Gori::Tui
 
       def initialize(text : String = "")
         @area = TextArea.new(text)
+        @area.follow_x = true # long lines scroll horizontally to keep the cursor visible (like the Project description)
       end
 
       # Sub-tab label: the note's title (first non-blank line, trimmed) truncated

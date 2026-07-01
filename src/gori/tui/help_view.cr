@@ -47,6 +47,7 @@ module Gori::Tui
         {"f · /", "follow newest · filter (query language)"},
         {"i", "toggle intercept hold-mode"},
         {"x · b · p", "in a flow: hex · whitespace · pretty bodies"},
+        {"⇧←/→", "in a flow: scroll a long line sideways"},
       ]},
       {"REPLAY", [
         {"^R", "send the request"},
@@ -57,6 +58,7 @@ module Gori::Tui
         {"^L", "toggle auto Content-Length"},
         {"↹", "cycle target → request → response"},
         {"x · d · p", "response: hex · diff · pretty"},
+        {"⇧←/→", "response: scroll a long line sideways"},
       ]},
       {"FUZZER", [
         {"⇧I", "send a flow/replay here (History/Replay)"},
@@ -69,6 +71,7 @@ module Gori::Tui
         {"↑/↓ · ↵", "results: select · open detail"},
         {"o · m", "sort · matched-only"},
         {"r", "rename the sub-tab (on the strip)"},
+        {"⇧←/→", "detail: scroll a long line sideways"},
       ]},
       {"COMPARER", [
         {"a · b", "pick flow A · flow B"},
@@ -83,11 +86,11 @@ module Gori::Tui
       ]},
       {"OTHER TABS", [
         {"Sitemap", "↑/↓ · / filter · ↵/→ expand · t tag · g group · ⇧S scope"},
-        {"Findings", "/ filter · ↵ open · n new · space triage · x export"},
+        {"Findings", "/ filter · ↵ open · n new · space triage · x export · ⇧←/→ h-scroll notes"},
         {"Prism", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · space cmds"},
         {"Notes", "type to edit · ^N new · ^1-9 switch"},
         {"Project", "scope rules + the description editor"},
-        {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition"},
+        {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition · ⇧←/→ h-scroll preview"},
       ]},
       {"CONVERT", [
         {"type / ↹", "edit input · switch input ↔ chain"},
@@ -98,6 +101,7 @@ module Gori::Tui
         {"^N · ^W", "new · close conversion sub-tab"},
         {"^1-9 · r", "switch sub-tab · rename (on the strip)"},
         {"space", "command menu (on the sub-tab strip)"},
+        {"⇧←/→", "output: scroll a long line sideways"},
       ]},
       {"OVERLAYS", [
         {"palette / settings", "↑/↓ · ↵ · esc"},

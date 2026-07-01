@@ -106,18 +106,18 @@ module Gori::Tui
       return "↹/esc tabs · ^N new" unless v
       return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit" if v.request_hex?
       if v.ws_mode? # WS replay: MESSAGES editor + TRANSCRIPT (no hex/diff/pretty/CL)
-        return v.focus == :response ? "↑/↓ scroll · ^F find · ^R replay · ↹ pane · esc tabs" \
+        return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" \
                                     : "edit messages (one per line) · ^R replay · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
       end
       if v.grpc_mode? # gRPC replay: editable head + verbatim body; deframed response
-        return v.focus == :response ? "↑/↓ scroll · ^F find · ^R replay · ↹ pane · esc tabs" \
+        return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" \
                                     : "edit head/metadata · ^R replay · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request # split: ENVELOPE + DECODED payload
       case v.focus
       when :target   then v.editing_sni? ? "type SNI host · ^S/↵/esc back to URL · ^R send" \
                                           : "type URL · ^S SNI · ↵/↓ request · ^R send · ↹ pane · esc tabs"
-      when :response then "↑/↓ scroll · ←/→/d diff · x hex · p pretty · ^F find · ^R send · space cmds · ↹ pane · esc tabs"
+      when :response then "↑/↓ scroll · ←/→/d diff · ⇧←/→ h-scroll · x hex · p pretty · ^F find · ^R send · space cmds · ↹ pane · esc tabs"
       else                "type to edit · ^R send · ^G goto · ^F find · ^X hex · ^B ws · ^N new · ^W close · ↹ pane · esc tabs"
       end
     end
@@ -734,6 +734,7 @@ module Gori::Tui
     # Response/Diff pane: read-only. ←/→ or d toggles response↔diff, ↑/↓ scroll, Enter re-sends.
     private def handle_replay_response(ev : Termisu::Event::Key, view : ReplayView) : Nil
       return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt? # space menu (response is navigable)
+      return if handle_replay_response_hscroll(ev, view)
       key = ev.key
       # A WS/gRPC TRANSCRIPT is scroll-only — the diff/hex/reveal/pretty toggles are
       # meaningless there and have side effects (a stuck @resp_hex would silently break
@@ -749,6 +750,23 @@ module Gori::Tui
       when key.lower_x?          then view.toggle_resp_hex
       when key.lower_b?          then @host.toggle_reveal
       when key.lower_p?          then @host.toggle_pretty
+      end
+    end
+
+    # Shift+←/→ horizontal scroll, split out of handle_replay_response to keep its
+    # cyclomatic complexity under ameba's threshold (this repo's dispatch-methods
+    # habitually tip over the limit one branch at a time). Works even in WS/gRPC
+    # transcript mode, so it's checked before that gate.
+    private def handle_replay_response_hscroll(ev : Termisu::Event::Key, view : ReplayView) : Bool
+      key = ev.key
+      if key.left? && ev.shift?
+        view.hscroll(-1)
+        true
+      elsif key.right? && ev.shift?
+        view.hscroll(1)
+        true
+      else
+        false
       end
     end
   end

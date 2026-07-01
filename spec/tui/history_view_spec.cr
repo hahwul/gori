@@ -161,6 +161,36 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "hscroll_detail scrolls a long response body line sideways into view (shift+←/→)" do
+    tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/api", http_version: "HTTP/1.1",
+        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+        body: ("HEAD" + ("." * 100) + "TAIL").to_slice, content_type: "text/plain"))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response
+
+      rect = Rect.new(0, 0, 80, 16)
+      backend = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(backend), rect)
+      backend.contains?("HEAD").should be_true
+      backend.contains?("TAIL").should be_false # off the right edge, clipped
+
+      20.times { view.hscroll_detail(1) } # scroll well past the line's width
+      backend2 = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(backend2), rect)
+      backend2.contains?("TAIL").should be_true
+      backend2.contains?("HEAD").should be_false # scrolled off the left edge
+    end
+  end
+
   it "pretty-prints a JSON response body when enabled, and restores raw when off" do
     tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(

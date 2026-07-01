@@ -1967,7 +1967,7 @@ module Gori::Tui
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
-      when :detail        then "←/→ panes · ↑/↓ scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
+      when :detail        then "←/→ panes · ↑/↓ scroll · ⇧←/→ h-scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
@@ -2453,6 +2453,10 @@ module Gori::Tui
       findings_controller.finding_edit_notes
     end
 
+    def finding_hscroll(delta : Int32) : Nil
+      findings_controller.finding_hscroll(delta)
+    end
+
     # Re-open the create form seeded from the open finding (title + severity), in
     # edit mode — commit updates instead of inserting (create_finding_from_form).
     # Stays in the shell: it opens the finding-form OVERLAY (shell-owned).
@@ -2701,6 +2705,10 @@ module Gori::Tui
 
     def scroll_detail(delta : Int32) : Nil
       history_controller.scroll_detail(delta)
+    end
+
+    def hscroll_detail(delta : Int32) : Nil
+      history_controller.hscroll_detail(delta)
     end
 
     def toggle_detail_pane : Nil

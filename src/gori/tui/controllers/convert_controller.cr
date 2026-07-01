@@ -77,6 +77,7 @@ module Gori::Tui
     # Build a fresh session from persisted/blank text, running the initial chain.
     private def make_session(input_text : String, chain : String, name : String?) : ConvertSession
       input = TextArea.new(input_text)
+      input.follow_x = true # long input lines scroll horizontally to keep the cursor visible
       result = Convert.run(@registry, input.text.to_slice, chain)
       view = ConvertView.new
       view.name = name
@@ -298,7 +299,7 @@ module Gori::Tui
         return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if @popup.open?
         "chain (> | ,) · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc tabs"
       when :output
-        "↑/↓ scroll · ↑-top chain · ↹ next · space menu · ^X mode · ^Y copy · esc tabs"
+        "↑/↓ scroll · ⇧←/→ h-scroll · ↑-top chain · ↹ next · space menu · ^X mode · ^Y copy · esc tabs"
       else
         "type to edit · ↓/↹ chain · ^L clear · ^Y copy · ^X mode · ^N new · ^W close · esc tabs"
       end
@@ -429,8 +430,10 @@ module Gori::Tui
       s = cur
       key = ev.key
       case
-      when key.up?   then s.view.output_at_top? ? (s.pane = :chain) : s.view.scroll_output(-1)
-      when key.down? then s.view.scroll_output(1)
+      when key.up?                 then s.view.output_at_top? ? (s.pane = :chain) : s.view.scroll_output(-1)
+      when key.down?               then s.view.scroll_output(1)
+      when key.left? && ev.shift?  then s.view.hscroll_output(-1)
+      when key.right? && ev.shift? then s.view.hscroll_output(1)
       end
     end
 

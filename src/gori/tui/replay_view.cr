@@ -40,9 +40,10 @@ module Gori::Tui
       @scx = 0             # SNI cursor
       @target_field = :url # which field the TARGET pane edits: :url | :sni
       @editor = TextArea.new
-      @editor.gutter = true # line numbers in the request body (pairs with ^G)
-      @search_hl = ""       # active ^F query → highlight in the response pane (request is via @editor)
-      @reveal = false       # 'w' shows whitespace/CR/LF as glyphs (response from raw bytes, request via @editor)
+      @editor.gutter = true   # line numbers in the request body (pairs with ^G)
+      @editor.follow_x = true # long lines (headers, URLs, base64 params) scroll horizontally to keep the cursor visible
+      @search_hl = ""         # active ^F query → highlight in the response pane (request is via @editor)
+      @reveal = false         # 'w' shows whitespace/CR/LF as glyphs (response from raw bytes, request via @editor)
       @reveal_lines = nil.as(Array(String)?)
       @reveal_lines_src = Pointer(UInt8).null
       @original_lines = [] of String
@@ -64,6 +65,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response # :response | :diff
       @scroll = 0
+      @xscroll = 0 # horizontal scroll offset shared by response/diff/reveal/transcript
       @loaded = false
       @http2 = false
       # WebSocket replay mode (a 101 flow): the request editor holds the editable
@@ -93,8 +95,9 @@ module Gori::Tui
       @decode_kind = nil.as(Symbol?) # nil | :saml | :graphql
       @decoded = TextArea.new        # the payload editor (lower split)
       @decoded.gutter = true
-      @req_pane = :envelope  # :envelope | :decoded — which split sub-pane is active
-      @decoded_dirty = false # the decoded payload was edited → re-encode on send
+      @decoded.follow_x = true # long decoded payload lines (SAML XML, GraphQL query) scroll horizontally
+      @req_pane = :envelope    # :envelope | :decoded — which split sub-pane is active
+      @decoded_dirty = false   # the decoded payload was edited → re-encode on send
       @saml_param = "SAMLResponse"
       @saml_binding = :post       # :post (base64) | :redirect (deflate+base64)
       @saml_location = :body      # :body (form) | :query (request line)
@@ -258,6 +261,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
+      @xscroll = 0
       @diffable = true
       @loaded = true
       @dirty = false
@@ -291,6 +295,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
+      @xscroll = 0
       @diffable = false
       @loaded = true
       @dirty = false
@@ -317,6 +322,7 @@ module Gori::Tui
       @ws_result = result
       @ws_lines_cache = nil
       @scroll = 0
+      @xscroll = 0
     end
 
     getter? grpc_mode : Bool
@@ -347,6 +353,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
+      @xscroll = 0
       @diffable = false
       @loaded = true
       @dirty = false
@@ -403,6 +410,7 @@ module Gori::Tui
       @focus = :request
       @resp_mode = :response
       @scroll = 0
+      @xscroll = 0
       @diffable = false
       @loaded = true
       @dirty = false
@@ -601,6 +609,7 @@ module Gori::Tui
       @focus = :target
       @resp_mode = :response
       @scroll = 0
+      @xscroll = 0
       @diffable = false
       @auto_content_length = auto_cl
       @loaded = true
@@ -642,6 +651,7 @@ module Gori::Tui
       @focus = :target
       @resp_mode = :response
       @scroll = 0
+      @xscroll = 0
       @diffable = false
       @loaded = true
       @dirty = false
@@ -865,6 +875,7 @@ module Gori::Tui
       # left untouched, keeping the user where they were.
       @resp_mode = :response unless @resp_mode == :diff && result.ok? && diff_baseline_lines
       @scroll = 0
+      @xscroll = 0
     end
 
     # --- request editor (focus == :request) ---
@@ -954,6 +965,7 @@ module Gori::Tui
       @editor.reveal = on
       @decoded.reveal = on # the decode split's payload editor honours reveal too
       @scroll = 0          # reveal renders the response from RAW bytes → a different line count; reset like pretty=/x/d
+      @xscroll = 0
     end
 
     # Pretty toggle feeds `resp_view`, so a change drops only the response-view cache
@@ -964,6 +976,7 @@ module Gori::Tui
       @pretty = on
       @resp_view_cache = nil
       @scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like x/d toggles)
+      @xscroll = 0
     end
 
     # ^F highlight, scoped to the searched pane (the Runner picks which).
@@ -1068,12 +1081,14 @@ module Gori::Tui
     def toggle_resp_mode : Nil
       @resp_mode = @resp_mode == :response ? :diff : :response
       @scroll = 0
+      @xscroll = 0
     end
 
     # 'x' toggles a raw hex dump of the response bytes (overrides response/diff).
     def toggle_resp_hex : Nil
       @resp_hex = !@resp_hex
       @scroll = 0 # row-based offset differs from the line-based one
+      @xscroll = 0
     end
 
     getter? resp_hex : Bool
@@ -1096,6 +1111,13 @@ module Gori::Tui
 
     def scroll(delta : Int32) : Nil
       @scroll = (@scroll + delta).clamp(0, {resp_line_count - 1, 0}.max)
+    end
+
+    # Horizontal companion to `scroll` (shift+←/→): nudges the response/diff/reveal/
+    # transcript pane sideways. Floored at 0 here; the render loop clamps the upper
+    # bound to the widest row actually on screen, so it can't scroll past content.
+    def hscroll(delta : Int32) : Nil
+      @xscroll = {@xscroll + delta * 4, 0}.max
     end
 
     # ^G go-to-line in the response pane: scroll so 1-based line `n` is at the top
@@ -1318,13 +1340,16 @@ module Gori::Tui
       end
       gw = {Gutter.width(lines.size), body.w}.min
       cw = {body.w - gw, 0}.max
+      widest = (0...body.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |(t, _)| Screen.display_width(t) } || 0
+      @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
       (0...body.h).each do |i|
         li = @scroll + i
         break if li >= lines.size
         text, color = lines[li]
         Gutter.draw(screen, body.x, body.y + i, li, gw)
-        screen.text(body.x + gw, body.y + i, text, color, width: cw)
-        SearchHi.mark(screen, body.x + gw, body.y + i, text, @search_hl, body.x + gw + cw) unless @search_hl.empty?
+        shown = @xscroll > 0 ? Highlight.slice_left_text(text, @xscroll) : text
+        screen.text(body.x + gw, body.y + i, shown, color, width: cw)
+        SearchHi.mark(screen, body.x + gw, body.y + i, shown, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
     end
 
@@ -1426,12 +1451,17 @@ module Gori::Tui
       total = lines.size
       gw = {Gutter.width(total), rect.w}.min
       cw = {rect.w - gw, 0}.max
+      widest = (0...rect.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |l| Screen.display_width(l) } || 0
+      @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= total
         Gutter.draw(screen, rect.x, rect.y + i, li, gw)
-        Highlight.draw(screen, rect.x + gw, rect.y + i, Reveal.styled(lines[li], li < total - 1, cw), width: cw)
-        SearchHi.mark(screen, rect.x + gw, rect.y + i, lines[li], @search_hl, rect.x + gw + cw) unless @search_hl.empty?
+        styled = Reveal.styled(lines[li], li < total - 1, cw + @xscroll)
+        styled = Highlight.slice_left(styled, @xscroll) if @xscroll > 0
+        Highlight.draw(screen, rect.x + gw, rect.y + i, styled, width: cw)
+        st = @xscroll > 0 ? Highlight.slice_left_text(lines[li], @xscroll) : lines[li]
+        SearchHi.mark(screen, rect.x + gw, rect.y + i, st, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
     end
 
@@ -1450,12 +1480,18 @@ module Gori::Tui
       total = rv.total
       gw = {Gutter.width(total), rect.w}.min
       cw = {rect.w - gw, 0}.max
-      (0...rect.h).each do |i|
+      # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
+      # never re-styles just to measure width (see the class comment on RespView).
+      rows = (0...rect.h).compact_map { |i| (li = @scroll + i) < total ? rv.line_at(li) : nil }
+      @xscroll = @xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width(l) } || 0) - cw, 0}.max)
+      rows.each_with_index do |styled, i|
         li = @scroll + i
-        break if li >= total
         Gutter.draw(screen, rect.x, rect.y + i, li, gw)
-        Highlight.draw(screen, rect.x + gw, rect.y + i, rv.line_at(li), width: cw) # styles only this visible line
-        SearchHi.mark(screen, rect.x + gw, rect.y + i, rv.line_text(li), @search_hl, rect.x + gw + cw) unless @search_hl.empty?
+        shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
+        Highlight.draw(screen, rect.x + gw, rect.y + i, shown, width: cw)
+        text = rv.line_text(li)
+        st = @xscroll > 0 ? Highlight.slice_left_text(text, @xscroll) : text
+        SearchHi.mark(screen, rect.x + gw, rect.y + i, st, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
     end
 
@@ -1463,20 +1499,28 @@ module Gori::Tui
       data = diff_lines
       gw = {Gutter.width(data.size), rect.w}.min
       cw = {rect.w - gw, 0}.max
-      (0...rect.h).each do |i|
+      rows = (0...rect.h).compact_map do |i|
         di = @scroll + i
-        break if di >= data.size
+        next nil if di >= data.size
         d = data[di]
         prefix, color = case d.kind
                         when .add? then {'+', Theme.green}
                         when .del? then {'-', Theme.red}
                         else            {' ', Theme.muted}
                         end
+        {di, "#{prefix} #{d.text}", color, d.text}
+      end
+      @xscroll = @xscroll.clamp(0, {(rows.max_of? { |(_, full, _, _)| Screen.display_width(full) } || 0) - cw, 0}.max)
+      rows.each_with_index do |(di, full, color, text), i|
         Gutter.draw(screen, rect.x, rect.y + i, di, gw)
-        screen.text(rect.x + gw, rect.y + i, "#{prefix} #{d.text}", color, width: cw)
-        # Highlight only the line text (past the 2-col "+ "/"- " prefix), so the marks
-        # match what response_search_lines counts (d.text), not the diff decoration.
-        SearchHi.mark(screen, rect.x + gw + 2, rect.y + i, d.text, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
+        shown = @xscroll > 0 ? Highlight.slice_left_text(full, @xscroll) : full
+        screen.text(rect.x + gw, rect.y + i, shown, color, width: cw)
+        # Highlight only the line text (past the 2-col "+ "/"- " prefix, shifted left by
+        # any horizontal scroll), so the marks match what response_search_lines counts
+        # (d.text), not the diff decoration.
+        mark_x = rect.x + gw + {2 - @xscroll, 0}.max
+        st = @xscroll > 2 ? Highlight.slice_left_text(text, @xscroll - 2) : text
+        SearchHi.mark(screen, mark_x, rect.y + i, st, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
     end
 
