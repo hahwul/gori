@@ -117,6 +117,20 @@ describe Gori::Prism::Passive do
       csp.affected.should contain("https://acme.test/b")
     end
   end
+
+  # A plaintext forward-proxy request is captured ABSOLUTE-form (the wire truth), so
+  # FlowRow#target already carries the scheme+authority. The affected URL must be that
+  # target verbatim — NOT "http://hosthttp://host:port/path" (the doubling a naive
+  # "scheme://host + target" produced before FlowRow#url).
+  it "does not double the scheme+host for an absolute-form (plain-HTTP) target" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        scheme: "http", host: "127.0.0.1", target: "http://127.0.0.1:8899/cors")
+      urls = Gori::Prism::Passive.analyze(detail).map(&.url).uniq!
+      urls.should eq(["http://127.0.0.1:8899/cors"])
+      urls.first.should_not contain("127.0.0.1http://")
+    end
+  end
 end
 
 describe Gori::Prism::Active do
@@ -144,6 +158,19 @@ describe Gori::Prism::Active do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/static/app.js", content_type: nil)
       Gori::Prism::Active.plan(detail).should be_nil
+    end
+  end
+
+  it "sends an ORIGIN-FORM request line even for an absolute-form (forward-proxy) target" do
+    with_store do |store|
+      # A plaintext forward-proxy flow is captured absolute-form; the probe goes DIRECT to
+      # the origin, so its request line must be origin-form (some origins reject absolute-form).
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", scheme: "http", host: "target.com",
+        target: "http://target.com/search?q=hello", content_type: nil)
+      plan = Gori::Prism::Active.plan(detail).not_nil!
+      line = String.new(plan.request).each_line.first
+      line.should start_with("GET /search?q=")
+      line.should_not contain("http://target.com")
     end
   end
 end
@@ -286,6 +313,58 @@ describe "Gori::Prism::Passive (new patterns)" do
                    "Access-Control-Allow-Credentials: true\r\n\r\n",
         req_headers: "Origin: https://acme.test\r\n", content_type: nil)
       codes_of(same_origin).should_not contain("cors_reflected_origin")
+    end
+  end
+
+  it "flags a CROSS-SCHEME/CROSS-PORT same-host credentialed reflection (not just cross-host)" do
+    with_store do |store|
+      # Page is https://acme.test (:443); the reflected Origin is the SAME host but a different
+      # scheme — genuinely a different origin, and exploitable with credentials.
+      cross_scheme = analyze(store, scheme: "https", host: "acme.test",
+        resp_head: "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: http://acme.test\r\n" \
+                   "Access-Control-Allow-Credentials: true\r\n\r\n",
+        req_headers: "Origin: http://acme.test\r\n", content_type: nil)
+      codes_of(cross_scheme).should contain("cors_reflected_origin")
+      cross_port = analyze(store, scheme: "https", host: "acme.test",
+        resp_head: "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://acme.test:8443\r\n" \
+                   "Access-Control-Allow-Credentials: true\r\n\r\n",
+        req_headers: "Origin: https://acme.test:8443\r\n", content_type: nil)
+      codes_of(cross_port).should contain("cors_reflected_origin")
+    end
+  end
+
+  it "flags a CSP that restricts nothing about scripts (no script-src and no default-src)" do
+    with_store do |store|
+      # A CSP present but with neither script-src nor default-src leaves scripts fully
+      # unrestricted, yet its mere presence suppresses missing_csp — it must trip weak_csp.
+      dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: img-src 'self'\r\n\r\n",
+        content_type: "text/html")
+      codes_of(dets).should contain("weak_csp")
+      codes_of(dets).should_not contain("missing_csp")
+      # A restrictive default-src is NOT weak.
+      ok = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self'\r\n\r\n",
+        content_type: "text/html")
+      codes_of(ok).should_not contain("weak_csp")
+    end
+  end
+
+  it "does not flag ordinary docs/tutorial prose that merely NAMES error types" do
+    with_store do |store|
+      {
+        %({"path":"config/routes.rb:15"}),           # a config path value, not a Ruby backtrace frame
+        "See the ActiveRecord::Base guide.",         # a class name in prose, not a Rails error
+        "Import org.springframework.boot to start.", # a package name, not a Spring trace frame
+        "Throws System.ArgumentException on null.",  # a .NET type named in prose
+        "Handle java.lang.IllegalStateException gracefully.",
+      }.each do |prose|
+        dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html", body: prose)
+        codes_of(dets).should_not contain("error_stack_leak")
+      end
+      # …but a genuinely error-shaped disclosure still fires.
+      real = analyze(store, resp_head: "HTTP/1.1 500 Server Error\r\n\r\n", status: 500,
+        content_type: "text/html",
+        body: "java.lang.IllegalStateException: bad state\n\tat com.acme.Svc.handle(Svc.java:42)")
+      codes_of(real).should contain("error_stack_leak")
     end
   end
 

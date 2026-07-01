@@ -19,19 +19,26 @@ module Gori
             sev = creds ? Store::Severity::High : Store::Severity::Medium
             acc << cors(ctx, "cors_null_origin", "CORS allows the null origin",
               sev, creds ? "with credentials" : nil)
-          elsif creds && (origin = ctx.request_origin) && (oh = origin_host(origin)) &&
-                oh != ctx.host.downcase && acao == origin.strip
+          elsif creds && (origin = ctx.request_origin) && cross_origin?(origin, ctx) &&
+                acao == origin.strip
             # The server echoes a CROSS-ORIGIN request Origin AND allows credentials — the classic
             # exploitable reflected-origin CORS misconfiguration. A same-origin echo (the page's
-            # own host) is legitimate and suppressed to avoid the common false positive.
+            # own scheme+host+port) is legitimate and suppressed to avoid the common false positive.
             acc << cors(ctx, "cors_reflected_origin",
               "CORS reflects a cross-origin request Origin with credentials",
               Store::Severity::High, origin.strip[0, 80])
           end
         end
 
-        private def origin_host(origin : String) : String?
-          origin.strip.match(%r{\Ahttps?://([^/:]+)}).try(&.[1].downcase)
+        # The request Origin is a DIFFERENT origin (scheme, host, OR port) from the page.
+        # CORS same-origin requires all three equal; comparing host alone (the old check)
+        # missed a credentialed reflection of a cross-SCHEME (http↔https) or cross-PORT
+        # same-host origin, which is genuinely exploitable. Unparseable → treat as cross.
+        private def cross_origin?(origin : String, ctx : Context) : Bool
+          m = origin.strip.downcase.match(%r{\A(https?)://([^/:]+)(?::(\d+))?\z}) || return true
+          scheme, host = m[1], m[2]
+          port = m[3]?.try(&.to_i?) || (scheme == "https" ? 443 : 80)
+          !(scheme == ctx.scheme.downcase && host == ctx.host.downcase && port == ctx.row.port)
         end
 
         private def cors(ctx : Context, code : String, title : String, sev : Store::Severity, evidence : String?) : Detection

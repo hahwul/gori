@@ -126,6 +126,33 @@ private def start_h2_origin_flow_controlled(status : Int32, body : Bytes) : Int3
   port
 end
 
+# An origin that interleaves PING frames (no END_STREAM) before the real response — the
+# non-terminal-frame path the MAX_FRAMES counter now guards. A handful must be ACKed and
+# must NOT stall or corrupt the response.
+private def start_h2_origin_pings(status : Int32, body : String, pings : Int32) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    Frame.read_preface(conn)
+    loop do
+      f = Frame.read(conn)
+      break if f.nil?
+      break if f.frame_type.in?(Frame::Type::Headers, Frame::Type::Data) && f.end_stream?
+    end
+    conn.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32, Bytes.empty).to_bytes)
+    pings.times { conn.write(Frame::Header.new(Frame::Type::Ping.value, 0_u8, 0_u32, Bytes.new(8)).to_bytes) }
+    sb = HPACK::Encoder.new.encode([{":status", status.to_s}])
+    conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, sb).to_bytes)
+    conn.write(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, 1_u32, body.to_slice).to_bytes)
+    conn.flush
+    sleep 0.2.seconds
+    conn.close
+  end
+  port
+end
+
 describe Gori::Replay::H2Engine do
   it "replays a GET as real cleartext h2 and reassembles the response" do
     seen = Channel(String).new(1)
@@ -165,6 +192,15 @@ describe Gori::Replay::H2Engine do
     seen.receive.should eq("POST /submit body=hello-h2-body")
     result.response.not_nil!.status.should eq(201)
     String.new(result.body.not_nil!).should eq("created")
+  end
+
+  it "handles interleaved PING frames before the response without stalling" do
+    port = start_h2_origin_pings(200, "pong-ok", 20)
+    result = Gori::Replay::H2Engine.send("GET / HTTP/2\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+    result.ok?.should be_true
+    result.response.not_nil!.status.should eq(200)
+    String.new(result.body.not_nil!).should eq("pong-ok")
   end
 
   it "reports an error when the origin is unreachable" do

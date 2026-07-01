@@ -61,12 +61,16 @@ module Gori
           dirs
         end
 
-        # Weak only when the SCRIPT context (script-src, else the default-src fallback) allows
-        # unsafe-inline / unsafe-eval or a bare wildcard. `unsafe-inline` confined to style-src
-        # is a common, low-risk pattern and no longer trips this.
+        # Weak when the SCRIPT context (script-src, else the default-src fallback) allows
+        # unsafe-inline / unsafe-eval or a bare wildcard — OR when it is ABSENT entirely: a
+        # CSP with neither script-src nor default-src places ZERO restriction on script
+        # loading/execution (the CSP spec's no-fallback case), which is as XSS-permissive as
+        # having no CSP at all, yet the header's mere presence suppresses the missing_csp
+        # check — so it must be caught here. (`unsafe-inline` confined to style-src is a
+        # common, low-risk pattern and still does NOT trip this.)
         private def weak_csp?(dirs : Hash(String, Array(String))) : Bool
           script = dirs["script-src"]? || dirs["default-src"]?
-          return false unless script
+          return true if script.nil?
           script.any? { |s| s.includes?("unsafe-inline") || s.includes?("unsafe-eval") || s == "*" }
         end
 

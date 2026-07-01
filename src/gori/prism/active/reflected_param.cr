@@ -21,7 +21,11 @@ module Gori
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
           return nil if req.malformed?
           return nil unless SAFE_METHODS.includes?(req.method.upcase)
-          path, query = split_target(req.target)
+          # A plaintext forward-proxy flow is captured ABSOLUTE-form ("GET http://h/p"); the
+          # probe is sent DIRECT to the origin (Fuzz::Sender → Replay::Engine, no rewrite),
+          # so normalize to origin-form here the way the regular replay path (FlowRequest)
+          # does — some origins reject an absolute-form target on a non-proxied request.
+          path, query = split_target(origin_form(req.target))
 
           params = [] of Param
           new_query, qp = canary_pairs(query, "query")
@@ -59,7 +63,7 @@ module Gori
           return [] of Detection if reflected.empty?
           names = reflected.map { |p| "#{p.name} (#{p.location})" }
           names.uniq!
-          url = "#{detail.row.scheme}://#{detail.row.host}#{detail.row.target}"
+          url = detail.row.url
           # An echo in an HTML response is a plausible XSS sink (Medium); an echo in a non-HTML
           # response (JSON/text API) is just a reflected value, not exploitable as XSS (Low).
           html = response_content_type(result).includes?("html")
@@ -89,6 +93,15 @@ module Gori
           (Proxy::Codec::Http1.parse_response_head(result.head).headers.get?("Content-Type") || "").downcase
         rescue
           ""
+        end
+
+        # Strip a scheme://authority prefix so an absolute-form (forward-proxy) target becomes
+        # origin-form; an already-origin-form target passes through unchanged.
+        private def origin_form(target : String) : String
+          return target unless target.starts_with?("http://") || target.starts_with?("https://")
+          scheme_end = target.index("://") || return target
+          slash = target.index('/', scheme_end + 3)
+          slash ? target[slash..] : "/"
         end
 
         # {path, query-without-'?'} — query is "" when the target has none.

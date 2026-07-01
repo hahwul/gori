@@ -68,6 +68,23 @@ describe "ReplayView split-decode (SAML/GraphQL)" do
       JSON.parse(body)["query"].as_s.should contain("ONSEND")
     end
 
+    it "rewrites the URL query (not a phantom body) when the GraphQL op is GET-bound" do
+      get_target = "/graphql?query=#{URI.encode_www_form("query Q { a }")}"
+      get_head = "GET #{get_target} HTTP/1.1\r\nHost: api.test\r\n\r\n"
+      detail = detail_of(get_target, get_head, "")
+      op = Gori::Graphql.from_flow(get_target, get_head.to_slice, nil).not_nil!
+      view = ReplayView.new
+      view.load_graphql(detail, op)
+
+      view.toggle_req_pane.should eq(:decoded)
+      move_to_line_end(view)
+      " EDITED".each_char { |c| view.edit_insert(c) }
+      raw = String.new(view.request_bytes) # commits on send
+      raw.should_not contain(%("query":))  # the edit must NOT be spliced into a phantom JSON body
+      qs = raw.each_line.first.split(' ')[1].split('?', 2)[1]
+      URI::Params.parse(qs)["query"].should contain("EDITED") # it reached the URL query
+    end
+
     it "reflects an envelope-side query edit into DECODED, then merges a decoded edit (bidirectional)" do
       view = load_gql(gql_head, gql_body)
       # Edit the ENVELOPE directly: a new body whose query mentions ENVEDIT.
