@@ -30,9 +30,10 @@ module Gori::Tui
       body_focused = focus == :body
       subtabs_focused = focus == :subtabs
       body_rect = rect
-      # Same chrome as Replay: the sub-tab strip rides above the framed editor (≥2
-      # notes), drawn by the shared BodyChrome — not inside the view.
-      if @notes.count >= 2
+      # Same chrome as Replay: the sub-tab strip rides above the framed editor (from
+      # the first note, so it's always labelled), drawn by the shared BodyChrome —
+      # not inside the view.
+      if subtab_strip_shown?
         sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
         BodyChrome.render_subtab_strip(screen, sub_rect, @notes.subtab_labels, @notes.current_index, subtabs_focused)
       end
@@ -87,7 +88,7 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      body = @notes.count >= 2 ? BodyChrome.carve_subtab_row(rect)[1] : rect
+      body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
       @notes.click_to_cursor(body.inset(1, 1), mx, my)
       true
     end
@@ -115,6 +116,13 @@ module Gori::Tui
 
     def subtab_index : Int32
       @notes.current_index
+    end
+
+    # Show the strip from the FIRST note (not ≥2), like Replay/Fuzzer: a lone note
+    # still labels its chip and exposes the strip's space-menu. NotesView never goes
+    # empty (always ≥1 note to type into), so this is unconditional.
+    def subtab_strip_shown? : Bool
+      true
     end
 
     def body_badge : Symbol # the body is a single TextArea
