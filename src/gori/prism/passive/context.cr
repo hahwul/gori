@@ -22,8 +22,7 @@ module Gori
         def initialize(@detail : Store::FlowDetail)
           @req = Proxy::Codec::Http1.parse_request_head(@detail.request_head)
           @resp = @detail.response_head.try { |h| Proxy::Codec::Http1.parse_response_head(h) }
-          r = @detail.row
-          @url = "#{r.scheme}://#{r.host}#{r.target}"
+          @url = @detail.row.url
         end
 
         def row : Store::FlowRow

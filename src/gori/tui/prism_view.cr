@@ -298,13 +298,18 @@ module Gori::Tui
         rx -= st.size + 1
       end
       if !issue.host.empty?
-        screen.text({rx - issue.host.size, rect.x}.max, y, issue.host, Theme.muted, bg)
-        rx -= issue.host.size + 1
+        # Right-align the host, but width-cap it: a host wider than its slot would otherwise
+        # (screen.text with no width) run to the SCREEN edge, painting over the status tag and
+        # title already drawn to its right. Cap to the span up to rx so it truncates instead.
+        hx = {rx - issue.host.size, rect.x}.max
+        screen.text(hx, y, issue.host, Theme.muted, bg, width: {rx - hx, 0}.max)
+        rx = hx - 1
       end
       if issue.affected.size > 1
         cnt = "×#{issue.affected.size}"
-        screen.text({rx - cnt.size, rect.x}.max, y, cnt, Theme.muted, bg)
-        rx -= cnt.size + 1
+        cx = {rx - cnt.size, rect.x}.max
+        screen.text(cx, y, cnt, Theme.muted, bg, width: {rx - cx, 0}.max)
+        rx = cx - 1
       end
       title_x = rect.x + 14
       tw = {rx - title_x, 0}.max
@@ -486,7 +491,10 @@ module Gori::Tui
       return if h <= 0
       @scroll = @selected if @selected < @scroll
       @scroll = @selected - h + 1 if @selected >= @scroll + h
-      @scroll = 0 if @scroll < 0
+      # Clamp to the current list size: a filter/dismiss that SHRINKS @issues can leave
+      # @scroll pointing past the (now shorter) end, so the draw loop breaks after one row
+      # and the pane shows only a trailing sliver. Pull it back to the last full page.
+      @scroll = @scroll.clamp(0, {@issues.size - h, 0}.max)
     end
   end
 end

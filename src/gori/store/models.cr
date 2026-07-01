@@ -81,6 +81,19 @@ module Gori
                      @status, @size, @state, @response_size = nil, @duration_us = nil,
                      @content_type = nil)
       end
+
+      # The full absolute URL of the request. Plaintext forward-proxy requests are captured
+      # ABSOLUTE-form (`http://host:port/path` — the wire truth, P7), so `target` already
+      # carries the scheme+authority; return it verbatim. Origin-form targets (the HTTPS /
+      # CONNECT case — a bare "/path") get scheme+host[:port] prefixed, keeping a non-default
+      # port and bracketing an IPv6 literal (mirrors FlowRequest.build_target). Prevents the
+      # doubled "http://hosthttp://host/path" a naive "#{scheme}://#{host}#{target}" produced.
+      def url : String
+        return target if target.starts_with?("http://") || target.starts_with?("https://")
+        h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
+        default = scheme == "https" ? 443 : 80
+        port == default ? "#{scheme}://#{h}#{target}" : "#{scheme}://#{h}:#{port}#{target}"
+      end
     end
 
     # Full detail incl. truth bytes — loaded lazily when a row is selected.

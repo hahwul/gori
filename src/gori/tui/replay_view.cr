@@ -101,6 +101,7 @@ module Gori::Tui
       @saml_param = "SAMLResponse"
       @saml_binding = :post       # :post (base64) | :redirect (deflate+base64)
       @saml_location = :body      # :body (form) | :query (request line)
+      @graphql_location = :body   # :body (POST JSON) | :query (GET ?query=) — where the op lives
       @inflight = false           # a replay round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
@@ -382,6 +383,10 @@ module Gori::Tui
     # Load a GraphQL flow: envelope = full request; decoded = the operation as readable
     # query + variables (Graphql.display), re-composed into the JSON body on send.
     def load_graphql(detail : Store::FlowDetail, op : Graphql::Op) : Nil
+      # Record the binding (POST body vs GET ?query=) so the re-encode targets the right place —
+      # mirrors @saml_location. Without it a GET GraphQL edit would splice into a phantom body
+      # while the origin reads the stale URL query (the decoded edit would never reach it).
+      @graphql_location = Graphql.location(detail.request_body)
       seed_decode(detail, :graphql, Graphql.display(op))
     end
 
@@ -523,8 +528,27 @@ module Gori::Tui
     end
 
     private def graphql_splice_text(env : String) : String
-      sep = env.index("\n\n") || return env
-      "#{env[0, sep]}\n\n#{Graphql.recompose(env[(sep + 2)..], @decoded.text)}"
+      if @graphql_location == :query # GET: rewrite the request-line query (no body), like SAML Redirect
+        lines = env.split('\n')
+        lines[0] = graphql_query_line(lines[0], @decoded.text) if lines[0]?
+        lines.join('\n')
+      else # POST: recompose the JSON body, preserving other fields
+        sep = env.index("\n\n") || return env
+        "#{env[0, sep]}\n\n#{Graphql.recompose(env[(sep + 2)..], @decoded.text)}"
+      end
+    end
+
+    # Rewrite a request line's query with the edited GraphQL op re-encoded (GET binding),
+    # reading the original query from the line itself — mirrors saml_query_line.
+    private def graphql_query_line(rl : String, decoded_text : String) : String
+      sp1 = rl.index(' ')
+      sp2 = rl.rindex(' ')
+      return rl unless sp1 && sp2 && sp2 > sp1
+      target = rl[(sp1 + 1)...sp2]
+      qidx = target.index('?')
+      path = qidx ? target[0, qidx] : target
+      query = Graphql.recompose_query(qidx ? target[(qidx + 1)..] : "", decoded_text)
+      "#{rl[0, sp1]} #{path}?#{query} #{rl[(sp2 + 1)..]}"
     end
 
     # Rewrite the Content-Length header (if present) to the envelope body's byte size —

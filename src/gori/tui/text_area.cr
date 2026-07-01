@@ -321,6 +321,7 @@ module Gori::Tui
           cgw = [Screen.display_width((@preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]).to_s), 1].max
           ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
           (0...cgw).each do |off|
+            break if cxs + off >= cx0 + cw # a wide-glyph caret at the last column must not spill its 2nd cell onto the pane border
             cch = (off == 0 ? ch : ' ')
             screen.cell(cxs + off, rect.y + i, cch, Theme.bg, Theme.accent)
           end

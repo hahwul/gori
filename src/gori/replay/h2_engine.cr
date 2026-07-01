@@ -25,6 +25,12 @@ module Gori
       # unboundedly, and a streaming/over-large body has no aggregate ceiling.
       MAX_HEADER_BLOCK = 1 << 20         # 1 MiB
       MAX_BODY         = 8 * 1024 * 1024 # 8 MiB (matches Codec::Body::CAPTURE_MAX)
+      # Hard ceiling on frames processed for one response. HEADERS/DATA are byte-capped
+      # above, but non-terminal frames (PING/PRIORITY/WINDOW_UPDATE/SETTINGS on any stream)
+      # are neither — a hostile origin can stream them forever without END_STREAM, and the
+      # per-op io_timeout only fires on IDLE, so bytes-always-arriving pins the fiber. This
+      # bounds the loop the way the h1 engine's MAX_INTERIM does (RFC-hostile-origin guard).
+      MAX_FRAMES = 100_000
 
       private alias Frame = Proxy::H2::Frame
       private alias HPACK = Proxy::H2::HPACK
@@ -114,6 +120,7 @@ module Gori
         done = false
         clean_eos = false          # a genuine END_STREAM closed the stream
         end_stream_pending = false # END_STREAM seen on a HEADERS frame whose block isn't closed yet
+        frames = 0                 # every frame counted (incl. ping/priority) — bounds a junk-frame flood
 
         until done
           # An IO error mid-response (connection reset — e.g. an origin that closed
@@ -129,6 +136,12 @@ module Gori
             nil
           end
           break if frame.nil?
+          # Count EVERY frame, not just data/headers: an origin flooding PING/PRIORITY/
+          # WINDOW_UPDATE without ever sending END_STREAM trips no byte cap and no idle
+          # timeout, so this ceiling is what guarantees the loop terminates. On trip the
+          # stream is left un-closed → the response is flagged incomplete.
+          frames += 1
+          break if frames > MAX_FRAMES
           case frame.frame_type
           when Frame::Type::Settings
             ack(io, Frame::Type::Settings, Bytes.empty) unless frame.ack?
@@ -256,7 +269,11 @@ module Gori
 
       private def self.authority(host : String, port : Int32, scheme : String) : String
         default = scheme == "https" ? 443 : 80
-        port == default ? host : "#{host}:#{port}"
+        # An IPv6 literal host must be bracketed in the :authority pseudo-header, else the
+        # colons collide with the port separator and a strict server rejects the stream
+        # (mirrors FlowRequest.build_target's h1 bracketing).
+        h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
+        port == default ? h : "#{h}:#{port}"
       end
 
       # Split at the first CRLFCRLF (head/body boundary); the editor always joins

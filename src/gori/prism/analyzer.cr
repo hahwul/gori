@@ -106,7 +106,7 @@ module Gori
         return if @stopped
         return unless @mode.active?
         row = detail.row
-        url = "#{row.scheme}://#{row.host}#{row.target}"
+        url = row.url
         # Active probes ONLY configured+enabled in-scope hosts (in_scope_url? is permissive
         # when scope is inactive, so gate on active? first) — the user's "in-scope only" rule.
         return unless @scope.active? && @scope.in_scope_url?(url, row.host)

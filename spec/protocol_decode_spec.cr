@@ -216,6 +216,41 @@ describe Gori::Graphql do
       q.should eq("{ ping }")
       v.should be_nil
     end
+
+    it "does not mistake an in-query '# variables' comment for the variables sentinel" do
+      # '# variables' is a valid GraphQL comment; with GraphQL (not JSON) after it, it must
+      # stay part of the query — not truncate the query and misroute the tail into variables.
+      text = "query {\n  # variables\n  user { id }\n}"
+      o, q, v = Gori::Graphql.parse_display(text)
+      o.should be_nil
+      v.should be_nil
+      q.should eq(text)
+    end
+
+    it "still splits a genuine '# variables' JSON block that follows a query comment" do
+      text = "query {\n  # variables\n  user { id }\n}\n\n# variables\n{\"a\":1}"
+      _, q, v = Gori::Graphql.parse_display(text)
+      q.should eq("query {\n  # variables\n  user { id }\n}")
+      v.should eq(%({"a":1}))
+    end
+  end
+
+  describe ".recompose_query" do
+    it "re-encodes an edited op into a GET query string, preserving unrelated params" do
+      q = Gori::Graphql.recompose_query("query=query%20Old%7Bx%7D&lang=en", "query New { y }")
+      params = URI::Params.parse(q)
+      params["query"].should eq("query New { y }")
+      params["lang"].should eq("en")
+    end
+
+    it "includes operationName and minified variables" do
+      q = Gori::Graphql.recompose_query("query=old",
+        "# operationName: Me\n\nquery Me { z }\n\n# variables\n{\n  \"a\": 1\n}")
+      params = URI::Params.parse(q)
+      params["operationName"].should eq("Me")
+      params["query"].should eq("query Me { z }")
+      JSON.parse(params["variables"]).should eq(JSON.parse(%({"a":1})))
+    end
   end
 
   describe ".recompose" do

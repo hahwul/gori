@@ -13,19 +13,35 @@ module Gori
         PRIVATE_IP = /(?<![\w.])(?:10(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){2}|192\.168(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){2}|127\.0\.0\.1)(?![\w.])/
 
         # Server-side error / stack-trace signatures, each tightened to a specific frame or
-        # exception shape so generic prose (a bare ".rb:" or "at System." in docs / a source
-        # viewer) does not match. {pattern, evidence label}.
+        # exception shape so a mere SYMBOL MENTION in documentation / tutorials / package
+        # registries (e.g. "config/routes.rb:15", "ActiveRecord::Base", "org.springframework
+        # .boot", "System.ArgumentException") does NOT match — only an actual backtrace frame
+        # or a `Type: message` / newline-`at` disclosure does. {pattern, evidence label}.
         ERROR_SIGNATURES = [
           {/Traceback \(most recent call last\)/, "Python traceback"},
-          {/\.(?:rb|py|php):\d+(?::in )?/, "source file:line frame"},
+          # A real CPython frame (`File "x.py", line N`) — the exact shape, so a bare
+          # "app.py:42" path reference (the old colon form's false positive) stays out.
+          {/File "[^"]*\.py", line \d+/, "Python stack frame"},
+          # Ruby backtrace frame: the `:in ` distinguishes a real frame from a config path.
+          {/\.rb:\d+:in /, "Ruby backtrace frame"},
           {/\bat [\w.$]+\([\w]+\.java:\d+\)/, "Java stack frame"},
           {/(?:\n|\A)\s+at [\w.$<>]+ \([^)]*:\d+:\d+\)/, "Node.js stack frame"},
           {/\bORA-\d{5}\b/, "Oracle error"},
           {/\bSQLSTATE\[/, "SQL error"},
-          {/\bjava\.lang\.[A-Z]\w+(?:Error|Exception)\b/, "Java exception"},
-          {/\borg\.springframework\.[\w.]{4,}/, "Spring framework trace"},
-          {/\bSystem\.[A-Z]\w+Exception\b/, ".NET exception"},
-          {/\b(?:NoMethodError|NameError|ActiveRecord::)\b/, "Ruby/Rails error"},
+          # A Java/.NET exception only counts as a disclosure when error-shaped: followed by a
+          # `: message` or a newline-`at` frame — not when merely named in prose.
+          {/\bjava\.lang\.[A-Z]\w+(?:Error|Exception)(?::|\r?\n\s*at )/, "Java exception"},
+          {/\bat org\.springframework\.[\w.]{4,}/, "Spring framework trace"},
+          {/\bSystem\.[A-Z]\w+Exception(?::|\r?\n\s*at )/, ".NET exception"},
+          # Rails: any ActiveRecord class, but only when error-shaped (`: message` / newline-
+          # `at`), so a real error (RecordNotFound, Rollback, StatementInvalid, …) is caught
+          # while the ubiquitous doc mention "ActiveRecord::Base guide" is not.
+          {/\bActiveRecord::[A-Z]\w+(?::|\r?\n\s*at )/, "Rails error"},
+          {/\b(?:NoMethodError|NameError|NoMatchingPatternError)(?::| \()/, "Ruby error"},
+          {/PHP (?:Fatal error|Parse error|Warning|Notice):/, "PHP error"},
+          # A real PHP stack/trace frame ("… /var/www/app.php(42): …") — the paren+line form
+          # a path reference lacks; keeps the FP-prone bare "app.php:42" colon form out.
+          {/\.php\(\d+\)/, "PHP stack frame"},
           {/(?:\n|\A)Stack trace:\s*(?:\n|#\d)/, "stack trace"},
         ]
 

@@ -76,12 +76,22 @@ module Gori
     end
 
     # Parse the editable DECODED-pane text back into {operationName?, query, variables?}.
-    # The variables block is whatever follows the LAST `# variables` line; an optional
-    # leading `# operationName:` header is lifted off; the rest is the query.
+    # The variables block is whatever follows the LAST *genuine* `# variables` line; an
+    # optional leading `# operationName:` header is lifted off; the rest is the query.
+    #
+    # `# variables` is ALSO a valid GraphQL source comment, so a comment line inside the
+    # query could masquerade as the sentinel and truncate the query. Disambiguate on the
+    # trailing block: the real sentinel is always followed by the variables JSON, whereas a
+    # query comment is followed by more GraphQL — so only accept a `# variables` whose
+    # remainder parses as JSON. This keeps an in-query `# variables` comment in the query.
     def parse_display(text : String) : {String?, String, String?}
       lines = text.split('\n')
       vi = nil.as(Int32?)
-      lines.each_with_index { |l, i| vi = i if l.strip == "# variables" }
+      lines.each_with_index do |l, i|
+        next unless l.strip == "# variables"
+        trailing = lines[(i + 1)..].join('\n').strip
+        vi = i if !trailing.empty? && json?(trailing)
+      end
       vars = vi ? lines[(vi + 1)..].join('\n').strip : nil
       body = vi ? lines[0...vi] : lines
       op = nil.as(String?)
@@ -110,6 +120,40 @@ module Gori
       end
       base.try &.each { |k, v| obj[k] = v unless obj.has_key?(k) } # keep extensions etc.
       obj.to_json
+    end
+
+    # Re-encode the edited DECODED pane back into a GET request's query string, overlaying
+    # query/operationName/variables onto the ORIGINAL params (any other params survive).
+    # Variables are minified. The GET-binding sibling of recompose (which targets the body).
+    def recompose_query(orig_query : String, decoded_text : String) : String
+      op, query, vars_text = parse_display(decoded_text)
+      managed = {"query", "operationName", "variables"}
+      parts = orig_query.split('&').reject { |pair| pair.empty? || managed.includes?(pair.partition('=')[0]) }
+      parts << "query=#{URI.encode_www_form(query)}"
+      parts << "operationName=#{URI.encode_www_form(op)}" if op
+      if vars_text
+        mini = (JSON.parse(vars_text).to_json rescue vars_text)
+        parts << "variables=#{URI.encode_www_form(mini)}"
+      end
+      parts.join('&')
+    end
+
+    # Where a flow carries its op: :body (a POST JSON body that parses as GraphQL) or
+    # :query (a GET `?query=…`). Drives which side the Replay re-encode targets. Decided
+    # solely by whether the request body is a GraphQL JSON document.
+    def location(req_body : Bytes?) : Symbol
+      if (b = req_body) && !b.empty? && b.size <= MAX_BODY && from_json(String.new(b))
+        :body
+      else
+        :query
+      end
+    end
+
+    private def json?(s : String) : Bool
+      JSON.parse(s)
+      true
+    rescue
+      false
     end
 
     private def strip(s : String) : String
