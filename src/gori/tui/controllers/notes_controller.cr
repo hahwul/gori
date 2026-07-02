@@ -1,5 +1,6 @@
 require "../tab_controller"
 require "../notes_view"
+require "../clipboard"
 
 module Gori::Tui
   # The Notes tab: a multi-note scratchpad (sub-tabs, like Replay). Owns the
@@ -23,7 +24,7 @@ module Gori::Tui
     end
 
     def command_scope : Verb::Scope
-      Verb::Scope::Body
+      Verb::Scope::Notes
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
@@ -130,7 +131,7 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · ↹/esc tabs"
+      "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · ↑ sub-tabs · ↹/esc tabs"
     end
 
     def goto_symbol : Symbol?
@@ -189,6 +190,25 @@ module Gori::Tui
     private def do_notes_close : Nil
       @notes.close_note
       @host.status("closed note (#{@notes.count} open)")
+    end
+
+    # Copy the entire current note to the system clipboard (OSC 52).
+    def notes_copy : Nil
+      text = @notes.current_text
+      if text.empty?
+        @host.status("nothing to copy")
+        return
+      end
+      written = Clipboard.copy(text)
+      msg = "copied note to clipboard (#{written}b)"
+      msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
+      @host.status(msg)
+    end
+
+    # Wipe the current note's text (the sub-tab stays open).
+    def notes_clear : Nil
+      @notes.clear_current
+      @host.status("note cleared")
     end
   end
 end

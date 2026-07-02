@@ -184,6 +184,16 @@ module Gori
       abstract def convert_save : Nil       # save the current chain by name (in-body prompt)
       abstract def convert_load : Nil       # load a saved chain by name (in-body prompt)
 
+      # notes: the multi-note scratchpad (sub-tab actions; the body's text editing
+      # stays inline, these power the space menu reachable from the sub-tab strip)
+      abstract def notes_new : Nil   # open a fresh blank note sub-tab
+      abstract def notes_close : Nil # close the active note sub-tab (keeps ≥1)
+      abstract def notes_copy : Nil  # copy the entire current note to the clipboard
+      abstract def notes_clear : Nil # clear the current note's text
+      abstract def notes_edit : Nil  # open the current note in the external editor
+      abstract def notes_goto : Nil  # open the go-to-line prompt
+      abstract def notes_find : Nil  # open the find-in-note prompt
+
       # settings: open the config editor for a section (:network | :editor | :theme |
       # :tabs | :hotkeys). :tabs opens the tab-bar customizer overlay.
       abstract def open_settings(section : Symbol) : Nil

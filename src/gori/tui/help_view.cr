@@ -88,7 +88,7 @@ module Gori::Tui
         {"Sitemap", "↑/↓ · / filter · ↵/→ expand · t tag · g group · ⇧S scope"},
         {"Findings", "/ filter · ↵ open · n new · space triage · x export · ⇧←/→ h-scroll notes"},
         {"Prism", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · space cmds"},
-        {"Notes", "type to edit · ^N new · ^1-9 switch"},
+        {"Notes", "type to edit · ^N new · ^1-9 switch · space cmds (sub-tab strip)"},
         {"Project", "scope rules + the description editor"},
         {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition · ⇧←/→ h-scroll preview"},
       ]},

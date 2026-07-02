@@ -71,6 +71,24 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('a').try(&.id).should eq("scope.add-rule")
   end
 
+  it "lists the Notes tab's actions in the Notes scope (reachable from the sub-tab strip)" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :notes
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Notes, ctx)
+
+    menu.entries.size.should be > 0
+    menu.entries.all?(&.scope.notes?).should be_true
+    menu.entries.all?(&.menu_key).should be_true
+    ids = menu.entries.map(&.id)
+    ids.should contain("notes.new")
+    ids.should contain("notes.close")
+    ids.should contain("notes.copy")
+    menu.verb_for('y').try(&.id).should eq("notes.copy")
+    menu.verb_for('n').try(&.id).should eq("notes.new")
+    menu.verb_for('w').try(&.id).should eq("notes.close")
+  end
+
   it "lists the Convert tab's actions in the Convert scope (reachable from the sub-tab strip)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :convert # the Convert verbs gate on the active tab
@@ -149,7 +167,8 @@ describe Gori::Tui::SpaceMenu do
       Gori::Verb::Scope::Body, Gori::Verb::Scope::Replay, Gori::Verb::Scope::Findings,
       Gori::Verb::Scope::Comparer, Gori::Verb::Scope::Fuzzer, Gori::Verb::Scope::Intercept,
       Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::FindingsDetail,
-      Gori::Verb::Scope::Project, Gori::Verb::Scope::Convert, Gori::Verb::Scope::Sitemap,
+      Gori::Verb::Scope::Project, Gori::Verb::Scope::Convert, Gori::Verb::Scope::Notes,
+      Gori::Verb::Scope::Sitemap,
       Gori::Verb::Scope::Miner, Gori::Verb::Scope::Prism, Gori::Verb::Scope::PrismDetail,
     ]
     menu_scopes.each do |scope|

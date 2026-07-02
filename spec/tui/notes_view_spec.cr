@@ -142,6 +142,18 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  it "clears the current note's text without closing the sub-tab" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "scratch")
+      view.clear_current
+      view.current_text.should eq("")
+      view.save(store)
+      saved_notes(store).should eq([""])
+    end
+  end
+
   it "save is a no-op when nothing was edited" do
     tmp_store do |store|
       store.set_setting("notes.docs", %({"cur":0,"notes":["kept"]}))

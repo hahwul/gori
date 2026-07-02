@@ -253,6 +253,7 @@ module Gori
       register_miner(r)
       register_comparer(r)
       register_convert(r)
+      register_notes(r)
       register_host_overrides(r)
       r
     end

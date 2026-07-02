@@ -1978,7 +1978,7 @@ module Gori::Tui
             return "←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ↑/esc tabs"
           end
           rn = renameable_subtabs? ? " · r rename" : ""
-          return "←/→ switch sub-tab · ↓/↵ edit · ^1-9 jump · ^N new · ^W close#{rn} · ↑/esc tabs"
+          return "←/→ switch sub-tab · ↓/↵ edit · ^1-9 jump · ^N new · ^W close · space cmds#{rn} · ↑/esc tabs"
         end
         body_hints
       end
@@ -3019,6 +3019,40 @@ module Gori::Tui
     def convert_load : Nil
       focus_pane(:body)
       convert_controller.open_prompt(:load)
+    end
+
+    # --- notes scratchpad (sub-tab actions). The body's text editing stays inline
+    # in NotesController; these power the space menu reachable from the sub-tab strip. ---
+    def notes_new : Nil
+      notes_controller.notes_new
+    end
+
+    def notes_close : Nil
+      notes_controller.notes_close
+      resolve_subtab_focus_after_close
+    end
+
+    def notes_copy : Nil
+      notes_controller.notes_copy
+    end
+
+    def notes_clear : Nil
+      notes_controller.notes_clear
+    end
+
+    def notes_edit : Nil
+      focus_pane(:body)
+      run_external_editor(notes_controller.view.current_text, :notes) { |t| notes_controller.view.replace_current(t) }
+    end
+
+    def notes_goto : Nil
+      focus_pane(:body)
+      open_goto(:notes)
+    end
+
+    def notes_find : Nil
+      focus_pane(:body)
+      open_search(:notes)
     end
 
     # --- settings (config control) ---
