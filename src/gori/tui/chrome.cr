@@ -89,7 +89,7 @@ module Gori::Tui
       x = screen.text(rect.x + 1, rect.y, "gori", Theme.text_bright, Theme.panel, Attribute::Bold)
       screen.text(x + 1, rect.y, "· #{project}", Theme.muted, Theme.panel)
 
-      # right-aligned status chips: scope:N · rules:N · intercept:on(N) · listen · HH:MM
+      # right-aligned status chips: scope:N · rules:N · intercept:on(N) · listen · h:MM AM/PM
       # value-emphasized, dim · separators; the hot intercept state in RED. The clock
       # is the rightmost anchor. (Capture state lives on the bottom status bar.)
       chips = [] of {String, Color}
