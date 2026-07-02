@@ -1890,7 +1890,7 @@ module Gori::Tui
     # event loop only bumps `dirty` when this string changes (see `last_clock`), so
     # an idle TUI re-renders once a minute, not every second (preserves idle-zero-CPU).
     private def clock_label : String
-      Time.local.to_s("%H:%M")
+      Time.local.to_s("%I:%M %p")
     end
 
     private def rules_label : String
