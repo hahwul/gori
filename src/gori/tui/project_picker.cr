@@ -1,4 +1,6 @@
 require "termisu"
+require "../capture_lock"
+require "../capture_status"
 require "../project"
 require "../project_registry"
 require "../fuzzy"
@@ -18,6 +20,12 @@ module Gori::Tui
   # Use arrows + ↵ , ctrl-n/ctrl-t/ctrl-d etc. Returns chosen Project or nil to quit.
   # Monochrome, keyboard-first (Grok Build feel).
   class ProjectPicker
+    # Throttle flock + status-file probes so the 50 ms poll loop doesn't hammer
+    # the filesystem on every visible project row every frame.
+    RUNNING_PROBE_TTL = 400.milliseconds
+
+    record RunningProbe, at : Time::Span, held : Bool, status : CaptureStatus::Status?
+
     def initialize(@term : Termisu, @registry : ProjectRegistry)
       @backend = TermisuBackend.new(@term)
       @projects = @registry.list
@@ -34,6 +42,7 @@ module Gori::Tui
       @confirm = nil.as(ConfirmDialog?)
       @pending_delete = nil.as(Project?)
       @settings = SettingsView.new # the config editor (ctrl-, → :settings mode)
+      @running_cache = {} of String => RunningProbe
     end
 
     def run : Project?
@@ -243,6 +252,7 @@ module Gori::Tui
       if project = @pending_delete
         @registry.delete(project)
         @projects = @registry.list
+        invalidate_running_cache
         @selected = 2
       end
       cancel_confirm
@@ -471,12 +481,12 @@ module Gori::Tui
           bg = is_selected ? Theme.accent_bg : Theme.panel
           screen.fill(Rect.new(box.x + 1, py, cw - 2, 1), bg) if is_selected
           screen.cell(box.x + 1, py, is_selected ? '▎' : ' ', Theme.accent, bg)
-          meta = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
+          meta, meta_fg = project_meta(proj)
           mdw = Screen.display_width(meta)
           name_w = cw - 3 - (mdw + 2)
           screen.text(box.x + 3, py, proj.name, is_selected ? Theme.text_bright : Theme.text, bg, width: [name_w, 1].max)
           meta_x = box.right - mdw - 2
-          screen.text(meta_x, py, meta, Theme.muted, bg) unless meta.empty?
+          screen.text(meta_x, py, meta, meta_fg, bg) unless meta.empty?
         end
       end
 
@@ -576,6 +586,46 @@ module Gori::Tui
       @results_scroll = 0 if @results_scroll < 0
       max_s = [total - list_h, 0].max
       @results_scroll = max_s if @results_scroll > max_s
+    end
+
+    private def invalidate_running_cache : Nil
+      @running_cache.clear
+    end
+
+    private def project_meta(proj : Project) : {String, Color}
+      held, status = probe_running(proj)
+      if held
+        if status && status.listening
+          {"● #{CaptureStatus.format_endpoint(status.host, status.port)}", Theme.green}
+        elsif status
+          {"● off · #{CaptureStatus.format_endpoint(status.host, status.port)}", Theme.yellow}
+        else
+          {"● off", Theme.yellow}
+        end
+      else
+        meta = proj.last_modified.try { |t| relative_time(Time.utc - t) } || "new"
+        {meta, Theme.muted}
+      end
+    end
+
+    private def probe_running(proj : Project) : {Bool, CaptureStatus::Status?}
+      now = Time.monotonic
+      if cached = @running_cache[proj.dir]?
+        return {cached.held, cached.status} if now - cached.at < RUNNING_PROBE_TTL
+      end
+      held, status = fetch_running(proj.dir)
+      @running_cache[proj.dir] = RunningProbe.new(at: now, held: held, status: status)
+      {held, status}
+    end
+
+    private def fetch_running(dir : String) : {Bool, CaptureStatus::Status?}
+      held = CaptureLock.held?(dir)
+      return {false, nil} unless held
+      status = CaptureStatus.read(dir)
+      status ||= CaptureStatus.read(dir) # retry once after a concurrent write
+      {true, status}
+    rescue IO::Error | File::Error
+      {false, nil}
     end
 
     private def relative_time(span : Time::Span) : String

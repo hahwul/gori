@@ -20,6 +20,19 @@ module Gori
       File.join(dir, LOCK_FILE)
     end
 
+    # Non-blocking probe: true when another LIVE instance already holds the lock.
+    # Opens and immediately releases the lock when free. Non-contention failures
+    # from `try` (EACCES, unwritable dir, …) propagate to the caller.
+    def self.held?(dir : String) : Bool
+      lock = try(dir)
+      if lock
+        lock.close
+        false
+      else
+        true
+      end
+    end
+
     # Try to acquire the project's capture lock WITHOUT blocking. Returns a held
     # CaptureLock (the caller MUST keep it alive for the session and `close` it on
     # session end) when this instance is the capturer, or nil when another LIVE

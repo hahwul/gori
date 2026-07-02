@@ -3179,6 +3179,7 @@ module Gori::Tui
       return save_msg if Settings.bind_host == proxy.host && Settings.bind_port == proxy.port
       begin
         proxy.rebind(Settings.bind_host, Settings.bind_port)
+        @session.sync_capture_status!
         if @session.capturing?
           "settings saved — now listening on #{proxy.host}:#{proxy.port} (repoint your client)"
         else

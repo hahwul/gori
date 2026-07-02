@@ -1,6 +1,7 @@
 require "./config"
 require "./project"
 require "./capture_lock"
+require "./capture_status"
 require "./store"
 require "./rules"
 require "./scope"
@@ -89,7 +90,9 @@ module Gori
             lock = nil
             ex.message || "could not open the project capture lock"
           end
-        new(config, ca, registry, project, store, proxy, events, prism, rules, scope, host_overrides, interceptor, bind_error, lock)
+        session = new(config, ca, registry, project, store, proxy, events, prism, rules, scope, host_overrides, interceptor, bind_error, lock)
+        session.sync_capture_status!
+        session
       rescue ex
         # A store/rules/scope failure (NOT the bind, which is handled above) would
         # otherwise leak the store's writer fiber + db fd, the events channels, the Prism
@@ -126,20 +129,31 @@ module Gori
     # instance). Starting reuses the held lock, or re-acquires it if we were
     # view-only and the other instance has since released it.
     def toggle_capture : Bool
-      if @proxy.listening?
-        @proxy.stop
-        false
-      else
-        @capture_lock ||= CaptureLock.try(@project.dir) # reuse if held, else try to take over
-        return false unless @capture_lock               # still held by another instance
-        @proxy.start(fallback: true)                    # cover a DIFFERENT project's port on resume
-        true
-      end
+      result =
+        if @proxy.listening?
+          @proxy.stop
+          false
+        else
+          @capture_lock ||= CaptureLock.try(@project.dir) # reuse if held, else try to take over
+          return false unless @capture_lock               # still held by another instance
+          @proxy.start(fallback: true)                    # cover a DIFFERENT project's port on resume
+          true
+        end
+      sync_capture_status!
+      result
+    end
+
+    # Refresh the per-project capture sidecar so the project picker can show the
+    # live bind address. No-op when this session doesn't hold the capture lock.
+    def sync_capture_status! : Nil
+      return unless capturing_lock_held?
+      CaptureStatus.write(@project.dir, @proxy.host, @proxy.port, capturing?)
     end
 
     def close : Nil
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
+      CaptureStatus.clear(@project.dir) if capturing_lock_held?
       @capture_lock.try(&.close) # release the flock so a later open of this project can capture
       # Stop Prism FIRST so its active workers wind down and its passive fiber stops issuing
       # get_flow against a live DB; this also closes the prism_events channel it consumes.
