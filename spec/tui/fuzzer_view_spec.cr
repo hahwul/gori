@@ -209,3 +209,68 @@ describe Gori::Tui::PathComplete do
     end
   end
 end
+
+describe "FuzzerView#template_click_to_cursor / #target_click_to_cursor" do
+  it "places the template caret at the clicked row/column (a later insert lands there)" do
+    view = FuzzerView.new
+    view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    rect = Rect.new(0, 0, 100, 30)
+    view.render(Screen.new(MemoryBackend.new(100, 30)), rect)
+    # The template card sits below the 3-row target band; row 1 is the "Host: h" line.
+    view.template_click_to_cursor(rect, 90, 5) # mx past end → clamps to end of that line
+    view.template_insert('X')
+    view.template_text.split('\n')[1].should eq("Host: hX")
+  end
+
+  it "places the target caret at the clicked column" do
+    view = FuzzerView.new
+    view.load_request("https://h", "GET / HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    rect = Rect.new(0, 0, 100, 30)
+    view.render(Screen.new(MemoryBackend.new(100, 30)), rect)
+    view.target_click_to_cursor(rect, rect.x + 4 + 3, rect.y + 1) # col 3 of "https://h"
+    view.target_insert('X')
+    view.target.should eq("httXps://h")
+  end
+end
+
+describe "FuzzerView result-detail decode panes" do
+  it "offers a GraphQL pane for a GET GraphQL request and renders the decoded query" do
+    view = FuzzerView.new
+    view.load_request("https://h", "GET /graphql?query={me{id}} HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.append_result(fuzz_result(1, 200, 12))
+    view.open_detail
+    view.detail_step_pane(1) # response → graphql
+    backend = MemoryBackend.new(120, 30)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+    backend.contains?("graphql").should be_true  # the pane chip
+    backend.contains?("{me{id}}").should be_true # the decoded query
+  end
+
+  it "offers a PARAMS pane for a form-encoded POST body" do
+    body = "user=admin&pw=secret"
+    req = "POST /login HTTP/1.1\r\nHost: h\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}"
+    view = FuzzerView.new
+    view.load_request("https://h", req, false, "")
+    view.append_result(fuzz_result(1, 200, 12))
+    view.open_detail
+    view.detail_step_pane(1) # response → params
+    backend = MemoryBackend.new(120, 30)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+    backend.contains?("params").should be_true
+    backend.contains?("user").should be_true
+    backend.contains?("admin").should be_true
+  end
+
+  it "shows only request/response when the flow carries no decodable protocol" do
+    view = FuzzerView.new
+    view.load_request("https://h", "GET /plain HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.append_result(fuzz_result(1, 200, 12))
+    view.open_detail
+    view.detail_step_pane(1) # → response (last pane; a further step is a no-op)
+    view.detail_step_pane(1) # clamped
+    backend = MemoryBackend.new(120, 30)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+    backend.contains?("graphql").should be_false
+    backend.contains?("params").should be_false
+  end
+end
