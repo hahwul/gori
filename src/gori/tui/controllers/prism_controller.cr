@@ -41,7 +41,7 @@ module Gori::Tui
       elsif @prism.mode.off?
         "m enable scanning · / filter · space cmds · esc tabs"
       else
-        "↑/↓ move · ↵ open · c dismiss · m mode · / filter · space cmds"
+        "o flow · r replay · p promote · c dismiss · d delete · m mode · / filter · space cmds"
       end
     end
 

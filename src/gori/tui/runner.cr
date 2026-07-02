@@ -2547,7 +2547,7 @@ module Gori::Tui
     # Jump from an issue to its sample flow's request/response in History. CROSS-TAB
     # mediator (mirrors finding_open_flow).
     def prism_open_flow : Nil
-      return unless i = prism_controller.view.detail_issue
+      return unless i = prism_controller.view.target_issue
       return (@toast = "this issue has no sample flow") unless fid = i.sample_flow_id
       if history_controller.view.open_detail_id(fid, @session.store)
         @active_tab = :history
@@ -2560,7 +2560,7 @@ module Gori::Tui
 
     # Send an issue's sample flow to Replay to re-test it (mirrors finding_replay_flow).
     def prism_replay_flow : Nil
-      return unless i = prism_controller.view.detail_issue
+      return unless i = prism_controller.view.target_issue
       return (@toast = "this issue has no sample flow") unless fid = i.sample_flow_id
       if @session.store.get_flow(fid)
         replay_flow(fid)
@@ -2572,7 +2572,7 @@ module Gori::Tui
     # Promote a machine-found Prism issue to a human-confirmed Finding (the bridge to the
     # Findings report). Reuses Store#insert_finding; the issue's severity/host/sample flow carry over.
     def prism_promote : Nil
-      return unless i = prism_controller.view.detail_issue
+      return unless i = prism_controller.view.target_issue
       @session.store.insert_finding(i.title, i.severity, i.host, i.sample_flow_id)
       # Mark the source confirmed (= "promoted to a Finding") so it leaves the default
       # open-only lens instead of lingering as unreviewed noise; still reachable via `a`.

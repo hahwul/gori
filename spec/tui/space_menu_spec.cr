@@ -89,6 +89,24 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('w').try(&.id).should eq("notes.close")
   end
 
+  it "lists the Prism list's detail-parity actions (promote, evidence, delete)" do
+    ctx = FakeExecContext.new
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Prism, ctx)
+
+    ids = menu.entries.map(&.id)
+    ids.should contain("prism.promote-selected")
+    ids.should contain("prism.open-evidence")
+    ids.should contain("prism.replay-evidence")
+    ids.should contain("prism.delete-selected")
+    menu.verb_for('p').try(&.id).should eq("prism.promote-selected")
+    menu.verb_for('o').try(&.id).should eq("prism.open-evidence")
+    menu.verb_for('r').try(&.id).should eq("prism.replay-evidence")
+    menu.verb_for('d').try(&.id).should eq("prism.delete-selected")
+    menu.verb_for('v').try(&.id).should eq("prism.open")
+    menu.verb_for('g').try(&.id).should eq("prism.dismiss-code")
+  end
+
   it "lists the Convert tab's actions in the Convert scope (reachable from the sub-tab strip)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :convert # the Convert verbs gate on the active tab
