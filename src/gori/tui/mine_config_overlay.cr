@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "../miner"
+require "../settings"
 
 module Gori::Tui
   # Everything needed to start a mining session, captured from History/Replay when the
@@ -17,11 +18,13 @@ module Gori::Tui
     applicable : Array(Miner::Location),
     default : Array(Miner::Location)
 
-  # The small config popup shown before a mine starts: adaptive location checkboxes +
-  # a concurrency cycler + a Start row. No text field (so no IME plumbing). On Start the
-  # Runner reads build_config + seed and hands them to the MinerController.
+  # The small config popup shown before a mine starts: adaptive location checkboxes,
+  # concurrency + notification cyclers, and a Start row. No text field (so no IME
+  # plumbing). Restores the last confirmed overlay choices from Settings when present.
+  # On Start the Runner reads build_config + seed and hands them to the MinerController.
   class MineConfigOverlay
     CONC_CHOICES = [5, 10, 20, 40]
+    NOTIFY_CHOICES = Miner::NotifyMode.values
 
     getter seed : MineSeed
 
@@ -29,20 +32,47 @@ module Gori::Tui
       @checked = Hash(Miner::Location, Bool).new
       @seed.applicable.each { |l| @checked[l] = @seed.default.includes?(l) }
       @conc_idx = CONC_CHOICES.index(10) || 1
+      @notify_idx = NOTIFY_CHOICES.index(Miner::NotifyMode::WhenFound) || 0
       @selected = 0
+      restore_saved_prefs
     end
 
-    # Rows: one per applicable location, then the concurrency cycler, then Start.
+    # Remember the last confirmed overlay for the next History/Replay mine.
+    def save_prefs : Nil
+      locs = @seed.applicable.select { |l| @checked[l]? }.map(&.label)
+      notify = NOTIFY_CHOICES[@notify_idx].token
+      Settings.save_mine_prefs(locs, CONC_CHOICES[@conc_idx], notify)
+    end
+
+    private def restore_saved_prefs : Nil
+      return unless Settings.mine_prefs_saved?
+      saved = Settings.mine_locations.to_set
+      @seed.applicable.each do |loc|
+        @checked[loc] = saved.includes?(loc.label)
+      end
+      if idx = CONC_CHOICES.index(Settings.mine_concurrency)
+        @conc_idx = idx
+      end
+      if mode = Miner::NotifyMode.parse?(Settings.mine_notify)
+        @notify_idx = NOTIFY_CHOICES.index(mode) || @notify_idx
+      end
+    end
+
+    # Rows: one per applicable location, then concurrency + notification cyclers, then Start.
     private def row_count : Int32
-      @seed.applicable.size + 2
+      @seed.applicable.size + 3
     end
 
     private def conc_row : Int32
       @seed.applicable.size
     end
 
-    private def start_row : Int32
+    private def notify_row : Int32
       @seed.applicable.size + 1
+    end
+
+    private def start_row : Int32
+      @seed.applicable.size + 2
     end
 
     def on_start_row? : Bool
@@ -58,16 +88,18 @@ module Gori::Tui
     end
 
     def adjust(d : Int32) : Nil
-      return unless @selected == conc_row
-      @conc_idx = (@conc_idx + d) % CONC_CHOICES.size
+      case @selected
+      when conc_row   then @conc_idx = (@conc_idx + d) % CONC_CHOICES.size
+      when notify_row then @notify_idx = (@notify_idx + d) % NOTIFY_CHOICES.size
+      end
     end
 
-    # Space/Enter on a location row flips its checkbox; on the concurrency row it cycles.
+    # Space/Enter on a location row flips its checkbox; cyclers advance on space.
     def toggle : Nil
       if @selected < @seed.applicable.size
         loc = @seed.applicable[@selected]
         @checked[loc] = !(@checked[loc]? || false)
-      elsif @selected == conc_row
+      elsif @selected == conc_row || @selected == notify_row
         adjust(1)
       end
     end
@@ -76,6 +108,7 @@ module Gori::Tui
       c = Miner::Config.new
       c.locations = @seed.applicable.select { |l| @checked[l]? }
       c.concurrency = CONC_CHOICES[@conc_idx]
+      c.notify = NOTIFY_CHOICES[@notify_idx]
       c
     end
 
@@ -120,6 +153,9 @@ module Gori::Tui
       elsif i == conc_row
         screen.text(x, py, "concurrency:", Theme.muted, bg)
         screen.text(x + 13, py, "#{CONC_CHOICES[@conc_idx]}  ‹/›", sel ? Theme.text_bright : Theme.text, bg)
+      elsif i == notify_row
+        screen.text(x, py, "notification:", Theme.muted, bg)
+        screen.text(x + 14, py, "#{NOTIFY_CHOICES[@notify_idx].label}  ‹/›", sel ? Theme.text_bright : Theme.text, bg)
       else
         label = any_checked? ? "[ Start mining ]" : "[ select a location ]"
         screen.text(x, py, label, any_checked? ? Theme.accent : Theme.muted, bg, Attribute::Bold)

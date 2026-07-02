@@ -54,6 +54,12 @@ module Gori::Tui
       @miners.map_with_index { |t, i| "#{i + 1}:#{t.view.label(18)}" }
     end
 
+    # Show the strip from the FIRST session (not ≥2): a single mine still labels its
+    # chip and exposes the strip's space-menu (^W close). Empty → no strip.
+    def subtab_strip_shown? : Bool
+      !@miners.empty?
+    end
+
     def subtab_index : Int32
       @current_idx
     end
@@ -72,7 +78,7 @@ module Gori::Tui
       case v.focus
       when :results then "↑/↓ select · ↵ detail · ^X stop · space cmds · ↹ pane · esc tabs"
       when :detail  then "↑/↓ scroll · esc back"
-      else               "↓ findings · ^X stop · ↹ pane · esc tabs"
+      else               "↓ findings · ^X stop · space cmds · ↹ pane · esc tabs"
       end
     end
 
@@ -80,7 +86,7 @@ module Gori::Tui
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
       body_rect = rect
-      if @miners.size >= 2
+      if subtab_strip_shown?
         sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
         BodyChrome.render_subtab_strip(screen, sub_rect, subtab_labels, @current_idx, focus == :subtabs)
       end
@@ -100,7 +106,7 @@ module Gori::Tui
       # instead of swallowing it, so the empty Miner tab isn't an input dead-end (^P
       # palette, escape, digit jumps, space all stay live). New runs start upstream.
       return false if v.nil?
-      if v.focus == :results && ev.key.space? && !ev.ctrl? && !ev.alt?
+      if navigable_pane?(v.focus) && ev.key.space? && !ev.ctrl? && !ev.alt?
         @host.open_space_menu
         return true
       end
@@ -119,6 +125,10 @@ module Gori::Tui
       else               return false
       end
       true
+    end
+
+    private def navigable_pane?(pane : Symbol) : Bool
+      pane == :summary || pane == :results
     end
 
     private def chord_action(ev : Termisu::Event::Key, c : Char?) : Symbol?
@@ -154,7 +164,7 @@ module Gori::Tui
       if key.down?
         v.focus_pane(:results)
       elsif key.up?
-        @host.request_focus(@miners.size >= 2 ? :subtabs : :menu)
+        @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
       end
     end
 
@@ -163,7 +173,7 @@ module Gori::Tui
       case
       when key.enter? then v.open_detail
       when key.down?  then v.results_move(1)
-      when key.up?    then v.at_top? ? @host.request_focus(@miners.size >= 2 ? :subtabs : :menu) : v.results_move(-1)
+      when key.up?    then v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.results_move(-1)
       end
     end
 
@@ -177,7 +187,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      body = @miners.size >= 2 ? BodyChrome.carve_subtab_row(rect)[1] : rect
+      body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
       return true unless v = current_view
       if pane = v.pane_at(body, mx, my)
         v.focus_pane(pane) unless pane == :detail
@@ -220,7 +230,7 @@ module Gori::Tui
 
     # --- sub-tab nav ---
     def move_subtab(dir : Int32) : Nil
-      return unless @miners.size >= 2
+      return unless subtab_strip_shown? && @miners.size >= 2
       @current_idx = (@current_idx + dir).clamp(0, @miners.size - 1)
     end
 
@@ -378,7 +388,7 @@ module Gori::Tui
       when Miner::ErrorEvent
         v.finish_run
         @host.jobs.finish(v.job_id, :error, ev.message)
-        @host.notifications.push(:error, "Miner: #{ev.message} on #{v.summary}", goto_for(v))
+        push_mine_notification(v, :error, "Miner: #{ev.message} on #{v.summary}")
         @host.status("miner error: #{ev.message}")
       end
     end
@@ -386,10 +396,15 @@ module Gori::Tui
     private def finish_job(v : MinerView, ev : Miner::DoneEvent) : Nil
       n = v.found_count
       @host.jobs.finish(v.job_id, :done, "#{n} found")
-      level = n > 0 ? :success : :info
       msg = "Miner: #{n} param#{n == 1 ? "" : "s"} found on #{v.summary}#{ev.stopped ? " (stopped)" : ""}"
-      @host.notifications.push(level, msg, goto_for(v))
+      level = n > 0 ? :success : :info
+      push_mine_notification(v, level, msg, found: n)
       @host.status(msg)
+    end
+
+    private def push_mine_notification(v : MinerView, level : Symbol, msg : String, found : Int32 = 0) : Nil
+      return unless v.config.notify.posts_notification?(found, error: level == :error)
+      @host.notifications.push(level, msg, goto_for(v))
     end
 
     private def goto_for(v : MinerView) : Jobs::Goto?

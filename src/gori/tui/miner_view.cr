@@ -232,6 +232,7 @@ module Gori::Tui
             j.array { @config.locations.each { |l| j.string l.label } }
           end
           j.field "concurrency", @config.concurrency
+          j.field "notify", @config.notify.token
           j.field "stability_rounds", @config.stability_rounds
           j.field "confirm_rounds", @config.confirm_rounds
           j.field "buckets" do
@@ -252,6 +253,7 @@ module Gori::Tui
         @config.locations = parsed unless parsed.empty?
       end
       any["concurrency"]?.try(&.as_i?).try { |n| @config.concurrency = n }
+      any["notify"]?.try(&.as_s?).try { |s| Miner::NotifyMode.parse?(s) }.try { |m| @config.notify = m }
       any["stability_rounds"]?.try(&.as_i?).try { |n| @config.stability_rounds = n }
       any["confirm_rounds"]?.try(&.as_i?).try { |n| @config.confirm_rounds = n }
       if buckets = any["buckets"]?.try(&.as_h?)

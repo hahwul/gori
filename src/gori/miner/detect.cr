@@ -26,11 +26,10 @@ module Gori::Miner
         default << Location::Json
       end
 
-      # Cookies always apply and default ON; headers apply but default OFF (noisy,
-      # multiplies the request budget, and infra often strips/echoes them).
+      # Cookies/headers always apply; both default OFF (noisy, multiplies the
+      # request budget, and infra often strips/echoes them).
       applicable << Location::Headers
       applicable << Location::Cookies
-      default << Location::Cookies
 
       Applicability.new(applicable, default)
     end
