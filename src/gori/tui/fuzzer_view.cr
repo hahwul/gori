@@ -10,6 +10,10 @@ require "../fuzz"
 require "../fuzzy"
 require "../paths"
 require "../replay/flow_request"
+require "../saml"
+require "../jwt"
+require "../graphql"
+require "../form_data"
 
 module Gori::Tui
   # One Fuzzer/Intruder session (a sub-tab under the Fuzzer tab). Holds the editable
@@ -107,6 +111,14 @@ module Gori::Tui
       @detail_scroll = 0
       @detail_xscroll = 0 # horizontal scroll offset for the RESULT detail (shift+←/→)
       @detail_pane = :response
+      # Decoded-protocol panes for the OPEN result detail (SAML/JWT/GraphQL/form),
+      # parsed once per opened row (@decoded_index guards re-decode). Each nil/empty
+      # one means that pane isn't offered — mirrors the History detail decode strip.
+      @d_saml = nil.as(Saml::Doc?)
+      @d_jwts = [] of Jwt::Found
+      @d_graphql = nil.as(Graphql::Op?)
+      @d_form = nil.as(Array(FormData::Field)?)
+      @decoded_index = nil.as(Int64?)
       @focus = :template
       @loaded = false
       @dirty = false
@@ -315,6 +327,7 @@ module Gori::Tui
       @stop_requested = false
       @run_total = total
       @progress = Fuzz::Progress.new(0_i64, total, 0_i64, 0_i64)
+      clear_detail_decode # a new run reuses request indices → drop the old decode cache
     end
 
     def finish_run : Nil
@@ -730,6 +743,7 @@ module Gori::Tui
       @detail_scroll = 0
       @detail_xscroll = 0
       @detail_pane = :response
+      decode_detail # parse the decoded-protocol panes for the row we're opening
     end
 
     def detail_scroll(d : Int32) : Nil
@@ -742,10 +756,71 @@ module Gori::Tui
       @detail_xscroll = {@detail_xscroll + delta * 4, 0}.max
     end
 
-    def detail_toggle_pane : Nil
-      @detail_pane = @detail_pane == :response ? :request : :response
+    # ←/→ in the RESULT detail: step through the pane chain (request → response →
+    # whichever decoded-protocol panes the row carries), clamped — no wrap, so ← past
+    # the first / → past the last is a no-op (esc leaves the detail).
+    def detail_step_pane(dir : Int32) : Nil
+      panes = detail_panes
+      i = (panes.index(@detail_pane) || 0) + dir
+      return if i < 0 || i >= panes.size
+      @detail_pane = panes[i]
       @detail_scroll = 0
       @detail_xscroll = 0
+    end
+
+    # Parse the OPEN result's request/response into the optional protocol panes
+    # (SAML/JWT/GraphQL/PARAMS), mirroring the History detail decode strip. The selected
+    # row is fixed while the detail is open, so this runs once per open (@decoded_index).
+    private def decode_detail : Nil
+      r = selected_result
+      unless r
+        clear_detail_decode
+        return
+      end
+      return if @decoded_index == r.index # already decoded this row
+      @decoded_index = r.index
+      req = detail_request_bytes(r)
+      off, sep_w = req_head_end(req)
+      req_head = off ? req[0, off] : req
+      req_body = off ? req[(off + sep_w)..] : Bytes.empty
+      tgt = request_target(req_head)
+      @d_saml = Saml.from_flow(tgt, req_head, req_body, r.head, r.body)
+      @d_jwts = Jwt.from_flow(tgt, req_head, req_body, r.head, r.body)
+      @d_graphql = Graphql.from_flow(tgt, req_head, req_body)
+      @d_form = FormData.from_flow(tgt, req_head, req_body)
+    end
+
+    private def clear_detail_decode : Nil
+      @decoded_index = nil
+      @d_saml = nil
+      @d_jwts = [] of Jwt::Found
+      @d_graphql = nil
+      @d_form = nil
+    end
+
+    # Locate the head/body separator = the first blank line (LFLF or CRLFCRLF) in the
+    # reconstructed request, mirroring Fuzz::ContentLength's left-to-right scan (the
+    # template holds LF-joined text, so it's usually LFLF). Returns {offset, sep-width};
+    # {nil, 0} when the request carries no body. Byte-level so a UTF-8 body can't skew it.
+    private def req_head_end(bytes : Bytes) : {Int32?, Int32}
+      i = 0
+      while i + 1 < bytes.size
+        return {i, 2} if bytes[i] == 0x0A_u8 && bytes[i + 1] == 0x0A_u8
+        if i + 3 < bytes.size && bytes[i] == 0x0D_u8 && bytes[i + 1] == 0x0A_u8 &&
+           bytes[i + 2] == 0x0D_u8 && bytes[i + 3] == 0x0A_u8
+          return {i, 4}
+        end
+        i += 1
+      end
+      {nil, 0}
+    end
+
+    # The request-target (path?query) from the reconstructed request line — the decoders
+    # read the GET-binding query from here (SAML Redirect, GraphQL GET), the same value
+    # History passes as the flow's stored target.
+    private def request_target(head : Bytes) : String
+      line = String.new(head).each_line.first?.try(&.strip) || ""
+      line.split(' ')[1]? || "/"
     end
 
     def selected_result : Fuzz::Result?
@@ -1397,10 +1472,11 @@ module Gori::Tui
         return
       end
       Frame.card(screen, rect, "RESULT ##{r.index}", bg: Theme.bg, border: Frame.pane_border(focused))
-      tx = screen.text(rect.x + 14, rect.y, " request ", @detail_pane == :request ? Theme.text_bright : Theme.muted, @detail_pane == :request ? Theme.accent_bg : Theme.bg) + 1
-      screen.text(tx, rect.y, " response ", @detail_pane == :response ? Theme.text_bright : Theme.muted, @detail_pane == :response ? Theme.accent_bg : Theme.bg)
+      panes = detail_panes
+      @detail_pane = :request unless panes.includes?(@detail_pane) # decode may have dropped a pane
+      render_detail_chips(screen, rect, panes)
       inner = rect.inset(1, 1)
-      lines = @detail_pane == :request ? detail_request_lines(r) : detail_response_lines(r)
+      lines = detail_lines(r)
       # Clamp so ↓/wheel can't scroll past the last line into a blank void (keeps ≥1 row).
       @detail_scroll = @detail_scroll.clamp(0, {lines.size - 1, 0}.max)
       rows = (0...inner.h).compact_map { |i| lines[@detail_scroll + i]? }
@@ -1411,10 +1487,59 @@ module Gori::Tui
       end
     end
 
+    # The detail sub-panes in order: REQUEST → RESPONSE → decoded-protocol panes (each
+    # present only when the open result carries it). Mirrors the History detail strip.
+    private def detail_panes : Array(Symbol)
+      panes = [:request, :response]
+      panes << :saml if @d_saml
+      panes << :jwt unless @d_jwts.empty?
+      panes << :graphql if @d_graphql
+      panes << :params if @d_form
+      panes
+    end
+
+    # The pane chips on the RESULT detail top border — one per pane the result carries,
+    # the active one lit. Starts right of the "RESULT ##" title; stops before the edge.
+    private def render_detail_chips(screen : Screen, rect : Rect, panes : Array(Symbol)) : Nil
+      x = rect.x + 14
+      panes.each do |pane|
+        label = " #{detail_pane_label(pane)} "
+        break if x + label.size >= rect.right - 1
+        active = pane == @detail_pane
+        x = screen.text(x, rect.y, label, active ? Theme.text_bright : Theme.muted,
+          active ? Theme.accent_bg : Theme.bg) + 1
+      end
+    end
+
+    private def detail_pane_label(pane : Symbol) : String
+      case pane
+      when :saml    then "saml"
+      when :jwt     then @d_jwts.size > 1 ? "jwt (#{@d_jwts.size})" : "jwt"
+      when :graphql then "graphql"
+      when :params  then "params"
+      when :request then "request"
+      else               "response"
+      end
+    end
+
+    private def detail_lines(r : Fuzz::Result) : Array(String)
+      case @detail_pane
+      when :saml    then saml_detail_lines
+      when :jwt     then jwt_detail_lines
+      when :graphql then graphql_detail_lines
+      when :params  then form_detail_lines
+      when :request then detail_request_lines(r)
+      else               detail_response_lines(r)
+      end
+    end
+
+    # The reconstructed wire request for a result (template with its payloads spliced in).
+    private def detail_request_bytes(r : Fuzz::Result) : Bytes
+      Fuzz::Template.parse(@editor.text, @http2).render(r.payloads)
+    end
+
     private def detail_request_lines(r : Fuzz::Result) : Array(String)
-      template = Fuzz::Template.parse(@editor.text, @http2)
-      bytes = template.render(r.payloads)
-      String.new(bytes).scrub.split('\n').map(&.rstrip('\r'))
+      String.new(detail_request_bytes(r)).scrub.split('\n').map(&.rstrip('\r'))
     end
 
     private def detail_response_lines(r : Fuzz::Result) : Array(String)
@@ -1429,7 +1554,73 @@ module Gori::Tui
       lines
     end
 
+    # --- decoded-protocol detail panes (plain text, like the request/response panes) ---
+    private def saml_detail_lines : Array(String)
+      doc = @d_saml || return [] of String
+      lines = ["▸ #{Saml.summary(doc)}", ""]
+      lines.concat(Saml.pretty_xml(doc.xml).scrub.split('\n').map(&.rstrip('\r')))
+      lines
+    end
+
+    private def jwt_detail_lines : Array(String)
+      lines = [] of String
+      @d_jwts.each_with_index do |f, i|
+        lines << "" if i > 0
+        brief = f.brief
+        lines << (brief ? "▸ #{f.location} · #{brief}" : "▸ #{f.location}")
+        lines << detail_jwt_token(f.token)
+        lines << ""
+        lines.concat(f.decoded.scrub.split('\n'))
+      end
+      lines
+    end
+
+    # A JWT can be hundreds of chars; show a head…tail preview so the raw token is
+    # available to read without dominating the pane (mirrors the History detail).
+    private def detail_jwt_token(tok : String) : String
+      tok.size > 64 ? "#{tok[0, 40]}…#{tok[-12, 12]}" : tok
+    end
+
+    private def graphql_detail_lines : Array(String)
+      op = @d_graphql || return [] of String
+      Graphql.display(op).scrub.split('\n')
+    end
+
+    private def form_detail_lines : Array(String)
+      fields = @d_form || return [] of String
+      lines = ["▸ #{fields.size} field#{fields.size == 1 ? "" : "s"}", ""]
+      fields.each do |f|
+        tag = f.source == :query ? "?" : " "
+        note = f.note
+        lines << "#{tag} #{f.name} = #{note ? "(#{note})" : f.value}"
+      end
+      lines
+    end
+
     # --- clicks --------------------------------------------------------------
+    # Mouse: place the TARGET field caret at a click. Single-line field; the value
+    # base mirrors render_target (the "›" marker at rect.x+2, the value at rect.x+4).
+    def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @loaded
+      base = rect.x + 4
+      @tcx = Screen.column_for(@target, mx - base)
+    end
+
+    # Mouse: place the TEMPLATE editor caret at a click. Re-derives the template
+    # half-pane exactly as render/render_top do (target band → 45%-tall top row →
+    # left half → the card's 1-cell inset), so the caret lands where the click points.
+    def template_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless @loaded
+      target_h = {rect.h, 3}.min
+      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      return if rest.h <= 0
+      top_h = {rest.h * 45 // 100, 5}.max
+      top_h = rest.h if rest.h < 6
+      half = {(rest.w - 1) // 2, 1}.max
+      left = Rect.new(rest.x, rest.y, half, top_h)
+      @editor.click_to_cursor(left.inset(1, 1), mx, my)
+    end
+
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless @loaded && rect.contains?(mx, my)
       target_h = {rect.h, 3}.min

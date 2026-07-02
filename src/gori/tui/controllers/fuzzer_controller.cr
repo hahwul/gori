@@ -88,7 +88,7 @@ module Gori::Tui
       when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ^N new · ↹ pane"
       when :config   then config_hint(v)
       when :results  then "↑/↓ select · ↵ detail · o sort · m matched · ^R run · ^X stop · space cmds · ↹ pane"
-      when :detail   then "↑/↓ scroll · ←/→ req/resp · ⇧←/→ h-scroll · esc back"
+      when :detail   then "↑/↓ scroll · ←/→ pane · ⇧←/→ h-scroll · esc back"
       else                "↹/esc tabs"
       end
     end
@@ -289,7 +289,8 @@ module Gori::Tui
       when key.down?               then v.detail_scroll(1)
       when key.left? && ev.shift?  then v.hscroll_detail(-1)
       when key.right? && ev.shift? then v.hscroll_detail(1)
-      when key.left?, key.right?   then v.detail_toggle_pane
+      when key.left?               then v.detail_step_pane(-1)
+      when key.right?              then v.detail_step_pane(1)
       end
     end
 
@@ -300,6 +301,8 @@ module Gori::Tui
         save_current
         v.focus_pane(pane)
         @host.focus_body
+        v.template_click_to_cursor(body, mx, my) if pane == :template
+        v.target_click_to_cursor(body, mx, my) if pane == :target
       end
       true
     end
