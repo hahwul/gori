@@ -253,5 +253,19 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def convert_load : Nil; end
 
+  def notes_new : Nil; end
+
+  def notes_close : Nil; end
+
+  def notes_copy : Nil; end
+
+  def notes_clear : Nil; end
+
+  def notes_edit : Nil; end
+
+  def notes_goto : Nil; end
+
+  def notes_find : Nil; end
+
   def open_settings(section : Symbol) : Nil; end
 end

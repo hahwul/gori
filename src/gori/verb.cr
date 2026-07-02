@@ -23,6 +23,7 @@ module Gori
       Intercept      # the Intercept queue tab has focus
       Comparer       # the Comparer tab has focus
       Convert        # the Convert tab has focus
+      Notes          # the Notes tab has focus (sub-tab strip space menu)
       Project        # the Project tab's SCOPE rule list has focus
       HostOverrides  # the Project tab's HOST OVERRIDES list has focus
       PaletteOpen    # the command palette overlay is up

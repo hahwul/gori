@@ -476,6 +476,34 @@ private class FakeContext < ExecContext
     @calls << :convert_load
   end
 
+  def notes_new : Nil
+    @calls << :notes_new
+  end
+
+  def notes_close : Nil
+    @calls << :notes_close
+  end
+
+  def notes_copy : Nil
+    @calls << :notes_copy
+  end
+
+  def notes_clear : Nil
+    @calls << :notes_clear
+  end
+
+  def notes_edit : Nil
+    @calls << :notes_edit
+  end
+
+  def notes_goto : Nil
+    @calls << :notes_goto
+  end
+
+  def notes_find : Nil
+    @calls << :notes_find
+  end
+
   def open_settings(section : Symbol) : Nil
     @calls << :open_settings
   end

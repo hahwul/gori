@@ -99,6 +99,12 @@ module Gori::Tui
       @dirty = true
     end
 
+    # Clear the current note's text (the sub-tab stays open).
+    def clear_current : Nil
+      current.area.set_text("")
+      @dirty = true
+    end
+
     def insert(ch : Char) : Nil
       current.area.insert(ch)
       @dirty = true
