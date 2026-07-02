@@ -4,6 +4,7 @@ require "./frame"
 require "./text_area"
 require "../store"
 require "../findings_query"
+require "../links"
 
 module Gori::Tui
   # The Findings tab (DESIGN.md: the final output — human-confirmed vulns). A
@@ -19,7 +20,10 @@ module Gori::Tui
       @scroll = 0
       @detail = nil.as(Store::Finding?)
       @detail_flow = nil.as(Store::FlowRow?)
-      @detail_scroll = 0
+      @detail_links = [] of Store::EntityLink
+      @detail_resolved = [] of Links::Resolved
+      @links_scroll = 0
+      @selected_link = 0
       @notes_xscroll = 0 # horizontal scroll offset for the read-only notes preview
       @editing_notes = false
       @notes = TextArea.new
@@ -170,7 +174,9 @@ module Gori::Tui
       return false unless finding
       @detail = finding
       @detail_flow = finding.flow_id.try { |fid| store.flow_row(fid) }
-      @detail_scroll = 0
+      reload_detail_links(store)
+      @links_scroll = 0
+      @selected_link = 0
       @notes_xscroll = 0
       @editing_notes = false
       true
@@ -185,8 +191,43 @@ module Gori::Tui
 
     def close_detail : Nil
       @detail = nil
+      @detail_links = [] of Store::EntityLink
+      @detail_resolved = [] of Links::Resolved
       @editing_notes = false
     end
+
+    def reload_detail_links(store : Store) : Nil
+      return unless finding = @detail
+      @detail_links = store.list_links(Store::LinkOwnerKind::Finding, finding.id)
+      @detail_links = Links.dedupe_finding_flow(@detail_links, finding.flow_id)
+      @detail_resolved = Links.resolve_all(store, @detail_links)
+      @selected_link = @selected_link.clamp(0, {@detail_resolved.size - 1, 0}.max)
+    end
+
+    def move_links(delta : Int32) : Nil
+      return if @detail_resolved.empty?
+      @selected_link = (@selected_link + delta).clamp(0, @detail_resolved.size - 1)
+      ensure_links_visible
+    end
+
+    def scroll_links_wheel(delta : Int32) : Nil
+      move_links(delta)
+    end
+
+    private def ensure_links_visible : Nil
+      list_h = links_visible_rows
+      max_scroll = {@detail_resolved.size - list_h, 0}.max
+      @links_scroll = @selected_link if @selected_link < @links_scroll
+      @links_scroll = @selected_link - list_h + 1 if @selected_link >= @links_scroll + list_h
+      @links_scroll = @links_scroll.clamp(0, max_scroll)
+    end
+
+    def selected_resolved_link : Links::Resolved?
+      @detail_resolved[@selected_link]?
+    end
+
+    # Max link rows shown in the detail pane (the rest scroll).
+    LINKS_VISIBLE = 4
 
     def severity_delta(delta : Int32, store : Store) : Nil
       finding = @detail
@@ -373,7 +414,7 @@ module Gori::Tui
       meta += " · edited #{fmt_ts(finding.updated_at)}" if finding.updated_at > finding.created_at
       screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: w)
 
-      # y3 — linked-flow evidence.
+      # y3 — primary linked-flow evidence.
       evidence = if flow = @detail_flow
                    "evidence  #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
                  elsif fid = finding.flow_id
@@ -383,8 +424,37 @@ module Gori::Tui
                  end
       screen.text(rect.x + 1, rect.y + 3, evidence, Theme.muted, width: w)
 
-      # y4 — divider; y5 — NOTES label (+ edit affordance); y6+ — notes body / editor.
+      # y4+ — RELATED links, then NOTES.
       y = rect.y + 4
+      Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
+      rel_head = "RELATED (#{@detail_resolved.size})"
+      screen.text(rect.x + 1, y + 1, rel_head, Theme.accent, attr: Attribute::Bold)
+      unless @editing_notes
+        links_hint = "space l"
+        screen.text(rect.right - links_hint.size - 1, y + 1, links_hint, Theme.muted)
+      end
+      list_y = y + 2
+      list_h = links_visible_rows
+      max_scroll = {@detail_resolved.size - list_h, 0}.max
+      @links_scroll = @links_scroll.clamp(0, max_scroll)
+      if @detail_resolved.empty?
+        screen.text(rect.x + 1, list_y, "(none — space › l to link History/Replay/…)", Theme.muted, width: w)
+      else
+        (0...list_h).each do |i|
+          idx = @links_scroll + i
+          break if idx >= @detail_resolved.size
+          res = @detail_resolved[idx]
+          active = idx == @selected_link
+          fg = res.stale? ? Theme.muted : (active ? Theme.text_bright : Theme.text)
+          row_x = rect.x + 1
+          if active
+            screen.cell(row_x, list_y + i, '▎', Theme.accent, Theme.bg)
+            row_x += 1
+          end
+          screen.text(row_x, list_y + i, res.line, fg, width: w - (row_x - rect.x - 1))
+        end
+      end
+      y = list_y + list_h
       Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
       screen.text(rect.x + 1, y + 1, "NOTES", Theme.accent, attr: Attribute::Bold)
       unless @editing_notes
@@ -415,8 +485,14 @@ module Gori::Tui
     private def refresh_detail(store : Store) : Nil
       if finding = @detail
         @detail = store.get_finding(finding.id)
+        @detail_flow = @detail.try { |f| f.flow_id.try { |fid| store.flow_row(fid) } }
+        reload_detail_links(store)
       end
       reload(store)
+    end
+
+    private def links_visible_rows : Int32
+      LINKS_VISIBLE
     end
 
     private def status_tag(s : Store::Status) : String

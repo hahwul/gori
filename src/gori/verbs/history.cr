@@ -1,4 +1,5 @@
 require "../verb"
+require "./links"
 
 module Gori
   module Verbs
@@ -248,6 +249,7 @@ module Gori
       register_import(r)
       register_history(r)
       register_sitemap(r)
+      register_links(r)
       register_findings(r)
       register_prism(r)
       register_fuzz(r)

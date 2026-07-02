@@ -240,10 +240,23 @@ module Gori::Tui
 
     # Notification "jump to result": focus the session row with this db_id.
     def reveal_session(id : Int64) : Nil
-      if idx = @miners.index { |t| t.db_id == id }
+      if idx = index_for_db_id(id)
         @current_idx = idx
         @host.focus_body
       end
+    end
+
+    def current_session_db_id : Int64?
+      return nil if @current_idx < 0 || @current_idx >= @miners.size
+      @miners[@current_idx].db_id
+    end
+
+    def index_for_db_id(id : Int64) : Int32?
+      @miners.index { |t| t.db_id == id }
+    end
+
+    def db_id_at(idx : Int32) : Int64?
+      @miners[idx]?.try(&.db_id)
     end
 
     # --- rename (orthogonal rename prompt drives this by VIEW identity) ---

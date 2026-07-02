@@ -608,6 +608,18 @@ module Gori::Tui
       end
     end
 
+    def current_session_db_id : Int64?
+      current_replay_tab.try(&.db_id)
+    end
+
+    def index_for_db_id(id : Int64) : Int32?
+      @replays.index { |t| t.db_id == id }
+    end
+
+    def db_id_at(idx : Int32) : Int64?
+      @replays[idx]?.try(&.db_id)
+    end
+
     # --- private helpers ---
     private def current_replay_tab : ReplayTab?
       return nil if @current_replay_idx < 0 || @current_replay_idx >= @replays.size

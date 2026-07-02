@@ -36,6 +36,10 @@ module Gori
       r.register Verb::Definition.new(
         "notes.find", "Find in note", "Search for text in the current note",
         Verb::Scope::Notes, available: in_notes, mnemonic: 'f') { |ctx| ctx.notes_find; nil }
+
+      r.register Verb::Definition.new(
+        "notes.links", "Manage links", "View/add/remove related History/Replay/Fuzzer/Miner URLs",
+        Verb::Scope::Notes, available: in_notes, mnemonic: 'k') { |ctx| ctx.notes_links; nil }
     end
   end
 end

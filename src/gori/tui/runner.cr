@@ -34,6 +34,11 @@ require "./browser_picker"
 require "./choice_picker"
 require "./flow_picker"
 require "./subtab_picker"
+require "./links_overlay"
+require "./finding_picker"
+require "./note_picker"
+require "../links"
+require "../notes"
 require "./settings_view"
 require "./tabs_overlay"
 require "./hosts_overlay"
@@ -72,7 +77,7 @@ module Gori::Tui
       # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :settings | :tabs | :hosts | :hotkeys | :notifications | :mine_config
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :hotkeys | :notifications | :mine_config
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -128,6 +133,13 @@ module Gori::Tui
       @flow_picker = nil.as(FlowPicker?)
       # The Replay sub-tab search picker (space → s); @overlay is :replay_subtab.
       @subtab_picker = nil.as(SubtabPicker?)
+      # Entity links overlay (Findings/Notes → space l) and pickers for add/link-to.
+      @links_overlay = nil.as(LinksOverlay?)
+      @finding_picker = nil.as(FindingPicker?)
+      @note_picker = nil.as(NotePicker?)
+      @link_pending_ref = nil.as({Store::LinkRefKind, Int64}?)
+      @link_add_owner = nil.as({Store::LinkOwnerKind, Int64}?)
+      @link_add_ref_kind = nil.as(Store::LinkRefKind?)
       # The settings editor (palette → settings:network); @overlay is :settings.
       @settings_view = SettingsView.new
       # The tab-bar customizer (palette → settings:tabs); @overlay is :tabs. Distinct
@@ -428,6 +440,8 @@ module Gori::Tui
       when :finding_new   then @finding_form.set_preedit(text)
       when :comparer_pick then @flow_picker.try(&.set_preedit(text))
       when :replay_subtab then @subtab_picker.try(&.set_preedit(text))
+      when :finding_pick  then @finding_picker.try(&.set_preedit(text))
+      when :note_pick     then @note_picker.try(&.set_preedit(text))
       when :settings      then @settings_view.set_preedit(text)
       when :hosts         then @hosts_overlay.set_preedit(text)
       when :none          then apply_preedit_body(text)
@@ -491,6 +505,9 @@ module Gori::Tui
       return handle_choice_key(ev) if @overlay == :choice
       return handle_flow_picker_key(ev) if @overlay == :comparer_pick
       return handle_subtab_picker_key(ev) if @overlay == :replay_subtab
+      return handle_links_key(ev) if @overlay == :links
+      return handle_finding_picker_key(ev) if @overlay == :finding_pick
+      return handle_note_picker_key(ev) if @overlay == :note_pick
       return handle_settings_key(ev) if @overlay == :settings
       return handle_tabs_key(ev) if @overlay == :tabs
       return handle_hosts_key(ev) if @overlay == :hosts
@@ -677,7 +694,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :settings, :tabs, :hotkeys, :notifications, :mine_config then true
+      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config then true
       else                                                                                                                                                            false
       end
     end
@@ -753,6 +770,9 @@ module Gori::Tui
       when :choice        then click_choice(area, mx, my)
       when :comparer_pick then click_flow_picker(area, mx, my)
       when :replay_subtab then click_subtab_picker(area, mx, my)
+      when :links         then click_links(area, mx, my)
+      when :finding_pick  then click_finding_picker(area, mx, my)
+      when :note_pick     then click_note_picker(area, mx, my)
       when :confirm       then click_confirm(area, mx, my)
       when :settings      then click_settings(area, mx, my)
       when :tabs          then click_tabs(area, mx, my)
@@ -928,6 +948,9 @@ module Gori::Tui
       when :choice        then @choice_picker.try(&.move(step))
       when :comparer_pick then @flow_picker.try(&.move(step))
       when :replay_subtab then @subtab_picker.try(&.move(step))
+      when :links         then @links_overlay.try(&.move(step))
+      when :finding_pick  then @finding_picker.try(&.move(step))
+      when :note_pick     then @note_picker.try(&.move(step))
       when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs          then @tabs_overlay.select_move(step)
       when :hosts         then @hosts_overlay.select_move(step)
@@ -1161,7 +1184,11 @@ module Gori::Tui
       fp = @flow_picker
       return close_flow_picker if fp.nil?
       if row = fp.selected_row
-        if detail = @session.store.get_flow(row.id)
+        if fp.target == :link
+          commit_link_add(Store::LinkRefKind::Flow, row.id)
+          @flow_picker = nil
+          return
+        elsif detail = @session.store.get_flow(row.id)
           comparer_controller.view.set_slot(fp.target, detail)
           @toast = "comparer: set #{fp.target.to_s.upcase} — #{row.method} #{row.host}"
         else
@@ -1182,8 +1209,15 @@ module Gori::Tui
     end
 
     private def close_flow_picker : Nil
+      owner = @link_add_owner
       @overlay = :none
       @flow_picker = nil
+      @link_add_owner = nil
+      @link_add_ref_kind = nil
+      if owner
+        owner_kind, owner_id = owner
+        open_links_overlay(owner_kind, owner_id)
+      end
     end
 
     # Replay sub-tab search (space → s): type to filter the open sessions, ↑/↓
@@ -1209,6 +1243,29 @@ module Gori::Tui
     private def commit_subtab_picker : Nil
       sp = @subtab_picker
       return close_subtab_picker if sp.nil?
+      if @link_add_owner
+        if idx = sp.selected_index
+          ref_kind = @link_add_ref_kind
+          ref_id = if rk = ref_kind
+                     case rk
+                     when .replay? then replay_controller.db_id_at(idx)
+                     when .fuzz?   then fuzzer_controller.db_id_at(idx)
+                     when .miner?  then miner_controller.db_id_at(idx)
+                     else             nil
+                     end
+                   end
+          if rid = ref_id
+            commit_link_add(ref_kind.not_nil!, rid)
+          else
+            @toast = "session not persisted"
+            close_subtab_picker
+          end
+        else
+          close_subtab_picker
+        end
+        @subtab_picker = nil
+        return
+      end
       if idx = sp.selected_index
         replay_controller.jump_subtab(idx)
         @focus = :body # land on the chosen session's content (we came from the response pane)
@@ -1227,8 +1284,308 @@ module Gori::Tui
     end
 
     private def close_subtab_picker : Nil
-      @overlay = :none
+      owner = @link_add_owner
       @subtab_picker = nil
+      @link_add_ref_kind = nil
+      @link_add_owner = nil
+      if owner
+        owner_kind, owner_id = owner
+        open_links_overlay(owner_kind, owner_id)
+      else
+        @overlay = :none
+      end
+    end
+
+    # --- entity links overlay ------------------------------------------------
+
+    private def handle_links_key(ev : Termisu::Event::Key) : Nil
+      lo = @links_overlay
+      return close_links_overlay unless lo
+      key = ev.key
+      c = ev.char || key.to_char
+      if lo.adding?
+        case c
+        when 'f' then open_link_add_flow_picker(lo)
+        when 'r' then open_link_add_replay_picker(lo)
+        when 'z' then open_link_add_fuzz_picker(lo)
+        when 'm' then open_link_add_miner_picker(lo)
+        when nil
+        else
+          lo.stop_add if key.escape?
+        end
+        return
+      end
+      case
+      when key.escape? then close_links_overlay
+      when key.up?     then lo.move(-1)
+      when key.down?   then lo.move(1)
+      when key.enter?       then open_selected_link(lo)
+      when c == 'o'         then open_selected_link(lo)
+      when c == 'd'         then remove_selected_link(lo)
+      when c == 'a'         then lo.start_add
+      end
+    end
+
+    private def click_links(area : Rect, mx : Int32, my : Int32) : Nil
+      lo = @links_overlay
+      box = lo.try(&.overlay_box(area))
+      return close_links_overlay if lo.nil? || box.nil? || dismiss_zone?(box, mx, my)
+      if idx = lo.row_at(box, mx, my)
+        lo.set_selected(idx)
+        open_selected_link(lo)
+      end
+    end
+
+    private def close_links_overlay : Nil
+      @overlay = :none
+      @links_overlay = nil
+      @link_add_owner = nil
+      @link_add_ref_kind = nil
+    end
+
+    def open_links_overlay(owner_kind : Store::LinkOwnerKind, owner_id : Int64) : Nil
+      lo = LinksOverlay.new(owner_kind, owner_id)
+      lo.reload(@session.store)
+      @links_overlay = lo
+      @overlay = :links
+    end
+
+    private def open_selected_link(lo : LinksOverlay) : Nil
+      return unless res = lo.selected_link
+      close_links_overlay
+      navigate_link_ref(res.link.ref_kind, res.link.ref_id)
+    end
+
+    private def remove_selected_link(lo : LinksOverlay) : Nil
+      return unless link = lo.selected_entity_link
+      @session.store.remove_link(link.id)
+      lo.reload(@session.store)
+      refresh_link_owners(lo.owner_kind, lo.owner_id)
+      @toast = "link removed"
+    end
+
+    private def refresh_link_owners(kind : Store::LinkOwnerKind, id : Int64) : Nil
+      case kind
+      when .finding?
+        findings_controller.view.reload_detail_links(@session.store)
+      when .note?
+        refresh_note_link_preview(id)
+      end
+    end
+
+    private def open_link_add_flow_picker(lo : LinksOverlay) : Nil
+      @link_add_owner = {lo.owner_kind, lo.owner_id}
+      @link_add_ref_kind = Store::LinkRefKind::Flow
+      rows = @session.store.recent_flows(500)
+      @flow_picker = FlowPicker.new(rows, :link)
+      @overlay = :comparer_pick
+      lo.stop_add
+    end
+
+    private def open_link_add_replay_picker(lo : LinksOverlay) : Nil
+      rows = replay_controller.subtab_search_rows
+      return (@toast = "no replay sessions to link"; lo.stop_add) if rows.empty?
+      @link_add_owner = {lo.owner_kind, lo.owner_id}
+      @link_add_ref_kind = Store::LinkRefKind::Replay
+      @subtab_picker = SubtabPicker.new("PICK REPLAY", rows)
+      @overlay = :replay_subtab
+      lo.stop_add
+    end
+
+    private def open_link_add_fuzz_picker(lo : LinksOverlay) : Nil
+      rows = fuzz_subtab_rows
+      return (@toast = "no fuzz sessions to link"; lo.stop_add) if rows.empty?
+      @link_add_owner = {lo.owner_kind, lo.owner_id}
+      @link_add_ref_kind = Store::LinkRefKind::Fuzz
+      @subtab_picker = SubtabPicker.new("PICK FUZZ", rows)
+      @overlay = :replay_subtab
+      lo.stop_add
+    end
+
+    private def open_link_add_miner_picker(lo : LinksOverlay) : Nil
+      rows = miner_subtab_rows
+      return (@toast = "no miner sessions to link"; lo.stop_add) if rows.empty?
+      @link_add_owner = {lo.owner_kind, lo.owner_id}
+      @link_add_ref_kind = Store::LinkRefKind::Miner
+      @subtab_picker = SubtabPicker.new("PICK MINER", rows)
+      @overlay = :replay_subtab
+      lo.stop_add
+    end
+
+    private def fuzz_subtab_rows : Array(SubtabPicker::Row)
+      fuzzer_controller.subtab_labels.map_with_index do |label, i|
+        detail = @session.store.fuzz_sessions[i]?.try(&.target) || ""
+        SubtabPicker::Row.new(i, label, detail)
+      end
+    end
+
+    private def miner_subtab_rows : Array(SubtabPicker::Row)
+      miner_controller.subtab_labels.map_with_index do |label, i|
+        detail = @session.store.miner_sessions[i]?.try(&.target) || ""
+        SubtabPicker::Row.new(i, label, detail)
+      end
+    end
+
+    private def commit_link_add(ref_kind : Store::LinkRefKind, ref_id : Int64) : Nil
+      return unless owner = @link_add_owner
+      owner_kind, owner_id = owner
+      commit_link_to_owner(owner_kind, owner_id, ref_kind, ref_id)
+      open_links_overlay(owner_kind, owner_id)
+      @link_add_owner = nil
+      @link_add_ref_kind = nil
+    end
+
+    private def handle_finding_picker_key(ev : Termisu::Event::Key) : Nil
+      fp = @finding_picker
+      return close_finding_picker if fp.nil?
+      key = ev.key
+      case
+      when key.escape?    then close_finding_picker
+      when key.up?        then fp.move(-1)
+      when key.down?      then fp.move(1)
+      when key.enter?     then commit_finding_picker
+      when key.backspace? then fp.backspace
+      else
+        fp.query_char(ev.char.not_nil!) if ev.char
+      end
+    end
+
+    private def commit_finding_picker : Nil
+      fp = @finding_picker
+      return close_finding_picker if fp.nil?
+      if f = fp.selected_finding
+        if ref = @link_pending_ref
+          commit_link_to_owner(Store::LinkOwnerKind::Finding, f.id, ref[0], ref[1])
+        end
+      end
+      close_finding_picker
+    end
+
+    private def click_finding_picker(area : Rect, mx : Int32, my : Int32) : Nil
+      fp = @finding_picker
+      box = fp.try(&.overlay_box(area))
+      return close_finding_picker if fp.nil? || box.nil? || dismiss_zone?(box, mx, my)
+      if idx = fp.row_at(box, mx, my)
+        fp.set_selected(idx)
+        commit_finding_picker
+      end
+    end
+
+    private def close_finding_picker : Nil
+      @overlay = :none
+      @finding_picker = nil
+      @link_pending_ref = nil
+    end
+
+    private def handle_note_picker_key(ev : Termisu::Event::Key) : Nil
+      np = @note_picker
+      return close_note_picker if np.nil?
+      key = ev.key
+      case
+      when key.escape?    then close_note_picker
+      when key.up?        then np.move(-1)
+      when key.down?      then np.move(1)
+      when key.enter?     then commit_note_picker
+      when key.backspace? then np.backspace
+      else
+        np.query_char(ev.char.not_nil!) if ev.char
+      end
+    end
+
+    private def commit_note_picker : Nil
+      np = @note_picker
+      return close_note_picker if np.nil?
+      if row = np.selected_row
+        if ref = @link_pending_ref
+          commit_link_to_owner(Store::LinkOwnerKind::Note, row.id, ref[0], ref[1])
+        end
+      end
+      close_note_picker
+    end
+
+    private def click_note_picker(area : Rect, mx : Int32, my : Int32) : Nil
+      np = @note_picker
+      box = np.try(&.overlay_box(area))
+      return close_note_picker if np.nil? || box.nil? || dismiss_zone?(box, mx, my)
+      if idx = np.row_at(box, mx, my)
+        np.set_selected(idx)
+        commit_note_picker
+      end
+    end
+
+    private def close_note_picker : Nil
+      @overlay = :none
+      @note_picker = nil
+      @link_pending_ref = nil
+    end
+
+    private def commit_link_to_owner(owner_kind : Store::LinkOwnerKind, owner_id : Int64,
+                                   ref_kind : Store::LinkRefKind, ref_id : Int64) : Bool
+      if @session.store.add_link(owner_kind, owner_id, ref_kind, ref_id)
+        @toast = "linked"
+        refresh_link_owners(owner_kind, owner_id)
+        true
+      else
+        @toast = "already linked"
+        false
+      end
+    end
+
+    def navigate_link_ref(ref_kind : Store::LinkRefKind, ref_id : Int64) : Nil
+      case ref_kind
+      when .flow?
+        if history_controller.view.open_detail_id(ref_id, @session.store)
+          @active_tab = :history
+          @focus = :body
+          @overlay = :detail
+        else
+          @toast = "flow no longer captured"
+        end
+      when .replay?
+        if idx = replay_controller.index_for_db_id(ref_id)
+          @active_tab = :replay
+          replay_controller.jump_subtab(idx)
+          @focus = :body
+        else
+          @toast = "replay session gone"
+        end
+      when .fuzz?
+        if idx = fuzzer_controller.index_for_db_id(ref_id)
+          @active_tab = :fuzzer
+          fuzzer_controller.jump_subtab(idx)
+          @focus = :body
+        else
+          @toast = "fuzz session gone"
+        end
+      when .miner?
+        if idx = miner_controller.index_for_db_id(ref_id)
+          @active_tab = :miner
+          miner_controller.jump_subtab(idx)
+          @focus = :body
+        else
+          @toast = "miner session gone"
+        end
+      end
+    end
+
+    private def refresh_note_link_preview(note_id : Int64) : Nil
+      notes_controller.view.link_preview = note_link_preview_line(note_id)
+    end
+
+    private def note_link_preview_line(note_id : Int64) : String
+      links = @session.store.list_links(Store::LinkOwnerKind::Note, note_id)
+      return "" if links.empty?
+      first = links.first
+      line = Links.resolve(@session.store, first).line
+      links.size > 1 ? "#{line} (+#{links.size - 1})" : line
+    end
+
+    private def note_picker_rows : Array(NotePicker::Row)
+      doc = Notes.load(@session.store)
+      doc.notes.map_with_index do |entry, i|
+        label = Notes.title(entry.text) || "note #{i + 1}"
+        NotePicker::Row.new(entry.id, "#{i + 1}:#{label}", entry.text.lines.first?.try(&.strip) || "")
+      end
     end
 
     # Settings editor (palette → settings:network): ↑/↓ pick a field, type to edit,
@@ -1852,6 +2209,9 @@ module Gori::Tui
       @choice_picker.try(&.render(screen, layout.body)) if @overlay == :choice
       @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
       @subtab_picker.try(&.render(screen, layout.body)) if @overlay == :replay_subtab
+      @links_overlay.try(&.render(screen, layout.body)) if @overlay == :links
+      @finding_picker.try(&.render(screen, layout.body)) if @overlay == :finding_pick
+      @note_picker.try(&.render(screen, layout.body)) if @overlay == :note_pick
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
       @hosts_overlay.render(screen, layout.body) if @overlay == :hosts
@@ -1940,6 +2300,9 @@ module Gori::Tui
       when :choice        then @choice_picker.try(&.title) || "CHOOSE"
       when :comparer_pick then "PICK FLOW"
       when :replay_subtab then "FIND SUB-TAB"
+      when :links         then @links_overlay.try(&.title) || "LINKS"
+      when :finding_pick  then "PICK FINDING"
+      when :note_pick     then "PICK NOTE"
       when :settings      then "SETTINGS"
       when :tabs          then "TAB BAR"
       when :hosts         then "HOSTNAME OVERRIDES"
@@ -1978,6 +2341,9 @@ module Gori::Tui
       when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
       when :replay_subtab then "type to filter · ↑/↓ select · ↵ jump · esc cancel"
+      when :links         then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
+      when :finding_pick  then "type to filter · ↑/↓ select · ↵ link · esc cancel"
+      when :note_pick     then "type to filter · ↑/↓ select · ↵ link · esc cancel"
       when :settings      then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
       when :tabs          then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
       when :hosts         then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
@@ -2604,6 +2970,84 @@ module Gori::Tui
         replay_flow(fid)
       else
         @toast = "evidence no longer captured (pruned)"
+      end
+    end
+
+    def finding_links : Nil
+      return unless f = findings_controller.view.detail_finding
+      open_links_overlay(Store::LinkOwnerKind::Finding, f.id)
+    end
+
+    def finding_open_link : Nil
+      if res = findings_controller.view.selected_resolved_link
+        navigate_link_ref(res.link.ref_kind, res.link.ref_id)
+      else
+        @toast = "no related link selected"
+      end
+    end
+
+    def finding_link_move(delta : Int32) : Nil
+      findings_controller.finding_link_move(delta)
+    end
+
+    def notes_links : Nil
+      notes_controller.save_notes
+      id = notes_controller.view.current_note_id
+      refresh_note_link_preview(id)
+      open_links_overlay(Store::LinkOwnerKind::Note, id)
+    end
+
+    def link_flow_id : Int64?
+      return unless @active_tab == :history
+      if @overlay == :detail
+        history_controller.view.detail_flow_id
+      else
+        history_controller.view.selected_id
+      end
+    end
+
+    def link_replay_id : Int64?
+      replay_controller.current_session_db_id if @active_tab == :replay
+    end
+
+    def link_fuzz_id : Int64?
+      fuzzer_controller.current_session_db_id if @active_tab == :fuzzer
+    end
+
+    def link_miner_id : Int64?
+      miner_controller.current_session_db_id if @active_tab == :miner
+    end
+
+    def link_to_finding : Nil
+      ref = current_link_ref
+      return (@toast = "nothing to link") unless ref
+      if f = findings_controller.view.detail_finding
+        commit_link_to_owner(Store::LinkOwnerKind::Finding, f.id, ref[0], ref[1])
+        return
+      end
+      @link_pending_ref = ref
+      @finding_picker = FindingPicker.new(@session.store.findings)
+      @overlay = :finding_pick
+    end
+
+    def link_to_note : Nil
+      ref = current_link_ref
+      return (@toast = "nothing to link") unless ref
+      notes_controller.save_notes
+      @link_pending_ref = ref
+      @note_picker = NotePicker.new(note_picker_rows)
+      @overlay = :note_pick
+    end
+
+    private def current_link_ref : {Store::LinkRefKind, Int64}?
+      if fid = link_flow_id
+        {Store::LinkRefKind::Flow, fid}
+      elsif rid = link_replay_id
+        {Store::LinkRefKind::Replay, rid}
+      elsif zid = link_fuzz_id
+        {Store::LinkRefKind::Fuzz, zid}
+      elsif mid = link_miner_id
+        {Store::LinkRefKind::Miner, mid}
       end
     end
 

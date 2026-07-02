@@ -109,6 +109,22 @@ module Gori
         "finding.replay-flow", "Replay evidence", "Send the linked flow to the Replay tab",
         Verb::Scope::FindingsDetail, [Verb::Chord.new("r")]) { |ctx| ctx.finding_replay_flow; nil }
 
+      r.register Verb::Definition.new(
+        "finding.links", "Manage links", "View/add/remove related History/Replay/Fuzzer/Miner URLs",
+        Verb::Scope::FindingsDetail, mnemonic: 'l') { |ctx| ctx.finding_links; nil }
+
+      r.register Verb::Definition.new(
+        "finding.open-link", "Open linked item", "Open the selected related URL in its tab",
+        Verb::Scope::FindingsDetail, mnemonic: 'k') { |ctx| ctx.finding_open_link; nil }
+
+      r.register Verb::Definition.new(
+        "finding.link-down", "Next related link", "Select the next related item",
+        Verb::Scope::FindingsDetail, [Verb::Chord.new("down"), Verb::Chord.new("j")], hidden: true) { |ctx| ctx.finding_link_move(1); nil }
+
+      r.register Verb::Definition.new(
+        "finding.link-up", "Previous related link", "Select the previous related item",
+        Verb::Scope::FindingsDetail, [Verb::Chord.new("up")], hidden: true) { |ctx| ctx.finding_link_move(-1); nil }
+
       # Export (palette/Global — the findings' way out): write a report to the project dir.
       r.register Verb::Definition.new(
         "findings.export-md", "Export findings (Markdown)", "Write all findings to findings.md in the project dir",

@@ -7,23 +7,34 @@ module Gori
   # so the on-disk layout has a single source of truth.
   #
   # Layout: a JSON document set lives in the project settings KV under
-  # "notes.docs" — {"cur":Int32, "notes":[String, ...]}. A project written by the
-  # pre-multi (single-note) build instead has a plain-text body under the legacy
-  # "notes" key; `load` migrates that into a one-note set on read. It never writes
-  # the legacy key back (it's left untouched — harmless).
+  # "notes.docs" — {"cur":Int32, "notes":[{"id":Int64,"text":String}, ...],
+  # "next_id":Int64}. A project written by the pre-multi (single-note) build instead
+  # has a plain-text body under the legacy "notes" key; `load` migrates that into a
+  # one-note set on read. It never writes the legacy key back (it's left untouched).
   module Notes
-    DOCS_KEY   = "notes.docs" # JSON {"cur":Int32, "notes":[String, ...]}
+    DOCS_KEY   = "notes.docs" # JSON note set (see above)
     LEGACY_KEY = "notes"      # pre-multi single plain-text note
 
-    # A parsed note set: `cur` is the active sub-tab index (0-based), `texts` holds
-    # each note's full body in tab order.
-    record Doc, cur : Int32, texts : Array(String) do
+    # One persisted note document with a stable id (used by entity_links).
+    record NoteEntry, id : Int64, text : String
+
+    # A parsed note set: `cur` is the active sub-tab index (0-based).
+    record Doc, cur : Int32, notes : Array(NoteEntry), next_id : Int64 do
       def empty? : Bool
-        texts.empty?
+        notes.empty?
       end
 
       def size : Int32
-        texts.size
+        notes.size
+      end
+
+      # Note bodies in tab order (CLI listing).
+      def texts : Array(String)
+        notes.map(&.text)
+      end
+
+      def note_id(idx : Int32) : Int64?
+        notes[idx]?.try(&.id)
       end
     end
 
@@ -36,41 +47,66 @@ module Gori
         end
       end
       if legacy = store.setting(LEGACY_KEY)
-        return Doc.new(0, [legacy]) unless legacy.empty?
+        return Doc.new(0, [NoteEntry.new(1_i64, legacy)], 2_i64) unless legacy.empty?
       end
-      Doc.new(0, [] of String)
+      Doc.new(0, [] of NoteEntry, 1_i64)
     end
 
-    # Parse the JSON document set; nil on malformed data so callers can fall back
-    # (defensive — the KV value could be hand-edited or written by a future build).
+    # Parse the JSON document set; nil on malformed data so callers can fall back.
     def self.parse(raw : String) : Doc?
       doc = JSON.parse(raw)
       arr = doc["notes"]?.try(&.as_a?)
       return nil unless arr
       cur = doc["cur"]?.try(&.as_i?) || 0
-      Doc.new(cur, arr.map { |v| v.as_s? || "" })
+      next_id = doc["next_id"]?.try(&.as_i64?) || 0_i64
+      entries = [] of NoteEntry
+      legacy_id = 1_i64
+      arr.each do |v|
+        if obj = v.as_h?
+          id = obj["id"]?.try(&.as_i64?) || legacy_id
+          text = obj["text"]?.try(&.as_s?) || ""
+          entries << NoteEntry.new(id, text)
+          legacy_id = {legacy_id, id + 1}.max
+        else
+          text = v.as_s? || ""
+          entries << NoteEntry.new(legacy_id, text)
+          legacy_id += 1
+        end
+      end
+      next_id = {next_id, legacy_id}.max
+      Doc.new(cur, entries, next_id)
     rescue JSON::ParseException
       nil
     end
 
     # Serialize a note set back to the "notes.docs" JSON value.
-    def self.serialize(cur : Int32, texts : Array(String)) : String
+    def self.serialize(cur : Int32, notes : Array(NoteEntry), next_id : Int64) : String
       JSON.build do |j|
         j.object do
           j.field "cur", cur
+          j.field "next_id", next_id
           j.field "notes" do
             j.array do
-              texts.each { |t| j.string(t) }
+              notes.each do |n|
+                j.object do
+                  j.field "id", n.id
+                  j.field "text", n.text
+                end
+              end
             end
           end
         end
       end
     end
 
+    # Allocate the next note id (caller persists next_id on save).
+    def self.alloc_id(doc : Doc) : {Int64, Int64}
+      id = doc.next_id
+      {id, id + 1}
+    end
+
     # The note's title: its first non-blank line, trimmed; nil when the note is
-    # empty/all-whitespace. Mirrors how the TUI derives each sub-tab's label
-    # (TextArea#first_nonblank_line over lines split on '\n' with '\r' trimmed),
-    # so a CLI listing reads the same titles the editor shows.
+    # empty/all-whitespace. Mirrors how the TUI derives each sub-tab's label.
     def self.title(text : String) : String?
       text.split('\n').each do |raw|
         line = raw.rstrip('\r')
@@ -79,8 +115,7 @@ module Gori
       nil
     end
 
-    # Number of editor lines in a note (split on '\n'); an empty note is one line,
-    # matching the TUI's TextArea.
+    # Number of editor lines in a note (split on '\n'); an empty note is one line.
     def self.line_count(text : String) : Int32
       text.split('\n').size
     end

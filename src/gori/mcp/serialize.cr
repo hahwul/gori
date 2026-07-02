@@ -1,6 +1,7 @@
 require "json"
 require "base64"
 require "../store"
+require "../findings_export"
 require "../replay/engine"
 require "../fuzz"
 require "../proxy/codec/content_decode"
@@ -127,7 +128,7 @@ module Gori
       end
 
       # --- findings -----------------------------------------------------------
-      def self.finding(j : JSON::Builder, f : Store::Finding) : Nil
+      def self.finding(j : JSON::Builder, f : Store::Finding, store : Store? = nil) : Nil
         j.object do
           j.field "id", f.id
           j.field "created_at", f.created_at
@@ -138,6 +139,9 @@ module Gori
           j.field "host", f.host
           j.field "flow_id", f.flow_id
           j.field "notes", f.notes
+          j.field "links" do
+            j.array { Findings::Export.append_links_json(j, f, store) if store }
+          end
         end
       end
 

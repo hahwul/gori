@@ -198,20 +198,22 @@ module Gori
       def self.notes_array_json(doc : Notes::Doc, with_text : Bool) : String
         JSON.build do |j|
           j.array do
-            doc.texts.each_with_index do |text, i|
-              note_object_fields(j, i, text, current: doc.cur == i, with_text: with_text)
+            doc.notes.each_with_index do |entry, i|
+              note_object_fields(j, i, entry, current: doc.cur == i, with_text: with_text)
             end
           end
         end
       end
 
       # One note as a standalone JSON object (the `show <n>` view).
-      def self.note_object_json(idx : Int32, text : String, current : Bool, with_text : Bool) : String
-        JSON.build { |j| note_object_fields(j, idx, text, current: current, with_text: with_text) }
+      def self.note_object_json(idx : Int32, entry : Notes::NoteEntry, current : Bool, with_text : Bool) : String
+        JSON.build { |j| note_object_fields(j, idx, entry, current: current, with_text: with_text) }
       end
 
-      def self.note_object_fields(j : JSON::Builder, idx : Int32, text : String, current : Bool, with_text : Bool) : Nil
+      def self.note_object_fields(j : JSON::Builder, idx : Int32, entry : Notes::NoteEntry, current : Bool, with_text : Bool) : Nil
+        text = entry.text
         j.object do
+          j.field "id", entry.id
           j.field "index", idx + 1
           j.field "title", Notes.title(text)
           j.field "lines", Notes.line_count(text)

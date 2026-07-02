@@ -165,6 +165,67 @@ module Gori
       end
     end
 
+    # Owner of a row in `entity_links`.
+    enum LinkOwnerKind
+      Finding
+      Note
+
+      def label : String
+        to_s.downcase
+      end
+
+      def self.parse(s : String) : LinkOwnerKind?
+        case s
+        when "finding" then Finding
+        when "note"    then Note
+        else                nil
+        end
+      end
+    end
+
+    # Target workbench entity referenced by an `entity_links` row.
+    enum LinkRefKind
+      Flow
+      Replay
+      Fuzz
+      Miner
+
+      def label : String
+        to_s.downcase
+      end
+
+      def self.parse(s : String) : LinkRefKind?
+        case s
+        when "flow"   then Flow
+        when "replay" then Replay
+        when "fuzz"   then Fuzz
+        when "miner"  then Miner
+        else               nil
+        end
+      end
+
+      # Short tag for the TUI list (e.g. "[hist]").
+      def tag : String
+        return "hist" if flow?
+        return "replay" if replay?
+        return "fuzz" if fuzz?
+        "miner"
+      end
+    end
+
+    # A link from a Finding or Note to a workbench entity (flow/replay/fuzz/miner).
+    struct EntityLink
+      getter id : Int64
+      getter owner_kind : LinkOwnerKind
+      getter owner_id : Int64
+      getter ref_kind : LinkRefKind
+      getter ref_id : Int64
+      getter created_at : Int64
+
+      def initialize(@id, @owner_kind, @owner_id, @ref_kind, @ref_id, @created_at)
+      end
+    end
+
     # A human-confirmed finding (DESIGN.md: the final output). Optionally linked
     # to a captured flow. One per project DB.
     struct Finding

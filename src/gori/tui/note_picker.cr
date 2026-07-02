@@ -1,0 +1,124 @@
+require "./screen"
+require "./theme"
+require "./frame"
+require "../notes"
+
+module Gori::Tui
+  # Pick a note sub-tab to attach the current workbench ref to.
+  class NotePicker
+    record Row, id : Int64, label : String, detail : String
+
+    getter selected : Int32
+    @indexed : Array({Row, String})
+
+    def initialize(@rows : Array(Row))
+      @query = ""
+      @preedit = ""
+      @indexed = @rows.map { |row| {row, "#{row.label} #{row.detail}".downcase} }
+      @filtered = @rows
+      @selected = 0
+      @scroll = 0
+    end
+
+    def set_preedit(text : String) : Nil
+      @preedit = text
+    end
+
+    def selected_row : Row?
+      @filtered[@selected]?
+    end
+
+    def move(delta : Int32) : Nil
+      return if @filtered.empty?
+      @selected = (@selected + delta).clamp(0, @filtered.size - 1)
+    end
+
+    def set_selected(idx : Int32) : Nil
+      return if @filtered.empty?
+      @selected = idx.clamp(0, @filtered.size - 1)
+    end
+
+    def query_char(ch : Char) : Nil
+      return if ch.control?
+      @preedit = ""
+      @query += ch
+      refilter
+    end
+
+    def backspace : Nil
+      return if @query.empty?
+      @preedit = ""
+      @query = @query[0, @query.size - 1]
+      refilter
+    end
+
+    private def refilter : Nil
+      terms = @query.downcase.split
+      @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
+      @selected = 0
+      @scroll = 0
+    end
+
+    def overlay_box(area : Rect) : Rect?
+      w = {area.w - 4, 72}.min
+      h = area.h - 2
+      return nil if w < 30 || h < 8
+      x = area.x + (area.w - w) // 2
+      y = area.y + (area.h - h) // 2
+      Rect.new(x, y, w, h)
+    end
+
+    def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      list_top = box.y + 3
+      list_h = box.bottom - 1 - list_top
+      i = my - list_top
+      return nil if i < 0 || i >= list_h
+      return nil if mx < box.x + 1 || mx >= box.right - 1
+      ri = @scroll + i
+      ri < @filtered.size ? ri : nil
+    end
+
+    def render(screen : Screen, area : Rect) : Nil
+      box = overlay_box(area)
+      return unless box
+      Frame.card(screen, box, "PICK NOTE", border: Theme.border_focus)
+      if @query.empty? && @preedit.empty?
+        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ link · esc cancel",
+          Theme.muted, Theme.panel, width: box.w - 4)
+      else
+        px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
+        screen.input_line(px, box.y + 1, @query, @query.size, @preedit, Theme.text_bright,
+          Theme.panel, width: {box.right - 1 - px, 1}.max)
+      end
+      Frame.tee_divider(screen, box, box.y + 2)
+      list_top = box.y + 3
+      list_h = box.bottom - 1 - list_top
+      ensure_visible(list_h)
+      if @filtered.empty?
+        msg = @rows.empty? ? "no notes yet" : "no notes match"
+        screen.text(box.x + 3, list_top, msg, Theme.muted, Theme.panel)
+        return
+      end
+      (0...list_h).each do |i|
+        ri = @scroll + i
+        break if ri >= @filtered.size
+        draw_row(screen, box, list_top + i, @filtered[ri], ri == @selected)
+      end
+    end
+
+    private def draw_row(screen : Screen, box : Rect, ry : Int32, row : Row, active : Bool) : Nil
+      bg = active ? Theme.accent_bg : Theme.panel
+      fg = active ? Theme.text_bright : Theme.text
+      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
+      screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+      screen.text(box.x + 3, ry, row.label, fg, bg, width: box.w - 5)
+    end
+
+    private def ensure_visible(list_h : Int32) : Nil
+      return if list_h <= 0
+      @scroll = @selected if @selected < @scroll
+      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
+      @scroll = @scroll.clamp(0, {@filtered.size - list_h, 0}.max)
+    end
+  end
+end

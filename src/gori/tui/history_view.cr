@@ -233,6 +233,11 @@ module Gori::Tui
       @selected = 0 if @follow && !@rows.empty?
     end
 
+    # The flow id currently open in the detail overlay (nil when the list is showing).
+    def detail_flow_id : Int64?
+      @detail.try(&.row.id)
+    end
+
     def selected_id : Int64?
       @rows[@selected]?.try(&.id)
     end

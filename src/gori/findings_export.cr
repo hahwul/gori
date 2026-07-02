@@ -1,5 +1,6 @@
 require "json"
 require "./store"
+require "./links"
 
 module Gori
   module Findings
@@ -30,6 +31,7 @@ module Gori
                 io << "#" << fid << " (no longer captured)\n"
               end
             end
+            append_related_links(io, f, store)
             io << "\n" << f.notes << "\n" unless f.notes.strip.empty?
             if flow
               append_evidence(io, "Request", flow.request_head, flow.request_body)
@@ -39,7 +41,7 @@ module Gori
         end
       end
 
-      def self.json(findings : Array(Store::Finding)) : String
+      def self.json(findings : Array(Store::Finding), store : Store? = nil) : String
         JSON.build do |j|
           j.array do
             findings.each do |f|
@@ -53,6 +55,9 @@ module Gori
                 j.field "created_at", f.created_at
                 j.field "updated_at", f.updated_at
                 j.field "notes", f.notes
+                j.field "links" do
+                  j.array { append_links_json(j, f, store) }
+                end
               end
             end
           end
@@ -65,6 +70,34 @@ module Gori
       # `gori run findings --format text`.
       def self.one_line(s : String) : String
         s.gsub(/[[:cntrl:]]+/, " ").strip
+      end
+
+      private def self.append_related_links(io : String::Builder, f : Store::Finding, store : Store) : Nil
+        links = store.list_links(Store::LinkOwnerKind::Finding, f.id)
+        links = Links.dedupe_finding_flow(links, f.flow_id)
+        return if links.empty?
+        io << "\n### Related\n\n"
+        Links.resolve_all(store, links).each do |res|
+          io << "- **" << res.tag << "** " << one_line(res.url)
+          io << " — " << one_line(res.label)
+          io << " (stale)" if res.stale?
+          io << "\n"
+        end
+      end
+
+      def self.append_links_json(j : JSON::Builder, f : Store::Finding, store : Store?) : Nil
+        return unless store
+        links = Links.dedupe_finding_flow(
+          store.list_links(Store::LinkOwnerKind::Finding, f.id), f.flow_id)
+        Links.resolve_all(store, links).each do |res|
+          j.object do
+            j.field "kind", res.link.ref_kind.label
+            j.field "ref_id", res.link.ref_id
+            j.field "url", res.url
+            j.field "label", res.label
+            j.field "stale", res.stale?
+          end
+        end
       end
 
       private def self.append_evidence(io : String::Builder, label : String, head : Bytes?, body : Bytes?) : Nil

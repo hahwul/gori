@@ -25,9 +25,7 @@ end
 # The persisted note bodies (parsed back out of the JSON KV value), or [] when
 # nothing has been saved yet.
 private def saved_notes(store : Gori::Store) : Array(String)
-  raw = store.setting("notes.docs")
-  return [] of String unless raw
-  JSON.parse(raw)["notes"].as_a.map(&.as_s)
+  Gori::Notes.load(store).texts
 end
 
 private def render_text(view : NotesView, w = 80, h = 10) : MemoryBackend
@@ -128,8 +126,9 @@ describe Gori::Tui::NotesView do
       view = NotesView.new
       view.reload(store)
       view.count.should eq(1)
-      view.close_note
+      closed_id = view.close_note
       view.count.should eq(1) # closing the last note leaves a fresh empty one
+      closed_id.should eq(1_i64) # stable id is still returned for link cleanup
     end
   end
 

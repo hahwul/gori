@@ -327,7 +327,7 @@ module Gori
       end
 
       private def list_findings : Result
-        Result.new(JSON.build { |j| j.array { @store.findings.each { |f| Serialize.finding(j, f) } } })
+        Result.new(JSON.build { |j| j.array { @store.findings.each { |f| Serialize.finding(j, f, @store) } } })
       end
 
       private def get_finding(h) : Result
@@ -335,7 +335,7 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) unless id
         f = @store.get_finding(id)
         return Result.new("no finding with id #{id}", is_error: true) unless f
-        Result.new(JSON.build { |j| Serialize.finding(j, f) })
+        Result.new(JSON.build { |j| Serialize.finding(j, f, @store) })
       end
 
       private def list_scope : Result

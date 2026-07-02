@@ -23,9 +23,10 @@ module Gori::Tui
     # One note document: a title is derived from its first non-blank line, so
     # there's no separate rename mode — the tab label tracks what you type.
     class Note
+      getter id : Int64
       getter area : TextArea
 
-      def initialize(text : String = "")
+      def initialize(@id : Int64, text : String = "")
         @area = TextArea.new(text)
         @area.follow_x = true # long lines scroll horizontally to keep the cursor visible (like the Project description)
       end
@@ -49,16 +50,32 @@ module Gori::Tui
     getter? dirty : Bool
 
     def initialize
-      @notes = [Note.new] of Note # never empty — always at least one note to type into
+      @notes = [Note.new(1_i64)] of Note # never empty — always at least one note to type into
       @current = 0
+      @next_id = 2_i64
       @dirty = false
+      @link_preview = "" # resolved first-link line for the bottom strip (set by controller)
+    end
+
+    getter link_preview : String
+
+    def link_preview=(s : String) : Nil
+      @link_preview = s
+    end
+
+    # Stable id of the active note (for entity_links owner_id).
+    def current_note_id : Int64
+      current.id
     end
 
     # Load from the store. Re-entering the tab refreshes from disk; safe because
     # edits are always saved before another tab can take focus.
     def reload(store : Store) : Nil
       @notes = load_notes(store)
-      @notes << Note.new if @notes.empty?
+      if @notes.empty?
+        id, @next_id = Notes.alloc_id(Notes::Doc.new(0, [] of Notes::NoteEntry, @next_id))
+        @notes << Note.new(id)
+      end
       @current = @current.clamp(0, @notes.size - 1)
       @dirty = false
     end
@@ -165,18 +182,24 @@ module Gori::Tui
 
     # Open a fresh note and make it current (the new tab gets focus to type into).
     def new_note : Nil
-      @notes << Note.new
+      id, @next_id = Notes.alloc_id(Notes::Doc.new(@current, @notes.map { |n| Notes::NoteEntry.new(n.id, n.area.text) }, @next_id))
+      @notes << Note.new(id)
       @current = @notes.size - 1
       @dirty = true
     end
 
-    # Close the current note. Always keeps at least one note open (a fresh empty
-    # one replaces the last), clamping the active index like Replay's ^W.
-    def close_note : Nil
+    # Close the current note. Returns the closed note's id (for link cleanup), or nil
+    # when nothing was removed. Always keeps at least one note open.
+    def close_note : Int64?
+      closed_id = @notes[@current]?.try(&.id)
       @notes.delete_at(@current) if @current < @notes.size
-      @notes << Note.new if @notes.empty?
+      if @notes.empty?
+        id, @next_id = Notes.alloc_id(Notes::Doc.new(0, [] of Notes::NoteEntry, @next_id))
+        @notes << Note.new(id)
+      end
       @current = @current.clamp(0, @notes.size - 1)
       @dirty = true
+      closed_id
     end
 
     # Switch to note `idx` (no-op if out of range or already current). Marks dirty
@@ -225,11 +248,13 @@ module Gori::Tui
     private def load_notes(store : Store) : Array(Note)
       doc = Notes.load(store)
       @current = doc.cur
-      doc.texts.map { |t| Note.new(t) }
+      @next_id = doc.next_id
+      doc.notes.map { |e| Note.new(e.id, e.text) }
     end
 
     private def serialize : String
-      Notes.serialize(@current, @notes.map(&.area.text))
+      entries = @notes.map { |n| Notes::NoteEntry.new(n.id, n.area.text) }
+      Notes.serialize(@current, entries, @next_id)
     end
   end
 end

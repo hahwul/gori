@@ -131,7 +131,18 @@ module Gori
       abstract def finding_edit_title : Nil               # rename + set severity via the form overlay
       abstract def finding_open_flow : Nil                # open the linked flow's detail in History
       abstract def finding_replay_flow : Nil              # send the linked flow to Replay
+      abstract def finding_links : Nil                     # open the links overlay for the open finding
+      abstract def finding_open_link : Nil                 # open the selected related item in its tab
+      abstract def finding_link_move(delta : Int32) : Nil  # move selection in the RELATED list
       abstract def findings_export(format : Symbol) : Nil # :markdown | :json → project dir
+
+      # entity links (cross-tab attach + link-target ids for availability gating)
+      abstract def link_to_finding : Nil
+      abstract def link_to_note : Nil
+      abstract def link_flow_id : Int64?
+      abstract def link_replay_id : Int64?
+      abstract def link_fuzz_id : Int64?
+      abstract def link_miner_id : Int64?
 
       # prism (passive/active scan issues — grouped by code+host)
       abstract def prism_move(delta : Int32) : Nil
@@ -193,6 +204,7 @@ module Gori
       abstract def notes_edit : Nil  # open the current note in the external editor
       abstract def notes_goto : Nil  # open the go-to-line prompt
       abstract def notes_find : Nil  # open the find-in-note prompt
+      abstract def notes_links : Nil # open the links overlay for the current note
 
       # settings: open the config editor for a section (:network | :editor | :theme |
       # :tabs | :hotkeys). :tabs opens the tab-bar customizer overlay.

@@ -577,6 +577,18 @@ module Gori::Tui
       v.clear_dirty
     end
 
+    def current_session_db_id : Int64?
+      current_tab_obj.try(&.db_id)
+    end
+
+    def index_for_db_id(id : Int64) : Int32?
+      @fuzzers.index { |t| t.db_id == id }
+    end
+
+    def db_id_at(idx : Int32) : Int64?
+      @fuzzers[idx]?.try(&.db_id)
+    end
+
     private def current_tab_obj : FuzzerTab?
       return nil if @current_idx < 0 || @current_idx >= @fuzzers.size
       @fuzzers[@current_idx]
