@@ -61,17 +61,32 @@ module Gori
           dirs
         end
 
-        # Weak when the SCRIPT context (script-src, else the default-src fallback) allows
-        # unsafe-inline / unsafe-eval or a bare wildcard — OR when it is ABSENT entirely: a
-        # CSP with neither script-src nor default-src places ZERO restriction on script
-        # loading/execution (the CSP spec's no-fallback case), which is as XSS-permissive as
-        # having no CSP at all, yet the header's mere presence suppresses the missing_csp
-        # check — so it must be caught here. (`unsafe-inline` confined to style-src is a
-        # common, low-risk pattern and still does NOT trip this.)
+        # A nonce-source or hash-source in the script context (parse_csp keeps the quotes and
+        # lowercases, so the value's original case is irrelevant to this prefix test).
+        SCRIPT_NONCE_HASH = /\A'(?:nonce|sha256|sha384|sha512)-/
+
+        # Weak when the SCRIPT context (script-src, else the default-src fallback) is unsafe —
+        # accounting for CSP Level 3 nullification so a modern, safe policy is NOT a false
+        # positive:
+        #   * ABSENT entirely (neither script-src nor default-src) ⇒ scripts unrestricted (as
+        #     XSS-permissive as no CSP, yet the header's presence suppresses missing_csp).
+        #   * 'unsafe-eval' ⇒ always weak (a nonce / 'strict-dynamic' does NOT nullify eval()).
+        #   * 'unsafe-inline' ⇒ weak ONLY when no nonce/hash source AND no 'strict-dynamic':
+        #     browsers IGNORE 'unsafe-inline' in the presence of either, so a nonce-based CSP
+        #     that keeps 'unsafe-inline' for CSP2-browser fallback is safe, not weak.
+        #   * a bare '*' or a 'data:' script source ⇒ any-origin / data-URI scripts (XSS), weak
+        #     UNLESS 'strict-dynamic' is present (it makes host/scheme sources be ignored).
+        # (`unsafe-inline` confined to style-src is a common, low-risk pattern; only the SCRIPT
+        # context is inspected, so it still does NOT trip this.)
         private def weak_csp?(dirs : Hash(String, Array(String))) : Bool
           script = dirs["script-src"]? || dirs["default-src"]?
           return true if script.nil?
-          script.any? { |s| s.includes?("unsafe-inline") || s.includes?("unsafe-eval") || s == "*" }
+          return true if script.any?(&.includes?("unsafe-eval"))
+          nonce_or_hash = script.any? { |s| SCRIPT_NONCE_HASH.matches?(s) }
+          strict_dynamic = script.includes?("'strict-dynamic'")
+          return true if !nonce_or_hash && !strict_dynamic && script.any?(&.includes?("unsafe-inline"))
+          return true if !strict_dynamic && script.any? { |s| s == "*" || s == "data:" }
+          false
         end
 
         private def hdr(ctx : Context, code : String, title : String, sev : Store::Severity, evidence : String? = nil) : Detection

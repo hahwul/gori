@@ -42,6 +42,7 @@ module Gori
       "cors_wildcard"                  => "Avoid Access-Control-Allow-Origin: * for credentialed/sensitive endpoints; echo a vetted allowlisted origin instead.",
       "cors_null_origin"               => "Never allow the null origin; it is sent by sandboxed iframes and redirects and is trivially forgeable.",
       "cors_reflected_origin"          => "Don't blindly reflect the Origin with Allow-Credentials: true; validate it against a strict allowlist.",
+      "cors_arbitrary_origin"          => "A probe confirmed the server echoes ANY Origin with Allow-Credentials: true — any site can read authenticated responses. Validate the Origin against a strict allowlist.",
       "private_ip_leak"                => "Strip internal hostnames/IPs from responses; they aid network reconnaissance.",
       "error_stack_leak"               => "Return generic errors to clients; log stack traces server-side only.",
       "secret_in_body"                 => "Rotate the exposed credential and remove it from the response; never ship keys/tokens to clients.",

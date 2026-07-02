@@ -263,6 +263,75 @@ describe "Gori::Prism::Passive (FP reduction)" do
     end
   end
 
+  it "does not flag a nonce/hash/strict-dynamic CSP that keeps 'unsafe-inline' for CSP2 fallback" do
+    with_store do |store|
+      # CSP Level 3: a nonce (or hash, or strict-dynamic) makes browsers IGNORE 'unsafe-inline',
+      # so this modern policy is SAFE and must not trip weak_csp (the common FP).
+      nonce = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \
+                                        "script-src 'self' 'unsafe-inline' 'nonce-abc123'\r\n\r\n",
+        content_type: "text/html")
+      codes_of(nonce).should_not contain("weak_csp")
+      hash = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \
+                                       "script-src 'unsafe-inline' 'sha256-abc123def456ghi789'\r\n\r\n",
+        content_type: "text/html")
+      codes_of(hash).should_not contain("weak_csp")
+      # strict-dynamic also nullifies 'unsafe-inline' AND host/scheme sources (https:, *).
+      strict = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \
+                                         "script-src 'strict-dynamic' 'nonce-x' 'unsafe-inline' https: *\r\n\r\n",
+        content_type: "text/html")
+      codes_of(strict).should_not contain("weak_csp")
+    end
+  end
+
+  it "still flags 'unsafe-eval' and a 'data:' script source (neither is nullified by a nonce)" do
+    with_store do |store|
+      # 'unsafe-eval' executes regardless of nonces/strict-dynamic → always weak.
+      eval_csp = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \
+                                           "script-src 'self' 'nonce-x' 'unsafe-eval'\r\n\r\n",
+        content_type: "text/html")
+      codes_of(eval_csp).should contain("weak_csp")
+      # a 'data:' script source allows data-URI scripts (XSS) when strict-dynamic is absent.
+      data_csp = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \
+                                           "script-src 'self' data:\r\n\r\n",
+        content_type: "text/html")
+      codes_of(data_csp).should contain("weak_csp")
+    end
+  end
+
+  it "rates a wildcard CORS with credentials Medium (the combination is browser-rejected, not High)" do
+    with_store do |store|
+      dets = analyze(store,
+        resp_head: "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\n" \
+                   "Access-Control-Allow-Credentials: true\r\n\r\n", content_type: nil)
+      hit = dets.find(&.code.==("cors_wildcard")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::Medium)
+    end
+  end
+
+  it "flags a Go panic dump and Stripe/SendGrid/npm secrets (type only, never the value)" do
+    with_store do |store|
+      go = analyze(store, resp_head: "HTTP/1.1 500 Server Error\r\n\r\n", status: 500,
+        content_type: "text/html",
+        body: "panic: runtime error\n\ngoroutine 1 [running]:\nmain.main()\n\t/app/main.go:10 +0x1d")
+      codes_of(go).should contain("error_stack_leak")
+      stripe = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: %({"key":"sk_live_ABCDEFGHIJKLMNOPQRSTUVWX"}))
+      hit = stripe.find(&.code.==("secret_in_body")).not_nil!
+      hit.evidence.should eq("Stripe secret key")
+      hit.evidence.not_nil!.should_not contain("sk_live")
+      sendgrid = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "SG.abcdefghijklmnop.qrstuvwxyz0123456789")
+      sendgrid.find(&.code.==("secret_in_body")).not_nil!.evidence.should eq("SendGrid API key")
+      npm = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "//registry.npmjs.org/:_authToken=npm_abcdefghijklmnopqrstuvwxyz0123456789")
+      npm.find(&.code.==("secret_in_body")).not_nil!.evidence.should eq("npm access token")
+      # a prose mention of "goroutine" (no `[state]:` header) must NOT trip.
+      prose = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", content_type: "text/html",
+        body: "Launch a goroutine to handle each request.")
+      codes_of(prose).should_not contain("error_stack_leak")
+    end
+  end
+
   it "does not fingerprint an Elasticsearch query-DSL body as GraphQL" do
     with_store do |store|
       es = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api/search",
@@ -443,6 +512,71 @@ describe "Gori::Prism::Passive (new patterns)" do
         content_type: "text/html")
       hit = dets.find(&.code.==("cookie_no_samesite")).not_nil!
       hit.evidence.should eq("samesite")
+    end
+  end
+end
+
+describe "Gori::Prism::Active::CorsReflection" do
+  probe = Gori::Prism::Active::CorsReflection.new
+
+  it "only probes CORS endpoints (response carried ACAO) with a safe method" do
+    with_store do |store|
+      # No ACAO on the captured response → nothing to probe.
+      plain = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/api", content_type: nil)
+      probe.plan(plain).should be_nil
+      # A POST is never probed even if it does CORS.
+      post = capture_flow(store, "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://a.test\r\n\r\n",
+        target: "/api", method: "POST", content_type: nil)
+      probe.plan(post).should be_nil
+      # A GET whose response did CORS → a probe is built.
+      cors = capture_flow(store, "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://a.test\r\n\r\n",
+        target: "/api", content_type: nil)
+      probe.plan(cors).should_not be_nil
+    end
+  end
+
+  it "sends a single synthetic Origin header (replacing any the browser sent)" do
+    with_store do |store|
+      cors = capture_flow(store, "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://real.test\r\n\r\n",
+        target: "/api", req_headers: "Origin: https://real.test\r\n", content_type: nil)
+      plan = probe.plan(cors).not_nil!
+      text = String.new(plan.request)
+      text.scan(/Origin:/i).size.should eq(1) # exactly one Origin header
+      text.should contain("Origin: #{Gori::Prism::Active::CorsReflection::PROBE_ORIGIN}")
+      text.should_not contain("https://real.test") # the browser's Origin was dropped
+    end
+  end
+
+  it "flags High only when the probe origin is reflected WITH credentials" do
+    with_store do |store|
+      cors = capture_flow(store, "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://real.test\r\n\r\n",
+        target: "/api", content_type: nil)
+      plan = probe.plan(cors).not_nil!
+      origin = Gori::Prism::Active::CorsReflection::PROBE_ORIGIN
+
+      reflected = Gori::Replay::Result.new(
+        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: #{origin}\r\n" \
+        "Access-Control-Allow-Credentials: true\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      dets = probe.detections(plan, reflected, cors)
+      dets.size.should eq(1)
+      dets.first.code.should eq("cors_arbitrary_origin")
+      dets.first.severity.should eq(Gori::Store::Severity::High)
+
+      # Reflected but NO credentials → not exploitable → not flagged.
+      no_creds = Gori::Replay::Result.new(
+        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: #{origin}\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections(plan, no_creds, cors).should be_empty
+
+      # A correctly-behaving allowlist rejects the probe origin (echoes its own) → not flagged.
+      allowlisted = Gori::Replay::Result.new(
+        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://real.test\r\n" \
+        "Access-Control-Allow-Credentials: true\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections(plan, allowlisted, cors).should be_empty
+
+      # A wildcard is handled by the passive check, not proven here.
+      wildcard = Gori::Replay::Result.new(
+        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections(plan, wildcard, cors).should be_empty
     end
   end
 end

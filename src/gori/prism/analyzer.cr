@@ -150,8 +150,12 @@ module Gori
         detections = task.rule.detections(task.plan, result, task.detail)
         return if detections.empty?
         detections.each { |d| @store.upsert_prism_issue(d) }
-        summary = detections.first.evidence
-        emit(IssueEvent.new(row.host, "reflected param on #{row.host} (#{summary})"))
+        # Notification wording is rule-agnostic: the detection's own title + evidence (so a CORS
+        # probe reads "CORS reflects an arbitrary origin…", not a hardcoded "reflected param").
+        first = detections.first
+        msg = "#{first.title} on #{row.host}"
+        msg = "#{msg}: #{first.evidence}" if first.evidence
+        emit(IssueEvent.new(row.host, msg))
       rescue DB::Error | SQLite3::Exception
         # store closing — stop quietly (the worker will exit when the queue closes)
       rescue ex

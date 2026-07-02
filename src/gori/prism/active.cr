@@ -1,5 +1,6 @@
 require "./active/types"
 require "./active/reflected_param"
+require "./active/cors_reflection"
 
 module Gori
   module Prism
@@ -10,7 +11,7 @@ module Gori
       # The primary rule, reused for the registry AND the module-level facade.
       PRIMARY = ReflectedParam.new
 
-      RULES = [PRIMARY] of Rule
+      RULES = [PRIMARY, CorsReflection.new] of Rule
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.
