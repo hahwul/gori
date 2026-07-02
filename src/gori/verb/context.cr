@@ -197,6 +197,12 @@ module Gori
       # settings: open the config editor for a section (:network | :editor | :theme |
       # :tabs | :hotkeys). :tabs opens the tab-bar customizer overlay.
       abstract def open_settings(section : Symbol) : Nil
+
+      # import: palette-only bulk importers — each opens a path prompt, parses the
+      # file, and inserts flows into History (Sitemap derives from the same store).
+      abstract def import_har : Nil
+      abstract def import_urls : Nil
+      abstract def import_oas : Nil
     end
   end
 end

@@ -1,0 +1,78 @@
+require "json"
+require "yaml"
+require "./builder"
+
+module Gori
+  module Import
+    module Oas
+      HTTP_METHODS = %w(get post put patch delete head options trace)
+
+      def self.parse_file(path : String) : Array(Builder::FlowPair)
+        raw = File.read(path)
+        json_raw = case File.extname(path).downcase
+                   when ".yaml", ".yml" then YAML.parse(raw).to_json
+                   else                      raw
+                   end
+        spec = JSON.parse(json_raw)
+        paths = spec["paths"]?
+        raise Gori::Error.new("OpenAPI spec missing paths") unless paths
+        base = server_base(spec)
+        now = Time.utc.to_unix * 1_000_000
+        pairs = [] of Builder::FlowPair
+        paths.as_h.each do |path, item|
+          HTTP_METHODS.each do |m|
+            op = item[m]?
+            next unless op
+            pairs << operation_to_flow(now, base, path.to_s, m, op)
+          end
+        end
+        pairs
+      end
+
+      private def self.server_base(spec : JSON::Any) : String
+        servers = spec["servers"]?
+        if servers && (arr = servers.as_a?) && (first = arr[0]?)
+          url = first["url"]?.to_s
+          raise Gori::Error.new("OpenAPI spec has no servers[0].url") if url.empty?
+          return url
+        end
+        raise Gori::Error.new("OpenAPI spec missing servers — add a servers[0].url block")
+      end
+
+      private def self.operation_to_flow(created_at : Int64, base : String, path : String,
+                                         method : String, op : JSON::Any) : Builder::FlowPair
+        url = join_url(base, path)
+        headers = {} of String => String
+        body = request_body(op)
+        if body
+          headers["Content-Type"] = body_content_type(op) || "application/json"
+        end
+        Builder.pending_request(created_at, url, method.upcase, headers, body)
+      end
+
+      private def self.join_url(base : String, path : String) : String
+        b = base.chomp('/')
+        p = path.starts_with?('/') ? path : "/#{path}"
+        "#{b}#{p}"
+      end
+
+      private def self.request_body(op : JSON::Any) : Bytes?
+        rb = op["requestBody"]?
+        return nil unless rb
+        content = rb["content"]?
+        return nil unless content
+        return %({}).to_slice if content["application/json"]? || !content.as_h.empty?
+        nil
+      end
+
+      private def self.body_content_type(op : JSON::Any) : String?
+        rb = op["requestBody"]?
+        return nil unless rb
+        content = rb["content"]?
+        return nil unless content
+        return "application/json" if content["application/json"]?
+        content.as_h.keys.first?.try(&.to_s)
+      end
+    end
+  end
+end

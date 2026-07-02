@@ -268,4 +268,10 @@ class FakeExecContext < Gori::Verb::ExecContext
   def notes_find : Nil; end
 
   def open_settings(section : Symbol) : Nil; end
+
+  def import_har : Nil; end
+
+  def import_urls : Nil; end
+
+  def import_oas : Nil; end
 end

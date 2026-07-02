@@ -507,6 +507,18 @@ private class FakeContext < ExecContext
   def open_settings(section : Symbol) : Nil
     @calls << :open_settings
   end
+
+  def import_har : Nil
+    @calls << :import_har
+  end
+
+  def import_urls : Nil
+    @calls << :import_urls
+  end
+
+  def import_oas : Nil
+    @calls << :import_oas
+  end
 end
 
 describe Gori::Verb do

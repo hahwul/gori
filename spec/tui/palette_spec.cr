@@ -107,6 +107,17 @@ describe Gori::Tui::PaletteState do
     r["capture.toggle"].category.should eq(Gori::Verb::Category::Action) # the default kind
   end
 
+  it "surfaces import commands when the palette is filtered by 'import:'" do
+    ctx = FakeExecContext.new
+    palette = PaletteState.new(Gori::Verbs.registry)
+    palette.reset(ctx)
+    "import:".each_char { |c| palette.append(c, ctx) }
+    ids = palette.results.map(&.id)
+    ids.should contain("import.har")
+    ids.should contain("import.urls")
+    ids.should contain("import.oas")
+  end
+
   it "prints a colour-coded category sigil before each entry" do
     ctx = FakeExecContext.new
     palette = PaletteState.new(Gori::Verbs.registry)

@@ -50,6 +50,7 @@ require "./clipboard"
 require "./keybind"
 require "../scope"
 require "../rules"
+require "../import"
 
 module Gori::Tui
   # The shell controller for ONE open project: owns view state, implements the
@@ -98,6 +99,13 @@ module Gori::Tui
       # reconcile can reorder/remove replay tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
       @rename_view = nil.as(ReplayView | FuzzerView | ConvertView | Nil)
+      # The import path prompt (palette → import:har/urls/oas) — bottom-anchored like
+      # ^G/^F, with filesystem tab-completion via PathComplete.
+      @import_open = false
+      @import_kind = :har
+      @import_buffer = ""
+      @import_preedit = ""
+      @import_path_complete = PathComplete.new
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
       # propagated to the focused view in render_body. Handy for smuggling tests.
       @reveal = false
@@ -404,6 +412,10 @@ module Gori::Tui
         @rename_preedit = text
         return
       end
+      if @import_open
+        @import_preedit = text
+        return
+      end
       # Route preedit to whichever input is active so composing text (e.g. Hangul
       # jamo building into a syllable) shows live with an underline, until it
       # commits (a normal char insert then clears the preedit). The dispatch
@@ -453,6 +465,7 @@ module Gori::Tui
       return handle_goto_key(ev) if @goto_open             # the ^G line prompt is modal while up
       return handle_search_key(ev) if @search_open         # the ^F find prompt is modal while up
       return handle_rename_key(ev) if @rename_open         # the sub-tab rename prompt is modal while up
+      return handle_import_key(ev) if @import_open         # the import path prompt is modal while up
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
       # multi-line view (editors move the cursor, read-only panes scroll). Modifier
       # keys, so they work inside text editors without conflicting with typing.
@@ -644,10 +657,11 @@ module Gori::Tui
     # like the keyboard). Centered modals capture every click (outside → dismiss).
     private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
       return if @space_menu_open && click_space_menu(layout, mx, my)
-      if @goto_open || @search_open || @rename_open
+      if @goto_open || @search_open || @rename_open || @import_open
         close_goto if @goto_open # a click anywhere dismisses the bottom prompt (like esc)
         close_search if @search_open
         close_rename if @rename_open
+        close_import if @import_open
         return
       end
       if modal_overlay?
@@ -1869,6 +1883,7 @@ module Gori::Tui
       render_goto_prompt(screen, layout.status) if @goto_open
       render_search_prompt(screen, layout.status) if @search_open
       render_rename_prompt(screen, layout.status) if @rename_open
+      render_import_prompt(screen, layout.status) if @import_open
     end
 
     # Emit the frame: a full repaint right after a resize (the diff renderer would
@@ -2251,6 +2266,104 @@ module Gori::Tui
       iw = {rect.right - x - hint.size - 2, 4}.max
       screen.input_line(x, rect.y, @rename_buffer, @rename_buffer.size, @rename_preedit, Theme.text_bright, Theme.panel, width: iw)
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
+    end
+
+    # --- Import path prompt (palette → import:har/urls/oas) ------------------
+
+    private def open_import(kind : Symbol) : Nil
+      @import_kind = kind
+      @import_buffer = ""
+      @import_preedit = ""
+      @import_path_complete.close
+      @import_open = true
+    end
+
+    private def close_import : Nil
+      @import_open = false
+      @import_preedit = ""
+      @import_path_complete.close
+    end
+
+    private def handle_import_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        close_import
+      elsif key.tab? || key.enter?
+        if @import_path_complete.open? && (res = @import_path_complete.accept)
+          insert, is_dir = res
+          @import_buffer = insert
+          if is_dir
+            @import_path_complete.refresh(@import_buffer)
+          else
+            @import_path_complete.close
+            if key.enter?
+              apply_import(@import_buffer)
+              close_import
+            end
+          end
+        elsif key.enter?
+          apply_import(@import_buffer)
+          close_import
+        end
+      elsif key.back_tab? || key.up?
+        @import_path_complete.move(-1) if @import_path_complete.open?
+      elsif key.down?
+        @import_path_complete.move(1) if @import_path_complete.open?
+      elsif key.backspace?
+        @import_buffer = @import_buffer[0, {@import_buffer.size - 1, 0}.max]
+        @import_path_complete.refresh(@import_buffer)
+      elsif c && !ev.ctrl? && !ev.alt?
+        @import_buffer += c
+        @import_preedit = ""
+        @import_path_complete.refresh(@import_buffer)
+      end
+    end
+
+    private def apply_import(path : String) : Nil
+      trimmed = path.strip
+      if trimmed.empty?
+        @toast = "import cancelled — path is empty"
+        close_import
+        return
+      end
+      result = Import.import_file(@session.store, @import_kind, trimmed)
+      sitemap_controller.reload
+      label = case @import_kind
+              when :har  then "HAR"
+              when :urls then "URLs"
+              when :oas  then "OpenAPI"
+              else            "file"
+              end
+      msg = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{label} · #{trimmed}"
+      msg += " (#{result.skipped} entries skipped)" if result.skipped > 0
+      @toast = msg
+    rescue ex
+      @toast = "import failed: #{ex.message}"
+    end
+
+    private def import_prompt_prefix : String
+      case @import_kind
+      when :har  then "import HAR: "
+      when :urls then "import URLs: "
+      when :oas  then "import OpenAPI: "
+      else            "import: "
+      end
+    end
+
+    private def render_import_prompt(screen : Screen, rect : Rect) : Nil
+      return if rect.w < 6
+      screen.fill(rect, Theme.panel)
+      prefix = import_prompt_prefix
+      screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
+      hint = "↵ import · tab complete · esc cancel"
+      x = rect.x + prefix.size
+      iw = {rect.right - x - hint.size - 2, 4}.max
+      screen.input_line(x, rect.y, @import_buffer, @import_buffer.size, @import_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
+      if @import_path_complete.open?
+        @import_path_complete.render(screen, x, rect.y - 1, Rect.new(rect.x, rect.y - 9, rect.w, 9))
+      end
     end
 
     private def render_search_prompt(screen : Screen, rect : Rect) : Nil
@@ -3079,6 +3192,18 @@ module Gori::Tui
 
     # Open the settings editor for `section` (palette → settings:network/editor/theme/
     # tabs/hotkeys). All sections are implemented; an unknown one toasts a TODO.
+    def import_har : Nil
+      open_import(:har)
+    end
+
+    def import_urls : Nil
+      open_import(:urls)
+    end
+
+    def import_oas : Nil
+      open_import(:oas)
+    end
+
     def open_settings(section : Symbol) : Nil
       case section
       when :network, :editor, :theme

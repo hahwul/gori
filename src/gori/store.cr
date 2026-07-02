@@ -24,6 +24,16 @@ module Gori
       end
     end
 
+    # Atomic bulk import (palette import:har/urls/oas) — every pair commits in one
+    # writer transaction so a mid-batch failure rolls back the whole import.
+    struct InsertImportBatch < WriteOp
+      getter pairs : Array({CapturedRequest, CapturedResponse?})
+      getter reply : Channel(Int32)
+
+      def initialize(@pairs, @reply)
+      end
+    end
+
     struct UpdateResp < WriteOp
       getter resp : CapturedResponse
       getter reply : Channel(Nil)
@@ -149,6 +159,16 @@ module Gori
       reply.receive
     rescue Channel::ClosedError
       0_i64 # store closing — drop the late row instead of raising into the proxy fiber
+    end
+
+    # Insert many flows atomically (one writer transaction). Returns the committed
+    # count, or 0 when the store is closing or the batch was rolled back.
+    def insert_import_batch(pairs : Array({CapturedRequest, CapturedResponse?})) : Int32
+      reply = Channel(Int32).new(1)
+      @writes.send(InsertImportBatch.new(pairs, reply))
+      reply.receive
+    rescue Channel::ClosedError
+      0_i32
     end
 
     # Fills in the response side of an existing flow. Blocks until committed.
@@ -1045,6 +1065,30 @@ module Gori
                   ins_reply = op.reply
                   id = insert_one(c, op.req)
                   deferred << -> { ins_reply.send(id); publish(FlowEvent.new(id, :inserted)) }
+                when InsertImportBatch
+                  batch_reply = op.reply
+                  inserted = [] of {Int64, Bool}
+                  op.pairs.each do |req, resp|
+                    id = insert_one(c, req)
+                    has_resp = !resp.nil?
+                    if resp
+                      update_one(c, Store::CapturedResponse.new(
+                        flow_id: id, status: resp.not_nil!.status, head: resp.not_nil!.head,
+                        body: resp.not_nil!.body, reason: resp.not_nil!.reason,
+                        content_type: resp.not_nil!.content_type, ttfb_us: resp.not_nil!.ttfb_us,
+                        duration_us: resp.not_nil!.duration_us, state: resp.not_nil!.state,
+                        error: resp.not_nil!.error, body_truncated: resp.not_nil!.body_truncated?,
+                        body_size: resp.not_nil!.body_size))
+                    end
+                    inserted << {id, has_resp}
+                  end
+                  deferred << -> {
+                    batch_reply.send(inserted.size.to_i32)
+                    inserted.each do |(id, has_resp)|
+                      publish(FlowEvent.new(id, :inserted))
+                      publish(FlowEvent.new(id, :updated)) if has_resp
+                    end
+                  }
                 when UpdateResp
                   upd_reply = op.reply
                   fid = op.resp.flow_id
@@ -1120,8 +1164,9 @@ module Gori
     # id, no event). The reply channels are buffered(1) so this never blocks.
     private def fail_reply(op : WriteOp) : Nil
       case op
-      when InsertFlow then op.reply.send(0_i64)
-      when UpdateResp then op.reply.send(nil)
+      when InsertFlow         then op.reply.send(0_i64)
+      when InsertImportBatch then op.reply.send(0_i32)
+      when UpdateResp         then op.reply.send(nil)
       when InsertWs   then op.reply.send(nil)
       when ExecTask   then op.reply.send(0_i64)
       end

@@ -245,6 +245,7 @@ module Gori
     def self.registry : Verb::Registry
       r = Verb::Registry.new
       register_core(r)
+      register_import(r)
       register_history(r)
       register_sitemap(r)
       register_findings(r)
