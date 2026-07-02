@@ -1471,8 +1471,8 @@ module Gori::Tui
     end
 
     # A navigable sub-tab strip is showing — gates entry into :subtabs (and the strip
-    # click/rename paths). Each controller decides its own threshold (Convert ≥2;
-    # Replay/Fuzzer/Notes ≥1 so a single session is still labelled + space-menu reachable).
+    # click/rename paths). Each controller decides its own threshold (Replay/Fuzzer/
+    # Notes/Convert ≥1 so a single session is still labelled + space-menu reachable).
     private def subtabs_shown? : Bool
       @tabs[@active_tab]?.try(&.subtab_strip_shown?) || false
     end
@@ -2292,7 +2292,7 @@ module Gori::Tui
     end
 
     # Descend from the tab menu (↓/↵/j on the tab bar). Tabs with a navigable
-    # sub-tab strip (Replay/Notes, ≥2 chips) land on the STRIP first so ←/→ can
+    # sub-tab strip (Replay/Notes/Convert) land on the STRIP first so ←/→ can
     # switch sub-tabs; ↓/↵ again drops into the editor. Other tabs go straight to
     # the body. (`focus_pane`'s guard would otherwise route an absent strip to the
     # menu, so the active tab is checked here.)

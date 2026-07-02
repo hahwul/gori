@@ -32,9 +32,9 @@ module Gori::Tui
   # consumes EVERY printable key (like Notes), so command_scope is the Convert scope
   # and handle_body_key always returns true: the Convert verbs' single-letter
   # mnemonics never collide with literal text (`:` stays literal) — they're reached
-  # only from the space menu + palette. A runner-owned sub-tab strip appears at ≥2
-  # sessions (^N new · ^W close · ^1-9/←→ switch · r rename); open sessions persist to
-  # the global settings.json.
+  # only from the space menu + palette. A runner-owned sub-tab strip appears from the
+  # first session (^N new · ^W close · ^1-9/←→ switch · r rename); open sessions persist
+  # to the global settings.json.
   class ConvertController < TabController
     SEPS = {'>', '|', ','}
 
@@ -84,13 +84,19 @@ module Gori::Tui
       ConvertSession.new(view, input, chain, chain.size, :input, result)
     end
 
-    # --- sub-tab strip (runner-owned chrome; shown at ≥2 sessions) ---
+    # --- sub-tab strip (runner-owned chrome; shown from the first session) ---
     def subtab_labels : Array(String)
       @sessions.map_with_index { |s, i| "#{i + 1}:#{session_label(s)}" }
     end
 
     def subtab_index : Int32
       @idx
+    end
+
+    # Show the strip from the FIRST session (not ≥2), like Replay/Notes: a lone
+    # conversion still labels its chip and exposes the strip's space-menu.
+    def subtab_strip_shown? : Bool
+      true
     end
 
     # The chip label: the custom name if set, else a compact preview of the chain
@@ -162,7 +168,7 @@ module Gori::Tui
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
       body_rect = rect
-      if @sessions.size >= 2
+      if subtab_strip_shown?
         sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
         BodyChrome.render_subtab_strip(screen, sub_rect, subtab_labels, @idx, focus == :subtabs)
       end
@@ -235,7 +241,7 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      body = @sessions.size >= 2 ? BodyChrome.carve_subtab_row(rect)[1] : rect
+      body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
       s = cur
       # The view frames each card itself, so layout takes the full body rect; the
       # editable content lives one cell inside each card border.
@@ -301,7 +307,7 @@ module Gori::Tui
       when :output
         "↑/↓ scroll · ⇧←/→ h-scroll · ↑-top chain · ↹ next · space menu · ^X mode · ^Y copy · esc tabs"
       else
-        "type to edit · ↓/↹ chain · ^L clear · ^Y copy · ^X mode · ^N new · ^W close · esc tabs"
+        "type to edit · ↓/↹ chain · ^L clear · ^Y copy · ^X mode · ^N new · ^W close · ↑ sub-tabs · esc tabs"
       end
     end
 
@@ -357,7 +363,12 @@ module Gori::Tui
       when key.backspace?
         s.input.backspace; touch
       when key.up?
-        s.input.at_top? ? (commit; @host.request_focus(:menu)) : s.input.move(-1, 0)
+        if s.input.at_top?
+          commit
+          @host.request_focus(:subtabs)
+        else
+          s.input.move(-1, 0)
+        end
       when key.down?
         s.input.at_bottom? ? (s.pane = :chain) : s.input.move(1, 0)
       else
