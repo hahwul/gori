@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 20
+      VERSION = 21
 
       V1 = [
         <<-SQL,
@@ -392,7 +392,30 @@ module Gori
         "CREATE INDEX idx_prism_issues_cat ON prism_issues (category, host)",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20]
+      # Cross-entity links: attach History/Replay/Fuzzer/Miner refs to a Finding or Note.
+      # V21 also backfills existing findings.flow_id rows as flow links.
+      V21 = [
+        <<-SQL,
+        CREATE TABLE entity_links (
+          id         INTEGER PRIMARY KEY,
+          owner_kind TEXT    NOT NULL,
+          owner_id   INTEGER NOT NULL,
+          ref_kind   TEXT    NOT NULL,
+          ref_id     INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          UNIQUE(owner_kind, owner_id, ref_kind, ref_id)
+        )
+        SQL
+        "CREATE INDEX idx_entity_links_owner ON entity_links (owner_kind, owner_id)",
+        <<-SQL,
+        INSERT INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at)
+        SELECT 'finding', id, 'flow', flow_id, created_at
+        FROM findings
+        WHERE flow_id IS NOT NULL
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

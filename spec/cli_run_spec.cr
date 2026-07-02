@@ -137,8 +137,27 @@ describe Gori::Findings::Export do
     parsed[0]["severity"].as_s.should eq("high")
     parsed[0]["status"].as_s.should eq("confirmed")
     parsed[0]["flow_id"].as_i.should eq(13)
+    parsed[0]["links"].as_a.should be_empty
     parsed[1]["host"].raw.should be_nil
     parsed[1]["flow_id"].raw.should be_nil
+  end
+
+  it "serialises entity links in findings JSON export" do
+    with_store do |store|
+      fid = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443, method: "GET",
+        target: "/x", http_version: "HTTP/1.1",
+        head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice))
+      finding_id = store.insert_finding("linked", Gori::Store::Severity::Medium, "api.test", fid)
+      store.add_link(Gori::Store::LinkOwnerKind::Finding, finding_id,
+        Gori::Store::LinkRefKind::Replay, 9_i64)
+      parsed = JSON.parse(Gori::Findings::Export.json(store.findings, store)).as_a
+      links = parsed[0]["links"].as_a
+      links.size.should eq(1) # primary flow link is deduped from the export list
+      links[0]["kind"].as_s.should eq("replay")
+      links[0]["ref_id"].as_i.should eq(9)
+      links[0]["label"].as_s.should_not be_empty
+    end
   end
 
   it "renders a Markdown report with severity/status labels and notes" do
@@ -284,7 +303,9 @@ describe Gori::CLI::Output do
   end
 
   it "emits a single-note JSON object with the documented fields (text only when asked)" do
-    full = JSON.parse(Gori::CLI::Output.note_object_json(0, "Title\nbody", current: true, with_text: true))
+    entry = Gori::Notes::NoteEntry.new(42_i64, "Title\nbody")
+    full = JSON.parse(Gori::CLI::Output.note_object_json(0, entry, current: true, with_text: true))
+    full["id"].as_i64.should eq(42_i64)
     full["index"].as_i.should eq(1)
     full["title"].as_s.should eq("Title")
     full["lines"].as_i.should eq(2)
@@ -292,15 +313,19 @@ describe Gori::CLI::Output do
     full["current"].as_bool.should be_true
     full["text"].as_s.should eq("Title\nbody")
 
-    summary = JSON.parse(Gori::CLI::Output.note_object_json(0, "Title\nbody", current: false, with_text: false))
+    summary = JSON.parse(Gori::CLI::Output.note_object_json(0, entry, current: false, with_text: false))
     summary["text"]?.should be_nil # summary omits the body
     summary["title"].as_s.should eq("Title")
   end
 
   it "emits the whole note set as a JSON array, marking the active note" do
-    doc = Gori::Notes::Doc.new(1, ["one", "two"])
+    doc = Gori::Notes::Doc.new(1, [
+      Gori::Notes::NoteEntry.new(1_i64, "one"),
+      Gori::Notes::NoteEntry.new(2_i64, "two"),
+    ], 3_i64)
     arr = JSON.parse(Gori::CLI::Output.notes_array_json(doc, with_text: false)).as_a
     arr.size.should eq(2)
+    arr[0]["id"].as_i64.should eq(1_i64)
     arr[0]["index"].as_i.should eq(1)
     arr[0]["current"].as_bool.should be_false
     arr[1]["current"].as_bool.should be_true # cur == 1
@@ -359,25 +384,35 @@ describe Gori::CLI::Output do
   end
 end
 
+def notes_spec_entries(texts : Array(String)) : Array(Gori::Notes::NoteEntry)
+  texts.map_with_index { |t, i| Gori::Notes::NoteEntry.new((i + 1).to_i64, t) }
+end
+
+def notes_spec_doc(cur : Int32, texts : Array(String), next_id : Int64 = 0_i64) : Gori::Notes::Doc
+  entries = notes_spec_entries(texts)
+  nid = next_id > 0 ? next_id : (entries.size + 1).to_i64
+  Gori::Notes::Doc.new(cur, entries, nid)
+end
+
 describe Gori::Notes do
   # Doc is a record (struct) → value equality, so whole-Doc comparison avoids
   # unwrapping the nilable parse result (and keeps the spec ameba-clean).
   it "parses a well-formed document set" do
-    Gori::Notes.parse(%({"cur":1,"notes":["a","b"]})).should eq(Gori::Notes::Doc.new(1, ["a", "b"]))
+    Gori::Notes.parse(%({"cur":1,"notes":["a","b"]})).should eq(notes_spec_doc(1, ["a", "b"]))
   end
 
   it "defaults cur to 0 and coerces non-string note entries to empty strings" do
-    Gori::Notes.parse(%({"notes":[1,"x",null]})).should eq(Gori::Notes::Doc.new(0, ["", "x", ""]))
+    Gori::Notes.parse(%({"notes":[1,"x",null]})).should eq(notes_spec_doc(0, ["", "x", ""]))
   end
 
   it "treats an empty notes array as a (non-nil) empty set" do
-    Gori::Notes.parse(%({"cur":0,"notes":[]})).should eq(Gori::Notes::Doc.new(0, [] of String))
+    Gori::Notes.parse(%({"cur":0,"notes":[]})).should eq(Gori::Notes::Doc.new(0, [] of Gori::Notes::NoteEntry, 1_i64))
   end
 
   it "exposes size/empty? on a Doc" do
-    Gori::Notes::Doc.new(0, ["a", "b"]).size.should eq(2)
-    Gori::Notes::Doc.new(0, ["a", "b"]).empty?.should be_false
-    Gori::Notes::Doc.new(0, [] of String).empty?.should be_true
+    notes_spec_doc(0, ["a", "b"]).size.should eq(2)
+    notes_spec_doc(0, ["a", "b"]).empty?.should be_false
+    Gori::Notes::Doc.new(0, [] of Gori::Notes::NoteEntry, 1_i64).empty?.should be_true
   end
 
   it "returns nil for malformed JSON or a missing notes key (so callers fall back)" do
@@ -386,8 +421,9 @@ describe Gori::Notes do
   end
 
   it "round-trips through serialize/parse" do
-    raw = Gori::Notes.serialize(2, ["alpha", "beta\ngamma", ""])
-    Gori::Notes.parse(raw).should eq(Gori::Notes::Doc.new(2, ["alpha", "beta\ngamma", ""]))
+    entries = notes_spec_entries(["alpha", "beta\ngamma", ""])
+    raw = Gori::Notes.serialize(2, entries, 4_i64)
+    Gori::Notes.parse(raw).should eq(Gori::Notes::Doc.new(2, entries, 4_i64))
   end
 
   it "loads the JSON set, the legacy single note, and prefers the JSON set over legacy" do

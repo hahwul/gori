@@ -1,28 +1,19 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "../notes"
 
 module Gori::Tui
-  # A type-to-filter picker over a tab's sub-tabs — search the open sessions by
-  # their chip label / request line, ↑/↓ select, ↵ jump to the chosen one. The
-  # structural twin of FlowPicker (in-memory substring filter, IME preedit,
-  # selection-follow scroll, mouse hit-test) but lists sub-tabs instead of flows.
-  # Pure state + rendering; the Runner owns the @overlay lifecycle and applies the
-  # pick. Generic over any sub-tab strip (only Replay wires it today).
-  class SubtabPicker
-    # `index` is the sub-tab's absolute position — the value handed back on commit;
-    # `label` is the chip text, `detail` the dim searchable request line.
-    record Row, index : Int32, label : String, detail : String
+  # Pick a note sub-tab to attach the current workbench ref to.
+  class NotePicker
+    record Row, id : Int64, label : String, detail : String
 
-    getter title : String
-    getter action : String # verb shown in the ↵ hint ("jump" for search, "link" when picking a link target)
     getter selected : Int32
-    @indexed : Array({Row, String}) # each row paired with its precomputed filter haystack
+    @indexed : Array({Row, String})
 
-    def initialize(@title : String, @rows : Array(Row), @action : String = "jump")
+    def initialize(@rows : Array(Row))
       @query = ""
-      @preedit = "" # live IME composition (e.g. Hangul jamo) shown under the filter caret
-      # Precompute each row's filter haystack ONCE (not per keystroke).
+      @preedit = ""
       @indexed = @rows.map { |row| {row, "#{row.label} #{row.detail}".downcase} }
       @filtered = @rows
       @selected = 0
@@ -33,9 +24,8 @@ module Gori::Tui
       @preedit = text
     end
 
-    # The absolute sub-tab index of the highlighted row (nil when nothing matches).
-    def selected_index : Int32?
-      @filtered[@selected]?.try(&.index)
+    def selected_row : Row?
+      @filtered[@selected]?
     end
 
     def move(delta : Int32) : Nil
@@ -50,7 +40,7 @@ module Gori::Tui
 
     def query_char(ch : Char) : Nil
       return if ch.control?
-      @preedit = "" # a committed char ends any in-progress composition
+      @preedit = ""
       @query += ch
       refilter
     end
@@ -62,8 +52,6 @@ module Gori::Tui
       refilter
     end
 
-    # Recompute the visible rows from the precomputed haystacks: every whitespace-
-    # separated term must appear (case-insensitive). Resets the cursor to the top.
     private def refilter : Nil
       terms = @query.downcase.split
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
@@ -71,10 +59,8 @@ module Gori::Tui
       @scroll = 0
     end
 
-    # A centred card filling most of the body area (stable height). nil when there
-    # isn't room to draw.
     def overlay_box(area : Rect) : Rect?
-      w = {area.w - 4, 96}.min
+      w = {area.w - 4, 72}.min
       h = area.h - 2
       return nil if w < 30 || h < 8
       x = area.x + (area.w - w) // 2
@@ -82,7 +68,6 @@ module Gori::Tui
       Rect.new(x, y, w, h)
     end
 
-    # Row index under (mx, my), mirroring render's list loop; nil outside the list.
     def row_at(box : Rect, mx : Int32, my : Int32) : Int32?
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top
@@ -95,14 +80,10 @@ module Gori::Tui
 
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      unless box
-        screen.text(area.x + 1, area.y, "picker needs a larger window · esc to close", Theme.muted, Theme.bg) unless area.empty?
-        return
-      end
-      Frame.card(screen, box, @title, border: Theme.border_focus)
-
+      return unless box
+      Frame.card(screen, box, "PICK NOTE", border: Theme.border_focus)
       if @query.empty? && @preedit.empty?
-        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ #{@action} · esc cancel",
+        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ link · esc cancel",
           Theme.muted, Theme.panel, width: box.w - 4)
       else
         px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
@@ -110,17 +91,14 @@ module Gori::Tui
           Theme.panel, width: {box.right - 1 - px, 1}.max)
       end
       Frame.tee_divider(screen, box, box.y + 2)
-
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top
       ensure_visible(list_h)
-
       if @filtered.empty?
-        msg = @rows.empty? ? "no sub-tabs open" : "no sub-tabs match"
+        msg = @rows.empty? ? "no notes yet" : "no notes match"
         screen.text(box.x + 3, list_top, msg, Theme.muted, Theme.panel)
         return
       end
-
       (0...list_h).each do |i|
         ri = @scroll + i
         break if ri >= @filtered.size
@@ -133,19 +111,9 @@ module Gori::Tui
       fg = active ? Theme.text_bright : Theme.text
       screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
       screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
-
-      num_x = box.x + 3
-      label_x = num_x + 4
-      label_w = {box.w // 3, 16}.max
-      detail_x = label_x + label_w + 1
-      detail_w = {box.right - 1 - detail_x, 1}.max
-
-      screen.text(num_x, ry, "#{row.index + 1}", Theme.accent, bg, width: 3)
-      screen.text(label_x, ry, row.label, fg, bg, Attribute::Bold, width: label_w)
-      screen.text(detail_x, ry, row.detail, Theme.muted, bg, width: detail_w)
+      screen.text(box.x + 3, ry, row.label, fg, bg, width: box.w - 5)
     end
 
-    # Keep the selection on-screen (selection-follow scroll), like the History list.
     private def ensure_visible(list_h : Int32) : Nil
       return if list_h <= 0
       @scroll = @selected if @selected < @scroll

@@ -35,7 +35,7 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       if @findings.detail_open?
         @findings.editing_notes? ? "esc save · ^W discard" \
-                                 : "e notes · o flow · r replay · space triage/cmds · ⇧←/→ h-scroll · ←/esc back"
+                                 : "↑/↓ links · ↵ open · e notes · o flow · r replay · space cmds · ⇧←/→ h-scroll · ←/esc back"
       elsif @findings.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       else
@@ -67,7 +67,11 @@ module Gori::Tui
     end
 
     def handle_wheel(step : Int32) : Bool
-      @findings.move(step) unless @findings.detail_open? # detail pane hides the list — don't shift behind it
+      if @findings.detail_open? && !@findings.editing_notes?
+        @findings.scroll_links_wheel(step)
+      elsif !@findings.detail_open?
+        @findings.move(step)
+      end
       true
     end
 
@@ -185,12 +189,18 @@ module Gori::Tui
       @findings.hscroll_notes(delta)
     end
 
+    def finding_link_move(delta : Int32) : Nil
+      return if @findings.editing_notes?
+      @findings.move_links(delta)
+    end
+
     # Write all findings to the project dir as Markdown (the report) or JSON.
     def findings_export(format : Symbol) : Nil
       findings = @host.session.store.findings
       return @host.status("no findings to export") if findings.empty?
       ext = format == :json ? "json" : "md"
-      content = format == :json ? Findings::Export.json(findings) : Findings::Export.markdown(findings, @host.session.store, @host.session.project.name)
+      store = @host.session.store
+      content = format == :json ? Findings::Export.json(findings, store) : Findings::Export.markdown(findings, store, @host.session.project.name)
       path = File.join(@host.session.project.dir, "findings.#{ext}")
       File.write(path, content)
       msg = "exported #{findings.size} finding#{findings.size == 1 ? "" : "s"} → #{path}"

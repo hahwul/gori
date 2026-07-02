@@ -85,6 +85,22 @@ def raw_flow(store : S, created_at : Int64, *,
   fid
 end
 
+# Build a minimal HTTP/1.1 request string for replay/fuzz/miner seed rows.
+def replay_req(method : String, host : String, target : String,
+               headers = {} of String => String, body : String? = nil) : String
+  String.build do |b|
+    b << method << ' ' << target << " HTTP/1.1\r\n"
+    b << "Host: " << host << "\r\n"
+    headers.each { |k, v| b << k << ": " << v << "\r\n" }
+    if body
+      b << "Content-Length: " << body.bytesize << "\r\n"
+      b << "\r\n" << body
+    else
+      b << "\r\n"
+    end
+  end
+end
+
 # protobuf length-delimited string field (wire type 2). Value < 256 bytes so the
 # length is a single varint byte — plenty for the demo greeter messages.
 def pb_string_field(field : Int32, value : String) : Bytes
@@ -116,7 +132,8 @@ end
 project = registry.create("demo",
   "Demo target for exploring gori's TUI — a fictional shop + JSON API, plus a real, " \
   "replayable capture of www.hahwul.com. Captured browsing of shop.demo.test / " \
-  "api.demo.test / cdn.demo.test / www.hahwul.com with a few planted findings.")
+  "api.demo.test / cdn.demo.test / www.hahwul.com with planted findings, replay/fuzz/miner " \
+  "sessions, and entity links tying findings and notes to related workbench items.")
 store = S.open(project.db_path)
 puts "• created project 'demo' at #{project.db_path}"
 
@@ -261,9 +278,10 @@ ws_resp = String.build do |b|
   b << "Connection: Upgrade\r\n"
   b << "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n"
 end
-ws_id = raw_flow(store, t.call(48), host: "api.demo.test", method: "GET", target: "/ws/chat",
+ids[:ws] = raw_flow(store, t.call(48), host: "api.demo.test", method: "GET", target: "/ws/chat",
   req_head: ws_req, status: 101, reason: "Switching Protocols",
   resp_head: ws_resp, dur_us: 1_200_000_i64)
+ws_id = ids[:ws]
 
 # direction "out" = client→server, "in" = server→client; opcode 1=text, 2=binary.
 ws_msgs = [
@@ -487,7 +505,7 @@ raw_flow(store, t.call(68), host: "www.hahwul.com", method: "GET", target: "/sit
 hahwul_home = html.call("Home | HAHWUL",
   "<h1>HAHWUL</h1><p>Offensive Security Engineer, Developer and H4cker.</p>" \
   "<nav><a href=/posts/>Posts</a> <a href=/notes/>Notes</a> <a href=/projects/>Projects</a> <a href=/about/>About</a></nav>")
-raw_flow(store, t.call(71), host: "www.hahwul.com", method: "GET", target: "/",
+ids[:hahwul_home] = raw_flow(store, t.call(71), host: "www.hahwul.com", method: "GET", target: "/",
   http: "HTTP/2", req_head: gh_req_head.call("GET", "/"),
   status: 200, reason: "OK", ctype: "text/html; charset=utf-8",
   resp_head: gh_resp_head.call(200, "OK", "text/html; charset=utf-8", hahwul_home.bytesize, "6a43cf55-3b80", "HIT"),
@@ -594,8 +612,70 @@ store.update_finding(f6, notes: "POST /graphql answers a full `__schema` introsp
 
 puts "• inserted 6 findings"
 
-# --- Notes doc -------------------------------------------------------------
-store.set_setting("notes", <<-NOTES)
+# --- Workbench sessions (Replay / Fuzzer / Miner) ----------------------------
+# Pre-seed sub-tabs so entity links have replay/fuzz/miner targets to jump to.
+xss_replay_req = replay_req("GET", "shop.demo.test",
+  "/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+ids[:replay_xss] = store.insert_replay("https://shop.demo.test", xss_replay_req,
+  false, true, ids[:xss], 0)
+store.set_replay_name(ids[:replay_xss], "XSS PoC")
+
+idor_replay_req = replay_req("GET", "api.demo.test", "/v1/users/2",
+  {"Authorization" => "Bearer eyJhbGciOiJIUzI1NiJ9.demo.token"})
+ids[:replay_idor] = store.insert_replay("https://api.demo.test", idor_replay_req,
+  false, true, ids[:idor], 1)
+store.set_replay_name(ids[:replay_idor], "IDOR probe")
+
+hahwul_replay_req = "GET / HTTP/2\r\nhost: www.hahwul.com\r\naccept: text/html\r\n\r\n"
+ids[:replay_hahwul] = store.insert_replay("https://www.hahwul.com", hahwul_replay_req,
+  true, true, ids[:hahwul_home], 2)
+store.set_replay_name(ids[:replay_hahwul], "hahwul home")
+
+fuzz_template = replay_req("GET", "api.demo.test", "/v1/users/§1§",
+  {"Authorization" => "Bearer eyJhbGciOiJIUzI1NiJ9.demo.token"})
+ids[:fuzz_users] = store.insert_fuzz_session("https://api.demo.test", fuzz_template,
+  false, nil, %({"mode":"sniper","sets":[{"kind":"numbers","value":"1-10"}]}),
+  ids[:idor], 0, "user id enum")
+
+miner_req = replay_req("GET", "api.demo.test", "/v1/users/1",
+  {"Authorization" => "Bearer eyJhbGciOiJIUzI1NiJ9.demo.token"}).to_slice
+ids[:miner_users] = store.insert_miner_session("https://api.demo.test", miner_req,
+  false, nil,
+  %({"locations":["query"],"concurrency":4,"notify":"off","stability_rounds":2,"confirm_rounds":1,"buckets":{"query":50}}),
+  ids[:idor], 0, "users path mine")
+
+puts "• inserted 3 replay + 1 fuzz + 1 miner sessions"
+
+# --- Entity links (findings + notes → history / replay / fuzz / miner) -------
+# insert_finding already auto-links the primary flow_id; add cross-workbench refs.
+store.add_link(S::LinkOwnerKind::Finding, f1, S::LinkRefKind::Replay, ids[:replay_xss])
+store.add_link(S::LinkOwnerKind::Finding, f1, S::LinkRefKind::Fuzz, ids[:fuzz_users])
+store.add_link(S::LinkOwnerKind::Finding, f1, S::LinkRefKind::Flow, ids[:login])
+
+store.add_link(S::LinkOwnerKind::Finding, f2, S::LinkRefKind::Replay, ids[:replay_idor])
+store.add_link(S::LinkOwnerKind::Finding, f2, S::LinkRefKind::Fuzz, ids[:fuzz_users])
+store.add_link(S::LinkOwnerKind::Finding, f2, S::LinkRefKind::Miner, ids[:miner_users])
+
+store.add_link(S::LinkOwnerKind::Finding, f4, S::LinkRefKind::Replay, ids[:replay_xss])
+
+store.add_link(S::LinkOwnerKind::Finding, f6, S::LinkRefKind::Flow, ws_id)
+
+NOTE_MAIN  = 1_i64 # stable note id (entity_links.owner_id)
+NOTE_LINKS = 2_i64
+
+store.add_link(S::LinkOwnerKind::Note, NOTE_MAIN, S::LinkRefKind::Replay, ids[:replay_xss])
+store.add_link(S::LinkOwnerKind::Note, NOTE_MAIN, S::LinkRefKind::Fuzz, ids[:fuzz_users])
+store.add_link(S::LinkOwnerKind::Note, NOTE_MAIN, S::LinkRefKind::Flow, ids[:cart])
+
+store.add_link(S::LinkOwnerKind::Note, NOTE_LINKS, S::LinkRefKind::Replay, ids[:replay_idor])
+store.add_link(S::LinkOwnerKind::Note, NOTE_LINKS, S::LinkRefKind::Miner, ids[:miner_users])
+store.add_link(S::LinkOwnerKind::Note, NOTE_LINKS, S::LinkRefKind::Flow, ws_id)
+store.add_link(S::LinkOwnerKind::Note, NOTE_LINKS, S::LinkRefKind::Replay, ids[:replay_hahwul])
+
+puts "• inserted entity links on findings + notes"
+
+# --- Notes doc (multi-tab, stable ids for entity_links) --------------------
+note_main = <<-NOTES
 # Demo engagement — recon notes
 
 ## Hosts
@@ -631,9 +711,37 @@ store.set_setting("notes", <<-NOTES)
 - Recon flow: /robots.txt -> /sitemap.xml -> / -> a css asset -> /posts/ -> an
   article -> a note -> /about/, plus one guessed path that 404s.
 
+## Entity links
+- **Finding detail** → Space → `l` opens the links overlay; `↵` opens the selected ref
+  (`↑/↓`·`j/k` navigate the RELATED list). The RELATED pane lists cross-links
+  (replay/fuzz/miner/history) beyond the primary evidence flow.
+- **Notes sub-tab** → Space → `l` opens links for the active note (preview strip at the bottom).
+- **History / Replay / Fuzzer / Miner** → Space → `k` link to a finding, `u` link to a note.
+- This demo project already has links seeded — try the XSS finding or switch to the
+  "Workbench cross-links" note sub-tab.
+
 ## Notes
 Token is the same JWT across requests — replayable in Replay (^R).
 NOTES
+
+note_links = <<-NOTES2
+# Workbench cross-links
+
+Pointers to the replay/fuzz/miner sessions tied to this engagement.
+Space → `l` (links) on this sub-tab opens the overlay; `↵`/`o` jumps to the linked session or flow.
+
+- **XSS PoC** replay — re-send the reflected /search payload
+- **IDOR probe** replay — GET /v1/users/2 with the customer token
+- **user id enum** fuzz — sweep /v1/users/{id} (positions marked §1§)
+- **users path mine** — parameter reflection probe on /v1/users/
+- **WebSocket chat** flow — MESSAGES pane for the 101 upgrade
+- **hahwul home** replay — live, replayable traffic against www.hahwul.com
+NOTES2
+
+store.set_setting(Notes::DOCS_KEY, Notes.serialize(0, [
+  Notes::NoteEntry.new(NOTE_MAIN, note_main),
+  Notes::NoteEntry.new(NOTE_LINKS, note_links),
+], 3_i64))
 
 # --- Scope (seed patterns, left OFF so History shows everything) ------------
 store.add_scope_rule("include", "host", "shop.demo.test")
@@ -653,5 +761,6 @@ store.set_prism_mode(Prism::Mode::Passive)
 puts "• prism: #{store.count_prism_issues} passive issues; tech=#{store.prism_tech_summary.join(", ")}"
 
 store.close
-puts "• notes + 3 scope patterns written"
+puts "• notes (2 tabs, stable ids) + 3 scope patterns written"
 puts "\n✓ demo project ready — launch ./bin/gori and pick 'demo'."
+puts "  Try: XSS finding → RELATED pane / Space→l; Notes → 'Workbench cross-links' sub-tab."

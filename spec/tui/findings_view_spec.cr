@@ -81,17 +81,40 @@ describe Gori::Tui::FindingsView do
       view.open_detail(store).should be_true
       view.editing_notes?.should be_false # read-only preview — hscroll_notes applies here
 
-      rect = Rect.new(0, 0, 80, 12)
-      backend = MemoryBackend.new(80, 12)
+      rect = Rect.new(0, 0, 80, 24)
+      backend = MemoryBackend.new(80, 24)
       view.render(Screen.new(backend), rect, focused: true)
       backend.contains?("HEAD").should be_true
       backend.contains?("TAIL").should be_false # off the right edge, clipped
 
       20.times { view.hscroll_notes(1) } # scroll well past the line's width
-      backend2 = MemoryBackend.new(80, 12)
+      backend2 = MemoryBackend.new(80, 24)
       view.render(Screen.new(backend2), rect, focused: true)
       backend2.contains?("TAIL").should be_true
       backend2.contains?("HEAD").should be_false # scrolled off the left edge
+    end
+  end
+
+  it "moves RELATED link selection with move_links (wheel/↑/↓)" do
+    tmp_store do |store|
+      f1 = store.insert_finding("A", Gori::Store::Severity::Low, nil, nil)
+      f2 = store.insert_finding("B", Gori::Store::Severity::Low, nil, nil)
+      fid1 = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "a.test", port: 443,
+        method: "GET", target: "/", http_version: "HTTP/1.1", head: Bytes[0]))
+      fid2 = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 2_i64, scheme: "https", host: "b.test", port: 443,
+        method: "GET", target: "/b", http_version: "HTTP/1.1", head: Bytes[0]))
+      store.add_link(Gori::Store::LinkOwnerKind::Finding, f1, Gori::Store::LinkRefKind::Flow, fid1)
+      store.add_link(Gori::Store::LinkOwnerKind::Finding, f1, Gori::Store::LinkRefKind::Flow, fid2)
+
+      view = FindingsView.new
+      view.reload(store)
+      view.select_index(1) # newest-first sort → f1 (with links) is second in the list
+      view.open_detail(store).should be_true
+      view.selected_resolved_link.not_nil!.label.should contain("a.test")
+      view.move_links(1)
+      view.selected_resolved_link.not_nil!.label.should contain("b.test")
     end
   end
 

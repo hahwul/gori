@@ -1152,9 +1152,10 @@ module Gori
 
       # Print one note (`idx` 0-based) in full: its exact text, or a full JSON object.
       private def self.show_note(doc : Notes::Doc, idx : Int32, format : Symbol) : Nil
-        text = doc.texts[idx]
+        entry = doc.notes[idx]
+        text = entry.text
         if format == :json
-          puts CLI::Output.note_object_json(idx, text, current: doc.cur == idx, with_text: true)
+          puts CLI::Output.note_object_json(idx, entry, current: doc.cur == idx, with_text: true)
         else
           STDOUT.puts text
         end
@@ -1307,7 +1308,7 @@ module Gori
           end
           content =
             case format
-            when :json     then Findings::Export.json(findings)
+            when :json     then Findings::Export.json(findings, store)
             when :markdown then Findings::Export.markdown(findings, store, project.name)
             else                findings_text(findings)
             end

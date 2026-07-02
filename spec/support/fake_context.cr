@@ -267,6 +267,34 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def notes_find : Nil; end
 
+  def notes_links : Nil; end
+
+  def finding_links : Nil; end
+
+  def finding_open_link : Nil; end
+
+  def finding_link_move(delta : Int32) : Nil; end
+
+  def link_to_finding : Nil; end
+
+  def link_to_note : Nil; end
+
+  def link_flow_id : Int64?
+    nil
+  end
+
+  def link_replay_id : Int64?
+    nil
+  end
+
+  def link_fuzz_id : Int64?
+    nil
+  end
+
+  def link_miner_id : Int64?
+    nil
+  end
+
   def open_settings(section : Symbol) : Nil; end
 
   def import_har : Nil; end

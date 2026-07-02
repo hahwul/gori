@@ -273,6 +273,12 @@ module Gori
       exec_task ->(c : DB::Connection) {
         c.exec("INSERT INTO findings (created_at, updated_at, title, severity, host, flow_id, notes) VALUES (?,?,?,?,?,?,'')",
           ts, ts, title, severity.value, host, flow_id)
+        if fid = flow_id
+          finding_id = c.scalar("SELECT last_insert_rowid()").as(Int64)
+          c.exec(
+            "INSERT OR IGNORE INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES ('finding', ?, 'flow', ?, ?)",
+            finding_id, fid, ts)
+        end
         nil
       }
     end
@@ -301,7 +307,11 @@ module Gori
     end
 
     def delete_finding(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM findings WHERE id = ?", id); nil }
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM entity_links WHERE owner_kind = 'finding' AND owner_id = ?", id)
+        c.exec("DELETE FROM findings WHERE id = ?", id)
+        nil
+      }
     end
 
     def findings : Array(Finding)
@@ -330,6 +340,68 @@ module Gori
     # severity breakdown. Backed by idx_findings_severity.
     def findings_severity_counts : StaticArray(Int64, 5)
       severity_tally("SELECT severity, COUNT(*) FROM findings GROUP BY severity")
+    end
+
+    # --- entity links (V21) --------------------------------------------------
+
+    # Insert a link; returns the row id, or nil when the link already exists.
+    def add_link(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Int64?
+      ts = now_us
+      exec_task ->(c : DB::Connection) {
+        c.exec(
+          "INSERT OR IGNORE INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES (?,?,?,?,?)",
+          owner_kind.label, owner_id, ref_kind.label, ref_id, ts)
+        nil
+      }
+      @db.query(
+        "SELECT id, created_at FROM entity_links WHERE owner_kind = ? AND owner_id = ? AND ref_kind = ? AND ref_id = ?",
+        owner_kind.label, owner_id, ref_kind.label, ref_id) do |rs|
+        return nil unless rs.move_next
+        id = rs.read(Int64)
+        created_at = rs.read(Int64)
+        return id if created_at == ts
+      end
+      nil
+    end
+
+    def link_id(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Int64?
+      @db.query(
+        "SELECT id FROM entity_links WHERE owner_kind = ? AND owner_id = ? AND ref_kind = ? AND ref_id = ?",
+        owner_kind.label, owner_id, ref_kind.label, ref_id) do |rs|
+        return rs.read(Int64) if rs.move_next
+      end
+      nil
+    end
+
+    def list_links(owner_kind : LinkOwnerKind, owner_id : Int64) : Array(EntityLink)
+      list = [] of EntityLink
+      @db.query(
+        "SELECT id, owner_kind, owner_id, ref_kind, ref_id, created_at FROM entity_links " \
+        "WHERE owner_kind = ? AND owner_id = ? ORDER BY created_at, id",
+        owner_kind.label, owner_id) do |rs|
+        rs.each { try_read_entity_link(rs).try { |link| list << link } }
+      end
+      list
+    end
+
+    def remove_link(id : Int64) : Nil
+      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM entity_links WHERE id = ?", id); nil }
+    end
+
+    def remove_link(owner_kind : LinkOwnerKind, owner_id : Int64, ref_kind : LinkRefKind, ref_id : Int64) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec(
+          "DELETE FROM entity_links WHERE owner_kind = ? AND owner_id = ? AND ref_kind = ? AND ref_id = ?",
+          owner_kind.label, owner_id, ref_kind.label, ref_id)
+        nil
+      }
+    end
+
+    def delete_links_for_owner(owner_kind : LinkOwnerKind, owner_id : Int64) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM entity_links WHERE owner_kind = ? AND owner_id = ?", owner_kind.label, owner_id)
+        nil
+      }
     end
 
     # --- prism scan issues (V20) ---------------------------------------------
@@ -559,6 +631,18 @@ module Gori
     # Request-side metadata only (no response BLOBs) — for the 750ms reconcile poll,
     # which only converges target/request/flags/position and never reads the
     # response (responses are personal per session). Response fields stay nil.
+    def get_replay(id : Int64) : ReplayRecord?
+      @db.query(
+        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni FROM replays WHERE id = ?",
+        id) do |rs|
+        return ReplayRecord.new(
+          rs.read(Int64), rs.read(String), rs.read(String),
+          rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
+          sni: rs.read(String?)) if rs.move_next
+      end
+      nil
+    end
+
     def replays_meta : Array(ReplayRecord)
       list = [] of ReplayRecord
       @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni FROM replays ORDER BY position, id") do |rs|
@@ -634,6 +718,17 @@ module Gori
       list
     end
 
+    def get_fuzz_session(id : Int64) : FuzzSessionRecord?
+      @db.query(
+        "SELECT id, target, template, http2, sni, config, flow_id, position, name FROM fuzz_sessions WHERE id = ?",
+        id) do |rs|
+        return FuzzSessionRecord.new(
+          rs.read(Int64), rs.read(String), rs.read(String), rs.read(Int32) != 0,
+          rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?)) if rs.move_next
+      end
+      nil
+    end
+
     def insert_fuzz_session(target : String, template : String, http2 : Bool, sni : String?,
                             config : String, flow_id : Int64?, position : Int32, name : String? = nil) : Int64
       ts = now_us
@@ -679,6 +774,17 @@ module Gori
         end
       end
       list
+    end
+
+    def get_miner_session(id : Int64) : MinerSessionRecord?
+      @db.query(
+        "SELECT id, target, request, http2, sni, config, flow_id, position, name FROM miner_sessions WHERE id = ?",
+        id) do |rs|
+        return MinerSessionRecord.new(
+          rs.read(Int64), rs.read(String), rs.read(Bytes), rs.read(Int32) != 0,
+          rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?)) if rs.move_next
+      end
+      nil
     end
 
     def insert_miner_session(target : String, request : Bytes, http2 : Bool, sni : String?,
@@ -1305,6 +1411,17 @@ module Gori
         rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String),
         Severity.new(rs.read(Int32)), rs.read(String?), rs.read(Int64?), rs.read(String),
         Status.new(rs.read(Int32)))
+    end
+
+    private def try_read_entity_link(rs : DB::ResultSet) : EntityLink?
+      id = rs.read(Int64)
+      owner = LinkOwnerKind.parse(rs.read(String))
+      owner_id = rs.read(Int64)
+      ref = LinkRefKind.parse(rs.read(String))
+      ref_id = rs.read(Int64)
+      created_at = rs.read(Int64)
+      return nil unless owner && ref
+      EntityLink.new(id, owner, owner_id, ref, ref_id, created_at)
     end
 
     private def read_row(rs : DB::ResultSet) : FlowRow

@@ -328,6 +328,42 @@ private class FakeContext < ExecContext
     @calls << :finding_replay_flow
   end
 
+  def finding_links : Nil
+    @calls << :finding_links
+  end
+
+  def finding_open_link : Nil
+    @calls << :finding_open_link
+  end
+
+  def finding_link_move(delta : Int32) : Nil
+    @calls << :finding_link_move
+  end
+
+  def link_to_finding : Nil
+    @calls << :link_to_finding
+  end
+
+  def link_to_note : Nil
+    @calls << :link_to_note
+  end
+
+  def link_flow_id : Int64?
+    nil
+  end
+
+  def link_replay_id : Int64?
+    nil
+  end
+
+  def link_fuzz_id : Int64?
+    nil
+  end
+
+  def link_miner_id : Int64?
+    nil
+  end
+
   def findings_export(format : Symbol) : Nil
     @calls << :findings_export
   end
@@ -502,6 +538,10 @@ private class FakeContext < ExecContext
 
   def notes_find : Nil
     @calls << :notes_find
+  end
+
+  def notes_links : Nil
+    @calls << :notes_links
   end
 
   def open_settings(section : Symbol) : Nil

@@ -1,6 +1,9 @@
 require "../tab_controller"
 require "../notes_view"
 require "../clipboard"
+require "../../store"
+require "../../links"
+require "../theme"
 
 module Gori::Tui
   # The Notes tab: a multi-note scratchpad (sub-tabs, like Replay). Owns the
@@ -38,7 +41,32 @@ module Gori::Tui
         sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
         BodyChrome.render_subtab_strip(screen, sub_rect, @notes.subtab_labels, @notes.current_index, subtabs_focused)
       end
+      links_rect = body_rect
+      if !@notes.link_preview.empty?
+        links_rect, body_rect = carve_links_row(body_rect)
+        screen.text(links_rect.x + 1, links_rect.y, "links", Theme.accent, width: 6)
+        screen.text(links_rect.x + 8, links_rect.y, @notes.link_preview, Theme.muted,
+          width: {links_rect.w - 9, 0}.max)
+      end
       BodyChrome.framed(screen, body_rect, body_focused) { |inner| @notes.render(screen, inner, focused: body_focused) }
+    end
+
+    def refresh_link_preview : Nil
+      id = @notes.current_note_id
+      links = @host.session.store.list_links(Store::LinkOwnerKind::Note, id)
+      if links.empty?
+        @notes.link_preview = ""
+      else
+        line = Links.resolve(@host.session.store, links.first).line
+        @notes.link_preview = links.size > 1 ? "#{line} (+#{links.size - 1})" : line
+      end
+    end
+
+    private def carve_links_row(rect : Rect) : {Rect, Rect}
+      h = 1
+      strip = Rect.new(rect.x, rect.bottom - h, rect.w, h)
+      body = Rect.new(rect.x, rect.y, rect.w, rect.h - h)
+      {strip, body}
     end
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool
@@ -104,6 +132,7 @@ module Gori::Tui
       # @dirty, so re-entering Notes after leaving via Tab/mouse (gestures that don't flush
       # the editor) would silently discard the in-memory edits. Only refresh a clean buffer.
       reload unless @notes.dirty?
+      refresh_link_preview
     end
 
     def commit : Nil
@@ -131,7 +160,7 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · ↑ sub-tabs · ↹/esc tabs"
+      "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · space l links · ↑ sub-tabs · ↹/esc tabs"
     end
 
     def goto_symbol : Symbol?
@@ -144,12 +173,14 @@ module Gori::Tui
       return if nidx == @notes.current_index
       save_notes
       @notes.switch_note(nidx)
+      refresh_link_preview
     end
 
     def jump_subtab(idx : Int32) : Nil
       return unless 0 <= idx < @notes.count
       save_notes
       @notes.switch_note(idx)
+      refresh_link_preview
     end
 
     # The dirty part of the cross-session reload guard (the shell adds the
@@ -188,7 +219,10 @@ module Gori::Tui
     end
 
     private def do_notes_close : Nil
-      @notes.close_note
+      if closed_id = @notes.close_note
+        @host.session.store.delete_links_for_owner(Store::LinkOwnerKind::Note, closed_id)
+      end
+      refresh_link_preview
       @host.status("closed note (#{@notes.count} open)")
     end
 
