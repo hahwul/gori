@@ -16,11 +16,12 @@ module Gori
         "prism.up", "Select previous issue", "Move up", Verb::Scope::Prism,
         [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.prism_move(-1); nil }
 
-      # open carries an explicit 'o' mnemonic — its primary chord is enter/l, which would
-      # otherwise front the space menu with the unintuitive 'l'.
+      # open carries an explicit 'v' mnemonic — its primary chord is enter/l, which would
+      # otherwise front the space menu with the unintuitive 'l'. 'o' is reserved for
+      # open-evidence (parity with the detail scope).
       r.register Verb::Definition.new(
         "prism.open", "Open issue", "View the selected issue's detail", Verb::Scope::Prism,
-        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], mnemonic: 'o') { |ctx| ctx.prism_open; nil }
+        [Verb::Chord.new("enter"), Verb::Chord.new("l"), Verb::Chord.new("right")], mnemonic: 'v') { |ctx| ctx.prism_open; nil }
 
       r.register Verb::Definition.new(
         "prism.filter", "Filter issues", "Filter the list (severity:/status:/category:/host:/code:/free text)",
@@ -43,14 +44,32 @@ module Gori
         Verb::Scope::Prism, [Verb::Chord.new("a")]) { |ctx| ctx.prism_toggle_closed; nil }
 
       # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
-      # code, or a whole host, in one confirmed action.
+      # code, or a whole host, in one confirmed action. 'r' is reserved for replay-evidence
+      # (parity with the detail scope).
       r.register Verb::Definition.new(
         "prism.dismiss-code", "Dismiss all with this code", "Mute every open issue sharing the selected issue's check code",
-        Verb::Scope::Prism, mnemonic: 'r') { |ctx| ctx.prism_dismiss_code; nil }
+        Verb::Scope::Prism, mnemonic: 'g') { |ctx| ctx.prism_dismiss_code; nil }
 
       r.register Verb::Definition.new(
         "prism.dismiss-host", "Dismiss all on this host", "Mute every open issue on the selected issue's host",
         Verb::Scope::Prism, mnemonic: 'h') { |ctx| ctx.prism_dismiss_host; nil }
+
+      # Detail-parity actions on the selected row (no need to drill in first).
+      r.register Verb::Definition.new(
+        "prism.open-evidence", "Open evidence", "Open the selected issue's sample flow in History",
+        Verb::Scope::Prism, [Verb::Chord.new("o")]) { |ctx| ctx.prism_open_flow; nil }
+
+      r.register Verb::Definition.new(
+        "prism.replay-evidence", "Replay evidence", "Send the selected issue's sample flow to Replay",
+        Verb::Scope::Prism, [Verb::Chord.new("r")]) { |ctx| ctx.prism_replay_flow; nil }
+
+      r.register Verb::Definition.new(
+        "prism.promote-selected", "Promote to finding", "Create a Finding from the selected issue",
+        Verb::Scope::Prism, [Verb::Chord.new("p")]) { |ctx| ctx.prism_promote; nil }
+
+      r.register Verb::Definition.new(
+        "prism.delete-selected", "Delete issue", "Delete the selected issue",
+        Verb::Scope::Prism, [Verb::Chord.new("d")]) { |ctx| ctx.prism_delete; nil }
 
       r.register Verb::Definition.new(
         "prism.clear", "Clear issues", "Delete all Prism issues for this project", Verb::Scope::Prism,
