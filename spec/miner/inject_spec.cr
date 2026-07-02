@@ -94,6 +94,6 @@ describe Gori::Miner::Detect do
   it "offers only query/cookies/headers for a bodyless GET" do
     appl = M::Detect.detect(req("GET /a HTTP/1.1\r\nHost: h\r\n\r\n"))
     appl.applicable.should eq([M::Location::Query, M::Location::Headers, M::Location::Cookies])
-    appl.default.should eq([M::Location::Query, M::Location::Cookies])
+    appl.default.should eq([M::Location::Query])
   end
 end

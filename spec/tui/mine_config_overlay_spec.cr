@@ -30,14 +30,41 @@ describe Gori::Tui::MineConfigOverlay do
     ov.build_config.locations.should eq([Gori::Miner::Location::Query, Gori::Miner::Location::Headers])
   end
 
-  it "cycles concurrency on its row and reports the Start row" do
+  it "cycles concurrency and notification on their rows and reports the Start row" do
     ov = MineConfigOverlay.new(seed([Gori::Miner::Location::Query], [Gori::Miner::Location::Query]))
-    # rows: [0]=query, [1]=concurrency, [2]=start
+    # rows: [0]=query, [1]=concurrency, [2]=notification, [3]=start
     ov.move(1) # concurrency row
     ov.adjust(1)
     ov.build_config.concurrency.should eq(20) # default 10 → next choice
-    ov.move(1)                                # start row
+    ov.move(1) # notification row
+    ov.adjust(1)
+    ov.build_config.notify.should eq(Gori::Miner::NotifyMode::Off)
+    ov.move(1) # start row
     ov.on_start_row?.should be_true
+  end
+
+  it "defaults notification to when-found" do
+    ov = MineConfigOverlay.new(seed([Gori::Miner::Location::Query], [Gori::Miner::Location::Query]))
+    ov.build_config.notify.should eq(Gori::Miner::NotifyMode::WhenFound)
+  end
+
+  it "restores the last saved overlay choices from Settings" do
+    Gori::Settings.mine_locations = ["query", "json"]
+    Gori::Settings.mine_concurrency = 20
+    Gori::Settings.mine_notify = "always"
+    Gori::Settings.mine_prefs_saved = true
+    ov = MineConfigOverlay.new(seed(
+      [Gori::Miner::Location::Query, Gori::Miner::Location::Json, Gori::Miner::Location::Headers],
+      [Gori::Miner::Location::Query]))
+    cfg = ov.build_config
+    cfg.locations.should eq([Gori::Miner::Location::Query, Gori::Miner::Location::Json])
+    cfg.concurrency.should eq(20)
+    cfg.notify.should eq(Gori::Miner::NotifyMode::Always)
+  ensure
+    Gori::Settings.mine_locations = [] of String
+    Gori::Settings.mine_concurrency = 10
+    Gori::Settings.mine_notify = "when-found"
+    Gori::Settings.mine_prefs_saved = false
   end
 
   it "renders without crashing and maps a click to a row" do

@@ -70,6 +70,48 @@ module Gori
       end
     end
 
+    # When a background mine posts to the notification center on completion.
+    # Persisted/config tokens: "when-found", "off", "always" (see #token / .parse?).
+    enum NotifyMode
+      WhenFound # default — only when at least one parameter was discovered
+      Off       # never post a completion notification
+      Always    # always post, even when zero parameters were found
+
+      def label : String
+        case self
+        in WhenFound then "when found"
+        in Off       then "off"
+        in Always    then "always"
+        end
+      end
+
+      # Canonical persisted token (round-trips through JSON config).
+      def token : String
+        case self
+        in WhenFound then "when-found"
+        in Off       then "off"
+        in Always    then "always"
+        end
+      end
+
+      # True when a finished mine should post to the notification center.
+      def posts_notification?(found : Int32, error : Bool = false) : Bool
+        return false if off?
+        return true if error
+        return false if when_found? && found == 0
+        true
+      end
+
+      def self.parse?(token : String) : NotifyMode?
+        norm = token.downcase.strip.gsub(/[\s_]+/, "-")
+        case norm
+        when "when-found", "whenfound", "found" then WhenFound
+        when "off", "none", "no"                then Off
+        when "always", "on", "all"              then Always
+        end
+      end
+    end
+
     # One discovered parameter.
     record Finding,
       name : String,
@@ -134,6 +176,7 @@ module Gori
       property max_requests : Int64?    # hard cap on total sends
       property? add_content_length_when_missing : Bool
       property user_wordlist : String?
+      property notify : NotifyMode
 
       # Per-Burp ceilings; query/form are additionally clamped by the URL byte budget
       # in Inject so a stuffed line can't exceed common request-line limits.
@@ -150,7 +193,8 @@ module Gori
                      @concurrency = 10, @rps = nil, @throttle_ms = nil, @jitter_ms = 0,
                      @timeout = nil, @retries = 1, @retry_pause = 500.milliseconds,
                      @stability_rounds = 4, @confirm_rounds = 2, @max_requests = nil,
-                     @add_content_length_when_missing = false, @user_wordlist = nil)
+                     @add_content_length_when_missing = false, @user_wordlist = nil,
+                     @notify = NotifyMode::WhenFound)
       end
 
       def bucket_for(loc : Location) : Int32

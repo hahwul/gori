@@ -1542,6 +1542,7 @@ module Gori::Tui
       case @active_tab
       when :replay  then replay_controller.request_close
       when :fuzzer  then fuzzer_controller.request_close
+      when :miner   then miner_controller.request_close
       when :convert then convert_controller.convert_close
       when :notes   then notes_controller.notes_close
       end
@@ -1551,6 +1552,7 @@ module Gori::Tui
       case @active_tab
       when :replay  then replay_controller.save_current_replay
       when :fuzzer  then fuzzer_controller.save_current
+      when :miner   then miner_controller.save_current
       when :convert then convert_controller.commit
       when :notes   then notes_controller.save_notes
       end
@@ -2962,6 +2964,7 @@ module Gori::Tui
         @toast = "select at least one location to mine"
         return
       end
+      ov.save_prefs
       miner_controller.start_session(ov.seed, ov.build_config)
       close_mine_config
     end
