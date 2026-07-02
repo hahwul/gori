@@ -1,6 +1,8 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./spark"
+require "./fmt"
 require "./text_area"
 require "../project"
 require "../store"
@@ -23,6 +25,10 @@ module Gori::Tui
     @db_size : Int64
     @total_captured : Int64
     @created : Time?
+    # AT A GLANCE viz snapshot (color-free: raw counts only, colours resolve live at
+    # draw so a theme switch needs no rebuild — the Fuzzer DistData convention).
+    @status_counts : Array({Int32?, Int64})
+    @sev_tally : StaticArray(Int64, 5)
     @desc_area : TextArea
 
     # The body has two focusable panes (cycled with Tab, like Replay's panes): the
@@ -38,6 +44,8 @@ module Gori::Tui
       @db_size = 0
       @total_captured = 0
       @created = nil
+      @status_counts = [] of {Int32?, Int64}
+      @sev_tally = StaticArray(Int64, 5).new(0_i64)
       @desc_area = TextArea.new
       @desc_area.follow_x = true # long description lines scroll horizontally to keep the cursor visible
       @desc_dirty = false
@@ -72,6 +80,11 @@ module Gori::Tui
       @prism_tech = store.prism_tech_summary
       @db_size = project.db_size
       @total_captured = store.total_size
+      # AT A GLANCE aggregates: status mix + combined finding/Prism severity tally.
+      @status_counts = store.flow_status_counts
+      f = store.findings_severity_counts
+      p = store.prism_severity_counts
+      @sev_tally = StaticArray(Int64, 5).new { |i| f[i] + p[i] }
       earliest = store.earliest_created_at
       # earliest_created_at is unix MICROSECONDS (the flows.created_at unit) — convert
       # to seconds for Time.unix, like History's fmt_time does. (Passing micros makes
@@ -137,6 +150,19 @@ module Gori::Tui
     # Height of the top OVERVIEW band (capped to ~2/5 of the body, 3..11 rows).
     private def overview_h(rect : Rect) : Int32
       {11, {rect.h * 2 // 5, 3}.max}.min
+    end
+
+    # Width carved off the RIGHT of the OVERVIEW band for the AT A GLANCE viz pane, or 0
+    # to hide it (so OVERVIEW keeps its full width on a narrow terminal). Mirrors the
+    # Fuzzer DIST sidebar's dist_width gating.
+    VIZ_MIN_TOTAL = 64 # below this band width, no room to split without cramping OVERVIEW
+    VIZ_MAX_W     = 30
+    VIZ_MIN_W     = 24
+
+    private def viz_width(w : Int32) : Int32
+      return 0 if w < VIZ_MIN_TOTAL
+      vw = {w * 32 // 100, VIZ_MAX_W}.min
+      vw < VIZ_MIN_W ? 0 : vw
     end
 
     # The three body-pane rects below the OVERVIEW band: {SCOPE (top-left), HOST
@@ -500,9 +526,15 @@ module Gori::Tui
       ov_focused = focused && @pane == :overrides
       desc_focused = focused && @pane == :desc
 
-      # OVERVIEW band on top, full width; below it SCOPE (top-left) over HOST OVERRIDES
-      # (bottom-left), with DESCRIPTION filling the right column.
-      render_overview(screen, Rect.new(rect.x, rect.y, rect.w, overview_h(rect)))
+      # OVERVIEW band on top; below it SCOPE (top-left) over HOST OVERRIDES (bottom-left),
+      # with DESCRIPTION filling the right column. The band splits into OVERVIEW (left) and
+      # a read-only AT A GLANCE viz pane (right) when there's room; the region below uses
+      # overview_h(rect) + full rect.w, so it's unaffected by the split.
+      band = Rect.new(rect.x, rect.y, rect.w, overview_h(rect))
+      vw = viz_width(band.w)
+      ov_rect = vw > 0 ? Rect.new(band.x, band.y, band.w - vw - 1, band.h) : band
+      render_overview(screen, ov_rect)
+      render_analytics(screen, Rect.new(band.right - vw, band.y, vw, band.h)) if vw > 0
       return unless panes = body_panes(rect)
       render_scope_card(screen, panes[0], scope_focused)
       render_overrides_card(screen, panes[1], ov_focused)
@@ -544,6 +576,116 @@ module Gori::Tui
         screen.text(inner.x + 1, y, label + ":", Theme.text_bright)
         screen.text(vx, y, value, Theme.text, width: vw) if vw > 0
         y += 1
+      end
+    end
+
+    # AT A GLANCE viz pane riding the right of the OVERVIEW band (read-only, like OVERVIEW
+    # — no focus/keys). Two stacked micro-charts an analyst wants without leaving the tab:
+    # the captured traffic's HTTP status mix, then the finding/Prism severity breakdown.
+    # Degrades top-down by height (mirrors the Fuzzer DIST pane).
+    private def render_analytics(screen : Screen, rect : Rect) : Nil
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "AT A GLANCE", bg: Theme.bg, border: Theme.border)
+      inner = rect.inset(1, 1)
+      return if inner.empty?
+
+      groups = status_class_groups
+      sevs = severity_rows
+      if groups.empty? && sevs.empty?
+        screen.text(inner.x, inner.y, "no data yet", Theme.muted, width: inner.w)
+        return
+      end
+
+      y = render_bar_section(screen, inner, inner.y, groups)
+      return if sevs.empty? || y >= inner.bottom
+      y += 1 if !groups.empty? && y < inner.bottom - 1 # spacer between sections when there's room
+      render_severity(screen, inner, y, sevs)
+    end
+
+    # Collapse @status_counts into ordered {label, count, sample_status} rows: 1xx..5xx
+    # classes plus a PEND row for still-pending (nil-status) flows. sample_status feeds
+    # Theme.status_color (PEND → nil → muted). Only nonzero classes are kept.
+    private def status_class_groups : Array({String, Int64, Int32?})
+      cls = StaticArray(Int64, 6).new(0_i64) # 0 = pending, 1..5 = 1xx..5xx
+      @status_counts.each do |(st, cnt)|
+        if st.nil? || st == 0
+          cls[0] += cnt
+        else
+          k = st // 100
+          cls[k] += cnt if 1 <= k < 6
+        end
+      end
+      out = [] of {String, Int64, Int32?}
+      (1..5).each do |k|
+        out << {"#{k}xx", cls[k], (k * 100).as(Int32?)} if cls[k] > 0
+      end
+      out << {"PEND", cls[0], nil.as(Int32?)} if cls[0] > 0
+      out
+    end
+
+    # Severity rows (Critical first) with nonzero counts, from the combined finding+Prism
+    # tally. The Int value feeds Theme.severity_color.
+    private def severity_rows : Array({String, Int64, Int32})
+      labels = { {4, "CRIT"}, {3, "HIGH"}, {2, "MED"}, {1, "LOW"}, {0, "INFO"} }
+      out = [] of {String, Int64, Int32}
+      labels.each do |(val, lab)|
+        n = @sev_tally[val]
+        out << {lab, n, val} if n > 0
+      end
+      out
+    end
+
+    # Draw status-class bars top-down, each colored by its class. Returns the next free y.
+    private def render_bar_section(screen : Screen, inner : Rect, y0 : Int32,
+                                   groups : Array({String, Int64, Int32?})) : Int32
+      return y0 if groups.empty?
+      maxc = groups.max_of { |(_, c, _)| c }
+      y = y0
+      groups.each do |(label, count, code)|
+        break if y >= inner.bottom
+        render_bar_row(screen, inner, y, label, count, maxc, Theme.status_color(code))
+        y += 1
+      end
+      y
+    end
+
+    # Severity section: full colored bars when every row fits, else a compact one-line
+    # tally so nothing is silently dropped on a short pane.
+    private def render_severity(screen : Screen, inner : Rect, y0 : Int32,
+                                rows : Array({String, Int64, Int32})) : Nil
+      avail = inner.bottom - y0
+      return if avail <= 0
+      if avail >= rows.size
+        maxc = rows.max_of { |(_, c, _)| c }
+        rows.each_with_index do |(label, count, val), i|
+          render_bar_row(screen, inner, y0 + i, label, count, maxc, Theme.severity_color(val))
+        end
+      else
+        render_severity_tally(screen, inner, y0, rows)
+      end
+    end
+
+    # One "LABEL ███░  42" row: label, a Spark.bar scaled to `maxc`, right-aligned count.
+    private def render_bar_row(screen : Screen, inner : Rect, y : Int32, label : String,
+                               count : Int64, maxc : Int64, color : Color) : Nil
+      label_w = 5 # "CRIT " / "PEND " / "2xx  "
+      num = Fmt.count(count)
+      num_w = num.size
+      bar_w = {inner.w - label_w - num_w - 1, 1}.max
+      screen.text(inner.x, y, label.ljust(label_w), color, Theme.bg)
+      screen.text(inner.x + label_w, y, Spark.bar(count, maxc, bar_w), color, Theme.bg)
+      screen.text(inner.x + label_w + bar_w + 1, y, num.rjust(num_w), Theme.muted, Theme.bg, width: num_w)
+    end
+
+    # Compact one-line colored severity tally ("C3 H12 M28 L9 I2") for when full bars
+    # won't fit — each chip tinted by its severity.
+    private def render_severity_tally(screen : Screen, inner : Rect, y : Int32,
+                                      rows : Array({String, Int64, Int32})) : Nil
+      x = inner.x
+      rows.each do |(label, count, val)|
+        break if x >= inner.right
+        x = screen.text(x, y, "#{label[0]}#{Fmt.count(count)}", Theme.severity_color(val), Theme.bg)
+        x = screen.text(x, y, " ", Theme.muted, Theme.bg)
       end
     end
 

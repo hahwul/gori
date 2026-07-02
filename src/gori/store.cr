@@ -306,6 +306,12 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM findings").as(Int64).to_i
     end
 
+    # Finding count per Severity value (index 0=Info … 4=Critical) for the Project tab's
+    # severity breakdown. Backed by idx_findings_severity.
+    def findings_severity_counts : StaticArray(Int64, 5)
+      severity_tally("SELECT severity, COUNT(*) FROM findings GROUP BY severity")
+    end
+
     # --- prism scan issues (V20) ---------------------------------------------
 
     # Cap on distinct affected URLs kept per grouped issue (newest accumulate; once full,
@@ -413,6 +419,29 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM prism_issues").as(Int64).to_i
     rescue
       0
+    end
+
+    # Prism-issue count per Severity value (index 0=Info … 4=Critical). Small table — a
+    # plain scan, GROUP BY on the severity column.
+    def prism_severity_counts : StaticArray(Int64, 5)
+      severity_tally("SELECT severity, COUNT(*) FROM prism_issues GROUP BY severity")
+    end
+
+    # Shared fold for the severity-tally queries: a 5-slot array keyed by the Severity
+    # enum value (0=Info … 4=Critical). Out-of-range rows are ignored; never crashes a
+    # poll (returns zeros on error).
+    private def severity_tally(sql : String) : StaticArray(Int64, 5)
+      out = StaticArray(Int64, 5).new(0_i64)
+      @db.query(sql) do |rs|
+        rs.each do
+          sev = rs.read(Int32)
+          cnt = rs.read(Int64)
+          out[sev] = cnt if 0 <= sev < 5
+        end
+      end
+      out
+    rescue
+      StaticArray(Int64, 5).new(0_i64)
     end
 
     # Per-project Prism MODE, stored in the generic settings table (key "prism_mode").
@@ -879,6 +908,20 @@ module Gori
 
     def count : Int64
       @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
+    end
+
+    # Per-status flow counts (e.g. {200 => n, 404 => n, nil => pending}) for the Project
+    # tab's status-distribution chart. Backed by idx_flows_status (V8) so it stays cheap
+    # on a full history. A nil status is a still-pending flow (no response yet). Never
+    # crashes a poll (returns [] on error).
+    def flow_status_counts : Array({Int32?, Int64})
+      rows = [] of {Int32?, Int64}
+      @db.query("SELECT status, COUNT(*) FROM flows GROUP BY status") do |rs|
+        rs.each { rows << {rs.read(Int32?), rs.read(Int64)} }
+      end
+      rows
+    rescue
+      [] of {Int32?, Int64}
     end
 
     # SQLite's per-connection change counter (PRAGMA data_version): it bumps when

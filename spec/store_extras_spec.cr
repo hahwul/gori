@@ -140,3 +140,73 @@ describe "Gori::Store findings (v3)" do
     end
   end
 end
+
+private def req_for(target : String, host = "acme.test")
+  Gori::Store::CapturedRequest.new(
+    created_at: 1_000_i64, scheme: "http", host: host, port: 80,
+    method: "GET", target: target, http_version: "HTTP/1.1",
+    head: "GET #{target} HTTP/1.1\r\nHost: #{host}\r\n\r\n".to_slice, body: nil)
+end
+
+private def respond(store, id : Int64, status : Int32)
+  store.update_response(Gori::Store::CapturedResponse.new(
+    flow_id: id, status: status, head: "HTTP/1.1 #{status}\r\n\r\n".to_slice, body: nil))
+end
+
+describe "Gori::Store project-tab aggregates (AT A GLANCE viz)" do
+  it "groups flow counts by status, with nil for still-pending flows" do
+    with_store do |store|
+      respond(store, store.insert_flow(req_for("/a")), 200)
+      respond(store, store.insert_flow(req_for("/b")), 200)
+      respond(store, store.insert_flow(req_for("/c")), 404)
+      respond(store, store.insert_flow(req_for("/d")), 503)
+      store.insert_flow(req_for("/pending")) # no response → status stays nil
+      store.flush
+
+      counts = store.flow_status_counts.to_h
+      counts[200].should eq(2)
+      counts[404].should eq(1)
+      counts[503].should eq(1)
+      counts[nil].should eq(1) # pending
+    end
+  end
+
+  it "returns an empty status breakdown for a fresh store" do
+    with_store do |store|
+      store.flow_status_counts.should be_empty
+    end
+  end
+
+  it "tallies findings by severity into a 5-slot array (0=Info .. 4=Critical)" do
+    with_store do |store|
+      store.insert_finding("crit", Gori::Store::Severity::Critical, "acme.test", nil)
+      store.insert_finding("high a", Gori::Store::Severity::High, "acme.test", nil)
+      store.insert_finding("high b", Gori::Store::Severity::High, "acme.test", nil)
+      store.insert_finding("info", Gori::Store::Severity::Info, "acme.test", nil)
+      store.flush
+
+      f = store.findings_severity_counts
+      f[0].should eq(1) # info
+      f[2].should eq(0) # medium (none)
+      f[3].should eq(2) # high
+      f[4].should eq(1) # critical
+    end
+  end
+
+  it "tallies prism issues by severity" do
+    with_store do |store|
+      store.upsert_prism_issue(Gori::Prism::Detection.new(
+        code: "missing_hsts", category: "security", host: "acme.test",
+        url: "http://acme.test/", title: "no hsts", severity: Gori::Store::Severity::Medium))
+      store.upsert_prism_issue(Gori::Prism::Detection.new(
+        code: "cors_wildcard", category: "security", host: "acme.test",
+        url: "http://acme.test/api", title: "cors *", severity: Gori::Store::Severity::High))
+      store.flush
+
+      p = store.prism_severity_counts
+      p[2].should eq(1) # medium
+      p[3].should eq(1) # high
+      p[4].should eq(0) # critical (none)
+    end
+  end
+end
