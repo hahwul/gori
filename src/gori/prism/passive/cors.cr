@@ -12,9 +12,11 @@ module Gori
           return unless acao
           creds = resp.headers.get?("Access-Control-Allow-Credentials").try(&.downcase.strip) == "true"
           if acao == "*"
-            sev = creds ? Store::Severity::High : Store::Severity::Medium
+            # `*` + Allow-Credentials is REJECTED by browsers (the credentialed request fails),
+            # so the combination is a non-functional misconfiguration — NOT more exploitable than
+            # a bare wildcard. Keep it Medium and say so, rather than inflating to High.
             acc << cors(ctx, "cors_wildcard", "Permissive CORS (Access-Control-Allow-Origin: *)",
-              sev, creds ? "with credentials" : nil)
+              Store::Severity::Medium, creds ? "with credentials (browser-rejected combination)" : nil)
           elsif acao.downcase == "null"
             sev = creds ? Store::Severity::High : Store::Severity::Medium
             acc << cors(ctx, "cors_null_origin", "CORS allows the null origin",
