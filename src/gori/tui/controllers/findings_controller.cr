@@ -35,7 +35,7 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       if @findings.detail_open?
         @findings.editing_notes? ? "esc save · ^W discard" \
-                                 : "↑/↓ links · k open · e notes · o flow · r replay · space cmds · ⇧←/→ h-scroll · ←/esc back"
+                                 : "↑/↓ links · ↵ open · e notes · o flow · r replay · space cmds · ⇧←/→ h-scroll · ←/esc back"
       elsif @findings.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       else

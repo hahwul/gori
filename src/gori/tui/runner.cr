@@ -1387,7 +1387,7 @@ module Gori::Tui
       return (@toast = "no replay sessions to link"; lo.stop_add) if rows.empty?
       @link_add_owner = {lo.owner_kind, lo.owner_id}
       @link_add_ref_kind = Store::LinkRefKind::Replay
-      @subtab_picker = SubtabPicker.new("PICK REPLAY", rows)
+      @subtab_picker = SubtabPicker.new("PICK REPLAY", rows, action: "link")
       @overlay = :replay_subtab
       lo.stop_add
     end
@@ -1397,7 +1397,7 @@ module Gori::Tui
       return (@toast = "no fuzz sessions to link"; lo.stop_add) if rows.empty?
       @link_add_owner = {lo.owner_kind, lo.owner_id}
       @link_add_ref_kind = Store::LinkRefKind::Fuzz
-      @subtab_picker = SubtabPicker.new("PICK FUZZ", rows)
+      @subtab_picker = SubtabPicker.new("PICK FUZZ", rows, action: "link")
       @overlay = :replay_subtab
       lo.stop_add
     end
@@ -1407,7 +1407,7 @@ module Gori::Tui
       return (@toast = "no miner sessions to link"; lo.stop_add) if rows.empty?
       @link_add_owner = {lo.owner_kind, lo.owner_id}
       @link_add_ref_kind = Store::LinkRefKind::Miner
-      @subtab_picker = SubtabPicker.new("PICK MINER", rows)
+      @subtab_picker = SubtabPicker.new("PICK MINER", rows, action: "link")
       @overlay = :replay_subtab
       lo.stop_add
     end
@@ -2299,7 +2299,7 @@ module Gori::Tui
       when :browser       then "BROWSER"
       when :choice        then @choice_picker.try(&.title) || "CHOOSE"
       when :comparer_pick then "PICK FLOW"
-      when :replay_subtab then "FIND SUB-TAB"
+      when :replay_subtab then @subtab_picker.try(&.title) || "FIND SUB-TAB"
       when :links         then @links_overlay.try(&.title) || "LINKS"
       when :finding_pick  then "PICK FINDING"
       when :note_pick     then "PICK NOTE"
@@ -2340,7 +2340,7 @@ module Gori::Tui
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
       when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when :replay_subtab then "type to filter · ↑/↓ select · ↵ jump · esc cancel"
+      when :replay_subtab then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
       when :links         then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
       when :finding_pick  then "type to filter · ↑/↓ select · ↵ link · esc cancel"
       when :note_pick     then "type to filter · ↑/↓ select · ↵ link · esc cancel"
@@ -3022,7 +3022,9 @@ module Gori::Tui
       ref = current_link_ref
       return (@toast = "nothing to link") unless ref
       if f = findings_controller.view.detail_finding
-        commit_link_to_owner(Store::LinkOwnerKind::Finding, f.id, ref[0], ref[1])
+        # An open finding detail is the implicit target — name it so it's clear which
+        # finding got the link (the picker path below is explicit, so it stays "linked").
+        @toast = "linked to finding ##{f.id}: #{link_title_snip(f.title)}" if commit_link_to_owner(Store::LinkOwnerKind::Finding, f.id, ref[0], ref[1])
         return
       end
       @link_pending_ref = ref
@@ -3037,6 +3039,12 @@ module Gori::Tui
       @link_pending_ref = ref
       @note_picker = NotePicker.new(note_picker_rows)
       @overlay = :note_pick
+    end
+
+    # Trim a finding title for a one-line toast (avoid a wall of text on wide titles).
+    private def link_title_snip(title : String) : String
+      t = title.strip
+      t.size > 48 ? "#{t[0, 47]}…" : t
     end
 
     private def current_link_ref : {Store::LinkRefKind, Int64}?

@@ -712,9 +712,10 @@ note_main = <<-NOTES
   article -> a note -> /about/, plus one guessed path that 404s.
 
 ## Entity links
-- **Finding detail** → Space → `l` opens the links overlay; `k` jumps to the selected ref.
-  The RELATED pane lists cross-links (replay/fuzz/miner/history) beyond the primary evidence flow.
-- **Notes sub-tab** → Space → `k` opens links for the active note (preview strip at the bottom).
+- **Finding detail** → Space → `l` opens the links overlay; `↵` opens the selected ref
+  (`↑/↓`·`j/k` navigate the RELATED list). The RELATED pane lists cross-links
+  (replay/fuzz/miner/history) beyond the primary evidence flow.
+- **Notes sub-tab** → Space → `l` opens links for the active note (preview strip at the bottom).
 - **History / Replay / Fuzzer / Miner** → Space → `k` link to a finding, `u` link to a note.
 - This demo project already has links seeded — try the XSS finding or switch to the
   "Workbench cross-links" note sub-tab.
@@ -727,7 +728,7 @@ note_links = <<-NOTES2
 # Workbench cross-links
 
 Pointers to the replay/fuzz/miner sessions tied to this engagement.
-Space → `k` (links) on this sub-tab jumps to the linked session or flow.
+Space → `l` (links) on this sub-tab opens the overlay; `↵`/`o` jumps to the linked session or flow.
 
 - **XSS PoC** replay — re-send the reflected /search payload
 - **IDOR probe** replay — GET /v1/users/2 with the customer token

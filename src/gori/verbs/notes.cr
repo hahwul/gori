@@ -23,7 +23,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "notes.clear", "Clear note", "Clear the current note's text",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'l') { |ctx| ctx.notes_clear; nil }
+        Verb::Scope::Notes, available: in_notes, mnemonic: 'c') { |ctx| ctx.notes_clear; nil }
 
       r.register Verb::Definition.new(
         "notes.edit", "Edit in $EDITOR", "Open the current note in the external editor",
@@ -39,7 +39,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "notes.links", "Manage links", "View/add/remove related History/Replay/Fuzzer/Miner URLs",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'k') { |ctx| ctx.notes_links; nil }
+        Verb::Scope::Notes, available: in_notes, mnemonic: 'l') { |ctx| ctx.notes_links; nil }
     end
   end
 end

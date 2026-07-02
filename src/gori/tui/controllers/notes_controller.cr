@@ -160,7 +160,7 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · ↑ sub-tabs · ↹/esc tabs"
+      "type to edit · ^N new · ^W close · ^G goto · ^F find · ^B ws · ^1-9 · space l links · ↑ sub-tabs · ↹/esc tabs"
     end
 
     def goto_symbol : Symbol?

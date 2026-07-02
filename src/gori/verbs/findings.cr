@@ -73,7 +73,7 @@ module Gori
       # bracket chords ([ ] { }) hidden (awkward as menu mnemonics; discoverable in Help).
       r.register Verb::Definition.new(
         "finding.edit-notes", "Edit notes", "Edit the finding notes inline", Verb::Scope::FindingsDetail,
-        [Verb::Chord.new("e"), Verb::Chord.new("enter")]) { |ctx| ctx.finding_edit_notes; nil }
+        [Verb::Chord.new("e")]) { |ctx| ctx.finding_edit_notes; nil }
 
       # Shift+←/→ scroll a long notes line sideways. `finding.close` (registered
       # above) owns plain ← — a distinct chord (shift: true), so no collision.
@@ -115,7 +115,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "finding.open-link", "Open linked item", "Open the selected related URL in its tab",
-        Verb::Scope::FindingsDetail, mnemonic: 'k') { |ctx| ctx.finding_open_link; nil }
+        Verb::Scope::FindingsDetail, [Verb::Chord.new("enter")], hidden: true) { |ctx| ctx.finding_open_link; nil }
 
       r.register Verb::Definition.new(
         "finding.link-down", "Next related link", "Select the next related item",
@@ -123,7 +123,7 @@ module Gori
 
       r.register Verb::Definition.new(
         "finding.link-up", "Previous related link", "Select the previous related item",
-        Verb::Scope::FindingsDetail, [Verb::Chord.new("up")], hidden: true) { |ctx| ctx.finding_link_move(-1); nil }
+        Verb::Scope::FindingsDetail, [Verb::Chord.new("up"), Verb::Chord.new("k")], hidden: true) { |ctx| ctx.finding_link_move(-1); nil }
 
       # Export (palette/Global — the findings' way out): write a report to the project dir.
       r.register Verb::Definition.new(

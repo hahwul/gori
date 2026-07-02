@@ -15,10 +15,11 @@ module Gori::Tui
     record Row, index : Int32, label : String, detail : String
 
     getter title : String
+    getter action : String # verb shown in the ↵ hint ("jump" for search, "link" when picking a link target)
     getter selected : Int32
     @indexed : Array({Row, String}) # each row paired with its precomputed filter haystack
 
-    def initialize(@title : String, @rows : Array(Row))
+    def initialize(@title : String, @rows : Array(Row), @action : String = "jump")
       @query = ""
       @preedit = "" # live IME composition (e.g. Hangul jamo) shown under the filter caret
       # Precompute each row's filter haystack ONCE (not per keystroke).
@@ -101,7 +102,7 @@ module Gori::Tui
       Frame.card(screen, box, @title, border: Theme.border_focus)
 
       if @query.empty? && @preedit.empty?
-        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ jump · esc cancel",
+        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ #{@action} · esc cancel",
           Theme.muted, Theme.panel, width: box.w - 4)
       else
         px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
