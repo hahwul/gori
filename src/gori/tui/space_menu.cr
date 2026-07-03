@@ -17,7 +17,12 @@ module Gori::Tui
   # Pure input/state + rendering; the Runner owns opening/closing, capturing the
   # scope, and executing the selection.
   class SpaceMenu
-    MAX_ROWS = 12 # tallest popup (scopes have far fewer verbs; scrolling deferred)
+    # Tallest popup before it scrolls. Sized to clear the busiest scope (History's
+    # Body has 13 menu entries) with headroom, so the common case never scrolls; when
+    # it does (a short terminal, or a future scope with more verbs) render() draws
+    # ▲/▼ markers. box() still clamps the height to the body, so this is only the
+    # "don't grow past this even on a tall terminal" ceiling.
+    MAX_ROWS = 16
 
     getter selected : Int32
 
@@ -83,6 +88,7 @@ module Gori::Tui
       Frame.card(screen, b, "SPACE", border: Theme.border_focus)
       rows = b.h - 2
       ensure_visible(rows)
+      visible = {rows, @entries.size - @scroll}.min # rows actually drawn this frame
       (0...rows).each do |i|
         idx = @scroll + i
         break if idx >= @entries.size
@@ -94,8 +100,28 @@ module Gori::Tui
         screen.cell(b.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
         screen.text(b.x + 2, ry, v.menu_key.to_s, Theme.accent, bg, Attribute::Bold)
         title_fg = active ? Theme.text_bright : Theme.text
-        screen.text(b.x + 4, ry, v.title, title_fg, bg, width: {b.w - 5, 0}.max)
+        # Reserve the rightmost interior col for the scroll marker (below) so a
+        # widest-title row can't paint over it.
+        screen.text(b.x + 4, ry, v.title, title_fg, bg, width: {b.w - 6, 0}.max)
+        if mark = scroll_marker(i, visible, rows)
+          screen.cell(b.right - 2, ry, mark, Theme.muted, bg)
+        end
       end
+    end
+
+    # The scroll affordance for row `i`: ▲ on the top row when entries are hidden
+    # above, ▼ on the bottom row when hidden below, ↕ when a 1-row viewport hides
+    # both — so it's obvious the popup scrolls (nil = list fully shown, no marker).
+    # Mirrors settings_view's marker convention.
+    private def scroll_marker(i : Int32, visible : Int32, rows : Int32) : Char?
+      above = @scroll > 0
+      below = @scroll + rows < @entries.size
+      first = i == 0
+      last = i == visible - 1
+      return '↕' if first && last && above && below
+      return '▲' if first && above
+      return '▼' if last && below
+      nil
     end
 
     # Scroll so the selection stays visible when the popup is shorter than the

@@ -50,7 +50,7 @@ module Gori::Tui
           ? "type \"IP host\" · ↵ save · esc cancel" \
           : "↑/↓ move · ↑ scope · → desc · a add · ↵/e edit · d del · space cmds · esc"
       else
-        "type to edit · ↑/↓/↔ move · ← scope · ^G goto · ^F find · ^B ws · esc tabs"
+        "type to edit · ↑/↓/↔ move · ← scope · ^G goto · ^F find · esc tabs"
       end
     end
 
@@ -205,15 +205,15 @@ module Gori::Tui
       elsif key.escape?
         save
         @host.request_focus(:menu)
-      elsif key.up?
-        if @project_view.scope_at_top? # ↑ on the first rule pops up to the tab bar
+      elsif key.up? || key.lower_k?
+        if @project_view.scope_at_top? # ↑/k on the first rule pops up to the tab bar
           save
           @host.request_focus(:menu)
         else
           @project_view.scope_select(-1)
         end
-      elsif key.down?
-        if @project_view.scope_at_bottom? # ↓ on the last rule drops into HOST OVERRIDES (the card below)
+      elsif key.down? || key.lower_j?
+        if @project_view.scope_at_bottom? # ↓/j on the last rule drops into HOST OVERRIDES (the card below)
           @project_view.focus_pane(:overrides)
         else
           @project_view.scope_select(1)
@@ -314,13 +314,13 @@ module Gori::Tui
       elsif key.escape?
         save
         @host.request_focus(:menu)
-      elsif key.up?
-        if @project_view.ov_at_top? # ↑ on the first override crosses up to the SCOPE pane
+      elsif key.up? || key.lower_k?
+        if @project_view.ov_at_top? # ↑/k on the first override crosses up to the SCOPE pane
           @project_view.pane_advance(-1)
         else
           @project_view.ov_select(-1)
         end
-      elsif key.down?
+      elsif key.down? || key.lower_j?
         @project_view.ov_select(1)
       elsif key.left?
         @project_view.pane_advance(-1) # ← back to SCOPE (the pane above-left)

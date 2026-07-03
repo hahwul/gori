@@ -441,8 +441,8 @@ module Gori::Tui
       s = cur
       key = ev.key
       case
-      when key.up?                 then s.view.output_at_top? ? (s.pane = :chain) : s.view.scroll_output(-1)
-      when key.down?               then s.view.scroll_output(1)
+      when key.up?, key.lower_k?   then s.view.output_at_top? ? (s.pane = :chain) : s.view.scroll_output(-1)
+      when key.down?, key.lower_j? then s.view.scroll_output(1)
       when key.left? && ev.shift?  then s.view.hscroll_output(-1)
       when key.right? && ev.shift? then s.view.hscroll_output(1)
       end

@@ -95,15 +95,15 @@ module Gori::Tui
       @search_target = :none
       @search_hits = [] of Int32
       @search_idx = 0
-      # The sub-tab rename prompt (Replay + Fuzzer) — orthogonal to @overlay (floats over
-      # the bottom status row, like ^G/^F).
+      # The sub-tab rename prompt (Replay + Fuzzer + Convert + Miner) — orthogonal to
+      # @overlay (floats over the bottom status row, like ^G/^F).
       @rename_open = false
       @rename_buffer = ""
       @rename_preedit = ""
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove replay tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
-      @rename_view = nil.as(ReplayView | FuzzerView | ConvertView | Nil)
+      @rename_view = nil.as(ReplayView | FuzzerView | ConvertView | MinerView | Nil)
       # The import path prompt (palette → import:har/urls/oas) — bottom-anchored like
       # ^G/^F, with filesystem tab-completion via PathComplete.
       @import_open = false
@@ -658,7 +658,7 @@ module Gori::Tui
       end
     end
 
-    # Right-click: rename a Replay/Fuzzer sub-tab chip (the one context menu we have).
+    # Right-click: rename a Replay/Fuzzer/Convert/Miner sub-tab chip (the one context menu we have).
     # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
       return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !@rename_open && subtabs_shown?
@@ -695,7 +695,7 @@ module Gori::Tui
     private def modal_overlay? : Bool
       case @overlay
       when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config then true
-      else                                                                                                                                                            false
+      else                                                                                                                                                                                               false
       end
     end
 
@@ -1251,7 +1251,7 @@ module Gori::Tui
                      when .replay? then replay_controller.db_id_at(idx)
                      when .fuzz?   then fuzzer_controller.db_id_at(idx)
                      when .miner?  then miner_controller.db_id_at(idx)
-                     else             nil
+                     else               nil
                      end
                    end
           if rid = ref_id
@@ -1319,10 +1319,10 @@ module Gori::Tui
       when key.escape? then close_links_overlay
       when key.up?     then lo.move(-1)
       when key.down?   then lo.move(1)
-      when key.enter?       then open_selected_link(lo)
-      when c == 'o'         then open_selected_link(lo)
-      when c == 'd'         then remove_selected_link(lo)
-      when c == 'a'         then lo.start_add
+      when key.enter?  then open_selected_link(lo)
+      when c == 'o'    then open_selected_link(lo)
+      when c == 'd'    then remove_selected_link(lo)
+      when c == 'a'    then lo.start_add
       end
     end
 
@@ -1520,7 +1520,7 @@ module Gori::Tui
     end
 
     private def commit_link_to_owner(owner_kind : Store::LinkOwnerKind, owner_id : Int64,
-                                   ref_kind : Store::LinkRefKind, ref_id : Int64) : Bool
+                                     ref_kind : Store::LinkRefKind, ref_id : Int64) : Bool
       if @session.store.add_link(owner_kind, owner_id, ref_kind, ref_id)
         @toast = "linked"
         refresh_link_owners(owner_kind, owner_id)
@@ -1866,7 +1866,7 @@ module Gori::Tui
       when ev.ctrl? && c && '1' <= c <= '9'
         jump_subtab(c.to_i - 1) # switch + stay on the strip
       when rename_chord?(ev)
-        open_rename(current_subtab_index) # rename the active sub-tab (Replay/Fuzzer)
+        open_rename(current_subtab_index) # rename the active sub-tab (Replay/Fuzzer/Convert/Miner)
       when key.left?, key.lower_h?
         move_subtab(-1)
       when key.right?, key.lower_l?
@@ -1885,13 +1885,25 @@ module Gori::Tui
     # Sub-tab new/close/commit dispatched across the multi-session tabs. The active
     # tab is matched explicitly (NOT an `else → notes`): tabs with a FIXED strip
     # (Help) also expose subtab_labels, so a stray ^N/^W/^P-commit from their strip
-    # must no-op here, never leak into Notes.
+    # must no-op here, never leak into Notes. :miner is intentionally absent — mining
+    # sessions are seeded by a background job (History/Replay → "Mine parameters"),
+    # not created in-place, so ^N is a deliberate no-op on the Miner strip (its
+    # body_hint never advertises it). Rename/close still work.
     private def subtab_new : Nil
       case @active_tab
       when :replay  then replay_controller.replay_new
       when :fuzzer  then fuzzer_controller.fuzz_new
       when :convert then convert_controller.convert_new
       when :notes   then notes_controller.notes_new
+      end
+    end
+
+    # The strips where ^N creates a sub-tab (mirrors subtab_new's cases). Miner is excluded
+    # — its sessions are seeded by a background job, not ^N — so the strip hint omits ^N new.
+    private def subtab_new_supported? : Bool
+      case @active_tab
+      when :replay, :fuzzer, :convert, :notes then true
+      else                                         false
       end
     end
 
@@ -2361,6 +2373,11 @@ module Gori::Tui
             return "←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ↑/esc tabs"
           end
           rn = renameable_subtabs? ? " · r rename" : ""
+          # Miner sessions are background-seeded (^N is a no-op) and its body is a read-only
+          # table (↵ ENTERS, doesn't edit) — drop the ^N/edit tokens that fit editor strips.
+          unless subtab_new_supported?
+            return "←/→ switch sub-tab · ↓/↵ enter · ^1-9 jump · ^W close · space cmds#{rn} · ↑/esc tabs"
+          end
           return "←/→ switch sub-tab · ↓/↵ edit · ^1-9 jump · ^N new · ^W close · space cmds#{rn} · ↑/esc tabs"
         end
         body_hints
@@ -2583,10 +2600,10 @@ module Gori::Tui
       renameable_subtabs? && ev.key.lower_r? && !ev.ctrl? && !ev.alt?
     end
 
-    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer + Convert).
+    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer + Convert + Miner).
     # Notes derives its label from the body text, so it has no rename.
     private def renameable_subtabs? : Bool
-      @active_tab == :replay || @active_tab == :fuzzer || @active_tab == :convert
+      @active_tab == :replay || @active_tab == :fuzzer || @active_tab == :convert || @active_tab == :miner
     end
 
     # Open the rename prompt for sub-tab `idx` on the active tab, seeding its current
@@ -2598,6 +2615,7 @@ module Gori::Tui
              when :replay  then replay_controller.view_at(idx)
              when :fuzzer  then fuzzer_controller.view_at(idx)
              when :convert then convert_controller.view_at(idx)
+             when :miner   then miner_controller.view_at(idx)
              end
       return unless view
       @rename_view = view
@@ -2621,6 +2639,7 @@ module Gori::Tui
       when ReplayView  then replay_controller.apply_rename(v, name)
       when FuzzerView  then fuzzer_controller.apply_rename(v, name)
       when ConvertView then convert_controller.apply_rename(v, name)
+      when MinerView   then miner_controller.apply_rename(v, name)
       end
     end
 

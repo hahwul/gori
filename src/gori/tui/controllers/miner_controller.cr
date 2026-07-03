@@ -161,9 +161,9 @@ module Gori::Tui
 
     private def handle_summary(ev : Termisu::Event::Key, v : MinerView) : Nil
       key = ev.key
-      if key.down?
+      if key.down? || key.lower_j?
         v.focus_pane(:results)
-      elsif key.up?
+      elsif key.up? || key.lower_k?
         @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
       end
     end
@@ -171,17 +171,17 @@ module Gori::Tui
     private def handle_results(ev : Termisu::Event::Key, v : MinerView) : Nil
       key = ev.key
       case
-      when key.enter? then v.open_detail
-      when key.down?  then v.results_move(1)
-      when key.up?    then v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.results_move(-1)
+      when key.enter?              then v.open_detail
+      when key.down?, key.lower_j? then v.results_move(1)
+      when key.up?, key.lower_k?   then v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.results_move(-1)
       end
     end
 
     private def handle_detail(ev : Termisu::Event::Key, v : MinerView) : Nil
       key = ev.key
-      if key.up?
+      if key.up? || key.lower_k?
         v.detail_scroll(-1)
-      elsif key.down?
+      elsif key.down? || key.lower_j?
         v.detail_scroll(1)
       end
     end
