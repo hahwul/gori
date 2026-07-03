@@ -41,10 +41,11 @@ describe Gori::Store do
       # Simulate a DB last migrated before V18: drop the post-V17 tables and roll
       # user_version back to 17 (e.g. a project created on the hostname-overrides branch).
       store = Gori::Store.open(path)
-      store.@db.exec("DROP TABLE sitemap_tags")   # V18
-      store.@db.exec("DROP TABLE miner_sessions") # V19
-      store.@db.exec("DROP TABLE prism_issues")   # V20
-      store.@db.exec("DROP TABLE entity_links")   # V21
+      store.@db.exec("DROP TABLE sitemap_tags")                        # V18
+      store.@db.exec("DROP TABLE miner_sessions")                      # V19
+      store.@db.exec("DROP TABLE prism_issues")                        # V20
+      store.@db.exec("DROP TABLE entity_links")                        # V21
+      store.@db.exec("ALTER TABLE replays DROP COLUMN mark_transform") # V22 (added a column to a pre-V17 table)
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 

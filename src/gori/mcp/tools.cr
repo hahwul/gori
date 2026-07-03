@@ -6,6 +6,7 @@ require "../replay/engine"
 require "../replay/h2_engine"
 require "../replay/flow_request"
 require "../fuzz"
+require "../convert"
 require "../miner"
 require "./serialize"
 require "./request_builder"
@@ -721,7 +722,7 @@ module Gori
         matcher = fuzz_matcher(h)
         config = fuzz_config(h, mode)
         gen_sets = mode.per_position? ? sets : [sets.first]
-        generator = Fuzz::Generator.new(template, gen_sets, config)
+        generator = Fuzz::Generator.new(template, gen_sets, config, registry: Convert.shared_registry)
         sender = Fuzz::Sender.new(origin, http2: use_h2,
           verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
         engine = Fuzz::Engine.new(generator, matcher, sender, config)

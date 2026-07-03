@@ -148,6 +148,30 @@ private class FakeContext < ExecContext
     @calls << :replay_toggle_auto_content_length
   end
 
+  def replay_toggle_mark_transform : Nil
+    @calls << :replay_toggle_mark_transform
+  end
+
+  def replay_auto_mark : Nil
+    @calls << :replay_auto_mark
+  end
+
+  def replay_mark_word : Nil
+    @calls << :replay_mark_word
+  end
+
+  def replay_insert_marker : Nil
+    @calls << :replay_insert_marker
+  end
+
+  def replay_clear_marks : Nil
+    @calls << :replay_clear_marks
+  end
+
+  def replay_attach_chain : Nil
+    @calls << :replay_attach_chain
+  end
+
   def fuzz_selected : Nil
     @calls << :fuzz_selected
   end
@@ -170,6 +194,10 @@ private class FakeContext < ExecContext
 
   def fuzz_automark : Nil
     @calls << :fuzz_automark
+  end
+
+  def fuzz_attach_chain : Nil
+    @calls << :fuzz_attach_chain
   end
 
   def mine_selected : Nil

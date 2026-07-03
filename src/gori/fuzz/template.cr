@@ -1,3 +1,5 @@
+require "../convert"
+
 module Gori::Fuzz
   # A base request with marked payload positions. The marked TEXT is the single
   # source of truth (re-parsed each run), so it stays robust to edits — gori's
@@ -12,8 +14,12 @@ module Gori::Fuzz
   # the byte-exact path remains `gori run replay` / export.
   struct Template
     MARKER = '§'
+    # Value|chain delimiter inside a marker: `§value¦chain§`. NOT '|' — the Convert
+    # chain syntax already uses '|'/','/'>'  as step separators, so the boundary must
+    # be a char the chain never contains. `¦¦` escapes a literal `¦`, mirroring `§§`.
+    CHAIN_SEP = '¦'
 
-    record Position, index : Int32, default : String
+    record Position, index : Int32, default : String, chain : String = ""
 
     getter segments : Array(String) # literal runs; size == positions.size + 1
     getter positions : Array(Position)
@@ -22,59 +28,78 @@ module Gori::Fuzz
     def initialize(@segments : Array(String), @positions : Array(Position), @http2 : Bool)
     end
 
+    # The result of scanning one marker's interior (see scan_interior): the decoded
+    # {default, chain}, whether a chain part was opened (a bare `¦` seen — needed to
+    # rebuild an unbalanced marker faithfully), whether the closing § was found, and the
+    # index just past the closing § (or n when unbalanced).
+    private record InteriorScan, default : String, chain : String,
+      chained : Bool, closed : Bool, next_i : Int32
+
     def self.parse(marked : String, http2 : Bool = false) : Template
       segs = [] of String
-      defs = [] of String
+      defs = [] of {String, String} # {default, chain}
       lit = IO::Memory.new
       chars = marked.chars
       n = chars.size
       i = 0
       while i < n
         c = chars[i]
-        if c == MARKER
-          if chars[i + 1]? == MARKER # escaped literal §
-            lit << MARKER
-            i += 2
-            next
-          end
-          segs << lit.to_s
-          lit = IO::Memory.new
-          j = i + 1
-          val = IO::Memory.new
-          closed = false
-          while j < n
-            cj = chars[j]
-            if cj == MARKER
-              if chars[j + 1]? == MARKER # §§ inside a marker → literal §
-                val << MARKER
-                j += 2
-                next
-              end
-              closed = true
-              break
-            end
-            val << cj
-            j += 1
-          end
-          if closed
-            defs << val.to_s
-            i = j + 1
-          else # unbalanced trailing § → literal text, opens no position
-            # The preceding literal was optimistically pushed as a segment above;
-            # fold it back (with the § and the trailing chars) into `lit` so the
-            # tail lands in the FINAL segment. Otherwise render() — which emits only
-            # positions.size + 1 segments — would silently drop these trailing bytes.
-            lit << (segs.pop? || "") << MARKER << val.to_s
-            i = n
-          end
-        else
+        if c != MARKER
           lit << c
           i += 1
+        elsif chars[i + 1]? == MARKER # escaped literal §
+          lit << MARKER
+          i += 2
+        else
+          s = scan_interior(chars, i, n)
+          if s.closed
+            segs << lit.to_s
+            lit = IO::Memory.new
+            defs << {s.default, s.chain}
+          else # unbalanced trailing § → literal text, opens no position (no truncation:
+            # the § + interior fold into `lit` so render's positions.size+1 segments keep it)
+            lit << MARKER << s.default
+            lit << CHAIN_SEP << s.chain if s.chained
+          end
+          i = s.next_i
         end
       end
       segs << lit.to_s
-      positions = defs.map_with_index { |d, k| Position.new(k, d) }
+      positions = defs.map_with_index { |(d, ch), k| Position.new(k, d, ch) }
       new(segs, positions, http2)
+    end
+
+    # Scan from the opening § at `open` to the matching close, decoding `§§`→§ and
+    # `¦¦`→¦; the first bare `¦` splits the interior into value|chain. Returns the decoded
+    # parts even when unbalanced (closed: false), so parse can fold them back as literal.
+    private def self.scan_interior(chars : Array(Char), open : Int32, n : Int32) : InteriorScan
+      j = open + 1
+      val = IO::Memory.new
+      chn = IO::Memory.new
+      in_chain = false
+      while j < n
+        cj = chars[j]
+        if cj == MARKER
+          if chars[j + 1]? == MARKER # §§ inside a marker → literal §
+            (in_chain ? chn : val) << MARKER
+            j += 2
+            next
+          end
+          return InteriorScan.new(val.to_s, chn.to_s, in_chain, true, j + 1)
+        elsif cj == CHAIN_SEP
+          if chars[j + 1]? == CHAIN_SEP # ¦¦ inside a marker → literal ¦
+            (in_chain ? chn : val) << CHAIN_SEP
+            j += 2
+            next
+          end
+          in_chain ? (chn << CHAIN_SEP) : (in_chain = true) # 1st bare ¦ splits value|chain; a 2nd is literal
+          j += 1
+          next
+        end
+        (in_chain ? chn : val) << cj
+        j += 1
+      end
+      InteriorScan.new(val.to_s, chn.to_s, in_chain, false, n)
     end
 
     def position_count : Int32
@@ -144,6 +169,23 @@ module Gori::Fuzz
       io.to_slice
     end
 
+    # Map each payload through its position's Convert chain (empty chain = identity),
+    # returning a new payload array to feed `render`. A chain that fails — an unknown
+    # token, a step that raised, or output over MAX_OUT — leaves that value
+    # UNTRANSFORMED: Convert.run never raises, and a streaming fuzz run has nowhere to
+    # surface a per-position error (validate chains in the Convert tab). Convert works
+    # on Bytes but the template splices Strings, so the transformed bytes are rewrapped
+    # with String.new — encoders (base64/url/hex/hash/escape) stay ASCII; a decoder that
+    # produces raw bytes may lose fidelity, the same limit binary bodies already have.
+    def apply_chains(payloads : Array(String), registry : Convert::Registry) : Array(String)
+      payloads.map_with_index do |p, k|
+        spec = @positions[k]?.try(&.chain)
+        next p if spec.nil? || spec.empty?
+        res = Convert.run(registry, p.to_slice, spec)
+        (res.ok? && (o = res.output)) ? String.new(o) : p
+      end
+    end
+
     # ── Marking helpers (shared by the TUI editor and the CLI) ────────────────────
 
     # Wrap every query / cookie / urlencoded-or-JSON body VALUE in `§…§`. A no-op if
@@ -183,7 +225,10 @@ module Gori::Fuzz
       cur = cursor.clamp(0, n)
       if span = enclosing_marker(chars, cur)
         a, b = span
-        return String.build { |io| chars.each_with_index { |c, i| io << c unless i == a || i == b } }
+        # Drop the whole marker: both `§` AND any `¦chain` (keep only the raw value),
+        # else unmarking `§v¦b64§` would leave a stray `v¦b64`.
+        value, _ = split_raw_interior(chars[(a + 1)...b])
+        return "#{chars[0, a].join}#{value.join}#{chars[(b + 1)..].join}"
       end
       lo = cur
       while lo > 0 && word_char?(chars[lo - 1])
@@ -201,8 +246,71 @@ module Gori::Fuzz
     end
 
     # Strip every marker, leaving the defaults inline (back to the base request).
+    # Chains are dropped too — `render(default_payloads)` emits only the defaults.
     def self.clear_markers(text : String) : String
-      parse(text).render(parse(text).default_payloads).then { |b| String.new(b) }
+      tmpl = parse(text)
+      String.new(tmpl.render(tmpl.default_payloads))
+    end
+
+    # The Convert-chain string of the `§…§` marker enclosing char index `cursor`, or
+    # nil when the cursor isn't inside a closed marker. Seeds the chain-edit overlay.
+    def self.chain_at(text : String, cursor : Int32) : String?
+      idx = marked_spans(text).index { |(a, b)| a <= cursor && cursor <= b }
+      return nil unless idx
+      parse(text).positions[idx]?.try(&.chain)
+    end
+
+    # Replace/insert/remove the chain of the marker enclosing `cursor`, returning the
+    # new text (nil when the cursor isn't inside a marker). An empty `chain` removes
+    # the `¦…` entirely. The raw default bytes are kept verbatim; the new chain has any
+    # literal `§`/`¦` escaped so it round-trips through `parse`.
+    def self.set_chain(text : String, cursor : Int32, chain : String) : String?
+      chars = text.chars
+      span = marked_spans(text).find { |(a, b)| a <= cursor && cursor <= b }
+      return nil unless span
+      a, b = span
+      close = b - 1 # index of the closing §
+      value, _ = split_raw_interior(chars[(a + 1)...close])
+      clean = chain.strip
+      interior = clean.empty? ? value.join : "#{value.join}#{CHAIN_SEP}#{escape_chain(clean)}"
+      "#{chars[0, a + 1].join}#{interior}#{chars[close..].join}"
+    end
+
+    # Per closed marker: {open, sep, close} char offsets — `open`/`close` index the two
+    # `§`, and `sep` is the value|chain boundary `¦` (== `close` when there's no chain).
+    # Lets the views tint the value and the (dimmer) chain separately; 1:1 with
+    # `positions` / `marked_spans`.
+    def self.marker_regions(text : String) : Array({Int32, Int32, Int32})
+      chars = text.chars
+      marked_spans(text).map do |(a, b)|
+        close = b - 1
+        value, chain = split_raw_interior(chars[(a + 1)...close])
+        sep = chain.nil? ? close : (a + 1 + value.size)
+        {a, sep, close}
+      end
+    end
+
+    # Split a marker's RAW interior chars at the first UNESCAPED `¦` into
+    # {value, chain}. `§§` and `¦¦` are escapes (skip both), so an escaped `¦` isn't a
+    # boundary. `chain` is nil when the marker carries no chain.
+    private def self.split_raw_interior(interior : Array(Char)) : {Array(Char), Array(Char)?}
+      i = 0
+      n = interior.size
+      while i < n
+        c = interior[i]
+        if (c == MARKER && interior[i + 1]? == MARKER) || (c == CHAIN_SEP && interior[i + 1]? == CHAIN_SEP)
+          i += 2
+          next
+        elsif c == CHAIN_SEP
+          return {interior[0, i], interior[(i + 1)..]}
+        end
+        i += 1
+      end
+      {interior, nil}
+    end
+
+    private def self.escape_chain(s : String) : String
+      s.gsub(MARKER, "#{MARKER}#{MARKER}").gsub(CHAIN_SEP, "#{CHAIN_SEP}#{CHAIN_SEP}")
     end
 
     private def self.eol_of(text : String) : String
@@ -278,7 +386,7 @@ module Gori::Fuzz
     end
 
     private def self.word_char?(c : Char) : Bool
-      !c.whitespace? && !"&=?;:/\"'{}[](),§".includes?(c)
+      !c.whitespace? && !"&=?;:/\"'{}[](),§¦".includes?(c)
     end
 
     # The {open, close} char indices of the marker pair enclosing `cursor`, else nil.

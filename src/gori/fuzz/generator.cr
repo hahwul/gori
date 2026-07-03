@@ -6,7 +6,11 @@ module Gori::Fuzz
   #   Pitchfork / ClusterBomb → one set per position (set[i] → position i).
   # (the frontend builds that mapping; out-of-range positions fall back to set 0.)
   class Generator
-    def initialize(@template : Template, @sets : Array(PayloadSet), @config : Config)
+    # `registry` (when given) applies each marked position's inline Convert chain to
+    # its payload at render time — see Template#apply_chains. nil = no transforms
+    # (keeps bare 3-arg callers and specs compiling).
+    def initialize(@template : Template, @sets : Array(PayloadSet), @config : Config,
+                   @registry : Convert::Registry? = nil)
     end
 
     def mode : Mode
@@ -40,7 +44,7 @@ module Gori::Fuzz
     # The unmodified base request (all positions = their defaults), CL-synced — used
     # to seed the matcher baseline for anomaly diffing / auto-calibration.
     def baseline_request : Bytes
-      raw = @template.render(@template.default_payloads)
+      raw = @template.render(chained(@template.default_payloads))
       @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
     end
 
@@ -119,9 +123,15 @@ module Gori::Fuzz
     # ── helpers ──────────────────────────────────────────────────────────────────
 
     private def emit(idx : Int64, payloads : Array(String), pos : Int32?) : Job
-      raw = @template.render(payloads)
+      raw = @template.render(chained(payloads))
       bytes = @config.update_content_length? ? ContentLength.sync(raw, @config.add_content_length_when_missing?) : raw
-      Job.new(idx, payloads, pos, bytes)
+      Job.new(idx, payloads, pos, bytes) # keep the ORIGINAL payloads for reporting; only the wire bytes are transformed
+    end
+
+    # Apply each position's inline Convert chain to its payload (identity when no
+    # registry was supplied). Kept separate so `render` stays a byte-verbatim splice.
+    private def chained(payloads : Array(String)) : Array(String)
+      (reg = @registry) ? @template.apply_chains(payloads, reg) : payloads
     end
 
     private def set_for(p : Int32) : PayloadSet

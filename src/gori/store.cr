@@ -617,12 +617,13 @@ module Gori
     # (potentially multi-MB) response on each cross-session commit.
     def replays : Array(ReplayRecord)
       list = [] of ReplayRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni FROM replays ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, mark_transform FROM replays ORDER BY position, id") do |rs|
         rs.each do
           list << ReplayRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?))
+            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
+            mark_transform: rs.read(Int32) != 0)
         end
       end
       list
@@ -633,24 +634,24 @@ module Gori
     # response (responses are personal per session). Response fields stay nil.
     def get_replay(id : Int64) : ReplayRecord?
       @db.query(
-        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni FROM replays WHERE id = ?",
+        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform FROM replays WHERE id = ?",
         id) do |rs|
         return ReplayRecord.new(
           rs.read(Int64), rs.read(String), rs.read(String),
           rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-          sni: rs.read(String?)) if rs.move_next
+          sni: rs.read(String?), mark_transform: rs.read(Int32) != 0) if rs.move_next
       end
       nil
     end
 
     def replays_meta : Array(ReplayRecord)
       list = [] of ReplayRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni FROM replays ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform FROM replays ORDER BY position, id") do |rs|
         rs.each do
           list << ReplayRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            sni: rs.read(String?))
+            sni: rs.read(String?), mark_transform: rs.read(Int32) != 0)
         end
       end
       list
@@ -659,19 +660,21 @@ module Gori
     # Returns the new row id (or 0 if the store is closing — the caller normalizes
     # 0 → nil so a later update never targets a bogus row).
     def insert_replay(target : String, request : String, http2 : Bool,
-                      auto_cl : Bool, flow_id : Int64?, position : Int32, sni : String? = nil) : Int64
+                      auto_cl : Bool, flow_id : Int64?, position : Int32, sni : String? = nil,
+                      mark_transform : Bool = false) : Int64
       ts = now_us
       exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO replays (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni) VALUES (?,?,?,?,?,?,?,?,?)",
-          ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position, sni)
+        c.exec("INSERT INTO replays (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position, sni, mark_transform ? 1 : 0)
         nil
       }
     end
 
-    def update_replay(id : Int64, target : String, request : String, http2 : Bool, auto_cl : Bool, sni : String? = nil) : Nil
+    def update_replay(id : Int64, target : String, request : String, http2 : Bool, auto_cl : Bool,
+                      sni : String? = nil, mark_transform : Bool = false) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE replays SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, updated_at = ? WHERE id = ?",
-          target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, now_us, id)
+        c.exec("UPDATE replays SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, mark_transform = ?, updated_at = ? WHERE id = ?",
+          target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, mark_transform ? 1 : 0, now_us, id)
         nil
       }
     end

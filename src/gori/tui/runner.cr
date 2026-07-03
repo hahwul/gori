@@ -3359,6 +3359,32 @@ module Gori::Tui
       replay_controller.replay_toggle_auto_content_length
     end
 
+    def replay_toggle_mark_transform : Nil
+      replay_controller.replay_toggle_mark_transform
+    end
+
+    def replay_auto_mark : Nil
+      replay_controller.replay_auto_mark
+    end
+
+    def replay_mark_word : Nil
+      replay_controller.replay_mark_word
+    end
+
+    def replay_insert_marker : Nil
+      replay_controller.replay_insert_marker
+    end
+
+    def replay_clear_marks : Nil
+      replay_controller.replay_clear_marks
+    end
+
+    # ^Y: jump focus DOWN into the visible CHAIN pane (the marker under the cursor). The
+    # controller gates on MARK mode + cursor-in-marker and toasts otherwise.
+    def replay_attach_chain : Nil
+      replay_controller.replay_focus_chain_pane
+    end
+
     def close_replay_tab : Nil
       replay_controller.close_replay_tab
     end
@@ -3391,6 +3417,12 @@ module Gori::Tui
 
     def fuzz_automark : Nil
       (v = fuzzer_controller.current_view) && (@toast = v.auto_mark)
+    end
+
+    # ^Y: jump focus DOWN into the visible CHAIN pane (the marker under the template
+    # cursor). The controller gates on cursor-in-marker and toasts otherwise.
+    def fuzz_attach_chain : Nil
+      fuzzer_controller.fuzz_focus_chain_pane
     end
 
     # --- Miner ExecContext / cross-tab mediators ---

@@ -31,7 +31,8 @@ module Gori::Tui
       @host.session.store.replays.each do |r|
         view = ReplayView.new
         view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
-          r.response_head, r.response_body, r.response_error, r.response_duration_us, sni: r.sni || "")
+          r.response_head, r.response_body, r.response_error, r.response_duration_us,
+          sni: r.sni || "", mark_transform: r.mark_transform?)
         view.name = r.name # custom sub-tab label survives reopen
         seed_replay_original(view, r.flow_id)
         @replays << ReplayTab.new(view, r.flow_id, r.id)
@@ -166,7 +167,9 @@ module Gori::Tui
       elsif ev.ctrl? && key.lower_w?
         request_close
       elsif key.escape?
-        if (view = current_view) && view.focus == :target && view.editing_sni?
+        if (view = current_view) && view.chain_pane_active?
+          view.commit_chain_pane # esc in the CHAIN pane → save + back to the request editor
+        elsif (view = current_view) && view.focus == :target && view.editing_sni?
           view.exit_sni_field # leave the SNI field, back to the URL (value kept)
         elsif (view = current_view) && view.focus == :request && view.request_hex?
           view.toggle_request_hex # exit hex back to the text editor (only when on the request pane)
@@ -224,15 +227,34 @@ module Gori::Tui
       Graphql.from_flow(detail.row.target, detail.request_head, detail.request_body)
     end
 
-    # Toggle the active request sub-pane (^T) in a split-decode tab: envelope ⇄ decoded.
+    # ^T is context-sensitive: a decode tab toggles the envelope/decoded split; a MARK tab
+    # drops a single § at the cursor (Fuzzer parity — the direct-marker keystroke).
     def replay_toggle_decoded : Nil
       view = current_view
       return @host.status("no replay open") unless view
-      return @host.status("not a decode flow — ^T switches the envelope/decoded split for SAML/GraphQL") unless view.decode_mode?
-      @host.request_focus(:body)
-      view.focus_pane(:request)
-      pane = view.toggle_req_pane
-      @host.status(pane == :decoded ? "editing the decoded payload — edits re-encode into the request on ^R send" : "editing the request envelope (headers · target · params)")
+      if view.decode_mode?
+        @host.request_focus(:body)
+        view.focus_pane(:request)
+        pane = view.toggle_req_pane
+        @host.status(pane == :decoded ? "editing the decoded payload — edits re-encode into the request on ^R send" : "editing the request envelope (headers · target · params)")
+      elsif view.mark_transform?
+        @host.status(view.insert_marker)
+      else
+        @host.status("not a decode flow — ^T inserts a § when MARK is on, or switches the SAML/GraphQL split")
+      end
+    end
+
+    # ^Y: focus the CHAIN pane for the marker under the cursor (again = save + back).
+    def replay_focus_chain_pane : Nil
+      return unless view = current_view
+      if view.chain_pane_active?
+        view.commit_chain_pane
+        save_current_replay
+        @host.status("chain saved")
+      else
+        msg = view.focus_chain_pane
+        @host.status(msg || "type the chain · Tab completes · ↵/esc saves")
+      end
     end
 
     def replay_toggle_hex : Nil
@@ -270,6 +292,38 @@ module Gori::Tui
         on = view.toggle_auto_content_length
         @host.status(on ? "auto Content-Length: on" : "auto Content-Length: off")
       end
+    end
+
+    # MARK transform mode: mark request values (§…§) and attach Convert chains applied on
+    # send. Off by default so a plain request is byte-identical (a captured § is literal).
+    def replay_toggle_mark_transform : Nil
+      return unless view = current_view
+      if view.request_hex? || view.grpc_mode? || view.decode_mode? || view.ws_mode?
+        @host.status("MARK transform isn't available in this request mode")
+      else
+        on = view.toggle_mark_transform
+        @host.status(on ? "MARK on · ^A mark all · ^T insert § · ^Y edit chain · ^R send" : "MARK transform: off")
+      end
+    end
+
+    def replay_auto_mark : Nil
+      return unless view = current_view
+      @host.status(view.auto_mark)
+    end
+
+    def replay_mark_word : Nil
+      return unless view = current_view
+      @host.status(view.mark_word)
+    end
+
+    def replay_insert_marker : Nil
+      return unless view = current_view
+      @host.status(view.insert_marker)
+    end
+
+    def replay_clear_marks : Nil
+      return unless view = current_view
+      @host.status(view.clear_marks)
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
@@ -421,11 +475,12 @@ module Gori::Tui
         # would needlessly wipe its on-screen response/scroll/focus).
         next if v.target == row.target && v.request_text == row.request &&
                 v.http2? == row.http2? && v.auto_content_length? == row.auto_content_length? &&
-                v.sni_override == row.sni
+                v.mark_transform? == row.mark_transform? && v.sni_override == row.sni
         # Live cross-session sync carries only the REQUEST (a response is personal to
         # each session's view); restore() is response-less so a peer's resend never
         # clobbers the local response/scroll/focus.
-        v.restore(row.target, row.request, row.http2?, row.auto_content_length?, sni: row.sni || "")
+        v.restore(row.target, row.request, row.http2?, row.auto_content_length?,
+          sni: row.sni || "", mark_transform: row.mark_transform?)
         seed_replay_original(v, row.flow_id) # restore() drops the baseline; re-seed it
       end
 
@@ -433,7 +488,8 @@ module Gori::Tui
       rows.each do |row|
         next if local_ids.includes?(row.id)
         view = ReplayView.new
-        view.restore(row.target, row.request, row.http2?, row.auto_content_length?, sni: row.sni || "")
+        view.restore(row.target, row.request, row.http2?, row.auto_content_length?,
+          sni: row.sni || "", mark_transform: row.mark_transform?)
         seed_replay_original(view, row.flow_id)
         @replays << ReplayTab.new(view, row.flow_id, row.id)
       end
@@ -517,7 +573,8 @@ module Gori::Tui
     # reconcile key). A closing store returns 0 → nil, leaving the tab unsaved.
     private def persist_new_replay(view : ReplayView, flow_id : Int64?) : Int64?
       id = @host.session.store.insert_replay(view.target, view.request_text, view.http2?,
-        view.auto_content_length?, flow_id, @replays.size, view.sni_override)
+        view.auto_content_length?, flow_id, @replays.size, view.sni_override,
+        mark_transform: view.mark_transform?)
       id == 0 ? nil : id
     end
 
@@ -632,7 +689,8 @@ module Gori::Tui
       return unless tab = current_replay_tab
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
-      @host.session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?, v.sni_override)
+      @host.session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?,
+        v.sni_override, mark_transform: v.mark_transform?)
       v.clear_dirty
     end
 
@@ -661,6 +719,7 @@ module Gori::Tui
 
     private def edit_replay_request(ev : Termisu::Event::Key, view : ReplayView) : Nil
       return edit_replay_request_hex(ev, view) if view.request_hex?
+      return view.handle_chain_pane_key(ev) if view.chain_pane_active? # CHAIN sub-pane owns typing
       key = ev.key
       c = ev.char || key.to_char
       case
