@@ -77,7 +77,7 @@ module Gori
         Verb::Scope::Replay, [Verb::Chord.new("x", ctrl: true)],
         available: in_replay) { |ctx| ctx.replay_toggle_hex; nil }
       r.register Verb::Definition.new(
-        "replay.toggle-decoded", "Switch envelope/decoded", "For a SAML/GraphQL flow: switch between the request envelope and the decoded payload",
+        "replay.toggle-decoded", "Switch envelope/decoded", "SAML/GraphQL flow: switch envelope/decoded · in MARK mode: insert a § at the cursor",
         Verb::Scope::Replay, [Verb::Chord.new("t", ctrl: true)],
         available: in_replay) { |ctx| ctx.replay_toggle_decoded; nil }
       r.register Verb::Definition.new(
@@ -88,6 +88,29 @@ module Gori
         "replay.toggle-auto-content-length", "Toggle auto Content-Length", "Recompute Content-Length from the body on send",
         Verb::Scope::Replay, [Verb::Chord.new("l", ctrl: true)],
         available: in_replay) { |ctx| ctx.replay_toggle_auto_content_length; nil }
+
+      # --- mark-transform (mark request values, attach Convert chains applied on send) ---
+      r.register Verb::Definition.new(
+        "replay.toggle-mark-transform", "Toggle MARK transform", "Mark request values (§…§) and apply Convert chains on send",
+        Verb::Scope::Replay, [Verb::Chord.new("k", ctrl: true)],
+        available: in_replay, mnemonic: 't') { |ctx| ctx.replay_toggle_mark_transform; nil }
+      r.register Verb::Definition.new(
+        "replay.auto-mark", "Auto-mark params", "Wrap every request parameter value in a §…§ marker",
+        Verb::Scope::Replay, [Verb::Chord.new("a", ctrl: true)],
+        available: in_replay, mnemonic: 'a') { |ctx| ctx.replay_auto_mark; nil }
+      r.register Verb::Definition.new(
+        "replay.mark-word", "Mark word", "Toggle a §…§ marker around the token at the cursor",
+        Verb::Scope::Replay, available: in_replay, mnemonic: 'w') { |ctx| ctx.replay_mark_word; nil }
+      r.register Verb::Definition.new(
+        "replay.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
+        Verb::Scope::Replay, available: in_replay, mnemonic: 'i') { |ctx| ctx.replay_insert_marker; nil }
+      r.register Verb::Definition.new(
+        "replay.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain)",
+        Verb::Scope::Replay, available: in_replay, mnemonic: 'c') { |ctx| ctx.replay_clear_marks; nil }
+      r.register Verb::Definition.new(
+        "replay.attach-chain", "Edit convert chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
+        Verb::Scope::Replay, [Verb::Chord.new("y", ctrl: true)],
+        available: in_replay, mnemonic: 'e') { |ctx| ctx.replay_attach_chain; nil }
 
       # --- detail view ---
       # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and only
@@ -214,6 +237,10 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.automark", "Auto-mark params", "Mark every request parameter value", Verb::Scope::Fuzzer,
         [Verb::Chord.new("a", ctrl: true)], available: in_fuzzer, mnemonic: 'm') { |ctx| ctx.fuzz_automark; nil }
+      r.register Verb::Definition.new(
+        "fuzz.attach-chain", "Edit convert chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied to each payload on send)",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("y", ctrl: true)],
+        available: in_fuzzer, mnemonic: 'c') { |ctx| ctx.fuzz_attach_chain; nil }
     end
 
     # Param-miner verbs: the cross-tab "Mine parameters" entry (space menu in History,

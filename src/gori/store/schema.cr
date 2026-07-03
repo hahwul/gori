@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 21
+      VERSION = 22
 
       V1 = [
         <<-SQL,
@@ -415,7 +415,14 @@ module Gori
         SQL
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21]
+      # Replay tabs gain a per-tab MARK-transform toggle: when on, `§…§` markers in the
+      # request carry inline Convert chains applied on send. Off (0) = byte-identical to
+      # today, so existing rows backfill to disabled.
+      V22 = [
+        "ALTER TABLE replays ADD COLUMN mark_transform INTEGER NOT NULL DEFAULT 0",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

@@ -120,4 +120,22 @@ describe "Gori::Store replay tabs (v9)" do
       r.response_error.should eq("connect failed: a.test:443")
     end
   end
+
+  it "round-trips the V22 mark_transform flag (default off, insert + update)" do
+    with_store do |store|
+      # defaults to false when the arg is omitted (existing call sites keep working)
+      id = store.insert_replay("https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 0)
+      store.replays.find!(&.id.==(id)).mark_transform?.should be_false
+      store.get_replay(id).not_nil!.mark_transform?.should be_false
+
+      # explicit on via insert
+      on = store.insert_replay("https://b.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 1, mark_transform: true)
+      store.replays.find!(&.id.==(on)).mark_transform?.should be_true
+      store.replays_meta.find!(&.id.==(on)).mark_transform?.should be_true
+
+      # flip it via update
+      store.update_replay(id, "https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, mark_transform: true)
+      store.replays.find!(&.id.==(id)).mark_transform?.should be_true
+    end
+  end
 end

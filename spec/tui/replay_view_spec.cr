@@ -156,6 +156,57 @@ describe Gori::Tui::ReplayView do
     end
   end
 
+  it "MARK transform off (default) sends § verbatim — byte-identical to today" do
+    view = ReplayView.new
+    view.restore("https://a.test", "POST /x HTTP/1.1\nHost: a.test\n\nq=§hi§", false, false)
+    view.mark_transform?.should be_false
+    String.new(view.request_bytes).should eq("POST /x HTTP/1.1\r\nHost: a.test\r\n\r\nq=§hi§")
+  end
+
+  it "MARK transform on applies a marker's inline chain on send + resyncs Content-Length" do
+    view = ReplayView.new
+    view.restore("https://a.test",
+      "POST /x HTTP/1.1\nHost: a.test\nContent-Length: 99\n\ntok=§secret¦base64-encode§", false, true)
+    view.toggle_mark_transform
+    view.mark_transform?.should be_true
+    sent = String.new(view.request_bytes)
+    sent.includes?("tok=c2VjcmV0").should be_true       # base64("secret") == c2VjcmV0
+    sent.includes?("Content-Length: 12").should be_true # body "tok=c2VjcmV0" is 12 bytes
+    sent.includes?("Content-Length: 99").should be_false
+  end
+
+  it "restore round-trips the MARK transform flag" do
+    view = ReplayView.new
+    view.restore("https://a.test", "GET / HTTP/1.1\n\n", false, true, mark_transform: true)
+    view.mark_transform?.should be_true
+  end
+
+  it "MARK CHAIN pane: focus a marker, type a chain, commit writes it back" do
+    view = ReplayView.new
+    # marker at offset 0 → set_text zeroes the cursor, so it sits inside §v§
+    view.restore("https://a.test", "§v§ HTTP/1.1\nHost: a.test\n\n", false, false)
+    view.toggle_mark_transform
+    view.chain_pane_active?.should be_false
+    view.focus_pane(:request)
+    view.focus_chain_pane.should be_nil # in a marker → enters the pane (no hint)
+    view.chain_pane_active?.should be_true
+    "md5".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+    view.commit_chain_pane
+    view.chain_pane_active?.should be_false
+    view.request_text.should contain("§v¦md5§")
+  end
+
+  it "MARK CHAIN pane hints when MARK is off or the cursor isn't in a marker" do
+    view = ReplayView.new
+    view.restore("https://a.test", "GET / HTTP/1.1\n\n", false, false)
+    view.focus_pane(:request)
+    view.focus_chain_pane.should_not be_nil # MARK off → hint, not activated
+    view.chain_pane_active?.should be_false
+    view.toggle_mark_transform
+    view.focus_chain_pane.should_not be_nil # MARK on but no marker under the cursor → hint
+    view.chain_pane_active?.should be_false
+  end
+
   it "load_grpc keeps the framed body byte-exact and the head editable" do
     replay_tmp_store do |store|
       # one gRPC message: 1-byte flag + 4-byte len(3) + payload incl a non-UTF-8 0xFF

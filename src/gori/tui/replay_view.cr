@@ -17,6 +17,9 @@ require "../replay/h2_engine"
 require "../replay/ws_engine"
 require "../replay/diff"
 require "../replay/flow_request"
+require "../fuzz"
+require "../convert"
+require "./chain_pane"
 
 module Gori::Tui
   # The Replay workbench (a tab). Layout: a target URL field on top, then a split
@@ -105,7 +108,18 @@ module Gori::Tui
       @inflight = false           # a replay round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
-      @dirty = false              # set by every editor/target/flag mutator, cleared on save/restore
+      # Mark-transform mode (V22, opt-in, default off): when on, `§…§` markers in the
+      # request carry inline Convert chains applied on send (mark a value, attach
+      # base64-encode → it's encoded on the wire). Off = byte-identical to a plain send,
+      # so a captured `§` is never reinterpreted unless the user turns this on.
+      @mark_transform = false
+      # The CHAIN sub-pane (MARK mode): a visible editor for the chain of the §…§ marker
+      # under the request cursor. @chain_focused = editing it (split enlarges + keys route
+      # there); @chain_marker_cursor remembers which marker to write back to on commit.
+      @chain_pane = ChainPane.new
+      @chain_focused = false
+      @chain_marker_cursor = 0
+      @dirty = false # set by every editor/target/flag mutator, cleared on save/restore
     end
 
     # --- hex edit (^X on the REQUEST pane) ---
@@ -611,7 +625,7 @@ module Gori::Tui
     def restore(target : String, request : String, http2 : Bool, auto_cl : Bool,
                 response_head : Bytes? = nil, response_body : Bytes? = nil,
                 response_error : String? = nil, response_duration_us : Int64? = nil,
-                sni : String = "") : Nil
+                sni : String = "", mark_transform : Bool = false) : Nil
       @flow = nil
       @http2 = http2
       @target = target
@@ -636,6 +650,7 @@ module Gori::Tui
       @xscroll = 0
       @diffable = false
       @auto_content_length = auto_cl
+      @mark_transform = mark_transform
       @loaded = true
       @dirty = false
       @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
@@ -687,7 +702,20 @@ module Gori::Tui
       return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit # byte-exact; NO auto-CL in hex mode
       return grpc_request_bytes if @grpc_mode                 # edited head + verbatim framed body
       return decoded_request_bytes if @decode_kind            # envelope + re-encoded decoded payload
+      return marked_request_bytes if @mark_transform          # §…§ inline Convert chains applied on send
       raw = @editor.to_bytes
+      @auto_content_length ? sync_content_length(raw) : raw
+    end
+
+    # MARK-transform mode: parse the CRLF wire form as a Fuzz template and render each
+    # marked position's default through its inline Convert chain (Template#apply_chains),
+    # then resync Content-Length as usual. Parsing the CRLF form (not @editor.text, which
+    # is LF) keeps render's output in wire form so the existing CRLF-based
+    # sync_content_length works unchanged. A chain-less `§v§` renders `v`; a failing chain
+    # passes the value through untransformed.
+    private def marked_request_bytes : Bytes
+      tmpl = Fuzz::Template.parse(String.new(@editor.to_bytes))
+      raw = tmpl.render(tmpl.apply_chains(tmpl.default_payloads, Convert.shared_registry))
       @auto_content_length ? sync_content_length(raw) : raw
     end
 
@@ -707,6 +735,111 @@ module Gori::Tui
       return @auto_content_length if @req_hex_edit # meaningless on raw bytes — refuse in hex mode
       @dirty = true
       @auto_content_length = !@auto_content_length
+    end
+
+    getter? mark_transform : Bool
+
+    # Toggle MARK-transform mode. Refused in the alternate request modes (hex / gRPC /
+    # decode / WS) where `§…§` templating doesn't apply — their request_bytes paths take
+    # precedence over the marked path anyway. Dirties so the flag persists.
+    def toggle_mark_transform : Bool
+      return @mark_transform if request_hex? || @grpc_mode || @decode_kind || @ws_mode
+      commit_chain_pane if @chain_focused # leaving MARK mode → save any pending chain edit
+      @dirty = true
+      @mark_transform = !@mark_transform
+    end
+
+    CHAIN_PLACEHOLDER = "put the cursor in a §…§ marker, then ^Y to add an encode chain (e.g. base64-encode)"
+
+    # Whether the CHAIN sub-pane currently owns keyboard input (MARK mode + focused +
+    # actually on the request column). The controller routes body keys here when true.
+    def chain_pane_active? : Bool
+      @mark_transform && @chain_focused && @focus == :request && !request_hex?
+    end
+
+    # ^Y: drop focus into the CHAIN pane for the marker under the request cursor. Returns
+    # a hint string when it can't (surfaced by the controller), nil on success.
+    def focus_chain_pane : String?
+      return "enable MARK mode first (^K)" unless @mark_transform
+      return "not available in hex edit" if request_hex?
+      return "move to the REQUEST pane first (↹)" unless @focus == :request
+      chain = Fuzz::Template.chain_at(@editor.text, @editor.cursor_offset)
+      return "put the cursor in a §…§ marker · ^A mark all · ^T insert §" if chain.nil?
+      @chain_marker_cursor = @editor.cursor_offset
+      @chain_pane.load(chain)
+      @chain_focused = true
+      nil
+    end
+
+    # Commit the CHAIN pane's text back to the bound marker and return focus to the editor.
+    # Idempotent — a no-op when the pane isn't focused (so set_focus can call it freely).
+    def commit_chain_pane : Nil
+      return unless @chain_focused
+      if updated = Fuzz::Template.set_chain(@editor.text, @chain_marker_cursor, @chain_pane.value)
+        @editor.set_text(updated)
+        @dirty = true
+      end
+      @chain_focused = false
+    end
+
+    # Route a key while the CHAIN pane is focused: typing/autocomplete stays in the pane;
+    # a focus-exit key (esc/↵/tab/↑) commits + returns to the request editor.
+    def handle_chain_pane_key(ev : Termisu::Event::Key) : Nil
+      return if @chain_pane.handle_key(ev) # consumed by the pane (edit / completion nav)
+      key = ev.key
+      commit_chain_pane if key.escape? || key.enter? || key.tab? || key.up?
+    end
+
+    # --- marking (MARK-transform mode) ---------------------------------------
+    # These mirror the Fuzzer's marking helpers but are gated on MARK mode + the REQUEST
+    # pane: a § is only special on send when MARK is on, so marking is pointless (and the
+    # tint hidden) otherwise. All delegate to the shared Fuzz::Template helpers.
+    def auto_mark : String
+      return mark_hint unless markable?
+      @editor.set_text(Fuzz::Template.auto_mark(@editor.text))
+      @dirty = true
+      n = Fuzz::Template.parse(@editor.text).position_count
+      "auto-marked #{n} position#{n == 1 ? "" : "s"}"
+    end
+
+    def mark_word : String
+      return mark_hint unless markable?
+      before = @editor.text
+      after = Fuzz::Template.mark_word(before, @editor.cursor_offset)
+      return "no word at the cursor — place it on a token (or auto-mark)" if after == before
+      @editor.set_text(after)
+      @dirty = true
+      Fuzz::Template.parse(after).position_count < Fuzz::Template.parse(before).position_count ? "unmarked position" : "marked position"
+    end
+
+    def insert_marker : String
+      return mark_hint unless markable?
+      @editor.insert(Fuzz::Template::MARKER)
+      @editor.set_preedit("")
+      @dirty = true
+      if @editor.text.count(Fuzz::Template::MARKER).odd?
+        "marker opened — move the cursor and mark again to close the region"
+      else
+        n = Fuzz::Template.parse(@editor.text).position_count
+        "marked point — #{n} position#{n == 1 ? "" : "s"}"
+      end
+    end
+
+    def clear_marks : String
+      return mark_hint unless markable?
+      @editor.set_text(Fuzz::Template.clear_markers(@editor.text))
+      @dirty = true
+      "cleared all § markers"
+    end
+
+    private def markable? : Bool
+      @mark_transform && @focus == :request && !request_hex?
+    end
+
+    private def mark_hint : String
+      return "enable MARK mode first (toggle it on)" unless @mark_transform
+      return "marking isn't available in hex edit" if request_hex?
+      "marking works on the REQUEST pane — ↹ to it"
     end
 
     # When enabled, rewrite an existing `Content-Length` header so it matches the
@@ -773,12 +906,13 @@ module Gori::Tui
     # focus change drops back to the URL field — otherwise navigating away while
     # editing SNI and returning would silently route URL keystrokes into @sni.
     private def set_focus(pane : Symbol) : Nil
+      commit_chain_pane if @chain_focused # any focus change saves a pending chain edit
       @focus = pane
       @target_field = :url
     end
 
     def set_preedit(text : String) : Nil
-      req_editor.set_preedit(text)
+      chain_pane_active? ? @chain_pane.set_preedit(text) : req_editor.set_preedit(text)
     end
 
     def pane_advance(dir : Int32) : Bool
@@ -827,6 +961,16 @@ module Gori::Tui
         else
           switch_req_pane(:envelope)
           @editor.click_to_cursor(env.inset(1, 1), mx, my)
+        end
+        return
+      end
+      if @mark_transform # split: click the CHAIN strip to edit it, else place the request caret
+        req, chain = req_chain_split(col)
+        if my >= chain.y
+          focus_chain_pane # binds to the marker at the current request cursor (hint ignored on a click)
+        else
+          commit_chain_pane if @chain_focused
+          @editor.click_to_cursor(req.inset(1, 1), mx, my)
         end
         return
       end
@@ -1195,10 +1339,56 @@ module Gori::Tui
         env, dec = decode_split(left)
         render_request(screen, env, req_focused && @req_pane == :envelope)
         render_decoded(screen, dec, req_focused && @req_pane == :decoded)
+      elsif @mark_transform # split into REQUEST (top) + CHAIN pane (bottom)
+        req, chain = req_chain_split(left)
+        render_request(screen, req, req_focused && !@chain_focused)
+        render_chain_pane(screen, chain, req_focused && @chain_focused)
       else
         render_request(screen, left, req_focused)
       end
       render_response(screen, right, focused && @focus == :response)
+    end
+
+    # REQUEST (top) + CHAIN (bottom) split for a MARK tab. The CHAIN strip is a slim 3
+    # rows normally and grows (≥8, for the autocomplete dropdown) while it's focused; the
+    # request editor keeps the rest (≥1 row).
+    private def req_chain_split(col : Rect) : {Rect, Rect}
+      want = @chain_focused ? {col.h // 2, 8}.max : 3
+      chain_h = want.clamp(1, {col.h - 1, 1}.max)
+      req_h = {col.h - chain_h, 1}.max
+      {Rect.new(col.x, col.y, col.w, req_h),
+       Rect.new(col.x, col.y + req_h, col.w, {col.h - req_h, 0}.max)}
+    end
+
+    # The CHAIN sub-pane. Focused → the live ChainPane editor (with autocomplete). Not
+    # focused → a read-only view of the chain of the marker UNDER THE CURSOR (updates as
+    # you move), or a hint when the cursor isn't in a marker — so the transform is always
+    # visible without entering the pane.
+    private def render_chain_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.w < 2 || rect.h < 2
+      if focused
+        @chain_pane.render(screen, rect, true, "CHAIN · #{marker_label}", CHAIN_PLACEHOLDER)
+        return
+      end
+      chain = Fuzz::Template.chain_at(@editor.text, @editor.cursor_offset)
+      Frame.card(screen, rect, chain ? "CHAIN · #{marker_label}" : "CHAIN", bg: Theme.bg, border: pane_border(false))
+      inner = rect.inset(1, 1)
+      w = {inner.w, 1}.max
+      if chain.nil?
+        screen.text(inner.x, inner.y, "put the cursor in a §…§ marker · ^Y to edit", Theme.muted, width: w)
+      elsif chain.empty?
+        screen.text(inner.x, inner.y, "^Y to add an encode chain (e.g. base64-encode)", Theme.muted, width: w)
+      else
+        screen.text(inner.x, inner.y, chain, Theme.text, width: w)
+      end
+    end
+
+    # "§N" label for the marker under the cursor (1-based), or "§" when not in one.
+    private def marker_label : String
+      spans = Fuzz::Template.marked_spans(@editor.text)
+      cur = @editor.cursor_offset
+      idx = spans.index { |(a, b)| a <= cur && cur <= b }
+      idx ? "§#{idx + 1}" : "§"
     end
 
     # The DECODED split sub-pane: the editable payload (SAML XML / GraphQL query+vars),
@@ -1319,7 +1509,28 @@ module Gori::Tui
       cl_x = {rect.right - cl.size - 1, rect.x + label.size + 4}.max
       screen.text(cl_x, rect.y, cl, @auto_content_length ? Theme.text_bright : Theme.muted,
         @auto_content_length ? Theme.accent_bg : Theme.bg)
+      paint_request_mark_tint(screen, rect, label, cl_x)
       @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
+    end
+
+    # In MARK-transform mode: draw the MARK badge (left of the CL badge) and tint each
+    # §…§ marker in the editor — value in the position hue, ¦chain over-painted dimmer.
+    # Off = clear the regions so a toggled-off tab paints untinted (empty = no-op paint).
+    private def paint_request_mark_tint(screen : Screen, rect : Rect, label : String, cl_x : Int32) : Nil
+      unless @mark_transform
+        @editor.bg_regions = [] of {Int32, Int32, Color}
+        return
+      end
+      mark = " MARK "
+      mx = {cl_x - mark.size, rect.x + label.size + 4}.max
+      screen.text(mx, rect.y, mark, Theme.text_bright, Theme.accent_bg) if mx + mark.size <= cl_x
+      bg = [] of {Int32, Int32, Color}
+      Fuzz::Template.marker_regions(@editor.text).each_with_index do |region, i|
+        a, sep, close = region
+        bg << {a, close + 1, Theme.marker_bg(i)}
+        bg << {sep, close + 1, Theme.elevated} if sep < close # dim the ¦chain segment
+      end
+      @editor.bg_regions = bg
     end
 
     private def render_response(screen : Screen, rect : Rect, focused : Bool) : Nil

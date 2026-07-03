@@ -79,6 +79,18 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_toggle_auto_content_length : Nil; end
 
+  def replay_toggle_mark_transform : Nil; end
+
+  def replay_auto_mark : Nil; end
+
+  def replay_mark_word : Nil; end
+
+  def replay_insert_marker : Nil; end
+
+  def replay_clear_marks : Nil; end
+
+  def replay_attach_chain : Nil; end
+
   def fuzz_selected : Nil; end
 
   def fuzz_from_replay : Nil; end
@@ -90,6 +102,8 @@ class FakeExecContext < Gori::Verb::ExecContext
   def fuzz_new : Nil; end
 
   def fuzz_automark : Nil; end
+
+  def fuzz_attach_chain : Nil; end
 
   def mine_selected : Nil; end
 

@@ -5,8 +5,10 @@ require "./frame"
 require "./text_area"
 require "./fmt"
 require "./spark"
+require "./chain_pane"
 require "../store"
 require "../fuzz"
+require "../convert"
 require "../fuzzy"
 require "../paths"
 require "../replay/flow_request"
@@ -100,6 +102,12 @@ module Gori::Tui
       # Backs BOTH the template tint colours and the Sets→marker chips, so they can't disagree.
       @marker_text_rev = -1
       @marker_spans = [] of {Int32, Int32}
+      # The CHAIN sub-pane: a visible editor for the Convert chain of the §…§ marker under
+      # the TEMPLATE cursor (transform applied to each payload on send). @chain_focused =
+      # editing it; @chain_marker_cursor remembers which marker to commit back to.
+      @chain_pane = ChainPane.new
+      @chain_focused = false
+      @chain_marker_cursor = 0
       @show_dist = true # the DIST sidebar beside RESULTS (toggled with `v`)
       @dist_cache = nil.as(DistData?)
       @dist_cache_rev = -1_i64
@@ -214,10 +222,13 @@ module Gori::Tui
     end
 
     def focus_pane(pane : Symbol) : Nil
-      @focus = pane if PANE_ORDER.includes?(pane)
+      return unless PANE_ORDER.includes?(pane)
+      commit_chain_pane if @chain_focused
+      @focus = pane
     end
 
     def focus_config : Nil
+      commit_chain_pane if @chain_focused
       @focus = :config
       @cfg_field = 0 # land straight on the payload type tabs
       @cfg_caret = 0
@@ -225,6 +236,7 @@ module Gori::Tui
     end
 
     def pane_advance(dir : Int32) : Bool
+      commit_chain_pane if @chain_focused
       if @focus == :detail
         @focus = :results
         return true
@@ -247,7 +259,57 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Nil
-      @editor.set_preedit(text) if @focus == :template
+      if chain_pane_active?
+        @chain_pane.set_preedit(text)
+      elsif @focus == :template
+        @editor.set_preedit(text)
+      end
+    end
+
+    CHAIN_PLACEHOLDER = "put the cursor in a §…§ marker, then ^Y to add an encode chain (e.g. base64-encode)"
+
+    # The CHAIN sub-pane owns keyboard input (focused on the TEMPLATE column). The
+    # controller routes template keys here when true.
+    def chain_pane_active? : Bool
+      @chain_focused && @focus == :template
+    end
+
+    # ^Y: focus the CHAIN pane for the marker under the template cursor. Returns a hint
+    # string when it can't (surfaced by the controller), nil on success.
+    def focus_chain_pane : String?
+      return "move to the TEMPLATE pane first (↹)" unless @focus == :template
+      chain = Fuzz::Template.chain_at(@editor.text, @editor.cursor_offset)
+      return "put the cursor in a §…§ marker · ^A mark all · ^T insert §" if chain.nil?
+      @chain_marker_cursor = @editor.cursor_offset
+      @chain_pane.load(chain)
+      @chain_focused = true
+      nil
+    end
+
+    # Commit the CHAIN pane back to the bound marker + return focus to the template editor.
+    # Idempotent so the focus changers above can call it freely.
+    def commit_chain_pane : Nil
+      return unless @chain_focused
+      if updated = Fuzz::Template.set_chain(@editor.text, @chain_marker_cursor, @chain_pane.value)
+        @editor.set_text(updated)
+        @dirty = true
+      end
+      @chain_focused = false
+    end
+
+    # Route a key while the CHAIN pane is focused (typing/autocomplete stays; a focus-exit
+    # key commits + returns to the template editor).
+    def handle_chain_pane_key(ev : Termisu::Event::Key) : Nil
+      return if @chain_pane.handle_key(ev)
+      key = ev.key
+      commit_chain_pane if key.escape? || key.enter? || key.tab? || key.up?
+    end
+
+    # "§N" label for the marker under the template cursor (1-based), or "§" when not in one.
+    private def marker_label : String
+      cur = @editor.cursor_offset
+      idx = marker_spans.index { |(a, b)| a <= cur && cur <= b }
+      idx ? "§#{idx + 1}" : "§"
     end
 
     # --- marking -------------------------------------------------------------
@@ -288,7 +350,9 @@ module Gori::Tui
     end
 
     def clear_marks : String
-      @editor.set_text(@editor.text.gsub("§", ""))
+      # clear_markers renders the defaults inline — drops both the § delimiters AND any
+      # ¦chain (a naive gsub("§","") would leave a stray value¦chain behind).
+      @editor.set_text(Fuzz::Template.clear_markers(@editor.text))
       @dirty = true
       "cleared all § markers"
     end
@@ -680,7 +744,7 @@ module Gori::Tui
       return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       sets = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)) }
       gen_sets = @config.mode.per_position? ? sets : [sets.first]
-      generator = Fuzz::Generator.new(template, gen_sets, @config)
+      generator = Fuzz::Generator.new(template, gen_sets, @config, registry: Convert.shared_registry)
       sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
         http2: @http2, verify: verify, sni: sni_override, timeout: @config.timeout)
       @matcher.auto_calibrate = @config.auto_calibrate?
@@ -990,8 +1054,42 @@ module Gori::Tui
       half = {(rect.w - 1) // 2, 1}.max
       left = Rect.new(rect.x, rect.y, half, rect.h)
       right = Rect.new(rect.x + half + 1, rect.y, {rect.w - half - 1, 0}.max, rect.h)
-      render_template(screen, left, focused && @focus == :template)
+      tmpl_focused = focused && @focus == :template
+      tmpl, chain = template_chain_split(left)
+      render_template(screen, tmpl, tmpl_focused && !@chain_focused)
+      render_chain_pane(screen, chain, tmpl_focused && @chain_focused)
       render_config(screen, right, focused && @focus == :config)
+    end
+
+    # TEMPLATE (top) + CHAIN (bottom) split — a slim 3-row CHAIN strip that grows (≥8, for
+    # the autocomplete dropdown) while focused; the template editor keeps the rest (≥1).
+    private def template_chain_split(col : Rect) : {Rect, Rect}
+      want = @chain_focused ? {col.h // 2, 8}.max : 3
+      chain_h = want.clamp(1, {col.h - 1, 1}.max)
+      tmpl_h = {col.h - chain_h, 1}.max
+      {Rect.new(col.x, col.y, col.w, tmpl_h),
+       Rect.new(col.x, col.y + tmpl_h, col.w, {col.h - tmpl_h, 0}.max)}
+    end
+
+    # The CHAIN sub-pane. Focused → the live editor (autocomplete); else a read-only view
+    # of the chain of the marker UNDER THE CURSOR (or a hint), so it's always visible.
+    private def render_chain_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.w < 2 || rect.h < 2
+      if focused
+        @chain_pane.render(screen, rect, true, "CHAIN · #{marker_label}", CHAIN_PLACEHOLDER)
+        return
+      end
+      chain = Fuzz::Template.chain_at(@editor.text, @editor.cursor_offset)
+      Frame.card(screen, rect, chain ? "CHAIN · #{marker_label}" : "CHAIN", bg: Theme.bg, border: Frame.pane_border(false))
+      inner = rect.inset(1, 1)
+      w = {inner.w, 1}.max
+      if chain.nil?
+        screen.text(inner.x, inner.y, "put the cursor in a §…§ marker · ^Y to edit", Theme.muted, width: w)
+      elsif chain.empty?
+        screen.text(inner.x, inner.y, "^Y to add an encode chain (e.g. base64-encode)", Theme.muted, width: w)
+      else
+        screen.text(inner.x, inner.y, chain, Theme.text, width: w)
+      end
     end
 
     private def render_bottom(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -1050,9 +1148,17 @@ module Gori::Tui
       badge = " §#{pc} "
       screen.text({rect.right - badge.size - 1, rect.x + label.size + 4}.max, rect.y, badge,
         pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg)
-      # Marker i ↔ position i ↔ generator.set_for(i). Colours resolved fresh each frame
-      # (theme-reactive without a revision key, since the cached offsets are colour-free).
-      @editor.bg_regions = spans.map_with_index { |(a, b), i| {a, b, Theme.marker_bg(i)} }
+      # Marker i ↔ position i ↔ generator.set_for(i). The value gets the position hue; a
+      # trailing ¦chain (Convert transform-on-send) is over-painted with a neutral band so
+      # it reads as metadata, not payload. Colours resolved fresh each frame (offsets are
+      # colour-free); marker_regions is 1:1 with `spans`, so the config chips stay in sync.
+      bg = [] of {Int32, Int32, Color}
+      Fuzz::Template.marker_regions(@editor.text).each_with_index do |region, i|
+        a, sep, close = region
+        bg << {a, close + 1, Theme.marker_bg(i)}
+        bg << {sep, close + 1, Theme.elevated} if sep < close # dim the ¦chain segment
+      end
+      @editor.bg_regions = bg
       @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
     end
 

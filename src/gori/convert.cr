@@ -35,4 +35,15 @@ module Gori::Convert
   def self.binary?(data : Bytes) : Bool
     !String.new(data).valid_encoding?
   end
+
+  # A process-wide registry built once and reused. The catalog is pure, read-only
+  # data after construction, so concurrent reads (fuzz worker fibers all splice
+  # through it) are safe. Callers that would otherwise rebuild `default_registry`
+  # per request/run — the Fuzzer/Replay send paths, `gori run fuzz`, MCP fuzz —
+  # share this instance instead.
+  @@shared : Registry?
+
+  def self.shared_registry : Registry
+    @@shared ||= default_registry
+  end
 end

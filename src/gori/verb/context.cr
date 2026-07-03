@@ -67,14 +67,22 @@ module Gori
       abstract def replay_toggle_decoded : Nil             # toggle the envelope/decoded split sub-pane (SAML/GraphQL)
       abstract def replay_toggle_sni : Nil                 # toggle the SNI-override sub-field (target pane)
       abstract def replay_toggle_auto_content_length : Nil # recompute Content-Length on send
+      # mark-transform mode: mark request values (§…§) and attach Convert chains applied on send
+      abstract def replay_toggle_mark_transform : Nil # toggle MARK mode on/off
+      abstract def replay_auto_mark : Nil             # wrap every request param value in §…§
+      abstract def replay_mark_word : Nil             # toggle a marker around the token at the cursor
+      abstract def replay_insert_marker : Nil         # drop a single § at the cursor (bracket by hand)
+      abstract def replay_clear_marks : Nil           # strip all markers (and their chains)
+      abstract def replay_attach_chain : Nil          # open the chain-edit prompt for the marker at the cursor
 
       # fuzzer workbench (run/stop/marking handled inline; these power the palette + cross-tab)
-      abstract def fuzz_selected : Nil    # send History's selection to the Fuzzer tab
-      abstract def fuzz_from_replay : Nil # turn the current Replay request into a fuzz template
-      abstract def fuzz_run : Nil         # start the fuzz run
-      abstract def fuzz_stop : Nil        # stop the running fuzz
-      abstract def fuzz_new : Nil         # open a blank fuzz session
-      abstract def fuzz_automark : Nil    # auto-mark every request parameter
+      abstract def fuzz_selected : Nil     # send History's selection to the Fuzzer tab
+      abstract def fuzz_from_replay : Nil  # turn the current Replay request into a fuzz template
+      abstract def fuzz_run : Nil          # start the fuzz run
+      abstract def fuzz_stop : Nil         # stop the running fuzz
+      abstract def fuzz_new : Nil          # open a blank fuzz session
+      abstract def fuzz_automark : Nil     # auto-mark every request parameter
+      abstract def fuzz_attach_chain : Nil # open the chain-edit prompt for the marker at the template cursor
 
       # param miner (cross-tab seeds open a config popup, then mining runs in background)
       abstract def mine_selected : Nil    # mine History's selected flow (opens the config popup)
@@ -131,9 +139,9 @@ module Gori
       abstract def finding_edit_title : Nil               # rename + set severity via the form overlay
       abstract def finding_open_flow : Nil                # open the linked flow's detail in History
       abstract def finding_replay_flow : Nil              # send the linked flow to Replay
-      abstract def finding_links : Nil                     # open the links overlay for the open finding
-      abstract def finding_open_link : Nil                 # open the selected related item in its tab
-      abstract def finding_link_move(delta : Int32) : Nil  # move selection in the RELATED list
+      abstract def finding_links : Nil                    # open the links overlay for the open finding
+      abstract def finding_open_link : Nil                # open the selected related item in its tab
+      abstract def finding_link_move(delta : Int32) : Nil # move selection in the RELATED list
       abstract def findings_export(format : Symbol) : Nil # :markdown | :json → project dir
 
       # entity links (cross-tab attach + link-target ids for availability gating)

@@ -315,12 +315,13 @@ module Gori
       getter response_body : Bytes?
       getter response_error : String?
       getter response_duration_us : Int64?
-      getter name : String? # custom sub-tab label (nil = derive from the request)
-      getter sni : String?  # custom TLS SNI host (nil = present the target host)
+      getter name : String?         # custom sub-tab label (nil = derive from the request)
+      getter sni : String?          # custom TLS SNI host (nil = present the target host)
+      getter? mark_transform : Bool # V22: apply §…§ inline Convert chains on send
 
       def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position,
                      @response_head = nil, @response_body = nil, @response_error = nil,
-                     @response_duration_us = nil, @name = nil, @sni = nil)
+                     @response_duration_us = nil, @name = nil, @sni = nil, @mark_transform = false)
       end
     end
 

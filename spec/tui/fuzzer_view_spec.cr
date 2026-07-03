@@ -17,6 +17,20 @@ private def loaded_fuzzer : FuzzerView
 end
 
 describe Gori::Tui::FuzzerView do
+  it "CHAIN pane: focus a template marker, type a chain, commit writes it back" do
+    view = FuzzerView.new
+    # marker at offset 0 → set_text zeroes the cursor, so it sits inside §x§
+    view.load_request("https://h", "§x§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.focus_pane(:template)
+    view.chain_pane_active?.should be_false
+    view.focus_chain_pane.should be_nil # in a marker → enters the pane
+    view.chain_pane_active?.should be_true
+    "rot13".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+    view.commit_chain_pane
+    view.chain_pane_active?.should be_false
+    view.template_text.should contain("§x¦rot13§")
+  end
+
   it "label uses the custom name when set, else the template summary" do
     view = FuzzerView.new
     view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")

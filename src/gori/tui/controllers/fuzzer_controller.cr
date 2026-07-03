@@ -190,7 +190,21 @@ module Gori::Tui
     end
 
     private def handle_escape(v : FuzzerView) : Nil
+      return v.commit_chain_pane if v.chain_pane_active? # esc in the CHAIN pane → save + back
       v.focus == :detail ? v.focus_pane(:results) : @host.request_focus(:menu)
+    end
+
+    # ^Y: focus the CHAIN pane for the marker under the template cursor (again = save + back).
+    def fuzz_focus_chain_pane : Nil
+      return unless view = current_view
+      if view.chain_pane_active?
+        view.commit_chain_pane
+        save_current
+        @host.status("chain saved")
+      else
+        msg = view.focus_chain_pane
+        @host.status(msg || "type the chain · Tab completes · ↵/esc saves")
+      end
     end
 
     private def switch_subtab(c : Char?) : Nil
@@ -231,6 +245,7 @@ module Gori::Tui
     end
 
     private def edit_template(ev : Termisu::Event::Key, v : FuzzerView) : Nil
+      return v.handle_chain_pane_key(ev) if v.chain_pane_active? # CHAIN sub-pane owns typing
       key = ev.key
       case
       when key.enter?     then v.template_newline

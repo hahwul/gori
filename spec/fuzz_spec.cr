@@ -123,6 +123,63 @@ describe F::Template do
       F::Template.marked_spans(t).size.should eq(F::Template.parse(t).position_count)
     end
   end
+
+  # --- inline Convert chains (§value¦chain§) ---
+  it "splits a marker's interior on the first unescaped ¦ into {default, chain}" do
+    t = F::Template.parse("tok=§secret¦base64-encode > url-encode§")
+    t.position_count.should eq(1)
+    t.positions.first.default.should eq("secret")
+    t.positions.first.chain.should eq("base64-encode > url-encode") # chain may contain '>' / '|' / ','
+  end
+
+  it "treats a chain-less marker as chain == \"\" (backward compatible)" do
+    F::Template.parse("v=§x§").positions.first.chain.should eq("")
+  end
+
+  it "escapes ¦¦ to a literal ¦ inside the value or chain" do
+    t = F::Template.parse("§a¦¦b¦rot13§") # value 'a¦b', chain 'rot13'
+    t.positions.first.default.should eq("a¦b")
+    t.positions.first.chain.should eq("rot13")
+  end
+
+  it "renders defaults through their chains via apply_chains (failure → untransformed)" do
+    reg = Gori::Convert.default_registry
+    t = F::Template.parse("a=§hi¦base64-encode§&b=§keep¦nope-unknown§&c=§plain§")
+    out = String.new(t.render(t.apply_chains(t.default_payloads, reg)))
+    out.should eq("a=aGk=&b=keep&c=plain") # base64(hi)=aGk=; unknown chain passes through; no chain untouched
+  end
+
+  it "marked_spans still counts chained markers 1:1 with positions" do
+    t = "a=§1¦base64-encode§&b=§2§"
+    F::Template.marked_spans(t).size.should eq(F::Template.parse(t).position_count)
+  end
+
+  it "clear_markers drops the marker AND its chain" do
+    F::Template.clear_markers("tok=§secret¦base64-encode§&x=1").should eq("tok=secret&x=1")
+  end
+
+  it "mark_word unmark strips a stray ¦chain, not just the § delimiters" do
+    # cursor inside the marker → unmark leaves the raw value only (no dangling ¦base64-encode)
+    F::Template.mark_word("tok=§secret¦base64-encode§", 8).should eq("tok=secret")
+  end
+
+  it "chain_at / set_chain read and write the marker under the cursor" do
+    text = "a=§1§&b=§2¦rot13§"
+    F::Template.chain_at(text, 3).should eq("")        # cursor in the first (chain-less) marker
+    F::Template.chain_at(text, 10).should eq("rot13")  # cursor in the second marker
+    F::Template.chain_at("plain", 2).should be_nil     # not in a marker
+    # attach a chain to the first marker
+    F::Template.set_chain(text, 3, "base64-encode").should eq("a=§1¦base64-encode§&b=§2¦rot13§")
+    # clearing (empty) removes the ¦chain
+    F::Template.set_chain(text, 10, "").should eq("a=§1§&b=§2§")
+  end
+
+  it "marker_regions exposes the value|chain split for tinting" do
+    # "a=§1¦rot13§" → open at 2, ¦ at 4, close at 10
+    F::Template.marker_regions("a=§1¦rot13§").should eq([{2, 4, 10}])
+    # chain-less marker: sep == close
+    F::Template.marker_regions("a=§1§").should eq([{2, 4, 4}])
+  end
 end
 
 describe F::ContentLength do
@@ -236,6 +293,26 @@ describe F::Generator do
     seen = 0
     g.each { seen += 1 }
     seen.should eq(9)
+  end
+
+  it "applies a position's inline Convert chain to the payload on the wire" do
+    reg = Gori::Convert.default_registry
+    chained = F::Template.parse("GET /?a=§1¦base64-encode§&b=§2§ HTTP/1.1\r\nHost: h\r\n\r\n")
+    s1 = F::PayloadSet.new(F::InlineList.new(["hi"]))
+    g = F::Generator.new(chained, [s1], F::Config.new(mode: F::Mode::BatteringRam), registry: reg)
+    bytes = [] of String
+    g.each { |j| bytes << String.new(j.bytes) }
+    # position a carries base64(hi)=aGk=; position b (no chain) gets the raw payload.
+    bytes.first.should eq("GET /?a=aGk=&b=hi HTTP/1.1\r\nHost: h\r\n\r\n")
+  end
+
+  it "leaves payloads untransformed when no registry is supplied (3-arg constructor)" do
+    chained = F::Template.parse("GET /?a=§1¦base64-encode§ HTTP/1.1\r\nHost: h\r\n\r\n")
+    s1 = F::PayloadSet.new(F::InlineList.new(["hi"]))
+    g = F::Generator.new(chained, [s1], F::Config.new(mode: F::Mode::BatteringRam))
+    bytes = [] of String
+    g.each { |j| bytes << String.new(j.bytes) }
+    bytes.first.should eq("GET /?a=hi HTTP/1.1\r\nHost: h\r\n\r\n")
   end
 end
 
