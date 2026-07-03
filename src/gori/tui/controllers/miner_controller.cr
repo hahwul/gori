@@ -402,7 +402,7 @@ module Gori::Tui
         v.finish_run
         @host.jobs.finish(v.job_id, :error, ev.message)
         push_mine_notification(v, :error, "Miner: #{ev.message} on #{v.summary}")
-        @host.status("miner error: #{ev.message}")
+        @host.status("miner error: #{ev.message}") if v.config.notify.posts_notification?(0, error: true)
       end
     end
 
@@ -412,7 +412,7 @@ module Gori::Tui
       msg = "Miner: #{n} param#{n == 1 ? "" : "s"} found on #{v.summary}#{ev.stopped ? " (stopped)" : ""}"
       level = n > 0 ? :success : :info
       push_mine_notification(v, level, msg, found: n)
-      @host.status(msg)
+      @host.status(msg) if v.config.notify.posts_notification?(n)
     end
 
     private def push_mine_notification(v : MinerView, level : Symbol, msg : String, found : Int32 = 0) : Nil
