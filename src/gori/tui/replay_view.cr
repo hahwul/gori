@@ -1686,7 +1686,7 @@ module Gori::Tui
       total = lines.size
       gw = {Gutter.width(total), rect.w}.min
       cw = {rect.w - gw, 0}.max
-      widest = (0...rect.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |l| Screen.display_width(l) } || 0
+      widest = (0...rect.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |l| Screen.display_width_upto(l, @xscroll + cw + 1) } || 0
       @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
       (0...rect.h).each do |i|
         li = @scroll + i
@@ -1718,7 +1718,7 @@ module Gori::Tui
       # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
       # never re-styles just to measure width (see the class comment on RespView).
       rows = (0...rect.h).compact_map { |i| (li = @scroll + i) < total ? rv.line_at(li) : nil }
-      @xscroll = @xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width(l) } || 0) - cw, 0}.max)
+      @xscroll = @xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @xscroll + cw + 1) } || 0) - cw, 0}.max)
       rows.each_with_index do |styled, i|
         li = @scroll + i
         Gutter.draw(screen, rect.x, rect.y + i, li, gw)

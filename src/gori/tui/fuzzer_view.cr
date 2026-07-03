@@ -112,6 +112,16 @@ module Gori::Tui
       @dist_cache = nil.as(DistData?)
       @dist_cache_rev = -1_i64
       @dist_cache_w = -1
+      # Results-pane memos, all keyed on @results_rev (the O(n)/O(n log n) scans below
+      # ran EVERY frame — the busiest moment is a live run streaming results, each of
+      # which forces a redraw). matched_count is rev-only; the sorted view also keys on
+      # the sort order + matched-only toggle.
+      @matched_count_cache = 0
+      @matched_count_rev = -1_i64
+      @sorted_cache = nil.as(Array(Fuzz::Result)?)
+      @sorted_cache_rev = -1_i64
+      @sorted_cache_sort = :index
+      @sorted_cache_matched = false
       @progress = nil.as(Fuzz::Progress?)
       @run_total = nil.as(Int64?)
       @job_id = 0
@@ -127,6 +137,13 @@ module Gori::Tui
       @d_graphql = nil.as(Graphql::Op?)
       @d_form = nil.as(Array(FormData::Field)?)
       @decoded_index = nil.as(Int64?)
+      # The reconstructed request / decoded response text of the OPEN result detail,
+      # cached by {pane, row index} — the request pane re-parsed the template + rendered
+      # payloads and the response pane re-scrubbed + split the whole (possibly multi-MiB)
+      # body on EVERY scroll keystroke. The selected row is fixed while the detail is open
+      # (same invariant @decoded_index relies on), so this only recomputes on pane/row change.
+      @detail_lines_cache = nil.as(Array(String)?)
+      @detail_lines_key = nil.as({Symbol, Int64}?)
       @focus = :template
       @loaded = false
       @dirty = false
@@ -385,6 +402,10 @@ module Gori::Tui
     def begin_run(total : Int64?) : Nil
       @results.clear
       @results_rev += 1
+      # A fresh run reuses result indices from 0, so drop the {pane, index}-keyed detail
+      # cache — otherwise an old row's lines could survive under a colliding new index.
+      @detail_lines_cache = nil
+      @detail_lines_key = nil
       @sel = 0
       @scroll = 0
       @running = true
@@ -409,7 +430,10 @@ module Gori::Tui
     end
 
     def matched_count : Int32
-      @results.count(&.matched?)
+      return @matched_count_cache if @matched_count_rev == @results_rev
+      @matched_count_cache = @results.count(&.matched?)
+      @matched_count_rev = @results_rev
+      @matched_count_cache
     end
 
     def result_count : Int32
@@ -892,14 +916,24 @@ module Gori::Tui
     end
 
     private def sorted_results : Array(Fuzz::Result)
-      rows = @matched_only ? @results.select(&.matched?) : @results
-      case @sort
-      when :status then rows.sort_by { |r| r.status || -1 }
-      when :length then rows.sort_by(&.length)
-      when :words  then rows.sort_by(&.words)
-      when :time   then rows.sort_by(&.duration_us)
-      else              rows
+      if (c = @sorted_cache) && @sorted_cache_rev == @results_rev &&
+         @sorted_cache_sort == @sort && @sorted_cache_matched == @matched_only
+        return c
       end
+      rows = @matched_only ? @results.select(&.matched?) : @results
+      sorted =
+        case @sort
+        when :status then rows.sort_by { |r| r.status || -1 }
+        when :length then rows.sort_by(&.length)
+        when :words  then rows.sort_by(&.words)
+        when :time   then rows.sort_by(&.duration_us)
+        else              rows # :index — the live @results order (uncopied; read-only here)
+        end
+      @sorted_cache = sorted
+      @sorted_cache_rev = @results_rev
+      @sorted_cache_sort = @sort
+      @sorted_cache_matched = @matched_only
+      sorted
     end
 
     # --- target editing ------------------------------------------------------
@@ -1586,7 +1620,7 @@ module Gori::Tui
       # Clamp so ↓/wheel can't scroll past the last line into a blank void (keeps ≥1 row).
       @detail_scroll = @detail_scroll.clamp(0, {lines.size - 1, 0}.max)
       rows = (0...inner.h).compact_map { |i| lines[@detail_scroll + i]? }
-      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width(l) } || 0) - inner.w, 0}.max)
+      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @detail_xscroll + inner.w + 1) } || 0) - inner.w, 0}.max)
       rows.each_with_index do |line, i|
         shown = @detail_xscroll > 0 ? Highlight.slice_left_text(line, @detail_xscroll) : line
         screen.text(inner.x, inner.y + i, shown, Theme.text, Theme.bg, width: inner.w)
@@ -1629,14 +1663,22 @@ module Gori::Tui
     end
 
     private def detail_lines(r : Fuzz::Result) : Array(String)
-      case @detail_pane
-      when :saml    then saml_detail_lines
-      when :jwt     then jwt_detail_lines
-      when :graphql then graphql_detail_lines
-      when :params  then form_detail_lines
-      when :request then detail_request_lines(r)
-      else               detail_response_lines(r)
+      key = {@detail_pane, r.index}
+      if (c = @detail_lines_cache) && @detail_lines_key == key
+        return c
       end
+      lines =
+        case @detail_pane
+        when :saml    then saml_detail_lines
+        when :jwt     then jwt_detail_lines
+        when :graphql then graphql_detail_lines
+        when :params  then form_detail_lines
+        when :request then detail_request_lines(r)
+        else               detail_response_lines(r)
+        end
+      @detail_lines_cache = lines
+      @detail_lines_key = key
+      lines
     end
 
     # The reconstructed wire request for a result (template with its payloads spliced in).

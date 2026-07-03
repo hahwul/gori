@@ -825,7 +825,7 @@ module Gori::Tui
       # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
       # never re-styles just to measure width (mirrors ReplayView#render_response_body).
       rows = (0...body.h).compact_map { |i| (li = @detail_scroll + i) < total ? dv.line_at(li) : nil }
-      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width(l) } || 0) - cw, 0}.max)
+      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
       rows.each_with_index do |styled, i|
         li = @detail_scroll + i
         Gutter.draw(screen, body.x, body.y + i, li, gw)
@@ -843,7 +843,7 @@ module Gori::Tui
       total = lines.size
       gw = {Gutter.width(total), body.w}.min
       cw = {body.w - gw, 0}.max
-      widest = (0...body.h).compact_map { |i| lines[@detail_scroll + i]? }.max_of? { |l| Screen.display_width(l) } || 0
+      widest = (0...body.h).compact_map { |i| lines[@detail_scroll + i]? }.max_of? { |l| Screen.display_width_upto(l, @detail_xscroll + cw + 1) } || 0
       @detail_xscroll = @detail_xscroll.clamp(0, {widest - cw, 0}.max)
       (0...body.h).each do |i|
         li = @detail_scroll + i

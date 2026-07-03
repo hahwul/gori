@@ -161,7 +161,7 @@ module Gori::Tui
       @out_scroll = @out_scroll.clamp(0, {lines.size - rect.h, 0}.max)
       fg = result.output.nil? ? Theme.red : Theme.text
       rows = (0...rect.h).compact_map { |i| lines[@out_scroll + i]? }
-      @out_xscroll = @out_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width(l) } || 0) - rect.w, 0}.max)
+      @out_xscroll = @out_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @out_xscroll + rect.w + 1) } || 0) - rect.w, 0}.max)
       rows.each_with_index do |line, i|
         shown = @out_xscroll > 0 ? Highlight.slice_left_text(line, @out_xscroll) : line
         screen.text(rect.x, rect.y + i, shown, fg, Theme.bg, width: rect.w)

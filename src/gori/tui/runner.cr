@@ -368,8 +368,15 @@ module Gori::Tui
       # Prism analyzer events (issues persisted / reflections found) — coalesced to one
       # list reload per tick inside the controller; drives a redraw when anything landed.
       drained = true if prism_controller.drain_events
-      # Coalesce a filtered-view reload to once per drain (on_event only flagged it).
-      history_controller.view.flush_filter(@session.store)
+      # Coalesce a filtered-view reload to once per drain (on_event only flagged it). A
+      # filtered / Scope-lens History can't update incrementally, so flush_filter re-runs
+      # the FULL-table search; do it only while History is the ACTIVE tab. In the
+      # background it would re-scan the whole page up to ~20×/sec during capture for a
+      # list nobody is viewing (a Scope lens alone puts every session in this state). The
+      # accumulated @filter_dirty makes it catch up on the first drain after History
+      # becomes active, and on_enter reloads on entry — so the list is never shown stale.
+      # (Mirrors apply_external_change, which already only reloads the active tab.)
+      history_controller.view.flush_filter(@session.store) if @active_tab == :history
       drained
     end
 

@@ -468,7 +468,7 @@ module Gori::Tui
       else
         visible_h = {rect.bottom - notes_y, 0}.max
         rows = finding.notes.split('\n').first(visible_h)
-        @notes_xscroll = @notes_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width(l) } || 0) - notes_rect.w, 0}.max)
+        @notes_xscroll = @notes_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @notes_xscroll + notes_rect.w + 1) } || 0) - notes_rect.w, 0}.max)
         rows.each_with_index do |note_line, i|
           shown = @notes_xscroll > 0 ? Highlight.slice_left_text(note_line, @notes_xscroll) : note_line
           screen.text(notes_rect.x, notes_rect.y + i, shown, Theme.text, width: notes_rect.w)
