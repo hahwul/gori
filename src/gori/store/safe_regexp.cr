@@ -26,21 +26,32 @@ module Gori
   # we read the FULL byte length via `value_bytes` so content past a NUL — common in a
   # body that mixes binary and text — is still matched.
   module SafeRegexp
-    # SQLite fires this scalar callback once per row, but a query's pattern is constant
-    # across all rows — recompiling per row is O(rows) PCRE2 compiles. Memoise the last
-    # (pattern → Regex). gori is single-threaded (fibers, no -Dpreview_mt) and the
-    # callback never yields, so a bare last-value memo is race-free: the pattern+regex
-    # pair is assigned together with no yield point between the two stores.
-    @@cache_pattern : String? = nil
-    @@cache_regex : Regex? = nil
+    # SQLite fires this scalar callback once per row. A query's WHERE clause holds a
+    # small FIXED set of regex patterns — one per `~` term / regex scope rule — constant
+    # across all rows, so recompiling per row is O(rows) PCRE2 compiles. Memoise every
+    # distinct pattern → Regex for the scan (O(patterns), not O(rows)).
+    #
+    # A single-slot last-value memo THRASHED the moment a query mixed two patterns
+    # (`body~x host~y`, or a regex scope rule AND-combined with a `~` term — see
+    # Scope#filter + QL.and): SQLite alternates the two patterns as it walks rows, and
+    # each call evicted the other from the one slot, so BOTH recompiled every row
+    # (2×rows compiles instead of 2). A small bounded map holds every pattern in the
+    # query at once. gori is single-threaded (fibers, no -Dpreview_mt) and the callback
+    # never yields (PCRE2 compile + Hash ops have no yield point), so a bare Hash is
+    # race-free — same reasoning the last-value memo relied on.
+    CACHE_MAX = 32
+    @@cache = {} of String => Regex
 
     # :nodoc: — internal (called from FN, which needs an explicit receiver, so not private)
     def self.compile(pattern : String) : Regex
-      cached = @@cache_regex
-      return cached if cached && @@cache_pattern == pattern
+      if rx = @@cache[pattern]?
+        return rx
+      end
       rx = Regex.new(pattern) # raises on a bad pattern (caught by FN); cache only on success
-      @@cache_pattern = pattern
-      @@cache_regex = rx
+      # Bound memory across a long session of varied queries. A realistic scan uses
+      # ≤ a few distinct patterns, so this clear never evicts a pattern mid-scan.
+      @@cache.clear if @@cache.size >= CACHE_MAX
+      @@cache[pattern] = rx
       rx
     end
 

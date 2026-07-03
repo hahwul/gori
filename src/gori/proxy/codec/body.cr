@@ -199,8 +199,12 @@ module Gori::Proxy::Codec
 
     # Copies exactly `n` bytes; returns false if the source EOF'd early (a
     # truncated Content-Length body), true once all `n` were transferred.
-    private def self.copy_n(src : IO, dst : IO, tee : IO, n : Int64) : Bool
-      buf = Bytes.new(BUFSIZE)
+    # `buf` is the scratch copy buffer. The Length-framing caller lets it default to a
+    # fresh 64 KiB slice (one alloc per body); copy_chunked passes ONE buffer reused
+    # across every chunk (a chunked body used to allocate a fresh 64 KiB per chunk — a
+    # 100 MB response in 16 KB chunks churned ~400 MB of throwaway buffers). Safe to
+    # share: a body is pumped one direction on one fiber, so chunks copy sequentially.
+    private def self.copy_n(src : IO, dst : IO, tee : IO, n : Int64, buf : Bytes = Bytes.new(BUFSIZE)) : Bool
       remaining = n
       while remaining > 0
         want = remaining < BUFSIZE ? remaining.to_i : BUFSIZE
@@ -226,6 +230,7 @@ module Gori::Proxy::Codec
     # Returns true once the terminating 0-length chunk is seen; false if the
     # source EOF'd mid-stream (a truncated chunked body).
     private def self.copy_chunked(src : IO, dst : IO, tee : IO) : Bool
+      buf = Bytes.new(BUFSIZE) # reused across every chunk's copy_n (see copy_n)
       loop do
         size_line = read_crlf_line(src)
         # EOF before any byte → truncated mid-stream. A line that hit MAX_LINE_BYTES WITHOUT an
@@ -261,8 +266,8 @@ module Gori::Proxy::Codec
           end
           return true # terminating chunk reached
         end
-        return false unless copy_n(src, dst, tee, size) # truncated mid-chunk
-        if crlf = read_exact(src, 2)                    # the CRLF terminating the chunk data
+        return false unless copy_n(src, dst, tee, size, buf) # truncated mid-chunk
+        if crlf = read_exact(src, 2)                         # the CRLF terminating the chunk data
           emit(dst, tee, crlf)
         end
       end

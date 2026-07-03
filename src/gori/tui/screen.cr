@@ -47,6 +47,21 @@ module Gori::Tui
       w
     end
 
+    # As `display_width`, but stops as soon as the running width reaches `limit`
+    # (returning a value ≥ limit without walking the rest of the string). The h-scroll
+    # clamps only need to know whether a line reaches the current view's right edge +
+    # one screen, so a minified multi-MB single line isn't grapheme-walked in full on
+    # EVERY frame just to clamp the scroll offset. Exact for lines narrower than limit.
+    def self.display_width_upto(str : String, limit : Int32) : Int32
+      return 0 if str.empty? || limit <= 0
+      w = 0
+      str.each_grapheme do |g|
+        w += Termisu::UnicodeWidth.grapheme_width(g.to_s)
+        return w if w >= limit
+      end
+      w
+    end
+
     # The codepoint index in `str` whose display cell the column `target` lands on,
     # clamped to [0, str.size]. Inverts a left-to-right display-width advance (the
     # same one `display_width` / `text` use), so click-to-cursor maps a click x to

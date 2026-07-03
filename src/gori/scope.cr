@@ -31,8 +31,14 @@ module Gori
       getter match_type : String # "host" | "string" | "regex"
       getter pattern : String
       @regex : Regex?
+      @pattern_down : String
 
       def initialize(@id : Int64, @kind : String, @match_type : String, @pattern : String)
+        # The pattern is immutable (a Rule is rebuilt, never edited in place), so its
+        # lowercased form — compared on every host/string match, once per rule per row
+        # of a Scope-filtered reload and per host of a Sitemap reload — is computed ONCE
+        # here rather than re-allocated on each `matches?` call (mirrors @regex).
+        @pattern_down = @pattern.downcase
         # Compile the regex once. An invalid pattern degrades to nil → never-match,
         # rather than unwinding through SQLite's C REGEXP callback or a proxy fiber.
         # Persisted patterns are validated on add/update; this is defense-in-depth.
@@ -65,7 +71,7 @@ module Gori
         when "host"
           host_match?(host)
         when "string"
-          url.downcase.includes?(@pattern.downcase)
+          url.downcase.includes?(@pattern_down)
         when "regex"
           r = @regex
           return false unless r
@@ -86,13 +92,12 @@ module Gori
           # unwind onto the proxy hot path (mirrors SQLite GLOB's tolerance → keeps
           # live gating and the History SQL view consistent).
           begin
-            File.match?(@pattern.downcase, h)
+            File.match?(@pattern_down, h)
           rescue File::BadPatternError
             false
           end
         else
-          d = @pattern.downcase
-          h == d || h.ends_with?(".#{d}")
+          h == @pattern_down || h.ends_with?(".#{@pattern_down}")
         end
       end
     end

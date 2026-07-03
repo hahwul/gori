@@ -413,6 +413,19 @@ module Gori::Tui
       line.sum { |span| Screen.display_width(span.text) }
     end
 
+    # As `line_width`, but stops summing once the running width reaches `limit` — and
+    # caps WITHIN a span too (a huge minified body is one plain span > MAX_HL_LINE), so
+    # the per-frame h-scroll clamp never fully measures a multi-MB line. See
+    # Screen.display_width_upto. Exact for lines narrower than limit.
+    def self.line_width_upto(line : Line, limit : Int32) : Int32
+      w = 0
+      line.each do |span|
+        break if w >= limit
+        w += Screen.display_width_upto(span.text, limit - w)
+      end
+      w
+    end
+
     # --- line builders -------------------------------------------------------
 
     private def self.start_line(raw : String, request : Bool) : Line

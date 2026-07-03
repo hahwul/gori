@@ -432,7 +432,7 @@ module Gori::Tui
         # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
         # mirrors ReplayView#render_response_body / HistoryView#render_detail.
         rows = (0...inner.h).compact_map { |i| i < total ? win.line_at(i) : nil }
-        @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width(l) } || 0) - inner.w, 0}.max)
+        @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + inner.w + 1) } || 0) - inner.w, 0}.max)
         rows.each_with_index do |styled, i|
           shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
           Highlight.draw(screen, inner.x, inner.y + i, shown, width: inner.w)
