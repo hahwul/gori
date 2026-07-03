@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "../verb"
+require "../hotkeys"
 
 module Gori::Tui
   # The command palette overlay (Ctrl-P) — the GORI-WIDE app-control surface:
@@ -98,6 +99,11 @@ module Gori::Tui
         return
       end
       ensure_visible(list_h)
+      # Resolve chords through the EFFECTIVE keymap (user override → OS profile → default)
+      # so a rebind is reflected here — the palette is the app's discovery surface. Uses the
+      # SAME filtered set the dispatch keymap does (Hotkeys.rebindable_overrides), so the
+      # column can never advertise a chord that dispatch drops. Parsed once, not per row.
+      overrides = Hotkeys.rebindable_overrides(@registry)
       (0...list_h).each do |i|
         idx = @scroll + i
         break if idx >= @results.size
@@ -121,7 +127,7 @@ module Gori::Tui
         if soon
           badge = "soon"
           screen.text(box.right - badge.size - 2, ry, badge, Theme.yellow, bg)
-        elsif chord = verb.chords.first?
+        elsif chord = Hotkeys.binding_for(@registry, verb.id, overrides)
           hint = chord.label
           screen.text(box.right - hint.size - 2, ry, hint, Theme.muted, bg)
         end

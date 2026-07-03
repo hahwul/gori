@@ -117,7 +117,7 @@ module Gori::Tui
       case v.focus
       when :target   then v.editing_sni? ? "type SNI host · ^S/↵/esc back to URL · ^R send" \
                                           : "type URL · ^S SNI · ↵/↓ request · ^R send · ↹ pane · esc tabs"
-      when :response then "↑/↓ scroll · ←/→/d diff · ⇧←/→ h-scroll · x hex · p pretty · ^F find · ^R send · space cmds · ↹ pane · esc tabs"
+      when :response then "↑/↓ scroll · ←/→/d diff · ⇧←/→ h-scroll · x hex · p pretty · ^F find · ↵/^R send · space cmds · ↹ pane · esc tabs"
       else                "type to edit · ^R send · ^G goto · ^F find · ^X hex · ^B ws · ^N new · ^W close · ↹ pane · esc tabs"
       end
     end
@@ -753,9 +753,9 @@ module Gori::Tui
       # ^F search; pretty= resets the scroll), so gate them out after the nav keys.
       transcript = view.ws_mode? || view.grpc_mode?
       case
-      when key.enter?            then replay_send
-      when key.up?               then view.at_top? ? view.focus_first : view.scroll(-1) # ↑-at-top → target field above
-      when key.down?             then view.scroll(1)
+      when key.enter?              then replay_send
+      when key.up?, key.lower_k?   then view.at_top? ? view.focus_first : view.scroll(-1) # ↑/k-at-top → target field above
+      when key.down?, key.lower_j? then view.scroll(1)
       when transcript            then nil
       when key.left?, key.right? then view.toggle_resp_mode
       when key.lower_d?          then view.toggle_resp_mode

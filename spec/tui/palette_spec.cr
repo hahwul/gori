@@ -118,6 +118,50 @@ describe Gori::Tui::PaletteState do
     ids.should contain("import.oas")
   end
 
+  it "renders a verb's EFFECTIVE chord so a rebind is reflected (not the default)" do
+    prev = Gori::Settings.keymap_overrides
+    begin
+      ctx = FakeExecContext.new
+      palette = PaletteState.new(Gori::Verbs.registry)
+      palette.reset(ctx)
+      "Toggle capture".each_char { |c| palette.append(c, ctx) } # capture.toggle (default: c)
+
+      # Default binding: the rebound label is nowhere on screen yet.
+      Gori::Settings.keymap_overrides = {} of String => Array(String)
+      base = MemoryBackend.new(80, 24)
+      palette.render(Screen.new(base), Rect.new(0, 0, 80, 24))
+      base.contains?("ctrl-y").should be_false
+
+      # Rebind capture.toggle → ^Y; the palette's chord column must follow the keymap.
+      Gori::Settings.keymap_overrides = {"capture.toggle" => ["ctrl-y"]}
+      rebound = MemoryBackend.new(80, 24)
+      palette.render(Screen.new(rebound), Rect.new(0, 0, 80, 24))
+      rebound.contains?("ctrl-y").should be_true
+    ensure
+      Gori::Settings.keymap_overrides = prev
+    end
+  end
+
+  it "ignores a hand-edited override for a FIXED verb so it can't advertise a dead chord" do
+    prev = Gori::Settings.keymap_overrides
+    begin
+      ctx = FakeExecContext.new
+      palette = PaletteState.new(Gori::Verbs.registry)
+      palette.reset(ctx)
+      "Command palette".each_char { |c| palette.append(c, ctx) } # app.palette (FIXED: ^P hardcoded)
+
+      # A hand-edited settings.json binds the FIXED app.palette to ctrl-y. Dispatch drops it
+      # (rebindable? == false) and ^P still opens the palette — so the palette must NOT show it.
+      Gori::Settings.keymap_overrides = {"app.palette" => ["ctrl-y"]}
+      backend = MemoryBackend.new(80, 24)
+      palette.render(Screen.new(backend), Rect.new(0, 0, 80, 24))
+      backend.contains?("ctrl-y").should be_false # the dead override is filtered out
+      backend.contains?("ctrl-p").should be_true  # the real (default, hardcoded) chord shows
+    ensure
+      Gori::Settings.keymap_overrides = prev
+    end
+  end
+
   it "prints a colour-coded category sigil before each entry" do
     ctx = FakeExecContext.new
     palette = PaletteState.new(Gori::Verbs.registry)

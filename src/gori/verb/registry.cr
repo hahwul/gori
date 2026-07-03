@@ -26,6 +26,28 @@ module Gori
         @by_id[id]? || raise Gori::Error.new("unknown verb id: #{id}")
       end
 
+      # Fail fast on a per-scope space-menu key collision. Two non-hidden verbs in the
+      # SAME scope deriving the same menu_key (an explicit mnemonic, else the first plain
+      # single-char chord) means the later one is silently unreachable by that key —
+      # SpaceMenu#verb_for is a first-match find, so the collision has no other symptom.
+      # Cross-scope reuse is fine (the space menu is scoped), so this checks WITHIN each
+      # scope only, mirroring Conflicts' same-scope rule. space_menu_spec asserts the same
+      # invariant; calling this at build time makes it a boot-time guarantee, like the
+      # duplicate verb-id raise in #register.
+      def validate_menu_keys! : Nil
+        seen = Hash(Scope, Hash(Char, String)).new
+        each do |verb|
+          next if verb.hidden?
+          next unless key = verb.menu_key
+          scope_keys = (seen[verb.scope] ||= {} of Char => String)
+          if prior = scope_keys[key]?
+            raise Gori::Error.new(
+              "space-menu key collision: '#{key}' claimed by both #{prior} and #{verb.id} in #{verb.scope}")
+          end
+          scope_keys[key] = verb.id
+        end
+      end
+
       def each(& : Definition ->)
         @order.each { |id| yield @by_id[id] }
       end

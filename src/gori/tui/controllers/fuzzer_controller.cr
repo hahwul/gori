@@ -87,7 +87,7 @@ module Gori::Tui
       when :target   then "type URL · ↵/↓ template · ^R run · ↹ pane · esc tabs"
       when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ^N new · ↹ pane"
       when :config   then config_hint(v)
-      when :results  then "↑/↓ select · ↵ detail · o sort · m matched · ^R run · ^X stop · space cmds · ↹ pane"
+      when :results  then "↑/↓ select · ↵ detail · o sort · m matched · v dist · ^R run · ^X stop · space cmds · ↹ pane"
       when :detail   then "↑/↓ scroll · ←/→ pane · ⇧←/→ h-scroll · esc back"
       else                "↹/esc tabs"
       end
@@ -273,20 +273,20 @@ module Gori::Tui
     private def handle_results(ev : Termisu::Event::Key, v : FuzzerView) : Nil
       key = ev.key
       case
-      when key.enter?   then v.open_detail
-      when key.up?      then v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.results_move(-1)
-      when key.down?    then v.results_move(1)
-      when key.lower_o? then @host.status(v.cycle_sort)
-      when key.lower_m? then @host.status(v.toggle_matched_only)
-      when key.lower_v? then @host.status(v.toggle_dist)
+      when key.enter?              then v.open_detail
+      when key.up?, key.lower_k?   then v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.results_move(-1)
+      when key.down?, key.lower_j? then v.results_move(1)
+      when key.lower_o?            then @host.status(v.cycle_sort)
+      when key.lower_m?            then @host.status(v.toggle_matched_only)
+      when key.lower_v?            then @host.status(v.toggle_dist)
       end
     end
 
     private def handle_detail(ev : Termisu::Event::Key, v : FuzzerView) : Nil
       key = ev.key
       case
-      when key.up?                 then v.detail_scroll(-1)
-      when key.down?               then v.detail_scroll(1)
+      when key.up?, key.lower_k?   then v.detail_scroll(-1)
+      when key.down?, key.lower_j? then v.detail_scroll(1)
       when key.left? && ev.shift?  then v.hscroll_detail(-1)
       when key.right? && ev.shift? then v.hscroll_detail(1)
       when key.left?               then v.detail_step_pane(-1)

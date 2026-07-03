@@ -68,6 +68,23 @@ module Gori::Tui
       true
     end
 
+    # The issue detail (remediation + affected URLs) is read-only and can be long, so
+    # give it keyboard scroll (↑/↓/j/k) to match every other detail view — otherwise it
+    # was reachable only by the mouse wheel. Everything else (list nav, the o/r/p/c/d
+    # actions, space) defers to the central keymap by returning false. When the detail is
+    # closed we claim nothing, so the list's scoped verbs still run.
+    def handle_body_key(ev : Termisu::Event::Key) : Bool
+      return false unless @prism.detail_open?
+      return false if ev.ctrl? || ev.alt?
+      key = ev.key
+      case
+      when key.up?, key.lower_k?   then @prism.scroll_detail(-1)
+      when key.down?, key.lower_j? then @prism.scroll_detail(1)
+      else                              return false
+      end
+      true
+    end
+
     # The `/` filter bar — a text sub-mode the shell claims before the focus ring (mirrors
     # Findings). Live filtering: every edit re-derives the visible list inside the view.
     def handle_query_key(ev : Termisu::Event::Key) : Bool

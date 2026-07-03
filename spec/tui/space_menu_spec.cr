@@ -173,6 +173,40 @@ describe Gori::Tui::SpaceMenu do
     backend.contains?(first).should be_false                # the top entries scrolled off
   end
 
+  it "grows past the old 12-row cap to fit a busy scope without scrolling (History Body has 13)" do
+    # ctx-independent: 15 synthetic entries on a tall body. Old MAX_ROWS=12 clamped the
+    # popup to 14 rows (scrolling 3 off); now it grows to fit all 15 (cap 16).
+    reg = Gori::Verb::Registry.new
+    15.times do |i|
+      reg.register(Gori::Verb::Definition.new(
+        "demo.#{i}", "Item #{i}", "x", Gori::Verb::Scope::Body, mnemonic: ('a'.ord + i).unsafe_chr) { |_| nil })
+    end
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, FakeExecContext.new)
+    menu.entries.size.should eq(15)
+
+    b = menu.box(Rect.new(0, 0, 60, 40)) # tall body — height is entry-bound, not body-bound
+    b.h.should eq(15 + 2)                # all 15 rows + frame; the old cap would have clamped to 14
+
+    backend = MemoryBackend.new(60, 40)
+    menu.render(Screen.new(backend), Rect.new(0, 0, 60, 40))
+    backend.contains?("Item 0").should be_true  # first entry shown
+    backend.contains?("Item 14").should be_true # AND the last — nothing clipped
+    backend.contains?("▼").should be_false      # so no scroll marker
+  end
+
+  it "draws a ▼ scroll marker when entries are hidden below (short terminal)" do
+    ctx = FakeExecContext.new
+    ctx.selected = 5_i64
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Body, ctx) # selection at the top → list clipped at the bottom
+
+    backend = MemoryBackend.new(40, 8)
+    menu.render(Screen.new(backend), Rect.new(0, 0, 40, 6)) # ~4 rows fit, 13 entries
+    backend.contains?("▼").should be_true                   # "more below" affordance is visible
+    backend.contains?("▲").should be_false                  # nothing hidden above at the top
+  end
+
   # Per menu scope, the keyed entries must never collide, and any verb with NO chord
   # at all must carry a mnemonic (else it's unreachable by ANY single key — the
   # oversight this guards). A verb whose only chord is ctrl/shift (e.g. Replay's
@@ -194,6 +228,42 @@ describe Gori::Tui::SpaceMenu do
       verbs.select(&.chords.empty?).all?(&.menu_key).should be_true # chordless ⇒ keyed
       keys = verbs.compact_map(&.menu_key)
       keys.uniq.size.should eq(keys.size) # no two entries collide on one key
+    end
+  end
+
+  # Registry#validate_menu_keys! turns the convention above into a BOOT-TIME invariant:
+  # Verbs.registry calls it, so a colliding menu key crashes at startup instead of
+  # silently shadowing a verb (SpaceMenu#verb_for is a first-match find).
+  describe "Registry#validate_menu_keys!" do
+    it "passes on the shipped registry" do
+      Gori::Verbs.registry.validate_menu_keys! # builds + re-checks; must not raise
+    end
+
+    it "raises on two verbs sharing a menu key WITHIN one scope" do
+      reg = Gori::Verb::Registry.new
+      reg.register(Gori::Verb::Definition.new("demo.a", "demo:a", "first",
+        Gori::Verb::Scope::Body, [Gori::Verb::Chord.new("z")]) { |_| nil })
+      reg.register(Gori::Verb::Definition.new("demo.b", "demo:b", "second",
+        Gori::Verb::Scope::Body, mnemonic: 'z') { |_| nil }) # derives the same 'z'
+      expect_raises(Gori::Error, /space-menu key collision/) { reg.validate_menu_keys! }
+    end
+
+    it "allows the same menu key across DIFFERENT scopes (scoped menu, deliberate reuse)" do
+      reg = Gori::Verb::Registry.new
+      reg.register(Gori::Verb::Definition.new("demo.a", "demo:a", "first",
+        Gori::Verb::Scope::Body, [Gori::Verb::Chord.new("z")]) { |_| nil })
+      reg.register(Gori::Verb::Definition.new("demo.b", "demo:b", "second",
+        Gori::Verb::Scope::Replay, [Gori::Verb::Chord.new("z")]) { |_| nil })
+      reg.validate_menu_keys! # cross-scope reuse must not raise
+    end
+
+    it "ignores hidden verbs (not shown in the menu, so their key can't collide)" do
+      reg = Gori::Verb::Registry.new
+      reg.register(Gori::Verb::Definition.new("demo.a", "demo:a", "shown",
+        Gori::Verb::Scope::Body, [Gori::Verb::Chord.new("z")]) { |_| nil })
+      reg.register(Gori::Verb::Definition.new("demo.hidden", "demo:hidden", "hidden",
+        Gori::Verb::Scope::Body, [Gori::Verb::Chord.new("z")], hidden: true) { |_| nil })
+      reg.validate_menu_keys! # the hidden verb never fronts a menu key
     end
   end
 end

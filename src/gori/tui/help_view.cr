@@ -18,6 +18,7 @@ module Gori::Tui
         {"space", "focus-area action menu"},
         {"c", "toggle capture"},
         {"s · m", "scope lens · Match & Replace rules"},
+        {"n", "notification center (or click the notify:N badge)"},
         {"^B", "reveal whitespace (·→␍␊)"},
         {"^D / ^C ×2", "quit gori"},
         {"q", "back to projects (on the tab bar)"},

@@ -3,10 +3,12 @@ require "./settings"
 
 module Gori
   # Facade over the hotkey engine (Verb::Keymap / OsProfile / Reserved / Conflicts) and
-  # the persisted Settings. The read-path the DISPATCH keymap (`build_keymap`) and the
-  # settings:hotkeys editor share for a verb's effective chord. NOTE: the Help tab and the
-  # status-bar hints still show DEFAULT chords (a documented limitation — they don't route
-  # through here), so a rebind isn't reflected there.
+  # the persisted Settings. The read-path the DISPATCH keymap (`build_keymap`), the
+  # settings:hotkeys editor, and the command PALETTE (via #binding_for) share for a verb's
+  # effective chord — so a rebind is reflected in the palette's chord column. NOTE: the
+  # Help tab and the status-bar hints are still curated DEFAULT-chord prose (a documented
+  # limitation — they don't route through here); a rebind isn't reflected in those, which
+  # is why the Help tab points users to settings:hotkeys.
   module Hotkeys
     # Selectable OS default profiles (the Settings.keymap_os domain). "auto" tracks the
     # build's native platform.
@@ -35,12 +37,19 @@ module Gori
     # Build the dispatch keymap from the registry under the persisted OS profile + user
     # overrides. Replaces the bare Verb::Keymap.build at its call sites.
     def self.build_keymap(registry : Verb::Registry) : Verb::Keymap
-      # Drop overrides for verbs the editor would never let you rebind (hidden nav
-      # primitives, fixed ids, multi-chord nav-alias verbs) — a hand-edited settings.json
-      # could otherwise install one and collapse a verb's structural chords (e.g. enter/
-      # arrows on body.open), the exact case the editor's rebindable? gate prevents.
-      overrides = chord_overrides.select { |id, _| (v = registry[id]?) && rebindable?(v) }
-      Verb::Keymap.build(registry, Verb::OsProfile.resolve(Settings.keymap_os), overrides)
+      Verb::Keymap.build(registry, Verb::OsProfile.resolve(Settings.keymap_os), rebindable_overrides(registry))
+    end
+
+    # The user overrides that actually reach the dispatch keymap: chord_overrides minus
+    # any id the editor would never let you rebind (hidden nav primitives, FIXED ids,
+    # multi-chord nav-alias verbs). A hand-edited settings.json could otherwise install one
+    # and collapse a verb's structural chords (e.g. enter/arrows on body.open) — the case
+    # the editor's rebindable? gate prevents. The command PALETTE resolves its shown chord
+    # through THIS set (not raw chord_overrides), so its column can never advertise a chord
+    # dispatch would drop — build_keymap and the palette must agree, so they share this one
+    # filter rather than duplicating it.
+    def self.rebindable_overrides(registry : Verb::Registry) : Hash(String, Array(Verb::Chord))
+      chord_overrides.select { |id, _| (v = registry[id]?) && rebindable?(v) }
     end
 
     # The persisted user overrides, parsed from Settings' label strings into Chords. A

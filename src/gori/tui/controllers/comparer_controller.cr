@@ -39,7 +39,7 @@ module Gori::Tui
       when key.down?, key.lower_j?
         @view.scroll(1)
         true
-      when key.left?, key.right?
+      when key.left?, key.right?, key.lower_h?, key.lower_l?
         @view.toggle_pane
         true
       when key.escape?
