@@ -330,14 +330,32 @@ module Gori::Tui
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
       return true unless v = current_view
-      if pane = v.pane_at(body, mx, my)
-        save_current
+      return true unless pane = v.pane_at(body, mx, my)
+      save_current
+      @host.focus_body
+      if pane == :results
+        click_results(v, body, mx, my)
+      else
         v.focus_pane(pane)
-        @host.focus_body
         v.template_click_to_cursor(body, mx, my) if pane == :template
         v.target_click_to_cursor(body, mx, my) if pane == :target
       end
       true
+    end
+
+    # A click in the RESULTS pane: select the row under the cursor (grabbing focus
+    # from another pane on the first click), or — a second click on the already-
+    # selected row while the pane already holds focus — open its detail, so mouse
+    # matches ↵ (mirrors History's select-then-open).
+    private def click_results(v : FuzzerView, body : Rect, mx : Int32, my : Int32) : Nil
+      already = v.focus == :results
+      row = v.results_row_at(body, mx, my)
+      if row && already && row == v.results_selected_index
+        v.open_detail
+      else
+        v.focus_pane(:results)
+        v.select_result_row(row) if row
+      end
     end
 
     def handle_wheel(step : Int32) : Bool

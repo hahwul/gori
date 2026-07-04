@@ -674,6 +674,18 @@ module Gori::Tui
       @sel = (@sel + d).clamp(0, view.size - 1)
     end
 
+    # The selected sorted-view row index (mouse dispatch: select-first, then open).
+    def results_selected_index : Int32
+      @sel
+    end
+
+    # Mouse: select a row without opening its detail (clamped to the live view).
+    def select_result_row(idx : Int32) : Nil
+      view = sorted_results
+      return if view.empty?
+      @sel = idx.clamp(0, view.size - 1)
+    end
+
     def cycle_sort : String
       order = [:index, :status, :length, :words, :time]
       i = order.index(@sort) || 0
@@ -1533,6 +1545,36 @@ module Gori::Tui
       half = {(rest.w - 1) // 2, 1}.max
       left = Rect.new(rest.x, rest.y, half, top_h)
       @editor.click_to_cursor(left.inset(1, 1), mx, my)
+    end
+
+    # Mouse: the sorted-view result index under a click in the RESULTS pane, or nil
+    # (outside the pane, on the header row, or past the last populated row). Mirrors
+    # render_results' 1-cell inset → header row → @scroll+i row math.
+    def results_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      results = results_rect(rect)
+      return nil if results.nil? || results.empty? || !results.contains?(mx, my)
+      inner = results.inset(1, 1)
+      i = my - (inner.y + 1) # rows start one line below the header
+      return nil if i < 0 || i >= {inner.h - 1, 0}.max
+      ri = @scroll + i
+      ri < sorted_results.size ? ri : nil
+    end
+
+    # The RESULTS pane rect within body `rect`, re-deriving render → render_bottom →
+    # render_results' split (target band → 45%-tall top row → bottom minus the DIST
+    # sidebar). nil when the layout leaves no room. Backs results_row_at hit-testing.
+    private def results_rect(rect : Rect) : Rect?
+      return nil unless @loaded
+      target_h = {rect.h, 3}.min
+      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      return nil if rest.h <= 0
+      top_h = {rest.h * 45 // 100, 5}.max
+      top_h = rest.h if rest.h < 6
+      bottom = Rect.new(rest.x, rest.y + top_h, rest.w, {rest.h - top_h, 0}.max)
+      return nil if bottom.h <= 0
+      vw = @show_dist ? dist_width(bottom.w) : 0
+      rw = vw > 0 ? bottom.w - vw - 1 : bottom.w
+      Rect.new(bottom.x, bottom.y, rw, bottom.h)
     end
 
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
