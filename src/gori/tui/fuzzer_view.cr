@@ -9,8 +9,8 @@ require "./chain_pane"
 require "../store"
 require "../fuzz"
 require "../convert"
-require "../fuzzy"
-require "../paths"
+require "./fuzz_set_overlay"
+require "./fuzz_advanced_overlay"
 require "../replay/flow_request"
 require "../saml"
 require "../jwt"
@@ -27,8 +27,6 @@ module Gori::Tui
   # `mode clusterbomb`, `list a,b,c`, `match status:200,500`, `concurrency 50`.
   class FuzzerView
     RESULT_CAP = 5000 # ring cap on retained result rows (metrics are cheap; bodies kept only for matched)
-
-    record SetSpec, kind : Symbol, value : String
 
     # Aggregated result distribution for the DIST sidebar. Raw numbers only — bakes no
     # Color, so a theme switch needs no cache rebuild (colours resolve live at draw).
@@ -69,29 +67,21 @@ module Gori::Tui
       @config = Fuzz::Config.new(keep_bodies: :matched)
       @sets = [] of SetSpec
       @matcher = Fuzz::Matcher.new(keep_bodies: :matched)
-      # CONFIG form state — a navigable field form (no command line). @cfg_field is
-      # the flat field cursor (↑/↓), @cfg_caret the caret in the focused text field.
-      @cfg_field = 0
-      @cfg_caret = 0
+      # CONFIG pane state — a calm, single-axis summary (no text field, no caret). @cfg_row
+      # is the row cursor (↑/↓) over the payload-set rows + Add + Mode + Advanced + Run;
+      # all text entry lives in the Set / Advanced overlays. @cfg_scroll windows the sets.
+      @cfg_row = 0
       @cfg_scroll = 0
-      @show_advanced = false            # Engine/Opts/Match/Filter collapsed by default
-      @path_complete = PathComplete.new # wordlist path inline auto-complete
-      @ptype = :list                    # selected payload-type tab
-      @s_conc = "20"                    # engine numeric fields are edited as string buffers, committed
-      @s_rate = ""                      # to @config at build/persist time (so a field can be cleared)
+      @s_conc = "20" # engine numeric fields are edited (in the Advanced overlay) as string
+      @s_rate = ""   # buffers, committed to @config at build/persist time (so a field can be cleared)
       @s_timeout = ""
       @s_retries = "0"
       @s_m_regex = "" # regex fields buffered as source strings, compiled on commit
       @s_f_regex = ""
-      @p_values = "" # payload-type draft fields (the input for the selected tab)
-      @p_from = "1"
-      @p_to = "100"
-      @p_step = "1"
-      @p_path = ""
-      @p_count = "10"
-      @p_charset = "abc"
-      @p_min = "1"
-      @p_max = "3"
+      # Memoized "Run · N requests" count, recomputed only when the config signature
+      # (mode + sets + marker count) changes, so the summary row never rebuilds sources each frame.
+      @run_count_cache = nil.as(Int64?)
+      @run_count_sig = ""
       @results = [] of Fuzz::Result
       @results_rev = 0_i64 # bumped on every @results mutation — the DIST cache key
       @sel = 0
@@ -108,12 +98,6 @@ module Gori::Tui
       @chain_pane = ChainPane.new
       @chain_focused = false
       @chain_marker_cursor = 0
-      # The LIST PASTE popup: a floating multi-line editor for the List payload's
-      # comma-joined @p_values, so a newline-separated wordlist can be pasted directly
-      # instead of retyped as one comma-joined line. ^L toggles it open (seeded one
-      # value per line) / commits (rejoins non-blank lines with ',' into @p_values).
-      @list_paste = TextArea.new
-      @list_paste_open = false
       @show_dist = true # the DIST sidebar beside RESULTS (toggled with `v`)
       @dist_cache = nil.as(DistData?)
       @dist_cache_rev = -1_i64
@@ -247,22 +231,17 @@ module Gori::Tui
     def focus_pane(pane : Symbol) : Nil
       return unless PANE_ORDER.includes?(pane)
       commit_chain_pane if @chain_focused
-      commit_list_paste if @list_paste_open
       @focus = pane
     end
 
     def focus_config : Nil
       commit_chain_pane if @chain_focused
-      commit_list_paste if @list_paste_open
       @focus = :config
-      @cfg_field = 0 # land straight on the payload type tabs
-      @cfg_caret = 0
-      @path_complete.close
+      @cfg_row = 0 # land on the first payload set / the Add row
     end
 
     def pane_advance(dir : Int32) : Bool
       commit_chain_pane if @chain_focused
-      commit_list_paste if @list_paste_open
       if @focus == :detail
         @focus = :results
         return true
@@ -278,7 +257,7 @@ module Gori::Tui
       case @focus
       when :target   then true
       when :template then @editor.at_top?
-      when :config   then @cfg_field == 0
+      when :config   then @cfg_row == 0
       when :results  then @sel == 0
       else                false
       end
@@ -287,8 +266,6 @@ module Gori::Tui
     def set_preedit(text : String) : Nil
       if chain_pane_active?
         @chain_pane.set_preedit(text)
-      elsif list_paste_active?
-        @list_paste.set_preedit(text)
       elsif @focus == :template
         @editor.set_preedit(text)
       end
@@ -331,52 +308,6 @@ module Gori::Tui
       return if @chain_pane.handle_key(ev)
       key = ev.key
       commit_chain_pane if key.escape? || key.enter? || key.tab? || key.up?
-    end
-
-    LIST_PASTE_PLACEHOLDER = "one payload per line — pasted newline-separated text splits automatically"
-
-    # True while the LIST PASTE popup owns the CONFIG pane's keyboard input.
-    def list_paste_active? : Bool
-      @list_paste_open && @focus == :config
-    end
-
-    # ^L: open the popup, seeded from the comma-joined @p_values (one entry per line).
-    # Returns a hint string when it can't (surfaced by the controller), nil on success.
-    def open_list_paste : String?
-      return "put the cursor in CONFIG first (^O)" unless @focus == :config
-      return "switch the payload type to List first (←/→)" unless @ptype == :list
-      @list_paste.set_text(@p_values.split(',').map(&.strip).reject(&.empty?).join('\n'))
-      @list_paste_open = true
-      nil
-    end
-
-    # Rejoin the popup's non-blank lines with ',' back into @p_values and close it.
-    # Idempotent so the focus changers above can call it freely.
-    def commit_list_paste : Nil
-      return unless @list_paste_open
-      @p_values = @list_paste.text.split('\n').map(&.strip).reject(&.empty?).join(',')
-      @dirty = true
-      @list_paste_open = false
-    end
-
-    # Route a key while the LIST PASTE popup is focused (the controller owns the
-    # escape/^L exit keys, which commit + close via commit_list_paste).
-    def handle_list_paste_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      case
-      when key.enter?     then @list_paste.insert_newline
-      when key.backspace? then @list_paste.backspace
-      when key.delete?    then @list_paste.delete
-      when key.up?        then @list_paste.move(-1, 0)
-      when key.down?      then @list_paste.move(1, 0)
-      when key.left?      then @list_paste.move(0, -1)
-      when key.right?     then @list_paste.move(0, 1)
-      when key.home?      then @list_paste.home
-      when key.end?       then @list_paste.end_of_line
-      else
-        ch = ev.char || key.to_char
-        @list_paste.insert(ch) if ch && !ev.ctrl? && !ev.alt?
-      end
     end
 
     # "§N" label for the marker under the template cursor (1-based), or "§" when not in one.
@@ -497,136 +428,68 @@ module Gori::Tui
       @results.size
     end
 
-    # --- config form ---------------------------------------------------------
-    # The cursor (@cfg_field, ↑/↓) walks an ordered field list split around the
-    # variable-length @sets rows: HEAD (payload type + its draft fields + add)
-    # comes first so entering CONFIG lands straight on the payload; the @sets rows
-    # sit in the MIDDLE (the `:set` pseudo-field); TAIL (mode + the collapsible
-    # `▸ Advanced` toggle, then Engine/Opts/Match/Filter only when expanded) is last.
-    ADVANCED_FIELDS = [:conc, :rate, :timeout, :retries, :follow, :calibrate,
-                       :m_status, :m_size, :m_words, :m_regex,
-                       :f_status, :f_size, :f_words, :f_regex]
+    # --- config pane (calm summary) ------------------------------------------
+    # A single row cursor @cfg_row (↑/↓) walks: one row per payload set, then the
+    # Add / Mode / Advanced / Run rows. There is NO text field and NO caret in-pane —
+    # all text entry lives in the Set / Advanced overlays — so ←/→ can only ever cycle
+    # (Mode), which removes the old caret-vs-cycle overload and the axis mismatch.
+    CONFIG_TAIL = [:add, :mode, :advanced, :run]
 
-    def config_field : Symbol
-      current_field
+    private def config_row_count : Int32
+      @sets.size + CONFIG_TAIL.size
     end
 
-    private def head_fields : Array(Symbol)
-      [:ptype] + ptype_fields + [:add]
+    # The kind of row under the cursor: :set | :add | :mode | :advanced | :run.
+    def config_row : Symbol
+      @cfg_row < @sets.size ? :set : (CONFIG_TAIL[@cfg_row - @sets.size]? || :run)
     end
 
-    private def tail_fields : Array(Symbol)
-      @show_advanced ? [:mode, :advanced] + ADVANCED_FIELDS : [:mode, :advanced]
+    # The payload-set index under the cursor, or nil when the cursor is on a tail row.
+    def current_set_index : Int32?
+      @cfg_row < @sets.size ? @cfg_row : nil
     end
 
-    private def ptype_fields : Array(Symbol)
-      case @ptype
-      when :numbers  then [:p_from, :p_to, :p_step]
-      when :wordlist then [:p_path]
-      when :null     then [:p_count]
-      when :brute    then [:p_charset, :p_min, :p_max]
-      else                [:p_values]
-      end
-    end
-
-    private def field_count : Int32
-      head_fields.size + @sets.size + tail_fields.size
-    end
-
-    private def current_field : Symbol
-      h = head_fields.size
-      return head_fields[@cfg_field] if @cfg_field < h
-      return :set if @cfg_field < h + @sets.size
-      tail_fields[@cfg_field - h - @sets.size]? || :mode # `|| :mode` guards a stale index
-    end
-
-    private def current_set_index : Int32
-      @cfg_field - head_fields.size
-    end
-
-    # ↑/↓ — move the field cursor (caret resets to the end of the new field).
+    # ↑/↓ — move the row cursor.
     def form_move(d : Int32) : Nil
-      @cfg_field = (@cfg_field + d).clamp(0, {field_count - 1, 0}.max)
-      @cfg_caret = field_text(current_field).size
-      sync_path_complete
+      @cfg_row = (@cfg_row + d).clamp(0, {config_row_count - 1, 0}.max)
     end
 
-    # ←/→ — cycle an enum/toggle, else move the text caret.
+    # ←/→ — cycle Mode (the only in-pane cycler); a no-op on every other row.
     def form_adjust(d : Int32) : Nil
-      case current_field
-      when :mode      then cycle_mode(d)
-      when :ptype     then cycle_ptype(d)
-      when :advanced  then toggle_advanced
-      when :follow    then @config.follow_redirects = !@config.follow_redirects?; @dirty = true
-      when :calibrate then toggle_calibrate
-      else                 @cfg_caret = (@cfg_caret + d).clamp(0, field_text(current_field).size)
-      end
+      cycle_mode(d) if config_row == :mode
     end
 
-    # ⏎ — Add field appends the set, Advanced toggles the block, else step down.
-    def form_enter : Nil
-      case current_field
-      when :add      then add_current_set
-      when :advanced then toggle_advanced
-      else                form_move(1)
-      end
-    end
-
+    # Del/⌫ on a set row — remove that set.
     def form_delete : Nil
-      remove_set(current_set_index) if current_field == :set
-    end
-
-    # ⌫ — delete a char in a text field, or remove the focused set row.
-    def form_backspace : Nil
-      if current_field == :set
-        remove_set(current_set_index)
-      elsif text_field?(current_field) && @cfg_caret > 0
-        s = field_text(current_field)
-        field_set(current_field, "#{s[0, @cfg_caret - 1]}#{s[@cfg_caret..]}")
-        @cfg_caret -= 1
-        @dirty = true
-        @path_complete.refresh(@p_path) if current_field == :p_path
+      if i = current_set_index
+        remove_set(i)
       end
     end
 
-    def form_type(ch : Char) : Nil
-      return unless text_field?(current_field)
-      s = field_text(current_field)
-      field_set(current_field, "#{s[0, @cfg_caret]}#{ch}#{s[@cfg_caret..]}")
-      @cfg_caret += 1
+    # The payload sets, for the Set overlay to seed an edit and the engine to build.
+    def set_specs : Array(SetSpec)
+      @sets
+    end
+
+    # Apply the Set overlay's result: append (edit_index nil) or replace an existing
+    # set. A nil spec (blank required input) leaves @sets unchanged.
+    def apply_set(edit_index : Int32?, spec : SetSpec?) : Nil
+      return unless spec
+      if i = edit_index
+        @sets[i] = spec if 0 <= i < @sets.size
+      else
+        @sets << spec
+        @cfg_row = @sets.size - 1 # land on the just-added set
+      end
+      @cfg_row = @cfg_row.clamp(0, {config_row_count - 1, 0}.max)
       @dirty = true
-      @path_complete.refresh(@p_path) if current_field == :p_path
     end
 
-    # Keep the wordlist path popup in lockstep with the cursor: open/refresh while
-    # the :p_path field is focused, close on any other field.
-    private def sync_path_complete : Nil
-      current_field == :p_path ? @path_complete.refresh(@p_path) : @path_complete.close
-    end
-
-    # --- wordlist path completion (mirrors Convert's ChainComplete contract) -----
-    # True while the popup owns Tab/Enter/↑/↓/Esc — the runner's pre-ring guard routes
-    # those keys here (via the controller) before the focus ring claims Tab.
-    def path_completing? : Bool
-      @focus == :config && current_field == :p_path && @path_complete.open?
-    end
-
-    def path_complete_move(d : Int32) : Nil
-      @path_complete.move(d)
-    end
-
-    def path_complete_close : Nil
-      @path_complete.close
-    end
-
-    # Apply the highlighted completion: replace the field, jump the caret to the end,
-    # keep the popup open + drill on a directory, close on a file.
-    def path_complete_accept : Nil
-      res = @path_complete.accept || return
-      @p_path, is_dir = res
-      @cfg_caret = @p_path.size
+    private def remove_set(i : Int32) : Nil
+      return unless 0 <= i < @sets.size
+      @sets.delete_at(i)
+      @cfg_row = @cfg_row.clamp(0, {config_row_count - 1, 0}.max)
       @dirty = true
-      is_dir ? @path_complete.refresh(@p_path) : @path_complete.close
     end
 
     private def cycle_mode(d : Int32) : Nil
@@ -636,151 +499,93 @@ module Gori::Tui
       @dirty = true
     end
 
-    private def cycle_ptype(d : Int32) : Nil
-      types = [:list, :numbers, :wordlist, :null, :brute]
-      i = types.index(@ptype) || 0
-      @ptype = types[(i + d) % types.size]
-      @cfg_caret = 0
-      sync_path_complete # cursor stays on :ptype → closes a stale wordlist popup
+    # ⏎ on the Mode row — cycle forward (mirrors form_adjust(1)).
+    def cycle_mode_forward : Nil
+      cycle_mode(1)
     end
 
-    private def toggle_calibrate : Nil
-      on = !@config.auto_calibrate?
-      @config.auto_calibrate = on
-      @matcher.auto_calibrate = on
+    # --- advanced overlay bridge ---------------------------------------------
+    # Read the current advanced knobs for FuzzAdvancedOverlay to seed from.
+    def advanced_snapshot : AdvancedSnapshot
+      AdvancedSnapshot.new(
+        conc: @s_conc, rate: @s_rate, timeout: @s_timeout, retries: @s_retries,
+        follow: @config.follow_redirects?, calibrate: @config.auto_calibrate?,
+        m_status: @matcher.match_status || "", m_size: @matcher.match_size || "",
+        m_words: @matcher.match_words || "", m_regex: @s_m_regex,
+        f_status: @matcher.filter_status || "", f_size: @matcher.filter_size || "",
+        f_words: @matcher.filter_words || "", f_regex: @s_f_regex)
+    end
+
+    # Write the overlay's edited knobs back into the engine buffers (regexes stay as
+    # source strings, compiled by commit_buffers at build/persist time — unchanged).
+    def apply_advanced(s : AdvancedSnapshot) : Nil
+      @s_conc = s.conc
+      @s_rate = s.rate
+      @s_timeout = s.timeout
+      @s_retries = s.retries
+      @config.follow_redirects = s.follow
+      @config.auto_calibrate = s.calibrate
+      @matcher.auto_calibrate = s.calibrate
+      @matcher.match_status = blank_nil(s.m_status)
+      @matcher.match_size = blank_nil(s.m_size)
+      @matcher.match_words = blank_nil(s.m_words)
+      @s_m_regex = s.m_regex
+      @matcher.filter_status = blank_nil(s.f_status)
+      @matcher.filter_size = blank_nil(s.f_size)
+      @matcher.filter_words = blank_nil(s.f_words)
+      @s_f_regex = s.f_regex
       @dirty = true
-    end
-
-    # Collapse/expand the Advanced block. Pure UI state — NO @dirty (mirrors
-    # cycle_ptype); re-clamp the cursor since tail_fields just shrank/grew.
-    private def toggle_advanced : Nil
-      @show_advanced = !@show_advanced
-      @cfg_field = @cfg_field.clamp(0, {field_count - 1, 0}.max)
-    end
-
-    private def add_current_set : Nil
-      return unless spec = draft_spec
-      @sets << spec
-      @dirty = true
-    end
-
-    # Build a SetSpec from the selected payload type's draft fields (nil if blank).
-    private def draft_spec : SetSpec?
-      case @ptype
-      when :list     then @p_values.strip.empty? ? nil : SetSpec.new(:list, @p_values.strip)
-      when :numbers  then SetSpec.new(:numbers, "#{num(@p_from)}-#{num(@p_to)}:#{num(@p_step, 1)}")
-      when :wordlist then @p_path.strip.empty? ? nil : SetSpec.new(:file, @p_path.strip)
-      when :null     then SetSpec.new(:null, num(@p_count, 1).to_s)
-      when :brute    then @p_charset.strip.empty? ? nil : SetSpec.new(:brute, "#{@p_charset.strip}:#{num(@p_min, 1)}-#{num(@p_max, 1)}")
-      end
-    end
-
-    private def num(s : String, default : Int32 = 0) : Int32
-      s.to_i? || default
-    end
-
-    private def remove_set(i : Int32) : Nil
-      return unless 0 <= i < @sets.size
-      @sets.delete_at(i)
-      @cfg_field = @cfg_field.clamp(0, {field_count - 1, 0}.max)
-      @dirty = true
-    end
-
-    private def text_field?(f : Symbol) : Bool
-      case f
-      when :mode, :ptype, :follow, :calibrate, :add, :set, :advanced then false
-      else                                                                true
-      end
-    end
-
-    private def field_text(f : Symbol) : String
-      engine_text(f) || matcher_text(f) || payload_text(f) || ""
-    end
-
-    private def engine_text(f : Symbol) : String?
-      case f
-      when :conc    then @s_conc
-      when :rate    then @s_rate
-      when :timeout then @s_timeout
-      when :retries then @s_retries
-      when :m_regex then @s_m_regex
-      when :f_regex then @s_f_regex
-      end
-    end
-
-    private def matcher_text(f : Symbol) : String?
-      case f
-      when :m_status then @matcher.match_status
-      when :m_size   then @matcher.match_size
-      when :m_words  then @matcher.match_words
-      when :f_status then @matcher.filter_status
-      when :f_size   then @matcher.filter_size
-      when :f_words  then @matcher.filter_words
-      end
-    end
-
-    private def payload_text(f : Symbol) : String?
-      case f
-      when :p_values  then @p_values
-      when :p_from    then @p_from
-      when :p_to      then @p_to
-      when :p_step    then @p_step
-      when :p_path    then @p_path
-      when :p_count   then @p_count
-      when :p_charset then @p_charset
-      when :p_min     then @p_min
-      when :p_max     then @p_max
-      end
-    end
-
-    private def field_set(f : Symbol, s : String) : Nil
-      engine_set(f, s) || matcher_set(f, s) || payload_set(f, s)
-    end
-
-    private def engine_set(f : Symbol, s : String) : Bool
-      case f
-      when :conc    then @s_conc = s
-      when :rate    then @s_rate = s
-      when :timeout then @s_timeout = s
-      when :retries then @s_retries = s
-      when :m_regex then @s_m_regex = s
-      when :f_regex then @s_f_regex = s
-      else               return false
-      end
-      true
-    end
-
-    private def matcher_set(f : Symbol, s : String) : Bool
-      case f
-      when :m_status then @matcher.match_status = blank_nil(s)
-      when :m_size   then @matcher.match_size = blank_nil(s)
-      when :m_words  then @matcher.match_words = blank_nil(s)
-      when :f_status then @matcher.filter_status = blank_nil(s)
-      when :f_size   then @matcher.filter_size = blank_nil(s)
-      when :f_words  then @matcher.filter_words = blank_nil(s)
-      else                return false
-      end
-      true
-    end
-
-    private def payload_set(f : Symbol, s : String) : Bool
-      case f
-      when :p_values  then @p_values = s
-      when :p_from    then @p_from = s
-      when :p_to      then @p_to = s
-      when :p_step    then @p_step = s
-      when :p_path    then @p_path = s
-      when :p_count   then @p_count = s
-      when :p_charset then @p_charset = s
-      when :p_min     then @p_min = s
-      when :p_max     then @p_max = s
-      else                 return false
-      end
-      true
     end
 
     private def blank_nil(s : String) : String?
-      s.empty? ? nil : s
+      s.strip.empty? ? nil : s
+    end
+
+    # --- run-count estimate --------------------------------------------------
+    # The "Run · N requests" figure for the summary's Run row, memoized on a cheap
+    # signature (mode + set specs + marker count) so it never rebuilds sources per
+    # frame. nil when the size is unknown (empty/invalid config, or an overflowing
+    # cluster-bomb / brute set) → the Run row omits the count.
+    def run_request_count : Int64?
+      sig = "#{@config.mode}|#{position_count}|#{@sets.map { |s| "#{s.kind}:#{s.value}" }.join("~")}"
+      return @run_count_cache if sig == @run_count_sig
+      @run_count_sig = sig
+      @run_count_cache = compute_run_count
+    end
+
+    private def compute_run_count : Int64?
+      return nil if @sets.empty? || position_count == 0
+      sizes = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)).size }
+      return nil if sizes.any?(Nil) # any unknown / overflowing size → unknown total
+      run_count_for_mode(sizes.compact)
+    rescue
+      nil
+    end
+
+    private def run_count_for_mode(ns : Array(Int64)) : Int64?
+      first = ns.first? || 0_i64
+      case @config.mode
+      when .sniper?        then mul_checked(position_count.to_i64, first)
+      when .battering_ram? then first
+      when .pitchfork?     then (0...position_count).min_of? { |i| ns[i]? || first } || 0_i64
+      else                      combos(ns) # cluster-bomb ∏Nᵢ
+      end
+    end
+
+    # ∏ of the per-position set sizes (cluster-bomb), nil on Int64 overflow.
+    private def combos(ns : Array(Int64)) : Int64?
+      total = 1_i64
+      (0...position_count).each do |i|
+        n = ns[i]? || ns.first? || 0_i64
+        total = mul_checked(total, n) || return nil
+      end
+      total
+    end
+
+    private def mul_checked(a : Int64, b : Int64) : Int64?
+      return 0_i64 if a == 0 || b == 0
+      return nil if a > Int64::MAX // b
+      a * b
     end
 
     # Push the buffered numeric/regex fields into @config/@matcher (before a run and
@@ -820,7 +625,7 @@ module Gori::Tui
       end
       template = Fuzz::Template.parse(@editor.text, @http2)
       return {nil, "mark a position first — ^A params · ^K word"} if template.position_count == 0
-      return {nil, "add a payload set — ^O config · pick a type · ⏎ add"} if @sets.empty?
+      return {nil, "add a payload set — ^O config · + Add set (^L for a List)"} if @sets.empty?
       scheme, host, port = Replay::FlowRequest.parse_target(@target)
       return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       sets = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)) }
@@ -1139,7 +944,6 @@ module Gori::Tui
       bottom = Rect.new(rest.x, rest.y + top_h, rest.w, {rest.h - top_h, 0}.max)
       render_top(screen, top, focused)
       render_bottom(screen, bottom, focused) if bottom.h > 0
-      render_list_paste(screen, rect) if list_paste_active?
     end
 
     private def render_top(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -1199,38 +1003,6 @@ module Gori::Tui
       end
     end
 
-    # Centered box for the LIST PASTE popup within the whole session `area` — sized
-    # generously (it's meant to hold a pasted wordlist) but capped to the terminal,
-    # nil when even a small popup can't fit.
-    private def list_paste_box(area : Rect) : Rect?
-      w = {area.w - 8, 70}.min
-      h = {area.h - 6, 22}.min
-      return nil if w < 24 || h < 6
-      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
-    end
-
-    private def render_list_paste(screen : Screen, area : Rect) : Nil
-      box = list_paste_box(area)
-      return unless box
-      # bg: Theme.bg (not the card default Theme.panel) — the embedded TextArea always
-      # paints its lines on Theme.bg, so the card must match or the interior two-tones.
-      Frame.card(screen, box, "PASTE LIST", bg: Theme.bg, border: Theme.border_focus)
-      n = @list_paste.text.split('\n').map(&.strip).reject(&.empty?).size
-      meta = "#{n} value#{n == 1 ? "" : "s"}"
-      screen.text({box.right - meta.size - 2, box.x + 13}.max, box.y, meta, Theme.muted, Theme.bg)
-      inner = box.inset(1, 1)
-      return if inner.h < 2
-      hint_y = inner.bottom - 1
-      screen.text(inner.x, hint_y, "one value per line · ⏎ newline · ^L / esc applies", Theme.muted, Theme.bg, width: inner.w)
-      editor = Rect.new(inner.x, inner.y, inner.w, inner.h - 1)
-      if @list_paste.line_count == 1 && @list_paste.text.empty?
-        screen.text(editor.x, editor.y, LIST_PASTE_PLACEHOLDER, Theme.muted, Theme.bg, width: editor.w)
-        screen.cursor(editor.x, editor.y)
-      else
-        @list_paste.render(screen, editor, cursor: true)
-      end
-    end
-
     # Sidebar width for a bottom rect `w` cols wide, or 0 (no sidebar) when too narrow.
     private def dist_width(w : Int32) : Int32
       return 0 if w < DIST_MIN_TOTAL
@@ -1286,140 +1058,111 @@ module Gori::Tui
       @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
     end
 
+    # The calm CONFIG summary: a header, the payload-set rows + an Add row, then the
+    # Mode / Advanced / Run rows anchored at the bottom. One row cursor (@cfg_row), no
+    # text field, no caret — so ←/→ can only cycle Mode. All editing drills into the
+    # Set / Advanced overlays.
     private def render_config(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "CONFIG", bg: Theme.bg, border: Frame.pane_border(focused))
       inner = rect.inset(1, 1)
+      return if inner.h < 1
       mx = inner.right
-      y = inner.y
 
-      # 1. payload type tabs — the cursor lands here on entry
-      draw_ptype(screen, inner.x, y, mx, focused)
-      y += 1
-
-      # 2. the selected type's draft fields + add (capture the :p_path anchor)
-      x = inner.x + 2
-      ppath_x = nil
-      ppath_y = y
-      ptype_fields.each do |f|
-        if f == :p_path
-          ppath_x = x
-          ppath_y = y
-        end
-        x = draw_seg(screen, x, y, ptype_label(f), f, mx, focused)
-      end
-      draw_add(screen, x, y, mx, focused)
-      y += 2
-
-      # 3. payload sets (variable length) — capped so the tail stays on-screen
-      tail_h = @show_advanced ? 7 : 3
-      y = render_sets(screen, inner, y, focused, {inner.bottom - tail_h, y}.max)
-      y += 1
-
-      # 4. mode
-      x = label_at(screen, inner.x, y, "Mode")
-      x = draw_seg(screen, x, y, "", :mode, mx, focused)
-      screen.text(x + 1, y, mode_formula, Theme.muted, Theme.bg) if x + 10 < mx
-      y += 1
-
-      # 5. advanced toggle
-      draw_advanced(screen, inner.x, y, mx, focused)
-      y += 1
-
-      # 6. advanced block — only when expanded
-      if @show_advanced
-        x = label_at(screen, inner.x, y, "Engine")
-        x = draw_seg(screen, x, y, "conc", :conc, mx, focused)
-        x = draw_seg(screen, x, y, "rate", :rate, mx, focused)
-        x = draw_seg(screen, x, y, "to", :timeout, mx, focused)
-        draw_seg(screen, x, y, "retry", :retries, mx, focused)
-        y += 1
-
-        x = label_at(screen, inner.x, y, "Opts")
-        x = draw_seg(screen, x, y, "follow", :follow, mx, focused)
-        draw_seg(screen, x, y, "calib", :calibrate, mx, focused)
-        y += 1
-
-        y = render_cond_line(screen, inner.x, y, mx, focused, "Match", :m_status, :m_size, :m_words, :m_regex)
-        render_cond_line(screen, inner.x, y, mx, focused, "Filtr", :f_status, :f_size, :f_words, :f_regex)
-      end
-
-      # the wordlist completion popup floats over the lines below the :p_path field
-      if @ptype == :wordlist && (ax = ppath_x) && @path_complete.open?
-        @path_complete.render(screen, ax, ppath_y + 1, inner)
-      end
-    end
-
-    private def draw_advanced(screen, x, y, mx, pane_focused) : Nil
-      foc = pane_focused && current_field == :advanced
-      label = @show_advanced ? "▾ Advanced" : "▸ Advanced (Engine · Match · Filter)"
-      bg = foc ? Theme.accent_bg : Theme.bg
-      fg = foc ? Theme.text_bright : Theme.muted
-      screen.text(x, y, label, fg, bg, width: {mx - x, 1}.max)
-    end
-
-    private def render_cond_line(screen, ox, y, mx, focused, label, st, sz, wd, re) : Int32
-      x = label_at(screen, ox, y, label)
-      x = draw_seg(screen, x, y, "st", st, mx, focused)
-      x = draw_seg(screen, x, y, "sz", sz, mx, focused)
-      x = draw_seg(screen, x, y, "wd", wd, mx, focused)
-      draw_seg(screen, x, y, "re", re, mx, focused)
-      y + 1
-    end
-
-    # Render the "Sets" header + rows, bounded so the rows never overrun `limit`
-    # (the bottom budget reserved for the Mode/Advanced tail). Overflow collapses
-    # into a "… +N more" line. Returns the next free y.
-    private def render_sets(screen, inner, y, focused, limit : Int32) : Int32
-      pp = @config.mode.per_position? # set i → marker i (Pitchfork/ClusterBomb)
-      header = "Sets"
-      screen.text(inner.x, y, header, Theme.muted, Theme.bg)
+      screen.text(inner.x, inner.y, "PAYLOAD SETS", Theme.muted, Theme.bg)
       mcount = marker_spans.size
-      if pp && !@sets.empty? && @sets.size != mcount
-        hx = inner.x + header.size + 1
-        screen.text(hx, y, sets_hint(mcount, @sets.size), Theme.muted, Theme.bg,
-          width: {inner.right - hx, 1}.max)
+      if @config.mode.per_position? && !@sets.empty? && @sets.size != mcount
+        hx = inner.x + 13
+        screen.text(hx, inner.y, sets_hint(mcount, @sets.size), Theme.muted, Theme.bg, width: {mx - hx, 1}.max)
       end
-      y += 1
+
+      # Mode / Advanced / Run anchor to the bottom 3 rows; the sets list + Add row fill
+      # the space between the header and that tail (windowed if they overflow).
+      tail_top = {inner.bottom - 3, inner.y + 1}.max
+      render_sets(screen, inner, inner.y + 1, focused, tail_top)
+      render_mode_row(screen, inner, tail_top, focused)
+      render_advanced_row(screen, inner, tail_top + 1, focused)
+      render_run_row(screen, inner, tail_top + 2, focused)
+    end
+
+    # Payload-set rows within [y0, limit), followed by the "+ Add payload set…" row.
+    # `limit` is the first row the bottom tail occupies, so sets never overwrite it.
+    private def render_sets(screen, inner : Rect, y0 : Int32, focused : Bool, limit : Int32) : Nil
+      pp = @config.mode.per_position? # set i → marker i (Pitchfork/ClusterBomb)
+      avail = {limit - y0, 1}.max
       if @sets.empty?
-        screen.text(inner.x + 2, y, "(none — pick a type above, ⏎ add)", Theme.muted, Theme.bg)
-        return y + 1
+        screen.text(inner.x + 1, y0, "(no sets yet)", Theme.muted, Theme.bg) if y0 < limit
+        draw_add_row(screen, inner, {y0 + 1, limit - 1}.min, focused)
+        return
       end
-      avail = {limit - y, 1}.max
-      return render_sets_all(screen, inner, y, focused, pp) if @sets.size <= avail
-      render_sets_windowed(screen, inner, y, focused, avail, pp)
+      set_rows = {avail - 1, 1}.max # reserve the last available row for the Add row
+      if @sets.size <= set_rows
+        @cfg_scroll = 0
+        y = y0
+        @sets.each_with_index do |s, i|
+          render_set_row(screen, inner, y, s, i, set_selected?(focused, i), pp)
+          y += 1
+        end
+        draw_add_row(screen, inner, y, focused)
+      else
+        visible = {set_rows - 1, 1}.max # 1 row for the overflow hint, 1 for Add
+        idx = current_set_index || 0
+        @cfg_scroll = idx if idx < @cfg_scroll
+        @cfg_scroll = idx - visible + 1 if idx >= @cfg_scroll + visible
+        @cfg_scroll = @cfg_scroll.clamp(0, {@sets.size - visible, 0}.max)
+        stop = {@cfg_scroll + visible, @sets.size}.min
+        y = y0
+        (@cfg_scroll...stop).each do |i|
+          render_set_row(screen, inner, y, @sets[i], i, set_selected?(focused, i), pp)
+          y += 1
+        end
+        above, below = @cfg_scroll, @sets.size - stop
+        hint = above > 0 && below > 0 ? "… #{above} above · #{below} below" : (above > 0 ? "… #{above} above" : "… +#{below} more")
+        screen.text(inner.x + 1, y, hint, Theme.muted, Theme.bg)
+        draw_add_row(screen, inner, y + 1, focused)
+      end
     end
 
-    # Every set fits — render them all (no scroll).
-    private def render_sets_all(screen, inner : Rect, y : Int32, focused : Bool, pp : Bool) : Int32
-      @cfg_scroll = 0
-      @sets.each_with_index do |s, i|
-        sel = focused && current_field == :set && current_set_index == i
-        render_set_row(screen, inner, y, s, i, sel, pp)
-        y += 1
-      end
-      y
+    private def set_selected?(focused : Bool, i : Int32) : Bool
+      focused && config_row == :set && current_set_index == i
     end
 
-    # The list exceeds the pane: window it around the focused set (the unused @cfg_scroll
-    # meant selection/delete could operate on a row scrolled off-screen). One row is
-    # reserved for an "above/below" overflow indicator.
-    private def render_sets_windowed(screen, inner : Rect, y : Int32, focused : Bool, avail : Int32, pp : Bool) : Int32
-      visible = {avail - 1, 1}.max
-      idx = current_set_index
-      @cfg_scroll = idx if idx < @cfg_scroll
-      @cfg_scroll = idx - visible + 1 if idx >= @cfg_scroll + visible
-      @cfg_scroll = @cfg_scroll.clamp(0, {@sets.size - visible, 0}.max)
-      stop = {@cfg_scroll + visible, @sets.size}.min
-      (@cfg_scroll...stop).each do |i|
-        sel = focused && current_field == :set && current_set_index == i
-        render_set_row(screen, inner, y, @sets[i], i, sel, pp)
-        y += 1
-      end
-      above, below = @cfg_scroll, @sets.size - stop
-      hint = above > 0 && below > 0 ? "… #{above} above · #{below} below" : (above > 0 ? "… #{above} above" : "… +#{below} more")
-      screen.text(inner.x + 1, y, hint, Theme.muted, Theme.bg)
-      y + 1
+    private def draw_add_row(screen, inner : Rect, y : Int32, focused : Bool) : Nil
+      return if y >= inner.bottom
+      foc = focused && config_row == :add
+      bg = foc ? Theme.accent_bg : Theme.bg
+      screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if foc
+      screen.text(inner.x + 1, y, "+ Add payload set…", foc ? Theme.text_bright : Theme.accent, bg, width: {inner.w - 1, 1}.max)
+    end
+
+    private def render_mode_row(screen, inner : Rect, y : Int32, focused : Bool) : Nil
+      return if y >= inner.bottom
+      foc = focused && config_row == :mode
+      bg = foc ? Theme.accent_bg : Theme.bg
+      screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if foc
+      screen.text(inner.x, y, "Mode", Theme.muted, bg)
+      x = screen.text(inner.x + 7, y, "‹ #{@config.mode.label} ›", foc ? Theme.text_bright : Theme.text, bg)
+      screen.text(x + 1, y, mode_formula, Theme.muted, bg) if x + 1 + mode_formula.size <= inner.right
+    end
+
+    private def render_advanced_row(screen, inner : Rect, y : Int32, focused : Bool) : Nil
+      return if y >= inner.bottom
+      foc = focused && config_row == :advanced
+      bg = foc ? Theme.accent_bg : Theme.bg
+      screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if foc
+      screen.text(inner.x, y, "Advanced", foc ? Theme.text_bright : Theme.muted, bg)
+      dx = inner.x + 9
+      screen.text(dx, y, "Engine · Match · Filter  ⏎", Theme.muted, bg, width: {inner.right - dx, 1}.max) if dx < inner.right
+    end
+
+    private def render_run_row(screen, inner : Rect, y : Int32, focused : Bool) : Nil
+      return if y >= inner.bottom
+      foc = focused && config_row == :run
+      bg = foc ? Theme.accent_bg : Theme.bg
+      screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if foc
+      n = run_request_count
+      label = n ? "▶ Run · #{Fmt.count(n)} request#{n == 1 ? "" : "s"}" : "▶ Run"
+      screen.text(inner.x, y, label, foc ? Theme.text_bright : Theme.accent, bg, width: {inner.w, 1}.max)
     end
 
     # One Sets row. In per-position modes (pp) it carries a marker-coloured swatch + →N
@@ -1448,84 +1191,12 @@ module Gori::Tui
       sets < markers ? "· #{markers} markers, #{sets} sets — marker #{sets + 1}+ reuse set 1" : "· #{markers} markers — set #{markers + 1}+ unused"
     end
 
-    private def label_at(screen, x, y, label) : Int32
-      screen.text(x, y, label, Theme.muted, Theme.bg)
-      x + label.size + 1
-    end
-
-    # Draw "label value" at x; the value highlighted (accent bg) when its field is
-    # focused, with a block caret + terminal cursor for a focused TEXT field.
-    private def draw_seg(screen, x, y, label : String, fid : Symbol, mx, pane_focused) : Int32
-      return x if x >= mx
-      foc = pane_focused && current_field == fid
-      vx = label.empty? ? x : label_at(screen, x, y, label)
-      raw = field_text(fid)
-      val = seg_display(fid, foc, raw)
-      bg = foc ? Theme.accent_bg : Theme.bg
-      fg = foc ? Theme.text_bright : Theme.text
-      screen.text(vx, y, val, fg, bg, width: {mx - vx, 1}.max)
-      if foc && text_field?(fid)
-        cx = vx + {@cfg_caret, raw.size}.min
-        if cx < mx
-          screen.cell(cx, y, @cfg_caret < raw.size ? raw[@cfg_caret] : ' ', Theme.bg, Theme.accent)
-          screen.cursor(cx, y)
-        end
-      end
-      vx + val.size + 2
-    end
-
-    private def seg_display(fid : Symbol, focused : Bool, raw : String) : String
-      case fid
-      when :mode           then "‹ #{@config.mode.label} ›"
-      when :follow         then @config.follow_redirects? ? "on" : "off"
-      when :calibrate      then @config.auto_calibrate? ? "on" : "off"
-      when :rate, :timeout then focused ? raw : (raw.empty? ? "∞" : raw)
-      else                      focused ? raw : (raw.empty? ? "—" : raw)
-      end
-    end
-
-    private def draw_ptype(screen, x, y, mx, pane_focused) : Nil
-      foc = pane_focused && current_field == :ptype
-      tx = label_at(screen, x, y, "Payld")
-      {:list, :numbers, :wordlist, :null, :brute}.each do |t|
-        sel = t == @ptype
-        bg = sel ? (foc ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
-        fg = sel ? Theme.text_bright : Theme.muted
-        seg = " #{t.to_s.capitalize} "
-        break if tx + seg.size > mx
-        screen.text(tx, y, seg, fg, bg)
-        tx += seg.size + 1
-      end
-    end
-
-    private def draw_add(screen, x, y, mx, pane_focused) : Nil
-      foc = pane_focused && current_field == :add
-      return if x + 7 >= mx
-      bg = foc ? Theme.accent_bg : Theme.bg
-      screen.text(x + 1, y, " + add ", foc ? Theme.text_bright : Theme.accent, bg)
-    end
-
     private def mode_formula : String
       case @config.mode
       when .sniper?        then "P×N"
       when .battering_ram? then "N"
       when .pitchfork?     then "min(Nᵢ)"
       else                      "∏Nᵢ"
-      end
-    end
-
-    private def ptype_label(f : Symbol) : String
-      case f
-      when :p_values  then "values"
-      when :p_from    then "from"
-      when :p_to      then "to"
-      when :p_step    then "step"
-      when :p_path    then "path"
-      when :p_count   then "count"
-      when :p_charset then "chars"
-      when :p_min     then "min"
-      when :p_max     then "max"
-      else                 ""
       end
     end
 
@@ -1880,124 +1551,6 @@ module Gori::Tui
       else
         vw = @show_dist ? dist_width(rest.w) : 0
         vw > 0 && mx >= rest.x + rest.w - vw ? nil : :results # read-only DIST sidebar → no-op
-      end
-    end
-  end
-
-  # Inline filesystem path completion for the wordlist payload field. Mirrors the
-  # Convert tab's ChainComplete (scroll-window dropdown) but with path-aware accept:
-  # it keeps the typed directory prefix, replaces only the basename, and appends "/"
-  # to directories so the user can keep drilling. Bare names (no "/") complete from
-  # BOTH the current working dir and ~/.gori/wordlists. Per-directory child caching
-  # keeps steady-state keystrokes off the filesystem.
-  class PathComplete
-    CAP = 60
-
-    record Entry, label : String, insert : String, dir : Bool
-
-    getter? open : Bool = false
-    getter entries : Array(Entry) = [] of Entry
-    getter selected : Int32 = 0
-    @scroll = 0
-    @cache = {} of String => Array(String) # dir → sorted children
-
-    def refresh(value : String) : Nil
-      @entries = candidates(value)
-      @selected = 0
-      @scroll = 0
-      @open = !@entries.empty?
-    end
-
-    def move(d : Int32) : Nil
-      return if @entries.empty?
-      @selected = (@selected + d).clamp(0, @entries.size - 1)
-    end
-
-    def close : Nil
-      @open = false
-    end
-
-    # The chosen insert string + whether it is a directory (the caller keeps the
-    # popup open + refreshes on a dir, closes on a file). nil when nothing selectable.
-    def accept : {String, Bool}?
-      e = @entries[@selected]? || return nil
-      {e.insert, e.dir}
-    end
-
-    private def candidates(value : String) : Array(Entry)
-      if slash = value.rindex('/')
-        prefix = value[0..slash] # kept verbatim, incl. trailing '/'
-        partial = value[(slash + 1)..]
-        read_dir = Path[prefix].expand(home: true).to_s
-        merged = ranked(read_dir, partial).map do |name, is_dir, rank|
-          {Entry.new(name, "#{prefix}#{name}#{is_dir ? "/" : ""}", is_dir), rank}
-        end
-        merge_cap(merged)
-      else
-        # bare name → cwd (bare insert) + ~/.gori/wordlists (ABSOLUTE insert: the
-        # engine opens wordlist paths relative to CWD, so a wordlists-dir-only name
-        # MUST resolve absolutely or it would fail at run time). Both sources are
-        # ranked TOGETHER so a prefix/wordlist hit isn't buried under cwd fuzz.
-        wl = Gori::Paths.wordlists_dir
-        merged = ranked(Dir.current, value).map do |name, is_dir, rank|
-          {Entry.new(name, "#{name}#{is_dir ? "/" : ""}", is_dir), rank}
-        end
-        ranked(wl, value).each do |name, is_dir, rank|
-          merged << {Entry.new("#{name}  ·~/.gori", "#{File.join(wl, name)}#{is_dir ? "/" : ""}", is_dir), rank}
-        end
-        merge_cap(merged)
-      end
-    end
-
-    private def merge_cap(scored : Array({Entry, Int32})) : Array(Entry)
-      scored.sort_by! { |(e, rank)| {-rank, e.label} }
-      scored.first(CAP).map { |(e, _)| e }
-    end
-
-    # Children of `dir` matching `partial` (case-insensitive prefix OR fuzzy),
-    # ranked prefix-first then by score then name. Returns [{name, dir?, rank}],
-    # capped; only the survivors are stat'd for directory-ness.
-    private def ranked(dir : String, partial : String) : Array({String, Bool, Int32})
-      pl = partial.downcase
-      scored = children_of(dir).compact_map do |name|
-        dn = name.downcase
-        if partial.empty?
-          {name, 1}
-        elsif dn.starts_with?(pl)
-          {name, 1_000_000}
-        elsif s = Gori::Fuzzy.score(pl, dn)
-          {name, s}
-        else
-          nil
-        end
-      end
-      scored.sort_by! { |(name, rank)| {-rank, name} }
-      scored.first(CAP).map { |(name, rank)| {name, File.directory?(File.join(dir, name)), rank} }
-    end
-
-    # Per-directory children cache (bounded): re-read only when a dir is first seen.
-    private def children_of(dir : String) : Array(String)
-      @cache.clear if @cache.size > 8
-      @cache[dir] ||= (Dir.children(dir).sort rescue [] of String)
-    end
-
-    # Frame-less dropdown anchored at (x, y), clamped within `inner`. Same scroll +
-    # accent-bg selection as ChainComplete.
-    def render(screen : Screen, x : Int32, y : Int32, inner : Rect) : Nil
-      return if !@open || @entries.empty?
-      w = ({@entries.max_of(&.label.size) + 2, 18}.max).clamp(1, {inner.right - x, 1}.max)
-      h = {@entries.size, 8, {inner.bottom - y, 1}.max}.min
-      return if h <= 0
-      @scroll = @selected if @selected < @scroll
-      @scroll = @selected - h + 1 if @selected >= @scroll + h
-      @scroll = @scroll.clamp(0, {@entries.size - h, 0}.max)
-      (0...h).each do |i|
-        e = @entries[@scroll + i]? || break
-        active = (@scroll + i) == @selected
-        bg = active ? Theme.accent_bg : Theme.elevated
-        screen.fill(Rect.new(x, y + i, w, 1), bg)
-        screen.cell(x, y + i, active ? '▎' : ' ', Theme.accent, bg)
-        screen.text(x + 1, y + i, e.label, active ? Theme.text_bright : Theme.text, bg, width: {w - 1, 1}.max)
       end
     end
   end

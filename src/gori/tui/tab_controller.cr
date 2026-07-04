@@ -24,6 +24,10 @@ module Gori::Tui
     abstract def goto_tab(tab : Symbol) : Nil         # raw: set active tab + body focus, no on_enter/view_focus_first (e.g. ^R → Replay)
     abstract def open_palette : Nil                   # open the command palette overlay
     abstract def open_space_menu : Nil                # open the space action menu (bottom-right)
+    # Open the Fuzzer's payload-set editor overlay (nil = add a new set, else edit that
+    # index) / the advanced-settings overlay. The Runner builds them from the current view.
+    abstract def open_fuzz_set_editor(edit_index : Int32?) : Nil
+    abstract def open_fuzz_advanced_editor : Nil
     # Destructive-action confirmation modal; `action` runs on confirm.
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, &action : -> Nil) : Nil
     abstract def session : Session             # store / scope / proxy / registry / interceptor
