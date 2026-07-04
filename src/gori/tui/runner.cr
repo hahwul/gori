@@ -48,6 +48,9 @@ require "./space_menu"
 require "./jobs"
 require "./notifications"
 require "./notifications_overlay"
+require "./path_complete"
+require "./fuzz_set_overlay"
+require "./fuzz_advanced_overlay"
 require "../paths"
 require "../browser"
 require "../external_editor"
@@ -77,7 +80,7 @@ module Gori::Tui
       # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :hotkeys | :notifications | :mine_config
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -159,6 +162,11 @@ module Gori::Tui
       # The Miner config popup (History/Replay → space → "Mine parameters"); @overlay is
       # :mine_config while it's up. Built fresh each time it opens (holds the seed request).
       @mine_config_overlay = nil.as(MineConfigOverlay?)
+      # The Fuzzer config overlays (CONFIG pane → ↵ on a set / Add / Advanced): a payload-set
+      # editor and the advanced-settings form. @overlay is :fuzz_set / :fuzz_advanced while up;
+      # built fresh from the current fuzz session each time they open.
+      @fuzz_set_overlay = nil.as(FuzzSetOverlay?)
+      @fuzz_advanced_overlay = nil.as(FuzzAdvancedOverlay?)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)         # transient action feedback; nil → show key hints
@@ -451,6 +459,8 @@ module Gori::Tui
       when :note_pick     then @note_picker.try(&.set_preedit(text))
       when :settings      then @settings_view.set_preedit(text)
       when :hosts         then @hosts_overlay.set_preedit(text)
+      when :fuzz_set      then @fuzz_set_overlay.try(&.set_preedit(text))
+      when :fuzz_advanced then @fuzz_advanced_overlay.try(&.set_preedit(text))
       when :none          then apply_preedit_body(text)
       end
     end
@@ -521,6 +531,8 @@ module Gori::Tui
       return handle_hotkeys_key(ev) if @overlay == :hotkeys
       return handle_notifications_key(ev) if @overlay == :notifications
       return handle_mine_config_key(ev) if @overlay == :mine_config
+      return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
+      return handle_fuzz_advanced_key(ev) if @overlay == :fuzz_advanced
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
@@ -549,13 +561,6 @@ module Gori::Tui
       if @active_tab == :convert && @overlay == :none && @focus == :body && convert_controller.completing?
         return if convert_controller.handle_complete_key(ev)
       end
-      # The Fuzzer wordlist-path autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
-      # before the focus ring claims Tab. Gated on the :p_path field + an open popup, so
-      # Tab on any other field/pane still advances panes. Non-popup keys fall through.
-      if @active_tab == :fuzzer && @overlay == :none && @focus == :body && fuzzer_controller.path_completing?
-        return if fuzzer_controller.handle_path_complete_key(ev)
-      end
-
       # Focusable sub-tab strip (Replay/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
       # the editor, ↑/esc pop to the tab bar. Claimed BEFORE the Tab ring + ^N so the
       # strip owns Tab and its own ^N. @focus is only ever :subtabs for Replay/Notes.
@@ -701,8 +706,8 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config then true
-      else                                                                                                                                                                                               false
+      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced then true
+      else                                                                                                                                                                                                                          false
       end
     end
 
@@ -787,6 +792,8 @@ module Gori::Tui
       when :hotkeys       then click_hotkeys(area, mx, my)
       when :notifications then click_notifications(area, mx, my)
       when :mine_config   then click_mine_config(area, mx, my)
+      when :fuzz_set      then click_fuzz_set(area, mx, my)
+      when :fuzz_advanced then click_fuzz_advanced(area, mx, my)
         # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
@@ -825,6 +832,20 @@ module Gori::Tui
         ov.set_selected(idx)
         ov.on_start_row? ? start_mining(ov) : ov.toggle
       end
+    end
+
+    private def click_fuzz_set(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @fuzz_set_overlay || return
+      box = ov.overlay_box(area)
+      return apply_close_fuzz_set(ov) if box.nil? || dismiss_zone?(box, mx, my) # click-away applies (esc semantics)
+      ov.handle_click(box, mx, my)
+    end
+
+    private def click_fuzz_advanced(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @fuzz_advanced_overlay || return
+      box = ov.overlay_box(area)
+      return apply_close_fuzz_advanced(ov) if box.nil? || dismiss_zone?(box, mx, my)
+      ov.handle_click(box, mx, my)
     end
 
     private def click_palette(area : Rect, mx : Int32, my : Int32) : Nil
@@ -964,6 +985,8 @@ module Gori::Tui
       when :hotkeys       then @hotkeys_overlay.select_move(step)
       when :notifications then @notifications_overlay.select_move(step)
       when :mine_config   then @mine_config_overlay.try(&.move(step))
+      when :fuzz_set      then @fuzz_set_overlay.try(&.move(step))
+      when :fuzz_advanced then @fuzz_advanced_overlay.try(&.move(step))
       end
     end
 
@@ -1006,6 +1029,31 @@ module Gori::Tui
       elsif key.enter? || key.space?
         ov.on_start_row? ? start_mining(ov) : ov.toggle
       end
+    end
+
+    # Fuzzer payload-set / advanced overlays. Each owns ALL its keys (incl. Tab + its
+    # own wordlist autocomplete) while open; :apply (esc / ↵ on the last field / a
+    # click-away) writes the edit back into the fuzz session and closes.
+    private def handle_fuzz_set_key(ev : Termisu::Event::Key) : Nil
+      ov = @fuzz_set_overlay || return
+      apply_close_fuzz_set(ov) if ov.handle_key(ev) == :apply
+    end
+
+    private def handle_fuzz_advanced_key(ev : Termisu::Event::Key) : Nil
+      ov = @fuzz_advanced_overlay || return
+      apply_close_fuzz_advanced(ov) if ov.handle_key(ev) == :apply
+    end
+
+    private def apply_close_fuzz_set(ov : FuzzSetOverlay) : Nil
+      fuzzer_controller.apply_fuzz_set(ov.edit_index, ov.build_spec)
+      @overlay = :none
+      @fuzz_set_overlay = nil
+    end
+
+    private def apply_close_fuzz_advanced(ov : FuzzAdvancedOverlay) : Nil
+      fuzzer_controller.apply_fuzz_advanced(ov.snapshot)
+      @overlay = :none
+      @fuzz_advanced_overlay = nil
     end
 
     # Match&Replace overlay: type a `[req:|resp:] pattern => replacement` rule;
@@ -2237,6 +2285,8 @@ module Gori::Tui
       @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
       @notifications_overlay.render(screen, layout.body) if @overlay == :notifications
       @mine_config_overlay.try(&.render(screen, layout.body)) if @overlay == :mine_config
+      @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
+      @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_advanced
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
 
@@ -2328,6 +2378,8 @@ module Gori::Tui
       when :hotkeys       then "HOTKEYS"
       when :notifications then "NOTIFICATIONS"
       when :mine_config   then "MINE PARAMS"
+      when :fuzz_set      then "PAYLOAD SET"
+      when :fuzz_advanced then "ADVANCED"
       else
         case @focus
         when :menu    then "TABS"
@@ -2369,6 +2421,8 @@ module Gori::Tui
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
+      when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
+      when :fuzz_advanced then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
       when :detail        then "←/→ panes · ↑/↓ scroll · ⇧←/→ h-scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
@@ -3488,6 +3542,25 @@ module Gori::Tui
     private def close_mine_config : Nil
       @overlay = :none
       @mine_config_overlay = nil
+    end
+
+    # Host: open the Fuzzer payload-set editor (nil = add, else edit that index) and
+    # the advanced-settings editor, each built from the current fuzz session.
+    def open_fuzz_set_editor(edit_index : Int32?) : Nil
+      return unless v = fuzzer_controller.current_view
+      @fuzz_set_overlay =
+        if (i = edit_index) && (spec = v.set_specs[i]?)
+          FuzzSetOverlay.editing(spec, i)
+        else
+          FuzzSetOverlay.for_list
+        end
+      @overlay = :fuzz_set
+    end
+
+    def open_fuzz_advanced_editor : Nil
+      return unless v = fuzzer_controller.current_view
+      @fuzz_advanced_overlay = FuzzAdvancedOverlay.new(v.advanced_snapshot)
+      @overlay = :fuzz_advanced
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is

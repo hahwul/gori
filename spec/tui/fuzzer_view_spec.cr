@@ -31,63 +31,76 @@ describe Gori::Tui::FuzzerView do
     view.template_text.should contain("§x¦rot13§")
   end
 
-  describe "LIST PASTE popup" do
-    it "opens on the List ptype's config field, types multi-line, commits comma-joined" do
+  describe "CONFIG summary" do
+    it "applies a payload set (from the Set overlay) and renders its row" do
       view = loaded_fuzzer
       view.focus_config
-      view.list_paste_active?.should be_false
-      view.open_list_paste.should be_nil # ptype defaults to :list
-      view.list_paste_active?.should be_true
-      "admin".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
-      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
-      "root".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
-      view.commit_list_paste
-      view.list_paste_active?.should be_false
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "admin,root,guest"))
+      view.set_specs.size.should eq(1)
       backend = MemoryBackend.new(120, 30)
       view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
-      backend.contains?("admin,root").should be_true
+      backend.contains?("PAYLOAD SETS").should be_true
+      backend.contains?("admin,root,guest").should be_true
     end
 
-    it "re-opening seeds one value per line from the existing comma-joined string" do
+    it "walks the single row cursor: sets → Add → Mode → Advanced → Run (clamped)" do
       view = loaded_fuzzer
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "a"))
       view.focus_config
-      view.open_list_paste
-      "a".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
-      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
-      "b".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
-      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
-      "c".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
-      view.commit_list_paste # @p_values is now "a,b,c"
-
-      view.open_list_paste # reseed: should split into 3 SEPARATE lines, not one blob
-      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Down))
-      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Down))              # cursor on the "c" line alone
-      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: 'Z')) # → "Zc"
-      view.commit_list_paste
-
-      backend = MemoryBackend.new(120, 30)
-      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
-      backend.contains?("a,b,Zc").should be_true
+      view.config_row.should eq(:set)
+      view.current_set_index.should eq(0)
+      view.form_move(1); view.config_row.should eq(:add)
+      view.form_move(1); view.config_row.should eq(:mode)
+      view.form_move(1); view.config_row.should eq(:advanced)
+      view.form_move(1); view.config_row.should eq(:run)
+      view.form_move(1); view.config_row.should eq(:run) # clamped at the last row
     end
 
-    it "requires the List payload type" do
+    it "←/→ only cycles Mode — a no-op on every other row (the de-overload)" do
       view = loaded_fuzzer
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "a"))
       view.focus_config
-      view.form_adjust(1) # ptype: list → numbers
-      view.open_list_paste.not_nil!.should contain("List")
-      view.list_paste_active?.should be_false
+      view.config_row.should eq(:set)
+      before_mode = view.config.mode
+      view.form_adjust(1) # on a set row → inert
+      view.config.mode.should eq(before_mode)
+      2.times { view.form_move(1) } # set → add → mode
+      view.config_row.should eq(:mode)
+      view.form_adjust(1)
+      view.config.mode.should_not eq(before_mode)
     end
 
-    it "esc (via the controller-facing commit) applies and closes, matching the CHAIN pane convention" do
+    it "Del removes the focused set" do
       view = loaded_fuzzer
-      view.focus_config
-      view.open_list_paste
-      "x".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
-      view.commit_list_paste # the controller calls this on both esc and the ^L toggle-close
-      view.list_paste_active?.should be_false
-      backend = MemoryBackend.new(120, 30)
-      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
-      backend.contains?("x").should be_true
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "a"))
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "b"))
+      view.set_specs.size.should eq(2)
+      view.focus_config # row 0 = the first set
+      view.form_delete
+      view.set_specs.size.should eq(1)
+      view.set_specs.first.value.should eq("b")
+    end
+
+    it "run_request_count is P×N for Sniper over the marked positions" do
+      view = FuzzerView.new
+      view.load_request("https://h", "GET /?x=§1§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "") # 1 position
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:numbers, "1-10:1"))                      # 10 values
+      view.run_request_count.should eq(10_i64)
+    end
+
+    it "advanced_snapshot round-trips through apply_advanced" do
+      view = loaded_fuzzer
+      snap = view.advanced_snapshot
+      edited = Gori::Tui::AdvancedSnapshot.new(
+        conc: "50", rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
+        follow: true, calibrate: snap.calibrate,
+        m_status: "200,500", m_size: snap.m_size, m_words: snap.m_words, m_regex: snap.m_regex,
+        f_status: snap.f_status, f_size: snap.f_size, f_words: snap.f_words, f_regex: snap.f_regex)
+      view.apply_advanced(edited)
+      back = view.advanced_snapshot
+      back.conc.should eq("50")
+      back.follow.should be_true
+      back.m_status.should eq("200,500")
     end
   end
 

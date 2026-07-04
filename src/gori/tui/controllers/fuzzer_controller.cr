@@ -94,10 +94,13 @@ module Gori::Tui
     end
 
     private def config_hint(v : FuzzerView) : String
-      return "type/paste · ⏎ newline · ^L / esc applies" if v.list_paste_active?
-      return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if v.path_completing?
-      base = "↑/↓ field · ←/→ change · type edit · ⏎ add/toggle · Del rm · ↹ pane"
-      v.config_field == :p_values ? "#{base} · ^L paste" : base
+      case v.config_row
+      when :set  then "↑/↓ row · ↵ edit set · Del remove · ^R run · ↹ pane"
+      when :add  then "↵ add a payload set · ^L quick List · ↑/↓ row · ^R run · ↹ pane"
+      when :mode then "←/→ mode · ↵ open editor · ↑/↓ row · ^R run · ↹ pane"
+      when :run  then "↵ run · ↑/↓ row · ^O sets · ↹ pane"
+      else            "↵ open Advanced · ↑/↓ row · ^R run · ↹ pane"
+      end
     end
 
     # --- rendering ---
@@ -140,26 +143,6 @@ module Gori::Tui
       true
     end
 
-    # The wordlist path autocomplete owns Tab/↵/↑/↓/Esc while its popup is up — the
-    # runner routes here via a pre-ring guard (gated on `path_completing?`) before the
-    # focus ring claims Tab. Mirrors ConvertController#completing?/handle_complete_key.
-    def path_completing? : Bool
-      current_view.try(&.path_completing?) || false
-    end
-
-    def handle_path_complete_key(ev : Termisu::Event::Key) : Bool
-      v = current_view
-      return false unless v
-      key = ev.key
-      case
-      when key.tab?, key.enter?   then v.path_complete_accept; true
-      when key.back_tab?, key.up? then v.path_complete_move(-1); true
-      when key.down?              then v.path_complete_move(1); true
-      when key.escape?            then v.path_complete_close; true
-      else                             false # printables fall through → form_type refilters
-      end
-    end
-
     # Run the action a chord mapped to; false when it was not a chord (fall through).
     private def dispatch_chord(action : Symbol?, v : FuzzerView, c : Char?) : Bool
       case action
@@ -193,7 +176,9 @@ module Gori::Tui
 
     private def handle_escape(v : FuzzerView) : Nil
       return v.commit_chain_pane if v.chain_pane_active? # esc in the CHAIN pane → save + back
-      return v.commit_list_paste if v.list_paste_active? # esc in the paste popup → apply + close
+      # The Set / Advanced overlays own esc themselves (they apply + close, handled by the
+      # Runner while @overlay is set) — so in-pane esc is a plain one-step exit, like every
+      # other pane: detail → results, else the whole CONFIG summary → the tab bar.
       v.focus == :detail ? v.focus_pane(:results) : @host.request_focus(:menu)
     end
 
@@ -210,17 +195,24 @@ module Gori::Tui
       end
     end
 
-    # ^L: open the multi-line paste popup for the List payload's values (again = apply + close).
+    # ^L / "Add a List payload set": open the Set overlay pre-seeded to the List type,
+    # a newline-native editor (one value per line, paste splits automatically).
     def fuzz_list_paste : Nil
-      return unless view = current_view
-      if view.list_paste_active?
-        view.commit_list_paste
-        save_current
-        @host.status("list updated")
-      else
-        msg = view.open_list_paste
-        @host.status(msg || "paste values, one per line · ^L / esc applies")
-      end
+      return unless current_view
+      @host.open_fuzz_set_editor(nil)
+    end
+
+    # The Runner calls these when an overlay applies (esc / ↵-on-last-field).
+    def apply_fuzz_set(edit_index : Int32?, spec : SetSpec?) : Nil
+      return unless v = current_view
+      v.apply_set(edit_index, spec)
+      save_current
+    end
+
+    def apply_fuzz_advanced(snap : AdvancedSnapshot) : Nil
+      return unless v = current_view
+      v.apply_advanced(snap)
+      save_current
     end
 
     private def switch_subtab(c : Char?) : Nil
@@ -282,19 +274,28 @@ module Gori::Tui
       v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.template_move(-1, 0)
     end
 
+    # The CONFIG summary is a calm single-axis row list — no text entry (that drills into
+    # the Set / Advanced overlays), so ←/→ can only cycle Mode and typing is inert.
     private def edit_config(ev : Termisu::Event::Key, v : FuzzerView) : Nil
-      return v.handle_list_paste_key(ev) if v.list_paste_active? # popup owns typing while open
       key = ev.key
       case
-      when key.up?        then config_up(v)
-      when key.down?      then v.form_move(1)
-      when key.left?      then v.form_adjust(-1)
-      when key.right?     then v.form_adjust(1)
-      when key.enter?     then v.form_enter
-      when key.delete?    then v.form_delete
-      when key.backspace? then v.form_backspace
-      else
-        printable(ev).try { |ch| v.form_type(ch) }
+      when key.up?                     then config_up(v)
+      when key.down?                   then v.form_move(1)
+      when key.left?                   then v.form_adjust(-1)
+      when key.right?                  then v.form_adjust(1)
+      when key.enter?                  then activate_config_row(v)
+      when key.delete?, key.backspace? then v.form_delete
+      end
+    end
+
+    # ↵ on a config row: drill into the Set / Advanced overlay, cycle Mode, or run.
+    private def activate_config_row(v : FuzzerView) : Nil
+      case v.config_row
+      when :set      then @host.open_fuzz_set_editor(v.current_set_index)
+      when :add      then @host.open_fuzz_set_editor(nil)
+      when :mode     then v.cycle_mode_forward
+      when :advanced then @host.open_fuzz_advanced_editor
+      when :run      then fuzz_run
       end
     end
 
@@ -327,7 +328,6 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      return true if current_view.try(&.list_paste_active?) # the floating popup owns the screen — swallow clicks
       body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
       return true unless v = current_view
       if pane = v.pane_at(body, mx, my)
@@ -341,7 +341,6 @@ module Gori::Tui
     end
 
     def handle_wheel(step : Int32) : Bool
-      return true if current_view.try(&.list_paste_active?) # popup owns the screen — swallow the wheel too
       if v = current_view
         case v.focus
         when :results then v.results_move(step)

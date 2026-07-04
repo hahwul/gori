@@ -242,7 +242,7 @@ module Gori
         Verb::Scope::Fuzzer, [Verb::Chord.new("y", ctrl: true)],
         available: in_fuzzer, mnemonic: 'c') { |ctx| ctx.fuzz_attach_chain; nil }
       r.register Verb::Definition.new(
-        "fuzz.list-paste", "Paste list values", "Open a multi-line popup to paste newline-separated values for the List payload (pressing it again applies + closes)",
+        "fuzz.list-paste", "Add List payload set", "Open the payload-set editor pre-seeded to a List — a multi-line editor, one value per line (paste splits automatically)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("l", ctrl: true)],
         available: in_fuzzer, mnemonic: 'l') { |ctx| ctx.fuzz_list_paste; nil }
     end
