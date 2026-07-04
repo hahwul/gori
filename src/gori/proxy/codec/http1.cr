@@ -24,12 +24,14 @@ module Gori::Proxy::Codec::Http1
   # an oversized head as an unusable connection (caller drops it). A head cut short
   # by EOF still returns its bytes (the connection is closing; P7 keeps the octets).
   def self.read_head(io : IO, max_bytes : Int32 = 1024 * 256) : Bytes?
-    buf = IO::Memory.new
+    buf = IO::Memory.new(512) # presized: covers a typical head without regrowing
     while buf.bytesize < max_bytes
       byte = io.read_byte
       break if byte.nil? # EOF
       buf.write_byte(byte)
-      break if buf.bytesize >= 4 && ends_with_crlf_crlf?(buf)
+      # CRLFCRLF ends in LF, so only a just-written LF can complete the terminator
+      # — skip the 4-byte tail compare on every other byte.
+      break if byte == 0x0a_u8 && buf.bytesize >= 4 && ends_with_crlf_crlf?(buf)
     end
     return nil if buf.bytesize == 0
     # Hit the cap without a terminator → oversized/hostile head; don't misframe.
@@ -44,8 +46,8 @@ module Gori::Proxy::Codec::Http1
   end
 
   def self.parse_request_head(raw : Bytes) : RawRequest
-    lines = head_lines(raw)
-    start = lines[0]? || ""
+    first_crlf = index_crlf(raw, 0)
+    start = String.new(raw[0, first_crlf || raw.size])
     parts = start.split(' ')
     malformed = parts.size != 3
     RawRequest.new(
@@ -53,14 +55,14 @@ module Gori::Proxy::Codec::Http1
       method: parts[0]? || "",
       target: parts[1]? || "",
       version: parts[2]? || "",
-      headers: parse_headers(lines),
+      headers: parse_headers(raw, first_crlf),
       malformed: malformed,
     )
   end
 
   def self.parse_response_head(raw : Bytes) : RawResponse
-    lines = head_lines(raw)
-    start = lines[0]? || ""
+    first_crlf = index_crlf(raw, 0)
+    start = String.new(raw[0, first_crlf || raw.size])
     # status-line: HTTP-version SP status-code SP [reason]
     first_sp = start.index(' ')
     version = first_sp ? start[0...first_sp] : ""
@@ -75,7 +77,7 @@ module Gori::Proxy::Codec::Http1
       version: version,
       status: status,
       reason: reason,
-      headers: parse_headers(lines),
+      headers: parse_headers(raw, first_crlf),
       malformed: malformed,
     )
   end
@@ -89,23 +91,41 @@ module Gori::Proxy::Codec::Http1
     resp.raw_head
   end
 
-  # Split head bytes into lines (best-effort latin1/utf8 projection). The raw
-  # bytes remain the truth; this view is only for parsing projections.
-  private def self.head_lines(raw : Bytes) : Array(String)
-    String.new(raw).split(CRLF)
+  # Index of the CRLF at or after `from`, or nil if none. Scans the raw bytes so
+  # the parser never materializes the whole head as a String (P7: raw is truth).
+  private def self.index_crlf(raw : Bytes, from : Int32) : Int32?
+    i = from
+    limit = raw.size - 1
+    while i < limit
+      return i if raw.unsafe_fetch(i) == 0x0d_u8 && raw.unsafe_fetch(i + 1) == 0x0a_u8
+      i += 1
+    end
+    nil
   end
 
-  private def self.parse_headers(lines : Array(String)) : HeaderList
+  # Parse header lines by scanning the raw bytes in place, starting at the
+  # start-line's terminating CRLF (`start_crlf`; nil when the head has no CRLF).
+  # Only the header name/value Strings are allocated — no whole-head String and
+  # no per-line String array (see codec_bench). Byte-for-byte equivalent to the
+  # old `String.new(raw).split(CRLF)` projection: name is bytes-before-colon
+  # (unstripped), value is bytes-after-colon stripped; an empty line ends headers;
+  # a colon-less line is skipped (raw_head still keeps it).
+  private def self.parse_headers(raw : Bytes, start_crlf : Int32?) : HeaderList
     list = HeaderList.new
-    # lines[0] is the start-line; headers follow until the first empty line.
-    lines.each_with_index do |line, idx|
-      next if idx == 0
-      break if line.empty? # end of headers
-      colon = line.index(':')
-      next unless colon # malformed header line: skip projection, raw_head keeps it
-      name = line[0...colon]
-      value = line[(colon + 1)..].strip
-      list << Header.new(name, value)
+    return list if start_crlf.nil? # no CRLF → no header block
+    pos = start_crlf + 2           # first byte after the start-line's CRLF
+    while pos < raw.size
+      crlf = index_crlf(raw, pos)
+      line_end = crlf || raw.size
+      break if line_end == pos # empty line → end of headers
+      line = raw[pos, line_end - pos]
+      if colon = line.index(0x3a_u8) # ':'
+        name = String.new(line[0, colon])
+        value = String.new(line[colon + 1, line.size - colon - 1]).strip
+        list << Header.new(name, value)
+      end
+      break if crlf.nil? # last line, no trailing CRLF
+      pos = crlf + 2
     end
     list
   end

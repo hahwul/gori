@@ -149,8 +149,6 @@ module Gori::Proxy::H2
       property sym : Int32?
     end
 
-    @@tree : HuffNode = build_tree
-
     private def self.build_tree : HuffNode
       root = HuffNode.new
       HUFF_CODE.each_with_index do |code, sym|
@@ -168,33 +166,121 @@ module Gori::Proxy::H2
       root
     end
 
+    # Nibble-driven decode FSM, generated once from the bit-tree. Each state is an
+    # INTERNAL tree node (state 0 = root; leaves reset to root so they are never a
+    # state); one step consumes 4 bits and yields the next state plus an optional
+    # emitted symbol, or `FSM_FAIL` for a code path that runs off the tree. The
+    # minimum HPACK code length is 5 bits, so a 4-bit step completes AT MOST one
+    # symbol — one emit slot per (state, nibble) suffices. This batches the RFC 7541
+    # App. B decode 4 bits at a time instead of bit-by-bit and is equivalent to the
+    # tree walk by construction (see hpack_bench). `depth`/`all_ones` per state let
+    # end-of-input reproduce the exact §5.2 padding checks: at a non-root end state,
+    # `depth` is the leftover-bit count (old `pending`) and `all_ones` whether that
+    # trailing partial path is the EOS prefix (old `partial_ones`).
+    FSM_FAIL = -1_i16
+
+    private struct HuffFsm
+      getter next_state : Slice(Int16) # [state*16 + nibble] -> next state, or FSM_FAIL
+      getter emit : Slice(Int16)       # [state*16 + nibble] -> symbol 0..255, or -1
+      getter depth : Slice(Int8)       # per state: bits from root
+      getter all_ones : Slice(Bool)    # per state: path from root is all 1-bits
+
+      def initialize(@next_state, @emit, @depth, @all_ones)
+      end
+    end
+
+    @@fsm : HuffFsm = build_fsm
+
+    # Depth-first id assignment over internal nodes (leaves excluded — a leaf resets
+    # to root). Records per-node bit-depth and whether the root path is all 1-bits.
+    private def self.assign_ids(node : HuffNode, depth : Int32, all1 : Bool,
+                                ids : Hash(HuffNode, Int32), order : Array(HuffNode),
+                                depths : Array(Int8), ones : Array(Bool)) : Nil
+      return if node.sym # leaf: never a state
+      ids[node] = order.size
+      order << node
+      depths << depth.to_i8
+      ones << all1
+      if z = node.zero
+        assign_ids(z, depth + 1, false, ids, order, depths, ones)
+      end
+      if o = node.one
+        assign_ids(o, depth + 1, all1, ids, order, depths, ones)
+      end
+    end
+
+    private def self.build_fsm : HuffFsm
+      tree = build_tree
+      ids = {} of HuffNode => Int32
+      order = [] of HuffNode
+      depths = [] of Int8
+      ones = [] of Bool
+      assign_ids(tree, 0, true, ids, order, depths, ones)
+
+      n = order.size
+      next_state = Slice(Int16).new(n * 16, FSM_FAIL)
+      emit = Slice(Int16).new(n * 16, -1_i16)
+      order.each_with_index do |start, sid|
+        16.times do |nib|
+          node = start
+          sym = -1_i16
+          fail = false
+          3.downto(0) do |i|
+            bit = (nib >> i) & 1
+            child = bit == 0 ? node.zero : node.one
+            if child.nil?
+              fail = true
+              break
+            end
+            node = child
+            if s = node.sym
+              sym = s.to_i16 # ≤1 symbol per nibble (min code length is 5 bits)
+              node = tree    # emit resets to root
+            end
+          end
+          next if fail # leave the FSM_FAIL / -1 defaults
+          next_state[sid * 16 + nib] = ids[node].to_i16
+          emit[sid * 16 + nib] = sym
+        end
+      end
+
+      HuffFsm.new(next_state, emit,
+        Slice(Int8).new(n) { |i| depths[i] },
+        Slice(Bool).new(n) { |i| ones[i] })
+    end
+
     # Decodes a Huffman-coded octet string. Trailing bits (< 8) must be the EOS
     # prefix (all ones) per RFC 7541 §5.2; we accept ≤7 leftover bits.
     def self.huffman_decode(data : Bytes) : String
-      buf = IO::Memory.new
-      node = @@tree
-      pending = 0
-      partial_ones = true # the trailing partial path must be all 1s (the EOS prefix)
+      fsm = @@fsm
+      nxt = fsm.next_state
+      emit = fsm.emit
+      buf = IO::Memory.new(data.size * 2)
+      state = 0
       data.each do |byte|
-        7.downto(0) do |i|
-          bit = (byte >> i) & 1
-          partial_ones = false if bit == 0
-          node = (bit == 0 ? node.zero : node.one) ||
-                 raise(Gori::Error.new("hpack: invalid huffman code"))
-          pending += 1
-          if sym = node.sym
-            buf.write_byte(sym.to_u8)
-            node = @@tree
-            pending = 0
-            partial_ones = true
-          end
-        end
+        idx = (state << 4) | (byte >> 4) # high nibble
+        n = nxt.unsafe_fetch(idx)
+        raise Gori::Error.new("hpack: invalid huffman code") if n == FSM_FAIL
+        s = emit.unsafe_fetch(idx)
+        buf.write_byte(s.to_u8) if s >= 0
+        state = n.to_i32
+
+        idx = (state << 4) | (byte & 0x0f) # low nibble
+        n = nxt.unsafe_fetch(idx)
+        raise Gori::Error.new("hpack: invalid huffman code") if n == FSM_FAIL
+        s = emit.unsafe_fetch(idx)
+        buf.write_byte(s.to_u8) if s >= 0
+        state = n.to_i32
       end
-      raise Gori::Error.new("hpack: truncated huffman code") if pending > 7
-      # RFC 7541 §5.2: padding that doesn't correspond to the EOS prefix (i.e. any
-      # 0 bit in the trailing <8 bits) MUST be a decoding error — else distinct byte
-      # sequences decode to the same value (a non-canonical-encoding bypass).
-      raise Gori::Error.new("hpack: invalid huffman padding") if pending > 0 && !partial_ones
+      if state != 0
+        # Non-root end state → a trailing partial code. RFC 7541 §5.2: padding that
+        # isn't the EOS prefix (i.e. any 0 bit, or > 7 leftover bits) is a decoding
+        # error — else distinct byte sequences decode to the same value (a
+        # non-canonical-encoding bypass). Order matches the old bit-loop: length
+        # first, then the all-ones check.
+        raise Gori::Error.new("hpack: truncated huffman code") if fsm.depth.unsafe_fetch(state) > 7
+        raise Gori::Error.new("hpack: invalid huffman padding") unless fsm.all_ones.unsafe_fetch(state)
+      end
       String.new(buf.to_slice)
     end
 
