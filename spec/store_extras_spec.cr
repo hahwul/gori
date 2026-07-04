@@ -39,6 +39,17 @@ describe "Gori::Store scope rules + settings (v3)" do
       store.setting("scope_enabled").should eq("0")
     end
   end
+
+  it "deletes a setting so it reads nil again (project network override clear)" do
+    with_store do |store|
+      store.set_setting("net.bind_port", "9100")
+      store.setting("net.bind_port").should eq("9100")
+      store.delete_setting("net.bind_port")
+      store.setting("net.bind_port").should be_nil
+      store.delete_setting("net.bind_port") # deleting an absent key is a no-op
+      store.setting("net.bind_port").should be_nil
+    end
+  end
 end
 
 describe "Gori::Store h2 raw frame log (v5)" do

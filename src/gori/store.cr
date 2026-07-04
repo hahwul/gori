@@ -293,6 +293,15 @@ module Gori
       }
     end
 
+    # Drop a per-project setting so `setting(key)` reads nil again (the Project settings pane
+    # clears a network override this way — reverting the field to inherit the global value).
+    def delete_setting(key : String) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM settings WHERE key = ?", key)
+        nil
+      }
+    end
+
     # --- findings ------------------------------------------------------------
 
     def insert_finding(title : String, severity : Severity, host : String?, flow_id : Int64?) : Int64

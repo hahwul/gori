@@ -36,6 +36,9 @@ module Gori::Tui
     abstract def toggle_pretty : Nil           # flip the pretty-print pref (`p` from History/Replay)
     abstract def jobs : Jobs                   # shared background-job registry (bottom-bar activity)
     abstract def notifications : Notifications # shared notification store (center + badge)
+    abstract def toggle_scope_lens : Nil       # flip the scope display lens (Project settings pane row/click)
+    # Persist + apply the Project settings pane's per-project network config; returns a toast.
+    abstract def apply_project_network(bind_host : String, bind_port : Int32, upstream : String) : String
   end
 
   # Shared, state-free body chrome used by BOTH Runner and the per-tab

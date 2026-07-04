@@ -260,7 +260,14 @@ module Gori::Tui
             "view-only — #{err}. History/Replay work; press c to take over if it closed"
           end
       elsif requested > 0 && @session.proxy.port != requested
-        Settings.bind_port = @session.proxy.port # keep the settings UI showing the live port
+        # Reflect the fallback port in whichever layer is effective so the settings UIs show the
+        # live port AND apply_settings won't see a phantom mismatch. Only the runtime layer — a
+        # transient environmental fallback must not be persisted into the project's pinned config.
+        if Settings.project_bind_port
+          Settings.project_bind_port = @session.proxy.port
+        else
+          Settings.bind_port = @session.proxy.port
+        end
         @toast = "port #{requested} in use — capturing on #{@session.proxy.port} instead (point your client there)"
       end
       render # initial paint (the loop below only re-renders when something changed)
@@ -3207,6 +3214,12 @@ module Gori::Tui
       project_controller.toast_scope_state
     end
 
+    # Host-facade alias so a TabController (the Project settings pane's lens row + click) flips
+    # the lens through the same reload+toast path a keybind/menu uses.
+    def toggle_scope_lens : Nil
+      scope_toggle_lens
+    end
+
     # Project SCOPE-pane rule editing (the inline a/e/d keys + its space menu both route here).
     def scope_add_rule : Nil
       project_controller.scope_add_rule
@@ -3695,9 +3708,14 @@ module Gori::Tui
     # rebind (port in use / bad address) keeps the current bind.
     private def apply_settings(save_msg : String) : String
       proxy = @session.proxy
-      return save_msg if Settings.bind_host == proxy.host && Settings.bind_port == proxy.port
+      # Rebind against the EFFECTIVE bind (a project override wins over the global). So a global
+      # settings:network edit while a project pins its own bind is a no-op here (effective
+      # unchanged), and a Project-pane edit rebinds because the effective address moved.
+      eff_host = Settings.effective_bind_host
+      eff_port = Settings.effective_bind_port
+      return save_msg if eff_host == proxy.host && eff_port == proxy.port
       begin
-        proxy.rebind(Settings.bind_host, Settings.bind_port)
+        proxy.rebind(eff_host, eff_port)
         @session.sync_capture_status!
         if @session.capturing?
           "settings saved — now listening on #{proxy.host}:#{proxy.port} (repoint your client)"
@@ -3708,6 +3726,25 @@ module Gori::Tui
       rescue ex
         "settings saved, but rebind failed: #{ex.message} (kept #{proxy.host}:#{proxy.port})"
       end
+    end
+
+    # Persist + apply the Project settings pane's per-project network config. Each field is
+    # stored only when it DIFFERS from the current global (else the KV key is dropped, so the
+    # project inherits — and later global edits propagate). Refreshes the Settings runtime
+    # override layer, then rebinds the live proxy (the upstream is already live via effective_*).
+    def apply_project_network(bind_host : String, bind_port : Int32, upstream : String) : String
+      set_or_clear(Settings::PROJECT_BIND_HOST_KEY, bind_host, Settings.bind_host)
+      set_or_clear(Settings::PROJECT_BIND_PORT_KEY, bind_port.to_s, Settings.bind_port.to_s)
+      set_or_clear(Settings::PROJECT_UPSTREAM_KEY, upstream, Settings.upstream_proxy)
+      Settings.project_bind_host = bind_host == Settings.bind_host ? nil : bind_host
+      Settings.project_bind_port = bind_port == Settings.bind_port ? nil : bind_port
+      Settings.project_upstream_proxy = upstream == Settings.upstream_proxy ? nil : upstream
+      apply_settings("project network saved")
+    end
+
+    private def set_or_clear(key : String, value : String, global : String) : Nil
+      store = @session.store
+      value == global ? store.delete_setting(key) : store.set_setting(key, value)
     end
 
     # Open the settings editor for `section` (palette → settings:network/editor/theme/
