@@ -3432,6 +3432,11 @@ module Gori::Tui
       fuzzer_controller.fuzz_focus_chain_pane
     end
 
+    # ^L: open the multi-line paste popup for the List payload's values (again = apply + close).
+    def fuzz_list_paste : Nil
+      fuzzer_controller.fuzz_list_paste
+    end
+
     # --- Miner ExecContext / cross-tab mediators ---
     # CROSS-TAB: open the config popup for History's selected flow (space → Mine params).
     def mine_selected : Nil

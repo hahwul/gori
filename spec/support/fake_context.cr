@@ -105,6 +105,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def fuzz_attach_chain : Nil; end
 
+  def fuzz_list_paste : Nil; end
+
   def mine_selected : Nil; end
 
   def mine_from_replay : Nil; end

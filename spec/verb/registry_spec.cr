@@ -200,6 +200,10 @@ private class FakeContext < ExecContext
     @calls << :fuzz_attach_chain
   end
 
+  def fuzz_list_paste : Nil
+    @calls << :fuzz_list_paste
+  end
+
   def mine_selected : Nil
     @calls << :mine_selected
   end
