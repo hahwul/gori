@@ -422,7 +422,7 @@ module Gori::Tui
       fy = box.y + 4
       render_field(screen, box, fy, "Bind IP", @ip, @bind_field == :ip)
       render_field(screen, box, fy + 1, "Bind Port", @port, @bind_field == :port)
-      screen.text(ix, fy + 3, "Default 127.0.0.1:8070 — change later in settings:network.", Theme.muted, Theme.panel, width: iw)
+      screen.text(ix, fy + 3, "Default 127.0.0.1:8070 — change later in Settings: Network.", Theme.muted, Theme.panel, width: iw)
       if st = @status
         screen.text(ix, fy + 4, "• #{st}", Theme.yellow, Theme.panel, width: iw)
       end
@@ -563,7 +563,7 @@ module Gori::Tui
       recap(screen, box, ix, y, "AI provider", @ai_interested ? "interested (coming soon)" : "not now"); y += 2
       screen.text(ix, y, "Change anytime from the command palette (^P):", Theme.muted, Theme.panel, width: {box.w - 6, 1}.max)
       y += 1
-      screen.text(ix, y, "settings:network · settings:theme", Theme.text, Theme.panel, width: {box.w - 6, 1}.max)
+      screen.text(ix, y, "Settings: Network · Settings: Theme", Theme.text, Theme.panel, width: {box.w - 6, 1}.max)
     end
 
     private def recap(screen : Screen, box : Rect, ix : Int32, y : Int32, key : String, value : String) : Nil

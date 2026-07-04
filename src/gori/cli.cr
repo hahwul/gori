@@ -143,7 +143,7 @@ module Gori
       edit = false
       parser = OptionParser.new do |p|
         p.banner = "Usage: gori settings [--edit]"
-        p.on("--edit", "Open the settings file in your editor (settings:editor / $VISUAL / $EDITOR / vi)") { edit = true }
+        p.on("--edit", "Open the settings file in your editor (Settings: Editor / $VISUAL / $EDITOR / vi)") { edit = true }
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
         p.missing_option { |flag| abort "missing value for #{flag}" }

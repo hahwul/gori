@@ -69,22 +69,22 @@ module Gori
       # Settings (config control) — palette-only. network/editor/theme are
       # implemented; hotkeys is registered for discoverability (shown "soon") + a TODO toast.
       r.register Verb::Definition.new(
-        "settings.network", "settings:network", "Edit the proxy bind address + upstream proxy",
+        "settings.network", "Settings: Network", "Edit the proxy bind address + upstream proxy",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:network); nil }
       r.register Verb::Definition.new(
-        "settings.editor", "settings:editor", "Set the external editor opened by ^E in editable fields",
+        "settings.editor", "Settings: Editor", "Set the external editor opened by ^E in editable fields",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:editor); nil }
       r.register Verb::Definition.new(
-        "settings.theme", "settings:theme", "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)",
+        "settings.theme", "Settings: Theme", "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:theme); nil }
       r.register Verb::Definition.new(
-        "settings.tabs", "settings:tabs", "Customize the top tab bar — show/hide tabs and reorder them",
+        "settings.tabs", "Settings: Tabs", "Customize the top tab bar — show/hide tabs and reorder them",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:tabs); nil }
       r.register Verb::Definition.new(
-        "settings.host-overrides", "settings:hostnames", "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials",
+        "settings.host-overrides", "Settings: Hostnames", "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hosts); nil }
       r.register Verb::Definition.new(
-        "settings.hotkeys", "settings:hotkeys", "Rebind keyboard shortcuts (press a key) + pick an OS default profile",
+        "settings.hotkeys", "Settings: Hotkeys", "Rebind keyboard shortcuts (press a key) + pick an OS default profile",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hotkeys); nil }
 
       # `s` toggles the scope lens from anywhere (its original behavior — this used to jump to
