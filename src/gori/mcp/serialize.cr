@@ -55,11 +55,13 @@ module Gori
       end
 
       # --- full detail incl. heads + decoded bodies ---------------------------
-      def self.flow_detail_json(detail : Store::FlowDetail) : String
-        JSON.build { |j| flow_detail(j, detail) }
+      def self.flow_detail_json(detail : Store::FlowDetail,
+                                ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : String
+        JSON.build { |j| flow_detail(j, detail, ws_msgs) }
       end
 
-      def self.flow_detail(j : JSON::Builder, detail : Store::FlowDetail) : Nil
+      def self.flow_detail(j : JSON::Builder, detail : Store::FlowDetail,
+                           ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : Nil
         row = detail.row
         j.object do
           j.field "id", row.id
@@ -80,7 +82,44 @@ module Gori
           j.field "response_head", head_text(detail.response_head)
           emit_body(j, "response_body", detail.response_head, detail.response_body, detail.response_body_truncated?)
           emit_sse_events(j, detail)
+          emit_ws_messages(j, ws_msgs)
           emit_decoded(j, detail)
+        end
+      end
+
+      WS_MSGS_MAX    =  500 # cap WS messages serialised for an LLM client
+      WS_PAYLOAD_MAX = 4096 # cap each text frame's payload (chars)
+
+      # A WebSocket flow (status 101) carries a separate message log the heads/bodies
+      # don't show. Mirror the `gori run show` WS pane, bounded for LLM use: text
+      # frames inline their (clipped) payload, binary frames report a size only.
+      # `count` is the true total; `messages` is the first WS_MSGS_MAX of them.
+      def self.emit_ws_messages(j : JSON::Builder, msgs : Array(Store::WsMessage)) : Nil
+        return if msgs.empty?
+        j.field "ws_messages" do
+          j.object do
+            j.field "count", msgs.size
+            j.field "truncated", msgs.size > WS_MSGS_MAX
+            j.field "messages" do
+              j.array do
+                msgs.first(WS_MSGS_MAX).each do |m|
+                  j.object do
+                    j.field "direction", m.direction
+                    j.field "opcode", m.opcode
+                    if m.text?
+                      s = String.new(m.payload).scrub
+                      cut = s.size > WS_PAYLOAD_MAX
+                      j.field "text", cut ? s[0, WS_PAYLOAD_MAX] : s
+                      j.field "text_truncated", true if cut
+                    else
+                      j.field "binary", true
+                      j.field "size", m.payload.size
+                    end
+                  end
+                end
+              end
+            end
+          end
         end
       end
 

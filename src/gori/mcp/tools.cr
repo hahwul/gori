@@ -310,7 +310,10 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) unless id
         detail = @store.get_flow(id)
         return Result.new("no flow with id #{id}", is_error: true) unless detail
-        Result.new(Serialize.flow_detail_json(detail))
+        # A WebSocket flow (101) carries a separate message log; fetch it so get_flow
+        # surfaces the frames (parity with `gori run show`). Non-WS flows skip the query.
+        ws_msgs = detail.row.status == 101 ? @store.ws_messages(id) : [] of Store::WsMessage
+        Result.new(Serialize.flow_detail_json(detail, ws_msgs))
       end
 
       private def list_sitemap(h) : Result
