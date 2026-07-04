@@ -146,13 +146,41 @@ describe Gori::Tui::ReplayView do
       view = ReplayView.new
       view.load(detail)
       view.auto_content_length?.should be_true # default on
+      view.request_text.includes?("Content-Length: 5").should be_true # reflected in the editor too
       sent = String.new(view.request_bytes)
       sent.includes?("Content-Length: 5").should be_true   # recomputed to the body size
       sent.includes?("Content-Length: 99").should be_false # stale value replaced
 
-      view.toggle_auto_content_length # off → send byte-exact
-      String.new(view.request_bytes).includes?("Content-Length: 99").should be_true
+      view.toggle_auto_content_length # off → send byte-exact (the already-synced editor)
+      String.new(view.request_bytes).includes?("Content-Length: 5").should be_true
+
+      byte_exact = ReplayView.new
+      byte_exact.restore("https://h.test",
+        "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nhello", false, false)
+      String.new(byte_exact.request_bytes).includes?("Content-Length: 99").should be_true
     end
+  end
+
+  it "reflects auto Content-Length in the visible REQUEST editor (^L on)" do
+    view = ReplayView.new
+    view.restore("https://h.test",
+      "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nhello", false, false)
+    view.request_text.includes?("Content-Length: 99").should be_true
+
+    view.toggle_auto_content_length # on → resync into the editor
+    view.request_text.includes?("Content-Length: 5").should be_true
+    view.request_text.includes?("Content-Length: 99").should be_false
+  end
+
+  it "keeps the REQUEST editor's Content-Length in sync while editing the body" do
+    view = ReplayView.new
+    view.restore("https://h.test",
+      "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nhi", false, true)
+    view.pane_advance(1) # :target → :request
+    view.goto_request_line(5) # body line
+    view.edit_insert('!')
+    view.request_text.includes?("Content-Length: 3").should be_true  # body "hi!" is 3 bytes
+    view.request_text.includes?("Content-Length: 99").should be_false
   end
 
   it "MARK transform off (default) sends § verbatim — byte-identical to today" do
