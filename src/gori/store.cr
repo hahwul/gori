@@ -1275,7 +1275,7 @@ module Gori
                   deferred << -> { task_reply.send(rowid) }
                 when AbandonPending
                   ab_reply = op.reply
-                  ids = abandon_pending_one(c, op.message)
+                  ids = abandon_all_pending(c, op.message)
                   deferred << -> {
                     ab_reply.send(ids.size.to_i32)
                     ids.each { |id| publish(FlowEvent.new(id, :updated)) }
@@ -1350,7 +1350,7 @@ module Gori
     end
 
     # Bulk-mark every Pending flow Error; returns the ids touched (for events).
-    private def abandon_pending_one(conn : DB::Connection, message : String) : Array(Int64)
+    private def abandon_all_pending(conn : DB::Connection, message : String) : Array(Int64)
       ids = [] of Int64
       conn.query("SELECT id FROM flows WHERE state = ?", FlowState::Pending.value) do |rs|
         rs.each { ids << rs.read(Int64) }

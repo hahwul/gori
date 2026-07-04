@@ -170,6 +170,9 @@ module Gori
       # Stop Prism FIRST so its active workers wind down and its passive fiber stops issuing
       # get_flow against a live DB; this also closes the prism_events channel it consumes.
       @prism.stop
+      # Second sweep: proxy/intercept fibers released above may still enqueue
+      # InsertFlow after the first abandon (right after proxy.stop).
+      @store.abandon_pending!("proxy stopped before response")
       # Drain + stop the store BEFORE closing the events channel: the writer
       # publishes post-commit events while draining, and a closed channel would
       # otherwise make it raise mid-drain. (publish() also tolerates a closed
