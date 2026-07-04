@@ -17,7 +17,16 @@ module Gori
         url = args["url"]?.try(&.as_s?)
         raise Gori::Error.new("'url' is required") if url.nil? || url.empty?
 
-        uri = URI.parse(url)
+        # URI.parse raises URI::Error on a malformed authority (e.g. a non-numeric
+        # port "example.com:abc"); turn that into a clean Gori::Error so the caller
+        # gets an actionable message instead of send_request's generic "tool error:"
+        # leaking the parser's internal "bad port at character N".
+        uri =
+          begin
+            URI.parse(url)
+          rescue ex : URI::Error
+            raise Gori::Error.new("invalid url #{url.inspect}: #{ex.message}")
+          end
         scheme = (uri.scheme || "http").downcase
         raise Gori::Error.new("unsupported scheme: #{scheme} (only http/https)") unless scheme.in?("http", "https")
         host = uri.host
@@ -29,6 +38,10 @@ module Gori
         # Host line).
         reject_token_breakers(host, "url host")
         port = uri.port || default_port(scheme)
+        # URI.parse accepts any digit run as a port (it doesn't range-check), so an
+        # out-of-range ":99999" would otherwise reach the dialer as a doomed connect.
+        # Reject it up front with a clean message (a valid TCP port is 1..65535).
+        raise Gori::Error.new("invalid port #{port} in url (expected 1..65535)") unless 1 <= port <= 65535
 
         bytes =
           if (raw = args["raw"]?.try(&.as_s?)) && !raw.empty?

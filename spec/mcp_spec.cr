@@ -195,6 +195,36 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "includes WebSocket messages for a 101 flow (parity with `gori run show`)" do
+      with_store do |store|
+        id = seed_flow(store, "ws.test", "GET", "/socket", 101,
+          resp_head: "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n")
+        store.insert_ws_message(id, "out", 1, "hello".to_slice)
+        store.insert_ws_message(id, "in", 1, "world".to_slice)
+        store.insert_ws_message(id, "in", 2, Bytes[0x00, 0x01, 0xff]) # binary frame
+        call = %({"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        ws = tool_payload(drive(store, call)[0])["ws_messages"]
+        ws["count"].as_i.should eq(3)
+        ws["truncated"].as_bool.should be_false
+        msgs = ws["messages"].as_a
+        msgs[0]["direction"].as_s.should eq("out")
+        msgs[0]["text"].as_s.should eq("hello")
+        msgs[1]["direction"].as_s.should eq("in")
+        msgs[1]["text"].as_s.should eq("world")
+        msgs[2]["binary"].as_bool.should be_true
+        msgs[2]["size"].as_i.should eq(3)
+        msgs[2].as_h.has_key?("text").should be_false # binary frames never inline a payload
+      end
+    end
+
+    it "omits ws_messages for a non-WebSocket flow" do
+      with_store do |store|
+        id = seed_flow(store, "ex.test", "GET", "/", 200)
+        call = %({"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        tool_payload(drive(store, call)[0]).as_h.has_key?("ws_messages").should be_false
+      end
+    end
+
     it "returns isError for an unknown flow id" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":9999}}})
@@ -439,33 +469,43 @@ describe Gori::MCP::RequestBuilder do
     expect_raises(Gori::Error) { Gori::MCP::RequestBuilder.build(args) }
   end
 
+  it "raises a clean Gori::Error (not a leaked URI::Error) for a malformed authority" do
+    args = JSON.parse(%({"url":"https://h.test:abc/"})).as_h
+    expect_raises(Gori::Error, /invalid url/) { Gori::MCP::RequestBuilder.build(args) }
+  end
+
+  it "rejects an out-of-range port instead of dialing a doomed connect" do
+    args = JSON.parse(%({"url":"https://h.test:99999/"})).as_h
+    expect_raises(Gori::Error, /invalid port/) { Gori::MCP::RequestBuilder.build(args) }
+  end
+
   describe "structured-path injection guards" do
     it "rejects CR/LF in a header value (header injection)" do
-      args = {"url" => JSON::Any.new("http://h.test/"),
+      args = {"url"     => JSON::Any.new("http://h.test/"),
               "headers" => JSON::Any.new({"X-Inj" => JSON::Any.new("a\r\nX-Evil: 1")})}
       expect_raises(Gori::Error, /header.*X-Inj/) { Gori::MCP::RequestBuilder.build(args) }
     end
 
     it "rejects a bare LF in a header value (lenient origins split on LF)" do
-      args = {"url" => JSON::Any.new("http://h.test/"),
+      args = {"url"     => JSON::Any.new("http://h.test/"),
               "headers" => JSON::Any.new({"X-LF" => JSON::Any.new("a\nX-Evil: 1")})}
       expect_raises(Gori::Error) { Gori::MCP::RequestBuilder.build(args) }
     end
 
     it "rejects CR/LF in a header name" do
-      args = {"url" => JSON::Any.new("http://h.test/"),
+      args = {"url"     => JSON::Any.new("http://h.test/"),
               "headers" => JSON::Any.new({"X-A\r\nX-S" => JSON::Any.new("1")})}
       expect_raises(Gori::Error, /header name/) { Gori::MCP::RequestBuilder.build(args) }
     end
 
     it "rejects an empty header name" do
-      args = {"url" => JSON::Any.new("http://h.test/"),
+      args = {"url"     => JSON::Any.new("http://h.test/"),
               "headers" => JSON::Any.new({"" => JSON::Any.new("v")})}
       expect_raises(Gori::Error, /empty/) { Gori::MCP::RequestBuilder.build(args) }
     end
 
     it "rejects whitespace/CRLF in the method (request-line forgery)" do
-      args = {"url" => JSON::Any.new("http://h.test/"),
+      args = {"url"    => JSON::Any.new("http://h.test/"),
               "method" => JSON::Any.new("GET /admin HTTP/1.1\r\nHost: a")}
       expect_raises(Gori::Error, /method/) { Gori::MCP::RequestBuilder.build(args) }
     end
@@ -480,16 +520,16 @@ describe Gori::MCP::RequestBuilder do
     it "rejects a whitespace-padded header name (framing-dedup evasion)" do
       # A leading space dodges the case-insensitive Content-Length dedup, so the
       # auto length would be appended too — two conflicting lengths on the wire.
-      args = {"url" => JSON::Any.new("http://h.test/"),
-              "method" => JSON::Any.new("POST"),
-              "body" => JSON::Any.new("abc"),
+      args = {"url"     => JSON::Any.new("http://h.test/"),
+              "method"  => JSON::Any.new("POST"),
+              "body"    => JSON::Any.new("abc"),
               "headers" => JSON::Any.new({" Content-Length" => JSON::Any.new("0")})}
       expect_raises(Gori::Error, /header name/) { Gori::MCP::RequestBuilder.build(args) }
     end
 
     it "still allows a custom method and internal spaces in a header VALUE" do
-      args = {"url" => JSON::Any.new("http://h.test/"),
-              "method" => JSON::Any.new("propfind"),
+      args = {"url"     => JSON::Any.new("http://h.test/"),
+              "method"  => JSON::Any.new("propfind"),
               "headers" => JSON::Any.new({"X-Note" => JSON::Any.new("hello world ok")})}
       out = String.new(Gori::MCP::RequestBuilder.build(args).bytes)
       out.should start_with("PROPFIND / HTTP/1.1\r\n")
