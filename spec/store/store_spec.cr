@@ -79,6 +79,23 @@ describe Gori::Store do
     end
   end
 
+  it "abandon_pending! marks every Pending flow Error and leaves Complete rows alone" do
+    with_store do |store|
+      pending1 = store.insert_flow(sample_request(target: "/hang"))
+      pending2 = store.insert_flow(sample_request(target: "/stuck"))
+      done = store.insert_flow(sample_request(target: "/ok"))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: done, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
+
+      store.abandon_pending!("proxy stopped before response").should eq(2)
+
+      store.get_flow(pending1).not_nil!.row.state.should eq(Gori::Store::FlowState::Error)
+      store.get_flow(pending1).not_nil!.error.should eq("proxy stopped before response")
+      store.get_flow(pending2).not_nil!.row.state.should eq(Gori::Store::FlowState::Error)
+      store.get_flow(done).not_nil!.row.state.should eq(Gori::Store::FlowState::Complete)
+    end
+  end
+
   it "round-trips raw request/response BLOBs byte-exact through get_flow (P7)" do
     with_store do |store|
       req = sample_request(method: "POST", target: "/api")

@@ -83,6 +83,15 @@ module Gori
       end
     end
 
+    # Marks every Pending flow Error (e.g. proxy shutdown before a response landed).
+    struct AbandonPending < WriteOp
+      getter message : String
+      getter reply : Channel(Int32)
+
+      def initialize(@message, @reply)
+      end
+    end
+
     BATCH_MAX = 128
 
     # Keep at most this many newest flows; older ones (and their ws/h2 rows) are
@@ -205,6 +214,17 @@ module Gori
       reply.receive
     rescue Channel::ClosedError
       nil
+    end
+
+    # Finalizes every still-Pending flow as Error. Called on proxy shutdown so
+    # in-flight captures don't linger as orphan Pending rows. Returns the count
+    # abandoned. No-op (0) when the store is already closing.
+    def abandon_pending!(message : String) : Int32
+      reply = Channel(Int32).new(1)
+      @writes.send(AbandonPending.new(message, reply))
+      reply.receive
+    rescue Channel::ClosedError
+      0_i32
     end
 
     # Records one captured WebSocket message for a flow. Blocks until committed
@@ -1253,6 +1273,13 @@ module Gori
                   op.run.call(c)
                   rowid = c.scalar("SELECT last_insert_rowid()").as(Int64)
                   deferred << -> { task_reply.send(rowid) }
+                when AbandonPending
+                  ab_reply = op.reply
+                  ids = abandon_pending_one(c, op.message)
+                  deferred << -> {
+                    ab_reply.send(ids.size.to_i32)
+                    ids.each { |id| publish(FlowEvent.new(id, :updated)) }
+                  }
                 end
               end
             end
@@ -1316,9 +1343,23 @@ module Gori
       when UpdateResp        then op.reply.send(nil)
       when InsertWs          then op.reply.send(nil)
       when ExecTask          then op.reply.send(0_i64)
+      when AbandonPending    then op.reply.send(0_i32)
       end
     rescue
       # caller gone / channel closed — nothing to unblock
+    end
+
+    # Bulk-mark every Pending flow Error; returns the ids touched (for events).
+    private def abandon_pending_one(conn : DB::Connection, message : String) : Array(Int64)
+      ids = [] of Int64
+      conn.query("SELECT id FROM flows WHERE state = ?", FlowState::Pending.value) do |rs|
+        rs.each { ids << rs.read(Int64) }
+      end
+      return ids if ids.empty?
+      conn.exec(
+        "UPDATE flows SET state = ?, error = ?, status = 0 WHERE state = ?",
+        FlowState::Error.value, message, FlowState::Pending.value)
+      ids
     end
 
     # Non-blocking receive for batching a burst (no `try_receive?` in stdlib).

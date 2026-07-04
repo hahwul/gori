@@ -148,6 +148,7 @@ module Gori::Proxy
         body_truncated: req_capture.truncated?, body_size: req_capture.total))
       unless req_complete # client cut the request body short — don't reuse the connection
         release_upstream
+        @sink.on_response(FlowMapper.error_response(flow_id, "client truncated request body"))
         return false
       end
       handle_response(upstream, req, flow_id, started, host, port, scheme,

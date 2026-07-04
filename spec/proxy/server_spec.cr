@@ -410,6 +410,31 @@ describe Gori::Proxy::Server do
     sink.responses.first.error.should_not be_nil
   end
 
+  it "records an error when the client truncates the request body" do
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("", seen)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "POST /post HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nContent-Length: 100\r\n\r\n"
+    client << "short"
+    client.flush
+    client.close
+
+    done.receive
+    proxy.stop
+
+    sink.requests.size.should eq(1)
+    sink.responses.size.should eq(1)
+    resp = sink.responses.first
+    resp.state.should eq(Gori::Store::FlowState::Error)
+    resp.error.not_nil!.should contain("truncated")
+  end
+
   it "applies Match&Replace to request/response heads and captures the sent bytes" do
     seen = Channel(String).new(1)
     done = Channel(Nil).new(1)

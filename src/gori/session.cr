@@ -164,6 +164,7 @@ module Gori
     def close : Nil
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
+      @store.abandon_pending!("proxy stopped before response")
       CaptureStatus.clear(@project.dir) if capturing_lock_held?
       @capture_lock.try(&.close) # release the flock so a later open of this project can capture
       # Stop Prism FIRST so its active workers wind down and its passive fiber stops issuing

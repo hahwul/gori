@@ -181,4 +181,27 @@ describe Gori::Session do
       s.close
     end
   end
+
+  it "abandons orphan Pending flows when the session closes" do
+    with_root do |root|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      registry = Gori::Verbs.registry
+      project = Gori::ProjectRegistry.new(root).create("abandon") # persistent: dir survives close
+
+      session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, project)
+      pending_id = session.store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h", port: 80, method: "GET", target: "/hang",
+        http_version: "HTTP/1.1", head: "GET /hang HTTP/1.1\r\nHost: h\r\n\r\n".to_slice))
+      session.close
+
+      store = Gori::Store.open(project.db_path)
+      begin
+        detail = store.get_flow(pending_id).not_nil!
+        detail.row.state.should eq(Gori::Store::FlowState::Error)
+        detail.error.should eq("proxy stopped before response")
+      ensure
+        store.close
+      end
+    end
+  end
 end
