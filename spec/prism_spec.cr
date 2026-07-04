@@ -95,6 +95,25 @@ describe Gori::Prism::Passive do
     end
   end
 
+  it "fingerprints framework/version-disclosure headers and surfaces them as project tech" do
+    with_store do |store|
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nX-AspNet-Version: 4.0.30319\r\n" \
+             "X-AspNetMvc-Version: 5.2\r\nX-Generator: Drupal 10 (https://www.drupal.org)\r\n\r\n"
+      detail = capture_flow(store, head)
+      Gori::Prism::Passive.analyze(detail).each { |d| store.upsert_prism_issue(d) }
+      found = codes(store)
+      found.should contain("tech_aspnet")
+      found.should contain("tech_aspnetmvc")
+      found.should contain("tech_generator")
+      summary = store.prism_tech_summary
+      summary.should contain("ASP.NET")
+      summary.should contain("ASP.NET MVC")
+      summary.should contain("Drupal") # X-Generator value reduced to the product name
+      # The exact version is kept in the issue evidence (the CVE-matching detail an analyst wants).
+      store.prism_issues.find(&.code.==("tech_aspnet")).not_nil!.evidence.should eq("4.0.30319")
+    end
+  end
+
   it "flags a sensitive parameter in the URL as High" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/cb?token=secret123&x=1", content_type: nil)
@@ -512,6 +531,126 @@ describe "Gori::Prism::Passive (new patterns)" do
         content_type: "text/html")
       hit = dets.find(&.code.==("cookie_no_samesite")).not_nil!
       hit.evidence.should eq("samesite")
+    end
+  end
+end
+
+describe "Gori::Prism::Passive (cookie deletion + prefixes)" do
+  it "suppresses hygiene findings for a cookie being cleared (empty value + deletion marker)" do
+    with_store do |store|
+      # A logout/reset cookie carries no secret — its missing flags are noise, not a finding.
+      maxage = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=; Max-Age=0\r\n\r\n",
+        content_type: "text/html")
+      codes_of(maxage).should_not contain("cookie_no_secure")
+      codes_of(maxage).should_not contain("cookie_no_httponly")
+      codes_of(maxage).should_not contain("cookie_no_samesite")
+      expired = analyze(store,
+        resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=; expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n\r\n",
+        content_type: "text/html")
+      codes_of(expired).should_not contain("cookie_no_httponly")
+      # …but a LIVE empty cookie (no deletion marker) is still ordinary hygiene.
+      live = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: foo=bar\r\n\r\n",
+        content_type: "text/html")
+      codes_of(live).should contain("cookie_no_secure")
+    end
+  end
+
+  it "flags __Host-/__Secure- prefix violations and suppresses the duplicate no-secure finding" do
+    with_store do |store|
+      # __Host- requires Secure, Path=/, and no Domain — this one is missing Path=/.
+      host_bad = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: __Host-sid=x; Secure\r\n\r\n",
+        content_type: "text/html")
+      hit = host_bad.find(&.code.==("cookie_prefix_violation")).not_nil!
+      hit.evidence.not_nil!.should contain("Path=/")
+      # A correctly-formed __Host- cookie is clean.
+      host_ok = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: __Host-sid=x; Secure; Path=/\r\n\r\n",
+        content_type: "text/html")
+      codes_of(host_ok).should_not contain("cookie_prefix_violation")
+      # A __Host- cookie with a Domain attribute is rejected by the browser.
+      host_dom = analyze(store,
+        resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: __Host-sid=x; Secure; Path=/; Domain=acme.test\r\n\r\n",
+        content_type: "text/html")
+      host_dom.find(&.code.==("cookie_prefix_violation")).not_nil!.evidence.not_nil!.should contain("Domain")
+      # __Secure- missing Secure trips the prefix violation but NOT the generic cookie_no_secure.
+      sec_bad = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: __Secure-sid=x\r\n\r\n",
+        content_type: "text/html")
+      codes_of(sec_bad).should contain("cookie_prefix_violation")
+      codes_of(sec_bad).should_not contain("cookie_no_secure")
+    end
+  end
+end
+
+describe "Gori::Prism::Passive (GraphQL introspection)" do
+  it "flags a response carrying an introspection result (full schema exposed)" do
+    with_store do |store|
+      introspection = analyze(store, target: "/graphql", method: "POST",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n", content_type: "application/json",
+        body: %({"data":{"__schema":{"queryType":{"name":"Query"},"types":[{"name":"User"}]}}}))
+      codes_of(introspection).should contain("graphql_introspection")
+      hit = introspection.find(&.code.==("graphql_introspection")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::Medium)
+    end
+  end
+
+  it "does not flag ordinary GraphQL data or a stray __schema mention" do
+    with_store do |store|
+      # A normal query result has neither introspection marker.
+      normal = analyze(store, target: "/graphql", method: "POST",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n", content_type: "application/json",
+        body: %({"data":{"me":{"id":"1","name":"a"}}}))
+      codes_of(normal).should_not contain("graphql_introspection")
+      # "__schema" alone (no queryType) is insufficient — keeps a docs/registry blob out.
+      partial = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        content_type: "application/json", body: %({"note":"see the __schema field docs"}))
+      codes_of(partial).should_not contain("graphql_introspection")
+    end
+  end
+end
+
+describe "Gori::Prism::Passive (insecure form action)" do
+  it "flags a form on an HTTPS page that submits to a cleartext http:// action" do
+    with_store do |store|
+      insecure = analyze(store, scheme: "https", content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        body: %(<form action="http://acme.test/login" method="post"><input name=pw></form>))
+      codes_of(insecure).should contain("insecure_form_action")
+      # An https:// action (or a same-page relative action) is fine.
+      secure = analyze(store, scheme: "https", content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        body: %(<form action="https://acme.test/login"><input name=pw></form><form action="/x"></form>))
+      codes_of(secure).should_not contain("insecure_form_action")
+    end
+  end
+end
+
+describe "Gori::Prism::Passive (insecure Basic auth)" do
+  it "flags request Basic credentials over cleartext HTTP as High" do
+    with_store do |store|
+      dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", scheme: "http",
+        req_headers: "Authorization: Basic dXNlcjpwYXNz\r\n", content_type: nil)
+      hit = dets.find(&.code.==("insecure_basic_auth")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::High)
+      hit.evidence.not_nil!.should_not contain("dXNlcjpwYXNz") # never the credential itself
+    end
+  end
+
+  it "flags a WWW-Authenticate: Basic challenge over cleartext HTTP as Medium" do
+    with_store do |store|
+      dets = analyze(store, resp_head: "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"x\"\r\n\r\n",
+        status: 401, scheme: "http", content_type: nil)
+      hit = dets.find(&.code.==("insecure_basic_auth")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::Medium)
+    end
+  end
+
+  it "does not flag Basic auth over HTTPS (transport-protected) or non-Basic schemes" do
+    with_store do |store|
+      https = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", scheme: "https",
+        req_headers: "Authorization: Basic dXNlcjpwYXNz\r\n", content_type: nil)
+      codes_of(https).should_not contain("insecure_basic_auth")
+      bearer = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", scheme: "http",
+        req_headers: "Authorization: Bearer token123\r\n", content_type: nil)
+      codes_of(bearer).should_not contain("insecure_basic_auth")
     end
   end
 end

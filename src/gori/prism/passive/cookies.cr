@@ -3,18 +3,41 @@ require "./rule"
 module Gori
   module Prism
     module Passive
-      # Set-Cookie flag hygiene (category "cookies"): Secure / HttpOnly / SameSite, plus the
-      # SameSite=None-without-Secure misconfiguration. Response-gated. The name is split from
-      # the attribute segments so a cookie literally named "samesite"/"secure" can't masquerade
-      # as a flag.
+      # Set-Cookie flag hygiene (category "cookies"): Secure / HttpOnly / SameSite, the
+      # SameSite=None-without-Secure misconfiguration, and the browser-enforced `__Host-`/
+      # `__Secure-` cookie-prefix rules. Response-gated. The name is split from the attribute
+      # segments so a cookie literally named "samesite"/"secure" can't masquerade as a flag.
+      #
+      # A cookie that is being CLEARED (empty value + Max-Age=0 or an Expires attribute — the
+      # logout/reset pattern) carries no secret, so its missing flags are suppressed as noise;
+      # only live cookies are scored.
       class Cookies < Rule
+        # A __Host- cookie is browser-rejected unless it is Secure, Path=/, and has NO Domain;
+        # a __Secure- cookie is rejected unless Secure. A violation means the security intent
+        # silently fails (the cookie is dropped), so it is a distinct, higher-signal finding.
+        HOST_PREFIX   = "__Host-"
+        SECURE_PREFIX = "__Secure-"
+
+        MAX_AGE_ZERO = /\Amax-age\s*=\s*0+\z/
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
           resp.headers.get_all("Set-Cookie").each do |raw|
-            eq = raw.index('=')
-            name = (eq ? raw[0...eq] : raw).strip
-            flags = raw.split(';').map(&.strip.downcase)[1..]? || [] of String
-            if ctx.scheme == "https" && !flags.includes?("secure")
+            segs = raw.split(';')
+            nv = segs[0]
+            eq = nv.index('=')
+            name = (eq ? nv[0...eq] : nv).strip
+            value = (eq ? nv[(eq + 1)..] : "").strip
+            flags = segs[1..].map(&.strip.downcase)
+            # A cookie being deleted holds no secret — skip its hygiene (avoids logout/reset FPs).
+            next if deletion?(value, flags)
+
+            has_secure = flags.includes?("secure")
+            prefixed = check_prefix(ctx, name, flags, has_secure, acc)
+
+            # Secure: the generic finding is subsumed by the more specific prefix violation, so a
+            # prefixed cookie reports at most one Secure-related issue.
+            if ctx.scheme == "https" && !has_secure && !prefixed
               acc << cookie(ctx, "cookie_no_secure", "Cookie without Secure flag", Store::Severity::Medium, name)
             end
             unless flags.includes?("httponly")
@@ -23,12 +46,44 @@ module Gori
             samesite = flags.find(&.starts_with?("samesite"))
             if samesite.nil?
               acc << cookie(ctx, "cookie_no_samesite", "Cookie without SameSite attribute", Store::Severity::Low, name)
-            elsif samesite == "samesite=none" && !flags.includes?("secure")
+            elsif samesite == "samesite=none" && !has_secure
               # SameSite=None REQUIRES Secure; browsers reject the cookie otherwise.
               acc << cookie(ctx, "cookie_samesite_none_insecure",
                 "Cookie SameSite=None without Secure", Store::Severity::Medium, name)
             end
           end
+        end
+
+        # True for a cookie being cleared: empty value AND a deletion marker (Max-Age=0 or an
+        # Expires attribute — a live cookie sets neither with an empty value).
+        private def deletion?(value : String, flags : Array(String)) : Bool
+          return false unless value.empty?
+          flags.any? { |f| MAX_AGE_ZERO.matches?(f) || f.starts_with?("expires=") }
+        end
+
+        # Validate a __Host-/__Secure- prefixed cookie against its browser-enforced rules;
+        # emits one `cookie_prefix_violation` listing every unmet requirement. Returns true when
+        # the cookie carries a recognised prefix (so the generic Secure check stands down).
+        private def check_prefix(ctx : Context, name : String, flags : Array(String),
+                                 has_secure : Bool, acc : Array(Detection)) : Bool
+          if name.starts_with?(HOST_PREFIX)
+            missing = [] of String
+            missing << "Secure" unless has_secure
+            missing << "Path=/" unless flags.includes?("path=/")
+            missing << "no Domain" if flags.any?(&.starts_with?("domain="))
+            emit_prefix(ctx, name, missing, acc) unless missing.empty?
+            true
+          elsif name.starts_with?(SECURE_PREFIX)
+            emit_prefix(ctx, name, ["Secure"], acc) unless has_secure
+            true
+          else
+            false
+          end
+        end
+
+        private def emit_prefix(ctx : Context, name : String, missing : Array(String), acc : Array(Detection)) : Nil
+          acc << cookie(ctx, "cookie_prefix_violation", "Cookie violates its #{name.starts_with?(HOST_PREFIX) ? "__Host-" : "__Secure-"} prefix rules",
+            Store::Severity::Medium, "#{name}: needs #{missing.join(", ")}")
         end
 
         private def cookie(ctx : Context, code : String, title : String, sev : Store::Severity, name : String) : Detection

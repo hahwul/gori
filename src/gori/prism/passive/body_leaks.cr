@@ -67,6 +67,11 @@ module Gori
         # genuine active mixed content (browsers block it; it signals an insecure dependency).
         MIXED_ACTIVE = /<(?:script|iframe)\b[^>]*\bsrc\s*=\s*["']?http:\/\//i
 
+        # A form on an HTTPS page that SUBMITS to a plain-http action: everything the user types
+        # (credentials included) is sent in cleartext. Browsers flag this for password fields;
+        # it's a distinct, higher-impact case than a passively-loaded sub-resource.
+        INSECURE_FORM = /<form\b[^>]*\baction\s*=\s*["']?http:\/\//i
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
           return unless texty?(ctx.content_type)
@@ -83,9 +88,15 @@ module Gori
           if hit = SECRET_PATTERNS.find { |(pat, _)| pat.matches?(text) }
             acc << leak(ctx, "secret_in_body", "Credential/secret disclosed in response body", Store::Severity::High, hit[1])
           end
-          if ctx.html? && ctx.scheme == "https" && MIXED_ACTIVE.matches?(text)
-            acc << Detection.new("mixed_content", Category::HEADERS, ctx.host, ctx.url,
-              "Active mixed content (http:// sub-resource on an HTTPS page)", Store::Severity::Low, nil, ctx.fid)
+          if ctx.html? && ctx.scheme == "https"
+            if MIXED_ACTIVE.matches?(text)
+              acc << Detection.new("mixed_content", Category::HEADERS, ctx.host, ctx.url,
+                "Active mixed content (http:// sub-resource on an HTTPS page)", Store::Severity::Low, nil, ctx.fid)
+            end
+            if INSECURE_FORM.matches?(text)
+              acc << Detection.new("insecure_form_action", Category::HEADERS, ctx.host, ctx.url,
+                "Form on an HTTPS page submits over cleartext http://", Store::Severity::Medium, nil, ctx.fid)
+            end
           end
         end
 

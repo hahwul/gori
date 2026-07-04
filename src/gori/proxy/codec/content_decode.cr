@@ -18,7 +18,13 @@ module Gori::Proxy::Codec
     # raw body unchanged (no transfer/content coding, or nothing to do). A note
     # describes what was applied ("decoded: gzip") or why it couldn't be ("compressed:
     # br — decode unsupported").
-    def self.decode(head : Bytes?, body : Bytes?) : {Bytes?, String?}
+    #
+    # `max_out` caps the decoded output (bomb ceiling by default). A caller that only
+    # scans a prefix (Prism scans the first 64 KiB) can pass a small cap so a large
+    # compressed body stops inflating early instead of expanding megabytes only to be
+    # truncated — the single-Content-Encoding case (virtually all traffic) yields exactly
+    # that prefix; a rare multi-coding body yields a valid, decode-tolerant prefix.
+    def self.decode(head : Bytes?, body : Bytes?, max_out : Int32 = MAX_OUT) : {Bytes?, String?}
       return {nil, nil} if body.nil? || body.empty? || head.nil?
       te_chunked = transfer_encoding_chunked?(header_values(head, "transfer-encoding"))
       encodings = header_values(head, "content-encoding")
@@ -33,7 +39,7 @@ module Gori::Proxy::Codec
       # Content-Encoding lists are applied in order; decode from the outermost
       # (last-listed) inward.
       encodings.reverse_each do |enc|
-        decoded, note = inflate(entity, enc)
+        decoded, note = inflate(entity, enc, max_out)
         notes << note if note
         return {entity, notes.join(" · ")} if decoded.nil? # unsupported/failed — stop
         entity = decoded
@@ -50,16 +56,16 @@ module Gori::Proxy::Codec
     end
 
     # {decoded | nil, note | nil}. nil => stop (unsupported or hard error).
-    private def self.inflate(data : Bytes, enc : String) : {Bytes?, String?}
+    private def self.inflate(data : Bytes, enc : String, max_out : Int32) : {Bytes?, String?}
       case enc
-      when "gzip", "x-gzip" then {gunzip(data), "decoded: gzip"}
-      when "deflate"        then {inflate_deflate(data), "decoded: deflate"}
+      when "gzip", "x-gzip" then {gunzip(data, max_out), "decoded: gzip"}
+      when "deflate"        then {inflate_deflate(data, max_out), "decoded: deflate"}
       when "br"
         return {nil, "compressed: br — decoder not built in"} unless Brotli::AVAILABLE
-        {Brotli.decode(data, MAX_OUT), "decoded: br"}
+        {Brotli.decode(data, max_out), "decoded: br"}
       when "zstd"
         return {nil, "compressed: zstd — decoder not built in"} unless Zstd::AVAILABLE
-        {Zstd.decode(data, MAX_OUT), "decoded: zstd"}
+        {Zstd.decode(data, max_out), "decoded: zstd"}
       else
         {nil, "compressed: #{enc} — decode unsupported"}
       end
@@ -67,31 +73,32 @@ module Gori::Proxy::Codec
       {nil, "decode error (#{enc}): #{ex.message}"}
     end
 
-    private def self.gunzip(data : Bytes) : Bytes
-      read_all(Compress::Gzip::Reader.new(IO::Memory.new(data)))
+    private def self.gunzip(data : Bytes, max_out : Int32) : Bytes
+      read_all(Compress::Gzip::Reader.new(IO::Memory.new(data)), max_out)
     end
 
     # HTTP "deflate" is ambiguous: usually zlib-wrapped (RFC 1950), sometimes raw
     # (RFC 1951). Try zlib first; if it produced nothing, retry as raw deflate.
-    private def self.inflate_deflate(data : Bytes) : Bytes
+    private def self.inflate_deflate(data : Bytes, max_out : Int32) : Bytes
       zlib = begin
-        read_all(Compress::Zlib::Reader.new(IO::Memory.new(data)))
+        read_all(Compress::Zlib::Reader.new(IO::Memory.new(data)), max_out)
       rescue
         Bytes.empty
       end
       return zlib unless zlib.empty?
-      read_all(Compress::Deflate::Reader.new(IO::Memory.new(data)))
+      read_all(Compress::Deflate::Reader.new(IO::Memory.new(data)), max_out)
     end
 
     # Drain a decompressing reader into a buffer, tolerant of a truncated/corrupt
-    # stream (returns what decoded so far) and capped at MAX_OUT.
-    private def self.read_all(reader : IO) : Bytes
+    # stream (returns what decoded so far) and capped at `max_out` (a prefix-only caller
+    # passes a small cap so inflation stops early instead of expanding the whole body).
+    private def self.read_all(reader : IO, max_out : Int32 = MAX_OUT) : Bytes
       out = IO::Memory.new
       buf = Bytes.new(64 * 1024)
       begin
         while (n = reader.read(buf)) > 0
           out.write(buf[0, n])
-          break if out.bytesize >= MAX_OUT
+          break if out.bytesize >= max_out
         end
       rescue
         # truncated/corrupt stream — return the partial we managed to decode

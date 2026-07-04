@@ -79,7 +79,8 @@ module Gori
         private def reflections(result : Replay::Result, params : Array(Param)) : Array(Param)
           return [] of Param unless result.ok?
           head = String.new(result.head).scrub
-          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body)
+          # Canary search only reads the first BODY_CAP bytes, so cap the inflate to match.
+          decoded, _ = Proxy::Codec::ContentDecode.decode(result.head, result.body, BODY_CAP)
           bytes = decoded || result.body
           body = (bytes && !bytes.empty?) ? String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub : ""
           hay = "#{head}\n#{body}"

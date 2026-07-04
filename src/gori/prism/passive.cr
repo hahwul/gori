@@ -7,6 +7,8 @@ require "./passive/security_headers"
 require "./passive/cookies"
 require "./passive/cors"
 require "./passive/body_leaks"
+require "./passive/auth"
+require "./passive/graphql"
 
 module Gori
   module Prism
@@ -25,6 +27,8 @@ module Gori
         Cookies.new,
         Cors.new,
         BodyLeaks.new,
+        Auth.new,
+        GraphqlIntrospection.new,
       ] of Rule
 
       def self.analyze(detail : Store::FlowDetail) : Array(Detection)
