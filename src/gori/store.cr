@@ -1273,11 +1273,11 @@ module Gori
     # id, no event). The reply channels are buffered(1) so this never blocks.
     private def fail_reply(op : WriteOp) : Nil
       case op
-      when InsertFlow         then op.reply.send(0_i64)
+      when InsertFlow        then op.reply.send(0_i64)
       when InsertImportBatch then op.reply.send(0_i32)
-      when UpdateResp         then op.reply.send(nil)
-      when InsertWs   then op.reply.send(nil)
-      when ExecTask   then op.reply.send(0_i64)
+      when UpdateResp        then op.reply.send(nil)
+      when InsertWs          then op.reply.send(nil)
+      when ExecTask          then op.reply.send(0_i64)
       end
     rescue
       # caller gone / channel closed — nothing to unblock
@@ -1339,8 +1339,31 @@ module Gori
         response_size,
         resp.state.value, resp.ttfb_us, resp.duration_us, resp.error,
         resp.body_truncated? ? 1 : 0, resp.flow_id)
+      # flows_fts is contentless (V24): FTS5 forbids UPDATE there, so re-write the whole
+      # row. insert_one indexed the request side (searchable while Pending); DELETE that
+      # row and re-INSERT with BOTH sides. The request text is re-derived from the stored
+      # row (update_one only carries the response), capped in SQL so a multi-MB upload
+      # isn't pulled back whole. DELETE is a cheap tombstone (contentless_delete=1) and
+      # also makes a double update_response idempotent (last write wins).
       resp_fts = binary_content?(resp.content_type) ? "" : fts_text(resp.body)
-      conn.exec("UPDATE flows_fts SET resp = ? WHERE rowid = ?", resp_fts, resp.flow_id)
+      req_fts = request_fts_from_row(conn, resp.flow_id)
+      conn.exec("DELETE FROM flows_fts WHERE rowid = ?", resp.flow_id)
+      conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, ?)", resp.flow_id, req_fts, resp_fts)
+    end
+
+    # The request-side FTS text for an already-stored flow, recomputed the same way
+    # request_fts does but reading the head + (SQL-capped) body back from the row —
+    # update_one has only the response, and contentless FTS can't keep the old req
+    # column across a rewrite. A bodyless request (the common GET) reads just the small
+    # head; a binary body is skipped (empty), matching request_fts.
+    private def request_fts_from_row(conn : DB::Connection, flow_id : Int64) : String
+      row = conn.query_one?(
+        "SELECT request_head, substr(request_body, 1, ?) FROM flows WHERE id = ?",
+        FTS_INDEX_MAX, flow_id, as: {Bytes, Bytes?})
+      return "" unless row
+      head, body = row
+      return "" if body.nil? || body.empty?
+      binary_content?(head_content_type(head)) ? "" : String.new(body)
     end
 
     # Body text fed to the FTS index, capped per side so a large body can't bloat
