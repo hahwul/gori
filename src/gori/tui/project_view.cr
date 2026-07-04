@@ -7,6 +7,7 @@ require "./text_area"
 require "../project"
 require "../store"
 require "../scope"
+require "../prism"
 require "../host_overrides"
 require "../settings"
 
@@ -77,7 +78,7 @@ module Gori::Tui
       @project = project
       @flow_count = store.count
       @findings_count = store.count_findings
-      @prism_tech = store.prism_tech_summary
+      @prism_tech = scoped_tech(store.prism_tech_rows)
       @db_size = project.db_size
       @total_captured = store.total_size
       # AT A GLANCE aggregates: status mix + combined finding/Prism severity tally.
@@ -93,6 +94,14 @@ module Gori::Tui
 
       @desc_area.set_text(store.setting(DESC_KEY) || "")
       @desc_dirty = false
+    end
+
+    # Drop tech fingerprints seen only on out-of-scope hosts before summarizing — with
+    # the scope lens ON, "representative technologies" should describe the in-scope
+    # target, not every host the proxy happened to see traffic for (mirrors PrismView).
+    private def scoped_tech(rows : Array({String, String, String?})) : Array(String)
+      rows = rows.select { |(_, host, _)| @scope.host_in_scope?(host) } if @scope.active?
+      Prism.tech_summary(rows.map { |(code, _, ev)| {code, ev} })
     end
 
     # IME preedit routes to whichever pane is composing: the SCOPE add-row when it's

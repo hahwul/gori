@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 private def view_store(&)
   path = File.tempname("gori-prismview", ".db")
@@ -63,6 +64,74 @@ describe Gori::Tui::PrismView do
 
       "status:fp".each_char { |c| view.query_insert(c) }
       view.target_issue.should_not be_nil # the explicit status term reveals it
+    end
+  end
+
+  it "filters the issue list to in-scope hosts once the scope lens is ON" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test")
+      seed(store, "missing_hsts", "b.test")
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "a.test")
+      scope.active?.should be_false # configured but not enabled yet
+
+      view = Gori::Tui::PrismView.new
+      view.set_scope(scope)
+      view.reload(store)
+      view.empty?.should be_false
+
+      # Lens off ⇒ both hosts show up.
+      b0 = MemoryBackend.new(80, 20)
+      view.render(Gori::Tui::Screen.new(b0), Gori::Tui::Rect.new(0, 0, 80, 20))
+      b0.contains?("a.test").should be_true
+      b0.contains?("b.test").should be_true
+
+      scope.enable
+      view.reload(store)
+      b1 = MemoryBackend.new(80, 20)
+      view.render(Gori::Tui::Screen.new(b1), Gori::Tui::Rect.new(0, 0, 80, 20))
+      b1.contains?("a.test").should be_true
+      b1.contains?("b.test").should be_false
+    end
+  end
+
+  it "shows the scope-lens empty hint (not the triage hint) when the lens empties the list" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test")
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "other.test") # excludes a.test → in-scope set empty
+      scope.enable
+
+      view = Gori::Tui::PrismView.new
+      view.set_scope(scope)
+      view.reload(store)
+
+      b = MemoryBackend.new(80, 20)
+      view.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 80, 20))
+      rows = (0...20).map { |y| b.row(y) }.join("\n")
+      rows.should contain("no issues in scope")
+      rows.should contain("⇧S clears the scope lens")
+    end
+  end
+
+  it "drops the MODE band tech chip for a fingerprint seen only on an out-of-scope host" do
+    view_store do |store|
+      store.upsert_prism_issue(
+        Gori::Prism::Detection.new("tech_grpc", "tech", "a.test", "https://a.test/", "gRPC detected", Gori::Store::Severity::Info))
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "other.test")
+      scope.enable
+
+      view = Gori::Tui::PrismView.new
+      view.set_scope(scope)
+      view.reload(store)
+
+      b = MemoryBackend.new(80, 20)
+      view.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 80, 20))
+      b.contains?("gRPC").should be_false
     end
   end
 end

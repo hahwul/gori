@@ -3203,6 +3203,7 @@ module Gori::Tui
       @scope.toggle
       history_controller.view.reload(@session.store)
       sitemap_controller.reload if @active_tab == :sitemap
+      prism_controller.view.reload(@session.store) if @active_tab == :prism
       project_controller.toast_scope_state
     end
 
