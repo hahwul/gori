@@ -59,14 +59,20 @@ describe "Gori::Store h2 raw frame log (v5)" do
       String.new(frames[0].payload).should eq("hdrblock")
       frames[1].direction.should eq("in")
       frames[1].type.should eq(0)
-      String.new(frames[1].payload).should eq("body")
+      # DATA (type 0) payloads are NOT persisted — they duplicate flows.request_body/
+      # response_body byte-for-byte. The frame log keeps only the metadata + the TRUE byte
+      # count in `length` (what the detail-view timeline renders); the payload is emptied.
+      frames[1].length.should eq("body".bytesize)
+      frames[1].payload.size.should eq(0)
     end
   end
 
   it "h2_frames(limit) returns the MOST RECENT n frames ascending; count is the full total" do
     with_store do |store|
       conn = store.insert_h2_connection("acme.test", 443, "h2")
-      10.times { |i| store.insert_h2_frame(conn, "out", 0x0_u8, 0x0_u8, 1_u32, "f#{i}".to_slice) }
+      # HEADERS (0x1), not DATA — DATA payloads are dropped on write (dedup), so this window
+      # test asserts on retained non-DATA payloads to prove ordering, not the dedup rule.
+      10.times { |i| store.insert_h2_frame(conn, "out", 0x1_u8, 0x0_u8, 1_u32, "f#{i}".to_slice) }
       store.flush
       store.count_h2_frames(conn).should eq(10)                           # full count regardless of the window
       win = store.h2_frames(conn, 3)                                      # bounded to the latest 3

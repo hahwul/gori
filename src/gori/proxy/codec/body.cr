@@ -79,8 +79,13 @@ module Gori::Proxy::Codec
 
     # Ceiling on a single captured request/response body. Forwarding is never
     # capped (it streams byte-exact); this only bounds what we buffer for the DB,
-    # so a multi-GB download can't OOM the proxy or bloat one row. Tune as needed.
-    CAPTURE_MAX = 8 * 1024 * 1024 # 8 MiB
+    # so a multi-GB download can't OOM the proxy or bloat one row. The TRUE wire
+    # size is preserved in request_size/response_size regardless of this cap, so
+    # lowering it only trims the stored BLOB, never the reported size. 2 MiB keeps
+    # whole HTML/JS/JSON/API bodies while cutting the multi-MB media/protobuf tail
+    # that dominated DB growth (a single 8 MiB Safe-Browsing blob was ~25% of one
+    # capture). Tune as needed.
+    CAPTURE_MAX = 2 * 1024 * 1024 # 2 MiB
 
     # RFC 7230 §3.3.3 framing for a request body.
     def self.request_framing(req : RawRequest) : {BodyFraming, Int64}

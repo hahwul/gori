@@ -7,7 +7,13 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 24
+      VERSION = 25
+
+      # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
+      # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
+      # freed pages actually shrink the file. Pin it to the exact version (not `VERSION`)
+      # so a later migration doesn't re-trigger the VACUUM.
+      RECLAIM_VERSION = 25
 
       V1 = [
         <<-SQL,
@@ -454,7 +460,28 @@ module Gori
         SQL
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24]
+      # Reclaim the single biggest source of on-disk bloat: h2 DATA frames (type 0) stored
+      # their payload in full even though the SAME bytes already live in flows.request_body/
+      # response_body. In one real capture this raw-frame duplication was ~44% of the whole
+      # DB. The frame-log detail view only ever renders the `length` column, never the
+      # payload, so empty every historical DATA payload while leaving `length` (already the
+      # true byte count) untouched. NEW inserts already store empty DATA payloads — see
+      # Store#insert_h2_frame_one. Freed pages are returned to the OS by the one-time VACUUM
+      # in Store.open (see RECLAIM_VERSION).
+      #
+      # NOTE: flows_fts is deliberately NOT rebuilt here. Its bloat comes from trigram-
+      # indexing COMPRESSED text bodies (high-entropy → trigram explosion), which the write
+      # path now skips going forward (Store#content_encoded?/#binary_content?). It can't be
+      # reclaimed cheaply in place: flows_fts is contentless, so DELETE only adds tombstones
+      # (grows it), and a SQL rebuild via CAST(body AS TEXT) truncates at the first NUL byte
+      # — silently dropping search coverage the runtime (String.new) had indexed. So the
+      # existing index is left to shrink naturally via retention rather than risk a lossy
+      # auto-rebuild on everyone's data.
+      V25 = [
+        "UPDATE h2_frames SET payload = X'' WHERE type = 0",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i

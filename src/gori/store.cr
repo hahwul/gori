@@ -113,7 +113,17 @@ module Gori
       # Make REGEXP byte-safe on every connection before any query runs (so a binary
       # body can't crash a `body~`/`header~` scan or a regex scope rule). See SafeRegexp.
       SafeRegexp.install(db)
+      pre_version = db.scalar("PRAGMA user_version").as(Int64).to_i
       Schema.migrate!(db)
+      # The V25 migration empties duplicated h2 DATA payloads (often ~40% of the DB). That
+      # frees pages for REUSE but doesn't shrink the file, so VACUUM once — only when an
+      # EXISTING db (pre_version >= 1) crossed into the reclaim version. A fresh db
+      # (pre_version 0) has nothing to reclaim; a db already at/after the reclaim version
+      # won't re-run it. VACUUM can't live inside migrate!'s transaction, and it is best-
+      # effort: a failure (disk full / lock) leaves the db fully usable, just un-shrunk.
+      if pre_version >= 1 && pre_version < Schema::RECLAIM_VERSION
+        db.exec("VACUUM") rescue nil
+      end
       new(db, events, prism_events, retention_flows)
     end
 
@@ -1345,7 +1355,7 @@ module Gori
       # row (update_one only carries the response), capped in SQL so a multi-MB upload
       # isn't pulled back whole. DELETE is a cheap tombstone (contentless_delete=1) and
       # also makes a double update_response idempotent (last write wins).
-      resp_fts = binary_content?(resp.content_type) ? "" : fts_text(resp.body)
+      resp_fts = (binary_content?(resp.content_type) || content_encoded?(resp.head)) ? "" : fts_text(resp.body)
       req_fts = request_fts_from_row(conn, resp.flow_id)
       conn.exec("DELETE FROM flows_fts WHERE rowid = ?", resp.flow_id)
       conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, ?)", resp.flow_id, req_fts, resp_fts)
@@ -1363,7 +1373,7 @@ module Gori
       return "" unless row
       head, body = row
       return "" if body.nil? || body.empty?
-      binary_content?(head_content_type(head)) ? "" : String.new(body)
+      (binary_content?(head_content_type(head)) || content_encoded?(head)) ? "" : String.new(body)
     end
 
     # Body text fed to the FTS index, capped per side so a large body can't bloat
@@ -1379,7 +1389,7 @@ module Gori
     private def request_fts(req : CapturedRequest) : String
       body = req.body
       return "" if body.nil? || body.empty?
-      binary_content?(head_content_type(req.head)) ? "" : fts_text(body)
+      (binary_content?(head_content_type(req.head)) || content_encoded?(req.head)) ? "" : fts_text(body)
     end
 
     # Skip body FTS for clearly-binary content types (images/media/archives/
@@ -1395,12 +1405,29 @@ module Gori
     end
 
     private def head_content_type(head : Bytes) : String?
+      header_field(head, "content-type")
+    end
+
+    # A body carrying a non-identity Content-Encoding is stored in COMPRESSED wire form, so
+    # its bytes are high-entropy: trigram-indexing them explodes flows_fts (many distinct
+    # trigrams per body) while being unsearchable for readable text (you can't `body:` a
+    # gzip stream). Skip the index for them, exactly like a binary content type.
+    private def content_encoded?(head : Bytes) : Bool
+      enc = header_field(head, "content-encoding")
+      return false unless enc
+      e = enc.downcase.strip
+      !e.empty? && e != "identity"
+    end
+
+    # Value of the first matching header (case-insensitive name) in a raw head BLOB, or nil
+    # if absent — reads Content-Type / Content-Encoding off the stored bytes at index time.
+    private def header_field(head : Bytes, name : String) : String?
       String.new(head).each_line do |raw|
         line = raw.chomp
         break if line.empty?
         idx = line.index(':')
         next unless idx
-        return line[(idx + 1)..].strip if line[0...idx].strip.downcase == "content-type"
+        return line[(idx + 1)..].strip if line[0...idx].strip.downcase == name
       end
       nil
     end
@@ -1418,9 +1445,22 @@ module Gori
     # Same columns/casts the old synchronous insert used (so h2_frames readback /
     # to_bytes round-trips are unchanged).
     private def insert_h2_frame_one(conn : DB::Connection, op : InsertH2Frame) : Nil
-      conn.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
-                "VALUES (?,?,?,?,?,?,?,?)",
-        op.conn_id, op.created_at, op.direction, op.stream_id, op.type_octet, op.flags, op.payload.size, op.payload)
+      # DATA frames (type 0) duplicate flows.response_body / request_body byte-for-byte
+      # and are the dominant h2_frames byte cost. The frame-log detail view renders the
+      # `length` COLUMN, never the payload, so persist an EMPTY payload while keeping the
+      # TRUE byte count in `length` (op.payload.size, still the full size). HEADERS/
+      # CONTINUATION/SETTINGS/etc stay verbatim — tiny, and their bytes exist nowhere else.
+      # Use the SQL literal X'' (a non-null zero-length BLOB the NOT NULL column accepts):
+      # binding Bytes.empty would bind SQL NULL (empty slice ⇒ null pointer) and violate it.
+      if op.type_octet.zero?
+        conn.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
+                  "VALUES (?,?,?,?,?,?,?,X'')",
+          op.conn_id, op.created_at, op.direction, op.stream_id, op.type_octet, op.flags, op.payload.size)
+      else
+        conn.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
+                  "VALUES (?,?,?,?,?,?,?,?)",
+          op.conn_id, op.created_at, op.direction, op.stream_id, op.type_octet, op.flags, op.payload.size, op.payload)
+      end
     end
 
     # Runs a write closure on the writer connection; returns last_insert_rowid.
