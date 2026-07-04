@@ -58,7 +58,7 @@ describe Gori::Tui::Theme do
   end
 
   it "lists the available themes" do
-    Theme.available.should eq(["goridark", "goriday", "latte", "espresso", "tokyonight"])
+    Theme.available.should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn"])
   end
 
   it "swaps the active palette and bumps the revision" do
@@ -171,7 +171,7 @@ describe "Theme custom loading" do
     }) do
       Gori::Tui::Theme.load_custom
       avail = Gori::Tui::Theme.available
-      avail.first(5).should eq(["goridark", "goriday", "latte", "espresso", "tokyonight"]) # built-ins lead
+      avail.first(10).should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn"]) # built-ins lead
       avail.should contain("ocean")
       avail.should contain("badname")
       avail.should_not contain("broken")
@@ -297,17 +297,23 @@ describe "SettingsView theme list" do
       view = SettingsView.new
       view.reload(:theme)
       names = Gori::Tui::Theme.available # [..builtins.., ocean, ruby] (file-name order)
-      ocean_row = names.index("ocean").not_nil!
-      ruby_row = names.index("ruby").not_nil!
+      # The built-ins overflow the viewport, so the appended custom rows only render once
+      # the list scrolls; select the last theme to bring ocean+ruby into view.
+      (names.size - 1).times { view.move_field(1) }
 
       backend = MemoryBackend.new(80, 24)
       area = Rect.new(0, 0, 80, 24)
       view.render(Screen.new(backend), area)
       box = view.overlay_box(area)
       tick_x = box.right - 9 # first swatch tick = the theme's accent (see draw_swatch)
+      # The on-screen row for a theme index, via field_at's inverse (robust to scroll).
+      screen_row = ->(idx : Int32) do
+        (box.y + 2...box.y + box.h).find { |y| view.field_at(box, box.x + 5, y) == idx } ||
+          raise "theme index #{idx} is not visible in the rendered list"
+      end
       # each row's accent swatch is the theme's own colour, proving it's not the active palette
-      backend.fg_at(tick_x, box.y + 2 + ocean_row).should eq(Termisu::Color.from_hex("#00ffcc"))
-      backend.fg_at(tick_x, box.y + 2 + ruby_row).should eq(Termisu::Color.from_hex("#ff0033"))
+      backend.fg_at(tick_x, screen_row.call(names.index!("ocean"))).should eq(Termisu::Color.from_hex("#00ffcc"))
+      backend.fg_at(tick_x, screen_row.call(names.index!("ruby"))).should eq(Termisu::Color.from_hex("#ff0033"))
     end
   end
 end
