@@ -43,8 +43,8 @@ module Gori
         "view.reveal-ws", "Reveal whitespace", "Show whitespace/CR/LF as glyphs (·→␍␊) in req/res — for smuggling tests",
         Verb::Scope::Global, [Verb::Chord.new("b", ctrl: true)]) { |ctx| ctx.toggle_reveal; nil }
 
-      # Emergency full repaint (palette-only, no chord — a rare recovery action). Clears
-      # the terminal and redraws everything, wiping stray glyphs the diff-renderer can't
+      # Emergency full repaint (palette-only, no chord — a rare recovery action). Redraws
+      # every cell (a full sync, not a diff), wiping stray glyphs the diff-renderer can't
       # reach (e.g. after a binary response body desynced the terminal's cursor tracking).
       r.register Verb::Definition.new(
         "view.refresh", "Refresh screen", "Force a full repaint — recover from terminal corruption / stray glyphs",

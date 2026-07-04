@@ -252,6 +252,15 @@ describe Gori::Tui::HistoryView do
       view.render_detail(Screen.new(hex), Rect.new(0, 0, 80, 16))
       hex.contains?("00000000").should be_true     # offset column of the hex dump
       hex.contains?("binary body").should be_false # placeholder gone in hex mode
+
+      # Reveal-whitespace (b) must NOT re-render the raw binary as text — it renders
+      # bytes as text just like the normal path, so it stays gated to the placeholder.
+      view.toggle_detail_hex # back to text
+      view.reveal = true
+      ws = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(ws), Rect.new(0, 0, 80, 16))
+      ws.contains?("binary body").should be_true # placeholder, not raw bytes
+      ws.contains?("RIFF").should be_false
     end
   end
 
