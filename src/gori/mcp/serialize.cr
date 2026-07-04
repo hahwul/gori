@@ -23,6 +23,7 @@ module Gori
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
+          j.field "created_at_iso", unix_micros_iso(row.created_at)
           j.field "scheme", row.scheme
           j.field "method", row.method
           j.field "host", row.host
@@ -66,6 +67,7 @@ module Gori
         j.object do
           j.field "id", row.id
           j.field "created_at", row.created_at
+          j.field "created_at_iso", unix_micros_iso(row.created_at)
           j.field "scheme", row.scheme
           j.field "method", row.method
           j.field "host", row.host
@@ -216,6 +218,14 @@ module Gori
       # JSON-RPC line.
       def self.head_text(head : Bytes?) : String?
         head ? String.new(head).scrub : nil
+      end
+
+      # RFC3339 UTC for store timestamps (unix microseconds). Helps LLM clients
+      # that can't interpret raw microsecond integers.
+      def self.unix_micros_iso(us : Int64) : String
+        sec, micro = us.divmod(1_000_000)
+        t = Time.utc(1970, 1, 1) + sec.seconds + micro.microseconds
+        t.to_s("%Y-%m-%dT%H:%M:%S.%LZ")
       end
 
       # Emits a `field_name` field carrying a decoded-body summary. nil/empty body
