@@ -1,5 +1,20 @@
 require "./spec_helper"
 require "file_utils"
+require "socket"
+
+# Origin that accepts a connection and reads the request head but never responds,
+# so the proxy blocks on read_response_head with a Pending flow in the store.
+private def start_hanging_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      Gori::Proxy::Codec::Http1.read_head(conn)
+      sleep # hang — no response
+    end
+  end
+  port
+end
 
 private def with_root(&)
   root = File.tempname("gori-projects")
@@ -179,6 +194,73 @@ describe Gori::Session do
       s.toggle_capture.should be_true # now acquires the freed lock and starts
       s.capturing?.should be_true
       s.close
+    end
+  end
+
+  it "abandons orphan Pending flows when the session closes" do
+    with_root do |root|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      registry = Gori::Verbs.registry
+      project = Gori::ProjectRegistry.new(root).create("abandon") # persistent: dir survives close
+
+      session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, project)
+      pending_id = session.store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h", port: 80, method: "GET", target: "/hang",
+        http_version: "HTTP/1.1", head: "GET /hang HTTP/1.1\r\nHost: h\r\n\r\n".to_slice))
+      session.close
+
+      store = Gori::Store.open(project.db_path)
+      begin
+        detail = store.get_flow(pending_id).not_nil!
+        detail.row.state.should eq(Gori::Store::FlowState::Error)
+        detail.error.should eq("proxy stopped before response")
+      ensure
+        store.close
+      end
+    end
+  end
+
+  it "abandons a live Pending capture when the session closes during an upstream hang" do
+    with_root do |root|
+      origin_port = start_hanging_origin
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      registry = Gori::Verbs.registry
+      project = Gori::ProjectRegistry.new(root).create("hang-close")
+
+      session = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: 0), ca, registry, project)
+      proxy_port = session.proxy.port
+
+      spawn do
+        client = TCPSocket.new("127.0.0.1", proxy_port)
+        client << "GET /hang HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+        client.flush
+        client.close
+      rescue
+      end
+
+      pending_id = nil.as(Int64?)
+      40.times do
+        session.store.recent_flows(5).each do |row|
+          if row.state == Gori::Store::FlowState::Pending
+            pending_id = row.id
+            break
+          end
+        end
+        break if pending_id
+        sleep 0.05.seconds
+      end
+      pending_id.should_not be_nil
+
+      session.close
+
+      store = Gori::Store.open(project.db_path)
+      begin
+        detail = store.get_flow(pending_id.not_nil!).not_nil!
+        detail.row.state.should eq(Gori::Store::FlowState::Error)
+        detail.error.should eq("proxy stopped before response")
+      ensure
+        store.close
+      end
     end
   end
 end
