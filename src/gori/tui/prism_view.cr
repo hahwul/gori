@@ -1,6 +1,8 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./traffic_empty_state"
+require "../settings"
 require "../store"
 require "../scope"
 require "../prism"
@@ -280,12 +282,15 @@ module Gori::Tui
 
     # --- rendering ------------------------------------------------------------
 
-    def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
+    def render(screen : Screen, rect : Rect, focused : Bool = true, *,
+               listen : String? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
-      @detail ? render_detail(screen, rect, focused) : render_list(screen, rect, focused)
+      @detail ? render_detail(screen, rect, focused) : render_list(screen, rect, focused,
+        listen: listen, capturing: capturing)
     end
 
-    private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
+    private def render_list(screen : Screen, rect : Rect, focused : Bool, *,
+                            listen : String? = nil, capturing : Bool = true) : Nil
       render_mode_band(screen, rect)
       render_filter_bar(screen, rect, rect.y + 1)
       screen.text(rect.x + 1, rect.y + 2, "SEV", Theme.muted)
@@ -294,7 +299,7 @@ module Gori::Tui
       Frame.inner_divider(screen, rect, rect.y + 3, border: Frame.pane_border(focused))
       top = rect.y + 4
       list_h = {rect.bottom - top, 0}.max
-      return render_empty(screen, rect, top) if @issues.empty?
+      return render_empty(screen, rect, top, listen: listen, capturing: capturing) if @issues.empty?
 
       ensure_visible(list_h)
       (0...list_h).each do |i|
@@ -342,22 +347,25 @@ module Gori::Tui
       screen.text(title_x, y, issue.title, selected ? Theme.text_bright : Theme.text, bg, width: tw)
     end
 
-    private def render_empty(screen : Screen, rect : Rect, top : Int32) : Nil
+    private def render_empty(screen : Screen, rect : Rect, top : Int32, *,
+                             listen : String? = nil, capturing : Bool = true) : Nil
       # Branch on a real `/` query FIRST (querying-aware hint): a blank-query empty set
       # is caused by the triage lens or the scope lens, where "esc clears the filter"
       # would mislead. Mirrors HistoryView/SitemapView's ordering.
-      msg = if @mode.off?
-              "scanning is OFF · press m (or space → set mode) to enable passive scanning"
-            elsif !@query.blank?
-              @querying ? "no issues match · esc clears the filter" : "no issues match · / to edit the filter"
-            elsif @pre_scope_empty && !@all.empty? && !@show_closed
-              "no open issues · all #{@all.size} triaged · press a to show closed"
-            elsif scope_active?
-              "no issues in scope · ⇧S clears the scope lens"
-            else
-              "no issues yet · capture in-scope traffic and Prism flags issues passively"
-            end
-      screen.text(rect.x + 1, top, msg, Theme.muted)
+      list_rect = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
+      if !@query.blank?
+        msg = @querying ? "no issues match · esc clears the filter" : "no issues match · / to edit the filter"
+        screen.text(rect.x + 1, top, msg, Theme.muted)
+      elsif @pre_scope_empty && !@all.empty? && !@show_closed
+        screen.text(rect.x + 1, top, "no open issues · all #{@all.size} triaged · press a to show closed", Theme.muted)
+      elsif scope_active?
+        screen.text(rect.x + 1, top, "no issues in scope · ⇧S clears the scope lens", Theme.muted)
+      else
+        addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"
+        TrafficEmptyState.render(screen, list_rect, variant: :prism, listen: addr,
+          capturing: capturing, scan_on: !@mode.off?,
+          title: @mode.off? ? "scanning is OFF" : "no issues yet")
+      end
     end
 
     # Row 0: a filled MODE chip (with its `m` cycle chord) + detected-tech summary + the

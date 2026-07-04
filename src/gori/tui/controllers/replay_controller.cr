@@ -1,4 +1,5 @@
 require "../tab_controller"
+require "../traffic_empty_state"
 require "../replay_view"
 require "../subtab_picker"
 require "../../store"
@@ -146,7 +147,7 @@ module Gori::Tui
         v.render(screen, body_rect, focused: body_focused)
       else
         BodyChrome.framed(screen, body_rect, body_focused) do |inner|
-          screen.text(inner.x + 1, inner.y, "no replays — ^N new request · ^R from History", Theme.muted)
+          TrafficEmptyState.render(screen, inner, variant: :replay)
         end
       end
     end

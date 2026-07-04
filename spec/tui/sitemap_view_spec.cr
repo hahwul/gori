@@ -69,9 +69,15 @@ describe Gori::Tui::SitemapView do
     tmp_store do |store|
       view = SitemapView.new
       view.reload(store)
-      backend = MemoryBackend.new(70, 6)
-      view.render(Screen.new(backend), Rect.new(0, 0, 70, 6))
+      backend = MemoryBackend.new(70, 14)
+      view.render(Screen.new(backend), Rect.new(0, 0, 70, 14),
+        listen: "127.0.0.1:8070", capturing: true)
       backend.contains?("no traffic captured").should be_true
+      backend.contains?("127.0.0.1:8070").should be_true
+      backend.contains?("Open browser").should be_true
+      backend.contains?("SITE MAP").should be_true
+      backend.contains?("HOST / PATH").should be_true
+      backend.contains?("METHODS").should be_true
     end
   end
 

@@ -1,5 +1,8 @@
 require "./screen"
 require "./theme"
+require "./frame"
+require "./traffic_empty_state"
+require "../settings"
 require "../store"
 require "../ql"
 require "../scope"
@@ -377,12 +380,19 @@ module Gori::Tui
       {host, row.node.path}
     end
 
-    def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
+    def render(screen : Screen, rect : Rect, focused : Bool = true, *,
+               listen : String? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       render_ql_bar(screen, rect)
-      # The bar takes the top row; while querying a suggestion row sits below it.
-      offset = bar_rows
-      tree = Rect.new(rect.x, rect.y + offset, rect.w, {rect.h - offset, 0}.max)
+      hdr_y = rect.y + 1
+      if @querying
+        render_suggestions(screen, rect, hdr_y)
+        hdr_y += 1
+      end
+      render_column_headers(screen, rect, hdr_y)
+      Frame.inner_divider(screen, rect, hdr_y + 1, border: Frame.pane_border(focused))
+      tree_top = hdr_y + 2
+      tree = Rect.new(rect.x, tree_top, rect.w, {rect.bottom - tree_top, 0}.max)
       return if tree.h <= 0
 
       unless @loaded && !@hosts.empty?
@@ -394,7 +404,9 @@ module Gori::Tui
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             {"no endpoints in scope", nil}
           else
-            {"no traffic captured yet", "browse through the proxy, then return here"}
+            addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"
+            TrafficEmptyState.render(screen, tree, variant: :sitemap, listen: addr, capturing: capturing)
+            return
           end
         screen.text(tree.x + 1, tree.y, msg, Theme.muted)
         screen.text(tree.x + 1, tree.y + 2, hint, Theme.muted) if hint && tree.h > 2
@@ -523,10 +535,12 @@ module Gori::Tui
       end
     end
 
-    # Rows the QL bar occupies at the top of the body: 1 (the bar) + 1 suggestion
-    # row while querying. The tree renders below it; clicks subtract the same offset.
-    private def bar_rows : Int32
-      @querying ? 2 : 1
+    # The first tree-row screen-y — mirrors render: filter bar, optional suggestion
+    # row while querying, column header, then divider.
+    private def list_top(rect : Rect) : Int32
+      hdr_y = rect.y + 1
+      hdr_y += 1 if @querying
+      hdr_y + 2
     end
 
     private def render_ql_bar(screen : Screen, rect : Rect) : Nil
@@ -535,7 +549,6 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2)
-        render_suggestions(screen, rect, rect.y + 1)
         return
       end
 
@@ -569,18 +582,28 @@ module Gori::Tui
       end
     end
 
+    private def render_column_headers(screen : Screen, rect : Rect, hdr_y : Int32) : Nil
+      label_x = rect.x + 1
+      methods_w = 8
+      methods_x = {rect.right - methods_w, label_x + 12}.max
+      label_w = {methods_x - label_x - 1, 6}.max
+      screen.text(label_x, hdr_y, "HOST / PATH", Theme.muted, width: label_w) if label_w > 0
+      screen.text(methods_x, hdr_y, "METHODS", Theme.muted, width: methods_w)
+    end
+
     private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
       sugg = query_suggestions
       return if sugg.empty?
       screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: rect.w - 2)
     end
 
-    # Inverts render's tree placement (offset below the QL bar) to find which
+    # Inverts render's tree placement (offset below the chrome band) to find which
     # visible_rows index a click lands on; nil past the last populated row.
     def row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil if mx < rect.x || mx >= rect.right # reject the frame border columns (mirror the other list helpers)
-      i = my - (rect.y + bar_rows)
-      return nil if i < 0 || i >= {rect.h - bar_rows, 0}.max
+      top = list_top(rect)
+      i = my - top
+      return nil if i < 0 || i >= {rect.bottom - top, 0}.max
       idx = @scroll + i
       idx < visible_rows.size ? idx : nil
     end

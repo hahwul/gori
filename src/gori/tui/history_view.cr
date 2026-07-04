@@ -1,6 +1,8 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./traffic_empty_state"
+require "../settings"
 require "./highlight"
 require "./hex_view"
 require "./gutter"
@@ -620,7 +622,8 @@ module Gori::Tui
 
     # --- rendering -----------------------------------------------------------
 
-    def render_list(screen : Screen, rect : Rect, focused : Bool = true) : Nil
+    def render_list(screen : Screen, rect : Rect, focused : Bool = true, *,
+                    listen : String? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       render_ql_bar(screen, rect)
       hdr_y = rect.y + 1
@@ -688,7 +691,10 @@ module Gori::Tui
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             {"no flows in scope", "⇧S clears the scope lens"}
           else
-            {"waiting for traffic…", "browse through the proxy, then return here"}
+            addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"
+            list_rect = Rect.new(time_x, list_top, rect.right - time_x, list_h)
+            TrafficEmptyState.render(screen, list_rect, variant: :history, listen: addr, capturing: capturing)
+            return
           end
         screen.text(time_x, list_top, msg, Theme.muted)
         screen.text(time_x, list_top + 2, hint, Theme.muted) if list_h > 2

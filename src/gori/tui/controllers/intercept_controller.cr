@@ -46,8 +46,10 @@ module Gori::Tui
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      @intercept.reload(@host.session.interceptor)             # live refresh (50ms loop)
-      @intercept.render(screen, rect, focused: focus == :body) # view frames its own panes
+      @intercept.reload(@host.session.interceptor) # live refresh (50ms loop)
+      proxy = @host.session.proxy
+      @intercept.render(screen, rect, focused: focus == :body,
+        listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
     end
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool

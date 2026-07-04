@@ -450,6 +450,20 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "renders an empty-state when no flows are captured" do
+    tmp_store do |store|
+      view = HistoryView.new
+      view.reload(store)
+      backend = MemoryBackend.new(80, 14)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 80, 14),
+        listen: "127.0.0.1:8070", capturing: true)
+      backend.contains?("waiting for traffic").should be_true
+      backend.contains?("127.0.0.1:8070").should be_true
+      backend.contains?("Open browser").should be_true
+      backend.contains?("FLOW LOG").should be_true
+    end
+  end
+
   it "shows the scope-lens empty hint (not the filter hint) when querying with a blank query" do
     tmp_store do |store|
       add_flow(store, "GET", "/a", 200) # captured on host h.test
