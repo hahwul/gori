@@ -43,6 +43,13 @@ module Gori
         "prism.toggle-closed", "Show closed", "Toggle between open-only and all issues (incl. dismissed)",
         Verb::Scope::Prism, [Verb::Chord.new("a")]) { |ctx| ctx.prism_toggle_closed; nil }
 
+      # Toggle the scope lens from Prism too (History has its own ⇧S binding; Sitemap
+      # mirrors it). scope_toggle_lens reloads the active Prism list, and the bar shows
+      # the ⇧S chip — so the toggle is reachable where its effect is visible.
+      r.register Verb::Definition.new(
+        "prism.scope-toggle", "Toggle scope lens", "Filter issues to in-scope hosts on/off",
+        Verb::Scope::Prism, [Verb::Chord.new("s", shift: true)], mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
+
       # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
       # code, or a whole host, in one confirmed action. 'r' is reserved for replay-evidence
       # (parity with the detail scope).

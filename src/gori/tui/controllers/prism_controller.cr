@@ -14,6 +14,7 @@ module Gori::Tui
     def initialize(host : Host)
       super(host)
       @prism = PrismView.new
+      @prism.set_scope(@host.session.scope) # honour the lens + show its chip on the bar
       @reload_pending = false
     end
 

@@ -137,6 +137,36 @@ describe "ProjectView DESCRIPTION scrolling" do
   end
 end
 
+describe "ProjectView AT A GLANCE Technologies" do
+  it "drops tech facts fingerprinted only on out-of-scope hosts once the scope lens is ON" do
+    tmp_store do |store|
+      store.upsert_prism_issue(
+        Gori::Prism::Detection.new("tech_grpc", "tech", "a.test", "https://a.test/", "gRPC detected", Gori::Store::Severity::Info))
+      store.upsert_prism_issue(
+        Gori::Prism::Detection.new("tech_websocket", "tech", "b.test", "https://b.test/", "WebSocket detected", Gori::Store::Severity::Info))
+      project = Gori::Project.new("t", File.tempname("gori-projview-p"))
+
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "a.test")
+      view = ProjectView.new(scope, Gori::HostOverrides.load(store))
+      view.reload(project, store)
+      rect = Rect.new(0, 0, 120, 30)
+
+      b0 = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b0), rect, focused: false)
+      b0.contains?("gRPC").should be_true
+      b0.contains?("WebSocket").should be_true # lens off ⇒ every host's facts show
+
+      scope.enable
+      view.reload(project, store)
+      b1 = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b1), rect, focused: false)
+      b1.contains?("gRPC").should be_true
+      b1.contains?("WebSocket").should be_false # out-of-scope host's fact dropped
+    end
+  end
+end
+
 describe "ProjectView#pane_at" do
   it "splits the body into the overview band + SCOPE/HOST-OVERRIDES (left) / DESCRIPTION (right) cards" do
     tmp_store do |store|

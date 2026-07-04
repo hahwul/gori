@@ -2,6 +2,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "../store"
+require "../scope"
 require "../prism"
 require "../prism_query"
 
@@ -33,14 +34,29 @@ module Gori::Tui
       @preedit_q = ""
       @querying = false
       @show_closed = false # default lens: open issues only (triaged ones drop out of view)
+      @scope = nil.as(Scope?)
+      @pre_scope_empty = false
+    end
+
+    # Wires the shared session Scope in (mirrors HistoryView/SitemapView) so the ⇧S
+    # lens filters this tab too, and its chip is discoverable on the filter bar.
+    def set_scope(scope : Scope) : Nil
+      @scope = scope
     end
 
     def reload(store : Store) : Nil
       @all = store.prism_issues
       @mode = store.prism_mode
-      @tech = store.prism_tech_summary
+      @tech = scoped_tech(store.prism_tech_rows)
       apply_filter
       refresh_detail(store)
+    end
+
+    # Drop tech fingerprints seen only on out-of-scope hosts before summarizing —
+    # the MODE band's tech chips should track the same lens as the issue list.
+    private def scoped_tech(rows : Array({String, String, String?})) : Array(String)
+      rows = rows.select { |(_, host, _)| @scope.try(&.host_in_scope?(host)) == true } if scope_active?
+      Prism.tech_summary(rows.map { |(code, _, ev)| {code, ev} })
     end
 
     private def recount(base : Array(Store::PrismIssue)) : Nil
@@ -55,9 +71,17 @@ module Gori::Tui
     private def apply_filter : Nil
       filter = Prism::Filter.parse(@query)
       base = (@show_closed || filter.has_status_term?) ? @all : @all.select(&.status.open?)
+      # Remember whether the triage lens alone already emptied the list — render_empty
+      # needs this to tell "all triaged" apart from "scope lens narrowed it to nothing".
+      @pre_scope_empty = base.empty?
+      base = base.select { |i| @scope.try(&.host_in_scope?(i.host)) == true } if scope_active?
       recount(base)
       @issues = filter.apply(base)
       @selected = @selected.clamp(0, {@issues.size - 1, 0}.max)
+    end
+
+    private def scope_active? : Bool
+      @scope.try(&.active?) == true
     end
 
     def show_closed? : Bool
@@ -119,8 +143,10 @@ module Gori::Tui
       @querying
     end
 
+    # True when a `/` query OR the scope lens is narrowing the list — either way the
+    # filter bar switches to "showing a subset" mode (mirrors HistoryView/SitemapView).
     def filtering? : Bool
-      !@query.blank?
+      !@query.blank? || scope_active?
     end
 
     # Click hit-test: the MODE band (y), filter bar (y+1), header (y+2), divider (y+3),
@@ -317,12 +343,17 @@ module Gori::Tui
     end
 
     private def render_empty(screen : Screen, rect : Rect, top : Int32) : Nil
+      # Branch on a real `/` query FIRST (querying-aware hint): a blank-query empty set
+      # is caused by the triage lens or the scope lens, where "esc clears the filter"
+      # would mislead. Mirrors HistoryView/SitemapView's ordering.
       msg = if @mode.off?
               "scanning is OFF · press m (or space → set mode) to enable passive scanning"
-            elsif filtering?
+            elsif !@query.blank?
               @querying ? "no issues match · esc clears the filter" : "no issues match · / to edit the filter"
-            elsif !@all.empty? && !@show_closed
+            elsif @pre_scope_empty && !@all.empty? && !@show_closed
               "no open issues · all #{@all.size} triaged · press a to show closed"
+            elsif scope_active?
+              "no issues in scope · ⇧S clears the scope lens"
             else
               "no issues yet · capture in-scope traffic and Prism flags issues passively"
             end
@@ -369,15 +400,22 @@ module Gori::Tui
         screen.input_line(base, y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max)
         return
       end
+      # Right cluster: a scope-lens chip (always shown so the ⇧S toggle is discoverable,
+      # mirroring HistoryView/SitemapView) and, when filtering, the row count.
+      scope_on = scope_active?
+      chip, chip_color = scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted}
       rx = rect.right - 1
       if filtering?
         count = @issues.size.to_s
         screen.text({rx - count.size, rect.x}.max, y, count, Theme.muted)
         rx -= count.size + 2
       end
-      left_w = {rx - (rect.x + 1), 0}.max
+      scope_x = {rx - chip.size, rect.x}.max
+      screen.text(scope_x, y, chip, chip_color)
+      left_w = {scope_x - (rect.x + 1) - 1, 0}.max
       if filtering?
-        screen.text(rect.x + 1, y, ": #{@query}", Theme.text, width: left_w)
+        label = @query.blank? ? "(in-scope only)" : ": #{@query}"
+        screen.text(rect.x + 1, y, label, Theme.text, width: left_w)
       else
         screen.text(rect.x + 1, y, "/ filter  ·  severity:  status:open  category:tech  host:", Theme.muted, width: left_w)
       end

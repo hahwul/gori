@@ -545,20 +545,22 @@ module Gori
       set_setting(Prism::MODE_SETTING_KEY, mode.label)
     end
 
-    # Distinct (tech code, evidence) rows — the raw material for the project's
+    # Distinct (tech code, host, evidence) rows — the raw material for the project's
     # "representative technologies" summary (Prism.tech_summary maps them to labels).
-    def prism_tech_rows : Array({String, String?})
-      rows = [] of {String, String?}
-      @db.query("SELECT DISTINCT code, evidence FROM prism_issues WHERE category = 'tech' ORDER BY code") do |rs|
-        rs.each { rows << {rs.read(String), rs.read(String?)} }
+    # The host is kept so scope-aware callers (Prism tab, Project AT A GLANCE) can drop
+    # rows fingerprinted on out-of-scope hosts before summarizing.
+    def prism_tech_rows : Array({String, String, String?})
+      rows = [] of {String, String, String?}
+      @db.query("SELECT DISTINCT code, host, evidence FROM prism_issues WHERE category = 'tech' ORDER BY code") do |rs|
+        rs.each { rows << {rs.read(String), rs.read(String), rs.read(String?)} }
       end
       rows
     rescue
-      [] of {String, String?}
+      [] of {String, String, String?}
     end
 
     def prism_tech_summary : Array(String)
-      Prism.tech_summary(prism_tech_rows)
+      Prism.tech_summary(prism_tech_rows.map { |(code, _, ev)| {code, ev} })
     end
 
     private def read_prism_issue(rs : DB::ResultSet) : PrismIssue
