@@ -20,7 +20,7 @@ module Gori
         row = detail.row
         head = detail.request_head
         body = detail.request_body
-        # The captured body is capped at CAPTURE_MAX (8 MiB). If it was truncated, a faithful
+        # The captured body is capped at CAPTURE_MAX. If it was truncated, a faithful
         # h1 replay would BLOCK the origin waiting for bytes that no longer exist (a
         # Content-Length over-promising, or a chunked stream cut before its 0-chunk). Byte-
         # exactness is already lost at the cap, so re-frame the head to a fixed Content-Length

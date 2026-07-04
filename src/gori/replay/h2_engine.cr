@@ -24,7 +24,7 @@ module Gori
       # are NOT flow-controlled, so a CONTINUATION flood grows the header block
       # unboundedly, and a streaming/over-large body has no aggregate ceiling.
       MAX_HEADER_BLOCK = 1 << 20         # 1 MiB
-      MAX_BODY         = 8 * 1024 * 1024 # 8 MiB (matches Codec::Body::CAPTURE_MAX)
+      MAX_BODY         = 8 * 1024 * 1024 # 8 MiB (replay response read ceiling; independent of the proxy-capture cap)
       # Hard ceiling on frames processed for one response. HEADERS/DATA are byte-capped
       # above, but non-terminal frames (PING/PRIORITY/WINDOW_UPDATE/SETTINGS on any stream)
       # are neither — a hostile origin can stream them forever without END_STREAM, and the

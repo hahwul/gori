@@ -194,6 +194,40 @@ describe Gori::Store do
     end
   end
 
+  it "V25 empties duplicated h2 DATA-frame payloads while preserving their length" do
+    path = File.tempname("gori-v25", ".db")
+    db = DB.open("sqlite3:#{path}?journal_mode=wal")
+    begin
+      # bring the schema up to V24 (the state just before the reclaim migration)
+      Gori::Store::Schema::MIGRATIONS[0..23].each_with_index do |stmts, i|
+        db.transaction do |tx|
+          stmts.each { |s| tx.connection.exec(s) }
+          tx.connection.exec("PRAGMA user_version = #{i + 1}")
+        end
+      end
+
+      # OLD writer behaviour: DATA (type 0) stored its full payload; HEADERS (type 1) too.
+      db.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) VALUES (?,?,?,?,?,?,?,?)",
+        1_i64, 1_i64, "in", 1_i64, 0, 1, "hello".bytesize, "hello".to_slice) # DATA
+      db.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) VALUES (?,?,?,?,?,?,?,?)",
+        1_i64, 2_i64, "in", 1_i64, 1, 4, "hdr".bytesize, "hdr".to_slice) # HEADERS
+
+      Gori::Store::Schema.migrate!(db) # runs V25
+      db.scalar("PRAGMA user_version").as(Int64).should eq(Gori::Store::Schema::VERSION)
+
+      # DATA payload emptied, but its length (the detail-view timeline value) preserved
+      db.scalar("SELECT length FROM h2_frames WHERE type = 0").as(Int64).should eq("hello".bytesize)
+      db.query_one("SELECT payload FROM h2_frames WHERE type = 0", as: Bytes).size.should eq(0)
+      # non-DATA payloads are retained verbatim
+      String.new(db.query_one("SELECT payload FROM h2_frames WHERE type = 1", as: Bytes)).should eq("hdr")
+    ensure
+      db.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
   it "bounds sitemap_entries by the limit so a huge history can't materialize unbounded" do
     with_store do |store|
       5.times { |i| store.insert_flow(sample_request(host: "h#{i}.test", target: "/p#{i}")) }

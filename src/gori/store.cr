@@ -1,5 +1,6 @@
 require "db"
 require "sqlite3"
+require "log"
 require "json"
 require "./store/models"
 require "./store/safe_regexp"
@@ -113,8 +114,34 @@ module Gori
       # Make REGEXP byte-safe on every connection before any query runs (so a binary
       # body can't crash a `body~`/`header~` scan or a regex scope rule). See SafeRegexp.
       SafeRegexp.install(db)
+      pre_version = db.scalar("PRAGMA user_version").as(Int64).to_i
       Schema.migrate!(db)
+      # V25 empties duplicated h2 DATA payloads (often ~40% of the DB), freeing pages but not
+      # shrinking the file — reclaim to disk once, only when an EXISTING db (pre_version >= 1)
+      # just crossed into the reclaim version. A fresh db (0) has nothing to reclaim; a db
+      # already at/after it won't re-run.
+      reclaim_to_disk(db) if pre_version >= 1 && pre_version < Schema::RECLAIM_VERSION
       new(db, events, prism_events, retention_flows)
+    end
+
+    # Ceiling on the db we auto-VACUUM on the boot path. VACUUM rewrites the WHOLE file
+    # (disk-bandwidth-bound) and holds an exclusive lock, so above this we SKIP it rather than
+    # freeze startup on a huge project — the freed pages are still reused by later writes, and
+    # the operator can VACUUM manually.
+    VACUUM_MAX_BYTES = 512_i64 * 1024 * 1024
+
+    # One-time disk reclaim after the V25 payload-emptying migration. NOT run inside migrate!'s
+    # transaction (VACUUM is illegal there). Best-effort: a failure (disk full, or a concurrent
+    # instance holding the db past busy_timeout) leaves the db fully usable, just un-shrunk.
+    private def self.reclaim_to_disk(db : DB::Database) : Nil
+      bytes = db.scalar("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()").as(Int64)
+      if bytes > VACUUM_MAX_BYTES
+        Log.info { "store: skipping post-migration VACUUM (#{bytes // (1024 * 1024)} MiB > #{VACUUM_MAX_BYTES // (1024 * 1024)} MiB cap); freed pages will be reused, or VACUUM manually to reclaim disk" }
+        return
+      end
+      db.exec("VACUUM")
+    rescue ex
+      Log.warn(exception: ex) { "store: post-migration VACUUM failed (non-fatal; db un-shrunk)" }
     end
 
     # Count of write batches that failed (e.g. disk full) — surfaced in the TUI
@@ -1347,7 +1374,7 @@ module Gori
       # row (update_one only carries the response), capped in SQL so a multi-MB upload
       # isn't pulled back whole. DELETE is a cheap tombstone (contentless_delete=1) and
       # also makes a double update_response idempotent (last write wins).
-      resp_fts = binary_content?(resp.content_type) ? "" : fts_text(resp.body)
+      resp_fts = (binary_content?(resp.content_type) || encoded?(head_markers(resp.head)[1])) ? "" : fts_text(resp.body)
       req_fts = request_fts_from_row(conn, resp.flow_id)
       conn.exec("DELETE FROM flows_fts WHERE rowid = ?", resp.flow_id)
       conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, ?)", resp.flow_id, req_fts, resp_fts)
@@ -1365,7 +1392,7 @@ module Gori
       return "" unless row
       head, body = row
       return "" if body.nil? || body.empty?
-      binary_content?(head_content_type(head)) ? "" : String.new(body)
+      skip_body_fts?(head) ? "" : String.new(body)
     end
 
     # Body text fed to the FTS index, capped per side so a large body can't bloat
@@ -1381,7 +1408,7 @@ module Gori
     private def request_fts(req : CapturedRequest) : String
       body = req.body
       return "" if body.nil? || body.empty?
-      binary_content?(head_content_type(req.head)) ? "" : fts_text(body)
+      skip_body_fts?(req.head) ? "" : fts_text(body)
     end
 
     # Skip body FTS for clearly-binary content types (images/media/archives/
@@ -1396,15 +1423,39 @@ module Gori
         c.starts_with?("application/wasm")
     end
 
-    private def head_content_type(head : Bytes) : String?
+    # Skip FTS for a body that is binary by content type OR compressed by Content-Encoding —
+    # both markers read in ONE pass over the head. A non-identity Content-Encoding means the
+    # body is stored in COMPRESSED wire form: high-entropy bytes that explode the trigram
+    # index while being unsearchable for readable text (you can't `body:` a gzip stream).
+    private def skip_body_fts?(head : Bytes) : Bool
+      ct, ce = head_markers(head)
+      binary_content?(ct) || encoded?(ce)
+    end
+
+    # {Content-Type, Content-Encoding} header values from a raw head BLOB (either nil), read
+    # in a single pass so a skip decision costs one scan, not one per header.
+    private def head_markers(head : Bytes) : {String?, String?}
+      ct = nil.as(String?)
+      ce = nil.as(String?)
       String.new(head).each_line do |raw|
         line = raw.chomp
         break if line.empty?
         idx = line.index(':')
         next unless idx
-        return line[(idx + 1)..].strip if line[0...idx].strip.downcase == "content-type"
+        case line[0...idx].strip.downcase
+        when "content-type"     then ct = line[(idx + 1)..].strip
+        when "content-encoding" then ce = line[(idx + 1)..].strip
+        end
       end
-      nil
+      {ct, ce}
+    end
+
+    # A non-identity Content-Encoding ⇒ the body is compressed (skip it from FTS). `ce` comes
+    # from head_markers already stripped, so downcase alone suffices.
+    private def encoded?(ce : String?) : Bool
+      return false unless ce
+      c = ce.downcase
+      !c.empty? && c != "identity"
     end
 
     private def insert_ws_one(conn : DB::Connection, op : InsertWs) : Nil
@@ -1420,9 +1471,19 @@ module Gori
     # Same columns/casts the old synchronous insert used (so h2_frames readback /
     # to_bytes round-trips are unchanged).
     private def insert_h2_frame_one(conn : DB::Connection, op : InsertH2Frame) : Nil
+      # DATA frames (type 0) duplicate flows.response_body / request_body byte-for-byte and
+      # are the dominant h2_frames byte cost. The frame-log detail view renders the `length`
+      # COLUMN, never the payload, so store an EMPTY payload for them while keeping the TRUE
+      # byte count in `length` (op.payload.size). HEADERS/CONTINUATION/SETTINGS/etc keep their
+      # payload — tiny, and their bytes exist nowhere else. For DATA use the SQL literal X''
+      # (a non-null zero-length BLOB the NOT NULL column accepts): binding Bytes.empty would
+      # bind SQL NULL (empty slice ⇒ null pointer) and violate the constraint.
+      data = op.type_octet.zero?
+      args = [op.conn_id, op.created_at, op.direction, op.stream_id,
+              op.type_octet, op.flags, op.payload.size] of DB::Any
+      args << op.payload unless data
       conn.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
-                "VALUES (?,?,?,?,?,?,?,?)",
-        op.conn_id, op.created_at, op.direction, op.stream_id, op.type_octet, op.flags, op.payload.size, op.payload)
+                "VALUES (?,?,?,?,?,?,?,#{data ? "X''" : "?"})", args: args)
     end
 
     # Runs a write closure on the writer connection; returns last_insert_rowid.

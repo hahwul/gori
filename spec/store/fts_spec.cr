@@ -74,6 +74,45 @@ describe "contentless FTS (V24)" do
     end
   end
 
+  it "skips a content-encoded (compressed) response body — unsearchable and index-bloating" do
+    fts_store do |store|
+      id = store.insert_flow(req_with_body("/gz", nil))
+      # A text content type, but Content-Encoding present ⇒ the stored body is compressed
+      # wire bytes: high-entropy (trigram-index bloat) and impossible to body-search for
+      # readable text. It must be skipped like a binary body.
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-encoding: gzip\r\n\r\n".to_slice,
+        body: "compressedbodytoken".to_slice, content_type: "text/html"))
+      store.flush
+      body_hits(store, "compressedbodytoken").should be_empty
+    end
+  end
+
+  it "skips a content-encoded request body too" do
+    fts_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "POST", target: "/up", http_version: "HTTP/1.1",
+        head: "POST /up HTTP/1.1\r\nHost: h.test\r\ncontent-encoding: gzip\r\n\r\n".to_slice,
+        body: "gzreqtoken".to_slice))
+      store.flush
+      body_hits(store, "gzreqtoken").should be_empty
+    end
+  end
+
+  it "still indexes an identity/uncompressed text response (regression guard)" do
+    fts_store do |store|
+      id = store.insert_flow(req_with_body("/id", nil))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-encoding: identity\r\n\r\n".to_slice,
+        body: "identitybodytoken".to_slice, content_type: "text/html"))
+      store.flush
+      body_hits(store, "identitybodytoken").should eq([id]) # identity ⇒ NOT skipped
+    end
+  end
+
   it "removes FTS rows on prune (contentless range delete leaves no dangling match)" do
     fts_store(retention: 5, prune_interval: 10) do |store|
       first = store.insert_flow(req_with_body("/old", "prunedbodytoken"))
