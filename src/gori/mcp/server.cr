@@ -28,9 +28,11 @@ module Gori
       EMPTY_ARGS = JSON::Any.new({} of String => JSON::Any)
 
       def initialize(@store : Store, *, allow_actions : Bool, verify_upstream : Bool,
+                     project_name : String? = nil, db_path : String? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
-        @tools = Tools.new(@store, allow_actions, verify_upstream)
+        @tools = Tools.new(@store, allow_actions, verify_upstream,
+          project_name: project_name, db_path: db_path)
         @initialized = false
       end
 
@@ -45,6 +47,7 @@ module Gori
       end
 
       private def handle_line(line : String) : Nil
+        id = nil.as(JSON::Any?)
         root = begin
           JSON.parse(line)
         rescue JSON::ParseException
@@ -70,6 +73,8 @@ module Gori
         end
       rescue ex
         Log.error(exception: ex) { "dispatch error" }
+        # Never leave a request with an id hanging — the client would block forever.
+        write_error(id, -32603, "Internal error: #{ex.message}") if id
       end
 
       private def handle_request(id : JSON::Any, method : String, params : JSON::Any?) : Nil
@@ -113,10 +118,12 @@ module Gori
       # disabled by read-only mode, rather than discovering it only on a rejected call.
       private def instructions_text : String
         base = "gori MCP exposes the active project's captured HTTP traffic " \
-               "(history, flows, sitemap, scope, findings)."
+               "(history, flows, sitemap, scope, findings). Call ql_reference before " \
+               "writing list_history/list_sitemap queries. Timestamps include unix " \
+               "microseconds plus *_iso RFC3339 fields where available."
         if @allow_actions
-          "#{base} Action tools are enabled: send_request, fuzz_*, mine_*, and " \
-          "create/update_finding make real outbound requests or mutate findings."
+          "#{base} Action tools are enabled: send_request (supports flow_id replay), " \
+          "fuzz_*, mine_*, and create/update_finding make real outbound requests or mutate findings."
         else
           "#{base} Read-only mode: action tools (send_request, fuzz_*, mine_*, " \
           "create/update_finding) are disabled — restart without --read-only to enable them."

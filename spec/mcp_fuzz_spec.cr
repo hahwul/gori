@@ -82,6 +82,20 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "accepts payloads as a JSON array (not only a JSON string)" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      args = {
+        "template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"      => "http://127.0.0.1:#{port}",
+        "payloads" => [{"list" => ["only"]}],
+      }.to_json
+      start = call_json(tools, "fuzz_start", args)
+      start["total"].as_i.should eq(1)
+    end
+  end
+
   it "rejects bad args, and gates the tool under --read-only" do
     with_store do |store|
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)

@@ -39,7 +39,8 @@ module Gori
       MINE_MAX_CONCURRENCY =         100
       MINE_MAX_STORED      =      10_000
 
-      def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool)
+      def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool,
+                     @project_name : String? = nil, @db_path : String? = nil)
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
         @job_seq = 0
@@ -107,11 +108,16 @@ module Gori
             "'header:set-cookie', 'body~secret\\d+' — `~` is regex, dur is ms); " \
             "empty query returns the most recent. Returns light rows (no bodies); " \
             "use get_flow for full detail. Paginate by passing the oldest id seen as " \
-            "`before_id` (rows are newest-first); a page shorter than `limit` means no older rows." do |s|
+            "`before_id` (rows are newest-first); a page shorter than `limit` means no older rows. " \
+            "Call ql_reference for full QL syntax." do |s|
             s.field "query", strprop("gori QL filter; empty = most recent")
             s.field "limit", intprop("max rows (default 50, max 500)")
-            s.field "before_id", intprop("cursor: only flows with id < this (pagination; ignored when query is set)")
+            s.field "before_id", intprop("cursor: only flows with id < this (pagination; works with query too)")
           end
+
+          tool j, "ql_reference",
+            "Return the gori QL (query language) syntax reference for filtering flows " \
+            "(list_history, list_sitemap). Call this before writing complex queries." { }
 
           tool j, "get_flow",
             "Full request+response for one flow id (heads + decoded bodies). " \
@@ -127,7 +133,12 @@ module Gori
             s.field "limit", intprop("max entries (default 200, max 5000)")
           end
 
-          tool j, "list_findings", "List triage findings (severity + status), newest/most-severe first." { }
+          tool j, "list_findings",
+            "List triage findings (severity + status), newest/most-severe first. " \
+            "Returns an object {findings, returned, offset, total} — not a bare array." do |s|
+            s.field "limit", intprop("max rows (default 100, max 500)")
+            s.field "offset", intprop("start row (default 0)")
+          end
 
           tool j, "get_finding", "Get one finding by id." do |s|
             s.field "id", intprop("finding id"), required: true
@@ -135,20 +146,25 @@ module Gori
 
           tool j, "list_scope", "List the project's scope include/exclude rules." { }
 
-          tool j, "project_info", "Project totals: flow count, finding count, captured bytes, earliest capture time." { }
+          tool j, "project_info",
+            "Project totals: flow count, finding count, captured bytes, earliest capture time, " \
+            "plus which project/db is being served (important when no --project was passed)." { }
 
           if @allow_actions
             tool j, "send_request",
               "Send/replay an HTTP request to its origin and return the response. " \
-              "ACTIVE: makes a real outbound request from this host. Give an " \
-              "absolute `url`; optionally method/headers/body, or a verbatim `raw` " \
-              "request. Host + Content-Length are auto-added when omitted." do |s|
-              s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x"), required: true
+              "ACTIVE: makes a real outbound request from this host. Either pass " \
+              "`flow_id` to replay a captured flow byte-exact, OR give an absolute " \
+              "`url` with optional method/headers/body, or a verbatim `raw` request. " \
+              "When `flow_id` is set, url/method/headers/body/raw are ignored. " \
+              "Host + Content-Length are auto-added when omitted on the url path." do |s|
+              s.field "flow_id", intprop("replay a captured flow by id (no url needed; like TUI replay)")
+              s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x")
               s.field "method", strprop("HTTP method (default GET)")
               s.field "headers", objprop("header name->value map")
               s.field "body", strprop("request body, sent as-is")
               s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
-              s.field "http2", boolprop("use real HTTP/2 (default false)")
+              s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
             end
 
@@ -179,9 +195,9 @@ module Gori
               s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
               s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
               s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
-              s.field "payloads", strprop(%(JSON array of sets, e.g. [{"list":["a","b"]},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}]))
-              s.field "match", strprop(%(JSON: keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"}))
-              s.field "filter", strprop(%(JSON: drop responses matching, same shape as match))
+              s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string))
+              s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string))
+              s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))
               s.field "extract", strprop("regex; grep a value (capture group 1) from each response")
               s.field "concurrency", intprop("parallel requests (default 20, max #{FUZZ_MAX_CONCURRENCY})")
               s.field "rate", intprop("requests/sec cap (0 = unlimited)")
@@ -266,10 +282,11 @@ module Gori
         when "list_history"  then list_history(h)
         when "get_flow"      then get_flow(h)
         when "list_sitemap"  then list_sitemap(h)
-        when "list_findings" then list_findings
+        when "list_findings" then list_findings(h)
         when "get_finding"   then get_finding(h)
         when "list_scope"    then list_scope
         when "project_info"  then project_info
+        when "ql_reference"  then ql_reference
         end
       end
 
@@ -295,12 +312,15 @@ module Gori
 
       private def list_history(h) : Result
         limit = clamp(int(h, "limit"), 50, 500)
+        before_id = int(h, "before_id")
         query = str(h, "query")
         rows =
           if query && !query.strip.empty?
-            @store.search(QL.parse(query), limit)
+            filter = QL.parse(query)
+            return ql_error(query) if QL.reject_empty?(query, filter)
+            @store.search(filter, limit, before_id)
           else
-            @store.recent_flows(limit, int(h, "before_id"))
+            @store.recent_flows(limit, before_id)
           end
         Result.new(JSON.build { |j| j.array { rows.each { |r| Serialize.flow_row(j, r) } } })
       end
@@ -319,7 +339,14 @@ module Gori
       private def list_sitemap(h) : Result
         limit = clamp(int(h, "limit"), 200, 5000)
         query = str(h, "query")
-        filter = query && !query.strip.empty? ? QL.parse(query) : QL::EMPTY
+        filter =
+          if query && !query.strip.empty?
+            parsed = QL.parse(query)
+            return ql_error(query) if QL.reject_empty?(query, parsed)
+            parsed
+          else
+            QL::EMPTY
+          end
         entries = @store.sitemap_entries(filter, limit)
         Result.new(JSON.build do |j|
           j.array do
@@ -330,8 +357,19 @@ module Gori
         end)
       end
 
-      private def list_findings : Result
-        Result.new(JSON.build { |j| j.array { @store.findings.each { |f| Serialize.finding(j, f, @store) } } })
+      private def list_findings(h) : Result
+        offset = clamp_nonneg(int(h, "offset"))
+        limit = clamp(int(h, "limit"), 100, 500)
+        all = @store.findings
+        page = all[offset, limit]? || [] of Store::Finding
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field("findings") { j.array { page.each { |f| Serialize.finding(j, f, @store) } } }
+            j.field "returned", page.size
+            j.field "offset", offset
+            j.field "total", all.size
+          end
+        end)
       end
 
       private def get_finding(h) : Result
@@ -360,19 +398,35 @@ module Gori
       private def project_info : Result
         Result.new(JSON.build do |j|
           j.object do
+            j.field "project", @project_name
+            j.field "db_path", @db_path
+            j.field "read_only", !@allow_actions
             j.field "flows", @store.count
             j.field "findings", @store.count_findings
             j.field "total_bytes", @store.total_size
             j.field "earliest_created_at", @store.earliest_created_at
+            if ea = @store.earliest_created_at
+              j.field "earliest_created_at_iso", Serialize.unix_micros_iso(ea)
+            end
           end
         end)
+      end
+
+      private def ql_reference : Result
+        Result.new(JSON.build { |j| j.object { j.field "reference", QL::REFERENCE } })
+      end
+
+      private def ql_error(query : String) : Result
+        Result.new(
+          "invalid query #{query.inspect}: did not match any field " \
+          "(call ql_reference; e.g. host:example.com status:>=500 method:POST)",
+          is_error: true)
       end
 
       # --- action / write tools (gated) ---------------------------------------
 
       private def send_request(h) : Result
-        built = RequestBuilder.build(h)
-        http2 = bool(h, "http2") || false
+        built, http2 = build_send_request(h)
         verify = @verify_upstream && !(bool(h, "insecure") || false)
         result =
           if http2
@@ -389,6 +443,24 @@ module Gori
         # actionable message instead of letting call()'s generic "tool error:"
         # wrapper swallow it, matching fuzz_start's FuzzArgError handling.
         Result.new(ex.message || "invalid request arguments", is_error: true)
+      end
+
+      # Either replays a captured flow (flow_id) or builds from url/raw/method args.
+      private def build_send_request(h) : {RequestBuilder::Built, Bool}
+        if present?(h, "flow_id")
+          id = int(h, "flow_id")
+          raise Gori::Error.new(id_error(h, "flow_id")) unless id
+          detail = @store.get_flow(id)
+          raise Gori::Error.new("no flow with id #{id}") unless detail
+          flow = Replay::FlowRequest.build(detail)
+          scheme, host, port = Replay::FlowRequest.parse_target(flow.target)
+          raise Gori::Error.new("could not parse target from flow #{id}") if host.empty?
+          http2 = bool(h, "http2") || flow.http2
+          {RequestBuilder::Built.new(flow.bytes, scheme, host, port), http2}
+        else
+          built = RequestBuilder.build(h)
+          {built, bool(h, "http2") || false}
+        end
       end
 
       private def create_finding(h) : Result
@@ -762,10 +834,18 @@ module Gori
       end
 
       private def fuzz_sets(h) : Array(Fuzz::PayloadSet)
-        raw = str(h, "payloads")
-        return [] of Fuzz::PayloadSet if raw.nil? || raw.strip.empty?
-        parsed = JSON.parse(raw) rescue raise FuzzArgError.new("'payloads' must be a JSON array of sets")
-        arr = parsed.as_a? || raise FuzzArgError.new("'payloads' must be a JSON array")
+        raw = h["payloads"]?
+        return [] of Fuzz::PayloadSet unless raw
+        arr =
+          if a = raw.as_a?
+            a
+          elsif s = raw.as_s?
+            return [] of Fuzz::PayloadSet if s.strip.empty?
+            parsed = JSON.parse(s) rescue raise FuzzArgError.new("'payloads' must be a JSON array of sets")
+            parsed.as_a? || raise FuzzArgError.new("'payloads' must be a JSON array")
+          else
+            raise FuzzArgError.new("'payloads' must be a JSON array of sets (not a bare string/scalar)")
+          end
         arr.map { |spec| fuzz_set_from(spec) }
       end
 
@@ -812,14 +892,14 @@ module Gori
 
       private def fuzz_matcher(h) : Fuzz::Matcher
         m = Fuzz::Matcher.new(keep_bodies: :none)
-        if c = fuzz_conditions(str(h, "match"), "match")
+        if c = fuzz_conditions(h["match"]?, "match")
           m.match_status = c[:status]
           m.match_size = c[:size]
           m.match_words = c[:words]
           m.match_lines = c[:lines]
           m.match_regex = fuzz_regex(c[:regex], "match")
         end
-        if c = fuzz_conditions(str(h, "filter"), "filter")
+        if c = fuzz_conditions(h["filter"]?, "filter")
           m.filter_status = c[:status]
           m.filter_size = c[:size]
           m.filter_words = c[:words]
@@ -832,9 +912,17 @@ module Gori
 
       private alias FuzzConds = NamedTuple(status: String?, size: String?, words: String?, lines: String?, regex: String?)
 
-      private def fuzz_conditions(raw : String?, which : String) : FuzzConds?
-        return nil if raw.nil? || raw.strip.empty?
-        obj = (JSON.parse(raw).as_h? rescue nil) || raise FuzzArgError.new("'#{which}' must be a JSON object")
+      private def fuzz_conditions(raw : JSON::Any?, which : String) : FuzzConds?
+        return nil unless raw
+        obj =
+          if h = raw.as_h?
+            h
+          elsif s = raw.as_s?
+            return nil if s.strip.empty?
+            (JSON.parse(s).as_h? rescue nil) || raise FuzzArgError.new("'#{which}' must be a JSON object")
+          else
+            raise FuzzArgError.new("'#{which}' must be a JSON object (not a bare string/scalar)")
+          end
         {status: jstr(obj, "status"), size: jstr(obj, "size"), words: jstr(obj, "words"),
          lines: jstr(obj, "lines"), regex: obj["regex"]?.try(&.as_s?)}
       end
@@ -1002,6 +1090,15 @@ module Gori
 
       private def objprop(desc : String) : JSON::Any
         JSON.parse(%({"type":"object","description":#{desc.to_json},"additionalProperties":{"type":"string"}}))
+      end
+
+      private def arrprop(desc : String) : JSON::Any
+        JSON.parse(%({"type":"array","description":#{desc.to_json},"items":{"type":"object"}}))
+      end
+
+      # Accepts a JSON object directly or a JSON-encoded string (LLM clients vary).
+      private def jsonprop(desc : String) : JSON::Any
+        JSON.parse(%({"description":#{desc.to_json},"oneOf":[{"type":"object"},{"type":"string"}]}))
       end
 
       private def prop(type : String, desc : String) : JSON::Any

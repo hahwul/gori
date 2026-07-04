@@ -28,6 +28,37 @@ module Gori
 
     EMPTY = Filter.new("1", [] of DB::Any)
 
+    # One-page reference for MCP clients / models. Kept in sync with the parser above.
+    REFERENCE = <<-DOC
+      gori QL filters captured HTTP flows (AND within a group, OR between groups):
+
+        host:example.com status:>=500 method:POST   # AND of terms
+        host:api OR status:5xx                        # OR of AND-groups
+        -host:cdn login                               # negation + free-text search
+
+      Fields (use : for value match, ~ for regex):
+        host path method scheme status size reqsize respsize dur header body url
+
+      Comparisons (status size reqsize respsize dur):
+        status:>=500  size:>10000  dur:>=500  dur:<2s  (dur defaults to ms; suffix ms|s)
+
+      Status class shorthand: status:5xx  status:4xx
+
+      Regex (~): host~^api\\.  body~secret\\d+  path~/admin
+
+      Free text (no field:): matches method, host, or target (case-insensitive substring).
+
+      Invalid syntax (e.g. status:>=foo with no numeric value) is rejected — it does NOT match all flows.
+      A mixed query (host:beta status:>=foo) silently drops only the bad terms and applies the rest.
+      DOC
+
+    # A non-blank user query must compile to at least one clause. EMPTY means every
+    # token was dropped (bad field, bad numeric, invalid regex) — matching all flows,
+    # which is the opposite of what the caller asked for.
+    def self.reject_empty?(query : String, filter : Filter) : Bool
+      !query.strip.empty? && filter == EMPTY
+    end
+
     # Combines two filters with AND (used to layer the Scope lens over a query).
     def self.and(a : Filter, b : Filter) : Filter
       return b if a.sql == "1"

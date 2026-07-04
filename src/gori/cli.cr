@@ -277,8 +277,8 @@ module Gori
       Log.setup(:info, Log::IOBackend.new(STDERR))
       Settings.load # send_request's replay engines read the upstream-proxy setting from here
 
-      resolved = resolve_mcp_db(db_path, project)
-      Log.info { "mcp: serving #{resolved} (actions=#{!read_only})" }
+      resolved, project_name = resolve_mcp_db(db_path, project)
+      Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name} (actions=#{!read_only})" }
       # Make the implicit fallback visible (STDERR only — STDOUT is the JSON-RPC stream):
       # with no --db/--project the most-recently-used project (or the default db) is served,
       # which can silently be an empty database an AI client then queries as if it were real.
@@ -294,7 +294,8 @@ module Gori
         end
       Log.warn { "mcp: #{resolved} has no captured flows (empty database)" } if store.count.zero?
       begin
-        server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream)
+        server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
+          project_name: project_name, db_path: resolved)
         server.run # blocks until STDIN EOF (client closed)
       ensure
         store.close
@@ -303,13 +304,13 @@ module Gori
 
     # Resolves which project DB `gori mcp` serves: explicit --db wins, then a named
     # --project, then the most-recently-used project, then the default headless db.
-    private def self.resolve_mcp_db(db : String?, project : String?) : String
+    private def self.resolve_mcp_db(db : String?, project : String?) : {String, String?}
       if d = db
         unless d.empty? # an empty --db= falls through to project/MRU (Crystal: "" is truthy)
           # Validate like `gori run` does — else SQLite silently CREATEs a fresh empty DB on a
           # typo'd path and the client queries an empty dataset believing it's the real capture.
           abort "gori mcp: --db is not a readable file: #{d}" unless File.file?(d)
-          return d
+          return {d, nil}
         end
       end
       Paths.ensure_dirs
@@ -318,9 +319,10 @@ module Gori
         # Case-insensitive, matching `gori run` (project slugs are always lowercased).
         proj = registry.list.find { |p| p.name.downcase == name.downcase }
         abort "gori mcp: no such project: #{name}" unless proj
-        return proj.db_path
+        return {proj.db_path, proj.name}
       end
-      registry.list.first?.try(&.db_path) || Paths.default_db
+      mru = registry.list.first?
+      {mru.try(&.db_path) || Paths.default_db, mru.try(&.name)}
     end
 
     private def self.run_update(args : Array(String)) : Nil

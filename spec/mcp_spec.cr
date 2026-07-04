@@ -110,6 +110,8 @@ describe Gori::MCP::Server do
         names = full.map(&.["name"].as_s)
         names.should contain("list_history")
         names.should contain("get_flow")
+        names.should contain("ql_reference")
+        names.should contain("project_info")
         names.should contain("send_request")
         names.should contain("create_finding")
         names.should contain("update_finding")
@@ -131,6 +133,33 @@ describe Gori::MCP::Server do
   end
 
   describe "list_history" do
+    it "rejects a QL query that compiles to nothing (not match-all)" do
+      with_store do |store|
+        seed_flow(store, "ex.test", "GET", "/", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:>=foo"}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("invalid query")
+        store.count.should eq(1) # didn't silently dump every flow
+      end
+    end
+
+    it "paginates filtered results with before_id" do
+      with_store do |store|
+        a = seed_flow(store, "h.test", "GET", "/a", 500)
+        b = seed_flow(store, "h.test", "GET", "/b", 500)
+        c = seed_flow(store, "h.test", "GET", "/c", 200)
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:500","limit":1}}})
+        page1 = tool_payload(drive(store, call)[0]).as_a
+        page1.map(&.["id"].as_i64).should eq([b])
+
+        cur = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:500","limit":1,"before_id":#{b}}}})
+        page2 = tool_payload(drive(store, cur)[0]).as_a
+        page2.map(&.["id"].as_i64).should eq([a])
+      end
+    end
+
     it "returns flows newest-first, filters by QL, and paginates by before_id" do
       with_store do |store|
         a = seed_flow(store, "alpha.test", "GET", "/a", 200)
@@ -349,7 +378,39 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "ql_reference" do
+    it "returns the QL syntax reference" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ql_reference","arguments":{}}})
+        ref = tool_payload(drive(store, call)[0])["reference"].as_s
+        ref.should contain("host:example.com")
+        ref.should contain("status:>=500")
+      end
+    end
+  end
+
+  describe "project_info" do
+    it "includes project metadata fields" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"project_info","arguments":{}}})
+        info = tool_payload(drive(store, call)[0])
+        info["flows"].as_i.should eq(0)
+        info["read_only"].as_bool.should be_false
+      end
+    end
+  end
+
   describe "send_request" do
+    it "replays a captured flow via flow_id without a url" do
+      with_store do |store|
+        id = seed_flow(store, "ex.test", "GET", "/replay-me", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id}}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        # May fail to connect in CI, but must NOT error with 'url is required'.
+        resp["result"]["content"][0]["text"].as_s.should_not contain("'url' is required")
+      end
+    end
+
     it "returns isError on a connection failure (port 1)" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/"}}})
@@ -360,7 +421,31 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "list_findings" do
+    it "returns a paginated object (not a bare array)" do
+      with_store do |store|
+        store.insert_finding("a", Gori::Store::Severity::Info, nil, nil)
+        store.insert_finding("b", Gori::Store::Severity::High, nil, nil)
+        store.flush
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_findings","arguments":{"limit":1,"offset":1}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload.as_h.has_key?("findings").should be_true
+        payload["returned"].as_i.should eq(1)
+        payload["offset"].as_i.should eq(1)
+        payload["total"].as_i.should eq(2)
+      end
+    end
+  end
+
   describe "error channels" do
+    it "returns -32600 with echoed id when method is missing" do
+      with_store do |store|
+        out = drive(store, %({"jsonrpc":"2.0","id":"req-1"}))
+        out[0]["error"]["code"].as_i.should eq(-32600)
+        out[0]["id"].as_s.should eq("req-1")
+      end
+    end
+
     it "answers a parse error with id null and keeps serving" do
       with_store do |store|
         out = drive(store, "{not json", %({"jsonrpc":"2.0","id":1,"method":"ping"}))

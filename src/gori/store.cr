@@ -1040,12 +1040,20 @@ module Gori
       rows
     end
 
-    # Newest-first flows matching a compiled QL filter.
-    def search(filter : QL::Filter, limit : Int32) : Array(FlowRow)
+    # Newest-first flows matching a compiled QL filter. `before_id` is a cursor for
+    # paging into older matches (stable as new rows append, unlike OFFSET).
+    def search(filter : QL::Filter, limit : Int32, before_id : Int64? = nil) : Array(FlowRow)
       rows = [] of FlowRow
       args = filter.args.dup
-      args << limit
-      @db.query("#{SELECT_ROW} WHERE #{filter.sql} ORDER BY id DESC LIMIT ?", args: args) do |rs|
+      if before_id
+        args << before_id
+        args << limit
+        sql = "#{SELECT_ROW} WHERE (#{filter.sql}) AND id < ? ORDER BY id DESC LIMIT ?"
+      else
+        args << limit
+        sql = "#{SELECT_ROW} WHERE #{filter.sql} ORDER BY id DESC LIMIT ?"
+      end
+      @db.query(sql, args: args) do |rs|
         rs.each { rows << read_row(rs) }
       end
       rows
