@@ -103,7 +103,9 @@ describe Gori::Tui::FuzzerView do
       3.times { |i| view.append_result(fuzz_result(i, 200, 1200)) }
       backend = MemoryBackend.new(50, 30)
       view.render(Screen.new(backend), Rect.new(0, 0, 50, 30))
-      backend.contains?("DIST").should be_false
+      # the sidebar CARD (title " DIST ") is gone; the always-on " v:DIST " toggle badge
+      # on the RESULTS border is not the sidebar, so match the spaced card title.
+      backend.contains?(" DIST ").should be_false
       backend.contains?("RESULTS").should be_true
     end
 
@@ -123,7 +125,8 @@ describe Gori::Tui::FuzzerView do
       view.toggle_dist # hide
       backend = MemoryBackend.new(120, 30)
       view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
-      backend.contains?("DIST").should be_false
+      # sidebar CARD gone; the muted " v:DIST " toggle badge on the RESULTS border remains
+      backend.contains?(" DIST ").should be_false
     end
   end
 

@@ -112,7 +112,10 @@ module Gori::Tui
       right_x = sep_x + SEP_W
 
       draw_header(screen, rect, rect.y, left_w, right_x, right_w)
-      Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused)) if rect.h > 2
+      if rect.h > 2
+        Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
+        render_pane_selector(screen, rect)
+      end
 
       body_top = rect.y + 2
       footer_y = rect.bottom - 1
@@ -143,6 +146,19 @@ module Gori::Tui
       screen.text(right_x, y, header_label("B", @slot_b), Theme.accent, attr: Attribute::Bold, width: right_w) if right_w > 0
     end
 
+    # The REQ ⇄ RES pane selector, right-aligned on the divider row: ←/→ switches which
+    # half of the two flows is diffed; the active side is lit, the other muted — so the
+    # mode + its keys ride the chrome instead of only the footer prose.
+    private def render_pane_selector(screen : Screen, rect : Rect) : Nil
+      hint = "←/→ "
+      total = Screen.display_width(hint) + 10 # " REQ " + " RES "
+      sx = rect.right - total - 1
+      return if sx <= rect.x + 1
+      x = screen.text(sx, rect.y + 1, hint, Theme.muted, Theme.bg)
+      x = Frame.chip(screen, x, rect.y + 1, " REQ ", @pane == :request)
+      Frame.chip(screen, x, rect.y + 1, " RES ", @pane == :response)
+    end
+
     private def header_label(tag : String, d : Store::FlowDetail?) : String
       d ? "#{tag}: #{summary(d)}" : "#{tag}: — empty (press #{tag.downcase} to pick) —"
     end
@@ -171,7 +187,7 @@ module Gori::Tui
       changed = @change_count
       note = changed == 0 ? "identical" : "#{changed} changed line#{changed == 1 ? "" : "s"}"
       note += " · truncated to #{Replay::Diff::MAX_LINES}/side" if @truncated
-      screen.text(rect.x + 1, y, "#{note} · comparing #{@pane} (←/→)", Theme.muted, width: {rect.w - 2, 1}.max)
+      screen.text(rect.x + 1, y, note, Theme.muted, width: {rect.w - 2, 1}.max) # pane + ←/→ moved to the divider selector
     end
 
     private def clamp_scroll(body_h : Int32, total : Int32) : Nil

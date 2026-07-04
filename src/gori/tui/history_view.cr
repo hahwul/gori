@@ -877,9 +877,17 @@ module Gori::Tui
         screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
         rx -= count.size + 2
       end
-      screen.text({rx - chip.size, rect.x}.max, rect.y, chip, chip_color)
+      scope_x = {rx - chip.size, rect.x}.max
+      screen.text(scope_x, rect.y, chip, chip_color)
+      # The live-tail (follow) toggle, left of the scope chip — same fg accent/muted
+      # style so the two mode toggles read as one cluster, surfacing the `f` chord
+      # (today follow is only implicit in the selection sitting on the newest row).
+      fchip = "f:follow"
+      fx = scope_x - fchip.size - 1
+      follow_shown = fx > rect.x + 1
+      screen.text(fx, rect.y, fchip, @follow ? Theme.accent : Theme.muted) if follow_shown
 
-      left_w = {(rx - chip.size) - (rect.x + 1) - 1, 0}.max
+      left_w = {(follow_shown ? fx : scope_x) - (rect.x + 1) - 1, 0}.max
       if filtering?
         label = @query.blank? ? "(in-scope only)" : ": #{@query}"
         screen.text(rect.x + 1, rect.y, label, Theme.text, width: left_w)

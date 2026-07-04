@@ -281,11 +281,14 @@ module Gori::Tui
 
     private def render_summary(screen : Screen, rect : Rect, focused : Bool) : Nil
       Frame.card(screen, rect, "MINER", border: focused ? Theme.focus_gold : Theme.border, bg: Theme.bg)
+      # Run control on the border: while mining a lit ` ^X:STOP `, otherwise a muted
+      # ` ^R:MINE ` (run / re-run) — so both chords stay in view once findings fill the
+      # pane. A state-swapping badge, not a boolean toggle: the chord itself changes.
+      chord, name = @running ? {"^X", "STOP"} : {"^R", "MINE"}
+      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + "MINER".size + 4, chord, name, @running)
       x = rect.x + 2
       y = rect.y + 1
-      screen.text(x, y, summary(rect.w - 18), Theme.text_bright, Theme.bg, Attribute::Bold)
-      state = @running ? "running" : (@progress.names_total > 0 ? "done" : "idle")
-      screen.text(rect.right - state.size - 2, y, state, @running ? Theme.accent : Theme.muted, Theme.bg)
+      screen.text(x, y, summary(rect.w - 4), Theme.text_bright, Theme.bg, Attribute::Bold)
       y += 1
       screen.text(x, y, target_origin, Theme.muted, Theme.bg, width: rect.w - 4) if y < rect.bottom - 1
       y += 1

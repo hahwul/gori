@@ -126,7 +126,13 @@ module Gori::Tui
     # OUTPUT — read-only but navigable (↑/↓ scroll); the title names the active
     # display mode + byte count, and the border gilds when the pane holds focus.
     private def render_output_card(screen : Screen, card : Rect, result : Convert::ChainResult, active : Bool) : Nil
-      Frame.card(screen, card, output_header(result), bg: Theme.bg, border: Frame.pane_border(active))
+      header = output_header(result)
+      Frame.card(screen, card, header, bg: Theme.bg, border: Frame.pane_border(active))
+      # ^X cycles the display mode; ride it on the border as ` ^X:MODE ` — lit when a mode
+      # is forced (HEX/B64), muted for AUTO (which just follows the bytes). Replaces the
+      # old title-embedded mode label so the chord is discoverable in place.
+      name, forced = out_mode_badge
+      Frame.toggle_badge(screen, card.right - 1, card.y, card.x + header.size + 4, "^X", name, forced)
       render_output(screen, card.inset(1, 1), result)
     end
 
@@ -178,23 +184,24 @@ module Gori::Tui
       @out_lines
     end
 
-    # The OUTPUT divider label: mode + byte count, or a failure marker.
+    # The OUTPUT divider label: byte count, or a failure marker. The display mode moved
+    # to the ` ^X:MODE ` border badge (render_output_card).
     private def output_header(result : Convert::ChainResult) : String
       if bytes = result.output
-        "OUTPUT  #{out_mode_label(bytes)} · #{bytes.size} B"
+        "OUTPUT · #{bytes.size} B"
       else
         "OUTPUT  ✗ chain failed"
       end
     end
 
-    # The mode label WITHOUT re-encoding the (possibly huge) output: only :auto needs
-    # to peek at the bytes, and a UTF-8 validity check is far cheaper than a full
-    # hex/base64 encode that the old code immediately threw away.
-    private def out_mode_label(bytes : Bytes) : String
+    # The ` ^X:MODE ` badge {name, forced?}: HEX/B64 (lit, an explicit mode) or AUTO
+    # (muted — follows the bytes). The auto sub-type (text vs binary→base64) is
+    # intentionally not spelled out on the badge.
+    private def out_mode_badge : {String, Bool}
       case @prefer
-      when Convert::RenderAs::Hex    then "hex"
-      when Convert::RenderAs::Base64 then "base64"
-      else                                Convert.binary?(bytes) ? "binary→base64" : "text"
+      when Convert::RenderAs::Hex    then {"HEX", true}
+      when Convert::RenderAs::Base64 then {"B64", true}
+      else                                {"AUTO", false}
       end
     end
 
