@@ -1,4 +1,5 @@
 require "../tab_controller"
+require "../traffic_empty_state"
 require "../fuzzer_view"
 require "../../store"
 require "../../fuzz"
@@ -115,7 +116,7 @@ module Gori::Tui
         v.render(screen, body_rect, focused: body_focused)
       else
         BodyChrome.framed(screen, body_rect, body_focused) do |inner|
-          screen.text(inner.x + 1, inner.y, "no fuzz sessions — ^N new session · ⇧I from History/Replay", Theme.muted)
+          TrafficEmptyState.render(screen, inner, variant: :fuzzer)
         end
       end
     end

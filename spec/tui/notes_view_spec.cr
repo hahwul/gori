@@ -35,6 +35,16 @@ private def render_text(view : NotesView, w = 80, h = 10) : MemoryBackend
 end
 
 describe Gori::Tui::NotesView do
+  it "shows the scratchpad guide on a blank note" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      backend = render_text(view, 80, 14)
+      backend.contains?("NOTES").should be_true
+      backend.contains?("scratchpad").should be_true
+    end
+  end
+
   it "loads, edits inline, and persists the note set as JSON" do
     tmp_store do |store|
       view = NotesView.new

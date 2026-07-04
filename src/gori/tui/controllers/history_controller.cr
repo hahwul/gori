@@ -41,10 +41,14 @@ module Gori::Tui
       @history.reveal = @host.reveal? # propagate the global whitespace-reveal pref
       @history.pretty = @host.pretty? # propagate the global pretty-print pref
       # Single body pane; the detail view is a drill-in within the same frame.
+      proxy = @host.session.proxy
       if @host.overlay == :detail
         BodyChrome.framed(screen, rect, body_focused) { |inner| @history.render_detail(screen, inner, focused: body_focused) }
       else
-        BodyChrome.framed(screen, rect, body_focused) { |inner| @history.render_list(screen, inner, focused: body_focused) }
+        BodyChrome.framed(screen, rect, body_focused) do |inner|
+          @history.render_list(screen, inner, focused: body_focused,
+            listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
+        end
       end
     end
 

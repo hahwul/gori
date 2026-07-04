@@ -2,6 +2,7 @@ require "json"
 require "./screen"
 require "./theme"
 require "./frame"
+require "./traffic_empty_state"
 require "./text_area"
 require "./fmt"
 require "./spark"
@@ -960,8 +961,7 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       unless @loaded
-        screen.text(rect.x + 1, rect.y, "no request loaded", Theme.muted)
-        screen.text(rect.x + 1, rect.y + 2, "select a flow in History/Replay and press ⇧I to send it here", Theme.muted)
+        TrafficEmptyState.render(screen, rect, variant: :fuzzer, title: "no request loaded")
         return
       end
       target_h = {rect.h, 3}.min
@@ -1259,7 +1259,8 @@ module Gori::Tui
         render_result_row(screen, inner, inner.y + 1 + i, view[ri], ri == @sel)
       end
       if view.empty?
-        screen.text(inner.x + 1, inner.y + 2, @running ? "running…" : "no results yet — ^R run", Theme.muted)
+        body = Rect.new(inner.x, inner.y + 1, inner.w, {inner.h - 1, 0}.max)
+        TrafficEmptyState.render(screen, body, variant: :fuzzer_results, running: @running)
       end
     end
 
@@ -1298,8 +1299,7 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       return if inner.empty?
       if @results.empty?
-        screen.text(inner.x, inner.y, @running ? "sampling…" : "no results yet",
-          Theme.muted, Theme.bg, width: inner.w)
+        TrafficEmptyState.render(screen, inner, variant: :fuzzer_results, running: @running)
         return
       end
       d = dist_data(inner.w)

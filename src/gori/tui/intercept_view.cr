@@ -1,6 +1,8 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./traffic_empty_state"
+require "../settings"
 require "./highlight"
 require "./text_area"
 require "./url"
@@ -322,18 +324,17 @@ module Gori::Tui
 
     # --- rendering -----------------------------------------------------------
 
-    def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
+    def render(screen : Screen, rect : Rect, focused : Bool = true, *,
+               listen : String? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
       render_filter_bar(screen, Rect.new(rect.x, rect.y, rect.w, FILTER_BAR_H), focused)
       body = body_rect(rect)
       return if body.empty?
 
       if @items.empty?
-        Frame.card(screen, body, "INTERCEPT", bg: Theme.bg, border: pane_border(focused))
-        inner = body.inset(1, 1)
-        screen.text(inner.x + 1, inner.y, "no held messages", Theme.muted)
-        hint = @enabled ? "intercept ON — in-scope requests/responses will appear here" : "turn intercept on (i) — held requests/responses appear here"
-        screen.text(inner.x + 1, inner.y + 2, hint, Theme.muted)
+        addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"
+        TrafficEmptyState.render(screen, body, variant: :intercept, listen: addr,
+          capturing: capturing, catch_on: @enabled)
         return
       end
 

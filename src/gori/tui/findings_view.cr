@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./traffic_empty_state"
 require "./text_area"
 require "../store"
 require "../findings_query"
@@ -331,14 +332,14 @@ module Gori::Tui
       list_h = {rect.bottom - top, 0}.max
 
       if @findings.empty?
-        msg = if !filtering?
-                "no findings yet · Shift+F on a History flow, or n here"
-              elsif querying?
-                "no findings match · esc clears the filter" # esc cancels the open query bar
-              else
-                "no findings match · / to edit the filter" # a committed filter: esc goes to tabs, not clear
-              end
-        screen.text(rect.x + 1, top, msg, Theme.muted)
+        list_rect = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
+        if !filtering?
+          TrafficEmptyState.render(screen, list_rect, variant: :findings)
+        elsif querying?
+          screen.text(rect.x + 1, top, "no findings match · esc clears the filter", Theme.muted)
+        else
+          screen.text(rect.x + 1, top, "no findings match · / to edit the filter", Theme.muted)
+        end
         return
       end
 

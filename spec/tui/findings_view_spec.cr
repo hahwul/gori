@@ -37,6 +37,18 @@ describe Gori::Tui::FindingsView do
     end
   end
 
+  it "renders an empty-state when there are no findings" do
+    tmp_store do |store|
+      view = FindingsView.new
+      view.reload(store)
+      backend = MemoryBackend.new(80, 12)
+      view.render(Screen.new(backend), Rect.new(0, 0, 80, 12))
+      backend.contains?("no findings yet").should be_true
+      backend.contains?("FINDINGS").should be_true
+      backend.contains?("⇧F").should be_true
+    end
+  end
+
   it "cycles triage status independently of severity" do
     tmp_store do |store|
       id = store.insert_finding("IDOR", Gori::Store::Severity::High, "acme.test", nil)

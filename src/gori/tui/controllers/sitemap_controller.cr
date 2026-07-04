@@ -34,7 +34,11 @@ module Gori::Tui
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       focused = focus == :body
-      BodyChrome.framed(screen, rect, focused) { |inner| @sitemap.render(screen, inner, focused: focused) }
+      proxy = @host.session.proxy
+      BodyChrome.framed(screen, rect, focused) do |inner|
+        @sitemap.render(screen, inner, focused: focused,
+          listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
+      end
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool

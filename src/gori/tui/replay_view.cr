@@ -2,6 +2,7 @@ require "uri"
 require "./screen"
 require "./theme"
 require "./frame"
+require "./traffic_empty_state"
 require "./highlight"
 require "./hex_view"
 require "./hex_edit"
@@ -1359,8 +1360,7 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       unless @loaded
-        screen.text(rect.x + 1, rect.y, "no flow loaded", Theme.muted)
-        screen.text(rect.x + 1, rect.y + 2, "select a flow in History and press ^R to replay it", Theme.muted)
+        TrafficEmptyState.render(screen, rect, variant: :replay, title: "no flow loaded")
         return
       end
 

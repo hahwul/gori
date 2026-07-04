@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./traffic_empty_state"
 require "./text_area"
 require "../store"
 require "../notes"
@@ -227,6 +228,7 @@ module Gori::Tui
       # (and that Notes used before): only the strip/band above the editor moved —
       # the editor body renders exactly where it did, now filling the freed height.
       area = Rect.new(rect.x + 1, rect.y, {rect.w - 2, 0}.max, rect.h)
+      TrafficEmptyState.render(screen, area, variant: :notes) if current_blank?
       current.area.render(screen, area, cursor: focused,
         highlight: Settings.editor_markdown ? :markdown : nil)
     end
