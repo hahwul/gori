@@ -38,6 +38,8 @@ module Gori
       "cookie_no_httponly"             => "Add HttpOnly so client-side script cannot read the cookie.",
       "cookie_no_samesite"             => "Add SameSite=Lax/Strict to reduce CSRF exposure.",
       "cookie_samesite_none_insecure"  => "SameSite=None requires the Secure attribute; add Secure or use SameSite=Lax/Strict.",
+      "cookie_prefix_violation"        => "A __Host-/__Secure- prefixed cookie must satisfy its rules or the browser silently rejects it: both require Secure, and __Host- also requires Path=/ and no Domain attribute.",
+      "insecure_basic_auth"            => "Serve authentication over HTTPS only; HTTP Basic credentials are Base64 (effectively cleartext) and are exposed to any network observer over http://.",
       "secret_in_url"                  => "Move credentials/tokens out of the URL (they leak via logs, history, and Referer) into headers or the body.",
       "cors_wildcard"                  => "Avoid Access-Control-Allow-Origin: * for credentialed/sensitive endpoints; echo a vetted allowlisted origin instead.",
       "cors_null_origin"               => "Never allow the null origin; it is sent by sandboxed iframes and redirects and is trivially forgeable.",
@@ -47,7 +49,9 @@ module Gori
       "error_stack_leak"               => "Return generic errors to clients; log stack traces server-side only.",
       "secret_in_body"                 => "Rotate the exposed credential and remove it from the response; never ship keys/tokens to clients.",
       "mixed_content"                  => "Load all sub-resources over HTTPS; active http:// scripts/iframes on an HTTPS page are blocked and insecure.",
+      "insecure_form_action"           => "Point the form action at an HTTPS URL; a form submitting to http:// sends everything the user enters (credentials included) in cleartext.",
       "reflected_param"                => "Context-encode reflected input; this parameter echoes attacker-controlled data and may enable XSS.",
+      "graphql_introspection"          => "Disable GraphQL introspection in production; the full schema it returns maps the entire API surface for an attacker.",
     } of String => String
 
     TECH_REMEDIATION = "Detected technology — informational; recorded as a project fact."
@@ -56,21 +60,30 @@ module Gori
       REMEDIATION[code]? || (code.starts_with?("tech_") ? TECH_REMEDIATION : "")
     end
 
+    # Codes whose product name is fixed (protocol/framework identity, not carried in a value).
+    FIXED_TECH_LABELS = {
+      "tech_websocket" => "WebSocket",
+      "tech_grpc"      => "gRPC",
+      "tech_graphql"   => "GraphQL",
+      "tech_sse"       => "SSE",
+      "tech_http2"     => "HTTP/2",
+      "tech_aspnet"    => "ASP.NET",
+      "tech_aspnetmvc" => "ASP.NET MVC",
+      "tech_drupal"    => "Drupal",
+    }
+
+    # Codes whose product name is the header VALUE's first token (Server/X-Powered-By/X-Generator).
+    VALUE_TECH_CODES = {"tech_server", "tech_powered_by", "tech_generator"}
+
     # Turn distinct (tech code, evidence) rows into the project's "representative
-    # technologies" display list (e.g. ["gRPC", "WebSocket", "nginx"]). Protocol codes map
-    # to fixed labels; Server/X-Powered-By use the detected product name from `evidence`.
+    # technologies" display list (e.g. ["gRPC", "WebSocket", "nginx"]). Fixed-identity codes map
+    # to a constant label; value-bearing codes use the detected product name from `evidence`.
     def self.tech_summary(rows : Array({String, String?})) : Array(String)
       out = [] of String
       rows.each do |(code, ev)|
-        label = case code
-                when "tech_websocket" then "WebSocket"
-                when "tech_grpc"      then "gRPC"
-                when "tech_graphql"   then "GraphQL"
-                when "tech_sse"       then "SSE"
-                when "tech_http2"     then "HTTP/2"
-                when "tech_server", "tech_powered_by"
-                  ev.try(&.split(/[\/ ;(]/, 2)[0].strip)
-                end
+        label = FIXED_TECH_LABELS[code]?
+        # Value names the product; keep the first token (drop version/URL suffixes).
+        label ||= ev.try(&.split(/[\/ ;(]/, 2)[0].strip) if VALUE_TECH_CODES.includes?(code)
         out << label if label && !label.empty? && !out.includes?(label)
       end
       out

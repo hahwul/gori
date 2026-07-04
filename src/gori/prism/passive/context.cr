@@ -72,7 +72,9 @@ module Gori
         def body_text : String?
           return @body_text if @body_text_done
           @body_text_done = true
-          decoded, _ = Proxy::Codec::ContentDecode.decode(@detail.response_head, @detail.response_body)
+          # Only the first BODY_CAP bytes are scanned, so cap the inflate too: a large
+          # compressed body stops decoding at the prefix instead of expanding in full.
+          decoded, _ = Proxy::Codec::ContentDecode.decode(@detail.response_head, @detail.response_body, BODY_CAP)
           bytes = decoded || @detail.response_body
           @body_text = (bytes && !bytes.empty?) ? String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub : nil
         end

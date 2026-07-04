@@ -33,6 +33,16 @@ module Gori
           end
         end
 
+        # Response headers that name a framework/runtime (often with an exact version → a
+        # CVE-matching aid) and serve no client purpose. Each is recorded as a project tech fact
+        # like Server/X-Powered-By, so an analyst sees the stack without opening a flow.
+        FRAMEWORK_HEADERS = {
+          "X-AspNet-Version"       => "tech_aspnet",
+          "X-AspNetMvc-Version"    => "tech_aspnetmvc",
+          "X-Generator"            => "tech_generator",
+          "X-Drupal-Dynamic-Cache" => "tech_drupal",
+        }
+
         private def check_tech_headers(ctx : Context, acc : Array(Detection)) : Nil
           return unless r = ctx.raw_response
           if (server = r.headers.get?("Server")) && !server.blank?
@@ -40,6 +50,11 @@ module Gori
           end
           if (pb = r.headers.get?("X-Powered-By")) && !pb.blank?
             acc << tech(ctx, "tech_powered_by", "X-Powered-By: #{pb.strip}", pb.strip)
+          end
+          FRAMEWORK_HEADERS.each do |header, code|
+            if (v = r.headers.get?(header)) && !v.blank?
+              acc << tech(ctx, code, "#{header}: #{v.strip}", v.strip)
+            end
           end
         end
 
