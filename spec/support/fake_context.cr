@@ -17,6 +17,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def close_overlay : Nil; end
 
+  def refresh_screen : Nil; end
+
   def focus_pane(pane : Symbol) : Nil; end
 
   def enter_content : Nil; end

@@ -16,8 +16,10 @@ module Gori::Tui
 
     # Raw bytes → display lines, split on LF but KEEPING any CR so it shows as ␍.
     # (Decoded as UTF-8, lossy on invalid bytes — use the hex view for byte-exact.)
+    # `.scrub` maps invalid UTF-8 to U+FFFD so stray bytes never reach width/search math,
+    # matching the same seam in Highlight.to_lines (control bytes are glyph-marked below).
     def self.lines(bytes : Bytes) : Array(String)
-      String.new(bytes).split('\n')
+      String.new(bytes).scrub.split('\n')
     end
 
     # One revealed, styled line: content runs in `fg`, whitespace markers dimmed.

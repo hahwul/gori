@@ -221,6 +221,49 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "shows a placeholder for a binary response body instead of rendering it as text" do
+    tmp_store do |store|
+      # A webp-ish body: RIFF header + a NUL byte (the binary marker) + bytes that,
+      # decoded as UTF-8, would be terminal-corrupting garbage.
+      binary = Bytes[0x52, 0x49, 0x46, 0x46, 0x00, 0x1b, 0x5b, 0x32, 0x4a, 0xff, 0xfe]
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/img", http_version: "HTTP/1.1",
+        head: "GET /img HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: image/webp\r\n\r\n".to_slice,
+        body: binary, content_type: "image/webp"))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response
+
+      backend = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 16))
+      backend.contains?("binary body").should be_true # placeholder shown
+      backend.contains?("hex view").should be_true    # points at the hex view
+      backend.contains?("RIFF").should be_false       # raw bytes NOT rendered as text
+
+      # The byte-exact hex view is still one keypress away (x).
+      view.toggle_detail_hex
+      hex = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(hex), Rect.new(0, 0, 80, 16))
+      hex.contains?("00000000").should be_true     # offset column of the hex dump
+      hex.contains?("binary body").should be_false # placeholder gone in hex mode
+
+      # Reveal-whitespace (b) must NOT re-render the raw binary as text — it renders
+      # bytes as text just like the normal path, so it stays gated to the placeholder.
+      view.toggle_detail_hex # back to text
+      view.reveal = true
+      ws = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(ws), Rect.new(0, 0, 80, 16))
+      ws.contains?("binary body").should be_true # placeholder, not raw bytes
+      ws.contains?("RIFF").should be_false
+    end
+  end
+
   it "refresh_detail picks up a Pending flow's response but skips a stable Complete one" do
     tmp_store do |store|
       pid = store.insert_flow(Gori::Store::CapturedRequest.new(

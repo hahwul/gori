@@ -93,7 +93,8 @@ module Gori::Tui
       body : Array(String),
       kind : Symbol,
       trailer : Array(Highlight::Line),
-      pretty : Bool = false do # whether Pretty actually reflowed this body (drives the indicator)
+      pretty : Bool = false,   # whether Pretty actually reflowed this body (drives the indicator)
+      binary : Bool = false do # a binary body shown as a placeholder — reveal/pretty don't apply
       def total : Int32
         head.size + body.size + trailer.size
       end
@@ -775,6 +776,15 @@ module Gori::Tui
       nil
     end
 
+    # The mode indicator + active toggle hints on the detail pane's top line. Hoisted
+    # out of render_detail to keep that method under the cyclomatic ceiling.
+    private def detail_mode_hint(hex : Bool, ws : Bool, dv : DetailView) : String
+      return "HEX · x:text" if hex
+      return "RAW · b:raw" if ws
+      return "BINARY · x:hex" if dv.binary # reveal / pretty don't apply to a binary placeholder
+      dv.pretty ? "PRETTY · x:hex · b:ws · p:raw" : "RAW · x:hex · b:ws · p:pretty"
+    end
+
     def render_detail(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       detail = @detail
@@ -793,12 +803,12 @@ module Gori::Tui
           attr: active ? Attribute::Bold : Attribute::None) + 1
       end
       hex = detail_hex?(detail)
-      ws = @reveal && !hex
-      applied = !hex && !ws && detail_view.pretty # Pretty actually reflowed this body
-      mode = hex ? "HEX" : (ws ? "RAW" : (applied ? "PRETTY" : "RAW"))
-      ptog = applied ? "p:raw" : "p:pretty"
-      mode_hint = hex ? "#{mode} · x:text" : (ws ? "#{mode} · b:raw" : "#{mode} · x:hex · b:ws · #{ptog}")
-      screen.text(x + 1, rect.y, "↑/↓ scroll · ⇧←/→ h-scroll · #{mode_hint} · esc back", Theme.muted)
+      dv = detail_view
+      # A binary body is shown as a placeholder; the reveal-whitespace path renders raw
+      # bytes as text, so gate it off there too — otherwise `b` re-triggers the very
+      # cursor-desync corruption the placeholder exists to avoid. Pretty likewise n/a.
+      ws = @reveal && !hex && !dv.binary
+      screen.text(x + 1, rect.y, "↑/↓ scroll · ⇧←/→ h-scroll · #{detail_mode_hint(hex, ws, dv)} · esc back", Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
@@ -1044,6 +1054,18 @@ module Gori::Tui
       # visible line at render — so opening a huge response doesn't freeze the UI.
       display, decode_note = Proxy::Codec::ContentDecode.decode(head, body)
       src = display || body
+      # Binary bodies (images/webp/fonts/media/…) are NOT text: decoding their raw
+      # bytes as UTF-8 and rendering them yields garbage AND — worse — the accidental
+      # wide/emoji graphemes among the bytes desync the terminal's cursor tracking, so
+      # the diff-renderer leaves stray glyphs it can never reach (the reported "잔상").
+      # Show a placeholder and point at the byte-exact hex view (x), like Burp/mitmproxy.
+      if (b = src) && !b.empty? && binary_body?(b)
+        head_lines = Highlight.message_windowed(head, nil, request).head
+        head_lines << Highlight::Line.new
+        head_lines << [Highlight::Span.new(
+          "— binary body (#{Fmt.size(b.size.to_i64)}) — not shown as text; press x for the hex view —", Theme.muted)]
+        return DetailView.new(head_lines, [] of String, :text, trailer, binary: true)
+      end
       # Pretty-print AFTER decode (so JSON/XML/… are reflowed from the decoded bytes),
       # display only — storage is untouched. nil = leave raw. `pretty.kind` overrides
       # the styler when the reflow is no longer the content-type's language.
@@ -1061,6 +1083,20 @@ module Gori::Tui
       # signals the reflow, so the "— pretty: … —" footer is redundant (and Replay
       # never showed one — this keeps the two response views consistent).
       DetailView.new(win.head, win.body, win.kind, trailer, pretty: pretty != nil)
+    end
+
+    # How many leading bytes to sniff for the binary heuristic. Binary formats carry
+    # NUL in their header/framing, so a bounded prefix scan is enough — and keeps this
+    # O(1) on a multi-MiB body rather than walking every byte on each cache rebuild.
+    BINARY_SNIFF_LIMIT = 8192
+
+    # A body is treated as binary (→ hex view, not text) when a NUL byte appears in its
+    # leading bytes — the classic git/grep detector. Real text, including UTF-8 Korean/
+    # CJK/emoji, never contains NUL; images, fonts, media and protobufs do.
+    private def binary_body?(bytes : Bytes) : Bool
+      n = {bytes.size, BINARY_SNIFF_LIMIT}.min
+      n.times { |i| return true if bytes[i] == 0u8 }
+      false
     end
 
     # Wrap pre-formatted plain strings (frames / ws / gRPC hex) as single-span

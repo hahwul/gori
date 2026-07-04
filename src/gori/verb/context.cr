@@ -16,6 +16,11 @@ module Gori
       abstract def open_notifications : Nil # open the notification center (background-job results)
       abstract def close_overlay : Nil
 
+      # Emergency full repaint: redraw every cell (a full sync, not a diff). Recovers from
+      # corruption the diff-renderer can't reach — e.g. stray glyphs a binary body's
+      # accidental wide/emoji graphemes left behind by desyncing cursor tracking.
+      abstract def refresh_screen : Nil
+
       # the currently focused tab (so verbs can gate by context, P4)
       abstract def current_tab : Symbol
 
