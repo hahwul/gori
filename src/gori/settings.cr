@@ -29,6 +29,35 @@ module Gori
     class_property bind_host : String = DEFAULT_BIND_HOST
     class_property bind_port : Int32 = DEFAULT_BIND_PORT
     class_property upstream_proxy : String = DEFAULT_UPSTREAM_PROXY # "host:port" HTTP proxy; "" = connect directly
+
+    # Per-project network overrides — a RUNTIME layer set by Session.open from the OPEN
+    # project's DB and NEVER persisted to settings.json (the project's own DB is the source
+    # of truth). nil = inherit the matching global value above. The proxy bind + Upstream.dial
+    # read the effective_* helpers, so a project can pin its own bind/upstream while the global
+    # settings:network editor keeps writing the shared defaults. Stored in the project's generic
+    # KV `settings` table under these keys (Store#setting/#set_setting/#delete_setting).
+    PROJECT_BIND_HOST_KEY = "net.bind_host"
+    PROJECT_BIND_PORT_KEY = "net.bind_port"
+    PROJECT_UPSTREAM_KEY  = "net.upstream_proxy"
+    class_property project_bind_host : String? = nil
+    class_property project_bind_port : Int32? = nil
+    class_property project_upstream_proxy : String? = nil
+
+    def self.effective_bind_host : String
+      project_bind_host || bind_host
+    end
+
+    def self.effective_bind_port : Int32
+      project_bind_port || bind_port
+    end
+
+    # The upstream proxy the proxy actually dials through: a project override wins, else the
+    # global. NOTE an explicit project "" (direct) is truthy in Crystal, so it correctly beats
+    # a non-blank global — only an ABSENT override (nil) falls through to the global value.
+    def self.effective_upstream_proxy : String
+      project_upstream_proxy || upstream_proxy
+    end
+
     # Global hostname overrides (a process-wide /etc/hosts): ordered {host (lowercased),
     # ip} pairs. Read LIVE by Upstream.dial (edits apply on the next flow); layered
     # UNDER each project's own HostOverrides, which wins on a host collision. Edited via
@@ -394,7 +423,7 @@ module Gori
     # "host:port" with an optional "http://" scheme prefix; defaults the port to
     # 8080 when omitted.
     def self.upstream_proxy_addr : {String, Int32}?
-      value = upstream_proxy.strip
+      value = effective_upstream_proxy.strip
       return nil if value.empty?
       value = value.sub(/\Ahttps?:\/\//, "").rstrip('/')
       # Bracketed IPv6 ("[::1]" / "[::1]:8080"): host is inside the brackets, the
@@ -414,6 +443,28 @@ module Gori
       return nil if host.empty?
       return {value, 8080} if host.includes?(':') # unbracketed IPv6 literal → no port
       {host, value[(idx + 1)..].to_i? || 8080}
+    end
+
+    # nil if `value` is an acceptable upstream-proxy string; an error message if its explicit
+    # port segment isn't a valid 0-65535 int — so a typo ("proxy:8O80") is caught at save time
+    # instead of silently resolving to 8080 (upstream_proxy_addr) and failing every captured
+    # flow later, far from the mistake. Shared by settings:network AND the Project settings pane.
+    def self.upstream_proxy_port_error(value : String) : String?
+      return nil if value.empty?
+      bare = value.sub(/\Ahttps?:\/\//, "").rstrip('/')
+      if bare.starts_with?('[') # bracketed IPv6 literal: [::1] or [::1]:port — the port is after ']'
+        return nil unless close = bare.index(']')
+        rest = bare[(close + 1)..]
+        return nil unless rest.starts_with?(':') && rest.size > 1 # no explicit port → defaults fine
+        seg = rest[1..]
+      else
+        i = bare.rindex(':')
+        return nil unless i && i < bare.size - 1 # no explicit port → defaults fine
+        return nil if bare[0...i].includes?(':') # pre-colon host has a ':' → unbracketed IPv6 literal, no port
+        seg = bare[(i + 1)..]
+      end
+      p = seg.to_i?
+      (p && 0 <= p <= 65535) ? nil : "settings: invalid upstream proxy port #{seg.inspect}"
     end
   end
 end

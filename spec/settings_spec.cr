@@ -1,6 +1,15 @@
 require "./spec_helper"
 require "file_utils"
 
+private def reset_net
+  Gori::Settings.project_bind_host = nil
+  Gori::Settings.project_bind_port = nil
+  Gori::Settings.project_upstream_proxy = nil
+  Gori::Settings.bind_host = "127.0.0.1"
+  Gori::Settings.bind_port = 8070
+  Gori::Settings.upstream_proxy = ""
+end
+
 describe Gori::Settings do
   describe ".upstream_proxy_addr" do
     it "returns nil when unset/blank" do
@@ -386,6 +395,77 @@ describe Gori::Settings do
       FileUtils.rm_rf(dir)
       Gori::Settings.keymap_os = "auto"
       Gori::Settings.keymap_overrides = {} of String => Array(String)
+    end
+  end
+
+  describe "per-project network override layer" do
+    it "effective_* falls back to the global when no override is set" do
+      reset_net
+      Gori::Settings.upstream_proxy = "glob:3128"
+      Gori::Settings.effective_bind_host.should eq("127.0.0.1")
+      Gori::Settings.effective_bind_port.should eq(8070)
+      Gori::Settings.effective_upstream_proxy.should eq("glob:3128")
+    ensure
+      reset_net
+    end
+
+    it "a project override wins over the global (incl. upstream_proxy_addr)" do
+      reset_net
+      Gori::Settings.upstream_proxy = "glob:3128"
+      Gori::Settings.project_bind_host = "0.0.0.0"
+      Gori::Settings.project_bind_port = 9100
+      Gori::Settings.project_upstream_proxy = "corp:8888"
+      Gori::Settings.effective_bind_host.should eq("0.0.0.0")
+      Gori::Settings.effective_bind_port.should eq(9100)
+      Gori::Settings.effective_upstream_proxy.should eq("corp:8888")
+      Gori::Settings.upstream_proxy_addr.should eq({"corp", 8888})
+    ensure
+      reset_net
+    end
+
+    it "an explicit project '' upstream (direct) beats a non-blank global" do
+      reset_net
+      Gori::Settings.upstream_proxy = "glob:3128"
+      Gori::Settings.project_upstream_proxy = ""
+      Gori::Settings.effective_upstream_proxy.should eq("")
+      Gori::Settings.upstream_proxy_addr.should be_nil # "" ⇒ direct
+    ensure
+      reset_net
+    end
+
+    it "never serializes the runtime project layer to settings.json" do
+      dir = File.tempname("gori-settings-projnet")
+      Dir.mkdir_p(dir)
+      prev = ENV["GORI_HOME"]?
+      begin
+        ENV["GORI_HOME"] = dir
+        Gori::Settings.project_bind_host = "10.9.9.9"
+        Gori::Settings.project_bind_port = 9100
+        Gori::Settings.project_upstream_proxy = "corp:8888"
+        Gori::Settings.save.should be_true
+        raw = File.read(Gori::Settings.path)
+        raw.includes?("10.9.9.9").should be_false
+        raw.includes?("9100").should be_false
+        raw.includes?("corp:8888").should be_false
+      ensure
+        prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+        FileUtils.rm_rf(dir)
+        reset_net
+      end
+    end
+  end
+
+  describe ".upstream_proxy_port_error" do
+    it "accepts blank / no-port / valid ports (incl. bracketed IPv6)" do
+      Gori::Settings.upstream_proxy_port_error("").should be_nil
+      Gori::Settings.upstream_proxy_port_error("proxy.local").should be_nil
+      Gori::Settings.upstream_proxy_port_error("proxy.local:3128").should be_nil
+      Gori::Settings.upstream_proxy_port_error("[::1]:8080").should be_nil
+    end
+
+    it "rejects a non-numeric / out-of-range explicit port" do
+      Gori::Settings.upstream_proxy_port_error("proxy:8O80").should_not be_nil
+      Gori::Settings.upstream_proxy_port_error("proxy:99999").should_not be_nil
     end
   end
 end

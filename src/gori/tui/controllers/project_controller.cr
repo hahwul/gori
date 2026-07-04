@@ -33,8 +33,10 @@ module Gori::Tui
       end
     end
 
-    def body_badge : Symbol # the description editor + either add-row capture text; the rule/override lists are nav
-      (@project_view.pane == :desc || @project_view.adding? || @project_view.ov_adding?) ? :editor : :body
+    def body_badge : Symbol # the description editor, add-row capture text, and settings text fields capture keys; the lists/toggle are nav
+      editing = @project_view.pane == :desc || @project_view.adding? || @project_view.ov_adding? ||
+                (@project_view.pane == :settings && @project_view.settings_text_row?)
+      editing ? :editor : :body
     end
 
     # Hints depend on the focused pane (SCOPE rule list / HOST OVERRIDES list / their
@@ -49,8 +51,12 @@ module Gori::Tui
         @project_view.ov_adding? \
           ? "type \"IP host\" · ↵ save · esc cancel" \
           : "↑/↓ move · ↑ scope · → desc · a add · ↵/e edit · d del · space cmds · esc"
+      when :settings
+        @project_view.settings_text_row? \
+          ? "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc" \
+          : "space/↵ toggle lens · ↑/↓ move · ← overrides · ↑ desc · esc"
       else
-        "type to edit · ↑/↓/↔ move · ← scope · ^G goto · ^F find · esc tabs"
+        "type to edit · ↑/↓/↔ move · ← scope · ↓ settings · ^G goto · ^F find · esc tabs"
       end
     end
 
@@ -70,6 +76,9 @@ module Gori::Tui
       case @project_view.pane
       when :scope     then handle_project_scope_key(ev)
       when :overrides then handle_project_overrides_key(ev)
+      when :settings
+        handle_project_settings_key(ev)
+        true
       else
         handle_project_desc_key(ev)
         true
@@ -79,6 +88,9 @@ module Gori::Tui
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       return true unless pane = @project_view.pane_at(rect, mx, my)
       @host.focus_body
+      # Clicking OUT of the settings pane applies any pending network edit (mirrors the
+      # keyboard leave paths); idempotent + dirty-guarded, so a same-pane click is a no-op.
+      commit_project_network(on_leave: true) if @project_view.pane == :settings && pane != :settings
       case pane
       when :scope
         @project_view.focus_pane(:scope)
@@ -93,6 +105,12 @@ module Gori::Tui
       when :desc
         @project_view.focus_pane(:desc)
         @project_view.desc_click_to_cursor(rect, mx, my)
+      when :settings
+        @project_view.focus_pane(:settings)
+        if idx = @project_view.set_row_at(rect, mx, my)
+          @project_view.select_setting(idx)
+          idx == 0 ? @host.toggle_scope_lens : @project_view.setting_click_to_cursor(rect, mx, my)
+        end
       end # :overview band → just take body focus
       true
     end
@@ -106,6 +124,7 @@ module Gori::Tui
       when :desc      then @project_view.desc_scroll(step)
       when :scope     then @project_view.scope_select(step)
       when :overrides then @project_view.ov_select(step)
+      when :settings  then @project_view.set_select(step)
       end # :overview band / outside → nothing to scroll
       true
     end
@@ -115,8 +134,10 @@ module Gori::Tui
       true
     end
 
-    # --- focus ring (SCOPE ◂▸ DESCRIPTION) ---
+    # --- focus ring (SCOPE ◂▸ HOST OVERRIDES ◂▸ DESCRIPTION ◂▸ PROJECT SETTINGS) ---
     def pane_advance(dir : Int32) : Bool
+      # Tab-ing off the settings pane applies its pending network edit before the pane changes.
+      commit_project_network(on_leave: true) if @project_view.pane == :settings
       @project_view.pane_advance(dir)
     end
 
@@ -134,6 +155,7 @@ module Gori::Tui
 
     def commit : Nil
       save
+      commit_project_network(on_leave: true) # apply a pending network edit before the tab leaves/quits
     end
 
     # True while EITHER inline add/edit row (SCOPE or HOST OVERRIDES) is composing — the
@@ -178,6 +200,9 @@ module Gori::Tui
         end
       elsif key.left? && @project_view.desc_at_start?
         @project_view.focus_pane(:scope) # ← at the very start of the description crosses back to SCOPE (left)
+      elsif key.down? && @project_view.desc_at_bottom?
+        save
+        @project_view.focus_pane(:settings) # ↓ on the last line drops into PROJECT SETTINGS (the card below)
       elsif key.down?
         @project_view.move(1, 0)
       elsif key.left?
@@ -253,9 +278,9 @@ module Gori::Tui
           "scope lens OFF — showing all flows"
         elsif n == 0
           # Signpost the add path for where the toggle fired: 'a' on the Project scope
-          # pane itself, else 's' (scope.edit) to jump here from History/Sitemap.
+          # pane itself, else point at the Project tab from History/Sitemap.
           @host.active_tab == :project ? "scope lens ON, but no rules yet — add one here (a)" \
-                                       : "scope lens ON, but no rules yet — add some in Project (s)"
+                                       : "scope lens ON, but no rules yet — add some in the Project tab"
         else
           "scope lens ON — showing in-scope only (#{n} rule#{n == 1 ? "" : "s"})"
         end
@@ -377,6 +402,103 @@ module Gori::Tui
       when :dup     then @host.status("host override: host already mapped — edit it (e)")
       when :ok      then @host.status("host override added — #{@host.session.host_overrides.size} total")
       end
+    end
+
+    # --- PROJECT SETTINGS pane: scope-lens toggle (row 0) + inline network fields (rows 1-3).
+    # handle_body_key returns true for it, so the pane OWNS every key — space toggles the lens
+    # on its row, and the text fields accept letters, so nothing falls through to the keymap.
+    private def handle_project_settings_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      if ev.ctrl? && key.lower_p?
+        commit_project_network(on_leave: true)
+        save
+        @host.open_palette
+      elsif key.escape?
+        commit_project_network(on_leave: true)
+        save
+        @host.request_focus(:menu)
+      elsif key.up?
+        settings_move(-1)
+      elsif key.down?
+        settings_move(1)
+      else
+        handle_project_settings_action(ev)
+      end
+    end
+
+    # ↑/↓ move between rows, crossing out at the boundaries (↑ off row 0 → DESCRIPTION above;
+    # ↓ off the last row → the tab bar). ONLY ↑/↓ move rows — the text fields need j/k as input.
+    private def settings_move(dir : Int32) : Nil
+      if dir < 0 && @project_view.set_at_top?
+        @project_view.focus_pane(:desc)
+      elsif dir > 0 && @project_view.set_at_bottom?
+        commit_project_network(on_leave: true)
+        @host.request_focus(:menu)
+      else
+        @project_view.set_select(dir)
+      end
+    end
+
+    private def handle_project_settings_action(ev : Termisu::Event::Key) : Nil
+      @project_view.settings_scope_row? ? handle_project_settings_scope_key(ev) : handle_project_settings_field_key(ev)
+    end
+
+    # Row 0 (scope lens): space/↵ toggles it; ← crosses to the left column.
+    private def handle_project_settings_scope_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      if key.enter? || key.space?
+        @host.toggle_scope_lens
+      elsif key.left?
+        @project_view.focus_pane(:overrides)
+      end # → is the rightmost column — nothing to cross to
+    end
+
+    # Rows 1-3 (bind IP / port / upstream): type to edit, ↵ applies, ← at the field start
+    # crosses to the left column (else moves the caret).
+    private def handle_project_settings_field_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.enter?
+        commit_project_network(on_leave: false)
+      elsif key.left?
+        if @project_view.set_at_cursor_start?
+          commit_project_network(on_leave: true)
+          @project_view.focus_pane(:overrides)
+        else
+          @project_view.set_move_cursor(-1)
+        end
+      elsif key.right?
+        @project_view.set_move_cursor(1)
+      elsif key.backspace?
+        @project_view.set_backspace
+      elsif c && !ev.ctrl? && !ev.alt?
+        @project_view.set_input(c)
+        @project_view.set_preedit("") # commit any preedit
+      end
+    end
+
+    # Validate + apply the pane's network fields to THIS project (persist to its DB + live
+    # rebind). `on_leave` = the commit fired because the pane is being left (esc/Tab/arrow/
+    # click) rather than an explicit ↵: a leave with an invalid field drops the bad edit, while
+    # ↵ keeps it so the user can fix it. Dirty-guarded so an unchanged pane never re-applies.
+    private def commit_project_network(on_leave : Bool = false) : Nil
+      return unless @project_view.settings_dirty?
+      host, port_s, upstream = @project_view.settings_values
+      return settings_invalid("bind IP is required", on_leave) if host.empty?
+      port = port_s.to_i?
+      unless port && 0 <= port <= 65535
+        return settings_invalid("invalid bind port #{port_s.inspect}", on_leave)
+      end
+      if err = Settings.upstream_proxy_port_error(upstream)
+        return settings_invalid(err, on_leave)
+      end
+      @host.status(@host.apply_project_network(host, port, upstream))
+      @project_view.refresh_settings
+    end
+
+    private def settings_invalid(msg : String, on_leave : Bool) : Nil
+      @host.status(msg.starts_with?("settings:") ? msg : "project network: #{msg}")
+      @project_view.refresh_settings if on_leave # leaving the pane drops the half-typed value
     end
   end
 end

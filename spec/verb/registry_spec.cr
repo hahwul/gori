@@ -643,6 +643,21 @@ describe Gori::Verb do
       keymap.lookup(Chord.new("down"), Scope::Body).should eq("body.down")
     end
 
+    it "binds bare 's' to the scope-lens toggle from any scope (was jump-to-editor)" do
+      reg = Gori::Verbs.registry
+      keymap = Keymap.build(reg)
+      keymap.lookup(Chord.new("s"), Scope::Body).should eq("scope.toggle-lens")
+      keymap.lookup(Chord.new("s"), Scope::Sitemap).should eq("scope.toggle-lens")
+
+      ctx = FakeContext.new
+      reg["scope.toggle-lens"].call(ctx)
+      ctx.calls.should contain(:scope_toggle_lens)
+
+      # jumping to the scope rule editor is still reachable, now palette-only (no chord)
+      reg["scope.edit"].call(ctx)
+      ctx.calls.should contain(:scope_open)
+    end
+
     it "binds ctrl-n to a new blank replay in the Replay scope" do
       reg = Gori::Verbs.registry
       keymap = Keymap.build(reg)

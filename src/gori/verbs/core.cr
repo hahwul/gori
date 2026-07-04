@@ -80,9 +80,14 @@ module Gori
         "settings.hotkeys", "settings:hotkeys", "Rebind keyboard shortcuts (press a key) + pick an OS default profile",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hotkeys); nil }
 
+      # `s` toggles the scope lens from anywhere (its original behavior — this used to jump to
+      # the Project scope editor). Jumping there is now the palette-only `scope.edit` below.
       r.register Verb::Definition.new(
-        "scope.edit", "Scope lens", "Edit the in-scope host patterns", Verb::Scope::Global,
-        [Verb::Chord.new("s")]) { |ctx| ctx.scope_open; nil }
+        "scope.toggle-lens", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",
+        Verb::Scope::Global, [Verb::Chord.new("s")]) { |ctx| ctx.scope_toggle_lens; nil }
+      r.register Verb::Definition.new(
+        "scope.edit", "Edit scope rules", "Jump to the Project tab's scope rule editor",
+        Verb::Scope::Global) { |ctx| ctx.scope_open; nil }
 
       r.register Verb::Definition.new(
         "scope.add-host", "Add host to scope", "Add the selected flow's host to the scope lens",

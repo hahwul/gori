@@ -21,6 +21,16 @@ private def tmp_store(&)
   end
 end
 
+# Reset the global + per-project network layer to a known baseline (specs share Gori::Settings).
+private def reset_projnet
+  Gori::Settings.project_bind_host = nil
+  Gori::Settings.project_bind_port = nil
+  Gori::Settings.project_upstream_proxy = nil
+  Gori::Settings.bind_host = "127.0.0.1"
+  Gori::Settings.bind_port = 8070
+  Gori::Settings.upstream_proxy = ""
+end
+
 private def render_ta(ta : TextArea, h : Int32) : MemoryBackend
   b = MemoryBackend.new(40, h)
   ta.render(Screen.new(b), Rect.new(0, 0, 40, h), cursor: false)
@@ -168,18 +178,83 @@ describe "ProjectView AT A GLANCE Technologies" do
 end
 
 describe "ProjectView#pane_at" do
-  it "splits the body into the overview band + SCOPE/HOST-OVERRIDES (left) / DESCRIPTION (right) cards" do
+  it "splits the body into the overview band + SCOPE/HOST-OVERRIDES (left) / DESCRIPTION over PROJECT SETTINGS (right)" do
     tmp_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       rect = Rect.new(0, 0, 120, 30)
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: false)
 
-      view.pane_at(rect, rect.x + 1, rect.y).should eq(:overview)       # top band
-      content_y = rect.y + 12                                           # below the capped overview (meta_h == 11)
-      view.pane_at(rect, rect.x + 1, content_y).should eq(:scope)       # top-left card
-      view.pane_at(rect, rect.x + 1, rect.y + 24).should eq(:overrides) # bottom-left card
-      view.pane_at(rect, rect.right - 2, content_y).should eq(:desc)    # right card
-      view.pane_at(Rect.new(0, 0, 0, 0), 0, 0).should be_nil            # empty rect → nothing
+      view.pane_at(rect, rect.x + 1, rect.y).should eq(:overview)          # top band
+      content_y = rect.y + 12                                              # below the capped overview (meta_h == 11)
+      view.pane_at(rect, rect.x + 1, content_y).should eq(:scope)          # top-left card
+      view.pane_at(rect, rect.x + 1, rect.y + 24).should eq(:overrides)    # bottom-left card
+      view.pane_at(rect, rect.right - 2, content_y).should eq(:desc)       # right-top card
+      view.pane_at(rect, rect.right - 2, rect.y + 26).should eq(:settings) # right-bottom card
+      view.pane_at(Rect.new(0, 0, 0, 0), 0, 0).should be_nil               # empty rect → nothing
+    end
+  end
+end
+
+describe "ProjectView PROJECT SETTINGS pane" do
+  it "renders the scope-lens toggle + the three network fields with an inherit marker" do
+    tmp_store do |store|
+      reset_projnet
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
+      b.contains?("PROJECT SETTINGS").should be_true
+      b.contains?("Scope lens").should be_true
+      b.contains?("Bind IP").should be_true
+      b.contains?("Bind Port").should be_true
+      b.contains?("Upstream proxy").should be_true
+      b.contains?("127.0.0.1").should be_true # inherited global bind host
+      b.contains?("· global").should be_true  # no override yet → inheriting
+    ensure
+      reset_projnet
+    end
+  end
+
+  it "marks a field · project when a per-project override is active" do
+    tmp_store do |store|
+      reset_projnet
+      Gori::Settings.project_bind_port = 9100
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
+      b.contains?("9100").should be_true
+      b.contains?("· project").should be_true
+    ensure
+      reset_projnet
+    end
+  end
+
+  it "hit-tests a settings row and edits a text field (dirty-tracked)" do
+    tmp_store do |store|
+      reset_projnet
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings
+      view.focus_pane(:settings)
+      rect = Rect.new(0, 0, 120, 30)
+      view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: true) # establish geometry
+
+      view.set_row_at(rect, rect.right - 4, rect.y + 26).should_not be_nil # a row in the settings band
+      view.settings_dirty?.should be_false                                 # fresh, inherited pane
+
+      view.select_setting(2) # Bind Port
+      view.settings_scope_row?.should be_false
+      view.settings_text_row?.should be_true
+      view.set_input('9')
+      view.set_input('9')
+      _, port, _ = view.settings_values
+      port.should eq("807099") # inserted at the caret (field end)
+      view.settings_dirty?.should be_true
+
+      view.set_backspace
+      view.settings_values[1].should eq("80709")
+    ensure
+      reset_projnet
     end
   end
 end

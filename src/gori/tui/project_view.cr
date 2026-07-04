@@ -69,6 +69,16 @@ module Gori::Tui
       @ov_input = ""               # add-row text ("IP host")
       @ov_icx = 0                  # add-row cursor index
       @ov_preedit = ""             # IME preedit for the add-row
+
+      # PROJECT SETTINGS pane: scope-lens toggle (row 0) + inline-editable network fields
+      # (rows 1-3: bind IP / bind port / upstream proxy). @set_values holds the three text
+      # fields; @set_overridden tracks whether each is a project override (vs inheriting global).
+      @set_sel = 0
+      @set_values = ["", "", ""]
+      @set_overridden = [false, false, false]
+      @set_cursor = 0
+      @set_preedit = ""
+      load_settings_values
     end
 
     # Snapshot stats from the live session (called on tab enter and initial run).
@@ -94,6 +104,20 @@ module Gori::Tui
 
       @desc_area.set_text(store.setting(DESC_KEY) || "")
       @desc_dirty = false
+      load_settings_values # refresh the network fields (Session.open loaded any project overrides)
+    end
+
+    # (Re)load the PROJECT SETTINGS network fields from the effective config — the project
+    # override when pinned, else the global default (Session.open populated Settings.project_*
+    # from this project's DB on open). @set_overridden drives the "· project/global" marker.
+    private def load_settings_values : Nil
+      @set_values = [Settings.effective_bind_host, Settings.effective_bind_port.to_s, Settings.effective_upstream_proxy]
+      @set_overridden = [!Settings.project_bind_host.nil?, !Settings.project_bind_port.nil?, !Settings.project_upstream_proxy.nil?]
+      @set_cursor = current_set_value.size
+    end
+
+    private def current_set_value : String
+      @set_sel >= 1 ? @set_values[@set_sel - 1] : ""
     end
 
     # Drop tech fingerprints seen only on out-of-scope hosts before summarizing — with
@@ -111,6 +135,8 @@ module Gori::Tui
         @add_preedit = text
       elsif @pane == :overrides && @ov_adding
         @ov_preedit = text
+      elsif @pane == :settings && settings_text_row?
+        @set_preedit = text
       else
         @desc_area.set_preedit(text)
       end
@@ -120,8 +146,13 @@ module Gori::Tui
       @desc_area.text
     end
 
-    # --- focus ring (three panes: :scope → :overrides → :desc, cycled by the Tab ring) ---
-    PANES = [:scope, :overrides, :desc]
+    # --- focus ring (four panes: :scope → :overrides → :desc → :settings, cycled by the Tab
+    # ring). :settings is the PROJECT SETTINGS pane below DESCRIPTION (scope lens + network). ---
+    PANES = [:scope, :overrides, :desc, :settings]
+
+    # PROJECT SETTINGS pane rows: row 0 is the scope-lens toggle, rows 1-3 the network fields.
+    SETTINGS_LABELS  = ["Scope lens", "Bind IP", "Bind Port", "Upstream proxy"]
+    SETTINGS_LABEL_W = 14 # value column starts past the widest label ("Upstream proxy")
 
     def focus_first : Nil
       @pane = :scope
@@ -174,11 +205,15 @@ module Gori::Tui
       vw < VIZ_MIN_W ? 0 : vw
     end
 
-    # The three body-pane rects below the OVERVIEW band: {SCOPE (top-left), HOST
-    # OVERRIDES (bottom-left), DESCRIPTION (full-height right)}, or nil when the body is
-    # too small to split. The left column is halved vertically; DESCRIPTION fills the
-    # right past a 1-col divider.
-    private def body_panes(rect : Rect) : {Rect, Rect, Rect}?
+    # The four body-pane rects below the OVERVIEW band: {SCOPE (top-left), HOST OVERRIDES
+    # (bottom-left), DESCRIPTION (right-top), PROJECT SETTINGS (right-bottom)}, or nil when the
+    # body is too small to split. The left column is halved vertically; the right column stacks
+    # DESCRIPTION over a PROJECT SETTINGS band pinned to the bottom (its card border + the scope
+    # row + 3 network rows ≈ SETTINGS_H), with DESCRIPTION keeping the remainder (≥ MIN_DESC_H).
+    SETTINGS_H = 6 # 2 border rows + scope-lens row + 3 network rows
+    MIN_DESC_H = 3 # never squeeze DESCRIPTION below this when the settings band can shrink
+
+    private def body_panes(rect : Rect) : {Rect, Rect, Rect, Rect}?
       oh = overview_h(rect)
       content = Rect.new(rect.x, rect.y + oh, rect.w, {rect.h - oh, 0}.max)
       return nil if content.h < 2 || content.w < 4
@@ -186,20 +221,26 @@ module Gori::Tui
       scope_h = {content.h // 2, 1}.max
       scope_rect = Rect.new(content.x, content.y, left_w, scope_h)
       ov_rect = Rect.new(content.x, content.y + scope_h, left_w, {content.h - scope_h, 0}.max)
-      right = Rect.new(content.x + left_w + 1, content.y, {content.w - left_w - 1, 0}.max, content.h)
-      {scope_rect, ov_rect, right}
+      right_x = content.x + left_w + 1
+      right_w = {content.w - left_w - 1, 0}.max
+      set_h = {SETTINGS_H, {content.h - MIN_DESC_H, 1}.max}.min # settings ≤ its full height, desc keeps its min
+      desc_h = {content.h - set_h, 0}.max
+      desc_rect = Rect.new(right_x, content.y, right_w, desc_h)
+      set_rect = Rect.new(right_x, content.y + desc_h, right_w, set_h)
+      {scope_rect, ov_rect, desc_rect, set_rect}
     end
 
     # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
 
-    # The pane symbol under (mx,my): :scope, :overrides, :desc, or :overview (top band).
+    # The pane symbol under (mx,my): :scope, :overrides, :desc, :settings, or :overview (band).
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if rect.empty? || !rect.contains?(mx, my)
       return :overview if my < rect.y + overview_h(rect)
       return nil unless panes = body_panes(rect)
       return :scope if panes[0].contains?(mx, my)
       return :overrides if panes[1].contains?(mx, my)
-      panes[2].contains?(mx, my) ? :desc : nil
+      return :desc if panes[2].contains?(mx, my)
+      panes[3].contains?(mx, my) ? :settings : nil
     end
 
     # Index of the scope-rule row clicked, or nil outside the populated list.
@@ -249,6 +290,105 @@ module Gori::Tui
     def desc_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless panes = body_panes(rect)
       @desc_area.click_to_cursor(panes[2].inset(1, 1), mx, my)
+    end
+
+    # --- PROJECT SETTINGS pane (delegated from ProjectController#handle_project_settings_key) ---
+    def set_sel : Int32
+      @set_sel
+    end
+
+    def settings_scope_row? : Bool
+      @set_sel == 0
+    end
+
+    def settings_text_row? : Bool
+      @set_sel >= 1
+    end
+
+    def set_at_top? : Bool
+      @set_sel <= 0
+    end
+
+    def set_at_bottom? : Bool
+      @set_sel >= SETTINGS_LABELS.size - 1
+    end
+
+    def set_at_cursor_start? : Bool
+      @set_cursor <= 0
+    end
+
+    # The three network fields, trimmed, for commit: {bind IP, bind port, upstream proxy}.
+    def settings_values : {String, String, String}
+      {@set_values[0].strip, @set_values[1].strip, @set_values[2].strip}
+    end
+
+    # True when any network field differs from the currently-applied effective config — the
+    # commit path skips a no-op apply (and its toast) when nothing was actually edited.
+    def settings_dirty? : Bool
+      h, p, u = settings_values
+      h != Settings.effective_bind_host || p != Settings.effective_bind_port.to_s || u != Settings.effective_upstream_proxy
+    end
+
+    # Move between the pane's rows (keyboard ↑/↓ + wheel); clamps to the row range.
+    def set_select(delta : Int32) : Nil
+      @set_sel = (@set_sel + delta).clamp(0, SETTINGS_LABELS.size - 1)
+      @set_cursor = current_set_value.size
+      @set_preedit = ""
+    end
+
+    # Mouse: focus a specific settings row (clamped).
+    def select_setting(idx : Int32) : Nil
+      @set_sel = idx.clamp(0, SETTINGS_LABELS.size - 1)
+      @set_cursor = current_set_value.size
+      @set_preedit = ""
+    end
+
+    def set_input(ch : Char) : Nil
+      return unless settings_text_row?
+      v = @set_values[@set_sel - 1]
+      c = @set_cursor.clamp(0, v.size)
+      @set_values[@set_sel - 1] = "#{v[0, c]}#{ch}#{v[c..]}"
+      @set_cursor = c + 1
+      @set_preedit = ""
+    end
+
+    # ⌫: delete the char before the caret. Returns false on an at-start caret so the caller can
+    # treat ⌫ as a no-op there (the text rows never auto-leave the pane, unlike the add-rows).
+    def set_backspace : Bool
+      return false unless settings_text_row? && @set_cursor > 0
+      v = @set_values[@set_sel - 1]
+      @set_values[@set_sel - 1] = "#{v[0, @set_cursor - 1]}#{v[@set_cursor..]}"
+      @set_cursor -= 1
+      true
+    end
+
+    def set_move_cursor(delta : Int32) : Nil
+      return unless settings_text_row?
+      @set_cursor = (@set_cursor + delta).clamp(0, @set_values[@set_sel - 1].size)
+    end
+
+    # Re-read the network fields after an apply (Settings.project_* / effective values changed).
+    def refresh_settings : Nil
+      load_settings_values
+    end
+
+    # Mouse hit-test: the settings row index under (mx,my), or nil outside the pane's rows.
+    def set_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless pane_at(rect, mx, my) == :settings
+      return nil unless panes = body_panes(rect)
+      inner = panes[3].inset(1, 1)
+      return nil if inner.h <= 0 || !inner.contains?(mx, my)
+      row = my - inner.y
+      (0 <= row < SETTINGS_LABELS.size) ? row : nil
+    end
+
+    # Mouse: place the caret in the focused network field at a click (no-op on the toggle row).
+    def setting_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless settings_text_row?
+      return unless panes = body_panes(rect)
+      inner = panes[3].inset(1, 1)
+      vx = inner.x + 1 + SETTINGS_LABEL_W + 1
+      @set_cursor = (mx - vx).clamp(0, @set_values[@set_sel - 1].size)
     end
 
     # --- SCOPE pane editing (delegated from Runner#handle_project_scope_key) ---
@@ -526,6 +666,11 @@ module Gori::Tui
       @desc_area.at_start?
     end
 
+    # Cursor on the last line of the description → ↓ crosses down to the PROJECT SETTINGS pane.
+    def desc_at_bottom? : Bool
+      @desc_area.at_bottom?
+    end
+
     # Self-framed (like Replay/Intercept): an OVERVIEW card on top (read-only stats),
     # then SCOPE (top-left) over HOST OVERRIDES (bottom-left) and DESCRIPTION (right) —
     # three focusable panes. The focused pane's card lights gold.
@@ -534,6 +679,7 @@ module Gori::Tui
       scope_focused = focused && @pane == :scope
       ov_focused = focused && @pane == :overrides
       desc_focused = focused && @pane == :desc
+      settings_focused = focused && @pane == :settings
 
       # OVERVIEW band on top; below it SCOPE (top-left) over HOST OVERRIDES (bottom-left),
       # with DESCRIPTION filling the right column. The band splits into OVERVIEW (left) and
@@ -548,6 +694,7 @@ module Gori::Tui
       render_scope_card(screen, panes[0], scope_focused)
       render_overrides_card(screen, panes[1], ov_focused)
       render_desc_card(screen, panes[2], desc_focused)
+      render_settings_card(screen, panes[3], settings_focused)
     end
 
     private def render_overview(screen : Screen, rect : Rect) : Nil
@@ -855,6 +1002,56 @@ module Gori::Tui
       Frame.card(screen, rect, "DESCRIPTION", bg: Theme.bg, border: Frame.pane_border(focused))
       @desc_area.render(screen, rect.inset(1, 1), cursor: focused,
         highlight: Settings.editor_markdown ? :markdown : nil)
+    end
+
+    # PROJECT SETTINGS card: the scope-lens toggle (row 0) over the three inline-editable network
+    # fields (bind IP / bind port / upstream proxy). Each network row carries a "· project" /
+    # "· global" marker so a pinned override reads distinct from an inherited global value.
+    private def render_settings_card(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "PROJECT SETTINGS", bg: Theme.bg, border: Frame.pane_border(focused))
+      inner = rect.inset(1, 1)
+      return if inner.h <= 0 || inner.w <= 0
+      SETTINGS_LABELS.each_with_index do |label, i|
+        break if i >= inner.h
+        render_settings_row(screen, inner, inner.y + i, i, label, focused && @set_sel == i)
+      end
+    end
+
+    private def render_settings_row(screen : Screen, inner : Rect, y : Int32, i : Int32,
+                                    label : String, selected : Bool) : Nil
+      bg = selected ? Theme.accent_bg : Theme.bg
+      if selected
+        screen.fill(Rect.new(inner.x, y, inner.w, 1), bg)
+        screen.cell(inner.x, y, '▎', Theme.accent, bg)
+      end
+      lx = inner.x + 1
+      screen.text(lx, y, label, selected ? Theme.text_bright : Theme.text, bg, width: SETTINGS_LABEL_W)
+      vx = lx + SETTINGS_LABEL_W + 1
+      return if vx >= inner.right
+      if i == 0
+        # Scope-lens toggle — ON (accent) / OFF (muted), reading the shared session Scope.
+        on = @scope.enabled?
+        screen.text(vx, y, on ? "ON" : "OFF", on ? Theme.accent : Theme.muted, bg, Attribute::Bold)
+      else
+        render_settings_field(screen, inner, y, vx, i - 1, selected, bg)
+      end
+    end
+
+    # One network text field: the value (editable input_line when the row is focused) plus a
+    # right-aligned "· project" / "· global" override marker.
+    private def render_settings_field(screen : Screen, inner : Rect, y : Int32, vx : Int32,
+                                      fi : Int32, selected : Bool, bg : Color) : Nil
+      overridden = @set_overridden[fi]
+      marker = overridden ? "· project" : "· global"
+      mx = inner.right - marker.size
+      fw = {mx - vx - 1, 3}.max
+      if selected
+        screen.input_line(vx, y, @set_values[fi], @set_cursor, @set_preedit, Theme.text_bright, bg, width: fw)
+      else
+        screen.text(vx, y, @set_values[fi], Theme.text, bg, width: fw)
+      end
+      screen.text(mx, y, marker, overridden ? Theme.accent : Theme.muted, bg) if mx > vx + 3
     end
 
     # Scroll offset that keeps `sel` visible in a window of `h` rows over `total`.
