@@ -1044,6 +1044,18 @@ module Gori::Tui
       # visible line at render — so opening a huge response doesn't freeze the UI.
       display, decode_note = Proxy::Codec::ContentDecode.decode(head, body)
       src = display || body
+      # Binary bodies (images/webp/fonts/media/…) are NOT text: decoding their raw
+      # bytes as UTF-8 and rendering them yields garbage AND — worse — the accidental
+      # wide/emoji graphemes among the bytes desync the terminal's cursor tracking, so
+      # the diff-renderer leaves stray glyphs it can never reach (the reported "잔상").
+      # Show a placeholder and point at the byte-exact hex view (x), like Burp/mitmproxy.
+      if (b = src) && !b.empty? && binary_body?(b)
+        head_lines = Highlight.message_windowed(head, nil, request).head
+        head_lines << Highlight::Line.new
+        head_lines << [Highlight::Span.new(
+          "— binary body (#{Fmt.size(b.size.to_i64)}) — not shown as text; press x for the hex view —", Theme.muted)]
+        return DetailView.new(head_lines, [] of String, :text, trailer)
+      end
       # Pretty-print AFTER decode (so JSON/XML/… are reflowed from the decoded bytes),
       # display only — storage is untouched. nil = leave raw. `pretty.kind` overrides
       # the styler when the reflow is no longer the content-type's language.
@@ -1061,6 +1073,20 @@ module Gori::Tui
       # signals the reflow, so the "— pretty: … —" footer is redundant (and Replay
       # never showed one — this keeps the two response views consistent).
       DetailView.new(win.head, win.body, win.kind, trailer, pretty: pretty != nil)
+    end
+
+    # How many leading bytes to sniff for the binary heuristic. Binary formats carry
+    # NUL in their header/framing, so a bounded prefix scan is enough — and keeps this
+    # O(1) on a multi-MiB body rather than walking every byte on each cache rebuild.
+    BINARY_SNIFF_LIMIT = 8192
+
+    # A body is treated as binary (→ hex view, not text) when a NUL byte appears in its
+    # leading bytes — the classic git/grep detector. Real text, including UTF-8 Korean/
+    # CJK/emoji, never contains NUL; images, fonts, media and protobufs do.
+    private def binary_body?(bytes : Bytes) : Bool
+      n = {bytes.size, BINARY_SNIFF_LIMIT}.min
+      n.times { |i| return true if bytes[i] == 0u8 }
+      false
     end
 
     # Wrap pre-formatted plain strings (frames / ws / gRPC hex) as single-span

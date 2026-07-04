@@ -2446,6 +2446,16 @@ module Gori::Tui
       @overlay = :none
     end
 
+    # Emergency full repaint (palette-only). `@resized` routes the next flush through the
+    # full-`sync` path — every cell is rewritten regardless of the diff — so stray glyphs
+    # the diff-renderer's front buffer believes are already correct (e.g. left after a
+    # binary response body desynced cursor tracking) get overwritten. Same recovery path
+    # the app already uses on resize / theme reload / external-editor return.
+    def refresh_screen : Nil
+      @resized = true
+      status("screen refreshed")
+    end
+
     # --- Host (the facade per-tab controllers drive the shell through) -------
     # Thin wrappers over the existing shell setters so a controller never writes
     # @overlay/@focus/@active_tab directly. `status` (above) already satisfies Host.

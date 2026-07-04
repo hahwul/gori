@@ -44,6 +44,10 @@ private class FakeContext < ExecContext
     @calls << :close_overlay
   end
 
+  def refresh_screen : Nil
+    @calls << :refresh_screen
+  end
+
   def focus_tab(tab : Symbol) : Nil
     @calls << tab
   end
@@ -705,6 +709,14 @@ describe Gori::Verb do
       ctx.calls.should contain(:replay_toggle_decoded)
       ctx.calls.should contain(:replay_toggle_sni)
       ctx.calls.should contain(:replay_toggle_auto_content_length)
+    end
+
+    it "routes the palette-only Refresh screen verb (no chord) to refresh_screen" do
+      reg = Gori::Verbs.registry
+      reg["view.refresh"].chords.empty?.should be_true # palette-only, unbound
+      ctx = FakeContext.new
+      reg["view.refresh"].call(ctx)
+      ctx.calls.should contain(:refresh_screen)
     end
   end
 

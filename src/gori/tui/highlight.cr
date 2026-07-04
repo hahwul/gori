@@ -649,7 +649,10 @@ module Gori::Tui
 
     private def self.to_lines(bytes : Bytes?) : Array(String)
       return [] of String unless bytes
-      String.new(bytes).split('\n').map(&.rstrip('\r'))
+      # `.scrub` maps invalid UTF-8 to U+FFFD (width-1, printable) so a body with stray
+      # bytes never feeds raw invalid sequences into width/search math — mirrors the
+      # `.scrub` the Fuzzer/Replay/Comparer views already apply on their byte→line seam.
+      String.new(bytes).scrub.split('\n').map(&.rstrip('\r'))
     end
 
     # The media type from the first `Content-Type` header, lowercased and
