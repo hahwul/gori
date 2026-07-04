@@ -76,6 +76,7 @@ module Gori::Tui
       @set_sel = 0
       @set_values = ["", "", ""]
       @set_overridden = [false, false, false]
+      @set_baseline = {"", "", ""} # the three fields as last loaded; drives settings_dirty?
       @set_cursor = 0
       @set_preedit = ""
       load_settings_values
@@ -114,6 +115,7 @@ module Gori::Tui
       @set_values = [Settings.effective_bind_host, Settings.effective_bind_port.to_s, Settings.effective_upstream_proxy]
       @set_overridden = [!Settings.project_bind_host.nil?, !Settings.project_bind_port.nil?, !Settings.project_upstream_proxy.nil?]
       @set_cursor = current_set_value.size
+      @set_baseline = settings_values # capture the load state so "dirty" means the USER edited a field
     end
 
     private def current_set_value : String
@@ -322,11 +324,13 @@ module Gori::Tui
       {@set_values[0].strip, @set_values[1].strip, @set_values[2].strip}
     end
 
-    # True when any network field differs from the currently-applied effective config — the
-    # commit path skips a no-op apply (and its toast) when nothing was actually edited.
+    # True when the user edited a network field since it was last loaded. Diffs against the
+    # LOAD-TIME baseline, NOT live effective_* — a global settings:network save or a startup
+    # port-fallback mutates effective under an untouched pane, and diffing against it would
+    # make `commit` (fires on every tab-leave/quit) persist that stale snapshot as a phantom
+    # per-project override, silently reverting the global edit. Mirrors @desc_dirty.
     def settings_dirty? : Bool
-      h, p, u = settings_values
-      h != Settings.effective_bind_host || p != Settings.effective_bind_port.to_s || u != Settings.effective_upstream_proxy
+      settings_values != @set_baseline
     end
 
     # Move between the pane's rows (keyboard ↑/↓ + wheel); clamps to the row range.

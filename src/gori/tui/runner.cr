@@ -253,7 +253,6 @@ module Gori::Tui
 
     def run : Symbol
       history_controller.view.reload(@session.store)
-      project_controller.reload
       notes_controller.view.reload(@session.store) # load persisted notes up front so the tab is ready before it's ever focused
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
       # port-fallback note if the configured port was taken and we picked another.
@@ -278,6 +277,9 @@ module Gori::Tui
         end
         @toast = "port #{requested} in use — capturing on #{@session.proxy.port} instead (point your client there)"
       end
+      # Reload AFTER the fallback sync above so the Project SETTINGS pane's snapshot (and its
+      # dirty baseline) reflect the ACTUAL bound port, not the requested one that was taken.
+      project_controller.reload
       render # initial paint (the loop below only re-renders when something changed)
       # The render loop polls input on a 50ms cadence (so async channels are still
       # checked ≤50ms), but RENDER only runs when the frame would actually change —
@@ -1671,7 +1673,7 @@ module Gori::Tui
         # rest just persist (the value is read live or only matters next session).
         msg = @settings_view.save
         @toast = case @settings_view.section
-                 when :network then apply_settings(msg)
+                 when :network then apply_settings(msg).tap { project_controller.refresh_network } # re-sync the Project pane's inherited fields to the new global
                  when :theme   then apply_theme(msg)
                  else               msg
                  end

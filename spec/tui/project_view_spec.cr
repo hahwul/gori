@@ -257,4 +257,22 @@ describe "ProjectView PROJECT SETTINGS pane" do
       reset_projnet
     end
   end
+
+  # Regression: settings_dirty? must diff the LOAD-TIME baseline, not live effective_*.
+  # A global settings:network save (or a startup port-fallback) changes effective under an
+  # untouched pane; if that read as "dirty", the next tab-leave `commit` would persist the
+  # stale snapshot as a phantom per-project override, silently reverting the global edit.
+  it "an untouched pane stays clean after a global edit moves effective (no phantom override)" do
+    tmp_store do |store|
+      reset_projnet
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.refresh_settings # baseline = inherited global (8070)
+      view.settings_dirty?.should be_false
+
+      Gori::Settings.bind_port = 9090      # a global settings:network save, no project override
+      view.settings_dirty?.should be_false # the user never touched the pane → not dirty
+    ensure
+      reset_projnet
+    end
+  end
 end
