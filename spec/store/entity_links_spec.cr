@@ -66,6 +66,7 @@ describe "entity_links (V21)" do
         "VALUES (1, 5, 5, 'legacy', 2, 'a.test', ?, '', 0)", fid)
       store.@db.exec("DROP TABLE entity_links")
       store.@db.exec("ALTER TABLE replays DROP COLUMN mark_transform") # V22 (added a column to a pre-V17 table)
+      store.@db.exec("DROP INDEX idx_flows_sizes")                     # V23
       store.@db.exec("PRAGMA user_version = 20")
       store.close
 

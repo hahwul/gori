@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 22
+      VERSION = 24
 
       V1 = [
         <<-SQL,
@@ -422,7 +422,39 @@ module Gori
         "ALTER TABLE replays ADD COLUMN mark_transform INTEGER NOT NULL DEFAULT 0",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22]
+      # Covering index over the two byte-size columns so the Project tab's
+      # `total_size` (SUM(request_size + COALESCE(response_size,0))) and `size:`/
+      # `reqsize:`/`respsize:` range filters are answered from a compact index scan
+      # instead of a full-table scan. The `flows` rows carry the multi-MB req/resp
+      # BLOBs inline, so a plain SUM scan pages through the ENTIRE table (~170ms /
+      # 100k flows, measured); this narrow index is a few MB and scans in ~2ms.
+      V23 = [
+        "CREATE INDEX idx_flows_sizes ON flows (request_size, response_size)",
+      ]
+
+      # Rebuild flows_fts as a CONTENTLESS FTS5 index (content='') instead of the
+      # default (which keeps a shadow %_content copy of the indexed body text). We
+      # already store the raw bodies in flows.{request,response}_body, so that copy
+      # was pure duplication — ~half of the FTS footprint, measured. Dropping it
+      # roughly halves the index size with ZERO change to `body:` search semantics
+      # (we only ever `MATCH` for rowids, never read columns back). contentless_delete=1
+      # (SQLite >= 3.43; ours is 3.51) keeps prune's `DELETE ... WHERE rowid <= ?` and
+      # the response-side re-index working. Contentless forbids UPDATE, so the writer
+      # switched from `UPDATE flows_fts SET resp` to DELETE + re-INSERT (see update_one).
+      # Backfill re-indexes every surviving row from the raw bodies (bounded by retention).
+      V24 = [
+        "DROP TABLE flows_fts",
+        "CREATE VIRTUAL TABLE flows_fts USING fts5(req, resp, content='', contentless_delete=1, tokenize='trigram')",
+        <<-SQL,
+        INSERT INTO flows_fts(rowid, req, resp)
+        SELECT id,
+               substr(CAST(request_body AS TEXT), 1, 65536),
+               substr(CAST(response_body AS TEXT), 1, 65536)
+        FROM flows
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24]
 
       def self.migrate!(db : DB::Database) : Nil
         current = db.scalar("PRAGMA user_version").as(Int64).to_i
