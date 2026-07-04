@@ -203,6 +203,66 @@ describe Gori::Tui::FuzzerView do
     end
   end
 
+  describe "RESULTS click-to-select" do
+    # On a 120×30 render the RESULTS pane sits at (0,15,85,12) → inner (1,16,83,10):
+    # the header is on y=16, so row i (sorted index @scroll+i) lands on y=17+i.
+    it "maps a click y to the sorted-view row index (header/out-of-range → nil)" do
+      view = loaded_fuzzer
+      5.times { |i| view.append_result(fuzz_result(i, 200, 1200)) }
+      rect = Rect.new(0, 0, 120, 30)
+      view.render(Screen.new(MemoryBackend.new(120, 30)), rect)
+      view.results_row_at(rect, 5, 16).should be_nil # the header row
+      view.results_row_at(rect, 5, 17).should eq(0)  # first result
+      view.results_row_at(rect, 5, 19).should eq(2)
+      view.results_row_at(rect, 5, 21).should eq(4)    # last populated
+      view.results_row_at(rect, 5, 22).should be_nil   # past the last row
+      view.results_row_at(rect, 5, 10).should be_nil   # up in the TEMPLATE/CONFIG band
+      view.results_row_at(rect, 100, 18).should be_nil # over the DIST sidebar
+    end
+
+    it "select_result_row picks a row (clamped) without opening detail" do
+      view = loaded_fuzzer
+      3.times { |i| view.append_result(fuzz_result(i, 200, 1200)) }
+      view.render(Screen.new(MemoryBackend.new(120, 30)), Rect.new(0, 0, 120, 30))
+      view.select_result_row(2)
+      view.results_selected_index.should eq(2)
+      view.focus.should_not eq(:detail)
+      view.select_result_row(99) # clamps to the last row
+      view.results_selected_index.should eq(2)
+    end
+
+    # Replays FuzzerController#click_results: first click on a row grabs focus + selects
+    # it; a second click on the already-selected row (pane already focused) opens detail.
+    it "first click selects + focuses, a second click on the same row opens detail" do
+      view = loaded_fuzzer
+      4.times { |i| view.append_result(fuzz_result(i, 200, 1200)) }
+      rect = Rect.new(0, 0, 120, 30)
+      view.render(Screen.new(MemoryBackend.new(120, 30)), rect)
+      view.focus_pane(:template) # start elsewhere in the focus ring
+      # First click on row 2 (y=19): focus is not on :results yet → select + focus.
+      row = view.results_row_at(rect, 5, 19).not_nil!
+      row.should eq(2)
+      if view.focus == :results && row == view.results_selected_index
+        view.open_detail
+      else
+        view.focus_pane(:results)
+        view.select_result_row(row)
+      end
+      view.focus.should eq(:results)
+      view.results_selected_index.should eq(2)
+      # Second click on the same row: now focused + already selected → open detail.
+      row2 = view.results_row_at(rect, 5, 19).not_nil!
+      if view.focus == :results && row2 == view.results_selected_index
+        view.open_detail
+      else
+        view.focus_pane(:results)
+        view.select_result_row(row2)
+      end
+      view.focus.should eq(:detail)
+      view.selected_result.try(&.index).should eq(2)
+    end
+  end
+
   it "hscroll_detail scrolls a long RESULT response line sideways into view (shift+←/→)" do
     view = loaded_fuzzer
     long_line = "HEAD" + ("." * 100) + "TAIL"
