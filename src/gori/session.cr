@@ -44,18 +44,19 @@ module Gori
       events = Channel(Store::FlowEvent).new(1024)
       prism_events = Channel(Store::FlowEvent).new(256)
       store = Store.open(project.db_path, events, prism_events)
-      # Per-project network overrides: pull this project's pinned bind/upstream (if any) into
-      # the Settings runtime layer BEFORE binding, so the proxy listens on the project's address
-      # and Upstream.dial (reads Settings.effective_upstream_proxy) tunnels through its upstream.
-      # Always assign all three (nil when unset) so switching projects resets cleanly. Mutating
-      # `config` is safe — App re-seeds it from the global Settings on every project open.
-      Settings.project_bind_host = store.setting(Settings::PROJECT_BIND_HOST_KEY)
-      Settings.project_bind_port = store.setting(Settings::PROJECT_BIND_PORT_KEY).try(&.to_i?)
-      Settings.project_upstream_proxy = store.setting(Settings::PROJECT_UPSTREAM_KEY)
-      config.listen = Settings.effective_bind_host
-      config.port = Settings.effective_bind_port
       prism = nil.as(Prism::Analyzer?)
       begin
+        # Per-project network overrides: pull this project's pinned bind/upstream (if any) into
+        # the Settings runtime layer BEFORE binding, so the proxy listens on the project's address
+        # and Upstream.dial (reads Settings.effective_upstream_proxy) tunnels through its upstream.
+        # Always assign all three (nil when unset) so switching projects resets cleanly. Mutating
+        # `config` is safe — App re-seeds it from the global Settings on every project open. Inside
+        # the begin so a failing settings read is torn down below rather than leaking store+channels.
+        Settings.project_bind_host = store.setting(Settings::PROJECT_BIND_HOST_KEY)
+        Settings.project_bind_port = store.setting(Settings::PROJECT_BIND_PORT_KEY).try(&.to_i?)
+        Settings.project_upstream_proxy = store.setting(Settings::PROJECT_UPSTREAM_KEY)
+        config.listen = Settings.effective_bind_host
+        config.port = Settings.effective_bind_port
         lock = nil.as(CaptureLock?)
         sink = Proxy::StoreSink.new(store)
         rules = Rules.load(store)                  # shared: proxy reads, TUI edits (Mutex-guarded)

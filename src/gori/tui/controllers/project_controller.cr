@@ -177,6 +177,13 @@ module Gori::Tui
       @project_view.save(@host.session.store)
     end
 
+    # Re-sync the SETTINGS pane's inherited network fields after a global settings:network
+    # save changed the effective config — but not while the user has an uncommitted edit in
+    # the pane (settings_dirty?), so their in-progress typing survives.
+    def refresh_network : Nil
+      @project_view.refresh_settings unless @project_view.settings_dirty?
+    end
+
     # --- DESCRIPTION pane: live multi-line editing ---
     private def handle_project_desc_key(ev : Termisu::Event::Key) : Nil
       key = ev.key

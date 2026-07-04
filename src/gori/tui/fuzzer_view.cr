@@ -555,11 +555,29 @@ module Gori::Tui
 
     private def compute_run_count : Int64?
       return nil if @sets.empty? || position_count == 0
-      sizes = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)).size }
+      sizes = @sets.map { |s| estimated_set_size(s) }
       return nil if sizes.any?(Nil) # any unknown / overflowing size → unknown total
       run_count_for_mode(sizes.compact)
     rescue
       nil
+    end
+
+    # Only line-count a wordlist this small on the render fiber; anything larger
+    # reports "unknown" for the live estimate rather than freezing the UI.
+    COUNT_FILE_CAP = 8_i64 * 1024 * 1024
+
+    # A set's payload count for the LIVE Run-row estimate. `run_request_count` runs on
+    # the render fiber, so a wordlist file is counted only when it's a regular file
+    # within COUNT_FILE_CAP — a rockyou-scale file would freeze the UI for seconds
+    # (re-read on every Mode cycle) and a non-regular path (/dev/zero, a FIFO) would
+    # block forever. Those report nil → the Run row just omits the count; the exact
+    # total is still computed off this path when the run actually starts.
+    private def estimated_set_size(s : SetSpec) : Int64?
+      if s.kind == :file
+        info = File.info?(s.value)
+        return nil unless info && info.type.file? && info.size <= COUNT_FILE_CAP
+      end
+      Fuzz::PayloadSet.new(build_source(s)).size
     end
 
     private def run_count_for_mode(ns : Array(Int64)) : Int64?

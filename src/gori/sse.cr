@@ -66,7 +66,7 @@ module Gori
       # Normalise all three line terminators to LF so a single split suffices, and
       # drop one leading BOM (U+FEFF) — WHATWG preprocessing — so the first field name
       # isn't mangled (a BOM-prefixed stream would otherwise lose its first event).
-      text = String.new(body).gsub("\r\n", "\n").gsub('\r', '\n').lchop(0xFEFF.chr)
+      text = String.new(body).scrub.gsub("\r\n", "\n").gsub('\r', '\n').lchop(0xFEFF.chr)
 
       last_id = nil.as(String?) # stream-level: persists across blocks (per spec)
       data = [] of String       # data lines accumulated for the current block

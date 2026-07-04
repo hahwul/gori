@@ -88,6 +88,16 @@ describe Gori::Tui::FuzzerView do
       view.run_request_count.should eq(10_i64)
     end
 
+    # run_request_count runs on the render fiber; a wordlist file must never be line-counted
+    # there when doing so could freeze (huge file) or block forever (/dev/zero, a FIFO). An
+    # uncountable file reports nil (the Run row just omits the count) instead of reading it.
+    it "run_request_count omits a wordlist file it can't safely count on the render path" do
+      view = FuzzerView.new
+      view.load_request("https://h", "GET /?x=§1§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+      view.apply_set(nil, Gori::Tui::SetSpec.new(:file, "/nonexistent/gori-spec-wordlist"))
+      view.run_request_count.should be_nil # File.info? → nil → unknown, never a blocking read
+    end
+
     it "advanced_snapshot round-trips through apply_advanced" do
       view = loaded_fuzzer
       snap = view.advanced_snapshot

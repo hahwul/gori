@@ -93,6 +93,16 @@ describe Gori::Sse do
       parse("retry: 99999999999999\ndata: x\n\n")[0].retry.should eq(Int32::MAX)
       parse("retry: 1500\ndata: x\n\n")[0].retry.should eq(1500)
     end
+
+    it "scrubs invalid UTF-8 so no raw bytes reach the display (a lying content-type can route binary here)" do
+      # "data: A" + a truncated 3-byte sequence (\xE4\xB8) + "B\n\n"
+      body = Bytes[0x64, 0x61, 0x74, 0x61, 0x3a, 0x20, 0x41, 0xE4, 0xB8, 0x42, 0x0a, 0x0a]
+      events = Gori::Sse.events(body)
+      events.size.should eq(1)
+      events[0].data.valid_encoding?.should be_true # the width-desync corruption vector is gone
+      events[0].data.should start_with("A")
+      events[0].data.should end_with("B")
+    end
   end
 
   describe ".event_stream?" do

@@ -1102,7 +1102,10 @@ module Gori::Tui
     # Wrap pre-formatted plain strings (frames / ws / gRPC hex) as single-span
     # body-text lines so they share the styled rendering path.
     private def wrap(strs : Array(String)) : Array(Highlight::Line)
-      strs.map { |s| [Highlight::Span.new(s, Theme.text)] of Highlight::Span }
+      # `.scrub` maps invalid UTF-8 to U+FFFD (width-1) so stray bytes in a WS text
+      # payload or SSE data line never desync the terminal — the same guard every
+      # sibling surface (Replay/CLI/MCP) already applies on this byte→line seam.
+      strs.map { |s| [Highlight::Span.new(s.scrub, Theme.text)] of Highlight::Span }
     end
 
     # Wrap a bounded log (frames/messages) and, when the window dropped older rows,
@@ -1215,12 +1218,15 @@ module Gori::Tui
 
     # A "▸ …" accent header line introducing a decoded-protocol section.
     private def derived_header(text : String) : Highlight::Line
-      [Highlight::Span.new("▸ #{text}", Theme.accent)] of Highlight::Span
+      [Highlight::Span.new("▸ #{text.scrub}", Theme.accent)] of Highlight::Span
     end
 
     # Append `raw`'s lines to `lines`, styled per `kind`, stopping at DERIVED_LINE_CAP.
     private def append_styled(lines : Array(Highlight::Line), raw : String, kind : Symbol) : Nil
-      raw.split('\n').each do |ln|
+      # Scrub before styling: decoded SAML/JWT/GraphQL payloads come from URL-/base64-
+      # decoded bytes that can be invalid UTF-8, and the `:text`/`plain` styler keeps
+      # them raw — matching the `.scrub` the CLI/MCP/decoded_view emitters apply.
+      raw.scrub.split('\n').each do |ln|
         if lines.size >= DERIVED_LINE_CAP
           lines << [Highlight::Span.new("… (truncated)", Theme.yellow)] of Highlight::Span
           break
@@ -1277,9 +1283,9 @@ module Gori::Tui
       tag = f.source == :query ? "?" : " "
       note = f.note
       [
-        Highlight::Span.new("#{tag} #{f.name}", Theme.syn_string),
+        Highlight::Span.new("#{tag} #{f.name.scrub}", Theme.syn_string),
         Highlight::Span.new(" = ", Theme.muted),
-        Highlight::Span.new(note ? "(#{note})" : f.value, note ? Theme.yellow : Theme.text),
+        Highlight::Span.new(note ? "(#{note})" : f.value.scrub, note ? Theme.yellow : Theme.text),
       ] of Highlight::Span
     end
   end
