@@ -24,7 +24,7 @@ module Gori::Tui
     # the filesystem on every visible project row every frame.
     RUNNING_PROBE_TTL = 400.milliseconds
 
-    record RunningProbe, at : Time::Span, held : Bool, status : CaptureStatus::Status?
+    record RunningProbe, at : Time::Instant, held : Bool, status : CaptureStatus::Status?
 
     def initialize(@term : Termisu, @registry : ProjectRegistry)
       @backend = TermisuBackend.new(@term)
@@ -609,7 +609,7 @@ module Gori::Tui
     end
 
     private def probe_running(proj : Project) : {Bool, CaptureStatus::Status?}
-      now = Time.monotonic
+      now = Time.instant
       if cached = @running_cache[proj.dir]?
         return {cached.held, cached.status} if now - cached.at < RUNNING_PROBE_TTL
       end
