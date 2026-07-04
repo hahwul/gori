@@ -241,6 +241,10 @@ module Gori
         "fuzz.attach-chain", "Edit convert chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied to each payload on send)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("y", ctrl: true)],
         available: in_fuzzer, mnemonic: 'c') { |ctx| ctx.fuzz_attach_chain; nil }
+      r.register Verb::Definition.new(
+        "fuzz.list-paste", "Paste list values", "Open a multi-line popup to paste newline-separated values for the List payload (pressing it again applies + closes)",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("l", ctrl: true)],
+        available: in_fuzzer, mnemonic: 'l') { |ctx| ctx.fuzz_list_paste; nil }
     end
 
     # Param-miner verbs: the cross-tab "Mine parameters" entry (space menu in History,

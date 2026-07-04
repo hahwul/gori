@@ -66,7 +66,7 @@ module Gori::Tui
         {"^N / ^W", "new / close a sub-tab"},
         {"^A · ^K · ^T · ^U", "auto-mark params · mark word · mark point (manual §) · clear §"},
         {"^O", "focus the config pane (lands on Payload)"},
-        {"config", "payload type/fields · ⏎ +add · ▸ Advanced (mode/engine/match/filter)"},
+        {"config", "payload type/fields · ⏎ +add · ^L paste List values (one per line) · ▸ Advanced (mode/engine/match/filter)"},
         {"wordlist path", "⇥/type to auto-complete from the dir + ~/.gori/wordlists"},
         {"^R · ^X", "run · stop"},
         {"↑/↓ · ↵", "results: select · open detail"},

@@ -108,6 +108,12 @@ module Gori::Tui
       @chain_pane = ChainPane.new
       @chain_focused = false
       @chain_marker_cursor = 0
+      # The LIST PASTE popup: a floating multi-line editor for the List payload's
+      # comma-joined @p_values, so a newline-separated wordlist can be pasted directly
+      # instead of retyped as one comma-joined line. ^L toggles it open (seeded one
+      # value per line) / commits (rejoins non-blank lines with ',' into @p_values).
+      @list_paste = TextArea.new
+      @list_paste_open = false
       @show_dist = true # the DIST sidebar beside RESULTS (toggled with `v`)
       @dist_cache = nil.as(DistData?)
       @dist_cache_rev = -1_i64
@@ -241,11 +247,13 @@ module Gori::Tui
     def focus_pane(pane : Symbol) : Nil
       return unless PANE_ORDER.includes?(pane)
       commit_chain_pane if @chain_focused
+      commit_list_paste if @list_paste_open
       @focus = pane
     end
 
     def focus_config : Nil
       commit_chain_pane if @chain_focused
+      commit_list_paste if @list_paste_open
       @focus = :config
       @cfg_field = 0 # land straight on the payload type tabs
       @cfg_caret = 0
@@ -254,6 +262,7 @@ module Gori::Tui
 
     def pane_advance(dir : Int32) : Bool
       commit_chain_pane if @chain_focused
+      commit_list_paste if @list_paste_open
       if @focus == :detail
         @focus = :results
         return true
@@ -278,6 +287,8 @@ module Gori::Tui
     def set_preedit(text : String) : Nil
       if chain_pane_active?
         @chain_pane.set_preedit(text)
+      elsif list_paste_active?
+        @list_paste.set_preedit(text)
       elsif @focus == :template
         @editor.set_preedit(text)
       end
@@ -320,6 +331,52 @@ module Gori::Tui
       return if @chain_pane.handle_key(ev)
       key = ev.key
       commit_chain_pane if key.escape? || key.enter? || key.tab? || key.up?
+    end
+
+    LIST_PASTE_PLACEHOLDER = "one payload per line — pasted newline-separated text splits automatically"
+
+    # True while the LIST PASTE popup owns the CONFIG pane's keyboard input.
+    def list_paste_active? : Bool
+      @list_paste_open && @focus == :config
+    end
+
+    # ^L: open the popup, seeded from the comma-joined @p_values (one entry per line).
+    # Returns a hint string when it can't (surfaced by the controller), nil on success.
+    def open_list_paste : String?
+      return "put the cursor in CONFIG first (^O)" unless @focus == :config
+      return "switch the payload type to List first (←/→)" unless @ptype == :list
+      @list_paste.set_text(@p_values.split(',').map(&.strip).reject(&.empty?).join('\n'))
+      @list_paste_open = true
+      nil
+    end
+
+    # Rejoin the popup's non-blank lines with ',' back into @p_values and close it.
+    # Idempotent so the focus changers above can call it freely.
+    def commit_list_paste : Nil
+      return unless @list_paste_open
+      @p_values = @list_paste.text.split('\n').map(&.strip).reject(&.empty?).join(',')
+      @dirty = true
+      @list_paste_open = false
+    end
+
+    # Route a key while the LIST PASTE popup is focused (the controller owns the
+    # escape/^L exit keys, which commit + close via commit_list_paste).
+    def handle_list_paste_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      case
+      when key.enter?     then @list_paste.insert_newline
+      when key.backspace? then @list_paste.backspace
+      when key.delete?    then @list_paste.delete
+      when key.up?        then @list_paste.move(-1, 0)
+      when key.down?      then @list_paste.move(1, 0)
+      when key.left?      then @list_paste.move(0, -1)
+      when key.right?     then @list_paste.move(0, 1)
+      when key.home?      then @list_paste.home
+      when key.end?       then @list_paste.end_of_line
+      else
+        ch = ev.char || key.to_char
+        @list_paste.insert(ch) if ch && !ev.ctrl? && !ev.alt?
+      end
     end
 
     # "§N" label for the marker under the template cursor (1-based), or "§" when not in one.
@@ -1082,6 +1139,7 @@ module Gori::Tui
       bottom = Rect.new(rest.x, rest.y + top_h, rest.w, {rest.h - top_h, 0}.max)
       render_top(screen, top, focused)
       render_bottom(screen, bottom, focused) if bottom.h > 0
+      render_list_paste(screen, rect) if list_paste_active?
     end
 
     private def render_top(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -1138,6 +1196,38 @@ module Gori::Tui
         rw = rect.w - vw - 1 # results width minus the 1-col gap (mirrors render_top)
         render_results(screen, Rect.new(rect.x, rect.y, rw, rect.h), focused && @focus == :results)
         render_dist(screen, Rect.new(rect.x + rw + 1, rect.y, vw, rect.h)) # read-only sidebar
+      end
+    end
+
+    # Centered box for the LIST PASTE popup within the whole session `area` — sized
+    # generously (it's meant to hold a pasted wordlist) but capped to the terminal,
+    # nil when even a small popup can't fit.
+    private def list_paste_box(area : Rect) : Rect?
+      w = {area.w - 8, 70}.min
+      h = {area.h - 6, 22}.min
+      return nil if w < 24 || h < 6
+      Rect.new(area.x + (area.w - w) // 2, area.y + (area.h - h) // 2, w, h)
+    end
+
+    private def render_list_paste(screen : Screen, area : Rect) : Nil
+      box = list_paste_box(area)
+      return unless box
+      # bg: Theme.bg (not the card default Theme.panel) — the embedded TextArea always
+      # paints its lines on Theme.bg, so the card must match or the interior two-tones.
+      Frame.card(screen, box, "PASTE LIST", bg: Theme.bg, border: Theme.border_focus)
+      n = @list_paste.text.split('\n').map(&.strip).reject(&.empty?).size
+      meta = "#{n} value#{n == 1 ? "" : "s"}"
+      screen.text({box.right - meta.size - 2, box.x + 13}.max, box.y, meta, Theme.muted, Theme.bg)
+      inner = box.inset(1, 1)
+      return if inner.h < 2
+      hint_y = inner.bottom - 1
+      screen.text(inner.x, hint_y, "one value per line · ⏎ newline · ^L / esc applies", Theme.muted, Theme.bg, width: inner.w)
+      editor = Rect.new(inner.x, inner.y, inner.w, inner.h - 1)
+      if @list_paste.line_count == 1 && @list_paste.text.empty?
+        screen.text(editor.x, editor.y, LIST_PASTE_PLACEHOLDER, Theme.muted, Theme.bg, width: editor.w)
+        screen.cursor(editor.x, editor.y)
+      else
+        @list_paste.render(screen, editor, cursor: true)
       end
     end
 
@@ -1451,7 +1541,7 @@ module Gori::Tui
                 "#{result_count} sent · #{matched_count} hit"
               end
       screen.text(rect.x + 11, rect.y, count, Theme.muted, Theme.bg) # +11 clears the " RESULTS " title
-      min_x = rect.x + 11 + count.size + 1 # badges never overwrite the count
+      min_x = rect.x + 11 + count.size + 1                           # badges never overwrite the count
       rx = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "v", "DIST", @show_dist)
       rx = Frame.toggle_badge(screen, rx, rect.y, min_x, "m", "MATCH", @matched_only)
       Frame.toggle_badge(screen, rx, rect.y, min_x, "o", @sort.to_s, false) # sort: a value chip, never lit

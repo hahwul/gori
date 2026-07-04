@@ -94,8 +94,10 @@ module Gori::Tui
     end
 
     private def config_hint(v : FuzzerView) : String
+      return "type/paste · ⏎ newline · ^L / esc applies" if v.list_paste_active?
       return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if v.path_completing?
-      "↑/↓ field · ←/→ change · type edit · ⏎ add/toggle · Del rm · ↹ pane"
+      base = "↑/↓ field · ←/→ change · type edit · ⏎ add/toggle · Del rm · ↹ pane"
+      v.config_field == :p_values ? "#{base} · ^L paste" : base
     end
 
     # --- rendering ---
@@ -191,6 +193,7 @@ module Gori::Tui
 
     private def handle_escape(v : FuzzerView) : Nil
       return v.commit_chain_pane if v.chain_pane_active? # esc in the CHAIN pane → save + back
+      return v.commit_list_paste if v.list_paste_active? # esc in the paste popup → apply + close
       v.focus == :detail ? v.focus_pane(:results) : @host.request_focus(:menu)
     end
 
@@ -204,6 +207,19 @@ module Gori::Tui
       else
         msg = view.focus_chain_pane
         @host.status(msg || "type the chain · Tab completes · ↵/esc saves")
+      end
+    end
+
+    # ^L: open the multi-line paste popup for the List payload's values (again = apply + close).
+    def fuzz_list_paste : Nil
+      return unless view = current_view
+      if view.list_paste_active?
+        view.commit_list_paste
+        save_current
+        @host.status("list updated")
+      else
+        msg = view.open_list_paste
+        @host.status(msg || "paste values, one per line · ^L / esc applies")
       end
     end
 
@@ -267,6 +283,7 @@ module Gori::Tui
     end
 
     private def edit_config(ev : Termisu::Event::Key, v : FuzzerView) : Nil
+      return v.handle_list_paste_key(ev) if v.list_paste_active? # popup owns typing while open
       key = ev.key
       case
       when key.up?        then config_up(v)
@@ -310,6 +327,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      return true if current_view.try(&.list_paste_active?) # the floating popup owns the screen — swallow clicks
       body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
       return true unless v = current_view
       if pane = v.pane_at(body, mx, my)
@@ -323,6 +341,7 @@ module Gori::Tui
     end
 
     def handle_wheel(step : Int32) : Bool
+      return true if current_view.try(&.list_paste_active?) # popup owns the screen — swallow the wheel too
       if v = current_view
         case v.focus
         when :results then v.results_move(step)

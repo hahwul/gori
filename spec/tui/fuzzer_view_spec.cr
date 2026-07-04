@@ -31,6 +31,66 @@ describe Gori::Tui::FuzzerView do
     view.template_text.should contain("§x¦rot13§")
   end
 
+  describe "LIST PASTE popup" do
+    it "opens on the List ptype's config field, types multi-line, commits comma-joined" do
+      view = loaded_fuzzer
+      view.focus_config
+      view.list_paste_active?.should be_false
+      view.open_list_paste.should be_nil # ptype defaults to :list
+      view.list_paste_active?.should be_true
+      "admin".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
+      "root".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      view.commit_list_paste
+      view.list_paste_active?.should be_false
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      backend.contains?("admin,root").should be_true
+    end
+
+    it "re-opening seeds one value per line from the existing comma-joined string" do
+      view = loaded_fuzzer
+      view.focus_config
+      view.open_list_paste
+      "a".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
+      "b".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Enter))
+      "c".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      view.commit_list_paste # @p_values is now "a,b,c"
+
+      view.open_list_paste # reseed: should split into 3 SEPARATE lines, not one blob
+      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Down))
+      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::Down))              # cursor on the "c" line alone
+      view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: 'Z')) # → "Zc"
+      view.commit_list_paste
+
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      backend.contains?("a,b,Zc").should be_true
+    end
+
+    it "requires the List payload type" do
+      view = loaded_fuzzer
+      view.focus_config
+      view.form_adjust(1) # ptype: list → numbers
+      view.open_list_paste.not_nil!.should contain("List")
+      view.list_paste_active?.should be_false
+    end
+
+    it "esc (via the controller-facing commit) applies and closes, matching the CHAIN pane convention" do
+      view = loaded_fuzzer
+      view.focus_config
+      view.open_list_paste
+      "x".each_char { |c| view.handle_list_paste_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+      view.commit_list_paste # the controller calls this on both esc and the ^L toggle-close
+      view.list_paste_active?.should be_false
+      backend = MemoryBackend.new(120, 30)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 30))
+      backend.contains?("x").should be_true
+    end
+  end
+
   it "label uses the custom name when set, else the template summary" do
     view = FuzzerView.new
     view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
