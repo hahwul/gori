@@ -49,6 +49,7 @@ module Gori
       Free text (no field:): matches method, host, or target (case-insensitive substring).
 
       Invalid syntax (e.g. status:>=foo with no numeric value) is rejected — it does NOT match all flows.
+      A mixed query (host:beta status:>=foo) silently drops only the bad terms and applies the rest.
       DOC
 
     # A non-blank user query must compile to at least one clause. EMPTY means every

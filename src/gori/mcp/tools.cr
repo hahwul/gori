@@ -133,7 +133,9 @@ module Gori
             s.field "limit", intprop("max entries (default 200, max 5000)")
           end
 
-          tool j, "list_findings", "List triage findings (severity + status), newest/most-severe first." do |s|
+          tool j, "list_findings",
+            "List triage findings (severity + status), newest/most-severe first. " \
+            "Returns an object {findings, returned, offset, total} — not a bare array." do |s|
             s.field "limit", intprop("max rows (default 100, max 500)")
             s.field "offset", intprop("start row (default 0)")
           end
@@ -154,6 +156,7 @@ module Gori
               "ACTIVE: makes a real outbound request from this host. Either pass " \
               "`flow_id` to replay a captured flow byte-exact, OR give an absolute " \
               "`url` with optional method/headers/body, or a verbatim `raw` request. " \
+              "When `flow_id` is set, url/method/headers/body/raw are ignored. " \
               "Host + Content-Length are auto-added when omitted on the url path." do |s|
               s.field "flow_id", intprop("replay a captured flow by id (no url needed; like TUI replay)")
               s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x")
@@ -402,6 +405,9 @@ module Gori
             j.field "findings", @store.count_findings
             j.field "total_bytes", @store.total_size
             j.field "earliest_created_at", @store.earliest_created_at
+            if ea = @store.earliest_created_at
+              j.field "earliest_created_at_iso", Serialize.unix_micros_iso(ea)
+            end
           end
         end)
       end

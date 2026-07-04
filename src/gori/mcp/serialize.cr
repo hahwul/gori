@@ -173,7 +173,9 @@ module Gori
         j.object do
           j.field "id", f.id
           j.field "created_at", f.created_at
+          j.field "created_at_iso", unix_micros_iso(f.created_at)
           j.field "updated_at", f.updated_at
+          j.field "updated_at_iso", unix_micros_iso(f.updated_at)
           j.field "title", f.title
           j.field "severity", f.severity.label
           j.field "status", f.status.label

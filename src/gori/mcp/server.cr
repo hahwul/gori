@@ -119,7 +119,8 @@ module Gori
       private def instructions_text : String
         base = "gori MCP exposes the active project's captured HTTP traffic " \
                "(history, flows, sitemap, scope, findings). Call ql_reference before " \
-               "writing list_history/list_sitemap queries. Timestamps are unix microseconds."
+               "writing list_history/list_sitemap queries. Timestamps include unix " \
+               "microseconds plus *_iso RFC3339 fields where available."
         if @allow_actions
           "#{base} Action tools are enabled: send_request (supports flow_id replay), " \
           "fuzz_*, mine_*, and create/update_finding make real outbound requests or mutate findings."

@@ -332,4 +332,19 @@ describe "Gori::Store#search (QL)" do
       store.search(Gori::QL.parse("dur:>=0"), 50).map(&.id).should_not contain(pending)
     end
   end
+
+  describe ".reject_empty?" do
+    it "flags a non-blank query that compiles to EMPTY" do
+      Gori::QL.reject_empty?("status:>=foo", Gori::QL.parse("status:>=foo")).should be_true
+    end
+
+    it "allows a blank query (caller handles separately)" do
+      Gori::QL.reject_empty?("  ", Gori::QL::EMPTY).should be_false
+    end
+
+    it "allows a query with at least one valid term" do
+      f = Gori::QL.parse("host:beta status:>=foo")
+      Gori::QL.reject_empty?("host:beta status:>=foo", f).should be_false
+    end
+  end
 end

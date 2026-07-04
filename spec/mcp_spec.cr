@@ -110,6 +110,8 @@ describe Gori::MCP::Server do
         names = full.map(&.["name"].as_s)
         names.should contain("list_history")
         names.should contain("get_flow")
+        names.should contain("ql_reference")
+        names.should contain("project_info")
         names.should contain("send_request")
         names.should contain("create_finding")
         names.should contain("update_finding")
@@ -419,7 +421,31 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "list_findings" do
+    it "returns a paginated object (not a bare array)" do
+      with_store do |store|
+        store.insert_finding("a", Gori::Store::Severity::Info, nil, nil)
+        store.insert_finding("b", Gori::Store::Severity::High, nil, nil)
+        store.flush
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_findings","arguments":{"limit":1,"offset":1}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload.as_h.has_key?("findings").should be_true
+        payload["returned"].as_i.should eq(1)
+        payload["offset"].as_i.should eq(1)
+        payload["total"].as_i.should eq(2)
+      end
+    end
+  end
+
   describe "error channels" do
+    it "returns -32600 with echoed id when method is missing" do
+      with_store do |store|
+        out = drive(store, %({"jsonrpc":"2.0","id":"req-1"}))
+        out[0]["error"]["code"].as_i.should eq(-32600)
+        out[0]["id"].as_s.should eq("req-1")
+      end
+    end
+
     it "answers a parse error with id null and keeps serving" do
       with_store do |store|
         out = drive(store, "{not json", %({"jsonrpc":"2.0","id":1,"method":"ping"}))
