@@ -47,10 +47,9 @@ describe Gori::Tui::ReplayView do
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
     backend.contains?("PONG").should be_true
-    # the "response" toggle is the active (bright) segment — i.e. NOT the diff view
-    ry = (0...20).find { |y| backend.row(y).includes?("response") }.not_nil!
-    rx = backend.row(ry).index("response").not_nil!
-    backend.fg_at(rx, ry).should eq(Theme.text_bright)
+    # plain response mode: the diff toggle chip is inactive (muted), not lit — the
+    # pane no longer carries a separate "response" chip (it's titled RESPONSE).
+    ry = (0...20).find { |y| backend.row(y).includes?("d:diff") }.not_nil!
     dx = backend.row(ry).index("diff").not_nil!
     backend.fg_at(dx, ry).should eq(Theme.muted) # diff segment inactive
   end
@@ -107,9 +106,8 @@ describe Gori::Tui::ReplayView do
       backend = MemoryBackend.new(120, 20)
       view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
       backend.contains?("NEW").should be_true
-      ry = (0...20).find { |y| backend.row(y).includes?("response") }.not_nil!
-      rx = backend.row(ry).index("response").not_nil!
-      backend.fg_at(rx, ry).should eq(Theme.text_bright) # response tab active
+      # response view kept — the diff toggle was NOT auto-opened (muted, inactive)
+      ry = (0...20).find { |y| backend.row(y).includes?("d:diff") }.not_nil!
       dx = backend.row(ry).index("diff").not_nil!
       backend.fg_at(dx, ry).should eq(Theme.muted) # diff tab NOT auto-opened
     end
@@ -128,9 +126,10 @@ describe Gori::Tui::ReplayView do
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
     backend.contains?("replay error: connection refused").should be_true
-    ry = (0...20).find { |y| backend.row(y).includes?("response") }.not_nil!
-    rx = backend.row(ry).index("response").not_nil!
-    backend.fg_at(rx, ry).should eq(Theme.text_bright)
+    # fell back to the response view — the diff toggle is inactive (muted)
+    ry = (0...20).find { |y| backend.row(y).includes?("d:diff") }.not_nil!
+    dx = backend.row(ry).index("diff").not_nil!
+    backend.fg_at(dx, ry).should eq(Theme.muted)
   end
 
   it "auto-updates an existing Content-Length to match the edited body on send" do
