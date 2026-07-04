@@ -329,29 +329,36 @@ module Gori::Tui
       screen.text(rect.x + 1, top, msg, Theme.muted)
     end
 
-    # Row 0: a filled MODE chip + detected-tech summary + right-aligned severity tallies.
+    # Row 0: a filled MODE chip (with its `m` cycle chord) + detected-tech summary + the
+    # `a:CLOSED` lens toggle + right-aligned severity tallies.
     private def render_mode_band(screen : Screen, rect : Rect) : Nil
-      x = chip(screen, rect.x + 1, rect.y, " #{@mode.title} ", mode_color(@mode)) + 1
+      x = chip(screen, rect.x + 1, rect.y, " m:#{@mode.title} ", mode_color(@mode)) + 1
+      tallies_x = render_tallies(screen, rect) # leftmost x the tallies occupy (or rect.right-1)
+      # The CLOSED lens toggle chains left of the tallies; lit when showing closed/dismissed
+      # issues, muted (its default open-only) otherwise — so the `a` chord stays in view.
+      cx = Frame.toggle_badge(screen, tallies_x, rect.y, x + 1, "a", "CLOSED", @show_closed)
       unless @tech.empty?
-        screen.text(x, rect.y, @tech.join(" "), Theme.green, width: {rect.right - x - 14, 0}.max)
+        screen.text(x, rect.y, @tech.join(" "), Theme.green, width: {cx - x - 1, 0}.max)
       end
-      render_tallies(screen, rect)
     end
 
-    private def render_tallies(screen : Screen, rect : Rect) : Nil
+    # Draws the right-aligned severity tallies; returns the leftmost x they occupy (or
+    # rect.right-1 when there are none) so the CLOSED lens badge can chain to their left.
+    private def render_tallies(screen : Screen, rect : Rect) : Int32
       labels = {4 => "C", 3 => "H", 2 => "M", 1 => "L", 0 => "I"}
       parts = [] of {String, Color}
       labels.each do |val, lab|
         n = @counts[val]
         parts << {"#{lab}:#{n}", severity_color(Store::Severity.new(val))} if n > 0
       end
-      return if parts.empty?
+      return rect.right - 1 if parts.empty?
       total = parts.sum { |(s, _)| s.size + 1 } - 1
-      rx = rect.right - 1 - total
+      left = rx = rect.right - 1 - total
       parts.each do |(s, color)|
         rx = screen.text(rx, rect.y, s, color)
         rx = screen.text(rx, rect.y, " ", Theme.muted)
       end
+      left
     end
 
     private def render_filter_bar(screen : Screen, rect : Rect, y : Int32) : Nil

@@ -1442,14 +1442,19 @@ module Gori::Tui
     private def render_results(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "RESULTS", bg: Theme.bg, border: Frame.pane_border(focused))
-      status = if @running
-                 p = @progress
-                 "running #{p ? p.sent : 0}/#{@run_total || "?"} · #{matched_count} hit"
-               else
-                 "#{result_count} sent · #{matched_count} hit · sort:#{@sort}#{@matched_only ? " · matched" : ""}"
-               end
-      sx = {rect.right - status.size - 1, rect.x + 10}.max
-      screen.text(sx, rect.y, status, Theme.muted, Theme.bg)
+      # Left: the live count. Right: keyed toggle badges (sort value · matched · dist) so
+      # each results toggle's shortcut rides the border, not just the bottom hint bar.
+      count = if @running
+                p = @progress
+                "running #{p ? p.sent : 0}/#{@run_total || "?"} · #{matched_count} hit"
+              else
+                "#{result_count} sent · #{matched_count} hit"
+              end
+      screen.text(rect.x + 11, rect.y, count, Theme.muted, Theme.bg) # +11 clears the " RESULTS " title
+      min_x = rect.x + 11 + count.size + 1 # badges never overwrite the count
+      rx = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "v", "DIST", @show_dist)
+      rx = Frame.toggle_badge(screen, rx, rect.y, min_x, "m", "MATCH", @matched_only)
+      Frame.toggle_badge(screen, rx, rect.y, min_x, "o", @sort.to_s, false) # sort: a value chip, never lit
       inner = rect.inset(1, 1)
       view = sorted_results
       @sel = @sel.clamp(0, {view.size - 1, 0}.max)

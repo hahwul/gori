@@ -1443,25 +1443,6 @@ module Gori::Tui
       end
     end
 
-    # Draws one mode chip (lit = active) at (x,y), returning the x past it.
-    private def chip(screen : Screen, x : Int32, y : Int32, label : String, lit : Bool) : Int32
-      screen.text(x, y, label, lit ? Theme.text_bright : Theme.muted, lit ? Theme.accent_bg : Theme.bg)
-    end
-
-    # One right-aligned toggle badge for the top border, ending just before `right_edge`
-    # (exclusive). Renders " chord:NAME ", lit (accent bg) when `on`, muted with NO
-    # background when off — so a disabled toggle is a quiet hint and its shortcut stays
-    # in view. Returns the badge's left x (chain the next badge to its left there), or
-    # `right_edge` unchanged when it doesn't fit (nothing drawn).
-    private def toggle_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
-                             chord : String, name : String, on : Bool) : Int32
-      text = " #{chord}:#{name} "
-      x = right_edge - text.size
-      return right_edge if x < min_x
-      screen.text(x, y, text, on ? Theme.text_bright : Theme.muted, on ? Theme.accent_bg : Theme.bg)
-      x
-    end
-
     # The RESPONSE pane's top-border chrome: keyed toggle chips + the right-aligned
     # latency·size of the last send. Each chip carries its shortcut (history-style:
     # d diff · x hex · p pretty) so the toggle is discoverable in place, and lights
@@ -1471,9 +1452,9 @@ module Gori::Tui
       resp_plain = !@resp_hex && @resp_mode == :response
       diff_lit = !@resp_hex && @resp_mode == :diff
       pretty_lit = resp_plain && !@reveal && resp_pretty_applied?
-      x = chip(screen, rect.x + 12, rect.y, " d:diff ", diff_lit) + 1
-      x = chip(screen, x, rect.y, " x:hex ", @resp_hex) + 1
-      chips_end = chip(screen, x, rect.y, " p:pretty ", pretty_lit)
+      x = Frame.chip(screen, rect.x + 12, rect.y, " d:diff ", diff_lit) + 1
+      x = Frame.chip(screen, x, rect.y, " x:hex ", @resp_hex) + 1
+      chips_end = Frame.chip(screen, x, rect.y, " p:pretty ", pretty_lit)
       if result = @result
         meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}" : Fmt.dur(result.duration_us)
         meta_x = rect.right - meta.size - 1
@@ -1514,7 +1495,7 @@ module Gori::Tui
       right_edge = rect.right - 1     # leave the right border cell untouched
       if h = @req_hex_edit
         # A single lit HEX badge — auto-CL/MARK don't apply to raw bytes (^X exits).
-        toggle_badge(screen, right_edge, rect.y, min_x, "^X", "HEX", true)
+        Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^X", "HEX", true)
         @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
         return
       end
@@ -1522,8 +1503,8 @@ module Gori::Tui
       # always shown (so the toggle is discoverable without the bottom hint bar), lit
       # when active and a muted no-background hint when off — ^L auto-Content-Length,
       # ^K MARK-transform.
-      cl_x = toggle_badge(screen, right_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
-      toggle_badge(screen, cl_x, rect.y, min_x, "^K", "MARK", @mark_transform)
+      cl_x = Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
+      Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^K", "MARK", @mark_transform)
       update_request_mark_tint
       @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
     end

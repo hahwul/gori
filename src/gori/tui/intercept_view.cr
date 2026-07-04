@@ -355,8 +355,11 @@ module Gori::Tui
         return
       end
 
+      # Left cluster: the master CATCH toggle (lit while holding) then the direction
+      # sub-mode — each carries its chord (i toggles, c cycles) so both are discoverable
+      # in the chrome, not just the empty-state prose.
+      x = Frame.chip(screen, rect.x + 1, rect.y, " i:CATCH ", @enabled) + 1
       label, color = direction_chip
-      x = rect.x + 1
       x = screen.text(x, rect.y, label, color, Theme.bg, Attribute::Bold) + 2
 
       rx = rect.right - 1
@@ -374,13 +377,14 @@ module Gori::Tui
       end
     end
 
-    # The catch-direction chip: text + colour. Dim when intercept is OFF (nothing is
-    # held yet, so the chip advertises what WILL be caught once toggled on).
+    # The catch-direction chip: `c`-chord + which direction, coloured by enabled state.
+    # Dim when intercept is OFF (nothing is held yet, so the chip advertises what WILL be
+    # caught once toggled on).
     private def direction_chip : {String, Color}
       label = case @direction
-              when .request_only?  then "catch:req"
-              when .response_only? then "catch:res"
-              else                      "catch:all"
+              when .request_only?  then "c:REQ"
+              when .response_only? then "c:RES"
+              else                      "c:ALL"
               end
       {label, @enabled ? Theme.accent : Theme.muted}
     end
@@ -418,6 +422,9 @@ module Gori::Tui
       it = selected_item
       title = it.nil? ? "DETAIL" : (it.kind.request? ? "REQUEST (held)" : "RESPONSE (held)")
       Frame.card(screen, rect, title, bg: Theme.bg, border: pane_border(focused))
+      # `e` (or ↵) toggles editing the held bytes vs previewing them — lit while editing,
+      # a muted hint while previewing, so the edit affordance rides the border.
+      Frame.toggle_badge(screen, rect.right - 1, rect.y, rect.x + title.size + 4, "e", "EDIT", @editing) if it
       inner = rect.inset(1, 1)
       unless it
         screen.text(inner.x, inner.y, "—", Theme.muted)

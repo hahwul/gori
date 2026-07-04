@@ -145,8 +145,9 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 8)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
-      backend.row(0).includes?("catch:all").should be_true # default direction chip
-      backend.contains?("/ condition").should be_true      # field hint
+      backend.row(0).includes?("c:ALL").should be_true   # default direction chip (c cycles it)
+      backend.row(0).includes?("i:CATCH").should be_true # master catch toggle badge
+      backend.contains?("/ condition").should be_true    # field hint
     end
   end
 
@@ -157,7 +158,7 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 8)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 8))
-      backend.row(0).includes?("catch:req").should be_true
+      backend.row(0).includes?("c:REQ").should be_true
     end
   end
 
@@ -190,8 +191,8 @@ describe "Intercept filter bar" do
       view.reload(ic)
       backend = MemoryBackend.new(100, 12)
       view.render(Screen.new(backend), Rect.new(0, 0, 100, 12))
-      backend.row(0).includes?("catch:all").should be_true # bar on the top row
-      backend.contains?("QUEUE (1)").should be_true        # queue card still drawn below
+      backend.row(0).includes?("c:ALL").should be_true # bar on the top row
+      backend.contains?("QUEUE (1)").should be_true    # queue card still drawn below
       backend.contains?("acme.test/login").should be_true
     end
   end

@@ -80,5 +80,26 @@ module Gori::Tui
     def self.pane_border(focused : Bool) : Color
       focused ? Theme.focus_gold : Theme.border
     end
+
+    # A left-aligned mode/toggle chip at (x,y), returning the x past it. `lit` (active)
+    # paints bright text on an accent fill; off is a muted, background-less label. Used
+    # for keyed toggle chips on a pane's top border (e.g. Replay's `d:diff`/`x:hex`).
+    def self.chip(screen : Screen, x : Int32, y : Int32, label : String, lit : Bool) : Int32
+      screen.text(x, y, label, lit ? Theme.text_bright : Theme.muted, lit ? Theme.accent_bg : Theme.bg)
+    end
+
+    # One right-aligned toggle badge for a top border, ending just before `right_edge`
+    # (exclusive). Renders " chord:NAME ", lit (accent bg) when `on`, muted with NO
+    # background when off — so a disabled toggle is a quiet hint whose shortcut stays in
+    # view. Returns the badge's left x (chain the next badge to its left there), or
+    # `right_edge` unchanged when it doesn't fit (nothing drawn).
+    def self.toggle_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
+                          chord : String, name : String, on : Bool) : Int32
+      text = " #{chord}:#{name} "
+      x = right_edge - text.size
+      return right_edge if x < min_x
+      screen.text(x, y, text, on ? Theme.text_bright : Theme.muted, on ? Theme.accent_bg : Theme.bg)
+      x
+    end
   end
 end
