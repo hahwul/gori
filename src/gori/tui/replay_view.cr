@@ -239,6 +239,7 @@ module Gori::Tui
     def replace_request(text : String) : Nil
       @editor.set_text(text)
       @dirty = true
+      reflect_content_length_in_editor
     end
 
     # The source History flow id for a ^R-opened tab (nil for a hand-authored ^N).
@@ -282,6 +283,7 @@ module Gori::Tui
       @dirty = false
       @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
       @scroll_req = 0
+      reflect_content_length_in_editor if @auto_content_length
     end
 
     getter? ws_mode : Bool
@@ -655,6 +657,7 @@ module Gori::Tui
       @dirty = false
       @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
       @scroll_req = 0
+      reflect_content_length_in_editor if @auto_content_length
     end
 
     # Re-seed the captured-original diff baseline for a ^R-from-History tab that was
@@ -735,6 +738,8 @@ module Gori::Tui
       return @auto_content_length if @req_hex_edit # meaningless on raw bytes — refuse in hex mode
       @dirty = true
       @auto_content_length = !@auto_content_length
+      reflect_content_length_in_editor if @auto_content_length
+      @auto_content_length
     end
 
     getter? mark_transform : Bool
@@ -858,6 +863,36 @@ module Gori::Tui
       return raw unless idx
       lines[idx] = "Content-Length: #{body.bytesize}"
       "#{lines.join("\r\n")}\r\n\r\n#{body}".to_slice
+    end
+
+    # Mirror the auto-Content-Length resync into the visible REQUEST editor (^L on) so
+    # the pane shows the same header `request_bytes` will send — not only at ^R time.
+    private def reflect_content_length_in_editor : Nil
+      return unless @auto_content_length
+      return if @req_hex_edit || @grpc_mode || @ws_mode
+      return if @decode_kind && @req_pane == :decoded
+
+      raw = @editor.to_bytes
+      synced = sync_content_length(raw)
+      return if synced == raw
+
+      synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first
+      return unless synced_head
+
+      synced_lines = synced_head.split("\r\n")
+      cl_idx = synced_lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
+      return unless cl_idx
+
+      env_sep = @editor.text.index("\n\n")
+      return unless env_sep
+
+      head_lines = @editor.text[0, env_sep].split('\n')
+      return unless cl_idx < head_lines.size
+
+      new_line = synced_lines[cl_idx]
+      return if head_lines[cl_idx] == new_line
+
+      @editor.replace_line(cl_idx, new_line)
     end
 
     # {scheme, host, port} parsed from the target field.
@@ -1051,7 +1086,12 @@ module Gori::Tui
     # dirties the right buffer — the envelope (persist/sync) or the decoded payload
     # (→ re-encode on send). Pure navigation dirties neither.
     private def mark_req_edit : Nil
-      (@decode_kind && @req_pane == :decoded) ? (@decoded_dirty = true) : (@dirty = true)
+      if @decode_kind && @req_pane == :decoded
+        @decoded_dirty = true
+      else
+        @dirty = true
+        reflect_content_length_in_editor
+      end
     end
 
     def edit_insert(ch : Char) : Nil

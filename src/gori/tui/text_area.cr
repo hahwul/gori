@@ -233,6 +233,17 @@ module Gori::Tui
       @lines.size
     end
 
+    # Replace one line in-place (cursor clamped when on that row). Used by Replay to
+    # resync a lone Content-Length header without resetting the whole buffer.
+    def replace_line(idx : Int32, content : String) : Nil
+      return if idx < 0 || idx >= @lines.size
+      return if @lines[idx] == content
+      @lines[idx] = content
+      @cx = @cx.clamp(0, content.size) if @cy == idx
+      @styled = nil
+      @edits += 1
+    end
+
     # Flat char offset of the cursor into `text` (LF-joined) — for marking helpers
     # that operate on the whole buffer text (e.g. the Fuzzer's §-position toggle).
     def cursor_offset : Int32
