@@ -71,6 +71,23 @@ describe Gori::Proxy::H2::HPACK do
     expect_raises(Gori::Error, /huffman padding/) { HPACK.huffman_decode(Bytes[0x00_u8]) }
   end
 
+  it "rejects a trailing partial code longer than 7 bits (RFC 7541 §5.2)" do
+    # 0xff = 8 all-ones bits: the EOS-prefix path, but 8 > 7 leftover bits is never
+    # valid padding — a truncated code, not the last-byte EOS pad.
+    expect_raises(Gori::Error, /truncated huffman code/) { HPACK.huffman_decode(Bytes[0xff_u8]) }
+    expect_raises(Gori::Error, /truncated huffman code/) { HPACK.huffman_decode(Bytes[0xff_u8, 0xff_u8]) }
+  end
+
+  it "Huffman decode is exact over many random byte strings (FSM regression guard)" do
+    # The nibble-driven decode FSM must reproduce the bit-by-bit walk for every input.
+    # Seeded so it's deterministic; round-trips a broad spread of byte values/lengths.
+    rng = Random.new(0x90ac)
+    500.times do
+      s = String.new(Bytes.new(rng.rand(0..48)) { rng.rand(0_u8..255_u8) })
+      HPACK.huffman_decode(HPACK.huffman_encode(s)).should eq(s)
+    end
+  end
+
   it "encoder output round-trips through the decoder" do
     headers = [
       {":method", "POST"},        # exact static match → indexed
