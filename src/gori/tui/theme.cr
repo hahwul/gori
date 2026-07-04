@@ -2,14 +2,17 @@ require "json"
 require "../paths"
 
 module Gori::Tui
-  # The TUI colour palette. gori ships five themes — GORIDARK (the default; a
+  # The TUI colour palette. gori ships ten themes — GORIDARK (the default; a
   # monochrome palette in the spirit of Grok Build: near-black canvas, white/grey
   # text, a white highlight, hairline dividers), GORIDAY (the same relationships
   # inverted onto an off-white canvas with dark ink), LATTE (a soft, cool light
   # palette inspired by Catppuccin Latte — lavender-grey paper with pastel-but-AA
   # accents), ESPRESSO (a warm, slightly muddy dark-brown palette with tan text +
-  # earthy accents), and TOKYONIGHT (the popular dark blue palette). Only HTTP
-  # status keeps functional colour.
+  # earthy accents), TOKYONIGHT (the popular dark blue palette), GRUVBOX (the warm
+  # retro dark palette), NORD (the cool arctic blue-grey palette), DRACULA (the
+  # popular high-contrast purple palette), SOLARIZED_LIGHT (the iconic cream/beige
+  # light palette), and ROSEPINE_DAWN (a soft rosy light palette). Only HTTP status
+  # keeps functional colour.
   #
   # `Termisu::Color` is a value struct, so colours can't be mutated in place to
   # re-theme. Instead one Palette is active at a time (`@@active`) and every colour
@@ -160,7 +163,140 @@ module Gori::Tui
       syn_literal: Color.from_hex("#bb9af7"), # true / false / null (magenta)
     )
 
-    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT}
+    # The warm retro Gruvbox (dark, medium) palette: a muddy brown-grey canvas with
+    # cream text and the recognizable earthy Gruvbox accents. The functional red is
+    # lifted a touch from upstream's #fb4934 so it clears AA on the canvas.
+    GRUVBOX = Palette.new(
+      bg: Color.from_hex("#282828"),            # gruvbox bg0 — muddy brown-grey canvas
+      panel: Color.from_hex("#32302f"),         # top bar / status / overlays (bg0_s, lifted)
+      elevated: Color.from_hex("#3c3836"),      # header band, active segment (bg1)
+      border: Color.from_hex("#504945"),        # hairline dividers (resting, bg2)
+      border_focus: Color.from_hex("#665c54"),  # brighter hairline for an active modal card (bg3)
+      focus_gold: Color.from_hex("#d79921"),    # focused body pane outline (gruvbox yellow, 5.9:1)
+      accent: Color.from_hex("#fbf1c7"),        # the highlight (gruvbox fg0 cream)
+      accent_bg: Color.from_hex("#45403d"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#363230"), # selection band (unfocused pane)
+      text: Color.from_hex("#ebdbb2"),          # body text (gruvbox fg1)
+      text_bright: Color.from_hex("#fbf1c7"),   # emphasis / active (fg0)
+      muted: Color.from_hex("#a89984"),         # secondary (gruvbox gray/fg4, 5.3:1)
+      green: Color.from_hex("#b8bb26"),         # 2xx (bright green)
+      yellow: Color.from_hex("#fabd2f"),        # 4xx (bright yellow)
+      red: Color.from_hex("#fb6055"),           # 5xx / error (lifted bright red, 4.9:1)
+      orange: Color.from_hex("#fe8019"),        # (bright orange)
+      syn_header: Color.from_hex("#83a598"),  # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#b8bb26"),  # quoted strings (green)
+      syn_number: Color.from_hex("#d3869b"),  # numbers, tag attribute names (purple)
+      syn_literal: Color.from_hex("#8ec07c"), # true / false / null (aqua)
+    )
+
+    # The cool arctic Nord palette: a desaturated blue-grey (Polar Night) canvas with
+    # Snow Storm text and the Frost/Aurora accents. The Aurora red/orange and the
+    # purple are lightened from upstream so they clear AA on the muted canvas.
+    NORD = Palette.new(
+      bg: Color.from_hex("#2e3440"),            # nord0 — Polar Night canvas
+      panel: Color.from_hex("#333b4a"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#3b4252"),      # header band, active segment (nord1)
+      border: Color.from_hex("#434c5e"),        # hairline dividers (resting, nord2)
+      border_focus: Color.from_hex("#4c566a"),  # brighter hairline for an active modal card (nord3)
+      focus_gold: Color.from_hex("#ebcb8b"),    # focused body pane outline (nord13 yellow, 8:1)
+      accent: Color.from_hex("#eceff4"),        # the highlight (nord6 Snow Storm)
+      accent_bg: Color.from_hex("#3f4a5c"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#353d4b"), # selection band (unfocused pane)
+      text: Color.from_hex("#d8dee9"),          # body text (nord4)
+      text_bright: Color.from_hex("#eceff4"),   # emphasis / active (nord6)
+      muted: Color.from_hex("#8d99ae"),         # secondary (lifted nord3 tone, 4.3:1)
+      green: Color.from_hex("#a3be8c"),         # 2xx (nord14)
+      yellow: Color.from_hex("#ebcb8b"),        # 4xx (nord13)
+      red: Color.from_hex("#dd8a94"),           # 5xx / error (lifted aurora red, 4.8:1)
+      orange: Color.from_hex("#d99a7d"),        # (lifted aurora orange, 5.3:1)
+      syn_header: Color.from_hex("#88c0d0"),  # header/field names, JSON keys, tag names (frost cyan)
+      syn_string: Color.from_hex("#a3be8c"),  # quoted strings (green)
+      syn_number: Color.from_hex("#d3a3b3"),  # numbers, tag attribute names (soft maroon)
+      syn_literal: Color.from_hex("#c49bc0"), # true / false / null (lifted purple)
+    )
+
+    # The popular high-contrast Dracula palette: a blue-tinted charcoal canvas with
+    # off-white text and the vivid Dracula accents (pink, purple, cyan, green). The
+    # bright upstream hues already clear AA; the comment/muted tone is lifted so
+    # secondary text stays legible.
+    DRACULA = Palette.new(
+      bg: Color.from_hex("#282a36"),            # dracula background — blue-charcoal canvas
+      panel: Color.from_hex("#2f313f"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#383a4a"),      # header band, active segment
+      border: Color.from_hex("#44475a"),        # hairline dividers (resting, current line)
+      border_focus: Color.from_hex("#565a75"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#f1fa8c"),    # focused body pane outline (dracula yellow)
+      accent: Color.from_hex("#f8f8f2"),        # the highlight (dracula foreground)
+      accent_bg: Color.from_hex("#3d4058"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#313342"), # selection band (unfocused pane)
+      text: Color.from_hex("#f8f8f2"),          # body text (dracula foreground)
+      text_bright: Color.from_hex("#ffffff"),   # emphasis / active
+      muted: Color.from_hex("#8a8fb0"),         # secondary (lifted comment tone, 4.5:1)
+      green: Color.from_hex("#50fa7b"),         # 2xx
+      yellow: Color.from_hex("#f1fa8c"),        # 4xx
+      red: Color.from_hex("#ff6e6e"),           # 5xx / error (lifted red)
+      orange: Color.from_hex("#ffb86c"),
+      syn_header: Color.from_hex("#8be9fd"),  # header/field names, JSON keys, tag names (cyan)
+      syn_string: Color.from_hex("#f1fa8c"),  # quoted strings (yellow)
+      syn_number: Color.from_hex("#bd93f9"),  # numbers, tag attribute names (purple)
+      syn_literal: Color.from_hex("#ff79c6"), # true / false / null (pink)
+    )
+
+    # The iconic Solarized Light palette: a warm cream/beige "paper" canvas (base3)
+    # with blue-grey ink (base00/base01) and the recognizable Solarized accents. The
+    # accents are darkened from upstream (which targets a fixed tone, not AA on paper)
+    # so every functional colour clears WCAG AA on the light base — the light-theme
+    # treatment applied to GORIDAY/LATTE.
+    SOLARIZED_LIGHT = Palette.new(
+      bg: Color.from_hex("#fdf6e3"),            # base3 — warm cream paper canvas
+      panel: Color.from_hex("#eee8d5"),         # top bar / status / overlays (base2)
+      elevated: Color.from_hex("#e4ddc8"),      # header band, active segment (one notch more)
+      border: Color.from_hex("#ac9f80"),        # hairline dividers (resting) — 2.4:1, visible-but-subtle
+      border_focus: Color.from_hex("#9c8e6e"),  # brighter hairline for an active modal card (~3:1)
+      focus_gold: Color.from_hex("#a57c00"),    # focused body pane outline (solarized yellow, reads on paper)
+      accent: Color.from_hex("#586e75"),        # the highlight ink (base01)
+      accent_bg: Color.from_hex("#e8e1cd"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#f2ebd8"), # selection band (unfocused pane)
+      text: Color.from_hex("#556a72"),          # body text (base00, slightly deepened — 5.3:1)
+      text_bright: Color.from_hex("#3f5359"),   # emphasis / active (darker ink)
+      muted: Color.from_hex("#7e735c"),         # secondary — AA on canvas (4.3:1)
+      green: Color.from_hex("#5e6b00"),         # 2xx (darkened solarized green, 5.4:1)
+      yellow: Color.from_hex("#8a6a00"),        # 4xx (darkened amber, 4.7:1)
+      red: Color.from_hex("#cb2f2b"),           # 5xx / error (4.9:1)
+      orange: Color.from_hex("#bd4712"),        # (4.8:1)
+      syn_header: Color.from_hex("#1f74b3"),   # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#5e6b00"),   # quoted strings (green)
+      syn_number: Color.from_hex("#167068"),   # numbers, tag attribute names (cyan)
+      syn_literal: Color.from_hex("#6455bd"),  # true / false / null (violet)
+    )
+
+    # The Rosé Pine Dawn palette: a soft rosy "paper" canvas with muted blue-violet
+    # ink and elegant, low-saturation accents. The golds/roses/greens are darkened
+    # from upstream so every functional colour clears WCAG AA on the light base.
+    ROSEPINE_DAWN = Palette.new(
+      bg: Color.from_hex("#faf4ed"),            # dawn base — soft rosy paper canvas
+      panel: Color.from_hex("#f2e9e1"),         # top bar / status / overlays (overlay)
+      elevated: Color.from_hex("#e9ddd2"),      # header band, active segment
+      border: Color.from_hex("#b39c85"),        # hairline dividers (resting) — 2.4:1, visible-but-subtle
+      border_focus: Color.from_hex("#ab917b"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#b07a1a"),    # focused body pane outline (darkened dawn gold)
+      accent: Color.from_hex("#575279"),        # the highlight ink (dawn text)
+      accent_bg: Color.from_hex("#e7dcd0"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#f0e8de"), # selection band (unfocused pane)
+      text: Color.from_hex("#575279"),          # body text (dawn text, 6.7:1)
+      text_bright: Color.from_hex("#423d5c"),   # emphasis / active (darker ink)
+      muted: Color.from_hex("#797593"),         # secondary — AA on canvas (4.0:1)
+      green: Color.from_hex("#467730"),         # 2xx (sage green, darkened — 4.9:1)
+      yellow: Color.from_hex("#8a6410"),        # 4xx (darkened dawn gold, 4.9:1)
+      red: Color.from_hex("#b03a56"),           # 5xx / error (dawn love, 5.4:1)
+      orange: Color.from_hex("#a5501f"),        # (darkened terracotta, 5.1:1)
+      syn_header: Color.from_hex("#286983"),   # header/field names, JSON keys, tag names (dawn pine)
+      syn_string: Color.from_hex("#467730"),   # quoted strings (sage green)
+      syn_number: Color.from_hex("#96611e"),   # numbers, tag attribute names (warm brown)
+      syn_literal: Color.from_hex("#7a5fa0"),  # true / false / null (dawn iris)
+    )
+
+    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN}
     DEFAULT_THEME  = "goridark"
     # Pre-rename names so a settings.json from the first theme release still resolves.
     LEGACY_ALIASES = {"dark" => "goridark", "light" => "goriday"}
