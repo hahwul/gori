@@ -166,9 +166,9 @@ module Gori
         [Verb::Chord.new("[")], category: Verb::Category::Navigation) { |ctx| ctx.cycle_tab(-1); nil }
 
       # Positional tab jump: digit N focuses the Nth VISIBLE tab (the order on the bar) —
-      # so the numbers follow the user's settings:tabs order/visibility. Hidden (default:
-      # Agent), so the keys exist but don't clutter the palette; the named "Go to …" verbs
-      # below are the discoverable entries (and the way to reach a hidden tab by command).
+      # so the numbers follow the user's settings:tabs order/visibility. Hidden, so the
+      # keys exist but don't clutter the palette; the named "Go to …" verbs below are the
+      # discoverable entries (and the way to reach a hidden tab by command).
       (1..9).each do |n|
         r.register Verb::Definition.new(
           "nav.pos#{n}", "Go to tab #{n}", "Focus the #{n}th visible tab", Verb::Scope::Global,
@@ -178,12 +178,12 @@ module Gori
       # Named tab jumps (no chord) — palette discoverability + the only by-command way to
       # reach a tab hidden in settings:tabs (focus_tab force-shows it while active). Keep
       # this list in sync with Tui::Chrome::TABS so every catalog tab — including the
-      # default-hidden ones (Miner, Agent) — stays reachable from the command palette.
+      # default-hidden one (Miner) — stays reachable from the command palette.
       {
         :project => "Project", :sitemap => "Sitemap", :history => "History", :intercept => "Intercept",
         :replay => "Replay", :fuzzer => "Fuzzer", :miner => "Miner", :convert => "Convert",
         :comparer => "Comparer", :prism => "Prism", :findings => "Findings", :notes => "Notes",
-        :agent => "Agent", :help => "Help",
+        :help => "Help",
       }.each do |tab, label|
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global,

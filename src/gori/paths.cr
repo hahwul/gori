@@ -35,6 +35,31 @@ module Gori
       File.join(home_dir, "wordlists")
     end
 
+    # A tiny global marker holding the DB PATH of the project the interactive TUI last
+    # opened, so a separate `gori mcp` process (given no --db/--project) serves what the user
+    # is viewing instead of an mtime-MRU guess. Path (not name) so display-name-vs-slug never
+    # breaks resolution. Never cleared — the last-viewed project is the sensible default after
+    # the TUI closes (a since-deleted path just falls through to MRU). Read by CLI.resolve_mcp_db.
+    def self.active_project_file : String
+      File.join(home_dir, "active_project")
+    end
+
+    def self.write_active_project(path : String) : Nil
+      ensure_dir(home_dir)
+      dest = active_project_file
+      tmp = "#{dest}.tmp.#{Process.pid}"
+      File.write(tmp, path)
+      File.rename(tmp, dest)
+    rescue
+      # best-effort: a missing/failed marker just falls back to MRU in resolve_mcp_db.
+    end
+
+    def self.read_active_project : String?
+      File.read(active_project_file).strip.presence
+    rescue
+      nil
+    end
+
     def self.ensure_dirs : Nil
       ensure_dir(home_dir)
       ensure_dir(wordlists_dir)

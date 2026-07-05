@@ -12,7 +12,7 @@ module Gori::Tui
   # Settings.tab_prefs. The Runner persists the committed copy via Settings.save.
   #
   #   ✓ Project      ▎ selected, shown
-  #   · Agent          hidden
+  #   · Miner           hidden
   class TabsOverlay
     def initialize
       @items = [] of {Symbol, String, Bool}

@@ -302,6 +302,11 @@ module Gori
       exec_task ->(c : DB::Connection) { c.exec("DELETE FROM host_overrides WHERE id = ?", id); nil }
     end
 
+    # Key under which the TUI records what the user is currently viewing (active tab,
+    # focus pane, selected flow, sub-tab) so a separate `gori mcp` process can report it
+    # via get_current_context. Written cross-process through the shared settings table.
+    UI_STATE_KEY = "ui_state"
+
     def setting(key : String) : String?
       @db.query_one?("SELECT value FROM settings WHERE key = ?", key, as: String)
     end

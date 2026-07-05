@@ -150,6 +150,14 @@ module Gori
             "Project totals: flow count, finding count, captured bytes, earliest capture time, " \
             "plus which project/db is being served (important when no --project was passed)." { }
 
+          tool j, "get_current_context",
+            "What the user is currently viewing in the gori TUI: active tab, focused pane, the " \
+            "History-selected flow id (only when on the History tab), and sub-tab index — so you " \
+            "can act on \"what I'm looking at right now\" without the user pasting ids. Reflects an " \
+            "open (or last-open) gori TUI for THIS project. `age_seconds` shows how long since the " \
+            "TUI last recorded focus (there is no live-TUI heartbeat) — use it to judge freshness; " \
+            "`available:false` means the TUI never ran against this project." { }
+
           if @allow_actions
             tool j, "send_request",
               "Send/replay an HTTP request to its origin and return the response. " \
@@ -279,14 +287,15 @@ module Gori
       # Read-only tools (always exposed). nil when `name` isn't one of them.
       private def read_tool(name : String, h) : Result?
         case name
-        when "list_history"  then list_history(h)
-        when "get_flow"      then get_flow(h)
-        when "list_sitemap"  then list_sitemap(h)
-        when "list_findings" then list_findings(h)
-        when "get_finding"   then get_finding(h)
-        when "list_scope"    then list_scope
-        when "project_info"  then project_info
-        when "ql_reference"  then ql_reference
+        when "list_history"        then list_history(h)
+        when "get_flow"            then get_flow(h)
+        when "list_sitemap"        then list_sitemap(h)
+        when "list_findings"       then list_findings(h)
+        when "get_finding"         then get_finding(h)
+        when "list_scope"          then list_scope
+        when "project_info"        then project_info
+        when "get_current_context" then get_current_context
+        when "ql_reference"        then ql_reference
         end
       end
 
@@ -407,6 +416,55 @@ module Gori
             j.field "earliest_created_at", @store.earliest_created_at
             if ea = @store.earliest_created_at
               j.field "earliest_created_at_iso", Serialize.unix_micros_iso(ea)
+            end
+          end
+        end)
+      end
+
+      # What the user is currently viewing in the gori TUI, recorded cross-process to the
+      # project store (Store::UI_STATE_KEY) by the running TUI. Read-only. The ui-state lives in
+      # THIS project's db, so it always describes this project — freshness is reported via
+      # age_seconds (there is no live-TUI heartbeat), not a name comparison that would skew on
+      # display-name-vs-slug.
+      private def get_current_context : Result
+        raw = @store.setting(Store::UI_STATE_KEY)
+        parsed = raw.try do |r|
+          begin
+            JSON.parse(r)
+          rescue
+            nil
+          end
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "project", @project_name # the project/db this server serves
+            if parsed.nil?
+              j.field "available", false
+              j.field "note", raw.nil? ? "No UI state recorded for this project — the gori TUI may not have run against it." : "Recorded UI state was unreadable."
+            else
+              j.field "available", true
+              j.field "active_tab", parsed["active_tab"]?.try(&.as_s?)
+              j.field "focus_pane", parsed["focus_pane"]?.try(&.as_s?)
+              if fid = parsed["selected_flow_id"]?.try(&.as_i64?)
+                j.field "selected_flow_id", fid
+              end
+              if st = parsed["subtab"]?.try(&.as_i64?)
+                j.field "subtab", st
+              end
+              if rec = parsed["recorded_at"]?.try(&.as_i64?)
+                j.field "recorded_at", rec
+                # A corrupt/out-of-range recorded_at must not sink the whole tool: Time.unix_ms
+                # raises on out-of-range, so guard it — keep the raw value, drop derived fields.
+                iso = begin
+                  Time.unix_ms(rec).to_rfc3339
+                rescue
+                  nil
+                end
+                if iso
+                  j.field "recorded_at_iso", iso
+                  j.field "age_seconds", (Time.utc.to_unix_ms - rec) // 1000
+                end
+              end
             end
           end
         end)

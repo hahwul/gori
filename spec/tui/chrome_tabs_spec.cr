@@ -10,8 +10,8 @@ describe "Chrome.reconcile" do
     out = Chrome.reconcile([] of {String, Bool})
     out.map(&.first).should eq(Chrome::TABS.map(&.first)) # canonical order, all present
     visible = out.select { |(_, _, v)| v }.map(&.first)
-    Chrome::DEFAULT_HIDDEN.each { |sym| visible.includes?(sym).should be_false } # only :agent hidden
-    out.find { |(s, _, _)| s == :agent }.not_nil![2].should be_false
+    Chrome::DEFAULT_HIDDEN.each { |sym| visible.includes?(sym).should be_false } # only :miner hidden
+    out.find { |(s, _, _)| s == :miner }.not_nil![2].should be_false
     out.find { |(s, _, _)| s == :comparer }.not_nil![2].should be_true # now a default-visible tab
     out.find { |(s, _, _)| s == :convert }.not_nil![2].should be_true  # now a default-visible tab
     out.find { |(s, _, _)| s == :project }.not_nil![2].should be_true
@@ -19,10 +19,10 @@ describe "Chrome.reconcile" do
 
   it "honors a stored order and visibility, inserting absent catalog tabs at their position" do
     out = Chrome.reconcile([{"help", true}, {"project", false}])
-    out[0][0].should eq(:help)    # stored order respected
+    out[0][0].should eq(:help) # stored order respected
     out[1][0].should eq(:project)
-    out[1][2].should be_false     # explicit hide survives
-    out.map(&.first).includes?(:history).should be_true # inserted (was absent from prefs)
+    out[1][2].should be_false                                         # explicit hide survives
+    out.map(&.first).includes?(:history).should be_true               # inserted (was absent from prefs)
     out.find { |(s, _, _)| s == :history }.not_nil![2].should be_true # inserted visible
   end
 
@@ -54,7 +54,7 @@ end
 describe "Chrome.visible_tabs" do
   it "returns only the visible tabs in order (default-hidden tabs excluded)" do
     vis = Chrome.visible_tabs([] of {String, Bool}).map(&.first)
-    vis.includes?(:agent).should be_false # only Agent is hidden by default now
+    vis.includes?(:miner).should be_false # only Miner is hidden by default now
     vis.includes?(:comparer).should be_true
     vis.includes?(:convert).should be_true
     vis.first.should eq(:project)
@@ -62,11 +62,12 @@ describe "Chrome.visible_tabs" do
   end
 
   it "force-includes a hidden active tab at its catalog-relative position" do
-    # Agent hidden by default; forcing it must slot it where it sits in the catalog (last).
-    vis = Chrome.visible_tabs([] of {String, Bool}, force: :agent).map(&.first)
-    vis.includes?(:agent).should be_true
-    vis.index(:agent).not_nil!.should be > vis.index(:notes).not_nil!
-    vis.index(:agent).not_nil!.should be < vis.index(:help).not_nil!
+    # Miner hidden by default; forcing it must slot it where it sits in the catalog
+    # (between Fuzzer and Convert).
+    vis = Chrome.visible_tabs([] of {String, Bool}, force: :miner).map(&.first)
+    vis.includes?(:miner).should be_true
+    vis.index(:miner).not_nil!.should be > vis.index(:fuzzer).not_nil!
+    vis.index(:miner).not_nil!.should be < vis.index(:convert).not_nil!
   end
 
   it "places the default-visible Convert tab between Fuzzer and Comparer" do
