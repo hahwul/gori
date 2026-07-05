@@ -1,8 +1,9 @@
 # Custom themes
 
-gori ships ten built-in colour themes — `goridark` (default), `goriday`, `latte`,
+gori ships thirteen built-in colour themes — `goridark` (default), `goriday`, `latte`,
 `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`,
-`rosepine_dawn` — selectable from **`settings:theme`** in the command palette
+`rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest` — selectable from
+**`settings:theme`** in the command palette
 (`^P`). The picker is a vertical, scrollable list; each row shows a small swatch of the
 theme's own palette, and selecting a row previews it live (`↵` applies + persists, `esc`
 reverts).

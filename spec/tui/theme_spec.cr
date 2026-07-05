@@ -58,7 +58,7 @@ describe Gori::Tui::Theme do
   end
 
   it "lists the available themes" do
-    Theme.available.should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn"])
+    Theme.available.should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest"])
   end
 
   it "swaps the active palette and bumps the revision" do
@@ -171,7 +171,7 @@ describe "Theme custom loading" do
     }) do
       Gori::Tui::Theme.load_custom
       avail = Gori::Tui::Theme.available
-      avail.first(10).should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn"]) # built-ins lead
+      avail.first(13).should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest"]) # built-ins lead
       avail.should contain("ocean")
       avail.should contain("badname")
       avail.should_not contain("broken")
@@ -272,7 +272,7 @@ describe "SettingsView theme list" do
 
   it "scrolls to keep the selected theme visible when the list overflows" do
     files = {} of String => String
-    (1..9).each { |i| files["z#{i}.json"] = %({"base": "goridark"}) } # 9 custom → 14 total > 10
+    (1..9).each { |i| files["z#{i}.json"] = %({"base": "goridark"}) } # 9 custom → 22 total, overflows the viewport
     with_themes(files) do
       Gori::Settings.theme = "goridark"
       view = SettingsView.new
@@ -309,7 +309,7 @@ describe "SettingsView theme list" do
       # The on-screen row for a theme index, via field_at's inverse (robust to scroll).
       screen_row = ->(idx : Int32) do
         (box.y + 2...box.y + box.h).find { |y| view.field_at(box, box.x + 5, y) == idx } ||
-          raise "theme index #{idx} is not visible in the rendered list"
+        raise "theme index #{idx} is not visible in the rendered list"
       end
       # each row's accent swatch is the theme's own colour, proving it's not the active palette
       backend.fg_at(tick_x, screen_row.call(names.index!("ocean"))).should eq(Termisu::Color.from_hex("#00ffcc"))
