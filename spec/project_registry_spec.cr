@@ -71,6 +71,34 @@ describe Gori::ProjectRegistry do
       reg.list.map(&.name).should_not contain("doomed")
     end
   end
+
+  it "persists the verbatim display name so list doesn't revert it to the slug" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("ACME Red Team!")
+      Gori::Store.open(p.db_path).close
+      # A fresh registry (as on TUI restart / `gori run projects`) must still show the
+      # verbatim name, not the lossy directory slug "acme-red-team".
+      Gori::ProjectRegistry.new(root).list.map(&.name).should contain("ACME Red Team!")
+    end
+  end
+
+  it "refuses to delete a project a live instance is capturing into (no silent orphan)" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("busy")
+      Gori::Store.open(p.db_path).close
+      lock = Gori::CaptureLock.try(p.dir).not_nil! # simulate a live capturer holding the lock
+      begin
+        expect_raises(Gori::Error, /in use/) { reg.delete(p) }
+        Dir.exists?(p.dir).should be_true # not wiped out from under the capturer
+      ensure
+        lock.close
+      end
+      reg.delete(p) # lock released → deletion proceeds
+      Dir.exists?(p.dir).should be_false
+    end
+  end
 end
 
 describe Gori::Session do
