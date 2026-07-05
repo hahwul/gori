@@ -77,6 +77,42 @@ describe Gori::Settings do
     end
   end
 
+  it "merges a concurrent writer's unrelated change instead of clobbering it" do
+    dir = File.tempname("gori-settings-merge")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_theme = Gori::Settings.theme
+    begin
+      ENV["GORI_HOME"] = dir
+      # Baseline file, then load it → establishes the 3-way-merge base.
+      Gori::Settings.theme = "goriday"
+      Gori::Settings.bind_port = 8070
+      Gori::Settings.save
+      Gori::Settings.load
+
+      # A concurrent writer (another instance / hand-edit) changes an UNRELATED field
+      # directly on disk, without touching this process's in-memory state.
+      disk = JSON.parse(File.read(Gori::Settings.path)).as_h
+      net = disk["network"].as_h
+      net["bind_port"] = JSON::Any.new(4321_i64)
+      disk["network"] = JSON::Any.new(net)
+      File.write(Gori::Settings.path, disk.to_json)
+
+      # This process changes a DIFFERENT field and saves.
+      Gori::Settings.theme = "monokai"
+      Gori::Settings.save
+
+      Gori::Settings.load
+      Gori::Settings.theme.should eq("monokai")    # my change won
+      Gori::Settings.bind_port.should eq(4321_i32) # concurrent writer's change preserved (was clobbered to 8070)
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.theme = prev_theme
+      Gori::Settings.bind_port = 8070
+    end
+  end
+
   it "keeps defaults on a missing/garbled settings file" do
     dir = File.tempname("gori-settings-empty")
     Dir.mkdir_p(dir)
