@@ -174,6 +174,12 @@ module Gori::Fuzz
 
     private def worker_loop : Nil
       while job = @jobs.receive?
+        # On stop, drain the jobs still buffered in the channel WITHOUT sending them.
+        # The channel is buffered to `conc` on top of `conc` busy workers, so without
+        # this the operator's stop still fired ~2x concurrency of extra requests; now
+        # only the requests already in-flight (inside run_one) finish, matching the
+        # documented "in-flight requests finish".
+        next if @state == State::Stopped
         result = run_one(job)
         @sent += 1
         @matched += 1 if result.matched?

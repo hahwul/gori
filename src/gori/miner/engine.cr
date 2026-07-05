@@ -6,6 +6,34 @@ require "./baseline"
 require "../fuzz/engine"
 
 module Gori::Miner
+  # Enforces a HARD ceiling on the total number of real network sends across a whole
+  # mining run — baseline calibration + bucket probes + confirmation rounds all count.
+  # Past the cap, send() returns a benign error Result without touching the network, so
+  # `--max-requests` is a true hard cap. Previously it was a soft/racy check in the
+  # dispatcher only: it overshot by ~2x concurrency (the check `@sent >= cap` lagged the
+  # workers' post-round-trip increment across a buffered channel) AND skipped baseline
+  # traffic entirely (Baseline called the backend directly, uncounted).
+  class CappedBackend < Fuzz::Backend
+    getter sent : Int64 = 0_i64
+
+    def initialize(@inner : Fuzz::Backend, @cap : Int64?)
+    end
+
+    def origin : Fuzz::Origin
+      @inner.origin
+    end
+
+    def cap_reached? : Bool
+      (c = @cap) && c > 0 ? @sent >= c : false
+    end
+
+    def send(bytes : Bytes) : Replay::Result
+      return Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, "max-requests cap reached") if cap_reached?
+      @sent += 1
+      @inner.send(bytes)
+    end
+  end
+
   # Drives a parameter-mining run: calibrate a baseline, then for each location stuff
   # candidate names into buckets, diff vs baseline, and BINARY-SEARCH each interesting
   # bucket to isolate the responsible name. Concurrency = level-synchronized BFS per
@@ -31,9 +59,9 @@ module Gori::Miner
     @concurrency : Int32
     @state : State
     @wake : Channel(Nil)
+    @backend : CappedBackend
     @report : Baseline::Report?
     @seen : Set({Location, String})
-    @sent : Int64
     @found : Int32
     @errors : Int64
     @names_done : Int64
@@ -41,14 +69,16 @@ module Gori::Miner
     @last_dispatch : Time::Instant
 
     def initialize(@base : Bytes, @http2 : Bool, @names : Array(String),
-                   @backend : Fuzz::Backend, @config : Config)
+                   backend : Fuzz::Backend, @config : Config)
+      # Wrap the backend so max_requests is enforced at every real send (baseline,
+      # bucket, and confirm), not just as a racy pre-dispatch check.
+      @backend = CappedBackend.new(backend, @config.max_requests)
       @concurrency = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @state = State::Running
       @wake = Channel(Nil).new(1)
       @events = Channel(Event).new(256)
       @report = nil
       @seen = Set({Location, String}).new
-      @sent = 0_i64
       @found = 0
       @errors = 0_i64
       @names_done = 0_i64
@@ -129,7 +159,9 @@ module Gori::Miner
             break if @state.stopped?
             park_if_paused
             break if @state.stopped?
-            break if (cap = @config.max_requests) && cap > 0 && @sent >= cap
+            # Early-out once the hard cap is hit — the CappedBackend also refuses any
+            # send that slips past this racy check, so the network count never exceeds it.
+            break if @backend.cap_reached?
             pace(interval)
             jobs.send(task)
           end
@@ -142,6 +174,7 @@ module Gori::Miner
         spawn(name: "miner-worker-#{i}") do
           begin
             while task = jobs.receive?
+              next if @state.stopped? # drain buffered tasks without sending on stop
               outcomes << process_bucket(task)
             end
           ensure
@@ -161,7 +194,6 @@ module Gori::Miner
       canaries = Hash(String, String).new # name => canary
       task.names.each { |n| canaries[n] = Canary.fresh }
       raw = send_with_retries(Inject.apply(@base, task.location, canaries.to_a, @config.add_content_length_when_missing?))
-      @sent += 1
       if raw.error
         @errors += 1
         mark_done(task.names.size) # keep the bar monotonic; this bucket is inconclusive
@@ -214,7 +246,6 @@ module Gori::Miner
       rounds.times do
         c = Canary.fresh
         raw = send_with_retries(Inject.apply(@base, location, [{name, c}], @config.add_content_length_when_missing?))
-        @sent += 1
         next if raw.error
         probe = Fingerprint.probe(raw)
         last_status = probe.metrics.status
@@ -325,7 +356,7 @@ module Gori::Miner
     end
 
     private def snapshot : Progress
-      Progress.new(@names_total, @names_done, @sent, @found, @errors)
+      Progress.new(@names_total, @names_done, @backend.sent, @found, @errors)
     end
 
     # ── sending / pacing ────────────────────────────────────────────────────────────
