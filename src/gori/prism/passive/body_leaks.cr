@@ -82,11 +82,15 @@ module Gori
           if !scripty?(ctx.content_type) && (m = PRIVATE_IP.match(text))
             acc << leak(ctx, "private_ip_leak", "Private IP address disclosed", Store::Severity::Low, m[0])
           end
-          if hit = ERROR_SIGNATURES.find { |(pat, _)| pat.matches?(text) }
-            acc << leak(ctx, "error_stack_leak", "Error/stack trace disclosed", Store::Severity::Medium, hit[1])
+          # Report EVERY distinct error-signature / secret TYPE present, not just the
+          # first: a body leaking both a Java exception and a Go panic (or an AWS key
+          # AND a GitHub token) previously surfaced only the earliest array entry, so
+          # every other distinct disclosure in the same body was silently missed.
+          ERROR_SIGNATURES.each do |(pat, label)|
+            acc << leak(ctx, "error_stack_leak", "Error/stack trace disclosed", Store::Severity::Medium, label) if pat.matches?(text)
           end
-          if hit = SECRET_PATTERNS.find { |(pat, _)| pat.matches?(text) }
-            acc << leak(ctx, "secret_in_body", "Credential/secret disclosed in response body", Store::Severity::High, hit[1])
+          SECRET_PATTERNS.each do |(pat, label)|
+            acc << leak(ctx, "secret_in_body", "Credential/secret disclosed in response body", Store::Severity::High, label) if pat.matches?(text)
           end
           if ctx.html? && ctx.scheme == "https"
             if MIXED_ACTIVE.matches?(text)

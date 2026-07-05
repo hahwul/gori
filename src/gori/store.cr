@@ -470,6 +470,8 @@ module Gori
     # Cap on distinct affected URLs kept per grouped issue (newest accumulate; once full,
     # further hits still bump hit_count but the URL list stops growing).
     PRISM_AFFECTED_CAP = 50
+    # Cap on distinct evidence labels accumulated per issue group (see merge_evidence).
+    PRISM_EVIDENCE_CAP = 12
 
     PRISM_COLS = "id, code, category, host, title, severity, status, hit_count, affected, " \
                  "sample_flow_id, evidence, first_seen, last_seen"
@@ -481,16 +483,21 @@ module Gori
       ts = now_us
       exec_task ->(c : DB::Connection) {
         existing = c.query_one?(
-          "SELECT id, affected, severity FROM prism_issues WHERE code = ? AND host = ?",
-          d.code, d.host, as: {Int64, String, Int32})
+          "SELECT id, affected, severity, evidence FROM prism_issues WHERE code = ? AND host = ?",
+          d.code, d.host, as: {Int64, String, Int32, String?})
         if existing
-          id, aff_json, sev = existing
+          id, aff_json, sev, prev_evidence = existing
           urls = parse_affected(aff_json)
           urls << d.url if !urls.includes?(d.url) && urls.size < PRISM_AFFECTED_CAP
           new_sev = sev > d.severity.value ? sev : d.severity.value
+          # For the type-labeled infoleak codes, accumulate every distinct type seen
+          # for this (code, host) group so a later flow's different secret/error type
+          # isn't masked by the first-wins COALESCE. Other codes keep their first
+          # representative sample.
+          new_evidence = accumulate_evidence?(d.code) ? merge_evidence(prev_evidence, d.evidence) : (prev_evidence || d.evidence)
           c.exec("UPDATE prism_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
-                 "evidence = COALESCE(evidence, ?), last_seen = ? WHERE id = ?",
-            urls.to_json, new_sev, d.evidence, ts, id)
+                 "evidence = ?, last_seen = ? WHERE id = ?",
+            urls.to_json, new_sev, new_evidence, ts, id)
         else
           c.exec("INSERT INTO prism_issues (code, category, host, title, severity, status, hit_count, " \
                  "affected, sample_flow_id, evidence, first_seen, last_seen) VALUES (?,?,?,?,?,0,1,?,?,?,?,?)",
@@ -499,6 +506,21 @@ module Gori
         end
         nil
       }
+    end
+
+    # Codes whose evidence is a TYPE label (not a one-off sample), so a (code, host)
+    # group should list every distinct type seen rather than pin to the first.
+    private def accumulate_evidence?(code : String) : Bool
+      code == "secret_in_body" || code == "error_stack_leak"
+    end
+
+    # Union of distinct evidence labels for one issue group, ", "-joined and capped.
+    private def merge_evidence(existing : String?, incoming : String?) : String?
+      return existing if incoming.nil? || incoming.empty?
+      return incoming if existing.nil? || existing.empty?
+      parts = existing.split(", ").map(&.strip).reject(&.empty?)
+      return existing if parts.includes?(incoming) || parts.size >= PRISM_EVIDENCE_CAP
+      (parts << incoming).join(", ")
     end
 
     def prism_issues(category : String? = nil, host : String? = nil,
