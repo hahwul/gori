@@ -157,6 +157,23 @@ module Gori::Tui
       Fuzz::ContentLength.sync(@editor.to_bytes, add_when_missing: true)
     end
 
+    # The method + target to DISPLAY for a held item — the EDITED values when this is
+    # the item loaded in the editor and modified (so a GET→PUT method change or a
+    # 200→201 status edit shows in the queue row + forward/drop toast, not the stale
+    # hold-time metadata), else the immutable Item's own fields. For a response,
+    # `target` is the "status reason" the response Item carries.
+    def effective_method_target(it : Interceptor::Item) : {String, String}
+      return {it.method, it.target} unless @loaded_id == it.id && @editor_dirty
+      first = (String.new(@editor.to_bytes).split('\n', 2).first? || "").rstrip('\r')
+      if it.kind.request?
+        parts = first.split(' ', 3)
+        {parts[0]?.presence || it.method, parts[1]?.presence || it.target}
+      else
+        parts = first.split(' ', 2) # "HTTP/1.1 201 CREATED" → the "201 CREATED" target
+        {it.method, parts[1]?.presence || it.target}
+      end
+    end
+
     def edit_insert(ch : Char) : Nil
       return unless @editing
       @editor.insert(ch)
@@ -412,8 +429,9 @@ module Gori::Tui
         end
         badge, bcolor = it.kind.request? ? {"REQ", Theme.yellow} : {"RES", Theme.accent}
         screen.text(inner.x + 1, y, badge, bcolor, bg, Attribute::Bold)
-        target = Url.origin_path(it.target) # strip scheme+authority for plaintext forward-proxy targets
-        label = it.kind.request? ? "#{it.method} #{it.host}#{target}" : "#{it.host} #{target}"
+        method, raw_target = effective_method_target(it) # edited values for the loaded item
+        target = Url.origin_path(raw_target)             # strip scheme+authority for plaintext forward-proxy targets
+        label = it.kind.request? ? "#{method} #{it.host}#{target}" : "#{it.host} #{target}"
         screen.text(inner.x + 5, y, label, selected ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
       end
     end

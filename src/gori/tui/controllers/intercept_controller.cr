@@ -279,9 +279,12 @@ module Gori::Tui
     end
 
     # A short human label for a held item — "GET /path" (request) or the status line
-    # (response) — for forward/drop toasts; the queue's internal id means nothing to the user.
+    # (response) — for forward/drop toasts; the queue's internal id means nothing to the
+    # user. Reads the EDITED method/status (via the view) so a forwarded edit shows what
+    # was actually sent, not the stale hold-time metadata.
     private def intercept_label(it : Interceptor::Item) : String
-      it.kind.request? ? "#{it.method} #{Url.origin_path(it.target)}" : it.target
+      method, target = @intercept.effective_method_target(it)
+      it.kind.request? ? "#{method} #{Url.origin_path(target)}" : target
     end
   end
 end
