@@ -25,4 +25,21 @@ describe Gori::Replay::MessageLines do
     body = "plain".to_slice
     MessageLines.of(head, body, decode: true).should eq(["HTTP/1.1 200 OK", "", "plain"])
   end
+
+  it "shows a placeholder for a binary body instead of rendering raw bytes" do
+    head = "HTTP/1.1 200 OK".to_slice
+    body = Bytes[0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0x01] # PNG-ish, contains NUL → binary
+    lines = MessageLines.of(head, body, decode: false)
+    lines[0].should eq("HTTP/1.1 200 OK")
+    lines[1].should eq("")
+    lines[2].should contain("binary body")
+    lines[2].should contain("press x") # never the raw bytes (which desync the terminal)
+  end
+
+  it "scrubs stray non-UTF-8 bytes in an otherwise-text body (no wide-grapheme desync)" do
+    head = "HTTP/1.1 200 OK".to_slice
+    body = Bytes[0x68, 0x69, 0x80, 0x0a, 0x62, 0x79, 0x65] # "hi<0x80>\nbye" — invalid byte, no NUL
+    lines = MessageLines.of(head, body, decode: false)
+    lines.should eq(["HTTP/1.1 200 OK", "", "hi�", "bye"]) # invalid byte → U+FFFD (width 1)
+  end
 end
