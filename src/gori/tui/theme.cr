@@ -2,7 +2,7 @@ require "json"
 require "../paths"
 
 module Gori::Tui
-  # The TUI colour palette. gori ships ten themes — GORIDARK (the default; a
+  # The TUI colour palette. gori ships thirteen themes — GORIDARK (the default; a
   # monochrome palette in the spirit of Grok Build: near-black canvas, white/grey
   # text, a white highlight, hairline dividers), GORIDAY (the same relationships
   # inverted onto an off-white canvas with dark ink), LATTE (a soft, cool light
@@ -11,8 +11,10 @@ module Gori::Tui
   # earthy accents), TOKYONIGHT (the popular dark blue palette), GRUVBOX (the warm
   # retro dark palette), NORD (the cool arctic blue-grey palette), DRACULA (the
   # popular high-contrast purple palette), SOLARIZED_LIGHT (the iconic cream/beige
-  # light palette), and ROSEPINE_DAWN (a soft rosy light palette). Only HTTP status
-  # keeps functional colour.
+  # light palette), ROSEPINE_DAWN (a soft rosy light palette), CATPPUCCIN_MOCHA (the
+  # popular dark lavender-tinted palette), MONOKAI (the classic olive-dark code-editor
+  # palette), and EVERFOREST (a muted, forest-green-toned dark palette). Only HTTP
+  # status keeps functional colour.
   #
   # `Termisu::Color` is a value struct, so colours can't be mutated in place to
   # re-theme. Instead one Palette is active at a time (`@@active`) and every colour
@@ -183,10 +185,10 @@ module Gori::Tui
       yellow: Color.from_hex("#fabd2f"),        # 4xx (bright yellow)
       red: Color.from_hex("#fb6055"),           # 5xx / error (lifted bright red, 4.9:1)
       orange: Color.from_hex("#fe8019"),        # (bright orange)
-      syn_header: Color.from_hex("#83a598"),  # header/field names, JSON keys, tag names (blue)
-      syn_string: Color.from_hex("#b8bb26"),  # quoted strings (green)
-      syn_number: Color.from_hex("#d3869b"),  # numbers, tag attribute names (purple)
-      syn_literal: Color.from_hex("#8ec07c"), # true / false / null (aqua)
+      syn_header: Color.from_hex("#83a598"),    # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#b8bb26"),    # quoted strings (green)
+      syn_number: Color.from_hex("#d3869b"),    # numbers, tag attribute names (purple)
+      syn_literal: Color.from_hex("#8ec07c"),   # true / false / null (aqua)
     )
 
     # The cool arctic Nord palette: a desaturated blue-grey (Polar Night) canvas with
@@ -209,10 +211,10 @@ module Gori::Tui
       yellow: Color.from_hex("#ebcb8b"),        # 4xx (nord13)
       red: Color.from_hex("#dd8a94"),           # 5xx / error (lifted aurora red, 4.8:1)
       orange: Color.from_hex("#d99a7d"),        # (lifted aurora orange, 5.3:1)
-      syn_header: Color.from_hex("#88c0d0"),  # header/field names, JSON keys, tag names (frost cyan)
-      syn_string: Color.from_hex("#a3be8c"),  # quoted strings (green)
-      syn_number: Color.from_hex("#d3a3b3"),  # numbers, tag attribute names (soft maroon)
-      syn_literal: Color.from_hex("#c49bc0"), # true / false / null (lifted purple)
+      syn_header: Color.from_hex("#88c0d0"),    # header/field names, JSON keys, tag names (frost cyan)
+      syn_string: Color.from_hex("#a3be8c"),    # quoted strings (green)
+      syn_number: Color.from_hex("#d3a3b3"),    # numbers, tag attribute names (soft maroon)
+      syn_literal: Color.from_hex("#c49bc0"),   # true / false / null (lifted purple)
     )
 
     # The popular high-contrast Dracula palette: a blue-tinted charcoal canvas with
@@ -264,10 +266,10 @@ module Gori::Tui
       yellow: Color.from_hex("#8a6a00"),        # 4xx (darkened amber, 4.7:1)
       red: Color.from_hex("#cb2f2b"),           # 5xx / error (4.9:1)
       orange: Color.from_hex("#bd4712"),        # (4.8:1)
-      syn_header: Color.from_hex("#1f74b3"),   # header/field names, JSON keys, tag names (blue)
-      syn_string: Color.from_hex("#5e6b00"),   # quoted strings (green)
-      syn_number: Color.from_hex("#167068"),   # numbers, tag attribute names (cyan)
-      syn_literal: Color.from_hex("#6455bd"),  # true / false / null (violet)
+      syn_header: Color.from_hex("#1f74b3"),    # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#5e6b00"),    # quoted strings (green)
+      syn_number: Color.from_hex("#167068"),    # numbers, tag attribute names (cyan)
+      syn_literal: Color.from_hex("#6455bd"),   # true / false / null (violet)
     )
 
     # The Rosé Pine Dawn palette: a soft rosy "paper" canvas with muted blue-violet
@@ -290,13 +292,93 @@ module Gori::Tui
       yellow: Color.from_hex("#8a6410"),        # 4xx (darkened dawn gold, 4.9:1)
       red: Color.from_hex("#b03a56"),           # 5xx / error (dawn love, 5.4:1)
       orange: Color.from_hex("#a5501f"),        # (darkened terracotta, 5.1:1)
-      syn_header: Color.from_hex("#286983"),   # header/field names, JSON keys, tag names (dawn pine)
-      syn_string: Color.from_hex("#467730"),   # quoted strings (sage green)
-      syn_number: Color.from_hex("#96611e"),   # numbers, tag attribute names (warm brown)
-      syn_literal: Color.from_hex("#7a5fa0"),  # true / false / null (dawn iris)
+      syn_header: Color.from_hex("#286983"),    # header/field names, JSON keys, tag names (dawn pine)
+      syn_string: Color.from_hex("#467730"),    # quoted strings (sage green)
+      syn_number: Color.from_hex("#96611e"),    # numbers, tag attribute names (warm brown)
+      syn_literal: Color.from_hex("#7a5fa0"),   # true / false / null (dawn iris)
     )
 
-    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN}
+    # The popular Catppuccin Mocha palette: a dark blue-purple canvas with the
+    # recognizable pastel Catppuccin accents. The bright upstream hues already clear
+    # AA on the canvas, so they're used as-is.
+    CATPPUCCIN_MOCHA = Palette.new(
+      bg: Color.from_hex("#1e1e2e"),            # base — dark blue-purple canvas
+      panel: Color.from_hex("#26283a"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#313244"),      # header band, active segment (surface0)
+      border: Color.from_hex("#45475a"),        # hairline dividers (resting, surface1)
+      border_focus: Color.from_hex("#585b70"),  # brighter hairline for an active modal card (surface2)
+      focus_gold: Color.from_hex("#f9e2af"),    # focused body pane outline (catppuccin yellow)
+      accent: Color.from_hex("#b4befe"),        # the highlight (catppuccin lavender)
+      accent_bg: Color.from_hex("#3a3d5c"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#282b3f"), # selection band (unfocused pane)
+      text: Color.from_hex("#cdd6f4"),          # body text (catppuccin text)
+      text_bright: Color.from_hex("#ffffff"),   # emphasis / active
+      muted: Color.from_hex("#9399b2"),         # secondary (overlay2, 5.8:1)
+      green: Color.from_hex("#a6e3a1"),         # 2xx
+      yellow: Color.from_hex("#f9e2af"),        # 4xx
+      red: Color.from_hex("#f38ba8"),           # 5xx / error
+      orange: Color.from_hex("#fab387"),        # peach
+      syn_header: Color.from_hex("#89b4fa"),    # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#a6e3a1"),    # quoted strings (green)
+      syn_number: Color.from_hex("#fab387"),    # numbers, tag attribute names (peach)
+      syn_literal: Color.from_hex("#cba6f7"),   # true / false / null (mauve)
+    )
+
+    # The classic Monokai code-editor palette: an olive-dark canvas with the
+    # recognizable high-saturation lime/pink/orange accents. The iconic pink/red
+    # (#f92672) is lifted to #fa518e so it clears AA on the canvas — the same
+    # treatment other dark themes give an upstream hue that's too dim as-is.
+    MONOKAI = Palette.new(
+      bg: Color.from_hex("#272822"),            # classic Monokai olive-dark canvas
+      panel: Color.from_hex("#2d2e27"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#3e3d32"),      # header band, active segment (current-line tone)
+      border: Color.from_hex("#49483e"),        # hairline dividers (resting)
+      border_focus: Color.from_hex("#5c5b50"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#e6db74"),    # focused body pane outline (monokai yellow)
+      accent: Color.from_hex("#f8f8f2"),        # the highlight (monokai foreground)
+      accent_bg: Color.from_hex("#4e4d3f"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#333428"), # selection band (unfocused pane)
+      text: Color.from_hex("#f8f8f2"),          # body text (monokai foreground)
+      text_bright: Color.from_hex("#ffffff"),   # emphasis / active
+      muted: Color.from_hex("#948d81"),         # secondary (lifted comment tone, 4.5:1)
+      green: Color.from_hex("#a6e22e"),         # 2xx (monokai lime)
+      yellow: Color.from_hex("#e6db74"),        # 4xx
+      red: Color.from_hex("#fa518e"),           # 5xx / error (lifted pink, 4.7:1)
+      orange: Color.from_hex("#fd971f"),        # (monokai orange)
+      syn_header: Color.from_hex("#66d9ef"),    # header/field names, JSON keys, tag names (cyan)
+      syn_string: Color.from_hex("#e6db74"),    # quoted strings (yellow)
+      syn_number: Color.from_hex("#fd971f"),    # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#ae81ff"),   # true / false / null (purple)
+    )
+
+    # A muted, forest-green-toned dark palette inspired by Everforest: a soft
+    # blue-green canvas with warm cream text and low-saturation nature accents. The
+    # signature red (#e67e80) is lifted a touch (#e78486) so it clears AA on the
+    # canvas.
+    EVERFOREST = Palette.new(
+      bg: Color.from_hex("#2d353b"),            # everforest bg0 — soft blue-green canvas
+      panel: Color.from_hex("#343f44"),         # top bar / status / overlays (bg1)
+      elevated: Color.from_hex("#3d484d"),      # header band, active segment (bg2)
+      border: Color.from_hex("#475258"),        # hairline dividers (resting, bg3)
+      border_focus: Color.from_hex("#4f585e"),  # brighter hairline for an active modal card (bg4)
+      focus_gold: Color.from_hex("#dbbc7f"),    # focused body pane outline (everforest yellow)
+      accent: Color.from_hex("#e8e4cf"),        # the highlight (lightened everforest fg)
+      accent_bg: Color.from_hex("#3f4a44"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#343f3d"), # selection band (unfocused pane)
+      text: Color.from_hex("#d3c6aa"),          # body text (everforest fg)
+      text_bright: Color.from_hex("#e8e4cf"),   # emphasis / active
+      muted: Color.from_hex("#859289"),         # secondary (everforest grey1, 3.8:1)
+      green: Color.from_hex("#a7c080"),         # 2xx
+      yellow: Color.from_hex("#dbbc7f"),        # 4xx
+      red: Color.from_hex("#e78486"),           # 5xx / error (lifted, 4.8:1)
+      orange: Color.from_hex("#e69875"),        # (everforest orange)
+      syn_header: Color.from_hex("#7fbbb3"),    # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#a7c080"),    # quoted strings (green)
+      syn_number: Color.from_hex("#e69875"),    # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#d699b6"),   # true / false / null (purple)
+    )
+
+    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN, "catppuccin_mocha" => CATPPUCCIN_MOCHA, "monokai" => MONOKAI, "everforest" => EVERFOREST}
     DEFAULT_THEME  = "goridark"
     # Pre-rename names so a settings.json from the first theme release still resolves.
     LEGACY_ALIASES = {"dark" => "goridark", "light" => "goriday"}
