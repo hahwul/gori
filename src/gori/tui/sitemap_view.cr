@@ -29,6 +29,11 @@ module Gori::Tui
     # in the shared QL) that filters the tree by a node's path memo.
     QL_FIELDS = %w(host path method status scheme body header size dur tag)
 
+    # Right-aligned column widths: path memo sits left of the method/aside cluster.
+    TAG_COL_W = 16
+    METHODS_COL_W = 8
+    COL_GAP = 1 # minimum blank column between tag text and methods/aside
+
     def initialize
       @hosts = [] of Node
       @selected = 0
@@ -453,22 +458,48 @@ module Gori::Tui
       marker, mcolor = node_marker(node, host && node.in_scope)
       screen.cell(mx, y, marker, mcolor, bg)
       lx = screen.text(mx + 2, y, node.label, label_color(host, node), bg)
-      lx = draw_tag(screen, rect, node, y, bg, lx)
       draw_cluster(screen, rect, node, host, y, bg, lx)
     end
 
-    # Inline path memo after the label (" # note") in accent, truncated to leave a
-    # gap before the right edge. Returns the new label-end x so the right cluster sits
-    # clear of it (a long tag legitimately crowds out the chips — it's a deliberate note).
-    private def draw_tag(screen : Screen, rect : Rect, node : Node, y : Int32, bg : Color, label_end : Int32) : Int32
-      tag = node.tag
-      return label_end if tag.nil? || node.grouped
-      avail = rect.right - 1 - label_end
-      return label_end if avail < 5 # not worth a stub
+    # Right edge of the tag column (COL_GAP clear of the METHODS column).
+    private def tag_col_right(rect : Rect) : Int32
+      methods_col_x(rect) - COL_GAP - 1
+    end
+
+    # Left edge of the tag column.
+    private def tag_col_left(rect : Rect) : Int32
+      {tag_col_right(rect) - TAG_COL_W + 1, rect.x + 1}.max
+    end
+
+    # Left edge of the methods/aside column.
+    private def methods_col_x(rect : Rect) : Int32
+      {rect.right - METHODS_COL_W, rect.x + 1 + 12}.max
+    end
+
+    # Path memo in the tag column (" # note"), right-aligned and truncated to fit.
+    # `tag_right` may be pulled left when methods/aside share the row.
+    private def draw_tag_column(screen : Screen, rect : Rect, tag : String, y : Int32, bg : Color, label_end : Int32, tag_right : Int32) : Nil
+      avail = tag_right - tag_col_left(rect) + 1
+      return if avail < 5 # not worth a stub
       text = " # #{tag}"
       text = "#{text[0, avail - 1]}…" if text.size > avail
-      screen.text(label_end, y, text, Theme.accent, bg)
-      label_end + text.size
+      x = tag_right - text.size + 1
+      screen.text(x, y, text, Theme.accent, bg) if x >= label_end + 1
+    end
+
+    # Screen-x where the right cluster (methods/aside) begins; nil when the row has none.
+    private def cluster_start(rect : Rect, node : Node, host : Bool) : Int32?
+      if node.grouped
+        txt = "#{node.children.size} values"
+      elsif host && node.endpoints > 0
+        txt = node.endpoints == 1 ? "1 path" : "#{node.endpoints} paths"
+      elsif !node.methods.empty?
+        total = node.methods.sum(&.size) + (node.methods.size - 1)
+        return rect.right - total - 1
+      else
+        return nil
+      end
+      rect.right - txt.size - 1
     end
 
     # Faint vertical guides at each ancestor level whose branch continues below this row.
@@ -490,10 +521,18 @@ module Gori::Tui
       end
     end
 
-    # The right-aligned cluster: a folded-value count on group rows, an endpoint count on
-    # host rows, colored method chips on endpoint rows (the three never collide — a node
-    # is at most one of group / host / endpoint).
+    # The right-aligned cluster: path memo in the tag column, then a folded-value count
+    # on group rows, an endpoint count on host rows, or colored method chips on endpoint
+    # rows (group / host / endpoint are mutually exclusive for the aside slot).
     private def draw_cluster(screen : Screen, rect : Rect, node : Node, host : Bool, y : Int32, bg : Color, label_end : Int32) : Nil
+      cluster_x = cluster_start(rect, node, host)
+      tag_right = tag_col_right(rect)
+      if cx = cluster_x
+        tag_right = {tag_right, cx - COL_GAP - 1}.min
+      end
+      if t = node.tag
+        draw_tag_column(screen, rect, t, y, bg, label_end, tag_right) unless node.grouped
+      end
       if node.grouped
         draw_aside(screen, rect, y, bg, "#{node.children.size} values", label_end)
       elsif host
@@ -584,11 +623,13 @@ module Gori::Tui
 
     private def render_column_headers(screen : Screen, rect : Rect, hdr_y : Int32) : Nil
       label_x = rect.x + 1
-      methods_w = 8
-      methods_x = {rect.right - methods_w, label_x + 12}.max
-      label_w = {methods_x - label_x - 1, 6}.max
+      methods_x = methods_col_x(rect)
+      tag_right = tag_col_right(rect)
+      label_w = {tag_col_left(rect) - label_x - 1, 6}.max
       screen.text(label_x, hdr_y, "HOST / PATH", Theme.muted, width: label_w) if label_w > 0
-      screen.text(methods_x, hdr_y, "METHODS", Theme.muted, width: methods_w)
+      tag_hdr = "TAG"
+      screen.text(tag_right - tag_hdr.size + 1, hdr_y, tag_hdr, Theme.muted) if tag_right - tag_hdr.size + 1 > label_x
+      screen.text(methods_x, hdr_y, "METHODS", Theme.muted, width: METHODS_COL_W)
     end
 
     private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil

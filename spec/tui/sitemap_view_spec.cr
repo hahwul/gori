@@ -77,6 +77,7 @@ describe Gori::Tui::SitemapView do
       backend.contains?("Open browser").should be_true
       backend.contains?("SITE MAP").should be_true
       backend.contains?("HOST / PATH").should be_true
+      backend.contains?("TAG").should be_true
       backend.contains?("METHODS").should be_true
     end
   end
@@ -249,6 +250,24 @@ describe Gori::Tui::SitemapView do
       b = MemoryBackend.new(70, 20)
       view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
       b.contains?("# payment flow").should be_true
+    end
+  end
+
+  it "keeps at least one blank column between a tag and method chips on the same row" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      store.set_sitemap_tag("acme.test", "/api/users", "memo")
+
+      view = SitemapView.new
+      view.reload(store)
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+
+      y = (0...20).find { |yy| b.row(yy).includes?("GET") && b.row(yy).includes?("# memo") }.not_nil!
+      row = b.row(y)
+      tag_end = row.index("# memo").not_nil! + "# memo".size - 1
+      method_start = row.index("GET").not_nil!
+      (method_start - tag_end).should be > 1
     end
   end
 
