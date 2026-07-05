@@ -109,7 +109,18 @@ module Gori::Proxy
         end
       end
 
-      req_framing, req_len = Codec::Body.request_framing(req)
+      # Ambiguous/illegal request framing (CL+TE, non-final chunked, bad
+      # Content-Length) means we can't determine the body boundary to forward it
+      # faithfully — the codec raises to force a close. But the attempt must stay
+      # VISIBLE in History (this smuggling-shape traffic is exactly what a pentester
+      # wants to see); previously the raise unwound to `run`'s blanket rescue and no
+      # flow was recorded at all. Record an error flow, then close.
+      begin
+        req_framing, req_len = Codec::Body.request_framing(req)
+      rescue ex : Gori::Error
+        record_error(sent_req, scheme, host, port, created_at, "request framing rejected: #{ex.message}")
+        return false
+      end
 
       # Intercept (request): hold only when enabled AND in scope. Holding buffers
       # the full body (vs streaming) so the human can see/edit it; the non-hold
@@ -256,54 +267,17 @@ module Gori::Proxy
       end
       resp = Codec::Http1.parse_response_head(resp_head)
 
-      # Interim 1xx (RFC 9110 §15.2): an informational response (100 Continue,
-      # 103 Early Hints, …) is NOT the final response. A conformant proxy forwards
-      # it to the client verbatim and keeps reading until the final (>=200) status;
-      # otherwise the real response is stranded on the upstream socket — it gets
-      # wrongly recorded as THIS flow's response AND served to the next reused
-      # request on this connection (response desync). 101 Switching Protocols is the
-      # exception: it is terminal (the protocol upgrade), so it falls through to the
-      # normal path (WebSocket handling below).
-      interim_seen = 0
-      while interim_response?(resp)
-        # RFC 9112 §6: a 1xx response MUST NOT carry content. An interim that declares
-        # a body (Content-Length / Transfer-Encoding) is malformed AND a desync vector
-        # — its "body" can embed a fake final response while the real one is stranded
-        # for the next reused request. Refuse it: close the connection (don't parse a
-        # body as the next response, don't reuse the upstream).
-        if interim_has_body?(resp)
-          @sink.on_response(FlowMapper.error_response(flow_id, "malformed interim 1xx response (declared a body)"))
-          release_upstream
-          return false
-        end
-        # Cap consecutive 1xx (like Burp/nginx) so a hostile upstream streaming endless
-        # body-less 103s can't spin this fiber forever / flood the client (per-conn DoS).
-        interim_seen += 1
-        if interim_seen > MAX_INTERIM
-          @sink.on_response(FlowMapper.error_response(flow_id, "too many interim 1xx responses (>#{MAX_INTERIM})"))
-          release_upstream
-          return false
-        end
-        # RFC 9110 §15.2 / RFC 7231: a proxy MUST NOT forward a 1xx to an HTTP/1.0
-        # client (it can't parse it). Read past it for everyone; forward only to 1.1.
-        if req.version == "HTTP/1.1"
-          @io.write(resp_head) # forward byte-exact (P6/P7); no rewrite on interim
-          @io.flush
-        end
-        resp_head = Codec::Http1.read_head(upstream)
-        if resp_head.nil?
-          @sink.on_response(FlowMapper.error_response(flow_id, "upstream closed after interim 1xx response"))
-          release_upstream
-          return false
-        end
-        resp = Codec::Http1.parse_response_head(resp_head)
-      end
+      final = skip_interim_responses(upstream, req, flow_id, resp_head, resp)
+      return false unless final
+      resp_head, resp = final
       ttfb = (Time.instant - started).total_microseconds.to_i64
 
       # Match&Replace (response head). Framing/keep-alive/upgrade stay on the
       # ORIGINAL response so the upstream body is read correctly.
       sent_resp_head, sent_resp = apply_response_rewrite(resp_head, resp)
-      resp_framing, resp_len = Codec::Body.response_framing(resp, req.method)
+      framing = response_framing_or_close(resp, req.method, flow_id)
+      return false unless framing
+      resp_framing, resp_len = framing
 
       # Intercept (response): hold only in-scope, non-streaming responses. SSE /
       # close-delimited / WebSocket bodies would buffer forever, so they bypass.
@@ -320,18 +294,14 @@ module Gori::Proxy
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
 
-      # Non-hold path: stream the response body byte-for-byte (P6), unchanged.
-      @io.write(sent_resp_head)
-      @io.flush
+      # Non-hold path: stream the response body byte-for-byte (P6) and record the
+      # flow. `completed` is true only when the whole body was delivered cleanly; a
+      # client abort or upstream truncation is recorded Aborted (see the helper).
       resp_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
-      resp_complete = Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture)
-      duration = (Time.instant - started).total_microseconds.to_i64
-      resp_body = resp_framing.none? ? nil : resp_capture.to_slice
-      @sink.on_response(FlowMapper.response(sent_resp,
-        flow_id: flow_id, body: resp_body, ttfb_us: ttfb, duration_us: duration,
-        body_truncated: resp_capture.truncated?, body_size: resp_capture.total))
+      completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
+        resp_framing, resp_len, resp_capture, flow_id, ttfb, started)
 
-      if websocket_upgrade?(resp)
+      if completed && websocket_upgrade?(resp)
         # Ownership of the upstream transfers to the relay (it cross-closes on
         # teardown); detach it from the reuse slot so `run`'s ensure won't also
         # touch it.
@@ -342,10 +312,10 @@ module Gori::Proxy
         return false
       end
 
-      # A truncated body (upstream EOF'd before the promised length) was forwarded
-      # short; close so the client sees end-of-response instead of waiting for the
-      # missing bytes while we read its next keep-alive request.
-      unless resp_complete
+      # A truncated/aborted body was forwarded short; close so the client sees
+      # end-of-response instead of waiting for the missing bytes while we read its
+      # next keep-alive request.
+      unless completed
         release_upstream
         return false
       end
@@ -353,6 +323,106 @@ module Gori::Proxy
       # open; the return value is the CLIENT keep-alive decision (separate sides).
       update_upstream_reuse(origin_keep_alive?(req, resp, resp_framing))
       keep_alive?(req, resp, resp_framing)
+    end
+
+    # Interim 1xx (RFC 9110 §15.2): an informational response (100 Continue,
+    # 103 Early Hints, …) is NOT the final response. A conformant proxy forwards it
+    # to the client verbatim and keeps reading until the final (>=200) status;
+    # otherwise the real response is stranded on the upstream socket — wrongly
+    # recorded as THIS flow's response AND served to the next reused request
+    # (response desync). 101 Switching Protocols is terminal (the upgrade) and falls
+    # through. Returns the final {head, resp}, or nil when it recorded an error +
+    # closed (malformed 1xx with a body, too many 1xx, or upstream closed).
+    private def skip_interim_responses(upstream : IO, req : Codec::RawRequest, flow_id : Int64,
+                                       resp_head : Bytes, resp : Codec::RawResponse) : {Bytes, Codec::RawResponse}?
+      interim_seen = 0
+      while interim_response?(resp)
+        # RFC 9112 §6: a 1xx response MUST NOT carry content. An interim that declares
+        # a body (Content-Length / Transfer-Encoding) is malformed AND a desync vector
+        # — its "body" can embed a fake final response while the real one is stranded
+        # for the next reused request. Refuse it: close the connection (don't parse a
+        # body as the next response, don't reuse the upstream).
+        if interim_has_body?(resp)
+          @sink.on_response(FlowMapper.error_response(flow_id, "malformed interim 1xx response (declared a body)"))
+          release_upstream
+          return nil
+        end
+        # Cap consecutive 1xx (like Burp/nginx) so a hostile upstream streaming endless
+        # body-less 103s can't spin this fiber forever / flood the client (per-conn DoS).
+        interim_seen += 1
+        if interim_seen > MAX_INTERIM
+          @sink.on_response(FlowMapper.error_response(flow_id, "too many interim 1xx responses (>#{MAX_INTERIM})"))
+          release_upstream
+          return nil
+        end
+        # RFC 9110 §15.2 / RFC 7231: a proxy MUST NOT forward a 1xx to an HTTP/1.0
+        # client (it can't parse it). Read past it for everyone; forward only to 1.1.
+        if req.version == "HTTP/1.1"
+          @io.write(resp_head) # forward byte-exact (P6/P7); no rewrite on interim
+          @io.flush
+        end
+        resp_head = Codec::Http1.read_head(upstream)
+        if resp_head.nil?
+          @sink.on_response(FlowMapper.error_response(flow_id, "upstream closed after interim 1xx response"))
+          release_upstream
+          return nil
+        end
+        resp = Codec::Http1.parse_response_head(resp_head)
+      end
+      {resp_head, resp}
+    end
+
+    # Computes the response body framing, or records a visible error flow and
+    # returns nil when the framing is illegal (CL+TE, non-final chunked, bad
+    # Content-Length). We already hold a flow_id from on_request, so a raise here
+    # used to leave the flow stuck Pending forever; record + close instead.
+    private def response_framing_or_close(resp : Codec::RawResponse, method : String,
+                                          flow_id : Int64) : {Codec::BodyFraming, Int64}?
+      Codec::Body.response_framing(resp, method)
+    rescue ex : Gori::Error
+      @sink.on_response(FlowMapper.error_response(flow_id, "response framing rejected: #{ex.message}"))
+      release_upstream
+      nil
+    end
+
+    # Streams the non-held response to the client while capturing it, then records
+    # the flow. Returns true only if the whole body was delivered:
+    #   - a raised write (the CLIENT aborted its read mid-response, e.g. an
+    #     EventSource cancel) → record Aborted, return false;
+    #   - `stream` returning false (the UPSTREAM cut a Content-Length/chunked body
+    #     short) → record Aborted with a truncation note, return false;
+    #   - otherwise → record Complete, return true.
+    # Both failure modes previously either unwound to `run`'s blanket rescue
+    # (leaving the flow Pending forever) or were recorded as a clean response.
+    private def stream_nonhold_response(upstream : IO, sent_resp : Codec::RawResponse,
+                                        sent_resp_head : Bytes, resp_framing : Codec::BodyFraming,
+                                        resp_len : Int64, resp_capture : Codec::CaptureBuffer,
+                                        flow_id : Int64, ttfb : Int64, started : Time::Instant) : Bool
+      begin
+        @io.write(sent_resp_head)
+        @io.flush
+        resp_complete = Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture)
+      rescue
+        record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
+          state: Store::FlowState::Aborted, error: "connection closed mid-response")
+        return false
+      end
+      record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
+        state: resp_complete ? Store::FlowState::Complete : Store::FlowState::Aborted,
+        error: resp_complete ? nil : "upstream closed before response body complete")
+      resp_complete
+    end
+
+    private def record_streamed_response(sent_resp : Codec::RawResponse, resp_framing : Codec::BodyFraming,
+                                         resp_capture : Codec::CaptureBuffer, flow_id : Int64,
+                                         ttfb : Int64, started : Time::Instant, *,
+                                         state : Store::FlowState, error : String?) : Nil
+      duration = (Time.instant - started).total_microseconds.to_i64
+      @sink.on_response(FlowMapper.response(sent_resp,
+        flow_id: flow_id, body: resp_framing.none? ? nil : resp_capture.to_slice,
+        ttfb_us: ttfb, duration_us: duration,
+        body_truncated: resp_capture.truncated?, body_size: resp_capture.total,
+        state: state, error: error))
     end
 
     # Reads the response head, transparently redialing + resending ONCE if a
