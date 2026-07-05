@@ -5,6 +5,13 @@ module Gori::Proxy::Tls
   # minimal: basicConstraints (required for trust) + subjectAltName (required
   # for hostname verification). AKI/SKI and upstream-cert mirroring are deferred.
   module CertBuilder
+    # OpenSSL enforces ub-common-name = 64 bytes on the CN attribute;
+    # X509_NAME_add_entry_by_txt fails (returns 0) for a longer value, silently
+    # leaving the subject EMPTY. CN is deprecated for hostname verification anyway
+    # (clients use the SAN), so we only set it when it fits and fall back to an
+    # empty subject + a CRITICAL SAN (RFC 5280 §4.2.1.6) for longer hostnames.
+    MAX_CN_BYTES = 64
+
     # Self-signed root CA.
     def self.build_root(common_name : String) : {Cert, KeyPair}
       key = KeyPair.generate_ec
@@ -32,15 +39,25 @@ module Gori::Proxy::Tls
         LibCrypto.x509_gmtime_adj(LibCrypto.x509_getm_not_after(x), validity)
 
         subject = LibCrypto.x509_get_subject_name(x)
-        LibCrypto.x509_name_add_entry_by_txt(subject, "CN", LibCrypto::MBSTRING_UTF8,
-          common_name, common_name.bytesize, -1, 0)
+        # Only set CN when it fits OpenSSL's 64-byte cap AND the add succeeds; a
+        # longer hostname (or any failure) leaves the subject empty, which then
+        # requires a critical SAN below.
+        subject_set = common_name.bytesize <= MAX_CN_BYTES &&
+                      LibCrypto.x509_name_add_entry_by_txt(subject, "CN", LibCrypto::MBSTRING_UTF8,
+                        common_name, common_name.bytesize, -1, 0) != 0
 
         issuer_name = issuer ? LibCrypto.x509_get_subject_name(issuer.handle) : subject
         LibCrypto.x509_set_issuer_name(x, issuer_name)
         LibCrypto.x509_set_pubkey(x, pubkey.handle)
 
         add_ext(x, NID_BASIC_CONSTR, is_ca ? "critical,CA:TRUE" : "critical,CA:FALSE")
-        add_ext(x, NID_SUBJECT_ALT, san_value(san_dns)) if san_dns && safe_san?(san_dns)
+        if san_dns && safe_san?(san_dns)
+          # RFC 5280 §4.2.1.6: a cert with an empty subject DN MUST carry a CRITICAL
+          # SAN, or strict TLS stacks (curl/LibreSSL, browsers) reject the handshake.
+          value = san_value(san_dns)
+          value = "critical,#{value}" unless subject_set
+          add_ext(x, NID_SUBJECT_ALT, value)
+        end
 
         raise Gori::Error.new("X509_sign failed") if LibCrypto.x509_sign(x, signing_key.handle, LibCrypto.evp_sha256) == 0
         Cert.new(x)

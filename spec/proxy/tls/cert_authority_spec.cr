@@ -71,6 +71,42 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
   end
 
+  it "mints a >64-byte-hostname leaf with an empty subject and a CRITICAL SAN" do
+    with_ca_dir do |dir|
+      Dir.mkdir_p(dir)
+      ca_cert, ca_key = Gori::Proxy::Tls::CertBuilder.build_root("gori test CA")
+      # 72 bytes, each DNS label <=63: valid host, but past OpenSSL's 64-byte CN cap.
+      long_host = ("a" * 60) + ".example.com"
+      leaf, _ = Gori::Proxy::Tls::CertBuilder.build_leaf(long_host, ca_cert, ca_key)
+      path = File.join(dir, "leaf.pem")
+      leaf.write_pem(path)
+
+      subject = `openssl x509 -in #{path} -noout -subject`
+      san = `openssl x509 -in #{path} -noout -ext subjectAltName`
+
+      subject.should_not contain("CN")                         # CN dropped silently before → now skipped cleanly
+      san.should contain(long_host)                            # host still verifiable via the SAN
+      san.should match(/Subject Alternative Name:\s*critical/) # RFC 5280 §4.2.1.6 (empty subject)
+    end
+  end
+
+  it "keeps the CN and a non-critical SAN for a hostname within the 64-byte cap" do
+    with_ca_dir do |dir|
+      Dir.mkdir_p(dir)
+      ca_cert, ca_key = Gori::Proxy::Tls::CertBuilder.build_root("gori test CA")
+      leaf, _ = Gori::Proxy::Tls::CertBuilder.build_leaf("api.example.com", ca_cert, ca_key)
+      path = File.join(dir, "leaf.pem")
+      leaf.write_pem(path)
+
+      subject = `openssl x509 -in #{path} -noout -subject`
+      san = `openssl x509 -in #{path} -noout -ext subjectAltName`
+
+      subject.should contain("api.example.com") # CN present (fits the cap)
+      san.should contain("api.example.com")
+      san.should_not match(/Subject Alternative Name:\s*critical/)
+    end
+  end
+
   it "computes the CA SubjectPublicKeyInfo SHA-256 pin (base64) for browser trust" do
     with_ca_dir do |dir|
       spki = Gori::Proxy::Tls::CertAuthority.load_or_create(dir).spki_sha256_base64
