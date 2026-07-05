@@ -430,7 +430,11 @@ module Gori
         raw = @store.setting(Store::UI_STATE_KEY)
         parsed = raw.try do |r|
           begin
-            JSON.parse(r)
+            obj = JSON.parse(r)
+            # Must decode to a JSON OBJECT: valid-but-wrong-shape JSON (an array,
+            # scalar, or null) would make `parsed["active_tab"]?` below raise a raw
+            # "Expected Hash for #[]?" cast error — treat it as unreadable instead.
+            obj if obj.as_h?
           rescue
             nil
           end
