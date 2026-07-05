@@ -86,7 +86,7 @@ module Gori::Tui
                             listen : String, time : String,
                             scope : String, rules : String = "", intercept : String = "") : Nil
       screen.fill(rect, Theme.panel)
-      x = screen.text(rect.x + 1, rect.y, "gori", Theme.text_bright, Theme.panel, Attribute::Bold)
+      x = screen.text(rect.x + 1, rect.y, "ǤØɌɨ", Theme.text_bright, Theme.panel, Attribute::Bold)
       screen.text(x + 1, rect.y, "· #{project}", Theme.muted, Theme.panel)
 
       # right-aligned status chips: scope:N · rules:N · intercept:on(N) · listen · h:MM AM/PM
