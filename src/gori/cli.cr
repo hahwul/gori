@@ -219,7 +219,7 @@ module Gori
     end
 
     # `gori wizard` launches the interactive, step-by-step setup wizard (bind
-    # address → theme → AI provider). It also runs automatically on first launch
+    # address → theme). It also runs automatically on first launch
     # (App#run_tui, when settings.json doesn't exist yet); this command re-runs it
     # anytime. Config-only — it edits settings.json + the live theme, so it sets up
     # its own terminal directly instead of going through App (which eagerly loads
@@ -227,7 +227,7 @@ module Gori
     private def self.run_wizard(args : Array(String)) : Nil
       if args.any? { |a| ["-h", "--help"].includes?(a) }
         puts "Usage: gori wizard"
-        puts "  Interactive setup wizard: proxy bind address, TUI theme, AI provider."
+        puts "  Interactive setup wizard: proxy bind address, TUI theme."
         puts "  Runs automatically on first launch; use this to re-run it anytime."
         return
       end
@@ -320,6 +320,13 @@ module Gori
         proj = registry.list.find { |p| p.name.downcase == name.downcase }
         abort "gori mcp: no such project: #{name}" unless proj
         return {proj.db_path, proj.name}
+      end
+      # Prefer the project the interactive TUI last opened (its ui-state is what
+      # get_current_context reports); fall back to the mtime-MRU project, then the default db.
+      if name = Paths.read_active_project
+        if proj = registry.list.find { |p| p.name.downcase == name.downcase }
+          return {proj.db_path, proj.name}
+        end
       end
       mru = registry.list.first?
       {mru.try(&.db_path) || Paths.default_db, mru.try(&.name)}

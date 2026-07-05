@@ -150,6 +150,13 @@ module Gori
             "Project totals: flow count, finding count, captured bytes, earliest capture time, " \
             "plus which project/db is being served (important when no --project was passed)." { }
 
+          tool j, "get_current_context",
+            "What the user is currently viewing in the gori TUI: active tab, focused pane, the " \
+            "selected flow id, and sub-tab index — so you can act on \"the request I'm looking at " \
+            "right now\" without the user pasting ids. Reflects an open (or last-open) gori TUI for " \
+            "this project. Check `project_match`: if false, the focus is for a different project " \
+            "than this server serves. `age_seconds` shows how long since the TUI last recorded focus." { }
+
           if @allow_actions
             tool j, "send_request",
               "Send/replay an HTTP request to its origin and return the response. " \
@@ -279,14 +286,15 @@ module Gori
       # Read-only tools (always exposed). nil when `name` isn't one of them.
       private def read_tool(name : String, h) : Result?
         case name
-        when "list_history"  then list_history(h)
-        when "get_flow"      then get_flow(h)
-        when "list_sitemap"  then list_sitemap(h)
-        when "list_findings" then list_findings(h)
-        when "get_finding"   then get_finding(h)
-        when "list_scope"    then list_scope
-        when "project_info"  then project_info
-        when "ql_reference"  then ql_reference
+        when "list_history"        then list_history(h)
+        when "get_flow"            then get_flow(h)
+        when "list_sitemap"        then list_sitemap(h)
+        when "list_findings"       then list_findings(h)
+        when "get_finding"         then get_finding(h)
+        when "list_scope"          then list_scope
+        when "project_info"        then project_info
+        when "get_current_context" then get_current_context
+        when "ql_reference"        then ql_reference
         end
       end
 
@@ -407,6 +415,51 @@ module Gori
             j.field "earliest_created_at", @store.earliest_created_at
             if ea = @store.earliest_created_at
               j.field "earliest_created_at_iso", Serialize.unix_micros_iso(ea)
+            end
+          end
+        end)
+      end
+
+      # What the user is currently viewing in the gori TUI, recorded cross-process to the
+      # project store (Store::UI_STATE_KEY) by the running TUI. Read-only + honest: reports
+      # a project mismatch / freshness rather than silently returning stale focus.
+      private def get_current_context : Result
+        raw = @store.setting(Store::UI_STATE_KEY)
+        parsed = raw.try do |r|
+          begin
+            JSON.parse(r)
+          rescue
+            nil
+          end
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "project", @project_name # what this server serves
+            if parsed.nil?
+              j.field "available", false
+              j.field "note", raw.nil? ? "No UI state recorded for this project — the gori TUI may not have run against it." : "Recorded UI state was unreadable."
+            else
+              ctx_project = parsed["active_project"]?.try(&.as_s?)
+              match = ctx_project.nil? || @project_name.nil? || ctx_project == @project_name
+              j.field "available", true
+              j.field "context_project", ctx_project # project the TUI recorded focus for
+              j.field "project_match", match
+              j.field "active_tab", parsed["active_tab"]?.try(&.as_s?)
+              j.field "focus_pane", parsed["focus_pane"]?.try(&.as_s?)
+              if fid = parsed["selected_flow_id"]?.try(&.as_i64?)
+                j.field "selected_flow_id", fid
+              end
+              if st = parsed["subtab"]?.try(&.as_i64?)
+                j.field "subtab", st
+              end
+              if rec = parsed["recorded_at"]?.try(&.as_i64?)
+                j.field "recorded_at", rec
+                j.field "recorded_at_iso", Time.unix_ms(rec).to_rfc3339
+                j.field "age_seconds", (Time.utc.to_unix_ms - rec) // 1000
+              end
+              unless match
+                j.field "note", "The recorded focus is for project '#{ctx_project}', not the served '#{@project_name}' — selected_flow_id refers to the other project."
+              end
             end
           end
         end)

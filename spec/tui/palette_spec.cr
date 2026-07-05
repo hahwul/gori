@@ -79,7 +79,7 @@ describe Gori::Tui::PaletteState do
     r = Gori::Verbs.registry
     # The named tab jumps are the only by-command way to reach a tab hidden in
     # settings:tabs — so every entry in the canonical catalog (incl. the default-hidden
-    # Fuzzer/Miner/Agent) must have one, or it becomes unreachable from the palette.
+    # Miner) must have one, or it becomes unreachable from the palette.
     Gori::Tui::Chrome::TABS.each do |(tab, label)|
       verb = r["tab.#{tab}"]?
       verb.should_not be_nil

@@ -196,11 +196,11 @@ describe Gori::Settings do
     prev = ENV["GORI_HOME"]?
     begin
       ENV["GORI_HOME"] = dir
-      Gori::Settings.tab_prefs = [{"help", true}, {"project", true}, {"agent", false}]
+      Gori::Settings.tab_prefs = [{"help", true}, {"project", true}, {"miner", false}]
       Gori::Settings.save.should be_true
       Gori::Settings.tab_prefs = [] of {String, Bool} # clear, then reload from disk
       Gori::Settings.load
-      Gori::Settings.tab_prefs.should eq([{"help", true}, {"project", true}, {"agent", false}])
+      Gori::Settings.tab_prefs.should eq([{"help", true}, {"project", true}, {"miner", false}])
 
       # an older file with no "tabs" key keeps the current in-memory value (the default
       # [] at real startup), like the other fields — never resurrects a phantom layout

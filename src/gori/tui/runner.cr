@@ -76,8 +76,8 @@ module Gori::Tui
       @finding_form = FindingForm.new
       @palette = PaletteState.new(@session.registry)
       @space_menu = SpaceMenu.new(@session.registry)
-      # Land on the home tab, but never on a hidden one (settings:tabs may hide Project,
-      # and Agent is hidden by default). Settings is loaded (cli.cr) before Runner.new.
+      # Land on the home tab, but never on a hidden one (settings:tabs may hide Project;
+      # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
       @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced
@@ -252,6 +252,9 @@ module Gori::Tui
     end
 
     def run : Symbol
+      # Record the opened project globally so a separate `gori mcp` (given no --db/--project)
+      # serves what the user is actually viewing instead of an mtime-MRU guess.
+      Paths.write_active_project(@session.project.name)
       history_controller.view.reload(@session.store)
       notes_controller.view.reload(@session.store) # load persisted notes up front so the tab is ready before it's ever focused
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
@@ -290,8 +293,10 @@ module Gori::Tui
       last_wf = @session.store.write_failures
       last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
       last_dv_poll = Time.instant
-      last_spin = Time.instant # advances the background-job spinner frame
-      last_clock = clock_label # top-bar wall clock; re-render only when the minute rolls over
+      last_spin = Time.instant        # advances the background-job spinner frame
+      last_clock = clock_label        # top-bar wall clock; re-render only when the minute rolls over
+      last_ui_ident = nil.as(String?) # last-written ui-state identity (see UI_STATE_THROTTLE)
+      last_ui_write = Time.instant
       loop do
         ev = @term.poll_event(50)
         dirty = false
@@ -357,6 +362,15 @@ module Gori::Tui
           last_clock = clock
           dirty = true
         end
+        # Record what the user is currently viewing (active tab / focus / selection) to
+        # the project store so a separate `gori mcp` process can report it via
+        # get_current_context. Throttled + diffed so idle focus never churns the WAL.
+        ident = ui_state_identity
+        if ident != last_ui_ident && (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE)
+          @session.store.set_setting(Store::UI_STATE_KEY, ui_state_json)
+          last_ui_ident = ident
+          last_ui_write = now
+        end
         render if dirty
         break unless @outcome == :running
       end
@@ -370,11 +384,38 @@ module Gori::Tui
     # 50ms tick — ~sub-second freshness is plenty.
     DV_POLL_INTERVAL = 750.milliseconds
 
+    # Minimum spacing between ui-state writes (get_current_context). Coalesces a fast
+    # focus/scroll burst into ≤1 write per window so the WAL never churns per frame.
+    UI_STATE_THROTTLE = 300.milliseconds
+
     # How fast the bottom-bar background-job spinner advances (only while a job runs).
     SPINNER_INTERVAL = 120.milliseconds
 
     # Braille spinner frames (U+2800–U+28FF: EAW-Neutral width 1, no emoji/VS16).
     SPINNER = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
+
+    # A cheap identity of "what the user is viewing" for change detection — no timestamp,
+    # so an unchanged view yields a stable string (ui_state_json stamps the time on write).
+    private def ui_state_identity : String
+      "#{@active_tab}|#{@focus}|#{history_controller.selected_flow_id}|#{current_subtab_index}|#{@session.project.name}"
+    end
+
+    # The ui-state payload written to the project store, read cross-process by
+    # `gori mcp get_current_context` to report what the user is currently viewing.
+    private def ui_state_json : String
+      JSON.build do |j|
+        j.object do
+          j.field "active_project", @session.project.name
+          j.field "active_tab", @active_tab.to_s
+          j.field "focus_pane", @focus.to_s
+          if fid = history_controller.selected_flow_id
+            j.field "selected_flow_id", fid
+          end
+          j.field "subtab", current_subtab_index
+          j.field "recorded_at", Time.utc.to_unix_ms
+        end
+      end
+    end
 
     private def drain_events : Bool
       drained = false
@@ -753,14 +794,14 @@ module Gori::Tui
       @tabs[@active_tab]?.try(&.subtab_index) || 0
     end
 
-    # Per-tab body click. Notes (a lone editor) + Agent just take focus; cursor
-    # placement inside editors is Phase 2.
+    # Per-tab body click. Every tab has a controller; the fallback just takes focus
+    # defensively if somehow none is registered for the active tab.
     private def click_body(body : Rect, mx : Int32, my : Int32) : Nil
-      if c = @tabs[@active_tab]? # migrated tab — controller owns its body clicks
+      if c = @tabs[@active_tab]? # controller owns its body clicks
         c.handle_click(body, mx, my)
         return
       end
-      @focus = :body # unmigrated/placeholder tab (e.g. :agent) — just take focus
+      @focus = :body # defensive: no controller for the active tab — just take focus
     end
 
     # Sitemap: a click selects the row; a click on the ▾/▸ marker toggles it
@@ -2455,20 +2496,15 @@ module Gori::Tui
     end
 
     # Body hints come from the active tab's controller (it knows its focused pane);
-    # an unmigrated/placeholder tab falls back to the bare ring reminder.
+    # falls back to the bare ring reminder if no controller is registered.
     private def body_hints : String
       @tabs[@active_tab]?.try(&.body_hint(@focus)) || "↹/esc tabs · ^P cmds · q projects · ^D quit"
     end
 
     private def render_body(screen : Screen, rect : Rect) : Nil
-      if c = @tabs[@active_tab]? # migrated tab — controller owns its body render
-        c.render_body(screen, rect, @focus)
-        return
-      end
-      # Unmigrated/placeholder tab (e.g. the half-wired :agent).
-      BodyChrome.framed(screen, rect, @focus == :body) do |inner|
-        screen.text(inner.x + 1, inner.y, "#{@active_tab.to_s.capitalize} — coming soon", Theme.muted)
-      end
+      # Every catalog tab has a controller that owns its body render; the `?` guard is
+      # defensive (a blank body beats a crash if the active tab ever lacks one).
+      @tabs[@active_tab]?.try(&.render_body(screen, rect, @focus))
     end
 
     # --- ExecContext (verbs drive the UI through these) ----------------------

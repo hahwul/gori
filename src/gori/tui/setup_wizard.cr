@@ -13,8 +13,7 @@ module Gori::Tui
   # `gori wizard`. A config-only tool — no Session/proxy/CA — so it just edits the
   # global Settings + live Theme, mirroring ProjectPicker's run-loop/render shape.
   #
-  # Steps: NETWORK (bind ip/port) → THEME (list + live preview) → AI PROVIDER
-  # (informational yes/no, NOT persisted) → REVIEW (recap + finish).
+  # Steps: NETWORK (bind ip/port) → THEME (list + live preview) → REVIEW (recap + finish).
   #
   # Edits are STAGED in wizard-local fields and committed to Settings only on
   # finish, so "skip" (Esc) is coherent: it reverts the live theme preview to the
@@ -30,7 +29,6 @@ module Gori::Tui
     enum Step
       Bind       # bind ip/port
       Appearance # theme (named Appearance to avoid clashing with the Theme module)
-      Provider   # AI provider (informational)
       Review     # recap + finish
     end
 
@@ -49,8 +47,6 @@ module Gori::Tui
       @theme_name = Theme.canonical(Settings.theme)
       @theme_baseline = Theme.active_name # reverted on skip
       @theme_scroll = 0
-      # AI step — local toggle only; the answer is never written anywhere.
-      @ai_interested = false
       @resized = false # forces a full repaint (resize OR a live theme swap)
       @running = false
     end
@@ -90,7 +86,6 @@ module Gori::Tui
       case @step
       when Step::Bind       then handle_bind_key(ev)
       when Step::Appearance then handle_theme_key(ev)
-      when Step::Provider   then handle_provider_key(ev)
       when Step::Review     then handle_review_key(ev)
       end
     end
@@ -127,7 +122,7 @@ module Gori::Tui
     private def handle_theme_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.enter? || key.tab?
-        @step = Step::Provider
+        @step = Step::Review
       elsif key.back_tab?
         back_to_bind
       elsif key.up? || key.left?
@@ -137,25 +132,13 @@ module Gori::Tui
       end
     end
 
-    # AI step (informational): ↑/↓/←/→/space toggle yes/no; ↵/⇥ next; ⇧⇥ back.
-    private def handle_provider_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      if key.enter? || key.tab?
-        @step = Step::Review
-      elsif key.back_tab?
-        @step = Step::Appearance
-      elsif key.up? || key.down? || key.left? || key.right? || key.space?
-        @ai_interested = !@ai_interested
-      end
-    end
-
     # Review step: ↵ finishes (commit + persist); ⇧⇥ back.
     private def handle_review_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.enter?
         finish
       elsif key.back_tab?
-        @step = Step::Provider
+        @step = Step::Appearance
       end
     end
 
@@ -263,7 +246,6 @@ module Gori::Tui
       end
       case @step
       when Step::Appearance then click_theme(mx, my)
-      when Step::Provider   then click_provider(mx, my)
       end
     end
 
@@ -281,18 +263,6 @@ module Gori::Tui
       @theme_name = names[i]
       Theme.apply(@theme_name)
       @resized = true
-    end
-
-    private def click_provider(mx : Int32, my : Int32) : Nil
-      w, h = @backend.size
-      box = step_card(w, h)
-      return unless box.contains?(mx, my)
-      oy = box.y + 2 + 3 # see render_provider: options start 3 rows below the title
-      if my == oy
-        @ai_interested = true
-      elsif my == oy + 1
-        @ai_interested = false
-      end
     end
 
     # --- geometry ------------------------------------------------------------
@@ -317,9 +287,8 @@ module Gori::Tui
     # short to hold them, and render_* draw at fixed offsets up to `box.y + 2 + this`.
     private def content_rows : Int32
       case @step
-      when Step::Bind     then 7 # heading, gap, ip, port, gap, info, status
-      when Step::Provider then 7 # question, note, gap, yes, no, gap, footnote
-      when Step::Review   then 8 # title, gap, 3 recap rows, gap, 2 reminder rows
+      when Step::Bind   then 7 # heading, gap, ip, port, gap, info, status
+      when Step::Review then 7 # title, gap, 2 recap rows, gap, 2 reminder rows
       # ≥7 so the preview panel (header + 3 status rows) is never clipped, capped so a
       # long theme list scrolls (the list viewport derives from the card height) instead
       # of demanding the whole screen.
@@ -358,7 +327,6 @@ module Gori::Tui
       case @step
       when Step::Bind       then render_bind(screen, box)
       when Step::Appearance then render_theme(screen, box)
-      when Step::Provider   then render_provider(screen, box)
       when Step::Review     then render_review(screen, box)
       end
       render_footer(screen, w, h)
@@ -389,9 +357,8 @@ module Gori::Tui
 
     private def progress_label : String
       case @step
-      when Step::Bind       then "step 1 of 3"
-      when Step::Appearance then "step 2 of 3"
-      when Step::Provider   then "step 3 of 3"
+      when Step::Bind       then "step 1 of 2"
+      when Step::Appearance then "step 2 of 2"
       else                       "review"
       end
     end
@@ -400,7 +367,6 @@ module Gori::Tui
       case @step
       when Step::Bind       then "NETWORK · proxy bind"
       when Step::Appearance then "THEME · appearance"
-      when Step::Provider   then "AI PROVIDER"
       else                       "REVIEW"
       end
     end
@@ -409,7 +375,6 @@ module Gori::Tui
       hint = case @step
              when Step::Bind       then "↵ next · ↑/↓ field · esc skip"
              when Step::Appearance then "↑/↓ pick theme · ↵ next · ⇧⇥ back · esc skip"
-             when Step::Provider   then "↑/↓ choose · ↵ next · ⇧⇥ back · esc skip"
              else                       "↵ finish · ⇧⇥ back · esc skip"
              end
       screen.text({(w - hint.size) // 2, 0}.max, h - 1, hint, Theme.muted, Theme.bg)
@@ -534,33 +499,13 @@ module Gori::Tui
       end
     end
 
-    private def render_provider(screen : Screen, box : Rect) : Nil
-      ix = box.x + 3
-      iw = {box.w - 6, 1}.max
-      screen.text(ix, box.y + 2, "Set up an AI provider?", Theme.text_bright, Theme.panel, width: iw)
-      screen.text(ix, box.y + 3, "gori's AI features are coming soon — you'll connect a provider here.", Theme.muted, Theme.panel, width: iw)
-      oy = box.y + 2 + 3
-      draw_choice(screen, box, oy, "Yes, I'm interested", @ai_interested)
-      draw_choice(screen, box, oy + 1, "Not now", !@ai_interested)
-      screen.text(ix, oy + 3, "Just a heads-up — your answer isn't saved yet.", Theme.muted, Theme.panel, width: iw)
-    end
-
-    private def draw_choice(screen : Screen, box : Rect, ry : Int32, label : String, on : Bool) : Nil
-      bg = on ? Theme.accent_bg : Theme.panel
-      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
-      screen.cell(box.x + 1, ry, on ? '▎' : ' ', Theme.accent, bg)
-      screen.cell(box.x + 3, ry, on ? '◉' : '◯', on ? Theme.accent : Theme.muted, bg)
-      screen.text(box.x + 5, ry, label, on ? Theme.text_bright : Theme.text, bg, width: {box.w - 7, 1}.max)
-    end
-
     private def render_review(screen : Screen, box : Rect) : Nil
       ix = box.x + 3
       y = box.y + 2
       screen.text(ix, y, "You're all set!", Theme.text_bright, Theme.panel, width: {box.w - 6, 1}.max)
       y += 2
       recap(screen, box, ix, y, "Proxy", "#{effective_ip}:#{@port.strip}"); y += 1
-      recap(screen, box, ix, y, "Theme", @theme_name); y += 1
-      recap(screen, box, ix, y, "AI provider", @ai_interested ? "interested (coming soon)" : "not now"); y += 2
+      recap(screen, box, ix, y, "Theme", @theme_name); y += 2
       screen.text(ix, y, "Change anytime from the command palette (^P):", Theme.muted, Theme.panel, width: {box.w - 6, 1}.max)
       y += 1
       screen.text(ix, y, "Settings: Network · Settings: Theme", Theme.text, Theme.panel, width: {box.w - 6, 1}.max)
