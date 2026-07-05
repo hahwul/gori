@@ -182,4 +182,89 @@ describe Gori::Import do
       File.delete?(oas)
     end
   end
+
+  it "skips a malformed HAR entry (invalid base64 body) instead of aborting the whole import" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, <<-JSON)
+        {"log":{"entries":[
+          {"request":{"method":"GET","url":"https://a.test/1"},"response":{"status":200,"content":{"text":"!!!notbase64!!!","encoding":"base64"}}},
+          {"request":{"method":"GET","url":"https://a.test/2"},"response":{"status":200,"content":{"text":"ok"}}}
+        ]}}
+        JSON
+      with_store do |store|
+        result = Gori::Import.import_file(store, :har, har)
+        result.count.should eq(1)   # the valid entry imported (was: whole import aborted)
+        result.skipped.should eq(1) # the bad-base64 entry skipped
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
+  it "skips a non-http(s) URL line instead of discarding the whole list" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "https://a.test/1\nftp://bad.test/x\nhttps://a.test/2\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.count.should eq(2)   # both valid URLs imported (was: all lost to one bad line)
+        result.skipped.should eq(1) # the ftp:// line skipped
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
+
+  it "skips a malformed OpenAPI operation instead of aborting the spec import" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, <<-JSON)
+        {"servers":[{"url":"https://api.test"}],"paths":{
+          "/ok":{"get":{}},
+          "/bad":{"post":{"requestBody":{"content":"notanobject"}}}
+        }}
+        JSON
+      with_store do |store|
+        result = Gori::Import.import_file(store, :oas, oas)
+        result.count.should eq(1)   # /ok get imported
+        result.skipped.should eq(1) # the /bad post (content not an object) skipped
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
+  it "raises a clean error when OpenAPI `paths` is not an object" do
+    oas = File.tempname("gori", ".json")
+    begin
+      File.write(oas, %({"servers":[{"url":"https://api.test"}],"paths":"nope"}))
+      with_store do |store|
+        expect_raises(Gori::Error, /not an object/) { Gori::Import.import_file(store, :oas, oas) }
+      end
+    ensure
+      File.delete?(oas)
+    end
+  end
+
+  it "caps an oversized imported body at the capture limit (true size + truncated flag)" do
+    max = Gori::Proxy::Codec::Body::CAPTURE_MAX
+    big = "A" * (max + 1000)
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, {log: {entries: [
+        {request:  {method: "GET", url: "https://a.test/big"},
+         response: {status: 200, content: {text: big}}},
+      ]}}.to_json)
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har)
+        row = store.search(Gori::QL::EMPTY, 10).first
+        detail = store.get_flow(row.id).not_nil!
+        detail.response_body.not_nil!.size.should eq(max) # stored blob capped, was unbounded
+        detail.response_body_truncated?.should be_true
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
 end

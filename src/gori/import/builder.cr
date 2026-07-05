@@ -1,11 +1,23 @@
 require "uri"
 require "../store/models"
+require "../proxy/codec/body"
 
 module Gori
   module Import
     # Shared helpers for turning parsed import data into store DTOs.
     module Builder
       record FlowPair, request : Store::CapturedRequest, response : Store::CapturedResponse?
+
+      # Bound a stored import body to the same ceiling live capture uses, so a HAR
+      # with a huge (e.g. media/base64) body can't insert an arbitrarily large,
+      # never-truncated BLOB straight into the DB. Returns {stored, truncated, true_size}.
+      def self.capped(body : Bytes?) : {Bytes?, Bool, Int64?}
+        return {nil, false, nil} unless body
+        size = body.size.to_i64
+        max = Proxy::Codec::Body::CAPTURE_MAX
+        return {body, false, size} if body.size <= max
+        {body[0, max].dup, true, size}
+      end
 
       def self.normalize_url(url : String) : String
         u = url.strip
@@ -60,10 +72,11 @@ module Gori
                                body : Bytes? = nil, http_version : String = "HTTP/1.1") : FlowPair
         scheme, host, port, target = endpoint(url)
         head = request_head(method, target, http_version, host, headers, body)
+        stored, trunc, size = capped(body)
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
           method: method.upcase, target: target, http_version: http_version,
-          head: head, body: body, body_size: body.try(&.size.to_i64))
+          head: head, body: stored, body_truncated: trunc, body_size: size)
         FlowPair.new(req, nil)
       end
 
@@ -76,14 +89,16 @@ module Gori
                              duration_us : Int64?) : FlowPair
         scheme, host, port, target = endpoint(url)
         req_head = request_head(method, target, http_version, host, req_headers, req_body)
+        req_stored, req_trunc, req_size = capped(req_body)
         req = Store::CapturedRequest.new(
           created_at: created_at, scheme: scheme, host: host, port: port,
           method: method.upcase, target: target, http_version: http_version,
-          head: req_head, body: req_body, body_size: req_body.try(&.size.to_i64))
+          head: req_head, body: req_stored, body_truncated: req_trunc, body_size: req_size)
         resp_head = response_head(http_version, status, reason, resp_headers, resp_body)
+        resp_stored, resp_trunc, resp_size = capped(resp_body)
         resp = Store::CapturedResponse.new(
           flow_id: 0, status: status, reason: reason.presence, content_type: content_type,
-          head: resp_head, body: resp_body, body_size: resp_body.try(&.size.to_i64),
+          head: resp_head, body: resp_stored, body_truncated: resp_trunc, body_size: resp_size,
           duration_us: duration_us, state: Store::FlowState::Complete)
         FlowPair.new(req, resp)
       end

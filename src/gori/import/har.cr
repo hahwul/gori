@@ -6,8 +6,6 @@ require "./builder"
 module Gori
   module Import
     module Har
-      record ParseResult, flows : Array(Builder::FlowPair), skipped : Int32
-
       def self.parse_file(path : String) : ParseResult
         raw = File.read(path)
         doc = JSON.parse(raw)
@@ -18,7 +16,15 @@ module Gori
         flows = [] of Builder::FlowPair
         skipped = 0
         entries.each do |e|
-          if flow = entry_to_flow(e)
+          # A single malformed entry (invalid base64 body, bad date, unexpected JSON
+          # shape) must SKIP, not abort the whole import — entry_to_flow can raise
+          # (Base64::Error, type casts), which previously discarded every valid entry.
+          flow = begin
+            entry_to_flow(e)
+          rescue
+            nil
+          end
+          if flow
             flows << flow
           else
             skipped += 1
@@ -89,8 +95,8 @@ module Gori
       private def self.normalize_http_version(v : String) : String
         case v.downcase
         when "h2", "http/2", "http2" then "HTTP/2"
-        when "", "http/1.0"            then "HTTP/1.0"
-        else                                "HTTP/1.1"
+        when "", "http/1.0"          then "HTTP/1.0"
+        else                              "HTTP/1.1"
         end
       end
 
@@ -116,7 +122,7 @@ module Gori
         when 403 then "Forbidden"
         when 404 then "Not Found"
         when 500 then "Internal Server Error"
-        else            ""
+        else          ""
         end
       end
     end
