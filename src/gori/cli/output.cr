@@ -158,13 +158,13 @@ module Gori
         String.build do |io|
           io << "[#{g.severity.label}]".ljust(11)
           io << g.code.ljust(28)
-          io << "  " << g.host
+          io << "  " << term_safe(g.host)
           io << "  ×" << g.hit_count
           if ev = g.evidence
-            io << "  " << ev
+            io << "  " << term_safe(ev)
           end
           if first = g.affected.first?
-            io << "\n    " << first
+            io << "\n    " << term_safe(first)
             more = g.affected.size - 1
             io << " (+#{more} more)" if more > 0
           end
@@ -244,7 +244,7 @@ module Gori
         String.build do |io|
           hosts.each_with_index do |host, i|
             io << '\n' if i > 0
-            io << host.label
+            io << term_safe(host.label)
             io << "  (" << sitemap_path_count(host.endpoints) << ')' if host.endpoints > 0
             io << '\n'
             sitemap_text_children(host, "", io)
@@ -265,14 +265,14 @@ module Gori
       end
 
       private def self.sitemap_node_label(node : Sitemap::Node, io : IO) : Nil
-        io << node.label
+        io << term_safe(node.label)
         if node.grouped
           io << "  (" << node.children.size << " values)"
         elsif !node.methods.empty?
-          io << "  [" << node.methods.join(' ') << ']'
+          io << "  [" << term_safe(node.methods.join(' ')) << ']'
         end
         if t = node.tag
-          io << "  # " << t
+          io << "  # " << term_safe(t)
         end
       end
 
@@ -290,7 +290,7 @@ module Gori
       end
 
       private def self.sitemap_host_paths(node : Sitemap::Node, host : String, io : IO) : Nil
-        io << node.methods.join(',') << "  " << host << node.path << '\n' unless node.methods.empty?
+        io << term_safe(node.methods.join(',')) << "  " << term_safe(host) << term_safe(node.path) << '\n' unless node.methods.empty?
         node.children.each { |c| sitemap_host_paths(c, host, io) }
       end
 

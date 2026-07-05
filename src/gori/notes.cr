@@ -99,12 +99,6 @@ module Gori
       end
     end
 
-    # Allocate the next note id (caller persists next_id on save).
-    def self.alloc_id(doc : Doc) : {Int64, Int64}
-      id = doc.next_id
-      {id, id + 1}
-    end
-
     # Reconcile THIS session's notes with the currently-persisted set before a save,
     # so two TUI sessions open on the same project don't clobber each other's notes.
     # `persisted` is re-read at save time; `mine` is this session's notes (id → text);
