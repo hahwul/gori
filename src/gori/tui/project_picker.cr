@@ -43,11 +43,16 @@ module Gori::Tui
       @pending_delete = nil.as(Project?)
       @settings = SettingsView.new # the config editor (ctrl-, → :settings mode)
       @running_cache = {} of String => RunningProbe
+      @art_frame = 0 # entrance-animation clock for the brand art; advances each frame until ART_ANIM_DONE
     end
 
     def run : Project?
       loop do
         render
+        # Drive the entrance animation off the idle poll cadence (~50 ms/frame):
+        # the loop re-renders whenever poll_event times out, so bumping the clock
+        # here plays the reveal once, then freezes at ART_ANIM_DONE (static after).
+        @art_frame += 1 if @art_frame < ART_ANIM_DONE
         case ev = @term.poll_event(50)
         when Termisu::Event::Resize
           # termisu already resized its buffer; force a full repaint next frame.
@@ -384,6 +389,55 @@ module Gori::Tui
 
     MENU_WIDTH = 50
 
+    # Decorative wordmark that rides above the "gori" title on the picker. Drawn
+    # as a block (every line shares one left edge so the internal spacing — and
+    # thus the shape — is preserved; per-line centering would shear it). Only
+    # painted when the terminal has rows/cols to spare (see `art_shown?`); short
+    # screens fall back to the plain wordmark. Kept in sync with `brand_h` so the
+    # card geometry reserves exactly these rows above the card.
+    BRAND_ART = [
+      "            ██    █",
+      "           █     █        █",
+      "            ████     ███████",
+      "         ██    ███        █",
+      "       █    ██          ██ █",
+      "      █  ██           ██  █",
+      "     █  █               █",
+      "     ██         █",
+      "      █ ████      ██ █",
+      "       ████████ █   ██",
+    ]
+    ART_H = BRAND_ART.size
+
+    # Entrance effect: the art materialises left-to-right, each cell ramping
+    # through these shades before settling on a solid block. Columns reveal in
+    # groups of ART_STAGGER so a wider logo doesn't drag the sweep out. ART_ANIM_DONE
+    # (derived: last column's stagger delay + the ramp) is the frame at which every
+    # cell has resolved — the run loop freezes @art_frame there so idle ticks stay
+    # static, and it auto-adjusts if the art above is swapped.
+    ART_SHADES    = {'░', '▒', '▓'}
+    ART_STAGGER   = 3
+    ART_ANIM_DONE = (BRAND_ART.max_of(&.size) - 1) // ART_STAGGER + ART_SHADES.size + 1
+    # Nudge the whole hero (art + wordmark + card) a hair above dead-centre so the
+    # logo reads as the focal point rather than floating mid-screen.
+    ART_LIFT = 2
+    # Blank rows between the art block and the "gori" wordmark, so the logo has a
+    # little breathing room instead of sitting flush on the text.
+    ART_GAP = 1
+
+    # The art is a nicety, not load-bearing — only show it when the terminal is
+    # tall enough to keep a usable project list beneath this taller logo and wide
+    # enough to fit the block without clipping; otherwise fall back to the wordmark.
+    private def art_shown?(w : Int32, h : Int32) : Bool
+      h >= 26 && w >= 32
+    end
+
+    # Rows reserved above the picker card for the brand block. With the art the
+    # stack is [art][ART_GAP][gori][subtitle][gap]; without it just [gori][subtitle][gap].
+    private def brand_h(w : Int32, h : Int32) : Int32
+      art_shown?(w, h) ? ART_H + ART_GAP + 3 : 3
+    end
+
     private def render : Nil
       screen = Screen.new(@backend)
       w, h = screen.width, screen.height
@@ -433,10 +487,19 @@ module Gori::Tui
       cw = {w - 4, MENU_WIDTH}.min
       cx = {(w - cw) // 2, 0}.max
       actions = 3
-      res_rows = (h - 5 - 2 - actions - 1).clamp(1, 8) # 5: brand header + hints · 2: card borders
+      bh = brand_h(w, h) # rows reserved above the card for the brand block
+      # The taller art block sits low enough that a naive centering would let the
+      # card bottom reach the hint row (h-2), so claw back 2 extra rows when it's
+      # shown to keep a clear gap. (Base header path stays h-5-2-… unchanged.)
+      bottom_gap = art_shown?(w, h) ? 2 : 0
+      res_rows = (h - bh - 2 - 2 - actions - 1 - bottom_gap).clamp(1, 8) # bh: brand block · 2: card borders
       card_h = actions + 1 + res_rows + 2
-      top = {(h - (3 + card_h)) // 2, 0}.max
-      {Rect.new(cx, top + 3, cw, card_h), res_rows}
+      # Bias the hero slightly above centre when the art shows, but keep at least
+      # one blank row above it so it never slams flush against the top edge.
+      lift = art_shown?(w, h) ? ART_LIFT : 0
+      floor = art_shown?(w, h) ? 1 : 0
+      top = {(h - (bh + card_h)) // 2 - lift, floor}.max
+      {Rect.new(cx, top + bh, cw, card_h), res_rows}
     end
 
     private def render_list(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
@@ -447,8 +510,11 @@ module Gori::Tui
       # the overlays use, so the picker matches the rest of the app.
       actions = 3
       box, res_rows = card_metrics(w, h)
-      top = box.y - 3 # the brand header sits 3 rows above the card
+      top = box.y - 3 # the "gori" wordmark sits 3 rows above the card
 
+      # The decorative art (when it fits) sits ART_GAP rows above the wordmark;
+      # card_metrics reserved ART_H + ART_GAP rows above `top` for exactly this.
+      draw_brand_art(screen, top - ART_H - ART_GAP, w, @art_frame) if art_shown?(w, h)
       centered(screen, top, "gori", Theme.text_bright, w, Attribute::Bold)
       centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme.muted, w)
 
@@ -569,6 +635,29 @@ module Gori::Tui
     private def centered(screen : Screen, y : Int32, text : String, fg : Color, w : Int32,
                          attr : Attribute = Attribute::None) : Nil
       screen.text({(w - text.size) // 2, 0}.max, y, text, fg, Theme.bg, attr: attr)
+    end
+
+    # Draw BRAND_ART as one centered block: every line starts at the same left
+    # edge (derived from the widest line) so the figure keeps its shape rather
+    # than each row centering on its own width. Accent colour so it reads as a
+    # logo mark distinct from the wordmark beneath it.
+    #
+    # `frame` drives the entrance reveal — a left-to-right materialise where each
+    # column group lags the one before it (`col // ART_STAGGER`), then ramps ░▒▓ before locking to
+    # a solid block. Once frame ≥ ART_ANIM_DONE every cell is solid, so the same
+    # call renders the final static logo.
+    private def draw_brand_art(screen : Screen, y : Int32, w : Int32, frame : Int32) : Nil
+      bw = BRAND_ART.max_of(&.size)
+      x = {(w - bw) // 2, 0}.max
+      BRAND_ART.each_with_index do |line, i|
+        line.each_char_with_index do |ch, col|
+          next if ch == ' '
+          prog = frame - col // ART_STAGGER
+          next if prog <= 0 # column not yet reached by the reveal front
+          glyph = prog > ART_SHADES.size ? '█' : ART_SHADES[prog - 1]
+          screen.cell(x + col, y + i, glyph, Theme.accent, Theme.bg, attr: Attribute::Bold)
+        end
+      end
     end
 
     private def ensure_results_visible(list_h : Int32) : Nil
