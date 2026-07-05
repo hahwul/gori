@@ -35,6 +35,7 @@ module Gori
                       body : Bytes? = nil, ttfb_us : Int64? = nil,
                       duration_us : Int64? = nil,
                       state : Store::FlowState = Store::FlowState::Complete,
+                      error : String? = nil,
                       body_truncated : Bool = false, body_size : Int64? = nil) : Store::CapturedResponse
       Store::CapturedResponse.new(
         flow_id: flow_id,
@@ -46,6 +47,7 @@ module Gori
         ttfb_us: ttfb_us,
         duration_us: duration_us,
         state: state,
+        error: error,
         body_truncated: body_truncated,
         body_size: body_size,
       )

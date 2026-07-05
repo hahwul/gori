@@ -22,17 +22,22 @@ module Gori::Proxy::H2
     def run : Nil
       conn_id = @sink.on_h2_open(@host, @port, "h2")
       assembler = Assembler.new(@sink, @host, @port, now_us, conn_id)
+      begin
+        # The client preface (RFC 7540 §3.5) precedes any frame; forward verbatim.
+        @upstream.write(Frame.read_preface(@client))
+        @upstream.flush
 
-      # The client preface (RFC 7540 §3.5) precedes any frame; forward verbatim.
-      @upstream.write(Frame.read_preface(@client))
-      @upstream.flush
-
-      done = Channel(Nil).new(2)
-      spawn { pump(@client, @upstream, conn_id, "out", assembler); done.send(nil) }
-      spawn { pump(@upstream, @client, conn_id, "in", assembler); done.send(nil) }
-      2.times { done.receive }
-    rescue
-      # handshake/preface failure: nothing decodable to relay
+        done = Channel(Nil).new(2)
+        spawn { pump(@client, @upstream, conn_id, "out", assembler); done.send(nil) }
+        spawn { pump(@upstream, @client, conn_id, "in", assembler); done.send(nil) }
+        2.times { done.receive }
+      rescue
+        # handshake/preface failure: nothing decodable to relay
+      ensure
+        # Flush any stream still open at connection close (never got END_STREAM on
+        # both halves) so it doesn't sit Pending forever.
+        assembler.finalize_all("h2 connection closed")
+      end
     end
 
     private def pump(src : IO, dst : IO, conn_id : Int64, direction : String, assembler : Assembler) : Nil

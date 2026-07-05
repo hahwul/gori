@@ -435,6 +435,126 @@ describe Gori::Proxy::Server do
     resp.error.not_nil!.should contain("truncated")
   end
 
+  it "refuses to proxy a request that targets its own listener (no self-loop)" do
+    done = Channel(Nil).new(1)
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    # Host points at the proxy's OWN address — a naive forward would dial itself,
+    # accept that as a new client, and loop forever.
+    client << "GET / HTTP/1.1\r\nHost: 127.0.0.1:#{proxy.port}\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    sink.responses.size.should eq(1)
+    resp = sink.responses.first
+    resp.state.should eq(Gori::Store::FlowState::Error)
+    resp.error.not_nil!.downcase.should contain("self")
+  end
+
+  it "records a visible error flow for a CL+TE request instead of dropping it" do
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("never", seen)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    # Both Content-Length and Transfer-Encoding: the classic CL.TE smuggling shape.
+    # gori can't frame the body to forward it, but the attempt must stay visible.
+    client << "POST /smuggle HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n"
+    client << "Content-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    sink.requests.size.should eq(1) # the attempt is captured (was: zero flows)
+    sink.responses.size.should eq(1)
+    resp = sink.responses.first
+    resp.state.should eq(Gori::Store::FlowState::Error)
+    resp.error.not_nil!.should contain("framing")
+  end
+
+  it "records a visible error flow for a CL+TE response instead of leaving it Pending" do
+    done = Channel(Nil).new(1)
+    # Raw origin that replies with BOTH Content-Length and Transfer-Encoding.
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+        conn.flush
+        conn.close
+      end
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /resp-smuggle HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    origin.close
+
+    sink.responses.size.should eq(1) # a resolved flow (was: permanent Pending)
+    resp = sink.responses.first
+    resp.state.should eq(Gori::Store::FlowState::Error)
+    resp.error.not_nil!.should contain("framing")
+  end
+
+  it "flags a response the upstream cut short as Aborted, not a clean 200" do
+    done = Channel(Nil).new(1)
+    # Raw origin that promises 100 body bytes but sends 5 and closes.
+    origin = TCPServer.new("127.0.0.1", 0)
+    origin_port = origin.local_address.port
+    spawn do
+      while conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort"
+        conn.flush
+        conn.close
+      end
+    end
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /truncated HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    origin.close
+
+    sink.responses.size.should eq(1)
+    resp = sink.responses.first
+    resp.status.should eq(200)                            # the real status is kept
+    resp.state.should eq(Gori::Store::FlowState::Aborted) # but flagged, not Complete
+    resp.error.not_nil!.should contain("upstream closed before")
+  end
+
   it "applies Match&Replace to request/response heads and captures the sent bytes" do
     seen = Channel(String).new(1)
     done = Channel(Nil).new(1)

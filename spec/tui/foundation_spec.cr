@@ -14,6 +14,31 @@ describe Gori::Tui::Rect do
   end
 end
 
+describe Gori::Tui::Screen do
+  it "column_width counts a raw control char as 1 column (inverse of column_for)" do
+    line = "ab\rc" # a lone CR (display width 0) between real chars
+    # display_width under-counts the control char (0); column_width matches the drawn
+    # cells + column_for, so the caret after it lands on the right column.
+    Screen.display_width(line).should eq(3)                                 # CR contributes 0
+    Screen.column_width(line).should eq(4)                                  # CR occupies a cell → counts as 1
+    Screen.column_for(line, Screen.column_width(line)).should eq(line.size) # round-trips
+  end
+
+  it "column_width equals display_width for plain text and doubles wide glyphs" do
+    Screen.column_width("hello").should eq(5)
+    Screen.column_width("日本").should eq(4) # CJK: 2 columns each, same as display_width
+  end
+
+  it "fit truncates a too-wide string with an ellipsis and returns a fitting one whole" do
+    screen = Screen.new(MemoryBackend.new(10, 1))
+    screen.fit("hello", 10).should eq("hello")   # fits → unchanged
+    screen.fit("hello", 5).should eq("hello")    # exactly fits → no ellipsis
+    screen.fit("abcdefgh", 5).should eq("abcd…") # overflows → 4 chars + ellipsis = width 5
+    screen.fit("日本語テスト", 5).should eq("日本…")     # wide glyphs (2 cols): 2+2+ellipsis = 5
+    screen.fit("x", 0).should eq("")
+  end
+end
+
 describe Gori::Tui::Layout do
   it "splits the screen into topbar / menu / rule / body (inset with padding) / status" do
     l = Layout.compute(100, 30)

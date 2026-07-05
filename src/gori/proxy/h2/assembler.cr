@@ -92,9 +92,12 @@ module Gori::Proxy::H2
 
       case frame.frame_type
       when Frame::Type::RstStream
-        # Stream cancelled (RFC 7540 §6.4): the exchange will never complete, so it
-        # would otherwise sit in @streams forever. Drop its buffers — a connection
-        # that cancels many streams (common) must not leak memory unboundedly.
+        # Stream cancelled (RFC 7540 §6.4): the exchange will never cleanly complete.
+        # Flush whatever we captured so a cancelled-mid-stream call (client
+        # context-cancel, timeout, LB idle-kill — the common way streaming RPCs end)
+        # still lands in History instead of vanishing / sitting Pending forever, then
+        # drop its buffers (a connection that cancels many streams must not leak).
+        finalize_stream(frame.stream_id, stream, "stream reset (RST_STREAM)")
         @streams.delete(frame.stream_id)
         return
       when Frame::Type::Headers
@@ -118,12 +121,22 @@ module Gori::Proxy::H2
         return
       end
 
-      emit_request(frame.stream_id, stream) if request && side.ended && side.headers
-      if !request && side.ended && side.headers
+      emit_ready(frame.stream_id, stream)
+    end
+
+    # After a frame updates a side, emit whichever halves are now ready: the request
+    # once it half-closes (headers + END_STREAM), then the response once IT half-closes
+    # AND the request has a flow_id to link to. The response can complete BEFORE the
+    # request finishes its body (an early 4xx to a still-streaming upload); we must NOT
+    # delete the stream in that case, or the later request END_STREAM would allocate a
+    # fresh empty stream and lose both halves entirely.
+    private def emit_ready(stream_id : UInt32, stream : Stream) : Nil
+      emit_request(stream_id, stream) if stream.req.ended && stream.req.headers && stream.flow_id.nil?
+      if stream.resp.ended && stream.resp.headers && stream.flow_id
         emit_response(stream)
         # The exchange is complete; a stream id is never reused on a connection
         # (RFC 7540 §5.1.1), so drop its buffers to bound per-connection memory.
-        @streams.delete(frame.stream_id)
+        @streams.delete(stream_id)
       end
     end
 
@@ -254,7 +267,8 @@ module Gori::Proxy::H2
       stream.flow_id = @sink.on_request(captured)
     end
 
-    private def emit_response(stream : Stream) : Nil
+    private def emit_response(stream : Stream, *, state : Store::FlowState = Store::FlowState::Complete,
+                              error : String? = nil) : Nil
       flow_id = stream.flow_id
       return unless flow_id # request not yet projected (rare interleaving) — drop
       headers = stream.resp.headers.not_nil!
@@ -269,8 +283,39 @@ module Gori::Proxy::H2
       @sink.on_response(Store::CapturedResponse.new(
         flow_id: flow_id, status: status, head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
-        content_type: content_type, state: Store::FlowState::Complete,
+        content_type: content_type, state: state, error: error,
         ttfb_us: ttfb_us, duration_us: duration_us))
+    end
+
+    # Flush a stream that ended abnormally (RST_STREAM or the connection closed at a
+    # frame boundary) rather than with a clean END_STREAM on both halves. Emits the
+    # request if we have its headers, then the response (Complete if it actually
+    # half-closed, else Aborted) or a bare Aborted marker — so a cancelled-mid-stream
+    # exchange (very common for server-streaming/bidi gRPC) never vanishes or sits
+    # Pending forever. The raw frame log remains the byte-exact truth (P7).
+    private def finalize_stream(stream_id : UInt32, stream : Stream, reason : String) : Nil
+      emit_request(stream_id, stream) if stream.req.headers && stream.flow_id.nil?
+      flow_id = stream.flow_id
+      return unless flow_id # never saw request headers — nothing to project
+      if stream.resp.headers
+        if stream.resp.ended
+          emit_response(stream) # response fully received; only the request never cleanly closed
+        else
+          emit_response(stream, state: Store::FlowState::Aborted, error: reason)
+        end
+      else
+        duration_us = (Time.instant - stream.started_at).total_microseconds.to_i64
+        @sink.on_response(FlowMapper.aborted_response(flow_id, reason, duration_us: duration_us))
+      end
+    end
+
+    # Called by the relay when the connection closes, to flush any streams still in
+    # flight (never got END_STREAM on both halves) so they don't sit Pending forever.
+    def finalize_all(reason : String) : Nil
+      @mutex.synchronize do
+        @streams.each { |id, stream| finalize_stream(id, stream, reason) }
+        @streams.clear
+      end
     end
 
     private def pseudo(headers : Array({String, String}), name : String) : String?

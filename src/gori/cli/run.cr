@@ -164,11 +164,13 @@ module Gori
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
-        parser.parse(args)
-        # Accept a positional QL too ("gori run history status:404"), mirroring the TUI's `/`
-        # bar — otherwise a positional query was silently dropped and EVERY flow dumped.
-        # An explicit --query wins. Multiple terms join with spaces (QL ANDs them).
-        query ||= positional.join(' ') unless positional.empty?
+        neg_terms, opt_args = split_ql_negations(args)
+        parser.parse(opt_args)
+        # Accept a positional QL too ("gori run history status:404" / "-status:404"),
+        # mirroring the TUI's `/` bar — otherwise a positional query was silently dropped
+        # and EVERY flow dumped. An explicit --query wins. Terms join with spaces (QL ANDs).
+        positional_query = (positional + neg_terms).join(' ')
+        query ||= positional_query unless positional_query.empty?
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
@@ -182,7 +184,12 @@ module Gori
                 store.close
                 abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
               end
-              store.search(filter, limit)
+              begin
+                store.search(filter, limit, raise_on_error: true)
+              rescue ex
+                store.close
+                abort "gori run history: query #{q.inspect} failed: #{ex.message}"
+              end
             else
               store.recent_flows(limit)
             end
@@ -1016,10 +1023,12 @@ module Gori
           p.invalid_option { |f| abort "gori run prism: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run prism: missing value for #{f}" }
         end
-        parser.parse(args)
-        # A positional QL is accepted too ("gori run prism status:>=500"), mirroring history; an
-        # explicit --query wins. Multiple terms join with spaces (QL ANDs them).
-        query ||= positional.join(' ') unless positional.empty?
+        neg_terms, opt_args = split_ql_negations(args)
+        parser.parse(opt_args)
+        # A positional QL is accepted too ("gori run prism status:>=500" / "-status:200"),
+        # mirroring history; an explicit --query wins. Terms join with spaces (QL ANDs them).
+        positional_query = (positional + neg_terms).join(' ')
+        query ||= positional_query unless positional_query.empty?
 
         filter : QL::Filter? = nil
         if q = query
@@ -1034,7 +1043,11 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         groups, scanned = begin
-          ids = prism_scan_ids(store, filter)
+          ids = begin
+            prism_scan_ids(store, filter)
+          rescue ex
+            abort "gori run prism: query #{query.inspect} failed: #{ex.message}"
+          end
           {Prism.group(scan_flows(store, ids)), ids.size}
         ensure
           store.close
@@ -1067,7 +1080,7 @@ module Gori
       # Flow IDs to scan, oldest-first (ascending id) — a stable, deterministic grouping order.
       # Reuses the proven search/recent_flows query paths.
       private def self.prism_scan_ids(store : Store, filter : QL::Filter?) : Array(Int64)
-        rows = filter ? store.search(filter, Int32::MAX) : store.recent_flows(Int32::MAX)
+        rows = filter ? store.search(filter, Int32::MAX, raise_on_error: true) : store.recent_flows(Int32::MAX)
         rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
       end
 
@@ -1212,10 +1225,12 @@ module Gori
           p.invalid_option { |f| abort "gori run sitemap: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run sitemap: missing value for #{f}" }
         end
-        parser.parse(args)
-        # Accept a positional QL too ("gori run sitemap host:api"), mirroring history's
-        # `/` bar; an explicit --query wins. Multiple terms join with spaces (QL ANDs).
-        query ||= positional.join(' ') unless positional.empty?
+        neg_terms, opt_args = split_ql_negations(args)
+        parser.parse(opt_args)
+        # Accept a positional QL too ("gori run sitemap host:api" / "-status:404"), mirroring
+        # history's `/` bar; an explicit --query wins. Terms join with spaces (QL ANDs).
+        positional_query = (positional + neg_terms).join(' ')
+        query ||= positional_query unless positional_query.empty?
 
         # Parse/validate the QL BEFORE opening the store: abort skips ensure blocks, so a
         # bad query must not leave a store handle open.
@@ -1224,6 +1239,8 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         hosts = begin
           collect_sitemap(store, filter, limit, in_scope, group)
+        rescue ex
+          abort "gori run sitemap: query #{query.inspect} failed: #{ex.message}"
         ensure
           store.close
         end
@@ -1250,7 +1267,7 @@ module Gori
       # the TUI lens's per-flow SQL filter and conservative on url-level includes.
       private def self.collect_sitemap(store : Store, filter : QL::Filter, limit : Int32,
                                        in_scope : Bool, group : Bool) : Array(Sitemap::Node)
-        hosts = Sitemap.build(store.sitemap_entries(filter, limit))
+        hosts = Sitemap.build(store.sitemap_entries(filter, limit, raise_on_error: true))
         Sitemap.stamp_tags!(hosts, store.sitemap_tags)
         if in_scope
           scope = Scope.load(store)
@@ -1421,6 +1438,17 @@ module Gori
         Store.open(project.db_path)
       rescue ex : DB::Error | SQLite3::Exception
         abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
+      end
+
+      # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser
+      # aborts them as unknown options before the positional-query join ever runs. Pull
+      # them out first so they join the query like any other positional term. A single-
+      # letter short flag ("-n50", "-k") has no ':'/'~' after the name, so it's untouched.
+      private def self.split_ql_negations(args : Array(String)) : {Array(String), Array(String)}
+        neg = [] of String
+        rest = [] of String
+        args.each { |a| a.matches?(/\A-[A-Za-z]+[:~]/) ? (neg << a) : (rest << a) }
+        {neg, rest}
       end
 
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64

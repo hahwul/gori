@@ -389,6 +389,30 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "get_current_context" do
+    it "reports a non-object ui_state as unreadable, not a raw tool error" do
+      with_store do |store|
+        store.set_setting(Gori::Store::UI_STATE_KEY, "[1,2,3]") # valid JSON, wrong shape
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_current_context","arguments":{}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"]?.try(&.as_bool?).should_not eq(true) # was: "tool error: Expected Hash…"
+        payload = tool_payload(resp)
+        payload["available"].as_bool.should be_false
+        payload["note"].as_s.should contain("unreadable")
+      end
+    end
+
+    it "reads a well-formed ui_state object" do
+      with_store do |store|
+        store.set_setting(Gori::Store::UI_STATE_KEY, %({"active_tab":"history","focus_pane":"body"}))
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_current_context","arguments":{}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload["available"].as_bool.should be_true
+        payload["active_tab"].as_s.should eq("history")
+      end
+    end
+  end
+
   describe "project_info" do
     it "includes project metadata fields" do
       with_store do |store|

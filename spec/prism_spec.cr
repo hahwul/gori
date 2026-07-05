@@ -351,6 +351,24 @@ describe "Gori::Prism::Passive (FP reduction)" do
     end
   end
 
+  it "reports EVERY distinct secret and error type present in one body, not just the first" do
+    with_store do |store|
+      dets = analyze(store, resp_head: "HTTP/1.1 500 Server Error\r\n\r\n", status: 500,
+        content_type: "text/html",
+        body: "AKIAABCDEFGHIJKLMNOP ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa " \
+              "sk_live_ABCDEFGHIJKLMNOPQRSTUV npm_abcdefghijklmnopqrstuvwxyz0123456789\n" \
+              "java.lang.NullPointerException: boom\n\ngoroutine 7 [running]:\nmain.main()")
+      secrets = dets.select(&.code.==("secret_in_body")).map(&.evidence)
+      secrets.should contain("AWS access key id")
+      secrets.should contain("GitHub token")
+      secrets.should contain("Stripe secret key")
+      secrets.should contain("npm access token") # every distinct type, was: only "AWS access key id"
+      errors = dets.select(&.code.==("error_stack_leak")).map(&.evidence)
+      errors.should contain("Java exception")
+      errors.should contain("Go stack trace") # was: only "Java exception"
+    end
+  end
+
   it "does not fingerprint an Elasticsearch query-DSL body as GraphQL" do
     with_store do |store|
       es = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api/search",
@@ -838,6 +856,24 @@ describe Gori::Prism do
       csp = groups.find!(&.code.==("missing_csp"))
       csp.hit_count.should eq(cap + 10) # every observation counted
       csp.affected.size.should eq(cap)  # but the URL list is capped
+    end
+
+    it "accumulates distinct secret/error types for one (code, host) group (not first-wins)" do
+      dets = [
+        Gori::Prism::Detection.new("secret_in_body", "infoleak", "a.test", "https://a.test/1", "t", Gori::Store::Severity::High, "AWS access key id"),
+        Gori::Prism::Detection.new("secret_in_body", "infoleak", "a.test", "https://a.test/2", "t", Gori::Store::Severity::High, "GitHub token"),
+        Gori::Prism::Detection.new("secret_in_body", "infoleak", "a.test", "https://a.test/1", "t", Gori::Store::Severity::High, "AWS access key id"),
+      ]
+      g = Gori::Prism.group(dets).find!(&.code.==("secret_in_body"))
+      g.evidence.not_nil!.should contain("AWS access key id")
+      g.evidence.not_nil!.should contain("GitHub token") # was masked by COALESCE-first-wins
+      g.hit_count.should eq(3)
+      # a non-type-labeled code still keeps the first sample (evidence is a one-off value)
+      ip = [
+        Gori::Prism::Detection.new("private_ip_leak", "infoleak", "b.test", "https://b.test/", "t", Gori::Store::Severity::Low, "10.0.0.1"),
+        Gori::Prism::Detection.new("private_ip_leak", "infoleak", "b.test", "https://b.test/", "t", Gori::Store::Severity::Low, "192.168.0.1"),
+      ]
+      Gori::Prism.group(ip).find!(&.code.==("private_ip_leak")).evidence.should eq("10.0.0.1")
     end
 
     it "tags the same code on different hosts as separate groups" do

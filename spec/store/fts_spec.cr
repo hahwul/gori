@@ -37,6 +37,29 @@ private def body_hits(store, term : String) : Array(Int64)
   store.search(Gori::QL.parse("body:#{term}"), 10).map(&.id)
 end
 
+# A QL::Filter whose raw SQL is syntactically invalid, so SQLite raises at query
+# time (the FTS/complex-phrase failure mode the raise_on_error flag guards). Built
+# directly since QL.parse only emits valid SQL.
+private def broken_filter : Gori::QL::Filter
+  Gori::QL::Filter.new("host GLOB (", [] of DB::Any)
+end
+
+describe "query error handling (raise_on_error)" do
+  it "search swallows a failed query to [] by default, but re-raises when asked" do
+    fts_store do |store|
+      store.search(broken_filter, 10).should eq([] of Gori::Store::FlowRow)
+      expect_raises(Exception) { store.search(broken_filter, 10, raise_on_error: true) }
+    end
+  end
+
+  it "sitemap_entries swallows a failed query to [] by default, but re-raises when asked" do
+    fts_store do |store|
+      store.sitemap_entries(broken_filter).should be_empty
+      expect_raises(Exception) { store.sitemap_entries(broken_filter, raise_on_error: true) }
+    end
+  end
+end
+
 describe "contentless FTS (V24)" do
   it "indexes the request body while Pending (before any response)" do
     fts_store do |store|

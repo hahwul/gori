@@ -312,11 +312,7 @@ module Gori::Tui
           # the user stopped. Draining applies the whole burst before the frame, so
           # scrolling tracks the input. Bounded so an infinitely-held key can't
           # starve the render / async-channel drains below.
-          drained = 0
-          while drained < 256 && (more = @term.poll_event(0))
-            handle(more)
-            drained += 1
-          end
+          drain_burst
         end
         dirty = true if drain_events # always drains; true if anything arrived
         if replay_controller.drain_results
@@ -391,6 +387,38 @@ module Gori::Tui
 
     # How fast the bottom-bar background-job spinner advances (only while a job runs).
     SPINNER_INTERVAL = 120.milliseconds
+
+    # Per-tick cap on coalesced printable-char events (a paste). Large enough that a
+    # typical paste applies in one render tick; still bounds a pathological stream.
+    CHAR_DRAIN_CAP = 65_536
+
+    # A plain printable char (a paste/typed character), as opposed to a nav/control
+    # key. Coalesced generously in the input drain so a paste doesn't force a
+    # full-screen render every 256 characters.
+    private def coalesceable_char?(ev : Termisu::Event::Any) : Bool
+      ev.is_a?(Termisu::Event::Key) && !ev.ctrl? && !ev.alt? && !ev.char.nil?
+    end
+
+    # Drain input already queued behind the tick's first event, then render once.
+    # Two budgets: a large one for printable-char events (a paste is thousands of
+    # them — capping at 256 forced ~N/256 full-screen renders, pegging a core for
+    # seconds on a big paste), and the old 256 for everything else so a held nav key
+    # (↑/↓/j/k, or a wheel fed as arrows) can't teleport the view a whole burst per
+    # frame.
+    private def drain_burst : Nil
+      chars = 0
+      nav = 0
+      while (more = @term.poll_event(0))
+        handle(more)
+        if coalesceable_char?(more)
+          chars += 1
+          break if chars >= CHAR_DRAIN_CAP
+        else
+          nav += 1
+          break if nav >= 256
+        end
+      end
+    end
 
     # Braille spinner frames (U+2800–U+28FF: EAW-Neutral width 1, no emoji/VS16).
     SPINNER = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']

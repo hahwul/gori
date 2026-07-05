@@ -7,7 +7,7 @@ module Gori
     module Oas
       HTTP_METHODS = %w(get post put patch delete head options trace)
 
-      def self.parse_file(path : String) : Array(Builder::FlowPair)
+      def self.parse_file(path : String) : ParseResult
         raw = File.read(path)
         json_raw = case File.extname(path).downcase
                    when ".yaml", ".yml" then YAML.parse(raw).to_json
@@ -16,17 +16,27 @@ module Gori
         spec = JSON.parse(json_raw)
         paths = spec["paths"]?
         raise Gori::Error.new("OpenAPI spec missing paths") unless paths
+        # A `paths` that isn't an object (null / string / array) is a malformed spec, not
+        # a valid-but-empty one — raise a clean error rather than a raw JSON type-cast.
+        paths_h = paths.as_h? || raise Gori::Error.new("OpenAPI spec `paths` is not an object")
         base = server_base(spec)
         now = Time.utc.to_unix * 1_000_000
         pairs = [] of Builder::FlowPair
-        paths.as_h.each do |path, item|
+        skipped = 0
+        paths_h.each do |path, item|
           HTTP_METHODS.each do |m|
-            op = item[m]?
+            # A path item / operation that isn't shaped as expected (null, string, array)
+            # skips rather than aborting the whole spec import with a raw type-check error.
+            op = item[m]? rescue nil
             next unless op
-            pairs << operation_to_flow(now, base, path.to_s, m, op)
+            begin
+              pairs << operation_to_flow(now, base, path.to_s, m, op)
+            rescue
+              skipped += 1
+            end
           end
         end
-        pairs
+        ParseResult.new(pairs, skipped)
       end
 
       private def self.server_base(spec : JSON::Any) : String

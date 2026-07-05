@@ -103,6 +103,25 @@ describe Gori::Tui::InterceptView do
     end
   end
 
+  it "labels a held item with the EDITED method, not the stale hold-time one" do
+    tmp_interceptor do |ic|
+      hold_req(ic, "acme.test", "/finalcheck", "GET /finalcheck HTTP/1.1\r\nHost: acme.test\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+      view.toggle_edit
+      it = view.selected_item.not_nil!
+      # change the method GET → PUT (cursor starts at 0,0)
+      3.times { view.edit_move(0, 1) } # move past "GET"
+      3.times { view.edit_backspace }  # delete "GET"
+      "PUT".each_char { |c| view.edit_insert(c) }
+
+      method, target = view.effective_method_target(it)
+      method.should eq("PUT") # edited value (was the stale "GET")
+      target.should eq("/finalcheck")
+      String.new(view.forward_bytes(it)).should start_with("PUT /finalcheck") # what's actually sent
+    end
+  end
+
   it "forwards a viewed-but-unedited held body byte-exact (no LF→CRLF rewrite)" do
     tmp_interceptor do |ic|
       raw = "POST /e HTTP/1.1\r\nHost: h\r\nContent-Length: 11\r\n\r\nline1\nline2" # bare LF in body

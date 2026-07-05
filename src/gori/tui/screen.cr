@@ -78,6 +78,17 @@ module Gori::Tui
       str.size
     end
 
+    # Column span of `str` where EVERY char counts at least 1 column — the exact
+    # inverse of `column_for`. `display_width` alone reports 0 for a raw control char
+    # (e.g. a lone \r), but each such char still occupies a drawn cell and click-to-
+    # cursor / Reveal count it as ≥1, so cursor placement must too or it lands one
+    # column short and overwrites a glyph.
+    def self.column_width(str : String) : Int32
+      w = 0
+      str.each_char { |ch| w += {display_width(ch.to_s), 1}.max }
+      w
+    end
+
     def cell(x : Int32, y : Int32, grapheme : Char | String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None) : Nil
       return unless x >= 0 && y >= 0 && x < @width && y < @height
@@ -143,23 +154,33 @@ module Gori::Tui
     end
 
     # Truncate `str` so its display width (columns) <= `w`, using a trailing
-    # ellipsis when it doesn't fit. Uses grapheme-aware width.
+    # ellipsis when it doesn't fit. Grapheme-aware, and — crucially — a SINGLE bounded
+    # walk that stops as soon as the running width overflows `w`, so a multi-MiB
+    # single line with one non-ASCII grapheme (which takes this path) isn't fully
+    # grapheme-scanned on every render frame (the old `display_width(str) <= w`
+    # pre-check walked the whole string first).
     def fit(str : String, w : Int32) : String
       return "" if w <= 0
-      return str if self.class.display_width(str) <= w
       return (str[0]? || "").to_s if w == 1
-      res = ""
-      cur = 0
-      str.each_grapheme do |g|
-        gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
-        if cur + gw > w - 1
-          break
+      cur = 0   # width accumulated into `head` (the ellipsis prefix, within w-1)
+      total = 0 # running total width, to detect overflow past `w`
+      overflow = false
+      head = String.build do |io|
+        str.each_grapheme do |g|
+          gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
+          total += gw
+          if total > w
+            overflow = true
+            break
+          end
+          if cur + gw <= w - 1
+            io << g.to_s
+            cur += gw
+          end
         end
-        res += g.to_s
-        cur += gw
       end
-
-      res + "…"
+      return str unless overflow # the whole string fit within `w`
+      "#{head}…"
     end
 
     # IME / terminal cursor positioning support.

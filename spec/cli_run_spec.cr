@@ -241,6 +241,22 @@ describe Gori::CLI::Output do
     txt.should contain("[Pending]")
   end
 
+  it "neutralizes terminal escape sequences in an untrusted captured target" do
+    # A malicious client puts ANSI/OSC escapes in its request line; the text row must
+    # not inject them into the operator's terminal (they'd be replayed on every view).
+    evil = "/p\e[31m\r\n\e]0;pwned\a"
+    txt = Gori::CLI::Output.flow_row_text(flow_row(target: evil, host: "h", status: 200, state: Gori::Store::FlowState::Complete))
+    txt.should_not contain('\e') # no ESC
+    txt.should_not contain('\r') # no CR
+    txt.should_not contain('\a') # no BEL
+    txt.should contain("·")      # control bytes replaced with a visible marker
+  end
+
+  it "term_safe leaves ordinary UTF-8 untouched but replaces control bytes" do
+    Gori::CLI::Output.term_safe("api.test/π/데이터").should eq("api.test/π/데이터")
+    Gori::CLI::Output.term_safe("a\tb\nc").should eq("a·b·c")
+  end
+
   it "emits a valid JSON object with the expected keys" do
     json = JSON.parse(Gori::CLI::Output.flow_row_json(flow_row(target: "/a", host: "h", status: 200, state: Gori::Store::FlowState::Complete)))
     json["id"].as_i.should eq(42)

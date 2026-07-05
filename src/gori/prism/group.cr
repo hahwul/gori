@@ -40,13 +40,34 @@ module Gori
           # size check first so a full list short-circuits the O(n) includes? scan.
           urls << d.url if urls.size < cap && !urls.includes?(d.url)
           sev = g.severity.value >= d.severity.value ? g.severity : d.severity
+          # Type-labeled infoleak codes accumulate every distinct type seen (so a body
+          # or host leaking several secret/error types surfaces them all); others keep
+          # the first representative sample. Mirrors Store#upsert_prism_issue.
+          evidence = accumulate_evidence?(d.code) ? merge_evidence(g.evidence, d.evidence) : (g.evidence || d.evidence)
           acc[key] = Group.new(g.code, g.category, g.host, g.title, sev, g.hit_count + 1,
-            urls, g.evidence || d.evidence, g.sample_flow_id)
+            urls, evidence, g.sample_flow_id)
         else
           acc[key] = Group.new(d.code, d.category, d.host, d.title, d.severity, 1,
             [d.url], d.evidence, d.flow_id)
         end
       end
+      finish_group_sort(acc)
+    end
+
+    # Codes whose evidence is a TYPE label (not a one-off sample) — see Store.
+    private def self.accumulate_evidence?(code : String) : Bool
+      code == "secret_in_body" || code == "error_stack_leak"
+    end
+
+    private def self.merge_evidence(existing : String?, incoming : String?) : String?
+      return existing if incoming.nil? || incoming.empty?
+      return incoming if existing.nil? || existing.empty?
+      parts = existing.split(", ").map(&.strip).reject(&.empty?)
+      return existing if parts.includes?(incoming) || parts.size >= Store::PRISM_EVIDENCE_CAP
+      (parts << incoming).join(", ")
+    end
+
+    private def self.finish_group_sort(acc : Hash({String, String}, Group)) : Array(Group)
       # Hash#values is insertion order, but the result is fully ordered by the sort below.
       acc.values.sort! do |a, b|
         by_sev = b.severity.value <=> a.severity.value

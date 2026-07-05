@@ -1,6 +1,7 @@
 require "file_utils"
 require "./project"
 require "./store"
+require "./capture_lock"
 
 module Gori
   # Discovers and creates project workspaces under a root directory. Named
@@ -8,6 +9,10 @@ module Gori
   # (hidden + ephemeral).
   class ProjectRegistry
     TEMP_PREFIX = ".tmp-"
+    # Sidecar holding the verbatim display name, so `list` doesn't reconstruct it
+    # (lossily) from the slugified directory. Lives inside the project dir, so it
+    # is never itself listed as a project.
+    NAME_FILE = ".name"
 
     def initialize(@root : String)
     end
@@ -21,9 +26,22 @@ module Gori
         dir = File.join(@root, child)
         db = File.join(dir, Project::DB_FILE)
         next unless Dir.exists?(dir) && File.exists?(db)
-        projects << Project.new(child, db)
+        projects << Project.new(display_name(dir, child), db)
       end
       projects.sort_by! { |p| -(p.last_modified.try(&.to_unix) || 0_i64) }
+    end
+
+    # The verbatim display name from the sidecar, falling back to the directory
+    # name for legacy projects created before the name was persisted.
+    private def display_name(dir : String, slug : String) : String
+      name_path = File.join(dir, NAME_FILE)
+      if File.exists?(name_path)
+        n = File.read(name_path).strip
+        return n unless n.empty?
+      end
+      slug
+    rescue
+      slug
     end
 
     # Create (or reopen) a named project. The display name is slugified for the
@@ -36,6 +54,9 @@ module Gori
       raise Gori::Error.new("invalid project name") if slug.empty?
       dir = File.join(@root, slug)
       FileUtils.mkdir_p(dir)
+      # Persist the verbatim display name so a later `list` shows "My Project", not
+      # the lossy slug "my-project".
+      File.write(File.join(dir, NAME_FILE), display) rescue nil
       proj = Project.new(display, File.join(dir, Project::DB_FILE))
       desc = description.strip
       unless desc.empty?
@@ -54,8 +75,14 @@ module Gori
       Project.new("temp", File.join(dir, Project::DB_FILE), ephemeral: true)
     end
 
+    # Removes a project's directory from disk. Refuses if another LIVE instance holds
+    # its capture lock: rm_rf would unlink the db out from under the capturer, which
+    # would then keep "successfully" writing flows into a now-pathless inode — a
+    # silent, total loss of everything captured after the delete.
     def delete(project : Project) : Nil
-      FileUtils.rm_rf(project.dir) if Dir.exists?(project.dir)
+      return unless Dir.exists?(project.dir)
+      raise Gori::Error.new("project is in use by another gori instance — stop its capture first") if CaptureLock.held?(project.dir)
+      FileUtils.rm_rf(project.dir)
     end
 
     # Slugify a display name into a safe directory name. gsub removes path

@@ -99,6 +99,12 @@ module Gori
     class_property mine_notify : String = "when-found"
     class_property? mine_prefs_saved : Bool = false
 
+    # The exact JSON this process last read from disk (nil = never loaded). It's the
+    # 3-way-merge BASE at save time: a top-level section this process didn't change
+    # (in-memory == base) yields to whatever is on disk now, so a concurrent writer's
+    # unrelated edit isn't clobbered by this process persisting one unrelated field.
+    @@loaded_raw : String? = nil
+
     def self.path : String
       File.join(Paths.home_dir, "settings.json")
     end
@@ -106,7 +112,9 @@ module Gori
     # Load persisted values into the class properties. Tolerant: a missing or
     # malformed file leaves the defaults (or CLI-provided values) in place.
     def self.load : Nil
-      root = JSON.parse(File.read(path))
+      raw = File.read(path)
+      @@loaded_raw = raw
+      root = JSON.parse(raw)
       if net = root["network"]?
         self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
         self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
@@ -283,12 +291,42 @@ module Gori
       # defaults — losing theme, hotkeys, hostname overrides, tab prefs, convert sessions.
       # Stage to a sibling temp then rename (atomic on POSIX), mirroring cert_authority.
       tmp = "#{path}.tmp"
-      File.write(tmp, serialize)
+      File.write(tmp, merge_with_disk(serialize))
       File.rename(tmp, path)
+      @@loaded_raw = File.read(path) # our write is now the base for the next merge
       true
     rescue
       File.delete?("#{path}.tmp") rescue nil
       false
+    end
+
+    # 3-way merge (base = what we loaded, mine = `current` serialization, theirs = the
+    # file on disk now) over the top-level sections, so persisting one field doesn't
+    # discard a concurrent writer's edit to an unrelated one: a section this process
+    # left unchanged (mine == base) yields to disk; a section it changed wins.
+    private def self.merge_with_disk(current : String) : String
+      base = @@loaded_raw
+      return current unless base && File.exists?(path)
+      disk = File.read(path)
+      return current if disk == base # nobody else wrote since we loaded — nothing to merge
+      cur_h = (JSON.parse(current).as_h? rescue nil)
+      base_h = (JSON.parse(base).as_h? rescue nil)
+      disk_h = (JSON.parse(disk).as_h? rescue nil)
+      return current unless cur_h && base_h && disk_h
+      keys = (cur_h.keys + disk_h.keys).uniq!
+      JSON.build do |j|
+        j.object do
+          keys.each do |k|
+            cur_v = cur_h[k]?
+            # I changed this section (mine != base) → mine wins; else take disk's (a
+            # concurrent writer's value, or unchanged). Drop a section absent from both.
+            chosen = cur_v != base_h[k]? ? cur_v : (disk_h[k]? || cur_v)
+            j.field k, chosen if chosen
+          end
+        end
+      end
+    rescue
+      current # any merge hiccup falls back to the plain write (never worse than before)
     end
 
     private def self.serialize : String

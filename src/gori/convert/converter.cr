@@ -76,11 +76,19 @@ module Gori
       Converter.new(name, alias_list(aliases), category, direction, description, fn)
     end
 
-    # text-in / text-out (rot13, url-encode, html-escape …). Input is decoded as
-    # UTF-8 via String.new (lossless even when not valid UTF-8); output re-encoded.
+    # text-in / text-out (rot13, url-encode, html-escape …). The transform is
+    # character-oriented (String#each_char / String::Builder), so a non-UTF-8
+    # intermediate (e.g. raw bytes from a prior hex/base64-decode or gzip step) can't
+    # be processed byte-faithfully — each_char would substitute U+FFFD, silently
+    # corrupting AND inflating the data. Fail cleanly with a ConvertError (the chain
+    # catches it per-step) instead of emitting garbage.
     def self.text(name : String, *aliases, category : Category,
                   direction : Direction, description : String, &fn : String -> String) : Converter
-      wrapped = ->(input : Bytes) { fn.call(String.new(input)).to_slice }
+      wrapped = ->(input : Bytes) {
+        str = String.new(input)
+        raise ConvertError.new("#{name}: needs valid UTF-8 text (got binary — decode/re-encode it to text first)") unless str.valid_encoding?
+        fn.call(str).to_slice
+      }
       Converter.new(name, alias_list(aliases), category, direction, description, wrapped)
     end
 
@@ -91,10 +99,17 @@ module Gori
       Converter.new(name, alias_list(aliases), category, Direction::Encode, description, wrapped)
     end
 
-    # text-in / bytes-out (base64-decode, hex-decode).
+    # text-in / bytes-out (base64-decode, hex-decode). Decoders read text-encoded
+    # data, so a non-UTF-8 intermediate is never valid input — guard it here with a
+    # clean ConvertError rather than letting the decoder's regex/each_char raise a
+    # raw "UTF-8 error: isolated byte" (base64/hex use gsub over the String).
     def self.decode(name : String, *aliases, category : Category,
                     description : String, &fn : String -> Bytes) : Converter
-      wrapped = ->(input : Bytes) { fn.call(String.new(input)) }
+      wrapped = ->(input : Bytes) {
+        str = String.new(input)
+        raise ConvertError.new("#{name}: input is not valid text (a decoder reads text-encoded data)") unless str.valid_encoding?
+        fn.call(str)
+      }
       Converter.new(name, alias_list(aliases), category, Direction::Decode, description, wrapped)
     end
   end

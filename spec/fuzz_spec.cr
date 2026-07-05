@@ -165,9 +165,9 @@ describe F::Template do
 
   it "chain_at / set_chain read and write the marker under the cursor" do
     text = "a=§1§&b=§2¦rot13§"
-    F::Template.chain_at(text, 3).should eq("")        # cursor in the first (chain-less) marker
-    F::Template.chain_at(text, 10).should eq("rot13")  # cursor in the second marker
-    F::Template.chain_at("plain", 2).should be_nil     # not in a marker
+    F::Template.chain_at(text, 3).should eq("")       # cursor in the first (chain-less) marker
+    F::Template.chain_at(text, 10).should eq("rot13") # cursor in the second marker
+    F::Template.chain_at("plain", 2).should be_nil    # not in a marker
     # attach a chain to the first marker
     F::Template.set_chain(text, 3, "base64-encode").should eq("a=§1¦base64-encode§&b=§2¦rot13§")
     # clearing (empty) removes the ¦chain
@@ -373,6 +373,33 @@ describe F::Engine do
     backend = FakeBackend.new(F::Origin.new("http", "h", 80)) { |_b| ok_result(200, "x") }
     results, _ = drain(F::Engine.new(gen, F::Matcher.new, backend, cfg))
     results.size.should eq(3) # all sent — a 0 cap must not break at @dispatched >= 0
+  end
+
+  it "stops after the in-flight batch, not the buffered jobs" do
+    gate = Channel(Nil).new        # unbuffered: each send blocks until released
+    started = Channel(Nil).new(64) # buffered so a send-entry signal never blocks a worker
+    set = F::PayloadSet.new(F::InlineList.new((1..20).map(&.to_s)))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 2)
+    gen = F::Generator.new(base, [set], cfg)
+    backend = FakeBackend.new(F::Origin.new("http", "h", 80)) do |_b|
+      started.send(nil)
+      gate.receive
+      ok_result(200, "ok")
+    end
+    engine = F::Engine.new(gen, F::Matcher.new, backend, cfg)
+
+    done = Channel(Nil).new
+    spawn { engine.run { |_ev| }; done.send(nil) }
+
+    2.times { started.receive } # both workers are inside send() (in-flight)
+    10.times { Fiber.yield }    # let the dispatcher fill the buffered @jobs channel
+    engine.stop
+    spawn { loop { gate.send(nil) } } # release: in-flight finish, buffered must be skipped
+    done.receive
+
+    # concurrency (2) buffered on top of concurrency (2) in-flight = 4 previously fired
+    # after stop; now only the in-flight batch does.
+    backend.sent.should eq(2)
   end
 
   it "sends byte-exact requests to a real origin and records metrics" do

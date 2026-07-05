@@ -137,4 +137,27 @@ describe Gori::Miner::Engine do
     saw_baseline.should be_true
     saw_done.should be_true
   end
+
+  it "enforces max_requests as a hard cap that counts baseline calibration too" do
+    backend = HiddenParamBackend.new(F::Origin.new("http", "h", 80), reflect: ["secret"])
+    c = cfg
+    c.max_requests = 2_i64 # < the 2 stability rounds + 1 control + mining a naive run would send
+    names = (1..30).map { |i| "p#{i}" } + ["secret"]
+    findings = mine(backend, names, c)
+    # The 2 baseline stability rounds use up the whole cap; control-signal + all mining
+    # sends are refused by the CappedBackend. Previously baseline bypassed the cap
+    # entirely and mining overshot it by ~2x concurrency.
+    backend.sent.should eq(2)
+    findings.should be_empty
+  end
+
+  it "does not overshoot max_requests under concurrency" do
+    backend = HiddenParamBackend.new(F::Origin.new("http", "h", 80), reflect: ["secret"])
+    c = cfg
+    c.concurrency = 8
+    c.max_requests = 12_i64
+    names = (1..60).map { |i| "p#{i}" } + ["secret"]
+    mine(backend, names, c)
+    backend.sent.should be <= 12 # was ~cap + 2*concurrency
+  end
 end

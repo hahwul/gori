@@ -8,15 +8,21 @@ module Gori
   module Import
     record Result, count : Int32, skipped : Int32 = 0
 
-    def self.from_har(path : String) : Har::ParseResult
+    # Parsed flows plus a count of malformed entries skipped. Every parser skips a
+    # bad ENTRY (invalid base64 body, non-http URL scheme, wrong-shaped path item)
+    # rather than aborting the whole import — one stray line no longer discards an
+    # otherwise-valid multi-thousand-entry file.
+    record ParseResult, flows : Array(Builder::FlowPair), skipped : Int32 = 0
+
+    def self.from_har(path : String) : ParseResult
       Har.parse_file(path)
     end
 
-    def self.from_urls(path : String) : Array(Builder::FlowPair)
+    def self.from_urls(path : String) : ParseResult
       Urls.parse_file(path)
     end
 
-    def self.from_oas(path : String) : Array(Builder::FlowPair)
+    def self.from_oas(path : String) : ParseResult
       Oas.parse_file(path)
     end
 
@@ -33,18 +39,14 @@ module Gori
       raise Gori::Error.new("file not found: #{expanded}") unless File.exists?(expanded)
       raise Gori::Error.new("not a file: #{expanded}") unless File.file?(expanded)
 
-      skipped = 0
-      pairs = case kind
-              when :har
-                result = from_har(expanded)
-                skipped = result.skipped
-                result.flows
-              when :urls then from_urls(expanded)
-              when :oas  then from_oas(expanded)
-              else              raise Gori::Error.new("unknown import kind: #{kind}")
-              end
-      raise Gori::Error.new("no flows found in #{expanded}") if pairs.empty?
-      Result.new(insert_all(store, pairs), skipped)
+      parsed = case kind
+               when :har  then from_har(expanded)
+               when :urls then from_urls(expanded)
+               when :oas  then from_oas(expanded)
+               else            raise Gori::Error.new("unknown import kind: #{kind}")
+               end
+      raise Gori::Error.new("no flows found in #{expanded}") if parsed.flows.empty?
+      Result.new(insert_all(store, parsed.flows), parsed.skipped)
     end
   end
 end

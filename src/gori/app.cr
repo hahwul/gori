@@ -82,7 +82,14 @@ module Gori
     # an optional wall-clock `every` duration, or an optional completed-flow `max`.
     def run_capture(project : Project, format : Symbol, max : Int32?, every : Time::Span?) : Nil
       setup_logging(STDERR)
-      session = Session.open(@config, @ca, @registry, project)
+      session =
+        begin
+          Session.open(@config, @ca, @registry, project)
+        rescue ex : DB::Error | SQLite3::Exception
+          # Mirror the read-side commands: a --db that isn't a SQLite database (or is
+          # unreadable) gets a clean error, not a raw DB::ConnectionRefused backtrace.
+          abort "gori run capture: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
+        end
       if err = session.bind_error
         STDERR.puts "gori: not capturing — #{err}"
         STDERR.puts "  another gori instance may hold this project or the port; close it or pass --port."

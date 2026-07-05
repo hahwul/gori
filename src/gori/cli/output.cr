@@ -38,18 +38,28 @@ module Gori
         end
       end
 
+      # Neutralize terminal control bytes in an untrusted CAPTURED string before it is
+      # printed to a live terminal. A malicious client can embed ANSI/OSC escape
+      # sequences in its request line (method / host / target), which `puts` would
+      # otherwise inject verbatim into the operator's terminal (and re-inject on every
+      # later view). Replace every control char (incl. ESC, CR/LF, tab, C1) with '·'.
+      def self.term_safe(s : String) : String
+        return s unless s.each_char.any?(&.control?)
+        String.build { |io| s.each_char { |c| io << (c.control? ? '·' : c) } }
+      end
+
       # "#42  GET   https  example.com:443/users  200  1.2kB  3ms  [Complete]"
       # Columns are padded for scannability; status/state make capture progress legible.
       def self.flow_row_text(row : Store::FlowRow) : String
         status = row.status.try(&.to_s) || "—"
         # HTTP proxied requests store an absolute-form target ("http://host/path")
         # that already carries the host; only origin-form targets need host prefixed.
-        loc = row.target.starts_with?("http") ? row.target : "#{row.host}#{row.target}"
+        loc = term_safe(row.target.starts_with?("http") ? row.target : "#{row.host}#{row.target}")
         dur = row.duration_us.try { |us| " #{human_us(us)}" } || ""
         String.build do |io|
           io << '#' << row.id.to_s.ljust(6)
-          io << row.method.ljust(7)
-          io << row.scheme.ljust(6)
+          io << term_safe(row.method).ljust(7)
+          io << term_safe(row.scheme).ljust(6)
           io << loc
           io << "  -> " << status
           io << "  " << human_size(row.size)
@@ -148,13 +158,13 @@ module Gori
         String.build do |io|
           io << "[#{g.severity.label}]".ljust(11)
           io << g.code.ljust(28)
-          io << "  " << g.host
+          io << "  " << term_safe(g.host)
           io << "  ×" << g.hit_count
           if ev = g.evidence
-            io << "  " << ev
+            io << "  " << term_safe(ev)
           end
           if first = g.affected.first?
-            io << "\n    " << first
+            io << "\n    " << term_safe(first)
             more = g.affected.size - 1
             io << " (+#{more} more)" if more > 0
           end
@@ -234,7 +244,7 @@ module Gori
         String.build do |io|
           hosts.each_with_index do |host, i|
             io << '\n' if i > 0
-            io << host.label
+            io << term_safe(host.label)
             io << "  (" << sitemap_path_count(host.endpoints) << ')' if host.endpoints > 0
             io << '\n'
             sitemap_text_children(host, "", io)
@@ -255,14 +265,14 @@ module Gori
       end
 
       private def self.sitemap_node_label(node : Sitemap::Node, io : IO) : Nil
-        io << node.label
+        io << term_safe(node.label)
         if node.grouped
           io << "  (" << node.children.size << " values)"
         elsif !node.methods.empty?
-          io << "  [" << node.methods.join(' ') << ']'
+          io << "  [" << term_safe(node.methods.join(' ')) << ']'
         end
         if t = node.tag
-          io << "  # " << t
+          io << "  # " << term_safe(t)
         end
       end
 
@@ -280,7 +290,7 @@ module Gori
       end
 
       private def self.sitemap_host_paths(node : Sitemap::Node, host : String, io : IO) : Nil
-        io << node.methods.join(',') << "  " << host << node.path << '\n' unless node.methods.empty?
+        io << term_safe(node.methods.join(',')) << "  " << term_safe(host) << term_safe(node.path) << '\n' unless node.methods.empty?
         node.children.each { |c| sitemap_host_paths(c, host, io) }
       end
 

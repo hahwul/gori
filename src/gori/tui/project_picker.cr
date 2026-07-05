@@ -245,6 +245,10 @@ module Gori::Tui
     private def request_delete : Nil
       return if @selected < 3
       if project = filtered_projects[@selected - 3]?
+        # Don't offer to delete a project another live instance is capturing into —
+        # the green "● on" dot already flags it; deleting would silently orphan its
+        # capture. (registry.delete also refuses, as a TOCTOU backstop below.)
+        return if probe_running(project)[0]
         @confirm = ConfirmDialog.new("DELETE PROJECT",
           %(Delete "#{project.name}"?\nThis permanently removes all of its captured data.),
           confirm_label: "delete", cancel_label: "cancel", danger: true)
@@ -255,10 +259,14 @@ module Gori::Tui
 
     private def commit_delete : Nil
       if project = @pending_delete
-        @registry.delete(project)
-        @projects = @registry.list
-        invalidate_running_cache
-        @selected = 2
+        begin
+          @registry.delete(project) # refuses if a live instance took the lock since request_delete
+          @projects = @registry.list
+          invalidate_running_cache
+          @selected = 2
+        rescue Gori::Error
+          # became live between confirm and here — leave it in place
+        end
       end
       cancel_confirm
     end

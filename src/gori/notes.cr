@@ -99,10 +99,35 @@ module Gori
       end
     end
 
-    # Allocate the next note id (caller persists next_id on save).
-    def self.alloc_id(doc : Doc) : {Int64, Int64}
-      id = doc.next_id
-      {id, id + 1}
+    # Reconcile THIS session's notes with the currently-persisted set before a save,
+    # so two TUI sessions open on the same project don't clobber each other's notes.
+    # `persisted` is re-read at save time; `mine` is this session's notes (id → text);
+    # `deleted` is the ids this session closed. Merge rules (per-note last-writer-wins,
+    # keyed by the stable id):
+    #   - a persisted note THIS session also has  → this session's text (an edit)
+    #   - a persisted note only the PEER has      → kept (was silently dropped before)
+    #   - a persisted note THIS session deleted   → dropped
+    #   - a note only THIS session has (new)      → appended
+    # (`mine` carry cross-session-unique ids, so a peer's new note can't be mistaken
+    # for an edit of ours.) next_id advances past every surviving id.
+    def self.merge(persisted : Doc, mine : Array(NoteEntry), deleted : Set(Int64),
+                   cur : Int32, next_id : Int64) : Doc
+      mine_by_id = {} of Int64 => String
+      mine.each { |n| mine_by_id[n.id] = n.text }
+      result = [] of NoteEntry
+      seen = Set(Int64).new
+      persisted.notes.each do |p|
+        next if deleted.includes?(p.id)
+        result << NoteEntry.new(p.id, mine_by_id[p.id]? || p.text)
+        seen << p.id
+      end
+      mine.each do |n|
+        next if seen.includes?(n.id)
+        result << n
+        seen << n.id
+      end
+      max_id = result.max_of?(&.id) || 0_i64
+      Doc.new(cur.clamp(0, {result.size - 1, 0}.max), result, {next_id, max_id + 1}.max)
     end
 
     # The note's title: its first non-blank line, trimmed; nil when the note is

@@ -22,10 +22,12 @@ module Gori::Proxy::Tls
     end
 
     def intercept(host : String, port : Int32, client : IO, sink : Proxy::FlowSink) : Nil
-      # When intercept is on for THIS host, don't advertise h2 — the client falls
-      # back to HTTP/1.1, taking the interceptable ClientConn path. Out-of-scope
-      # (and intercept-off) hosts keep the fast h2 relay.
-      advertise_h2 = !(@interceptor.try(&.intercepts_host?(host)))
+      # Don't advertise h2 — forcing the client to HTTP/1.1, the ClientConn path —
+      # when EITHER intercept is on for this host OR Match&Replace rules are live. h2's
+      # HPACK-encoded heads never reach the HeadRewriter/interceptor seams, so the
+      # fast h2 relay would silently skip both. Out-of-scope, intercept-off, rule-less
+      # hosts keep the fast h2 relay.
+      advertise_h2 = !(@interceptor.try(&.intercepts_host?(host)) || @rewriter.try(&.active?))
       server_ctx = @ca.context_for(host, advertise_h2: advertise_h2)
       # sync_close: true is REQUIRED, not cosmetic. The h2/ws relays tear down by
       # closing the socket the *other* pump fiber is mid-read on, to unblock it.

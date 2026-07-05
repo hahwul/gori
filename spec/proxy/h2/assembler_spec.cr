@@ -93,6 +93,66 @@ describe Gori::Proxy::H2::Assembler do
     String.new(sink.requests.first.body.not_nil!).should eq("q=1&x=2")
   end
 
+  it "emits both halves when the response completes before the request body (early response)" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+
+    # Client sends request HEADERS but keeps streaming its body (no END_STREAM).
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    sink.requests.size.should eq(0)
+
+    # Server responds and closes its half BEFORE the client finished (e.g. 413).
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM, Bytes[0x88_u8]))
+    sink.requests.size.should eq(0) # nothing emitted / lost prematurely
+    sink.responses.size.should eq(0)
+
+    # Client finally finishes its request body.
+    assembler.feed("out", data_frame(1_u32, Frame::END_STREAM, "late upload"))
+
+    sink.requests.size.should eq(1) # was: silently dropped entirely
+    sink.responses.size.should eq(1)
+    sink.responses.first.flow_id.should eq(1)
+    sink.responses.first.status.should eq(200)
+  end
+
+  it "flushes a partial response as Aborted when the stream is reset mid-stream" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    sink.requests.size.should eq(1)
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, Bytes[0x88_u8])) # 200, no END_STREAM
+    assembler.feed("in", data_frame(1_u32, 0_u8, "partial"))                       # DATA, still open
+    sink.responses.size.should eq(0)
+
+    # Client cancels the stream (RST_STREAM, error code 8 = CANCEL) mid-stream.
+    assembler.feed("in", Frame::Header.new(Frame::Type::RstStream.value, 0_u8, 1_u32, Bytes[0, 0, 0, 8]))
+
+    sink.responses.size.should eq(1) # was: whole response discarded, flow left Pending
+    resp = sink.responses.first
+    resp.state.should eq(Gori::Store::FlowState::Aborted)
+    String.new(resp.body.not_nil!).should eq("partial")
+  end
+
+  it "finalizes an in-flight stream when the connection closes (no permanent Pending)" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, Bytes[0x88_u8])) # 200, no END_STREAM
+    assembler.feed("in", data_frame(1_u32, 0_u8, "chunk1"))                        # server-stream, never ends
+    sink.responses.size.should eq(0)
+
+    assembler.finalize_all("h2 connection closed")
+
+    sink.responses.size.should eq(1)
+    sink.responses.first.state.should eq(Gori::Store::FlowState::Aborted)
+    String.new(sink.responses.first.body.not_nil!).should eq("chunk1")
+  end
+
   it "skips a PADDED DATA frame whose pad length exceeds the payload (no garbage projection)" do
     sink = RecSink.new
     assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)

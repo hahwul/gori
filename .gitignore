@@ -3,3 +3,6 @@
 /bin/
 /.shards/
 *.dwarf
+/ca2/
+/home*/
+*.key.pem

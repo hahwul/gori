@@ -96,8 +96,8 @@ module Gori
 
       parser = OptionParser.new do |p|
         p.banner = "Usage: gori tui [options]"
-        p.on("-lHOST", "--listen=HOST", "Listen address (default 127.0.0.1)") { |v| listen = v }
-        p.on("-pPORT", "--port=PORT", "Listen port (default 8070)") do |v|
+        p.on("-lHOST", "--listen=HOST", "Listen address (default #{Settings.bind_host})") { |v| listen = v }
+        p.on("-pPORT", "--port=PORT", "Listen port (default #{Settings.bind_port})") do |v|
           parsed = v.to_i?
           abort "gori: invalid --port '#{v}' (expected 0-65535)" unless parsed && 0 <= parsed <= 65535
           port = parsed
@@ -196,8 +196,12 @@ module Gori
           p.missing_option { |flag| abort "missing value for #{flag}" }
         end
         parser.parse(args[1..])
-        Paths.ensure_dirs
-        puts Proxy::Tls::CertAuthority.load_or_create(ca_dir).ca_cert_path
+        begin
+          Paths.ensure_dirs
+          puts Proxy::Tls::CertAuthority.load_or_create(ca_dir).ca_cert_path
+        rescue ex
+          abort "gori export ca-cert: could not create/read the CA in #{ca_dir}: #{ex.message}"
+        end
       else
         STDERR.puts "unknown export subcommand: #{args[0]}"
         print_export_usage(STDERR)

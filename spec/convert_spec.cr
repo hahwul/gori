@@ -192,6 +192,24 @@ describe Gori::Convert do
       String.new(conv_bytes("base64-decode", res.steps[1].output.not_nil!)
         .dup).should_not be_empty
     end
+
+    it "fails a text converter on a binary intermediate instead of corrupting it with U+FFFD" do
+      # hex-decode of 80ff412042 → raw bytes incl. invalid-UTF-8 0x80/0xff; rot13 is
+      # char-oriented and can't process binary — it must FAIL cleanly, not silently
+      # substitute U+FFFD (which corrupted AND inflated the bytes).
+      res = Gori::Convert.run(REG, "80ff412042".to_slice, "hex-decode > rot13")
+      res.steps[0].state.should eq Gori::Convert::StepState::Ok
+      res.steps[1].state.should eq Gori::Convert::StepState::Failed
+      res.steps[1].error.not_nil!.should contain("UTF-8")
+      res.ok?.should be_false
+    end
+
+    it "fails a decoder on a binary intermediate with a clean message, not a raw UTF-8 error" do
+      res = Gori::Convert.run(REG, "hello".to_slice, "gzip > hex-decode")
+      res.steps[0].state.should eq Gori::Convert::StepState::Ok # gzip → binary
+      res.steps[1].state.should eq Gori::Convert::StepState::Failed
+      res.steps[1].error.not_nil!.should contain("not valid text") # was "Regex match error: UTF-8 error…"
+    end
   end
 
   describe ".display" do
