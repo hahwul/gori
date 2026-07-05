@@ -55,7 +55,19 @@ module Gori::Tui
       @current = 0
       @next_id = 2_i64
       @dirty = false
-      @link_preview = "" # resolved first-link line for the bottom strip (set by controller)
+      @link_preview = ""            # resolved first-link line for the bottom strip (set by controller)
+      @deleted_ids = Set(Int64).new # notes closed this session — so a merge-on-save doesn't resurrect them
+    end
+
+    # Allocate a cross-session-unique note id. A random 63-bit id (not a shared
+    # per-doc counter) means a SECOND TUI session on the same project can't hand out
+    # the same id for a DIFFERENT new note — which the merge would otherwise mistake
+    # for an edit of ours and drop one note's content. Collision is astronomically
+    # unlikely for any realistic note count.
+    private def alloc_note_id : Int64
+      id = Random::Secure.rand(1_i64..0x7fff_ffff_ffff_ffff_i64)
+      @next_id = {@next_id, id + 1}.max
+      id
     end
 
     getter link_preview : String
@@ -74,8 +86,7 @@ module Gori::Tui
     def reload(store : Store) : Nil
       @notes = load_notes(store)
       if @notes.empty?
-        id, @next_id = Notes.alloc_id(Notes::Doc.new(0, [] of Notes::NoteEntry, @next_id))
-        @notes << Note.new(id)
+        @notes << Note.new(alloc_note_id)
       end
       @current = @current.clamp(0, @notes.size - 1)
       @dirty = false
@@ -183,8 +194,7 @@ module Gori::Tui
 
     # Open a fresh note and make it current (the new tab gets focus to type into).
     def new_note : Nil
-      id, @next_id = Notes.alloc_id(Notes::Doc.new(@current, @notes.map { |n| Notes::NoteEntry.new(n.id, n.area.text) }, @next_id))
-      @notes << Note.new(id)
+      @notes << Note.new(alloc_note_id)
       @current = @notes.size - 1
       @dirty = true
     end
@@ -194,9 +204,9 @@ module Gori::Tui
     def close_note : Int64?
       closed_id = @notes[@current]?.try(&.id)
       @notes.delete_at(@current) if @current < @notes.size
+      @deleted_ids << closed_id if closed_id # so merge-on-save doesn't resurrect it from a peer's copy
       if @notes.empty?
-        id, @next_id = Notes.alloc_id(Notes::Doc.new(0, [] of Notes::NoteEntry, @next_id))
-        @notes << Note.new(id)
+        @notes << Note.new(alloc_note_id)
       end
       @current = @current.clamp(0, @notes.size - 1)
       @dirty = true
@@ -212,10 +222,16 @@ module Gori::Tui
       @dirty = true
     end
 
-    # Persist iff edited (no-op otherwise — cheap to call on every exit path).
+    # Persist iff edited (no-op otherwise — cheap to call on every exit path). Merges
+    # against the currently-persisted set first, so a second TUI session on the same
+    # project doesn't clobber this session's notes (and vice-versa): peer notes are
+    # kept, this session's edits win per-note, and this session's closes are honoured.
     def save(store : Store) : Nil
       return unless @dirty
-      store.set_setting(DOCS_KEY, serialize)
+      mine = @notes.map { |n| Notes::NoteEntry.new(n.id, n.area.text) }
+      merged = Notes.merge(Notes.load(store), mine, @deleted_ids, @current, @next_id)
+      store.set_setting(DOCS_KEY, Notes.serialize(merged.cur, merged.notes, merged.next_id))
+      @next_id = merged.next_id
       @dirty = false
     end
 
@@ -252,11 +268,6 @@ module Gori::Tui
       @current = doc.cur
       @next_id = doc.next_id
       doc.notes.map { |e| Note.new(e.id, e.text) }
-    end
-
-    private def serialize : String
-      entries = @notes.map { |n| Notes::NoteEntry.new(n.id, n.area.text) }
-      Notes.serialize(@current, entries, @next_id)
     end
   end
 end

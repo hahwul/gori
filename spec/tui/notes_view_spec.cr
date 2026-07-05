@@ -86,6 +86,48 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  it "does not clobber a peer session's notes on save (concurrent editing)" do
+    tmp_store do |store|
+      seed = NotesView.new # an existing note in the project
+      seed.reload(store)
+      type(seed, "hi")
+      seed.save(store)
+
+      a = NotesView.new # two sessions both load the existing set
+      a.reload(store)
+      b = NotesView.new
+      b.reload(store)
+
+      a.new_note # each adds its own note; B saves last
+      type(a, "AAA")
+      a.save(store)
+      b.new_note
+      type(b, "BBB")
+      b.save(store) # previously overwrote the whole doc, wiping A's "AAA"
+
+      saved = saved_notes(store)
+      saved.should contain("hi")
+      saved.should contain("AAA") # peer note survives the concurrent save
+      saved.should contain("BBB")
+    end
+  end
+
+  it "Notes.merge keeps peer notes, applies my edits, drops my deletions, appends new" do
+    persisted = Gori::Notes::Doc.new(0, [
+      Gori::Notes::NoteEntry.new(1_i64, "peer-only"),
+      Gori::Notes::NoteEntry.new(2_i64, "shared-orig"),
+      Gori::Notes::NoteEntry.new(3_i64, "to-delete"),
+    ], 4_i64)
+    mine = [
+      Gori::Notes::NoteEntry.new(2_i64, "shared-EDITED"), # I edited note 2
+      Gori::Notes::NoteEntry.new(9_i64, "my-new"),        # I added note 9
+    ]
+    merged = Gori::Notes.merge(persisted, mine, Set{3_i64}, 0, 4_i64) # I deleted note 3
+    merged.notes.map { |n| {n.id, n.text} }.should eq(
+      [{1_i64, "peer-only"}, {2_i64, "shared-EDITED"}, {9_i64, "my-new"}])
+    merged.next_id.should eq(10_i64) # past the max surviving id
+  end
+
   it "migrates a legacy single-note document into the first note" do
     tmp_store do |store|
       store.set_setting("notes", "legacy body")
@@ -136,9 +178,11 @@ describe Gori::Tui::NotesView do
       view = NotesView.new
       view.reload(store)
       view.count.should eq(1)
+      id_before = view.current_note_id
       closed_id = view.close_note
-      view.count.should eq(1) # closing the last note leaves a fresh empty one
-      closed_id.should eq(1_i64) # stable id is still returned for link cleanup
+      view.count.should eq(1)          # closing the last note leaves a fresh empty one
+      closed_id.should eq(id_before)   # the closed note's stable id is returned for link cleanup
+      view.current_note_id.should_not eq(id_before) # the replacement is a distinct note
     end
   end
 
