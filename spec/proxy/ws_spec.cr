@@ -70,6 +70,44 @@ describe Gori::Proxy::WS do
     it "returns nil on EOF" do
       Gori::Proxy::WS.read_frame(IO::Memory.new(Bytes.empty)).should be_nil
     end
+
+    it "returns nil for an oversized advertised length (buffered form)" do
+      # 127 length header advertising > MAX_FRAME, unmasked. read_frame must refuse
+      # to buffer it (the relay streams it instead).
+      hdr = IO::Memory.new
+      hdr.write_byte(0x82_u8)
+      hdr.write_byte(0x7f_u8)
+      len = (Gori::Proxy::WS::MAX_FRAME + 1)
+      (0..7).each { |i| hdr.write_byte((len >> (56 - i * 8)).to_u8!) }
+      Gori::Proxy::WS.read_frame(IO::Memory.new(hdr.to_slice)).should be_nil
+    end
+  end
+
+  describe ".read_header" do
+    it "parses a masked header exposing len and mask key without the payload" do
+      h = Gori::Proxy::WS.read_header(IO::Memory.new(MASKED_HI)).not_nil!
+      h.fin?.should be_true
+      h.opcode.should eq(Gori::Proxy::WS::OP_TEXT)
+      h.masked?.should be_true
+      h.len.should eq(2)
+      h.mask_key.should eq(Bytes[0x01, 0x02, 0x03, 0x04])
+    end
+  end
+
+  describe ".stream_payload" do
+    it "copies exactly len bytes byte-exact and reports completion" do
+      src = IO::Memory.new(Bytes.new(1000) { |i| (i % 256).to_u8 })
+      dst = IO::Memory.new
+      Gori::Proxy::WS.stream_payload(src, dst, 1000_u64, Bytes.new(64)).should be_true
+      dst.to_slice.should eq(Bytes.new(1000) { |i| (i % 256).to_u8 })
+    end
+
+    it "returns false if the source dies mid-payload (truncated frame)" do
+      src = IO::Memory.new(Bytes.new(10, 0x41_u8)) # only 10 bytes available
+      dst = IO::Memory.new
+      Gori::Proxy::WS.stream_payload(src, dst, 100_u64, Bytes.new(64)).should be_false
+      dst.to_slice.size.should eq(10) # forwarded what arrived, byte-exact
+    end
   end
 
   describe ".encode" do
@@ -119,6 +157,62 @@ describe Gori::Proxy::WS do
       fwd_server.should eq(MASKED_HI)   # client→server forwarded verbatim
       fwd_client.should eq(UNMASKED_YO) # server→client forwarded verbatim
       sink.messages.should contain({"out", 1, "hi"})
+      sink.messages.should contain({"in", 1, "yo"})
+    end
+
+    it "streams a frame larger than MAX_FRAME byte-exact instead of killing the tunnel" do
+      big = Gori::Proxy::WS::MAX_FRAME.to_i + 16
+      # Unmasked server binary frame: FIN|OP_BIN, 127 length, 8-byte big-endian length.
+      hdr = IO::Memory.new
+      hdr.write_byte(0x82_u8)
+      hdr.write_byte(0x7f_u8)
+      len = big.to_u64
+      (0..7).each { |i| hdr.write_byte((len >> (56 - i * 8)).to_u8!) }
+      header = hdr.to_slice
+      payload = Bytes.new(big, 0x41_u8) # 'A' * big
+
+      # Real (evented) socket pairs, not IO.pipe: kernel buffering + truly
+      # independent directions, so a 16 MiB stream doesn't deadlock the fibers.
+      client_side, relay_client = UNIXSocket.pair
+      origin_side, relay_upstream = UNIXSocket.pair
+
+      # Drain forwarded-to-client bytes concurrently (the ~16 MiB write would block).
+      # The relay closes its end when both pumps finish, so the read sees EOF then.
+      forwarded = IO::Memory.new
+      drain = Channel(Nil).new
+      spawn do
+        buf = Bytes.new(64 * 1024)
+        while (n = client_side.read(buf)) > 0
+          forwarded.write(buf[0, n])
+        end
+      rescue IO::Error
+        # relay closed its end — end of the forwarded stream
+      ensure
+        drain.send(nil)
+      end
+      # Origin sends the oversized frame, then a normal "yo" frame, then EOF.
+      spawn do
+        origin_side.write(header)
+        origin_side.write(payload)
+        origin_side.write(UNMASKED_YO)
+        origin_side.close
+      end
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(relay_client, relay_upstream, 9_i64, sink)
+      drain.receive
+      client_side.close rescue nil
+
+      fwd = forwarded.to_slice
+      # Both frames forwarded whole and byte-exact (was: 0 bytes, tunnel killed).
+      fwd.size.should eq(header.size + big + UNMASKED_YO.size)
+      fwd[0, header.size].should eq(header)
+      fwd[header.size].should eq(0x41_u8)
+      fwd[header.size + big - 1].should eq(0x41_u8)
+      fwd[(header.size + big), UNMASKED_YO.size].should eq(UNMASKED_YO)
+      # The oversized frame is surfaced as a marker (not silently dropped); the
+      # normal frame still captures.
+      sink.messages.any? { |(_, _, s)| s.includes?("too large to capture") }.should be_true
       sink.messages.should contain({"in", 1, "yo"})
     end
   end

@@ -32,12 +32,38 @@ module Gori::Proxy::WS
     end
   end
 
-  # Reads one frame from `io`. Returns nil on EOF / truncated frame. Pure over an
-  # IO so it can be unit-tested with IO::Memory (sans-IO spirit).
-  def self.read_frame(io : IO) : Frame?
-    # Read the header (2..14 bytes) into a stack buffer — no heap alloc — then read
-    # the payload directly into ONE wire buffer (header+payload) used as `raw`. The
-    # old path allocated ~4× the payload (IO::Memory grow + buf + buf.dup + raw.dup).
+  # A parsed frame header (no payload). `bytes` are the exact header wire octets
+  # (2..14, incl. the mask key when masked) for byte-faithful forwarding; `len` is
+  # the advertised payload length (UNbounded — the caller decides whether to buffer
+  # it, `read_body`, or stream it past the cap, `stream_payload`).
+  struct Header
+    getter? fin : Bool
+    getter opcode : UInt8
+    getter? masked : Bool
+    getter len : UInt64
+    getter bytes : Bytes
+
+    def initialize(@fin : Bool, @opcode : UInt8, @masked : Bool, @len : UInt64, @bytes : Bytes)
+    end
+
+    def data? : Bool
+      opcode == OP_TEXT || opcode == OP_BIN || opcode == OP_CONT
+    end
+
+    def close? : Bool
+      opcode == OP_CLOSE
+    end
+
+    # The 4-byte masking key (a view into `bytes`), or empty when unmasked.
+    def mask_key : Bytes
+      masked? ? bytes[bytes.size - 4, 4] : Bytes.empty
+    end
+  end
+
+  # Reads only a frame header (RFC 6455 §5.2). Returns nil on EOF / truncated
+  # header. Does NOT bound `len` — a big advertised length is the caller's call
+  # (buffer up to the cap, or stream past it for byte-exact forwarding).
+  def self.read_header(io : IO) : Header?
     hdr = uninitialized UInt8[14]
     hs = hdr.to_slice
     return nil unless io.read_fully?(hs[0, 2])
@@ -59,31 +85,64 @@ module Gori::Proxy::WS
       (2...10).each { |i| len = (len << 8) | hs[i].to_u64 }
       hlen = 10
     end
-    return nil if len > MAX_FRAME # oversized / hostile frame — abort this direction
 
-    mask_off = hlen
     if masked
       return nil unless io.read_fully?(hs[hlen, 4])
       hlen += 4
     end
+    Header.new(fin, opcode, masked, len, hs[0, hlen].dup)
+  end
 
-    n = len.to_i
-    buf = Bytes.new(hlen + n) # the byte-exact wire frame (header + payload) = `raw`
-    hs[0, hlen].copy_to(buf[0, hlen])
+  # Reads a header-plus-payload frame from `io`, buffering the whole payload.
+  # Returns nil on EOF / truncated frame, or when the advertised length exceeds
+  # MAX_FRAME (so `n.to_i` can't overflow and one frame can't OOM us). The relay
+  # streams oversized frames instead (see `stream_payload`); this buffered form is
+  # for the WS replay engine and per-frame capture.
+  def self.read_frame(io : IO) : Frame?
+    h = read_header(io) || return nil
+    return nil if h.len > MAX_FRAME # oversized — caller must stream, not buffer
+    read_body(io, h)
+  end
+
+  # Reads the payload for an already-read `Header` into ONE wire buffer
+  # (header + payload) reused as `raw` for byte-exact forwarding, unmasking a copy
+  # for `payload`. The caller MUST have checked `h.len <= MAX_FRAME`.
+  def self.read_body(io : IO, h : Header) : Frame?
+    hlen = h.bytes.size
+    n = h.len.to_i
+    buf = Bytes.new(hlen + n)
+    h.bytes.copy_to(buf[0, hlen])
     if n > 0
       return nil unless io.read_fully?(buf[hlen, n])
     end
 
     payload =
-      if masked
+      if h.masked?
+        key = h.mask_key
         out = Bytes.new(n) # unmask into a separate buffer; keep `raw` masked for byte-exact relay
-        n.times { |i| out[i] = buf[hlen + i] ^ hs[mask_off + (i & 3)] }
+        n.times { |i| out[i] = buf[hlen + i] ^ key[i & 3] }
         out
       else
         buf[hlen, n] # zero-copy view into the wire buffer (already unmasked)
       end
 
-    Frame.new(fin, opcode, payload, buf)
+    Frame.new(h.fin?, h.opcode, payload, buf)
+  end
+
+  # Copies exactly `len` payload bytes from `src` to `dst` in bounded chunks,
+  # WITHOUT buffering the whole frame — so the relay can forward a frame larger
+  # than MAX_FRAME byte-exact (P7) instead of aborting the tunnel. Returns false if
+  # the peer died mid-payload (truncated frame). `scratch` is a reused copy buffer.
+  def self.stream_payload(src : IO, dst : IO, len : UInt64, scratch : Bytes) : Bool
+    left = len
+    while left > 0
+      want = left < scratch.size ? left.to_i : scratch.size
+      read = src.read(scratch[0, want])
+      return false if read == 0 # truncated mid-payload
+      dst.write(scratch[0, read])
+      left -= read
+    end
+    true
   end
 
   # Encodes one frame for sending. Client→server frames MUST be masked (RFC 6455
