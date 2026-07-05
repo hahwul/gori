@@ -252,9 +252,10 @@ module Gori::Tui
     end
 
     def run : Symbol
-      # Record the opened project globally so a separate `gori mcp` (given no --db/--project)
-      # serves what the user is actually viewing instead of an mtime-MRU guess.
-      Paths.write_active_project(@session.project.name)
+      # Record the opened project's db path globally so a separate `gori mcp` (given no
+      # --db/--project) serves what the user is viewing instead of an mtime-MRU guess. Path,
+      # not name, so display-name-vs-slug never breaks resolution (see CLI.resolve_mcp_db).
+      Paths.write_active_project(@session.project.db_path)
       history_controller.view.reload(@session.store)
       notes_controller.view.reload(@session.store) # load persisted notes up front so the tab is ready before it's ever focused
       # Surface the bind outcome on entry: capture-off if nothing could bind, or a
@@ -394,21 +395,29 @@ module Gori::Tui
     # Braille spinner frames (U+2800–U+28FF: EAW-Neutral width 1, no emoji/VS16).
     SPINNER = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
 
+    # The flow the user is looking at, but only where that's meaningful — the History list.
+    # Replay/Fuzzer/etc. carry their own selection semantics (session ids, not flow ids), so we
+    # don't conflate them under one "selected flow" that get_current_context would misreport.
+    private def current_selected_flow_id : Int64?
+      @active_tab == :history ? history_controller.selected_flow_id : nil
+    end
+
     # A cheap identity of "what the user is viewing" for change detection — no timestamp,
     # so an unchanged view yields a stable string (ui_state_json stamps the time on write).
+    # Project is constant per session, so it's not part of the identity.
     private def ui_state_identity : String
-      "#{@active_tab}|#{@focus}|#{history_controller.selected_flow_id}|#{current_subtab_index}|#{@session.project.name}"
+      "#{@active_tab}|#{@focus}|#{current_selected_flow_id}|#{current_subtab_index}"
     end
 
     # The ui-state payload written to the project store, read cross-process by
-    # `gori mcp get_current_context` to report what the user is currently viewing.
+    # `gori mcp get_current_context`. It lives in this project's own db, so the served project
+    # identity is implicit — no name field (which would skew display-name vs slug).
     private def ui_state_json : String
       JSON.build do |j|
         j.object do
-          j.field "active_project", @session.project.name
           j.field "active_tab", @active_tab.to_s
           j.field "focus_pane", @focus.to_s
-          if fid = history_controller.selected_flow_id
+          if fid = current_selected_flow_id
             j.field "selected_flow_id", fid
           end
           j.field "subtab", current_subtab_index

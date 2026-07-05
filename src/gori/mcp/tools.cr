@@ -152,10 +152,11 @@ module Gori
 
           tool j, "get_current_context",
             "What the user is currently viewing in the gori TUI: active tab, focused pane, the " \
-            "selected flow id, and sub-tab index — so you can act on \"the request I'm looking at " \
-            "right now\" without the user pasting ids. Reflects an open (or last-open) gori TUI for " \
-            "this project. Check `project_match`: if false, the focus is for a different project " \
-            "than this server serves. `age_seconds` shows how long since the TUI last recorded focus." { }
+            "History-selected flow id (only when on the History tab), and sub-tab index — so you " \
+            "can act on \"what I'm looking at right now\" without the user pasting ids. Reflects an " \
+            "open (or last-open) gori TUI for THIS project. `age_seconds` shows how long since the " \
+            "TUI last recorded focus (there is no live-TUI heartbeat) — use it to judge freshness; " \
+            "`available:false` means the TUI never ran against this project." { }
 
           if @allow_actions
             tool j, "send_request",
@@ -421,8 +422,10 @@ module Gori
       end
 
       # What the user is currently viewing in the gori TUI, recorded cross-process to the
-      # project store (Store::UI_STATE_KEY) by the running TUI. Read-only + honest: reports
-      # a project mismatch / freshness rather than silently returning stale focus.
+      # project store (Store::UI_STATE_KEY) by the running TUI. Read-only. The ui-state lives in
+      # THIS project's db, so it always describes this project — freshness is reported via
+      # age_seconds (there is no live-TUI heartbeat), not a name comparison that would skew on
+      # display-name-vs-slug.
       private def get_current_context : Result
         raw = @store.setting(Store::UI_STATE_KEY)
         parsed = raw.try do |r|
@@ -434,16 +437,12 @@ module Gori
         end
         Result.new(JSON.build do |j|
           j.object do
-            j.field "project", @project_name # what this server serves
+            j.field "project", @project_name # the project/db this server serves
             if parsed.nil?
               j.field "available", false
               j.field "note", raw.nil? ? "No UI state recorded for this project — the gori TUI may not have run against it." : "Recorded UI state was unreadable."
             else
-              ctx_project = parsed["active_project"]?.try(&.as_s?)
-              match = ctx_project.nil? || @project_name.nil? || ctx_project == @project_name
               j.field "available", true
-              j.field "context_project", ctx_project # project the TUI recorded focus for
-              j.field "project_match", match
               j.field "active_tab", parsed["active_tab"]?.try(&.as_s?)
               j.field "focus_pane", parsed["focus_pane"]?.try(&.as_s?)
               if fid = parsed["selected_flow_id"]?.try(&.as_i64?)
@@ -454,11 +453,17 @@ module Gori
               end
               if rec = parsed["recorded_at"]?.try(&.as_i64?)
                 j.field "recorded_at", rec
-                j.field "recorded_at_iso", Time.unix_ms(rec).to_rfc3339
-                j.field "age_seconds", (Time.utc.to_unix_ms - rec) // 1000
-              end
-              unless match
-                j.field "note", "The recorded focus is for project '#{ctx_project}', not the served '#{@project_name}' — selected_flow_id refers to the other project."
+                # A corrupt/out-of-range recorded_at must not sink the whole tool: Time.unix_ms
+                # raises on out-of-range, so guard it — keep the raw value, drop derived fields.
+                iso = begin
+                  Time.unix_ms(rec).to_rfc3339
+                rescue
+                  nil
+                end
+                if iso
+                  j.field "recorded_at_iso", iso
+                  j.field "age_seconds", (Time.utc.to_unix_ms - rec) // 1000
+                end
               end
             end
           end

@@ -55,7 +55,7 @@ module Gori
 
       begin
         # First-run onboarding: no settings.json yet → walk the user through bind /
-        # theme / AI setup once. Inside `begin` so the `ensure term.close` restores
+        # theme setup once. Inside `begin` so the `ensure term.close` restores
         # the terminal if it raises. The wizard persists settings.json (even on skip),
         # so it never auto-launches again.
         Tui::SetupWizard.new(term).run unless File.exists?(Settings.path)

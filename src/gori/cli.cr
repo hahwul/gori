@@ -18,7 +18,7 @@ module Gori
   # - `gori export ca-cert`         → print CA cert path (refactors old --export-ca)
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
-  # - `gori wizard`                 → interactive first-run setup wizard (bind/theme/AI)
+  # - `gori wizard`                 → interactive first-run setup wizard (bind/theme)
   # - `gori update`                 → print how to update gori (no built-in self-update yet)
   #
   # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
@@ -74,7 +74,7 @@ module Gori
       puts "  settings  Print/edit the persistent settings file (settings.json)"
       puts "  export    Export things (currently only ca-cert)"
       puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
-      puts "  wizard    Interactive setup wizard (bind, theme, AI) — also runs on first launch"
+      puts "  wizard    Interactive setup wizard (bind, theme) — also runs on first launch"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
       puts "  update    Show how to update gori to the latest version"
       puts ""
@@ -321,11 +321,13 @@ module Gori
         abort "gori mcp: no such project: #{name}" unless proj
         return {proj.db_path, proj.name}
       end
-      # Prefer the project the interactive TUI last opened (its ui-state is what
-      # get_current_context reports); fall back to the mtime-MRU project, then the default db.
-      if name = Paths.read_active_project
-        if proj = registry.list.find { |p| p.name.downcase == name.downcase }
-          return {proj.db_path, proj.name}
+      # Prefer the db path the interactive TUI last recorded (its ui-state is what
+      # get_current_context reports). Match by PATH, not name, so a project's display name
+      # vs its dir slug can't miss. Fall back to the mtime-MRU project, then the default db.
+      if path = Paths.read_active_project
+        if File.file?(path)
+          proj = registry.list.find { |p| p.db_path == path }
+          return {path, proj.try(&.name)}
         end
       end
       mru = registry.list.first?
