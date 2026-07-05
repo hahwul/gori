@@ -145,7 +145,7 @@ describe Gori::Tui::ReplayView do
 
       view = ReplayView.new
       view.load(detail)
-      view.auto_content_length?.should be_true # default on
+      view.auto_content_length?.should be_true                        # default on
       view.request_text.includes?("Content-Length: 5").should be_true # reflected in the editor too
       sent = String.new(view.request_bytes)
       sent.includes?("Content-Length: 5").should be_true   # recomputed to the body size
@@ -172,14 +172,25 @@ describe Gori::Tui::ReplayView do
     view.request_text.includes?("Content-Length: 99").should be_false
   end
 
+  it "reflects the RENDERED Content-Length when MARK transform + auto-CL are both on" do
+    view = ReplayView.new
+    # auto-CL (^L) on and MARK transform (^K) on. Body q=§hi§ is 8 raw bytes but renders
+    # to q=hi (4 bytes) — the value ^R actually sends.
+    view.restore("https://a.test",
+      "POST /x HTTP/1.1\nHost: a.test\nContent-Length: 0\n\nq=§hi§", false, true, mark_transform: true)
+    String.new(view.request_bytes).includes?("Content-Length: 4").should be_true # what ^R sends
+    view.request_text.includes?("Content-Length: 4").should be_true              # editor matches (was 8)
+    view.request_text.includes?("Content-Length: 8").should be_false
+  end
+
   it "keeps the REQUEST editor's Content-Length in sync while editing the body" do
     view = ReplayView.new
     view.restore("https://h.test",
       "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nhi", false, true)
-    view.pane_advance(1) # :target → :request
+    view.pane_advance(1)      # :target → :request
     view.goto_request_line(5) # body line
     view.edit_insert('!')
-    view.request_text.includes?("Content-Length: 3").should be_true  # body "hi!" is 3 bytes
+    view.request_text.includes?("Content-Length: 3").should be_true # body "hi!" is 3 bytes
     view.request_text.includes?("Content-Length: 99").should be_false
   end
 

@@ -718,9 +718,18 @@ module Gori::Tui
     # sync_content_length works unchanged. A chain-less `§v§` renders `v`; a failing chain
     # passes the value through untransformed.
     private def marked_request_bytes : Bytes
-      tmpl = Fuzz::Template.parse(String.new(@editor.to_bytes))
-      raw = tmpl.render(tmpl.apply_chains(tmpl.default_payloads, Convert.shared_registry))
+      raw = render_marked(@editor.to_bytes)
       @auto_content_length ? sync_content_length(raw) : raw
+    end
+
+    # Render the §…§ template in `raw` (each marked default through its inline Convert
+    # chain), returning wire-form bytes with the markers stripped. Shared by the
+    # MARK-transform send AND the CL reflection so both derive Content-Length from the
+    # SAME rendered body — otherwise the visible header showed a CL for the raw marked
+    # text while ^R sent one for the rendered body.
+    private def render_marked(raw : Bytes) : Bytes
+      tmpl = Fuzz::Template.parse(String.new(raw))
+      tmpl.render(tmpl.apply_chains(tmpl.default_payloads, Convert.shared_registry))
     end
 
     # A replay round-trip is outstanding (set/cleared by the Runner around the
@@ -874,8 +883,12 @@ module Gori::Tui
       return if @decode_kind && @req_pane == :decoded
 
       raw = @editor.to_bytes
-      synced = sync_content_length(raw)
-      return if synced == raw
+      # In MARK-transform mode the CL that ^R actually sends is computed from the
+      # RENDERED template (markers stripped, chains applied), not the raw marked text —
+      # reflect THAT value so the visible header matches request_bytes.
+      source = @mark_transform ? render_marked(raw) : raw
+      synced = sync_content_length(source)
+      return if synced == source
 
       synced_head = String.new(synced).split("\r\n\r\n", limit: 2).first
       return unless synced_head
