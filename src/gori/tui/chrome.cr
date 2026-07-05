@@ -86,7 +86,7 @@ module Gori::Tui
                             scope : String, rules : String = "", intercept : String = "") : Nil
       screen.fill(rect, Theme.panel)
       x = screen.text(rect.x + 1, rect.y, "ǤØɌɨ", Theme.text_bright, Theme.panel, Attribute::Bold)
-      screen.text(x + 1, rect.y, "· #{project}", Theme.muted, Theme.panel)
+      name_x = x + 1
 
       # right-aligned status chips: scope:N · rules:N · intercept:on(N) · listen · h:MM AM/PM
       # value-emphasized, dim · separators; the hot intercept state in RED. The clock
@@ -97,7 +97,14 @@ module Gori::Tui
       chips << {intercept, Theme.red} unless intercept.empty?
       chips << {listen, Theme.muted}
       chips << {time, Theme.muted}
-      render_chips(screen, rect, chips)
+
+      # Bound the project name and floor the chips past it, so neither overwrites the
+      # other at narrow widths (previously the name was unbounded and render_chips got
+      # no min_x, so the chips slid left and collided with the project name).
+      chips_left = {rect.right - chips_width(chips) - 1, name_x}.max
+      name_end = screen.text(name_x, rect.y, "· #{project}", Theme.muted, Theme.panel,
+        width: {chips_left - name_x - 1, 0}.max)
+      render_chips(screen, rect, chips, min_x: name_end + 1)
     end
 
     # A horizontal tab menu (row 1) styled as a segmented control. The active tab

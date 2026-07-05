@@ -30,9 +30,9 @@ module Gori::Tui
     QL_FIELDS = %w(host path method status scheme body header size dur tag)
 
     # Right-aligned column widths: path memo sits left of the method/aside cluster.
-    TAG_COL_W = 16
-    METHODS_COL_W = 8
-    COL_GAP = 1 # minimum blank column between tag text and methods/aside
+    TAG_COL_W     = 16
+    METHODS_COL_W =  8
+    COL_GAP       =  1 # minimum blank column between tag text and methods/aside
 
     def initialize
       @hosts = [] of Node
@@ -457,8 +457,31 @@ module Gori::Tui
       mx = rect.x + 1 + row.depth * 2
       marker, mcolor = node_marker(node, host && node.in_scope)
       screen.cell(mx, y, marker, mcolor, bg)
-      lx = screen.text(mx + 2, y, node.label, label_color(host, node), bg)
+      lx0 = mx + 2
+      # Bound the label to the pane. Unbounded, a deeply-nested long leaf name overran
+      # the pane's right BORDER and pushed label_end off-screen, so draw_cluster's
+      # collision checks dropped this row's tag memo AND method chips. It's now clipped
+      # (with an ellipsis) before whichever right column the row has.
+      lx = screen.text(lx0, y, node.label, label_color(host, node), bg, width: label_width(rect, node, host, lx0))
       draw_cluster(screen, rect, node, host, y, bg, lx)
+    end
+
+    # The label's max width: it stops before the tag column (when the node carries a
+    # memo), else before the right cluster (methods/aside), else the pane's right edge,
+    # always leaving COL_GAP and the border column clear.
+    private def label_width(rect : Rect, node : Node, host : Bool, lx0 : Int32) : Int32
+      cx = cluster_start(rect, node, host)
+      limit =
+        if node.tag && !node.grouped
+          tag_right = tag_col_right(rect)
+          tag_right = {tag_right, cx - COL_GAP - 1}.min if cx
+          {tag_right - TAG_COL_W + 1, rect.x + 1}.max
+        elsif cx
+          cx
+        else
+          rect.right
+        end
+      {limit - lx0 - COL_GAP, 1}.max
     end
 
     # Right edge of the tag column (COL_GAP clear of the METHODS column).

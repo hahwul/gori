@@ -159,7 +159,10 @@ module Gori::Tui
 
     private def render_history_full(screen : Screen, rect : Rect, headline : String,
                                     addr : String, capturing : Bool) : Nil
-      inner_h = 5 + (capturing ? 0 : 1) + 2
+      # +3 (not +2): the intro/addr/diagram block spans through relative row 3, the
+      # divider + palette hint reach row 6, and the final "or set your client's proxy"
+      # line lands on row 7 — which the old budget pushed onto the card's bottom border.
+      inner_h = 5 + (capturing ? 0 : 1) + 3
       _, inner, ix, iw = begin_card(screen, rect, headline, "FLOW LOG", inner_h)
       y = inner.y
 
@@ -181,7 +184,9 @@ module Gori::Tui
 
     private def render_sitemap_full(screen : Screen, rect : Rect, headline : String,
                                     addr : String, capturing : Bool) : Nil
-      inner_h = 6 + (capturing ? 0 : 1) + 2
+      # +3 (not +2): the final "or set your client's proxy" line lands one row below
+      # the palette hint, which the old budget pushed onto the card's bottom border.
+      inner_h = 6 + (capturing ? 0 : 1) + 3
       _, inner, ix, iw = begin_card(screen, rect, headline, "SITE MAP", inner_h)
       y = inner.y
 
