@@ -182,7 +182,12 @@ module Gori
                 store.close
                 abort "gori run history: query #{q.inspect} did not match any field (check syntax, e.g. status:>=500 host:example.com method:POST)"
               end
-              store.search(filter, limit)
+              begin
+                store.search(filter, limit, raise_on_error: true)
+              rescue ex
+                store.close
+                abort "gori run history: query #{q.inspect} failed: #{ex.message}"
+              end
             else
               store.recent_flows(limit)
             end
@@ -1034,7 +1039,11 @@ module Gori
 
         store = open_store(resolve_read_project(project_name, db_path))
         groups, scanned = begin
-          ids = prism_scan_ids(store, filter)
+          ids = begin
+            prism_scan_ids(store, filter)
+          rescue ex
+            abort "gori run prism: query #{query.inspect} failed: #{ex.message}"
+          end
           {Prism.group(scan_flows(store, ids)), ids.size}
         ensure
           store.close
@@ -1067,7 +1076,7 @@ module Gori
       # Flow IDs to scan, oldest-first (ascending id) — a stable, deterministic grouping order.
       # Reuses the proven search/recent_flows query paths.
       private def self.prism_scan_ids(store : Store, filter : QL::Filter?) : Array(Int64)
-        rows = filter ? store.search(filter, Int32::MAX) : store.recent_flows(Int32::MAX)
+        rows = filter ? store.search(filter, Int32::MAX, raise_on_error: true) : store.recent_flows(Int32::MAX)
         rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
       end
 
@@ -1224,6 +1233,8 @@ module Gori
         store = open_store(resolve_read_project(project_name, db_path))
         hosts = begin
           collect_sitemap(store, filter, limit, in_scope, group)
+        rescue ex
+          abort "gori run sitemap: query #{query.inspect} failed: #{ex.message}"
         ensure
           store.close
         end

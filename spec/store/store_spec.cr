@@ -182,6 +182,65 @@ describe Gori::Store do
     end
   end
 
+  it "insert_finding returns the finding's own id, not the entity_links row id, when linked to a flow" do
+    with_store do |store|
+      fid = store.insert_flow(sample_request(target: "/f"))
+      # An unlinked finding first (findings id 1, no entity_links row), so the linked
+      # finding's id (2) diverges from its link row's id (1) — exposing the old bug
+      # that returned last_insert_rowid AFTER the entity_links insert.
+      store.insert_finding("no-link", Gori::Store::Severity::Low, "acme.test", nil)
+      linked_id = store.insert_finding("linked", Gori::Store::Severity::High, "acme.test", fid)
+      linked_id.should eq(2)
+      store.findings.find { |f| f.id == linked_id }.not_nil!.title.should eq("linked")
+    end
+  end
+
+  it "migrate! serializes concurrent openers: a second opener sees the migrated version" do
+    path = File.tempname("gori-migrace", ".db")
+    db1 = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+    db2 = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+    begin
+      Gori::Store::Schema.migrate!(db1)
+      # The second opener re-reads user_version UNDER the write lock and finds nothing
+      # to do — rather than racing the same CREATE/ALTER and crashing on "table exists".
+      Gori::Store::Schema.migrate!(db2)
+      db2.scalar("PRAGMA user_version").as(Int64).should eq(Gori::Store::Schema::VERSION)
+    ensure
+      db1.close
+      db2.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "retention prune keeps an in-flight h2 connection's frame log but reaps orphaned ones" do
+    path = File.tempname("gori-h2ret", ".db")
+    db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+    Gori::Store::Schema.migrate!(db)
+    store = Gori::Store.new(db, nil, retention_flows: 5, prune_interval: 10)
+    begin
+      # IN-FLIGHT: a RECENT frame, no flow references it yet (flow not projected).
+      db.exec("INSERT INTO h2_connections (id, created_at, host, port, alpn) VALUES (1, 1, 'h', 443, 'h2')")
+      db.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) VALUES (1, 999999, 'in', 1, 0, 0, 3, ?)", "abc".to_slice)
+      # ORPHANED: old frames, no flow, no recent activity.
+      db.exec("INSERT INTO h2_connections (id, created_at, host, port, alpn) VALUES (2, 1, 'h', 443, 'h2')")
+      db.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) VALUES (2, 1, 'in', 1, 0, 0, 3, ?)", "old".to_slice)
+
+      12.times { |i| store.insert_flow(sample_request(target: "/#{i}")) } # trigger prune
+
+      store.count_h2_frames(1_i64).should eq(1) # in-flight: survives (was silently deleted → dangling FK)
+      store.count_h2_frames(2_i64).should eq(0) # orphaned: reaped
+      db.scalar("SELECT COUNT(*) FROM h2_connections WHERE id = 1").as(Int64).should eq(1)
+      db.scalar("SELECT COUNT(*) FROM h2_connections WHERE id = 2").as(Int64).should eq(0)
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
   it "backfills the body FTS index for rows that predate the V8 migration" do
     path = File.tempname("gori-bf", ".db")
     db = DB.open("sqlite3:#{path}?journal_mode=wal")

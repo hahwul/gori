@@ -331,17 +331,22 @@ module Gori
 
     def insert_finding(title : String, severity : Severity, host : String?, flow_id : Int64?) : Int64
       ts = now_us
+      finding_id = 0_i64
       exec_task ->(c : DB::Connection) {
         c.exec("INSERT INTO findings (created_at, updated_at, title, severity, host, flow_id, notes) VALUES (?,?,?,?,?,?,'')",
           ts, ts, title, severity.value, host, flow_id)
+        # Capture the finding's own id BEFORE the entity_links insert below overwrites
+        # last_insert_rowid: exec_task's generic reply reads it AFTER the closure, so with
+        # a flow_id it would otherwise return the link row's id, not the finding's.
+        finding_id = c.scalar("SELECT last_insert_rowid()").as(Int64)
         if fid = flow_id
-          finding_id = c.scalar("SELECT last_insert_rowid()").as(Int64)
           c.exec(
             "INSERT OR IGNORE INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES ('finding', ?, 'flow', ?, ?)",
             finding_id, fid, ts)
         end
         nil
       }
+      finding_id
     end
 
     def update_finding(id : Int64, *, title : String? = nil, severity : Severity? = nil,
@@ -1069,7 +1074,13 @@ module Gori
 
     # Newest-first flows matching a compiled QL filter. `before_id` is a cursor for
     # paging into older matches (stable as new rows append, unlike OFFSET).
-    def search(filter : QL::Filter, limit : Int32, before_id : Int64? = nil) : Array(FlowRow)
+    # `raise_on_error` propagates a SQLite execution failure (a malformed FTS phrase,
+    # or a pathological query hitting SQLite's expression-tree-depth limit) instead of
+    # degrading to no matches. The TUI keeps the default (never crash the live run
+    # loop); one-shot CLI callers pass true so a failed query is reported distinctly
+    # from a genuinely empty result rather than as a clean "no flows match".
+    def search(filter : QL::Filter, limit : Int32, before_id : Int64? = nil, *,
+               raise_on_error : Bool = false) : Array(FlowRow)
       rows = [] of FlowRow
       args = filter.args.dup
       if before_id
@@ -1085,9 +1096,7 @@ module Gori
       end
       rows
     rescue ex
-      # A malformed FTS phrase (FTS5 operator syntax, stray characters) raises a
-      # SQLite error; a live filter must never crash the TUI run loop — degrade to
-      # no matches and let the user fix the query.
+      raise ex if raise_on_error
       STDERR.puts "gori: search failed (#{ex.message})"
       [] of FlowRow
     end
@@ -1177,7 +1186,8 @@ module Gori
     # with thousands of endpoints is already past human-scannable).
     SITEMAP_MAX = 10_000
 
-    def sitemap_entries(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX) : Array({String, String, String})
+    def sitemap_entries(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
+                        raise_on_error : Bool = false) : Array({String, String, String})
       rows = [] of {String, String, String}
       args = filter.args.dup
       args << limit
@@ -1187,9 +1197,11 @@ module Gori
       end
       rows
     rescue ex
-      # The Sitemap's `/` filter feeds user QL here; a malformed FTS phrase raises a
-      # SQLite error. A live filter must never crash the run loop — degrade to no
-      # matches (mirrors #search) and let the user fix the query.
+      # The Sitemap's `/` filter feeds user QL here; a malformed FTS phrase or a query
+      # too complex for SQLite raises. The live TUI must never crash (degrade to no
+      # matches, mirrors #search); the one-shot CLI passes raise_on_error so a failed
+      # query reads distinctly from a genuinely empty tree.
+      raise ex if raise_on_error
       STDERR.puts "gori: sitemap query failed (#{ex.message})"
       [] of {String, String, String}
     end
@@ -1355,13 +1367,18 @@ module Gori
         c.exec("DELETE FROM ws_messages WHERE flow_id <= ?", cutoff)
         c.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
-        # h2 frames/connections key off conn_id, not flow id — drop those no longer
-        # referenced by a surviving flow. Guard with `created_at < oldest-kept` so
-        # an IN-FLIGHT connection (frames logged but its flow not yet projected)
-        # isn't wiped: its raw log only goes once it's older than everything kept.
-        # The subquery excludes NULLs so the NOT IN logic is well-defined.
+        # h2 frames/connections key off conn_id, not flow id. Reap a connection's raw
+        # log only once it's (a) not referenced by any surviving flow AND (b) INACTIVE
+        # — its newest frame is older than the oldest kept flow. Keying (b) on frame
+        # recency, not the connection's OPEN time, is the fix: a long-lived in-flight
+        # stream (flow not projected yet, but still logging frames) has recent frames,
+        # so it's never wiped. The old `h2_connections.created_at < oldest` guard
+        # deleted exactly such a stream once retention churn advanced the window past
+        # its open time, leaving a dangling h2_conn_id + empty frame log. (b)'s absence
+        # of any recent frame still lets genuinely-orphaned connections be reaped.
         oldest = c.query_one?("SELECT MIN(created_at) FROM flows", as: Int64?) || Int64::MAX
-        stale = "id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL) AND created_at < ?"
+        stale = "id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL) " \
+                "AND id NOT IN (SELECT conn_id FROM h2_frames WHERE created_at >= ?)"
         c.exec("DELETE FROM h2_frames WHERE conn_id IN (SELECT id FROM h2_connections WHERE #{stale})", oldest)
         c.exec("DELETE FROM h2_connections WHERE #{stale}", oldest)
       end

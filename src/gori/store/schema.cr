@@ -484,12 +484,23 @@ module Gori
       MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25]
 
       def self.migrate!(db : DB::Database) : Nil
-        current = db.scalar("PRAGMA user_version").as(Int64).to_i
-        MIGRATIONS[current..]?.try &.each_with_index(offset: current) do |statements, idx|
-          db.transaction do |tx|
-            conn = tx.connection
-            statements.each { |sql| conn.exec(sql) }
-            conn.exec("PRAGMA user_version = #{idx + 1}")
+        db.using_connection do |conn|
+          # Take the write lock (RESERVED) BEFORE reading user_version, so concurrent
+          # openers of the same db serialize here: the loser blocks on BEGIN IMMEDIATE
+          # (busy_timeout), then re-reads an already-migrated user_version and does
+          # nothing — rather than both reading current=0 and racing the same CREATE/
+          # ALTER statements, which crashed the loser with an uncaught SQLite error.
+          conn.exec("BEGIN IMMEDIATE")
+          begin
+            current = conn.scalar("PRAGMA user_version").as(Int64).to_i
+            MIGRATIONS[current..]?.try &.each_with_index(offset: current) do |statements, idx|
+              statements.each { |sql| conn.exec(sql) }
+              conn.exec("PRAGMA user_version = #{idx + 1}")
+            end
+            conn.exec("COMMIT")
+          rescue ex
+            conn.exec("ROLLBACK") rescue nil
+            raise ex
           end
         end
       end
