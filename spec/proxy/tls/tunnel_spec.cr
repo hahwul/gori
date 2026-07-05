@@ -101,4 +101,52 @@ describe Gori::Proxy::Tls::Tunnel do
       FileUtils.rm_rf(dir) if Dir.exists?(dir)
     end
   end
+
+  it "downgrades an h2 client to HTTP/1.1 so live Match&Replace rules still apply" do
+    dir = File.tempname("gori-ca-mr")
+    dbpath = File.tempname("gori-mr", ".db")
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    store : Gori::Store? = nil
+    begin
+      origin_port = start_tls_origin("OK", seen)
+      ca = CertAuthority.load_or_create(dir)
+      store = Gori::Store.open(dbpath)
+      rules = Gori::Rules.load(store.not_nil!)
+      rules.add(Gori::Store::RuleTarget::Request, "/secret", "/rewritten") # one enabled rule → active
+      rules.active?.should be_true
+
+      sink = RecordingSink.new(done)
+      proxy = Server.new("127.0.0.1", 0, sink, tls: Tunnel.new(ca, verify_upstream: false, rewriter: rules))
+      proxy.start
+
+      raw = TCPSocket.new("127.0.0.1", proxy.port)
+      raw << "CONNECT localhost:#{origin_port} HTTP/1.1\r\nHost: localhost:#{origin_port}\r\n\r\n"
+      raw.flush
+      Codec::Http1.read_head(raw).not_nil!
+
+      client_ctx = OpenSSL::SSL::Context::Client.new
+      client_ctx.alpn_protocol = "h2" # client OFFERS h2
+      ca_cert = Cert.read_pem(File.join(dir, "root.crt.pem"))
+      st = LibSSL.ssl_ctx_get_cert_store(client_ctx.to_unsafe)
+      LibCrypto.x509_store_add_cert(st, ca_cert.handle)
+
+      tls = OpenSSL::SSL::Socket::Client.new(raw, context: client_ctx, sync_close: true, hostname: "localhost")
+      tls.alpn_protocol.should_not eq("h2") # gori refused to advertise h2 → the rewritable h1 path
+      tls << "GET /secret HTTP/1.1\r\nHost: localhost\r\n\r\n"
+      tls.flush
+      tls.gets_to_end
+      tls.close
+
+      done.receive
+      proxy.stop
+      seen.receive.should eq("GET /rewritten HTTP/1.1") # the rule applied (was silently skipped on h2)
+    ensure
+      store.try(&.close)
+      FileUtils.rm_rf(dir) if Dir.exists?(dir)
+      File.delete?(dbpath)
+      File.delete?("#{dbpath}-wal")
+      File.delete?("#{dbpath}-shm")
+    end
+  end
 end
