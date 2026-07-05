@@ -38,18 +38,28 @@ module Gori
         end
       end
 
+      # Neutralize terminal control bytes in an untrusted CAPTURED string before it is
+      # printed to a live terminal. A malicious client can embed ANSI/OSC escape
+      # sequences in its request line (method / host / target), which `puts` would
+      # otherwise inject verbatim into the operator's terminal (and re-inject on every
+      # later view). Replace every control char (incl. ESC, CR/LF, tab, C1) with '·'.
+      def self.term_safe(s : String) : String
+        return s unless s.each_char.any?(&.control?)
+        String.build { |io| s.each_char { |c| io << (c.control? ? '·' : c) } }
+      end
+
       # "#42  GET   https  example.com:443/users  200  1.2kB  3ms  [Complete]"
       # Columns are padded for scannability; status/state make capture progress legible.
       def self.flow_row_text(row : Store::FlowRow) : String
         status = row.status.try(&.to_s) || "—"
         # HTTP proxied requests store an absolute-form target ("http://host/path")
         # that already carries the host; only origin-form targets need host prefixed.
-        loc = row.target.starts_with?("http") ? row.target : "#{row.host}#{row.target}"
+        loc = term_safe(row.target.starts_with?("http") ? row.target : "#{row.host}#{row.target}")
         dur = row.duration_us.try { |us| " #{human_us(us)}" } || ""
         String.build do |io|
           io << '#' << row.id.to_s.ljust(6)
-          io << row.method.ljust(7)
-          io << row.scheme.ljust(6)
+          io << term_safe(row.method).ljust(7)
+          io << term_safe(row.scheme).ljust(6)
           io << loc
           io << "  -> " << status
           io << "  " << human_size(row.size)

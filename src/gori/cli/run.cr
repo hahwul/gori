@@ -164,11 +164,13 @@ module Gori
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
-        parser.parse(args)
-        # Accept a positional QL too ("gori run history status:404"), mirroring the TUI's `/`
-        # bar — otherwise a positional query was silently dropped and EVERY flow dumped.
-        # An explicit --query wins. Multiple terms join with spaces (QL ANDs them).
-        query ||= positional.join(' ') unless positional.empty?
+        neg_terms, opt_args = split_ql_negations(args)
+        parser.parse(opt_args)
+        # Accept a positional QL too ("gori run history status:404" / "-status:404"),
+        # mirroring the TUI's `/` bar — otherwise a positional query was silently dropped
+        # and EVERY flow dumped. An explicit --query wins. Terms join with spaces (QL ANDs).
+        positional_query = (positional + neg_terms).join(' ')
+        query ||= positional_query unless positional_query.empty?
 
         store = open_store(resolve_read_project(project_name, db_path))
         begin
@@ -1021,10 +1023,12 @@ module Gori
           p.invalid_option { |f| abort "gori run prism: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run prism: missing value for #{f}" }
         end
-        parser.parse(args)
-        # A positional QL is accepted too ("gori run prism status:>=500"), mirroring history; an
-        # explicit --query wins. Multiple terms join with spaces (QL ANDs them).
-        query ||= positional.join(' ') unless positional.empty?
+        neg_terms, opt_args = split_ql_negations(args)
+        parser.parse(opt_args)
+        # A positional QL is accepted too ("gori run prism status:>=500" / "-status:200"),
+        # mirroring history; an explicit --query wins. Terms join with spaces (QL ANDs them).
+        positional_query = (positional + neg_terms).join(' ')
+        query ||= positional_query unless positional_query.empty?
 
         filter : QL::Filter? = nil
         if q = query
@@ -1221,10 +1225,12 @@ module Gori
           p.invalid_option { |f| abort "gori run sitemap: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run sitemap: missing value for #{f}" }
         end
-        parser.parse(args)
-        # Accept a positional QL too ("gori run sitemap host:api"), mirroring history's
-        # `/` bar; an explicit --query wins. Multiple terms join with spaces (QL ANDs).
-        query ||= positional.join(' ') unless positional.empty?
+        neg_terms, opt_args = split_ql_negations(args)
+        parser.parse(opt_args)
+        # Accept a positional QL too ("gori run sitemap host:api" / "-status:404"), mirroring
+        # history's `/` bar; an explicit --query wins. Terms join with spaces (QL ANDs).
+        positional_query = (positional + neg_terms).join(' ')
+        query ||= positional_query unless positional_query.empty?
 
         # Parse/validate the QL BEFORE opening the store: abort skips ensure blocks, so a
         # bad query must not leave a store handle open.
@@ -1432,6 +1438,17 @@ module Gori
         Store.open(project.db_path)
       rescue ex : DB::Error | SQLite3::Exception
         abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
+      end
+
+      # QL negation terms ("-field:value" / "-field~rx") begin with '-', so OptionParser
+      # aborts them as unknown options before the positional-query join ever runs. Pull
+      # them out first so they join the query like any other positional term. A single-
+      # letter short flag ("-n50", "-k") has no ':'/'~' after the name, so it's untouched.
+      private def self.split_ql_negations(args : Array(String)) : {Array(String), Array(String)}
+        neg = [] of String
+        rest = [] of String
+        args.each { |a| a.matches?(/\A-[A-Za-z]+[:~]/) ? (neg << a) : (rest << a) }
+        {neg, rest}
       end
 
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64
