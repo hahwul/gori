@@ -299,7 +299,7 @@ module Gori::Tui
             px = cx0
             if !prefix.empty?
               screen.text(px, rect.y + i, prefix, Theme.text, width: cw)
-              px += Screen.display_width(prefix)
+              px += Screen.column_width(prefix) # ≥1/char, matching the drawn cells + caret math
             end
             if !@preedit.empty?
               screen.text(px, rect.y + i, @preedit, Theme.text, attr: Attribute::Underline, width: cw - (px - cx0))
@@ -324,7 +324,10 @@ module Gori::Tui
           SearchHi.mark(screen, cx0, rect.y + i, st, @search_hl, cx0 + cw)
         end
         next unless cursor && li == @cy
-        prefix_w = Screen.display_width(line[0, @cx])
+        # column_width (not display_width): a raw control char in the prefix occupies a
+        # cell and click-to-cursor counts it, so the caret must too — else it sits one
+        # column left of the real position and paints over a glyph.
+        prefix_w = Screen.column_width(line[0, @cx])
         preedit_w = Screen.display_width(@preedit)
         cxs = cx0 + prefix_w + preedit_w - @xscroll
         if cxs >= cx0 && cxs < cx0 + cw

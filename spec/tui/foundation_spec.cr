@@ -14,6 +14,22 @@ describe Gori::Tui::Rect do
   end
 end
 
+describe Gori::Tui::Screen do
+  it "column_width counts a raw control char as 1 column (inverse of column_for)" do
+    line = "ab\rc" # a lone CR (display width 0) between real chars
+    # display_width under-counts the control char (0); column_width matches the drawn
+    # cells + column_for, so the caret after it lands on the right column.
+    Screen.display_width(line).should eq(3)                                 # CR contributes 0
+    Screen.column_width(line).should eq(4)                                  # CR occupies a cell → counts as 1
+    Screen.column_for(line, Screen.column_width(line)).should eq(line.size) # round-trips
+  end
+
+  it "column_width equals display_width for plain text and doubles wide glyphs" do
+    Screen.column_width("hello").should eq(5)
+    Screen.column_width("日本").should eq(4) # CJK: 2 columns each, same as display_width
+  end
+end
+
 describe Gori::Tui::Layout do
   it "splits the screen into topbar / menu / rule / body (inset with padding) / status" do
     l = Layout.compute(100, 30)

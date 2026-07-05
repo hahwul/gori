@@ -78,6 +78,17 @@ module Gori::Tui
       str.size
     end
 
+    # Column span of `str` where EVERY char counts at least 1 column — the exact
+    # inverse of `column_for`. `display_width` alone reports 0 for a raw control char
+    # (e.g. a lone \r), but each such char still occupies a drawn cell and click-to-
+    # cursor / Reveal count it as ≥1, so cursor placement must too or it lands one
+    # column short and overwrites a glyph.
+    def self.column_width(str : String) : Int32
+      w = 0
+      str.each_char { |ch| w += {display_width(ch.to_s), 1}.max }
+      w
+    end
+
     def cell(x : Int32, y : Int32, grapheme : Char | String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None) : Nil
       return unless x >= 0 && y >= 0 && x < @width && y < @height
