@@ -38,6 +38,30 @@ describe Gori::Sitemap do
       root.path.should eq("/")
       root.methods.should eq(["GET"])
     end
+
+    it "does not fabricate path nodes from an unencoded '/' in a query value" do
+      hosts = Gori::Sitemap.build([{"h", "GET", "/api?redirect=/home/dashboard"}])
+      api = hosts.first.children
+      api.map(&.label).should eq(["api?redirect=/home/dashboard"]) # one leaf, not a fake home/dashboard subtree
+      api.first.children.should be_empty
+      api.first.path.should eq("/api?redirect=/home/dashboard")
+    end
+
+    it "normalizes a trailing slash but keeps an interior '//' distinct" do
+      hosts = Gori::Sitemap.build([
+        {"h", "GET", "/dup/a"},
+        {"h", "GET", "/dup/a/"},  # trailing slash → same endpoint as /dup/a
+        {"h", "POST", "//dup/a"}, # interior '//' → a DISTINCT literal path
+      ])
+      root = hosts.first
+      # /dup/a and /dup/a/ merged onto the same leaf (methods just GET, deduped)
+      dup = root.children.find! { |c| c.label == "dup" }
+      dup.children.find! { |c| c.label == "a" }.methods.should eq(["GET"])
+      # //dup/a lives under a distinct interior-empty node, not merged into /dup/a
+      empties = root.children.select { |c| c.label == "" }
+      empties.size.should eq(1)
+      empties.first.children.find! { |c| c.label == "dup" }.children.find! { |c| c.label == "a" }.methods.should eq(["POST"])
+    end
   end
 
   describe ".endpoint_count" do

@@ -77,10 +77,21 @@ module Gori
         hosts << node
         node
       end
-      segments = path.split('/').reject(&.empty?)
+      # Segment the PATH only: an unencoded '/' in a query VALUE (e.g. ?redirect=/a/b)
+      # must not fabricate path-tree nodes. The query rides on the leaf so /x?a=1 and
+      # /x?a=2 stay distinct endpoints without corrupting the tree.
+      qidx = path.index('?')
+      path_part = qidx ? path[0...qidx] : path
+      suffix = qidx ? path[qidx..] : ""
+      segments = path_part.split('/')
+      segments.shift if segments.first? == "" # the mandatory leading-slash empty
+      segments.pop if segments.last? == ""    # a trailing slash → same endpoint (normalized)
+      # An INTERIOR empty (a literal "//") is kept, so //dup/a stays distinct from /dup/a.
+      segments[-1] = "#{segments[-1]}#{suffix}" unless segments.empty? || suffix.empty?
       if segments.empty?
-        node = host_node.child("/")
-        node.path = "/"
+        leaf = suffix.empty? ? "/" : suffix
+        node = host_node.child(leaf)
+        node.path = suffix.empty? ? "/" : "/#{suffix}"
       else
         acc = ""
         node = host_node
