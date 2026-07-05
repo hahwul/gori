@@ -112,7 +112,8 @@ module Gori::Proxy
       spawn do
         client.sync = true # immediate writes (P6)
         client.tcp_nodelay = true
-        ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor, host_overrides: @host_overrides).run
+        ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor,
+          host_overrides: @host_overrides, self_addr: {@host, @port}).run
       rescue
         # Setup (setsockopt) can raise if the peer RST'd between accept and here;
         # ClientConn never took ownership, so close the accepted fd ourselves or

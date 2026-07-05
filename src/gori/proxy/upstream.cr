@@ -36,6 +36,34 @@ module Gori::Proxy
       overrides.try(&.connect_ip(host)) || Settings.host_override_ip(host) || host
     end
 
+    # True when dialing `host:port` (after override resolution) would connect back
+    # to gori's own listener `self_addr` — an unbounded self-proxy loop (gori dials
+    # itself, its accept loop treats that as a new client, re-resolves the same
+    # target, dials itself again…). Triggered when a hostname override — or a request
+    # Host — points at the proxy's own bind. Only a matching port on a loopback/self
+    # address counts, so proxying a real external host on the same port is unaffected.
+    def self.loops_to_self?(host : String, port : Int32, overrides : Gori::HostOverrides?,
+                            self_addr : {String, Int32}) : Bool
+      return false unless port == self_addr[1]
+      target = normalize_host(connect_target(host, overrides))
+      bind = normalize_host(self_addr[0])
+      return true if target == bind
+      loopback?(target) && (loopback?(bind) || wildcard?(bind))
+    end
+
+    private def self.normalize_host(h : String) : String
+      h = h[1...-1] if h.starts_with?('[') && h.ends_with?(']') # strip IPv6 brackets
+      h.downcase
+    end
+
+    private def self.loopback?(h : String) : Bool
+      h == "localhost" || h == "::1" || h == "0:0:0:0:0:0:0:1" || h.starts_with?("127.")
+    end
+
+    private def self.wildcard?(h : String) : Bool
+      h.empty? || h == "0.0.0.0" || h == "::"
+    end
+
     private def self.direct_dial(host : String, port : Int32,
                                  connect_timeout : Time::Span = CONNECT_TIMEOUT,
                                  io_timeout : Time::Span = IO_TIMEOUT) : TCPSocket?

@@ -32,7 +32,8 @@ module Gori::Proxy
                    @fixed_host : String? = nil, @fixed_port : Int32 = 0,
                    @tls_upstream : Bool = false, @verify_upstream : Bool = true,
                    @rewriter : HeadRewriter? = nil, @interceptor : Gori::Interceptor? = nil,
-                   @host_overrides : Gori::HostOverrides? = nil)
+                   @host_overrides : Gori::HostOverrides? = nil,
+                   @self_addr : {String, Int32}? = nil)
       # Per-connection upstream reuse (see `acquire_upstream`). One live origin
       # connection kept across this client's keep-alive requests.
       @upstream = nil.as(IO?)
@@ -94,6 +95,15 @@ module Gori::Proxy
       started = Time.instant
       created_at = now_us
       host, port, scheme, forward_head = resolve_forward(req)
+
+      # Refuse to forward a request whose (override-resolved) target is gori's own
+      # listener — otherwise gori dials itself, accepts that as a new client, and
+      # loops forever. Record it as a visible error instead.
+      if (sa = @self_addr) && Upstream.loops_to_self?(host, port, @host_overrides, sa)
+        record_error(req, scheme, host, port, created_at, "refusing to proxy to self (loop): #{host}:#{port}")
+        write_gateway_error
+        return false
+      end
 
       # Match&Replace (request head): rewrite the bytes sent upstream. Only when
       # a rule actually changes something do we capture the modified bytes (the
@@ -542,6 +552,13 @@ module Gori::Proxy
     # CONNECT host:port -> 200, then TLS MITM (if configured) or blind tunnel.
     private def handle_connect(req : Codec::RawRequest) : Bool
       host, port = Upstream.split_host_port(req.target, 443)
+
+      # A CONNECT whose (override-resolved) authority is gori's own listener would
+      # loop the proxy into itself — refuse before answering 200 / starting MITM.
+      if (sa = @self_addr) && Upstream.loops_to_self?(host, port, @host_overrides, sa)
+        write_gateway_error
+        return false
+      end
 
       if tls = @tls
         @io.write("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)

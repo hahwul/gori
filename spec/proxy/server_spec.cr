@@ -435,6 +435,29 @@ describe Gori::Proxy::Server do
     resp.error.not_nil!.should contain("truncated")
   end
 
+  it "refuses to proxy a request that targets its own listener (no self-loop)" do
+    done = Channel(Nil).new(1)
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    # Host points at the proxy's OWN address — a naive forward would dial itself,
+    # accept that as a new client, and loop forever.
+    client << "GET / HTTP/1.1\r\nHost: 127.0.0.1:#{proxy.port}\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    sink.responses.size.should eq(1)
+    resp = sink.responses.first
+    resp.state.should eq(Gori::Store::FlowState::Error)
+    resp.error.not_nil!.downcase.should contain("self")
+  end
+
   it "records a visible error flow for a CL+TE request instead of dropping it" do
     seen = Channel(String).new(1)
     done = Channel(Nil).new(1)
