@@ -30,15 +30,17 @@ module Gori::Tui
     WORDMARK = "𝓰𝓸𝓻𝓲"
 
     # Draw WORDMARK left-aligned at (x, y), or horizontally centred when `center_w`
-    # is set. Returns the x just past the drawn wordmark.
+    # is set. Returns the x just past the drawn wordmark. `fg` exists for the
+    # picker's entrance fade (blends toward bg); everything else takes the default.
     def self.render_wordmark(screen : Screen, x : Int32, y : Int32, *, bg : Color = Theme.bg,
-                             attr : Attribute = Attribute::Bold, center_w : Int32? = nil) : Int32
+                             attr : Attribute = Attribute::Bold, center_w : Int32? = nil,
+                             fg : Color = Theme.text_bright) : Int32
       start_x = if cw = center_w
                   {(cw - Screen.display_width(WORDMARK)) // 2, 0}.max
                 else
                   x
                 end
-      screen.text(start_x, y, WORDMARK, Theme.text_bright, bg, attr)
+      screen.text(start_x, y, WORDMARK, fg, bg, attr)
     end
 
     # Reconcile stored prefs against the canonical catalog → full ordered

@@ -557,7 +557,9 @@ module Gori::Tui
     end
 
     # Linear RGB blend of `hue` toward `base` by ratio t (0 = base, 1 = hue).
-    private def self.blend(hue : Color, base : Color, t : Float64) : Color
+    # Public: marker tints here plus the picker's banner entrance (colour fades
+    # and the glint sweep) derive their in-between shades from the live palette.
+    def self.blend(hue : Color, base : Color, t : Float64) : Color
       hr, hg, hb = hue.to_rgb_components
       lr, lg, lb = base.to_rgb_components
       Color.rgb(
