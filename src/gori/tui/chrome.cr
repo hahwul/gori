@@ -27,8 +27,8 @@ module Gori::Tui
     # this no longer applies.
     DEFAULT_HIDDEN = [:miner]
 
-    # The canonical script wordmark — drawn in the theme accent so it re-themes with
-    # the active palette (GORIDARK: near-white; themes with a gold accent read warm).
+    # The canonical script wordmark — drawn in focus_gold so it re-themes with the
+    # active palette (GORIDARK: subtle gold; other themes mirror their focus pill).
     WORDMARK = "𝓰𝓸𝓻𝓲"
 
     # Display width of WORDMARK in terminal columns (grapheme-aware).
@@ -44,7 +44,7 @@ module Gori::Tui
       cur_x = center_w ? {(center_w - total_w) // 2, 0}.max : x
       WORDMARK.each_grapheme do |g|
         gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
-        screen.cell(cur_x, y, g.to_s, Theme.accent, bg, attr)
+        screen.cell(cur_x, y, g.to_s, Theme.focus_gold, bg, attr)
         cur_x += gw
       end
       cur_x
