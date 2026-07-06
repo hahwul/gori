@@ -764,8 +764,8 @@ module Gori::Tui
     # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
       return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !@rename_open && subtabs_shown?
-      sub_rect, _ = BodyChrome.carve_subtab_row(layout.body)
-      return unless sub_rect.contains?(mx, my)
+      sub_rect = BodyChrome.strip_rect(layout.body, strip: true)
+      return unless sub_rect && sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
         open_rename(seg[0])
       end
@@ -816,8 +816,8 @@ module Gori::Tui
     # Click a Replay/Notes sub-tab chip (carved off the body's top row). Returns true
     # when the click landed on the strip row (handled), false to fall through to body.
     private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
-      sub_rect, _ = BodyChrome.carve_subtab_row(body)
-      return false unless sub_rect.contains?(mx, my)
+      sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?)
+      return false unless sub_rect && sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
         jump_subtab(seg[0])
         focus_pane(:subtabs)

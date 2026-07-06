@@ -167,18 +167,15 @@ module Gori::Tui
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
-      body_rect = rect
-      if subtab_strip_shown?
-        sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
-        BodyChrome.render_subtab_strip(screen, sub_rect, subtab_labels, @idx, focus == :subtabs)
-      end
+      labels = subtab_strip_shown? ? subtab_labels : nil
       s = cur
-      # Each section frames its own card (per-pane focus border), so we hand the view
-      # the full body rect rather than wrapping it in one outer frame.
-      s.view.render(screen, body_rect,
-        input: s.input, chain: s.chain, chain_cx: s.chain_cx, chain_pre: @chain_pre,
-        result: s.result, pane: s.pane, focused: body_focused,
-        popup: @popup, prompt: @prompt, prompt_buf: @prompt_buf)
+      BodyChrome.framed_body(screen, rect, body_focused, focus == :subtabs, labels, @idx) do |content|
+        # Each section frames its own card (per-pane focus border) inside the shell frame.
+        s.view.render(screen, content,
+          input: s.input, chain: s.chain, chain_cx: s.chain_cx, chain_pre: @chain_pre,
+          result: s.result, pane: s.pane, focused: body_focused,
+          popup: @popup, prompt: @prompt, prompt_buf: @prompt_buf)
+      end
     end
 
     # The body dispatcher. Reached only when this tab is active, no overlay is up,
@@ -241,10 +238,9 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
+      body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
       s = cur
-      # The view frames each card itself, so layout takes the full body rect; the
-      # editable content lives one cell inside each card border.
+      # The view frames each card itself; editable content lives one cell inside each card border.
       regions = s.view.layout(body)
       if regions.input.contains?(mx, my)
         s.pane = :input

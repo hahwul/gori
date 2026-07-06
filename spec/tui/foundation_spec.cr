@@ -151,6 +151,16 @@ describe Gori::Tui::Chrome do
     backend.contains?("capture:on").should be_false # replaced, not appended
   end
 
+  it "carves the sub-tab strip inside a framed body" do
+    outer = Rect.new(0, 0, 80, 20)
+    strip = BodyChrome.strip_rect(outer, strip: true).not_nil!
+    content = BodyChrome.content_rect(outer, strip: true)
+    strip.y.should eq(1)      # inside the frame, not on the canvas
+    strip.h.should eq(BodyChrome::STRIP_H)
+    content.y.should eq(strip.y + strip.h)
+    content.h.should eq(outer.h - 2 - BodyChrome::STRIP_H) # frame inset + strip
+  end
+
   it "renders the sub-tab strip on an elevated band with panel pills and a divider" do
     backend = MemoryBackend.new(60, 2)
     screen = Screen.new(backend)

@@ -57,7 +57,40 @@ module Gori::Tui
     # distinct from the lifted PANEL-filled modal overlays.
     def framed(screen : Screen, rect : Rect, focused : Bool, & : Rect ->) : Nil
       Frame.card(screen, rect, bg: Theme.bg, border: focused ? Theme.focus_gold : Theme.border)
-      yield rect.inset(1, 1)
+      yield frame_inner(rect)
+    end
+
+    # One cell inside a body frame — shared by render and click hit-tests.
+    def frame_inner(rect : Rect) : Rect
+      rect.inset(1, 1)
+    end
+
+    # Frame the tab body, carve the sub-tab strip from the interior top when
+    # `labels` is given, then yield the remaining content rect.
+    def framed_body(screen : Screen, rect : Rect, body_focused : Bool,
+                    subtabs_focused : Bool, labels : Array(String)?, active : Int32, & : Rect ->) : Nil
+      framed(screen, rect, body_focused) do |inner|
+        if labels
+          sub_rect, content = carve_subtab_row(inner)
+          render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused)
+          yield content
+        else
+          yield inner
+        end
+      end
+    end
+
+    # Content rect inside a framed body after optional sub-tab carving — keeps
+    # render and click geometry aligned.
+    def content_rect(rect : Rect, *, strip : Bool) : Rect
+      inner = frame_inner(rect)
+      strip ? carve_subtab_row(inner)[1] : inner
+    end
+
+    # The sub-tab strip inside a framed body (nil when hidden).
+    def strip_rect(rect : Rect, *, strip : Bool) : Rect?
+      return nil unless strip
+      carve_subtab_row(frame_inner(rect))[0]
     end
 
     # Height of the sub-tab chrome carved off a body rect: one tab row on an elevated

@@ -32,23 +32,17 @@ module Gori::Tui
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
-      subtabs_focused = focus == :subtabs
-      body_rect = rect
-      # Same chrome as Replay: the sub-tab strip rides above the framed editor (from
-      # the first note, so it's always labelled), drawn by the shared BodyChrome —
-      # not inside the view.
-      if subtab_strip_shown?
-        sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
-        BodyChrome.render_subtab_strip(screen, sub_rect, @notes.subtab_labels, @notes.current_index, subtabs_focused)
+      labels = subtab_strip_shown? ? @notes.subtab_labels : nil
+      BodyChrome.framed_body(screen, rect, body_focused, focus == :subtabs, labels, @notes.current_index) do |content|
+        editor_rect = content
+        if !@notes.link_preview.empty?
+          links_rect, editor_rect = carve_links_row(content)
+          screen.text(links_rect.x + 1, links_rect.y, "links", Theme.accent, width: 6)
+          screen.text(links_rect.x + 8, links_rect.y, @notes.link_preview, Theme.muted,
+            width: {links_rect.w - 9, 0}.max)
+        end
+        @notes.render(screen, editor_rect, focused: body_focused)
       end
-      links_rect = body_rect
-      if !@notes.link_preview.empty?
-        links_rect, body_rect = carve_links_row(body_rect)
-        screen.text(links_rect.x + 1, links_rect.y, "links", Theme.accent, width: 6)
-        screen.text(links_rect.x + 8, links_rect.y, @notes.link_preview, Theme.muted,
-          width: {links_rect.w - 9, 0}.max)
-      end
-      BodyChrome.framed(screen, body_rect, body_focused) { |inner| @notes.render(screen, inner, focused: body_focused) }
     end
 
     def refresh_link_preview : Nil
@@ -117,8 +111,9 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
-      @notes.click_to_cursor(body.inset(1, 1), mx, my)
+      body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
+      body = carve_links_row(body)[1] unless @notes.link_preview.empty?
+      @notes.click_to_cursor(body, mx, my)
       true
     end
 

@@ -49,17 +49,12 @@ module Gori::Tui
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      # Same chrome as Notes/Replay: the strip rides above the framed body (drawn
-      # by the shared BodyChrome, not the view). The set is always 3, so the strip
-      # is always shown.
-      sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
-      BodyChrome.render_subtab_strip(screen, sub_rect, PAGE_LABELS, @current, focus == :subtabs)
       focused = focus == :body
-      BodyChrome.framed(screen, body_rect, focused) do |inner|
+      BodyChrome.framed_body(screen, rect, focused, focus == :subtabs, PAGE_LABELS, @current) do |content|
         case @current
-        when 1 then @help.render_links(screen, inner)
-        when 2 then @help.render_version(screen, inner)
-        else        @help.render(screen, inner, focused: focused) # Shortcuts
+        when 1 then @help.render_links(screen, content)
+        when 2 then @help.render_version(screen, content)
+        else        @help.render(screen, content, focused: focused) # Shortcuts
         end
       end
     end

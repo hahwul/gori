@@ -107,16 +107,12 @@ module Gori::Tui
     # --- rendering ---
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
-      body_rect = rect
-      if subtab_strip_shown?
-        sub_rect, body_rect = BodyChrome.carve_subtab_row(rect)
-        BodyChrome.render_subtab_strip(screen, sub_rect, subtab_labels, @current_idx, focus == :subtabs)
-      end
-      if v = current_view
-        v.render(screen, body_rect, focused: body_focused)
-      else
-        BodyChrome.framed(screen, body_rect, body_focused) do |inner|
-          TrafficEmptyState.render(screen, inner, variant: :fuzzer)
+      labels = subtab_strip_shown? ? subtab_labels : nil
+      BodyChrome.framed_body(screen, rect, body_focused, focus == :subtabs, labels, @current_idx) do |content|
+        if v = current_view
+          v.render(screen, content, focused: body_focused)
+        else
+          TrafficEmptyState.render(screen, content, variant: :fuzzer)
         end
       end
     end
@@ -329,7 +325,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      body = subtab_strip_shown? ? BodyChrome.carve_subtab_row(rect)[1] : rect
+      body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
       return true unless v = current_view
       return true unless pane = v.pane_at(body, mx, my)
       save_current
