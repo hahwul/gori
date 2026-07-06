@@ -156,7 +156,7 @@ describe Gori::Tui::Chrome do
     screen = Screen.new(backend)
     Chrome.render_top_bar(screen, Rect.new(0, 0, 80, 1),
       project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2")
-    backend.row(0).should contain("Ǥ⌀Ɍɪ")
+    backend.row(0).should contain("🅶🅾🆁🅸")
     backend.row(0).should contain("acme")
     backend.row(0).should contain("scope:2")
     backend.row(0).should contain("01:37 PM")

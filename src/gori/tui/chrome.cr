@@ -84,8 +84,9 @@ module Gori::Tui
     def self.render_top_bar(screen : Screen, rect : Rect, *, project : String,
                             listen : String, time : String,
                             scope : String, rules : String = "", intercept : String = "") : Nil
-      screen.fill(rect, Theme.panel)
-      x = screen.text(rect.x + 1, rect.y, "Ǥ⌀Ɍɪ", Theme.text_bright, Theme.panel, Attribute::Bold)
+      # Logo row sits flush on the canvas — no lifted panel band (tabs/status keep panel).
+      screen.fill(rect, Theme.bg)
+      x = screen.text(rect.x + 1, rect.y, "🅶🅾🆁🅸", Theme.text_bright, Theme.bg, Attribute::Bold)
       name_x = x + 1
 
       # right-aligned status chips: scope:N · rules:N · intercept:on(N) · listen · h:MM AM/PM
@@ -102,9 +103,9 @@ module Gori::Tui
       # other at narrow widths (previously the name was unbounded and render_chips got
       # no min_x, so the chips slid left and collided with the project name).
       chips_left = {rect.right - chips_width(chips) - 1, name_x}.max
-      name_end = screen.text(name_x, rect.y, "· #{project}", Theme.muted, Theme.panel,
+      name_end = screen.text(name_x, rect.y, "· #{project}", Theme.muted, Theme.bg,
         width: {chips_left - name_x - 1, 0}.max)
-      render_chips(screen, rect, chips, min_x: name_end + 1)
+      render_chips(screen, rect, chips, bg: Theme.bg, min_x: name_end + 1)
     end
 
     # A horizontal tab menu (row 1) styled as a segmented control. The active tab
