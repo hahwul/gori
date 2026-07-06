@@ -417,21 +417,40 @@ module Gori::Tui
     ]
     ART_H = BRAND_ART.size
 
-    # Entrance effect: the art materialises left-to-right, each cell ramping
-    # through these shades before settling on a solid block. Columns reveal in
-    # groups of ART_STAGGER so a wider logo doesn't drag the sweep out. ART_ANIM_DONE
-    # (derived: last column's stagger delay + the ramp) is the frame at which every
-    # cell has resolved — the run loop freezes @art_frame there so idle ticks stay
-    # static, and it auto-adjusts if the art above is swapped.
+    # Entrance effect — three phases on one frame clock (~50 ms/frame, the idle poll):
+    #   1. Wave reveal: a diagonal front (top-left → bottom-right) materialises the
+    #      art; each cell ramps ░▒▓ while its colour fades from near-canvas up to
+    #      the accent, then locks to a solid block.
+    #   2. Glint: a narrow focus_gold band sweeps the same diagonal once — light
+    #      catching the finished mark.
+    #   3. The wordmark, then the tagline, fade in beneath it (see render_list).
+    # Every timeline constant derives from BRAND_ART, so swapping the art re-times
+    # the entrance. ART_ANIM_DONE is the frame at which everything has resolved —
+    # the run loop freezes @art_frame there, and past it the same code paints the
+    # identical static logo (band swept out, full accent, text at full strength).
     ART_SHADES    = {'░', '▒', '▓'}
-    ART_STAGGER   = 3
-    ART_ANIM_DONE = (BRAND_ART.max_of(&.size) - 1) // ART_STAGGER + ART_SHADES.size + 1
+    ART_ROW_SLOPE = 2 # diagonal metric d = col + row * SLOPE — the front's tilt
+    ART_STAGGER   = 4 # d-units the wave front advances per frame
+    ART_MAX_D     = BRAND_ART.map_with_index { |line, row| line.rstrip.size - 1 + row * ART_ROW_SLOPE }.max
+    REVEAL_DONE   = ART_MAX_D // ART_STAGGER + ART_SHADES.size + 1
+    GLINT_BAND    = 6 # width of the light band, in d-units
+    GLINT_SPEED   = 7 # d-units the band advances per frame
+    GLINT_DONE    = REVEAL_DONE + (ART_MAX_D + GLINT_BAND) // GLINT_SPEED + 1
+    # Text staging: the wordmark starts fading in as the wave crests, the tagline
+    # one beat later; each fade spans TEXT_FADE frames. ART_ANIM_DONE covers the
+    # slower of glint/tagline so neither can freeze mid-animation.
+    TEXT_FADE      = 5
+    WORDMARK_START = REVEAL_DONE - 3
+    TAGLINE_START  = REVEAL_DONE + 1
+    ART_ANIM_DONE  = {GLINT_DONE, TAGLINE_START + TEXT_FADE}.max
     # Nudge the whole hero (art + wordmark + card) a hair above dead-centre so the
     # logo reads as the focal point rather than floating mid-screen.
     ART_LIFT = 2
     # Blank rows between the art block and the "gori" wordmark, so the logo has a
     # little breathing room instead of sitting flush on the text.
     ART_GAP = 1
+    # The strapline under the wordmark (fades in last during the entrance).
+    TAGLINE = "free · open-source · human in the driver's seat"
 
     # The art is a nicety, not load-bearing — only show it when the terminal is
     # tall enough to keep a usable project list beneath this taller logo and wide
@@ -529,8 +548,7 @@ module Gori::Tui
         screen.fill(Rect.new(0, hero_top, w, box.y - hero_top), Theme.bg)
       end
       draw_brand_art(screen, top - ART_H - ART_GAP, w, @art_frame) if art_shown?(w, h)
-      Chrome.render_wordmark(screen, 0, top, center_w: w, bg: Theme.bg)
-      centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme.muted, w)
+      render_hero_text(screen, top, w, h)
 
       Frame.card(screen, box)
 
@@ -656,9 +674,10 @@ module Gori::Tui
     # than each row centering on its own width. Accent colour so it reads as a
     # logo mark distinct from the wordmark beneath it.
     #
-    # `frame` drives the entrance reveal — a left-to-right materialise where each
-    # column group lags the one before it (`col // ART_STAGGER`), then ramps ░▒▓ before locking to
-    # a solid block. Once frame ≥ ART_ANIM_DONE every cell is solid, so the same
+    # `frame` drives the entrance (see the timeline constants above): the diagonal
+    # wave front reveals cells by their d-coordinate, each ramping ░▒▓ and fading
+    # up to the accent before locking solid; the glint band then sweeps the same
+    # diagonal once. Past ART_ANIM_DONE every cell is solid accent, so the same
     # call renders the final static logo.
     private def draw_brand_art(screen : Screen, y : Int32, w : Int32, frame : Int32) : Nil
       bw = BRAND_ART.max_of(&.size)
@@ -666,12 +685,58 @@ module Gori::Tui
       BRAND_ART.each_with_index do |line, i|
         line.each_char_with_index do |ch, col|
           next if ch == ' '
-          prog = frame - col // ART_STAGGER
-          next if prog <= 0 # column not yet reached by the reveal front
-          glyph = prog > ART_SHADES.size ? '█' : ART_SHADES[prog - 1]
-          screen.cell(x + col, y + i, glyph, Theme.accent, Theme.bg, attr: Attribute::Bold)
+          d = col + i * ART_ROW_SLOPE
+          prog = frame - d // ART_STAGGER
+          next if prog <= 0 # not yet reached by the wave front
+          glyph, fg = art_cell(prog)
+          fg = glint_tint(d, frame, fg) if glyph == '█'
+          screen.cell(x + col, y + i, glyph, fg, Theme.bg, attr: Attribute::Bold)
         end
       end
+    end
+
+    # Shade + colour for a cell `prog` frames after the wave front reached it:
+    # ░▒▓ ramping from a dim accent up toward full strength, then a solid block.
+    private def art_cell(prog : Int32) : {Char, Color}
+      return {'█', Theme.accent} if prog > ART_SHADES.size
+      t = 0.35 + 0.65 * prog / (ART_SHADES.size + 1)
+      {ART_SHADES[prog - 1], Theme.blend(Theme.accent, Theme.bg, t)}
+    end
+
+    # 0..1 progress of a text fade that starts at frame `start` and spans TEXT_FADE.
+    private def fade_t(start : Int32) : Float64
+      ((@art_frame - start) / TEXT_FADE.to_f).clamp(0.0, 1.0)
+    end
+
+    # The wordmark + tagline under the art. With the art shown they stage in —
+    # the wordmark fades up as the wave crests, the tagline one beat later — each
+    # skipped while still fully transparent. At ART_ANIM_DONE both fades sit at
+    # 1.0, i.e. the same static render as the no-art path, which skips the
+    # entrance entirely (short/narrow terminals shouldn't wait on a flourish).
+    private def render_hero_text(screen : Screen, top : Int32, w : Int32, h : Int32) : Nil
+      unless art_shown?(w, h)
+        Chrome.render_wordmark(screen, 0, top, center_w: w, bg: Theme.bg)
+        centered(screen, top + 1, TAGLINE, Theme.muted, w)
+        return
+      end
+      if (t = fade_t(WORDMARK_START)) > 0
+        Chrome.render_wordmark(screen, 0, top, center_w: w, bg: Theme.bg,
+          fg: Theme.blend(Theme.text_bright, Theme.bg, t))
+      end
+      if (t = fade_t(TAGLINE_START)) > 0
+        centered(screen, top + 1, TAGLINE, Theme.blend(Theme.muted, Theme.bg, t), w)
+      end
+    end
+
+    # The glint: a GLINT_BAND-wide focus_gold band sweeping down the diagonal after
+    # the reveal — brightest at its leading edge, trailing back off to the accent.
+    # A no-op before the sweep starts and after the band has left the art, so the
+    # frozen frame is pure accent.
+    private def glint_tint(d : Int32, frame : Int32, fg : Color) : Color
+      return fg if frame <= REVEAL_DONE
+      dist = (frame - REVEAL_DONE) * GLINT_SPEED - d
+      return fg if dist < 0 || dist >= GLINT_BAND
+      Theme.blend(Theme.focus_gold, Theme.accent, 1.0 - dist / GLINT_BAND.to_f)
     end
 
     private def ensure_results_visible(list_h : Int32) : Nil
