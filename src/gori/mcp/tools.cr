@@ -39,8 +39,11 @@ module Gori
       MINE_MAX_CONCURRENCY =         100
       MINE_MAX_STORED      =      10_000
 
+      MCP_REPLAY_REQUEST_MAX = 16 * 1024
+
       def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool,
-                     @project_name : String? = nil, @db_path : String? = nil)
+                     @project_name : String? = nil, @project_slug : String? = nil,
+                     @db_path : String? = nil)
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
         @job_seq = 0
@@ -157,6 +160,12 @@ module Gori
             "open (or last-open) gori TUI for THIS project. `age_seconds` shows how long since the " \
             "TUI last recorded focus (there is no live-TUI heartbeat) — use it to judge freshness; " \
             "`available:false` means the TUI never ran against this project." { }
+
+          tool j, "get_replay_context",
+            "The Replay workbench state: persisted replay sessions (target, request, http2, last " \
+            "response status) plus, when the TUI is on the Replay tab, a live snapshot of the active " \
+            "sub-tab (including ephemeral WebSocket/gRPC tabs that are not stored in `replays`). " \
+            "Use this instead of guessing from History when the user is editing a replay." { }
 
           if @allow_actions
             tool j, "send_request",
@@ -295,6 +304,7 @@ module Gori
         when "list_scope"          then list_scope
         when "project_info"        then project_info
         when "get_current_context" then get_current_context
+        when "get_replay_context" then get_replay_context
         when "ql_reference"        then ql_reference
         end
       end
@@ -408,6 +418,7 @@ module Gori
         Result.new(JSON.build do |j|
           j.object do
             j.field "project", @project_name
+            j.field "project_slug", @project_slug
             j.field "db_path", @db_path
             j.field "read_only", !@allow_actions
             j.field "flows", @store.count
@@ -447,6 +458,8 @@ module Gori
               j.field "note", raw.nil? ? "No UI state recorded for this project — the gori TUI may not have run against it." : "Recorded UI state was unreadable."
             else
               j.field "available", true
+              j.field "project", @project_name
+              j.field "project_slug", @project_slug
               j.field "active_tab", parsed["active_tab"]?.try(&.as_s?)
               j.field "focus_pane", parsed["focus_pane"]?.try(&.as_s?)
               if fid = parsed["selected_flow_id"]?.try(&.as_i64?)
@@ -472,6 +485,97 @@ module Gori
             end
           end
         end)
+      end
+
+      private def get_replay_context : Result
+        ui = parse_ui_state
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "project", @project_name
+            j.field "project_slug", @project_slug
+            j.field "db_path", @db_path
+            on_replay = ui.try { |u| u["active_tab"]?.try(&.as_s?) == "replay" } || false
+            j.field "tui_on_replay_tab", on_replay
+            if ui
+              if rec = ui["recorded_at"]?.try(&.as_i64?)
+                j.field "ui_recorded_at", rec
+                iso = begin
+                  Time.unix_ms(rec).to_rfc3339
+                rescue
+                  nil
+                end
+                if iso
+                  j.field "ui_recorded_at_iso", iso
+                  j.field "ui_age_seconds", (Time.utc.to_unix_ms - rec) // 1000
+                end
+              end
+              if replay = ui["replay"]?
+                j.field "tui_replay", replay
+              end
+            end
+            j.field "sessions" do
+              j.array { emit_replay_sessions(j) }
+            end
+            unless on_replay
+              j.field "note", "TUI is not on the Replay tab — `tui_replay` may be stale; use `sessions` for persisted tabs."
+            end
+          end
+        end)
+      end
+
+      private def emit_replay_sessions(j : JSON::Builder) : Nil
+        @store.replays_mcp.each do |r|
+          j.object do
+            j.field "db_id", r.id
+            j.field "position", r.position
+            j.field "target", r.target
+            j.field "http2", r.http2?
+            j.field "auto_content_length", r.auto_content_length?
+            j.field "mark_transform", r.mark_transform?
+            j.field "flow_id", r.flow_id if r.flow_id
+            j.field "name", r.name if r.name
+            j.field "sni", r.sni if r.sni
+            emit_capped_text(j, "request", r.request)
+            if err = r.response_error
+              j.field "last_error", err
+            end
+            if d = r.response_duration_us
+              j.field "last_duration_us", d
+            end
+            if head = r.response_head
+              resp = begin
+                Proxy::Codec::Http1.parse_response_head(head)
+              rescue
+                nil
+              end
+              if resp
+                j.field "last_status", resp.status
+                j.field "last_reason", resp.reason
+              end
+              j.field "last_response_head", Serialize.head_text(head)
+            end
+          end
+        end
+      end
+
+      private def emit_capped_text(j : JSON::Builder, field : String, text : String) : Nil
+        if text.size > MCP_REPLAY_REQUEST_MAX
+          j.field field, text.byte_slice(0, MCP_REPLAY_REQUEST_MAX)
+          j.field "#{field}_truncated", true
+        else
+          j.field field, text
+        end
+      end
+
+      private def parse_ui_state : JSON::Any?
+        @store.setting(Store::UI_STATE_KEY).try do |r|
+          begin
+            obj = JSON.parse(r)
+            obj if obj.as_h?
+          rescue
+            nil
+          end
+        end
       end
 
       private def ql_reference : Result

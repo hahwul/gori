@@ -28,11 +28,12 @@ module Gori
       EMPTY_ARGS = JSON::Any.new({} of String => JSON::Any)
 
       def initialize(@store : Store, *, allow_actions : Bool, verify_upstream : Bool,
-                     project_name : String? = nil, db_path : String? = nil,
+                     project_name : String? = nil, project_slug : String? = nil,
+                     db_path : String? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
         @tools = Tools.new(@store, allow_actions, verify_upstream,
-          project_name: project_name, db_path: db_path)
+          project_name: project_name, project_slug: project_slug, db_path: db_path)
         @initialized = false
       end
 

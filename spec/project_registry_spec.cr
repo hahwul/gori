@@ -37,6 +37,18 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "finds a project by display name or directory slug" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("ACME Red Team!")
+      Gori::Store.open(p.db_path).close # list/find only sees dirs with a DB file
+      reg.find("ACME Red Team!").try(&.db_path).should eq(p.db_path)
+      reg.find("acme-red-team").try(&.db_path).should eq(p.db_path)
+      reg.find("ACME-RED-TEAM").try(&.db_path).should eq(p.db_path)
+      reg.find("missing").should be_nil
+    end
+  end
+
   it "lists created projects (and ignores temp/hidden dirs)" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)

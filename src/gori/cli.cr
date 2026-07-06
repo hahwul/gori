@@ -281,8 +281,8 @@ module Gori
       Log.setup(:info, Log::IOBackend.new(STDERR))
       Settings.load # send_request's replay engines read the upstream-proxy setting from here
 
-      resolved, project_name = resolve_mcp_db(db_path, project)
-      Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name} (actions=#{!read_only})" }
+      resolved, project_name, project_slug = resolve_mcp_db(db_path, project)
+      Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name}#{" [#{project_slug}]" if project_slug} (actions=#{!read_only})" }
       # Make the implicit fallback visible (STDERR only — STDOUT is the JSON-RPC stream):
       # with no --db/--project the most-recently-used project (or the default db) is served,
       # which can silently be an empty database an AI client then queries as if it were real.
@@ -299,7 +299,7 @@ module Gori
       Log.warn { "mcp: #{resolved} has no captured flows (empty database)" } if store.count.zero?
       begin
         server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
-          project_name: project_name, db_path: resolved)
+          project_name: project_name, project_slug: project_slug, db_path: resolved)
         server.run # blocks until STDIN EOF (client closed)
       ensure
         store.close
@@ -307,23 +307,24 @@ module Gori
     end
 
     # Resolves which project DB `gori mcp` serves: explicit --db wins, then a named
-    # --project, then the most-recently-used project, then the default headless db.
-    private def self.resolve_mcp_db(db : String?, project : String?) : {String, String?}
+    # --project (display name or directory slug), then the most-recently-used project,
+    # then the default headless db. Returns {db_path, display_name, slug}.
+    private def self.resolve_mcp_db(db : String?, project : String?) : {String, String?, String?}
+      Paths.ensure_dirs
+      registry = ProjectRegistry.new(Paths.projects_dir)
       if d = db
         unless d.empty? # an empty --db= falls through to project/MRU (Crystal: "" is truthy)
           # Validate like `gori run` does — else SQLite silently CREATEs a fresh empty DB on a
           # typo'd path and the client queries an empty dataset believing it's the real capture.
           abort "gori mcp: --db is not a readable file: #{d}" unless File.file?(d)
-          return {d, nil}
+          proj = registry.list.find { |p| p.db_path == d }
+          return {d, proj.try(&.name), proj.try { |p| registry.slug_of(p) }}
         end
       end
-      Paths.ensure_dirs
-      registry = ProjectRegistry.new(Paths.projects_dir)
       if name = project
-        # Case-insensitive, matching `gori run` (project slugs are always lowercased).
-        proj = registry.list.find { |p| p.name.downcase == name.downcase }
-        abort "gori mcp: no such project: #{name}" unless proj
-        return {proj.db_path, proj.name}
+        proj = registry.find(name)
+        abort "gori mcp: no such project: #{name} (match display name or directory slug)" unless proj
+        return {proj.db_path, proj.name, registry.slug_of(proj)}
       end
       # Prefer the db path the interactive TUI last recorded (its ui-state is what
       # get_current_context reports). Match by PATH, not name, so a project's display name
@@ -331,11 +332,12 @@ module Gori
       if path = Paths.read_active_project
         if File.file?(path)
           proj = registry.list.find { |p| p.db_path == path }
-          return {path, proj.try(&.name)}
+          return {path, proj.try(&.name), proj.try { |p| registry.slug_of(p) }}
         end
       end
       mru = registry.list.first?
-      {mru.try(&.db_path) || Paths.default_db, mru.try(&.name)}
+      db = mru.try(&.db_path) || Paths.default_db
+      {db, mru.try(&.name), mru.try { |p| registry.slug_of(p) }}
     end
 
     private def self.run_update(args : Array(String)) : Nil

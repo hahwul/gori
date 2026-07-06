@@ -449,6 +449,9 @@ module Gori::Tui
             j.field "selected_flow_id", fid
           end
           j.field "subtab", current_subtab_index
+          if @active_tab == :replay
+            j.field "replay" { replay_controller.write_mcp_context(j) }
+          end
           j.field "recorded_at", Time.utc.to_unix_ms
         end
       end

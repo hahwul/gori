@@ -91,6 +91,38 @@ module Gori::Tui
       @current_replay_idx
     end
 
+    # Snapshot of open replay sub-tabs for `gori mcp get_replay_context` (embedded in
+    # ui_state by the runner). Includes ephemeral WS/gRPC/decode tabs (db_id nil).
+    def write_mcp_context(j : JSON::Builder) : Nil
+      j.object do
+        j.field "count", @replays.size
+        j.field "active_subtab", @current_replay_idx
+        if tab = current_replay_tab
+          j.field "active" do
+            j.object do
+              j.field "subtab", @current_replay_idx
+              j.field "db_id", tab.db_id if tab.db_id
+              j.field "flow_id", tab.flow_id if tab.flow_id
+              tab.view.write_mcp_fields(j)
+            end
+          end
+        end
+        j.field "subtabs" do
+          j.array do
+            @replays.each_with_index do |t, i|
+              j.object do
+                j.field "subtab", i
+                j.field "db_id", t.db_id if t.db_id
+                j.field "flow_id", t.flow_id if t.flow_id
+                j.field "label", t.view.label(40)
+                j.field "summary", t.view.summary(60)
+              end
+            end
+          end
+        end
+      end
+    end
+
     # Show the strip from the FIRST session (not ≥2): a single replay still labels its
     # chip and exposes the strip's space-menu (the editor body swallows space). Empty →
     # no strip (the "no replays" placeholder takes the full body).

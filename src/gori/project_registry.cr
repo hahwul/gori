@@ -17,6 +17,22 @@ module Gori
     def initialize(@root : String)
     end
 
+    # Resolve a project by its verbatim display name OR its directory slug (both
+    # case-insensitive). Lets `gori mcp --project=api` work when the display name
+    # is a non-ASCII phrase stored in `.name`.
+    def find(name_or_slug : String) : Project?
+      q = name_or_slug.strip.downcase
+      return nil if q.empty?
+      list.find do |p|
+        p.name.downcase == q || slug_of(p).downcase == q
+      end
+    end
+
+    # The on-disk directory name for a project (the slugified workspace dir).
+    def slug_of(project : Project) : String
+      File.basename(project.dir)
+    end
+
     # Existing named projects, most-recently-active first.
     def list : Array(Project)
       return [] of Project unless Dir.exists?(@root)

@@ -19,11 +19,13 @@ end
 
 # Runs the server over the given request lines and returns each emitted line as a
 # parsed JSON::Any (also proves STDOUT purity — a non-JSON line would raise here).
-private def drive(store, *lines, allow_actions = true, verify_upstream = true) : Array(JSON::Any)
+private def drive(store, *lines, allow_actions = true, verify_upstream = true,
+                project_name : String? = nil, project_slug : String? = nil) : Array(JSON::Any)
   input = IO::Memory.new(lines.join('\n') + "\n")
   output = IO::Memory.new
   Gori::MCP::Server.new(store,
     allow_actions: allow_actions, verify_upstream: verify_upstream,
+    project_name: project_name, project_slug: project_slug,
     input: input, output: output).run
   output.to_s.each_line.reject(&.strip.empty?).map { |l| JSON.parse(l) }.to_a
 end
@@ -112,6 +114,7 @@ describe Gori::MCP::Server do
         names.should contain("get_flow")
         names.should contain("ql_reference")
         names.should contain("project_info")
+        names.should contain("get_replay_context")
         names.should contain("send_request")
         names.should contain("create_finding")
         names.should contain("update_finding")
@@ -385,6 +388,56 @@ describe Gori::MCP::Server do
         ref = tool_payload(drive(store, call)[0])["reference"].as_s
         ref.should contain("host:example.com")
         ref.should contain("status:>=500")
+      end
+    end
+  end
+
+  describe "get_replay_context" do
+    it "lists persisted replay sessions with last response status" do
+      with_store do |store|
+        store.insert_replay("https://ex.test", "GET /x HTTP/1.1\nHost: ex.test\n\n", false, true, nil, 0)
+        id = store.replays_meta.last.id
+        store.update_replay_response(id, "HTTP/1.1 400 Bad\r\n\r\n".to_slice, "nope".to_slice, nil, 99_i64)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload["sessions"].as_a.size.should eq(1)
+        sess = payload["sessions"][0]
+        sess["db_id"].as_i64.should eq(id)
+        sess["last_status"].as_i64.should eq(400)
+        sess["request"].as_s.should contain("GET /x")
+      end
+    end
+
+    it "includes the live TUI replay snapshot when ui_state carries it" do
+      with_store do |store|
+        ui = JSON.build do |j|
+          j.object do
+            j.field "active_tab", "replay"
+            j.field "focus_pane", "body"
+            j.field "subtab", 0
+            j.field "replay" do
+              j.object do
+                j.field "count", 1
+                j.field "active_subtab", 0
+                j.field "active" do
+                  j.object do
+                    j.field "subtab", 0
+                    j.field "db_id", 7
+                    j.field "target", "https://ex.test"
+                    j.field "http2", true
+                    j.field "request", "GET /gw HTTP/2"
+                  end
+                end
+              end
+            end
+          end
+        end
+        store.set_setting(Gori::Store::UI_STATE_KEY, ui)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{}}})
+        payload = tool_payload(drive(store, call, project_name: "demo", project_slug: "demo")[0])
+        payload["tui_on_replay_tab"].as_bool.should be_true
+        payload["tui_replay"]["active"]["http2"].as_bool.should be_true
+        payload["project_slug"].as_s.should eq("demo")
       end
     end
   end

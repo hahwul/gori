@@ -747,6 +747,24 @@ module Gori
       list
     end
 
+    # Persisted replay tabs for MCP: request-side fields plus the last response HEAD
+    # (no response body — keeps the tool lightweight).
+    def replays_mcp : Array(ReplayRecord)
+      list = [] of ReplayRecord
+      @db.query(
+        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform, " \
+        "name, response_head, response_error, response_duration_us FROM replays ORDER BY position, id") do |rs|
+        rs.each do
+          list << ReplayRecord.new(
+            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
+            sni: rs.read(String?), mark_transform: rs.read(Int32) != 0, name: rs.read(String?),
+            response_head: rs.read(Bytes?), response_error: rs.read(String?), response_duration_us: rs.read(Int64?))
+        end
+      end
+      list
+    end
+
     # Returns the new row id (or 0 if the store is closing — the caller normalizes
     # 0 → nil so a later update never targets a bogus row).
     def insert_replay(target : String, request : String, http2 : Bool,

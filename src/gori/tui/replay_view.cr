@@ -335,6 +335,65 @@ module Gori::Tui
       @ws_upgrade || Bytes.empty
     end
 
+    # Cross-process snapshot for `gori mcp get_replay_context` (written into ui_state
+    # by the TUI). Captures what the user is actually editing/sending — including
+    # ephemeral WS/gRPC/decode tabs that never land in the `replays` table.
+    def write_mcp_fields(j : JSON::Builder) : Nil
+        j.field "target", @target
+        j.field "summary", summary(80)
+        j.field "http2", @http2
+        j.field "auto_content_length", @auto_content_length
+        j.field "mark_transform", @mark_transform
+        j.field "ws_mode", @ws_mode
+        j.field "grpc_mode", @grpc_mode
+        j.field "decode_mode", decode_mode?
+        if kind = @decode_kind
+          j.field "decode_kind", kind.to_s
+        end
+        j.field "sni", @sni unless @sni.empty?
+        j.field "inflight", inflight?
+        j.field "focus", @focus.to_s
+        if fid = source_flow_id
+          j.field "source_flow_id", fid
+        end
+        if @ws_mode
+          j.field "messages", @editor.text
+          unless (@ws_upgrade || Bytes.empty).empty?
+            j.field "upgrade_request", String.new(ws_upgrade_bytes).scrub
+          end
+          if wr = @ws_result
+            j.field "last_ws_result" do
+              j.object do
+                j.field "ok", wr.ok?
+                j.field "upgraded", wr.upgraded?
+                j.field "error", wr.error
+                j.field "note", wr.note
+                j.field "close_code", wr.close_code
+                j.field "duration_us", wr.duration_us
+                j.field "messages_sent", wr.messages.count(&.direction.==("out"))
+                j.field "messages_received", wr.messages.count(&.direction.==("in"))
+              end
+            end
+          end
+        else
+          j.field "request", request_text
+          if res = @result
+            j.field "last_result" do
+              j.object do
+                j.field "ok", res.ok?
+                j.field "error", res.error
+                j.field "duration_us", res.duration_us
+                j.field "incomplete", res.incomplete? if res.incomplete?
+                if resp = res.response
+                  j.field "status", resp.status
+                  j.field "reason", resp.reason
+                end
+              end
+            end
+          end
+        end
+    end
+
     # Apply a finished WS replay transcript (the counterpart of #apply for HTTP).
     def apply_ws(result : Replay::WsEngine::Result) : Nil
       @ws_result = result
