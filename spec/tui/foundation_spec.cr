@@ -161,24 +161,24 @@ describe Gori::Tui::Chrome do
     content.h.should eq(outer.h - 2 - BodyChrome::STRIP_H) # frame inset + strip
   end
 
-  it "renders the sub-tab strip on an elevated band with panel pills and a divider" do
+  it "renders the sub-tab strip without a row fill and a divider hairline" do
     backend = MemoryBackend.new(60, 2)
     screen = Screen.new(backend)
     BodyChrome.render_subtab_strip(screen, Rect.new(0, 0, 60, 2),
       ["1:alpha", "2:beta"], 0, focused: true)
 
-    backend.bg_at(30, 0).should eq(Theme.elevated)  # lifted header band (past the chips)
-    backend.bg_at(12, 0).should eq(Theme.panel)    # inactive pill
-    backend.bg_at(2, 0).should eq(Theme.focus_gold)  # active pill when focused
+    backend.bg_at(12, 0).should eq(Theme.bg)       # inactive label, no pill
+    backend.bg_at(12, 0).should_not eq(Theme.elevated)
+    backend.bg_at(2, 0).should eq(Theme.focus_gold) # active pill when focused
     backend.row(1).should contain("─")             # hairline under the chips
   end
 
-  it "brightens the active sub-tab chip with accent_bg when the strip is unfocused" do
+  it "settles the active sub-tab chip to selection_dim when the strip is unfocused" do
     backend = MemoryBackend.new(60, 1)
     Chrome.render_tab_strip(Screen.new(backend), Rect.new(0, 0, 60, 1),
       ["one", "two"], 1, focused: false)
-    backend.bg_at(8, 0).should eq(Theme.accent_bg)
-    backend.fg_at(8, 0).should eq(Theme.text_bright)
+    backend.bg_at(8, 0).should eq(Theme.selection_dim)
+    backend.fg_at(8, 0).should eq(Theme.text)
   end
 
   it "renders the top bar with project, scope, and the right-aligned clock" do

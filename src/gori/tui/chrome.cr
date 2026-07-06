@@ -196,31 +196,27 @@ module Gori::Tui
       start
     end
 
-    # A windowed horizontal sub-tab strip (Replay / Notes / Fuzzer / …). Sits on an
-    # ELEVATED band so it reads as a lifted header above the body canvas. Segments
-    # scroll so the ACTIVE one is always visible. Inactive chips are PANEL pills on
-    # that band; the active chip is FOCUS_GOLD when the strip holds focus, else
-    # ACCENT_BG (bright enough to read at rest). `‹` / `›` flag overflow.
+    # A windowed horizontal sub-tab strip (Replay / Notes / Fuzzer / …). Mirrors the
+    # top tab menu: no row fill — inactive labels are muted on the canvas, the active
+    # chip is FOCUS_GOLD when the strip holds focus else a dim SELECTION_DIM band.
+    # `‹` / `›` flag overflow.
     def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
-                              active : Int32, focused : Bool, *, bg : Color = Theme.elevated,
-                              chip_bg : Color = Theme.panel) : Nil
+                              active : Int32, focused : Bool) : Nil
       return if rect.empty? || labels.empty?
-      screen.fill(rect, bg)
       active = active.clamp(0, labels.size - 1)
       segs, start, last = strip_layout(rect, labels, active)
       segs.each do |(i, label, seg)|
         if i == active
-          abg = focused ? Theme.focus_gold : Theme.accent_bg
-          afg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text_bright
+          abg = focused ? Theme.focus_gold : Theme.selection_dim
+          afg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text
           screen.fill(seg, abg)
           screen.text(seg.x + 1, seg.y, label, afg, abg, attr: Attribute::Bold)
         else
-          screen.fill(seg, chip_bg)
-          screen.text(seg.x + 1, seg.y, label, Theme.text, chip_bg)
+          screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.bg)
         end
       end
-      screen.cell(rect.x, rect.y, '‹', Theme.muted, bg) if start > 0
-      screen.cell(rect.right - 1, rect.y, '›', Theme.muted, bg) if last < labels.size - 1
+      screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0
+      screen.cell(rect.right - 1, rect.y, '›', Theme.muted, Theme.bg) if last < labels.size - 1
     end
 
     # Pure: the visible sub-tab chips — {index, cell rect} — computed IDENTICALLY to
