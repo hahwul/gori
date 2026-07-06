@@ -5,10 +5,10 @@ require "../../interceptor"
 
 module Gori::Tui
   # The Intercept tab: the hold-and-decide queue (P4). Owns the InterceptView (a
-  # list pane + an inline editor pane) and the intercept verbs. The view self-frames
-  # its panes and is reloaded every frame off the 50ms loop so async holds appear
-  # live. `view` is exposed for the shell's still-centralized orthogonal prompts
-  # (^G/^F/^E).
+  # list pane + an inline editor pane) and the intercept verbs. The shell frames
+  # the body (like History/Replay's empty state); the view self-frames its inner
+  # panes. Reloaded every frame off the 50ms loop so async holds appear live.
+  # `view` is exposed for the shell's still-centralized orthogonal prompts (^G/^F/^E).
   class InterceptController < TabController
     def initialize(host : Host)
       super(host)
@@ -48,8 +48,11 @@ module Gori::Tui
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       @intercept.reload(@host.session.interceptor) # live refresh (50ms loop)
       proxy = @host.session.proxy
-      @intercept.render(screen, rect, focused: focus == :body,
-        listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
+      body_focused = focus == :body
+      BodyChrome.framed(screen, rect, body_focused) do |inner|
+        @intercept.render(screen, inner, focused: body_focused,
+          listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
+      end
     end
 
     def handle_body_key(ev : Termisu::Event::Key) : Bool
@@ -184,21 +187,22 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      if zone = @intercept.bar_zone_at(rect, mx, my) # click the top filter bar
+      inner = rect.inset(1, 1) # framed insets 1,1
+      if zone = @intercept.bar_zone_at(inner, mx, my) # click the top filter bar
         @host.focus_body
         zone == :direction ? intercept_cycle_direction : intercept_query
         return true
       end
-      return true unless pane = @intercept.pane_at(rect, mx, my)
+      return true unless pane = @intercept.pane_at(inner, mx, my)
       @host.focus_body
       if pane == :list
         @intercept.focus_list
-        if idx = @intercept.list_row_at(rect, mx, my)
+        if idx = @intercept.list_row_at(inner, mx, my)
           @intercept.select_index(idx)
         end
       else
         @intercept.focus_detail
-        @intercept.editor_click_to_cursor(rect, mx, my)
+        @intercept.editor_click_to_cursor(inner, mx, my)
       end
       true
     end

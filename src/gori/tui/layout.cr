@@ -6,16 +6,16 @@ module Gori::Tui
   #   (empty margin top)
   #   ┌────────────────────────────────┐  (inset by padding)
   #   │  topbar                        │  row 0
-  #   │  menu (tab segments)           │  row 1
-  #   │  ────────────────────────────  │  row 2: header hairline rule
+  #   │  ────────────────────────────  │  row 1: header hairline rule
+  #   │  menu (tab segments)           │  row 2
   #   │  body                          │  row 3+
   #   │                                │
   #   │  status                        │  bottom row
   #   (empty margin bottom)
   struct Layout
     getter topbar : Rect # row 0: logo + project + right-aligned indicators (inset)
-    getter menu : Rect   # row 1: horizontal tab menu (inset)
-    getter rule : Rect   # row 2: header hairline separating chrome from body
+    getter rule : Rect   # row 1: header hairline under the logo row
+    getter menu : Rect   # row 2: horizontal tab menu (inset)
     getter body : Rect   # inset content area (row 3+)
     getter status : Rect # bottom row: contextual key hints (inset)
 
@@ -36,8 +36,8 @@ module Gori::Tui
       y0 = vpad
 
       topbar = Rect.new(x, y0 + 0, inner_w, 1)
-      menu = Rect.new(x, y0 + 1, inner_w, 1)
-      rule = Rect.new(x, y0 + 2, inner_w, 1)
+      rule = Rect.new(x, y0 + 1, inner_w, 1)
+      menu = Rect.new(x, y0 + 2, inner_w, 1)
       status = Rect.new(x, y0 + inner_h - 1, inner_w, 1)
       body = Rect.new(x, y0 + 3, inner_w, {inner_h - 4, 0}.max)
       new(topbar, menu, rule, body, status)

@@ -122,7 +122,7 @@ module Gori::Tui
       render_chips(screen, rect, chips, bg: Theme.bg, min_x: name_end + 1)
     end
 
-    # A horizontal tab menu (row 1) styled as a segmented control. The active tab
+    # A horizontal tab menu (row 2) styled as a segmented control. The active tab
     # is a solid FOCUS_GOLD pill when the menu holds focus (mirroring the Replay/
     # Notes sub-tab strip, so "gold = focus is here" reads the same one level up);
     # at rest it settles to a dim SELECTION_DIM band. Inactive tabs are muted. The
@@ -131,10 +131,9 @@ module Gori::Tui
                          tabs : Array({Symbol, String}) = TABS,
                          intercept_count : Int32 = 0) : Nil
       return if rect.empty?
-      screen.fill(rect, Theme.panel)
 
       segs, start = menu_layout(rect, active_tab, tabs, intercept_count)
-      screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.panel) if start > 0 # earlier tabs hidden
+      screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0 # earlier tabs hidden
       segs.each do |(sym, label, seg)|
         if sym == active_tab
           bg = focused ? Theme.focus_gold : Theme.selection_dim
@@ -142,7 +141,7 @@ module Gori::Tui
           screen.fill(seg, bg)
           screen.text(seg.x + 1, seg.y, label, fg, bg, Attribute::Bold)
         else
-          screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.panel)
+          screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.bg)
         end
       end
     end
@@ -197,29 +196,27 @@ module Gori::Tui
       start
     end
 
-    # A windowed horizontal sub-tab strip (Replay / Notes). Segments scroll so the
-    # ACTIVE one is always visible — advance the window start until [start..active]
-    # fits, instead of breaking at the first overflow and hiding the active tab off
-    # the right edge. `‹` / `›` markers flag tabs hidden off either edge. Each label
-    # is drawn as a " label " segment. The active chip, when the strip HOLDS FOCUS, is a
-    # solid FOCUS_GOLD pill (the same gold that outlines a focused body pane — so "gold =
-    # focus is here" reads one level down too, and clearly beats the old near-identical
-    # ACCENT_BG/SELECTION_DIM bands); at rest it settles to a dim SELECTION_DIM band.
-    # Mirrors render_menu's windowing.
+    # A windowed horizontal sub-tab strip (Replay / Notes / Fuzzer / …). Sits on an
+    # ELEVATED band so it reads as a lifted header above the body canvas. Segments
+    # scroll so the ACTIVE one is always visible. Inactive chips are PANEL pills on
+    # that band; the active chip is FOCUS_GOLD when the strip holds focus, else
+    # ACCENT_BG (bright enough to read at rest). `‹` / `›` flag overflow.
     def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
-                              active : Int32, focused : Bool, *, bg : Color = Theme.panel) : Nil
+                              active : Int32, focused : Bool, *, bg : Color = Theme.elevated,
+                              chip_bg : Color = Theme.panel) : Nil
       return if rect.empty? || labels.empty?
       screen.fill(rect, bg)
       active = active.clamp(0, labels.size - 1)
       segs, start, last = strip_layout(rect, labels, active)
       segs.each do |(i, label, seg)|
         if i == active
-          abg = focused ? Theme.focus_gold : Theme.selection_dim
-          afg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text
+          abg = focused ? Theme.focus_gold : Theme.accent_bg
+          afg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text_bright
           screen.fill(seg, abg)
           screen.text(seg.x + 1, seg.y, label, afg, abg, attr: Attribute::Bold)
         else
-          screen.text(seg.x + 1, seg.y, label, Theme.muted, bg)
+          screen.fill(seg, chip_bg)
+          screen.text(seg.x + 1, seg.y, label, Theme.text, chip_bg)
         end
       end
       screen.cell(rect.x, rect.y, '‹', Theme.muted, bg) if start > 0
@@ -258,7 +255,7 @@ module Gori::Tui
       {segs, start, last}
     end
 
-    # The header hairline (row 2) separating the chrome from the body.
+    # The header hairline (row 1) under the logo row, above the tab menu.
     def self.render_rule(screen : Screen, rect : Rect) : Nil
       return if rect.empty?
       screen.hline(rect.x, rect.y, rect.w, fg: Theme.border, bg: Theme.bg)

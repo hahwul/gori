@@ -766,7 +766,7 @@ module Gori::Tui
       return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !@rename_open && subtabs_shown?
       sub_rect, _ = BodyChrome.carve_subtab_row(layout.body)
       return unless sub_rect.contains?(mx, my)
-      if seg = Chrome.strip_segments(sub_rect, subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
+      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
         open_rename(seg[0])
       end
     end
@@ -818,7 +818,7 @@ module Gori::Tui
     private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
       sub_rect, _ = BodyChrome.carve_subtab_row(body)
       return false unless sub_rect.contains?(mx, my)
-      if seg = Chrome.strip_segments(sub_rect, subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
+      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
         jump_subtab(seg[0])
         focus_pane(:subtabs)
       end
@@ -2350,9 +2350,9 @@ module Gori::Tui
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
         listen: "#{@session.proxy.host}:#{@session.proxy.port}", time: clock_label,
         scope: scope_label, rules: rules_label, intercept: intercept_label)
+      Chrome.render_rule(screen, layout.rule)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
         tabs: effective_tabs, intercept_count: @session.interceptor.pending_count)
-      Chrome.render_rule(screen, layout.rule)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: @toast || key_hints,
         capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,

@@ -60,20 +60,34 @@ module Gori::Tui
       yield rect.inset(1, 1)
     end
 
-    # Carve the top row of a body rect for the sub-tab strip, returning
-    # {strip_row, body_below}. Degenerate heights keep the body on `rect`.
+    # Height of the sub-tab chrome carved off a body rect: one tab row on an elevated
+    # band + one hairline that anchors the strip to the body card below.
+    STRIP_H = 2
+
+    # Carve the top of a body rect for the sub-tab strip, returning {strip, body_below}.
+    # Degenerate heights keep the body on `rect`.
     def carve_subtab_row(rect : Rect) : {Rect, Rect}
-      sub = Rect.new(rect.x, rect.y, rect.w, 1)
-      body = rect.h > 1 ? Rect.new(rect.x, rect.y + 1, rect.w, rect.h - 1) : rect
+      h = {STRIP_H, rect.h}.min
+      sub = Rect.new(rect.x, rect.y, rect.w, h)
+      body = rect.h > h ? Rect.new(rect.x, rect.y + h, rect.w, rect.h - h) : rect
       {sub, body}
     end
 
-    # The frame-less, 1-row segmented control shared by Replay and Notes. `focused`
-    # = the strip itself holds focus (←/→ switch) → active chip lights ACCENT_BG.
+    # The clickable 1-row chip band within a carved strip (hit-tests ignore the divider).
+    def tab_row(strip : Rect) : Rect
+      Rect.new(strip.x, strip.y, strip.w, 1)
+    end
+
+    # The frame-less segmented control shared by Replay, Notes, Fuzzer, … `focused` =
+    # the strip itself holds focus (←/→ switch) → active chip lights FOCUS_GOLD and the
+    # divider hairline matches.
     def render_subtab_strip(screen : Screen, rect : Rect, labels : Array(String),
                             active : Int32, focused : Bool) : Nil
       return if rect.empty?
-      Chrome.render_tab_strip(screen, rect, labels, active, focused)
+      Chrome.render_tab_strip(screen, tab_row(rect), labels, active, focused)
+      return if rect.h < 2
+      border = focused ? Theme.focus_gold : Theme.border
+      screen.hline(rect.x, rect.y + 1, rect.w, fg: border, bg: Theme.bg)
     end
   end
 

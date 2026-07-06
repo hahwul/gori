@@ -47,8 +47,8 @@ describe Gori::Tui::Layout do
     iw = 100 - 2 * hpad
     ih = 30 - 2 * vpad
     l.topbar.should eq(Rect.new(hpad, vpad + 0, iw, 1))
-    l.menu.should eq(Rect.new(hpad, vpad + 1, iw, 1))
-    l.rule.should eq(Rect.new(hpad, vpad + 2, iw, 1)) # header hairline under the tabs
+    l.rule.should eq(Rect.new(hpad, vpad + 1, iw, 1)) # header hairline under the logo row
+    l.menu.should eq(Rect.new(hpad, vpad + 2, iw, 1))
     l.status.should eq(Rect.new(hpad, vpad + ih - 1, iw, 1))
     l.body.should eq(Rect.new(hpad, vpad + 3, iw, ih - 4)) # inset vertically and horizontally
   end
@@ -149,6 +149,26 @@ describe Gori::Tui::Chrome do
     fx = backend.row(0).index("capture:FAILING").not_nil!
     backend.fg_at(fx, 0).should eq(Theme.red)
     backend.contains?("capture:on").should be_false # replaced, not appended
+  end
+
+  it "renders the sub-tab strip on an elevated band with panel pills and a divider" do
+    backend = MemoryBackend.new(60, 2)
+    screen = Screen.new(backend)
+    BodyChrome.render_subtab_strip(screen, Rect.new(0, 0, 60, 2),
+      ["1:alpha", "2:beta"], 0, focused: true)
+
+    backend.bg_at(30, 0).should eq(Theme.elevated)  # lifted header band (past the chips)
+    backend.bg_at(12, 0).should eq(Theme.panel)    # inactive pill
+    backend.bg_at(2, 0).should eq(Theme.focus_gold)  # active pill when focused
+    backend.row(1).should contain("─")             # hairline under the chips
+  end
+
+  it "brightens the active sub-tab chip with accent_bg when the strip is unfocused" do
+    backend = MemoryBackend.new(60, 1)
+    Chrome.render_tab_strip(Screen.new(backend), Rect.new(0, 0, 60, 1),
+      ["one", "two"], 1, focused: false)
+    backend.bg_at(8, 0).should eq(Theme.accent_bg)
+    backend.fg_at(8, 0).should eq(Theme.text_bright)
   end
 
   it "renders the top bar with project, scope, and the right-aligned clock" do
