@@ -1066,8 +1066,8 @@ module Gori::Tui
 
     private def format_time(t : Time?) : String
       return "—" if t.nil?
-      # Absolute local-ish time for creation date (no tz noise in TUI).
-      t.to_s("%Y-%m-%d %H:%M")
+      # Local wall-clock time for creation date (no tz noise in TUI).
+      t.to_local.to_s("%Y-%m-%d %H:%M")
     end
 
     private def human_size(bytes : Int64) : String

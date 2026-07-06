@@ -147,6 +147,32 @@ describe "ProjectView DESCRIPTION scrolling" do
   end
 end
 
+describe "ProjectView created time" do
+  it "shows project creation time in the local timezone" do
+    path = File.tempname("gori-projview-created", ".db")
+    store = Gori::Store.open(path)
+    begin
+      created_us = 1_700_000_000_000_000_i64
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: created_us, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/", http_version: "HTTP/1.1",
+        head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+      project = Gori::Project.new("t", path)
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.reload(project, store)
+      expected = Time.unix(created_us // 1_000_000).to_local.to_s("%Y-%m-%d %H:%M")
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: false)
+      b.contains?(expected).should be_true
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+end
+
 describe "ProjectView AT A GLANCE Technologies" do
   it "drops tech facts fingerprinted only on out-of-scope hosts once the scope lens is ON" do
     tmp_store do |store|
