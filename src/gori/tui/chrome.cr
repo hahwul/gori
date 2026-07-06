@@ -85,7 +85,7 @@ module Gori::Tui
                             listen : String, time : String,
                             scope : String, rules : String = "", intercept : String = "") : Nil
       screen.fill(rect, Theme.panel)
-      x = screen.text(rect.x + 1, rect.y, "ǤØɌɨ", Theme.text_bright, Theme.panel, Attribute::Bold)
+      x = screen.text(rect.x + 1, rect.y, "Ǥ⌀Ɍɪ", Theme.text_bright, Theme.panel, Attribute::Bold)
       name_x = x + 1
 
       # right-aligned status chips: scope:N · rules:N · intercept:on(N) · listen · h:MM AM/PM

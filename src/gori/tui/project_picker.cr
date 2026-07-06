@@ -518,12 +518,12 @@ module Gori::Tui
       # the overlays use, so the picker matches the rest of the app.
       actions = 3
       box, res_rows = card_metrics(w, h)
-      top = box.y - 3 # the "ǤØɌɨ" wordmark sits 3 rows above the card
+      top = box.y - 3 # the "Ǥ⌀Ɍɪ" wordmark sits 3 rows above the card
 
       # The decorative art (when it fits) sits ART_GAP rows above the wordmark;
       # card_metrics reserved ART_H + ART_GAP rows above `top` for exactly this.
       draw_brand_art(screen, top - ART_H - ART_GAP, w, @art_frame) if art_shown?(w, h)
-      centered(screen, top, "ǤØɌɨ", Theme.text_bright, w, Attribute::Bold)
+      centered(screen, top, "Ǥ⌀Ɍɪ", Theme.text_bright, w, Attribute::Bold)
       centered(screen, top + 1, "free · open-source · human in the driver's seat", Theme.muted, w)
 
       Frame.card(screen, box)
@@ -603,7 +603,7 @@ module Gori::Tui
 
     private def render_new(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
       top = {(h - 5) // 2, 1}.max
-      centered(screen, top, "ǤØɌɨ", Theme.text_bright, w, Attribute::Bold)
+      centered(screen, top, "Ǥ⌀Ɍɪ", Theme.text_bright, w, Attribute::Bold)
       centered(screen, top + 2, "new project", Theme.muted, w)
       iy = top + 3
       # Two-row input area: name (required) + description (optional)
