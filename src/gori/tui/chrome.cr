@@ -27,6 +27,30 @@ module Gori::Tui
     # this no longer applies.
     DEFAULT_HIDDEN = [:miner]
 
+    # The canonical script wordmark — one grapheme per letter, drawn with per-letter
+    # syntax accents so it re-themes with the active palette.
+    WORDMARK = "𝓰𝓸𝓻𝓲"
+
+    # Display width of WORDMARK in terminal columns (grapheme-aware).
+    def self.wordmark_width : Int32
+      Screen.display_width(WORDMARK)
+    end
+
+    # Draw WORDMARK left-aligned at (x, y), or horizontally centred when `center_w`
+    # is set. Returns the x just past the drawn wordmark.
+    def self.render_wordmark(screen : Screen, x : Int32, y : Int32, *, bg : Color = Theme.bg,
+                             attr : Attribute = Attribute::Bold, center_w : Int32? = nil) : Int32
+      hues = [Theme.syn_header, Theme.syn_string, Theme.orange, Theme.syn_literal]
+      total_w = wordmark_width
+      cur_x = center_w ? {(center_w - total_w) // 2, 0}.max : x
+      WORDMARK.each_grapheme.with_index do |g, i|
+        gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
+        screen.cell(cur_x, y, g.to_s, hues[i % hues.size], bg, attr)
+        cur_x += gw
+      end
+      cur_x
+    end
+
     # Reconcile stored prefs against the canonical catalog → full ordered
     # {symbol, label, visible?}. Removed/unknown ids are dropped, duplicates collapse to
     # first occurrence, and catalog tabs absent from prefs are INSERTED at their
@@ -86,7 +110,7 @@ module Gori::Tui
                             scope : String, rules : String = "", intercept : String = "") : Nil
       # Logo row sits flush on the canvas — no lifted panel band (tabs/status keep panel).
       screen.fill(rect, Theme.bg)
-      x = screen.text(rect.x + 1, rect.y, "🅶🅾🆁🅸", Theme.text_bright, Theme.bg, Attribute::Bold)
+      x = render_wordmark(screen, rect.x + 1, rect.y, bg: Theme.bg)
       name_x = x + 1
 
       # right-aligned status chips: scope:N · rules:N · intercept:on(N) · listen · h:MM AM/PM
