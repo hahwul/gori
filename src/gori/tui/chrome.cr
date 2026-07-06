@@ -27,27 +27,18 @@ module Gori::Tui
     # this no longer applies.
     DEFAULT_HIDDEN = [:miner]
 
-    # The canonical script wordmark — drawn in focus_gold so it re-themes with the
-    # active palette (GORIDARK: subtle gold; other themes mirror their focus pill).
     WORDMARK = "𝓰𝓸𝓻𝓲"
-
-    # Display width of WORDMARK in terminal columns (grapheme-aware).
-    def self.wordmark_width : Int32
-      Screen.display_width(WORDMARK)
-    end
 
     # Draw WORDMARK left-aligned at (x, y), or horizontally centred when `center_w`
     # is set. Returns the x just past the drawn wordmark.
     def self.render_wordmark(screen : Screen, x : Int32, y : Int32, *, bg : Color = Theme.bg,
                              attr : Attribute = Attribute::Bold, center_w : Int32? = nil) : Int32
-      total_w = wordmark_width
-      cur_x = center_w ? {(center_w - total_w) // 2, 0}.max : x
-      WORDMARK.each_grapheme do |g|
-        gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
-        screen.cell(cur_x, y, g.to_s, Theme.focus_gold, bg, attr)
-        cur_x += gw
-      end
-      cur_x
+      start_x = if cw = center_w
+                  {(cw - Screen.display_width(WORDMARK)) // 2, 0}.max
+                else
+                  x
+                end
+      screen.text(start_x, y, WORDMARK, Theme.text_bright, bg, attr)
     end
 
     # Reconcile stored prefs against the canonical catalog → full ordered
