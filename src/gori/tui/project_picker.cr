@@ -416,6 +416,12 @@ module Gori::Tui
       "       ████████ █   ██",
     ]
     ART_H = BRAND_ART.size
+    # Ink extent of the art: leftmost stroke column and inked width. Centering
+    # uses these — not raw line widths — so the visible figure (rather than its
+    # leading indentation) is what centres over the wordmark; raw-width centering
+    # pushed the figure a few cells right of the wordmark's optical centre.
+    ART_LEFT  = BRAND_ART.min_of { |line| line.size - line.lstrip.size }
+    ART_INK_W = BRAND_ART.max_of(&.rstrip.size) - ART_LEFT
 
     # Entrance effect — three phases on one frame clock (~50 ms/frame, the idle poll):
     #   1. Wave reveal: a diagonal front (top-left → bottom-right) materialises the
@@ -670,9 +676,9 @@ module Gori::Tui
     end
 
     # Draw BRAND_ART as one centered block: every line starts at the same left
-    # edge (derived from the widest line) so the figure keeps its shape rather
-    # than each row centering on its own width. Accent colour so it reads as a
-    # logo mark distinct from the wordmark beneath it.
+    # edge (derived from the ink extent — see ART_LEFT/ART_INK_W) so the figure
+    # keeps its shape rather than each row centering on its own width. Accent
+    # colour so it reads as a logo mark distinct from the wordmark beneath it.
     #
     # `frame` drives the entrance (see the timeline constants above): the diagonal
     # wave front reveals cells by their d-coordinate, each ramping ░▒▓ and fading
@@ -680,8 +686,7 @@ module Gori::Tui
     # diagonal once. Past ART_ANIM_DONE every cell is solid accent, so the same
     # call renders the final static logo.
     private def draw_brand_art(screen : Screen, y : Int32, w : Int32, frame : Int32) : Nil
-      bw = BRAND_ART.max_of(&.size)
-      x = {(w - bw) // 2, 0}.max
+      x = {(w - ART_INK_W) // 2 - ART_LEFT, 0}.max
       BRAND_ART.each_with_index do |line, i|
         line.each_char_with_index do |ch, col|
           next if ch == ' '
