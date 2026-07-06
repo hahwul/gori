@@ -151,6 +151,12 @@ describe Gori::Tui::Chrome do
     backend.contains?("capture:on").should be_false # replaced, not appended
   end
 
+  it "gilds the shell only for single-pane body focus" do
+    BodyChrome.shell_focused(:body, multi_pane: false).should be_true
+    BodyChrome.shell_focused(:body, multi_pane: true).should be_false
+    BodyChrome.shell_focused(:subtabs, multi_pane: false).should be_false
+  end
+
   it "carves the sub-tab strip inside a framed body" do
     outer = Rect.new(0, 0, 80, 20)
     strip = BodyChrome.strip_rect(outer, strip: true).not_nil!

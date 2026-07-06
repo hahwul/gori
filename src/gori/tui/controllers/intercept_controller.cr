@@ -49,7 +49,8 @@ module Gori::Tui
       @intercept.reload(@host.session.interceptor) # live refresh (50ms loop)
       proxy = @host.session.proxy
       body_focused = focus == :body
-      BodyChrome.framed(screen, rect, body_focused) do |inner|
+      shell = BodyChrome.shell_focused(focus, multi_pane: !@intercept.empty?)
+      BodyChrome.framed(screen, rect, shell) do |inner|
         @intercept.render(screen, inner, focused: body_focused,
           listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
       end

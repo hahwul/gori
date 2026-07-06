@@ -65,11 +65,17 @@ module Gori::Tui
       rect.inset(1, 1)
     end
 
+    # True when the outer body shell should gild its border — single-pane tabs only.
+    # Multi-pane views (Replay, Fuzzer, …) highlight the focused pane themselves.
+    def shell_focused(focus : Symbol, *, multi_pane : Bool) : Bool
+      focus == :body && !multi_pane
+    end
+
     # Frame the tab body, carve the sub-tab strip from the interior top when
     # `labels` is given, then yield the remaining content rect.
-    def framed_body(screen : Screen, rect : Rect, body_focused : Bool,
+    def framed_body(screen : Screen, rect : Rect, shell_focused : Bool,
                     subtabs_focused : Bool, labels : Array(String)?, active : Int32, & : Rect ->) : Nil
-      framed(screen, rect, body_focused) do |inner|
+      framed(screen, rect, shell_focused) do |inner|
         if labels
           sub_rect, content = carve_subtab_row(inner)
           render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused)

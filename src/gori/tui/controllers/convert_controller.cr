@@ -169,7 +169,8 @@ module Gori::Tui
       body_focused = focus == :body
       labels = subtab_strip_shown? ? subtab_labels : nil
       s = cur
-      BodyChrome.framed_body(screen, rect, body_focused, focus == :subtabs, labels, @idx) do |content|
+      shell = BodyChrome.shell_focused(focus, multi_pane: true)
+      BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @idx) do |content|
         # Each section frames its own card (per-pane focus border) inside the shell frame.
         s.view.render(screen, content,
           input: s.input, chain: s.chain, chain_cx: s.chain_cx, chain_pre: @chain_pre,

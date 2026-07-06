@@ -33,7 +33,8 @@ module Gori::Tui
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
       labels = subtab_strip_shown? ? @notes.subtab_labels : nil
-      BodyChrome.framed_body(screen, rect, body_focused, focus == :subtabs, labels, @notes.current_index) do |content|
+      shell = BodyChrome.shell_focused(focus, multi_pane: false)
+      BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @notes.current_index) do |content|
         editor_rect = content
         if !@notes.link_preview.empty?
           links_rect, editor_rect = carve_links_row(content)
