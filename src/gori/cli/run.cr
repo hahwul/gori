@@ -1,5 +1,6 @@
 require "option_parser"
 require "json"
+require "base64"
 require "../config"
 require "../paths"
 require "../settings"
@@ -164,6 +165,7 @@ module Gori
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run history: missing value for #{f}" }
         end
+        args = normalize_query_flag(args)
         neg_terms, opt_args = split_ql_negations(args)
         parser.parse(opt_args)
         # Accept a positional QL too ("gori run history status:404" / "-status:404"),
@@ -177,6 +179,9 @@ module Gori
           rows =
             if q = query
               filter = QL.parse(q)
+              QL.invalid_regex_terms(q).each do |t|
+                STDERR.puts "gori run history: warning: invalid regex in #{t.inspect} — that term matches nothing"
+              end
               # A query that fails to compile to ANY clause (e.g. `status:>=foo`)
               # yields the match-all EMPTY filter — silently dumping every flow,
               # the opposite of what the user asked. Refuse it instead.
@@ -388,36 +393,40 @@ module Gori
             j.field "error", detail.error
             emit_decoded_json(j, detail, req, resp)
             if req
-              req_body, req_decoded = decode_body(detail.request_head, detail.request_body)
               j.field "request" do
                 j.object do
                   j.field "head", scrub(detail.request_head)
-                  j.field "body", scrub(req_body)
-                  j.field "body_decoded", req_decoded
-                  j.field "body_truncated", detail.request_body_truncated?
+                  emit_body_json(j, "body", detail.request_head, detail.request_body, detail.request_body_truncated?)
                 end
               end
             end
             if resp
-              resp_body, resp_decoded = decode_body(detail.response_head, detail.response_body)
               j.field "response" do
                 j.object do
                   j.field "head", scrub(detail.response_head)
-                  j.field "body", scrub(resp_body)
-                  j.field "body_decoded", resp_decoded
-                  j.field "body_truncated", detail.response_body_truncated?
+                  emit_body_json(j, "body", detail.response_head, detail.response_body, detail.response_body_truncated?)
                 end
               end
               unless ws_msgs.empty?
                 j.field "ws_messages" do
-                  j.array do
-                    ws_msgs.each do |m|
-                      j.object do
-                        j.field "direction", m.direction
-                        j.field "opcode", m.opcode
-                        j.field "text", m.text?
-                        j.field "payload", m.text? ? String.new(m.payload).scrub : nil
-                        j.field "size", m.payload.size
+                  j.object do
+                    j.field "count", ws_msgs.size
+                    j.field "truncated", false
+                    j.field "messages" do
+                      j.array do
+                        ws_msgs.each do |m|
+                          j.object do
+                            j.field "direction", m.direction
+                            j.field "opcode", m.opcode
+                            if m.text?
+                              j.field "text", String.new(m.payload).scrub
+                            else
+                              j.field "binary", true
+                              j.field "size", m.payload.size
+                              j.field "base64", Base64.strict_encode(m.payload)
+                            end
+                          end
+                        end
                       end
                     end
                   end
@@ -425,13 +434,19 @@ module Gori
               end
               if (events = sse_events_of(detail)) && !events.empty?
                 j.field "sse_events" do
-                  j.array do
-                    events.each do |e|
-                      j.object do
-                        j.field "type", e.type
-                        j.field "data", e.data.scrub
-                        j.field "id", e.id
-                        j.field "retry", e.retry
+                  j.object do
+                    j.field "count", events.size
+                    j.field "truncated", false
+                    j.field "events" do
+                      j.array do
+                        events.each do |e|
+                          j.object do
+                            j.field "type", e.type
+                            j.field "id", e.id
+                            j.field "retry", e.retry
+                            j.field "data", e.data.scrub
+                          end
+                        end
                       end
                     end
                   end
@@ -496,9 +511,11 @@ module Gori
         verify = !insecure
         result = use_h2 ? Replay::H2Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify) : Replay::Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
 
-        # Decode the response body once; only build the diff lines when --diff asked
-        # for them (decoding the captured baseline isn't free for large bodies).
-        new_body, body_decoded = decode_body(result.head, result.body)
+        # Decode the response body once for TEXT display (--diff / plain print); only
+        # build the diff lines when --diff asked for them (decoding the captured
+        # baseline isn't free for large bodies). The JSON path decodes independently
+        # inside emit_body_json, from the raw head+body, to match MCP's contract.
+        new_body, _ = decode_body(result.head, result.body)
         diff =
           if do_diff
             orig = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
@@ -506,7 +523,7 @@ module Gori
           end
 
         if format == :json
-          puts replay_json(result, new_body, body_decoded, diff)
+          puts replay_json(result, diff)
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}"
           if d = diff
@@ -522,7 +539,7 @@ module Gori
         exit 1 unless result.ok?
       end
 
-      private def self.replay_json(result : Replay::Result, body : Bytes?, body_decoded : Bool, diff : Array(Replay::DiffLine)?) : String
+      private def self.replay_json(result : Replay::Result, diff : Array(Replay::DiffLine)?) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
@@ -530,8 +547,7 @@ module Gori
             j.field "duration_us", result.duration_us
             j.field "error", result.error
             j.field "head", scrub(result.head)
-            j.field "body", scrub(body)
-            j.field "body_decoded", body_decoded
+            emit_body_json(j, "body", result.head, result.body, false)
             if d = diff
               j.field "changed_lines", Replay::Diff.change_count(d)
             end
@@ -671,10 +687,29 @@ module Gori
       private def self.build_fuzz_template(text : String, auto : Bool, marks : Array(String), http2 : Bool) : Fuzz::Template
         text = Fuzz::Template.auto_mark(text) if auto
         m = Fuzz::Template::MARKER
-        marks.each { |tok| text = text.gsub(tok, "#{m}#{tok}#{m}") }
+        marks.each do |tok|
+          occ = mark_occurrences(text, tok)
+          STDERR.puts "gori run fuzz: note: --mark #{tok.inspect} matches #{occ} positions (including any in headers)" if occ > 1
+          text = text.gsub(tok, "#{m}#{tok}#{m}")
+        end
         template = Fuzz::Template.parse(text, http2)
         abort "gori run fuzz: no positions — add §…§ markers, --auto, or --mark TOKEN" if template.position_count == 0
         template
+      end
+
+      # How many times a literal --mark TOKEN occurs in the template text — a
+      # short/common token (e.g. "A") can match many spots including request
+      # headers, silently exploding the position count. Non-overlapping count
+      # (mirrors String#gsub's own scan), so it matches exactly what gets marked.
+      private def self.mark_occurrences(text : String, tok : String) : Int32
+        return 0 if tok.empty?
+        count = 0
+        idx = 0
+        while found = text.index(tok, idx)
+          count += 1
+          idx = found + tok.size
+        end
+        count
       end
 
       private def self.run_fuzz_stream(engine : Fuzz::Engine, mode : Fuzz::Mode, scheme : String,
@@ -1023,6 +1058,7 @@ module Gori
           p.invalid_option { |f| abort "gori run prism: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run prism: missing value for #{f}" }
         end
+        args = normalize_query_flag(args)
         neg_terms, opt_args = split_ql_negations(args)
         parser.parse(opt_args)
         # A positional QL is accepted too ("gori run prism status:>=500" / "-status:200"),
@@ -1033,6 +1069,9 @@ module Gori
         filter : QL::Filter? = nil
         if q = query
           parsed = QL.parse(q)
+          QL.invalid_regex_terms(q).each do |t|
+            STDERR.puts "gori run prism: warning: invalid regex in #{t.inspect} — that term matches nothing"
+          end
           # A query that compiles to NOTHING (e.g. `status:>=foo`) becomes the match-all EMPTY
           # filter — here that would scan every flow, the opposite of what was asked. Refuse it.
           if !q.strip.empty? && parsed == QL::EMPTY
@@ -1225,6 +1264,7 @@ module Gori
           p.invalid_option { |f| abort "gori run sitemap: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run sitemap: missing value for #{f}" }
         end
+        args = normalize_query_flag(args)
         neg_terms, opt_args = split_ql_negations(args)
         parser.parse(opt_args)
         # Accept a positional QL too ("gori run sitemap host:api" / "-status:404"), mirroring
@@ -1253,6 +1293,9 @@ module Gori
       private def self.sitemap_filter(query : String?) : QL::Filter
         return QL::EMPTY unless q = query
         filter = QL.parse(q)
+        QL.invalid_regex_terms(q).each do |t|
+          STDERR.puts "gori run sitemap: warning: invalid regex in #{t.inspect} — that term matches nothing"
+        end
         if !q.strip.empty? && filter == QL::EMPTY
           abort "gori run sitemap: query #{q.inspect} did not match any field (check syntax, e.g. host:example.com method:POST path:/api status:>=500)"
         end
@@ -1451,6 +1494,33 @@ module Gori
         {neg, rest}
       end
 
+      # A short `-q` value that itself starts with '-' (e.g. `-q '-method:POST'`)
+      # confuses OptionParser: it reads "-method:POST" as another flag rather than
+      # -q's value, and the query is silently dropped. `--query=VALUE` doesn't have
+      # this problem (OptionParser only splits on the first '='), so rewrite every
+      # `-q`/`-qVALUE`/`-q=VALUE`/`-q VALUE` form into `--query=VALUE` up front.
+      private def self.normalize_query_flag(args : Array(String)) : Array(String)
+        out = [] of String
+        i = 0
+        while i < args.size
+          a = args[i]
+          if a == "-q" || a == "--query"
+            if v = args[i + 1]?
+              out << "--query=#{v}"; i += 2
+            else
+              out << a; i += 1
+            end
+          elsif a.starts_with?("-q=")
+            out << "--query=#{a[3..]}"; i += 1
+          elsif a.starts_with?("-q") && a.size > 2
+            out << "--query=#{a[2..]}"; i += 1
+          else
+            out << a; i += 1
+          end
+        end
+        out
+      end
+
       private def self.take_flow_id(rest : Array(String), sub : String) : Int64
         abort "gori run #{sub}: missing <flow-id>" if rest.empty?
         abort "gori run #{sub}: too many arguments (expected one <flow-id>, got: #{rest.join(" ")})" if rest.size > 1
@@ -1517,12 +1587,60 @@ module Gori
         bytes ? String.new(bytes).scrub : nil
       end
 
+      # The CLI counterpart of MCP's Serialize.emit_body (src/gori/mcp/serialize.cr)
+      # — same object shape ({encoding, size, truncated, text|base64, binary?,
+      # wire_truncated?, note?}) so a script gets a consistent contract whether it
+      # reads `gori mcp` or `gori run … --format json`. UNCLIPPED: unlike MCP (which
+      # caps at MAX_TEXT/MAX_B64 for an LLM's context window), the CLI is read by a
+      # script that expects the whole value, so no size cap is applied here.
+      private def self.emit_body_json(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?, wire_truncated : Bool) : Nil
+        if body.nil? || body.empty?
+          j.field field_name, nil
+          return
+        end
+        decoded, note = Proxy::Codec::ContentDecode.decode(head, body)
+        bytes = decoded || body
+        s = String.new(bytes)
+        j.field field_name do
+          j.object do
+            if s.valid_encoding?
+              j.field "encoding", "text"
+              j.field "size", bytes.size
+              j.field "truncated", wire_truncated
+              j.field "text", s
+            else
+              j.field "encoding", "base64"
+              j.field "binary", true
+              j.field "size", bytes.size
+              j.field "truncated", wire_truncated
+              j.field "base64", Base64.strict_encode(bytes)
+            end
+            j.field "wire_truncated", true if wire_truncated
+            j.field "note", note if note
+          end
+        end
+      end
+
       private def self.print_message_text(head : Bytes?, body : Bytes?) : Nil
         STDOUT.puts(String.new(head || Bytes.empty).scrub.rstrip)
         if body && !body.empty?
           STDOUT.puts ""
-          STDOUT.puts(String.new(body).scrub)
+          if binary_body?(body)
+            STDOUT.puts "[binary body, #{body.size} bytes — use --format raw for exact bytes, or view hex]"
+          else
+            STDOUT.puts(String.new(body).scrub)
+          end
         end
+      end
+
+      # `.scrub` only fixes invalid UTF-8 byte sequences — it does NOT strip control
+      # bytes, so a binary body (e.g. a PNG/NUL-laden blob) would otherwise dump raw
+      # control bytes (NUL/SUB/ESC/…) straight to the terminal and corrupt it. Sniff
+      # for a NUL in the first 8KB, mirroring the TUI's binary-body guard.
+      private def self.binary_body?(bytes : Bytes) : Bool
+        n = {bytes.size, 8192}.min
+        n.times { |i| return true if bytes[i] == 0u8 }
+        false
       end
 
       # head lines + blank + body lines (scrubbed), for the --diff line comparison.

@@ -262,7 +262,7 @@ describe Gori::CLI::Output do
     json["id"].as_i.should eq(42)
     json["method"].as_s.should eq("GET")
     json["status"].as_i.should eq(200)
-    json["state"].as_s.should eq("Complete")
+    json["state"].as_s.should eq("complete") # lowercased to match the MCP serializer
   end
 
   it "humanises sizes and durations" do

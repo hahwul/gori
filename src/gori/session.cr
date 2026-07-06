@@ -92,7 +92,7 @@ module Gori
                 ex.message || "could not bind #{config.listen}:#{config.port}"
               end
             else
-              "another gori instance is already capturing this project"
+              "another gori instance already holds this directory's capture lock"
             end
           rescue ex
             # CaptureLock.try itself failed (can't create/open the lock file) — not a

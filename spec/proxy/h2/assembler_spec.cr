@@ -52,6 +52,9 @@ describe Gori::Proxy::H2::Assembler do
     req.port.should eq(443)
     req.http_version.should eq("HTTP/2")
     String.new(req.head).should contain("GET / HTTP/2")
+    # The h2 `:authority` pseudo-header is rendered as a `Host:` line so the
+    # synthesized head carries the target host (else `show` / QL header:host miss it).
+    String.new(req.head).should contain("Host: www.example.com")
   end
 
   it "links a response (HEADERS + DATA) to the request flow" do

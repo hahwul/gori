@@ -92,6 +92,37 @@ module Gori
       clauses.empty? ? EMPTY : Filter.new(clauses.join(" OR "), args)
     end
 
+    # A `~` (regex) term whose pattern fails to compile silently degrades to a
+    # never-match "0" SQL clause inside term_to_sql/regex_cond (see there) — unlike
+    # a bad numeric term (status:>=foo), which is simply DROPPED and lets the rest
+    # of the query stand. That asymmetry means a query like `body~[bad` can zero
+    # out an entire result set with exit 0 and no diagnostic. This surfaces those
+    # terms so a caller can warn without changing match behaviour. Mirrors the
+    # exact tokenization term_to_sql/regex_cond use, so it flags precisely the
+    # terms that would compile to the never-match clause — no more, no less.
+    def self.invalid_regex_terms(query : String) : Array(String)
+      bad = [] of String
+      query.split.each do |tok|
+        next if tok == "OR"
+        term = tok.starts_with?('-') ? tok[1..] : tok
+        next if term.empty?
+
+        ci = term.index(':')
+        ti = term.index('~')
+        sep = [ci, ti].compact.min?
+        next unless sep && sep > 0 && ti == sep # a regex op, not free text / field op
+
+        field = term[0...sep].downcase
+        next unless field.in?("host", "path", "url", "header", "body")
+
+        value = term[(sep + 1)..]
+        next if value.empty?
+
+        bad << tok unless valid_regex?(value)
+      end
+      bad
+    end
+
     private def self.term_to_sql(term : String) : {String, Array(DB::Any)}?
       negate = term.starts_with?('-')
       term = term[1..] if negate

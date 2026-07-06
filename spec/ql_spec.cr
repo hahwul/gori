@@ -347,4 +347,26 @@ describe "Gori::Store#search (QL)" do
       Gori::QL.reject_empty?("host:beta status:>=foo", f).should be_false
     end
   end
+
+  describe ".invalid_regex_terms" do
+    it "flags a regex term whose pattern does not compile" do
+      Gori::QL.invalid_regex_terms("host:h body~[bad").should eq(["body~[bad"])
+    end
+
+    it "keeps the leading '-' on a negated invalid regex term" do
+      Gori::QL.invalid_regex_terms("-host~[bad").should eq(["-host~[bad"])
+    end
+
+    it "returns nothing for valid regexes and non-regex terms" do
+      Gori::QL.invalid_regex_terms("host~^api\\. status:>=foo body:token").should be_empty
+    end
+
+    it "does not flag a '~' on a non-regex field (that free-texts the whole token)" do
+      Gori::QL.invalid_regex_terms("foo~[bad").should be_empty
+    end
+
+    it "flags each bad term across OR groups" do
+      Gori::QL.invalid_regex_terms("body~[a OR path~[b").should eq(["body~[a", "path~[b"])
+    end
+  end
 end

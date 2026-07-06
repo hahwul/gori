@@ -71,7 +71,7 @@ module Gori
       puts ""
       puts "Commands:"
       puts "  tui       Start the interactive TUI (default when no command)"
-      puts "  settings  Print/edit the persistent settings file (settings.json)"
+      puts "  settings  Show the settings.json path (or --edit to open it)"
       puts "  export    Export things (currently only ca-cert)"
       puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
       puts "  wizard    Interactive setup wizard (bind, theme) — also runs on first launch"
