@@ -258,7 +258,7 @@ module Gori::Proxy::H2
       cap = stream.req.body
       body = cap.total == 0 ? nil : cap.to_slice
 
-      head = synth_request_head(method, path, headers)
+      head = synth_request_head(method, path, headers, authority)
       captured = Store::CapturedRequest.new(
         created_at: @created_at, scheme: scheme, host: host, port: port,
         method: method, target: path, http_version: "HTTP/2", head: head, body: body,
@@ -334,9 +334,19 @@ module Gori::Proxy::H2
 
     # A readable HTTP/2 request head (the bytes shown in the detail view). The
     # authoritative octets are the raw frames; this is a normalized view.
-    private def synth_request_head(method : String, path : String, headers : Array({String, String})) : Bytes
+    #
+    # HTTP/2 carries the request's host in the `:authority` pseudo-header
+    # (RFC 7540 §8.1.2.3) rather than a `Host:` field, and the loop below skips
+    # ALL pseudo-headers — so without this, the synthesized head has no host at
+    # all, breaking `gori run show` / MCP get_flow / QL `header:host` for every
+    # h2 flow. Emit `Host: <authority>` first (authority is the caller's
+    # already-resolved `:authority` pseudo value, falling back to @host),
+    # unless the headers already carry an explicit (non-pseudo) `host` field.
+    private def synth_request_head(method : String, path : String, headers : Array({String, String}), authority : String) : Bytes
       String.build do |io|
         io << method << ' ' << path << " HTTP/2\r\n"
+        has_host = headers.any? { |(n, _)| n.downcase == "host" }
+        io << "Host: " << authority << "\r\n" if !authority.empty? && !has_host
         headers.each { |(n, v)| io << n << ": " << v << "\r\n" unless n.starts_with?(':') }
         io << "\r\n"
       end.to_slice

@@ -30,7 +30,10 @@ module Gori
         scheme = (uri.scheme || "http").downcase
         raise Gori::Error.new("unsupported scheme: #{scheme} (only http/https)") unless scheme.in?("http", "https")
         host = uri.host
-        raise Gori::Error.new("url has no host: #{url}") if host.nil? || host.empty?
+        if host.nil? || host.empty?
+          hint = url.includes?("://") ? "" : " — include a scheme, e.g. https://#{url}"
+          raise Gori::Error.new("url has no host: #{url}#{hint}")
+        end
         # URI.parse keeps a CR/LF embedded in the authority as part of `host`
         # (e.g. "http://h.com\r\nEvil: x/"), which would otherwise be written into
         # the auto-generated Host header and inject. Reject it on BOTH paths (raw

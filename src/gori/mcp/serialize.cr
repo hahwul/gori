@@ -116,6 +116,10 @@ module Gori
                     else
                       j.field "binary", true
                       j.field "size", m.payload.size
+                      cut = m.payload.size > MAX_B64
+                      slice = cut ? m.payload[0, MAX_B64] : m.payload
+                      j.field "base64", Base64.strict_encode(slice)
+                      j.field "base64_truncated", true if cut
                     end
                   end
                 end

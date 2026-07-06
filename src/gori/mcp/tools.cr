@@ -204,13 +204,15 @@ module Gori
               "Start a fuzz/intruder run against an origin and return a job_id " \
               "immediately (poll with fuzz_status / fuzz_results; end with fuzz_stop). " \
               "ACTIVE: sends many real outbound requests from this host. Mark payload " \
-              "positions with §…§ in `template`, or pass `flow_id` + auto:true, then " \
-              "provide payload sets via `payloads`. Capped " \
+              "positions with §…§ in `template`, via `marks` (literal token wrap, like " \
+              "CLI --mark), or pass `flow_id` + auto:true, then provide payload sets via " \
+              "`payloads`. Capped " \
               "at #{FUZZ_MAX_REQUESTS} requests / #{FUZZ_MAX_CONCURRENCY} concurrency." do |s|
               s.field "template", strprop("raw HTTP request with §…§ position markers")
               s.field "flow_id", intprop("seed the template from a captured flow id (instead of template)")
               s.field "url", strprop("absolute target URL (scheme+host); required unless flow_id carries one")
               s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
+              s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template")
               s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
               s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string))
               s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string))
@@ -304,7 +306,7 @@ module Gori
         when "list_scope"          then list_scope
         when "project_info"        then project_info
         when "get_current_context" then get_current_context
-        when "get_replay_context" then get_replay_context
+        when "get_replay_context"  then get_replay_context
         when "ql_reference"        then ql_reference
         end
       end
@@ -954,6 +956,8 @@ module Gori
         text, default_target, src_h2 = fuzz_template_source(h)
         use_h2 = (bool(h, "http2") || false) || src_h2
         text = Fuzz::Template.auto_mark(text) if bool(h, "auto") || false
+        m = Fuzz::Template::MARKER
+        fuzz_marks(h).each { |tok| text = text.gsub(tok, "#{m}#{tok}#{m}") }
         template = Fuzz::Template.parse(text, use_h2)
         raise FuzzArgError.new("template has no §…§ positions (add markers, or pass auto:true with a flow_id)") if template.position_count == 0
         origin = fuzz_origin(h, default_target)
@@ -997,6 +1001,24 @@ module Gori
         s = str(h, "mode")
         return Fuzz::Mode::Sniper if s.nil? || s.strip.empty?
         Fuzz::Mode.parse?(s) || raise FuzzArgError.new("invalid mode '#{s}' (sniper|batteringram|pitchfork|clusterbomb)")
+      end
+
+      # Mirrors `fuzz_sets`'s array-pulling pattern (bare array, or a JSON-encoded
+      # string — LLM clients vary), but for plain string tokens.
+      private def fuzz_marks(h) : Array(String)
+        raw = h["marks"]?
+        return [] of String unless raw
+        arr =
+          if a = raw.as_a?
+            a
+          elsif s = raw.as_s?
+            return [] of String if s.strip.empty?
+            parsed = JSON.parse(s) rescue raise FuzzArgError.new("'marks' must be a JSON array of strings")
+            parsed.as_a? || raise FuzzArgError.new("'marks' must be a JSON array")
+          else
+            raise FuzzArgError.new("'marks' must be a JSON array of strings (not a bare string/scalar)")
+          end
+        arr.map { |v| v.as_s? || raise FuzzArgError.new("each 'marks' entry must be a string") }
       end
 
       private def fuzz_sets(h) : Array(Fuzz::PayloadSet)
@@ -1260,6 +1282,10 @@ module Gori
 
       private def arrprop(desc : String) : JSON::Any
         JSON.parse(%({"type":"array","description":#{desc.to_json},"items":{"type":"object"}}))
+      end
+
+      private def strarrprop(desc : String) : JSON::Any
+        JSON.parse(%({"type":"array","description":#{desc.to_json},"items":{"type":"string"}}))
       end
 
       # Accepts a JSON object directly or a JSON-encoded string (LLM clients vary).

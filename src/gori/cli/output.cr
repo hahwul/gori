@@ -30,7 +30,7 @@ module Gori
           j.field "port", row.port
           j.field "target", row.target
           j.field "status", row.status
-          j.field "state", row.state.to_s
+          j.field "state", row.state.to_s.downcase
           j.field "size", row.size
           j.field "response_size", row.response_size
           j.field "duration_us", row.duration_us
