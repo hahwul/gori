@@ -47,13 +47,9 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       case @project_view.pane
       when :scope
-        @project_view.adding? \
-          ? "type pattern · ^K kind · ^T type · ↵ save · esc cancel" \
-          : "↑/↓ move · ↓ host-overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
+        @project_view.adding? ? "type pattern · ^K kind · ^T type · ↵ save · esc cancel" : "↑/↓ move · ↓ host-overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
       when :overrides
-        @project_view.ov_adding? \
-          ? "type \"IP host\" · ↵ save · esc cancel" \
-          : "↑/↓ move · ↑ scope · ↓ env · → desc · a add · ↵/e edit · d del · space cmds · esc"
+        @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ move · ↑ scope · ↓ env · → desc · a add · ↵/e edit · d del · space cmds · esc"
       when :env
         if @project_view.env_prefix_editing?
           "type prefix · ↵ save · esc cancel"
@@ -63,9 +59,7 @@ module Gori::Tui
           "↑/↓ move · ↑ overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
         end
       when :settings
-        @project_view.settings_text_row? \
-          ? "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc" \
-          : "space/↵ toggle lens · ↑/↓ move · ← overrides · ↑ desc · esc"
+        @project_view.settings_text_row? ? "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc" : "space/↵ toggle lens · ↑/↓ move · ← overrides · ↑ desc · esc"
       else
         "type to edit · ↑/↓/↔ move · ← scope · ↓ settings · ^G goto · ^F find · esc tabs"
       end
@@ -305,8 +299,7 @@ module Gori::Tui
         elsif n == 0
           # Signpost the add path for where the toggle fired: 'a' on the Project scope
           # pane itself, else point at the Project tab from History/Sitemap.
-          @host.active_tab == :project ? "scope lens ON, but no rules yet — add one here (a)" \
-                                       : "scope lens ON, but no rules yet — add some in the Project tab"
+          @host.active_tab == :project ? "scope lens ON, but no rules yet — add one here (a)" : "scope lens ON, but no rules yet — add some in the Project tab"
         else
           "scope lens ON — showing in-scope only (#{n} rule#{n == 1 ? "" : "s"})"
         end
@@ -347,8 +340,7 @@ module Gori::Tui
         n = @host.session.scope.size
         # Confirm the add AND surface that the lens is still off (the common "I added
         # a rule but nothing filtered" confusion — the space menu's 's' enables it).
-        @host.status(@host.session.scope.enabled? ? "scope rule added — #{n} rule#{n == 1 ? "" : "s"}" \
-                                                   : "scope rule added — #{n} rule#{n == 1 ? "" : "s"} · space → s to enable the lens")
+        @host.status(@host.session.scope.enabled? ? "scope rule added — #{n} rule#{n == 1 ? "" : "s"}" : "scope rule added — #{n} rule#{n == 1 ? "" : "s"} · space → s to enable the lens")
       end
     end
 
@@ -555,8 +547,7 @@ module Gori::Tui
         Settings.env_prefix = prefix
         ok = Settings.save
         Env.bump_highlight_rev if ok
-        @host.status(ok ? "env prefix saved — #{prefix.inspect}" \
-                        : "env prefix applied — could not save to #{Settings.path}")
+        @host.status(ok ? "env prefix saved — #{prefix.inspect}" : "env prefix applied — could not save to #{Settings.path}")
       end
     end
 

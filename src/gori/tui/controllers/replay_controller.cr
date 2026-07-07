@@ -146,17 +146,14 @@ module Gori::Tui
       return "↹/esc tabs · ^N new" unless v
       return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit" if v.request_hex?
       if v.ws_mode? # WS replay: Handshake request + MESSAGES editor + TRANSCRIPT (no hex/diff/pretty/CL)
-        return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" \
-                                    : ws_hint(v)
+        return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" : ws_hint(v)
       end
       if v.grpc_mode? # gRPC replay: editable head + verbatim body; deframed response
-        return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" \
-                                    : "edit head/metadata · ^R replay · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
+        return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" : "edit head/metadata · ^R replay · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request # split: ENVELOPE + DECODED payload
       case v.focus
-      when :target   then v.editing_sni? ? "type SNI host · ^S/↵/esc back to URL · ^R send" \
-                                          : "type URL · ^S SNI · ↵/↓ request · ^R send · ↹ pane · esc tabs"
+      when :target   then v.editing_sni? ? "type SNI host · ^S/↵/esc back to URL · ^R send" : "type URL · ^S SNI · ↵/↓ request · ^R send · ↹ pane · esc tabs"
       when :response then "↑/↓ scroll · ←/→/d diff · ⇧←/→ h-scroll · x hex · p pretty · ^F find · ↵/^R send · space cmds · ↹ pane · esc tabs"
       else                "type to edit · ^R send · ^G goto · ^F find · ^X hex · ^B ws · ^N new · ^W close · ↹ pane · esc tabs"
       end
@@ -475,8 +472,7 @@ module Gori::Tui
         if (id = tab.db_id) && result.ok?
           @host.session.store.update_replay_response(id, result.head, result.body, result.error, result.duration_us)
         end
-        @host.status(result.ok? ? "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}"
-                                 : "replay error: #{result.error}")
+        @host.status(result.ok? ? "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}" : "replay error: #{result.error}")
         applied = true
       end
       while pair = nonblocking_ws_result
@@ -845,7 +841,7 @@ module Gori::Tui
       return edit_replay_sni(ev, view) if view.editing_sni? # ^S sub-field of the TARGET pane
       key = ev.key
       case
-      when key.enter? then view.pane_advance(1)                                       # ↵ confirms URL → Request (^R sends, not ↵)
+      when key.enter? then view.pane_advance(1)                                        # ↵ confirms URL → Request (^R sends, not ↵)
       when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) # target is the top pane → ↑ pops up
       when key.down?  then view.pane_advance(1)                                        # ↓ → drop into the Request pane below
       else                 edit_target_common(ev, view)
@@ -897,12 +893,12 @@ module Gori::Tui
       when key.enter?              then replay_send
       when key.up?, key.lower_k?   then view.at_top? ? view.focus_first : view.scroll(-1) # ↑/k-at-top → target field above
       when key.down?, key.lower_j? then view.scroll(1)
-      when transcript            then nil
-      when key.left?, key.right? then view.toggle_resp_mode
-      when key.lower_d?          then view.toggle_resp_mode
-      when key.lower_x?          then view.toggle_resp_hex
-      when key.lower_b?          then @host.toggle_reveal
-      when key.lower_p?          then @host.toggle_pretty
+      when transcript              then nil
+      when key.left?, key.right?   then view.toggle_resp_mode
+      when key.lower_d?            then view.toggle_resp_mode
+      when key.lower_x?            then view.toggle_resp_hex
+      when key.lower_b?            then @host.toggle_reveal
+      when key.lower_p?            then @host.toggle_pretty
       end
     end
 

@@ -10,9 +10,9 @@ module Gori::Tui
   module TrafficEmptyState
     extend self
 
-    FULL_MIN_H = 7
+    FULL_MIN_H =  7
     FULL_MIN_W = 42
-    MED_MIN_H  = 5
+    MED_MIN_H  =  5
     MED_MIN_W  = 30
 
     def render(screen : Screen, rect : Rect, *,
@@ -40,16 +40,16 @@ module Gori::Tui
 
     private def default_title(variant : Symbol, *, running : Bool, scan_on : Bool) : String
       case variant
-      when :history         then "waiting for traffic…"
-      when :sitemap         then "no traffic captured yet"
-      when :intercept       then "no held messages"
-      when :replay          then "no replay open"
-      when :fuzzer          then "no fuzz session open"
-      when :fuzzer_results  then running ? "running…" : "no results yet"
-      when :prism            then scan_on ? "no issues yet" : "scanning is OFF"
-      when :findings         then "no findings yet"
-      when :notes            then "empty note"
-      else                       "nothing here yet"
+      when :history        then "waiting for traffic…"
+      when :sitemap        then "no traffic captured yet"
+      when :intercept      then "no held messages"
+      when :replay         then "no replay open"
+      when :fuzzer         then "no fuzz session open"
+      when :fuzzer_results then running ? "running…" : "no results yet"
+      when :prism          then scan_on ? "no issues yet" : "scanning is OFF"
+      when :findings       then "no findings yet"
+      when :notes          then "empty note"
+      else                      "nothing here yet"
       end
     end
 
@@ -60,12 +60,12 @@ module Gori::Tui
       when :history        then render_history_full(screen, rect, headline, addr, capturing)
       when :sitemap        then render_sitemap_full(screen, rect, headline, addr, capturing)
       when :intercept      then render_intercept_full(screen, rect, headline, addr, capturing, catch_on)
-      when :replay          then render_replay_full(screen, rect, headline)
-      when :fuzzer          then render_fuzzer_full(screen, rect, headline)
-      when :fuzzer_results  then render_fuzzer_results_full(screen, rect, headline, running)
-      when :prism           then render_prism_full(screen, rect, headline, addr, capturing, scan_on)
-      when :findings        then render_findings_full(screen, rect, headline)
-      when :notes           then render_notes_full(screen, rect)
+      when :replay         then render_replay_full(screen, rect, headline)
+      when :fuzzer         then render_fuzzer_full(screen, rect, headline)
+      when :fuzzer_results then render_fuzzer_results_full(screen, rect, headline, running)
+      when :prism          then render_prism_full(screen, rect, headline, addr, capturing, scan_on)
+      when :findings       then render_findings_full(screen, rect, headline)
+      when :notes          then render_notes_full(screen, rect)
       end
     end
 
@@ -98,8 +98,8 @@ module Gori::Tui
     end
 
     private def render_minimal(screen : Screen, rect : Rect, variant : Symbol, headline : String,
-                                 addr : String, capturing : Bool, catch_on : Bool, running : Bool,
-                                 scan_on : Bool) : Nil
+                               addr : String, capturing : Bool, catch_on : Bool, running : Bool,
+                               scan_on : Bool) : Nil
       hint = case variant
              when :history
                "──► #{addr} ──► ^P Open browser#{capturing ? "" : " · press c"}"
@@ -214,8 +214,7 @@ module Gori::Tui
       _, inner, ix, iw = begin_card(screen, rect, headline, "INTERCEPT", inner_h)
       y = inner.y
 
-      msg = catch_on ? "Matching traffic pauses here for review before it continues." \
-                     : "Catch is OFF — press i to hold matching requests/responses."
+      msg = catch_on ? "Matching traffic pauses here for review before it continues." : "Catch is OFF — press i to hold matching requests/responses."
       screen.text(ix, y, msg, Theme.text, Theme.bg, width: iw)
       y += 2
       screen.text(ix, y, "traffic ──► ⏸ hold ──► f forward · d drop", Theme.muted, Theme.bg, width: iw)
@@ -270,8 +269,7 @@ module Gori::Tui
       _, inner, ix, iw = begin_card(screen, rect, headline, "RESULTS", inner_h)
       y = inner.y
 
-      msg = running ? "Probes are in flight — hits and status codes land here." \
-                    : "Add payload sets (^O), then press ^R to start a fuzz run."
+      msg = running ? "Probes are in flight — hits and status codes land here." : "Add payload sets (^O), then press ^R to start a fuzz run."
       screen.text(ix, y, msg, Theme.text, Theme.bg, width: iw)
       y += 2
       draw_chord_hint(screen, ix, y, iw, " ^R ", running ? "running…" : "run fuzzer", bullet: "▸ ") unless running

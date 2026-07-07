@@ -57,8 +57,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       return "type a tag · ↵ save · esc cancel" if @sitemap.tagging?
-      @sitemap.querying? ? "type query · ↹ complete · ↵ apply · esc clear" \
-                         : "↑/↓ move · / filter · t tag · g group · ↵/→ expand · ← collapse · esc tabs"
+      @sitemap.querying? ? "type query · ↹ complete · ↵ apply · esc clear" : "↑/↓ move · / filter · t tag · g group · ↵/→ expand · ← collapse · esc tabs"
     end
 
     # Live IME composition flows to whichever text field is open (the QL filter bar or
@@ -156,10 +155,10 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
-      when key.enter?  then commit_tag
-      when key.escape? then @sitemap.cancel_tag
-      when key.left?   then @sitemap.tag_move(-1)
-      when key.right?  then @sitemap.tag_move(1)
+      when key.enter?     then commit_tag
+      when key.escape?    then @sitemap.cancel_tag
+      when key.left?      then @sitemap.tag_move(-1)
+      when key.right?     then @sitemap.tag_move(1)
       when key.backspace? then @sitemap.tag_backspace
       else
         if c && !ev.ctrl? && !ev.alt?
