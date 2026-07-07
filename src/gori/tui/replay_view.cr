@@ -324,13 +324,22 @@ module Gori::Tui
     end
 
     # The editable outbound messages, parsed from the editor — one TEXT frame per
-    # non-empty line. Uses @decoded.text (LF-joined) NOT to_bytes (CRLF-joined), else
-    # every frame but the last would carry a spurious trailing '\r'. (A captured frame
-    # with an embedded newline can't be represented one-per-line — a known v1 limit.)
+    # non-empty line, with `$KEY` env tokens expanded at send time (parity with the
+    # handshake and every other outbound path). Uses @decoded.text (LF-joined) NOT
+    # to_bytes (CRLF-joined), else every frame but the last would carry a spurious
+    # trailing '\r'. (A captured frame with an embedded newline can't be represented
+    # one-per-line — a known v1 limit.)
     def ws_out_messages : Array(Replay::WsEngine::OutMsg)
       @decoded.text.split('\n').compact_map do |line|
-        line.empty? ? nil : Replay::WsEngine::OutMsg.new(1, line.to_slice)
+        line.empty? ? nil : Replay::WsEngine::OutMsg.new(1, Env.expand(line).to_slice)
       end
+    end
+
+    # Raw outbound message lines (LF-split, env tokens UNexpanded) for persistence.
+    # The store masks secrets and stores these verbatim, so `$KEY` survives to re-expand
+    # on the next send — never bake an expanded secret into the DB (see ws_out_messages).
+    def ws_out_texts_raw : Array(String)
+      @decoded.text.split('\n').reject(&.empty?)
     end
 
     def ws_upgrade_bytes : Bytes
@@ -701,7 +710,7 @@ module Gori::Tui
       @scx = @sni.size
       @target_field = :url
 
-      is_ws = !ws_messages.nil? || request.includes?("Upgrade: websocket") || request.includes?("upgrade: websocket")
+      is_ws = !ws_messages.nil? || Replay::WsEngine.upgrade_request?(request)
       if is_ws
         @ws_mode = true
         @ws_upgrade = request.to_slice
@@ -971,18 +980,10 @@ module Gori::Tui
     # actual edited body length (the part after the blank line). Common when
     # tampering with a captured body — you change the JSON and the length should
     # follow. Only an EXISTING header is updated (never added, so GETs stay clean);
-    # chunked/h2 bodies have no Content-Length and are left untouched.
+    # chunked/h2 bodies have no Content-Length and are left untouched. Shared with the
+    # headless CLI/MCP replay-send paths via FlowRequest so they can't drift apart.
     private def sync_content_length(raw : Bytes) : Bytes
-      text = String.new(raw)
-      sep = text.index("\r\n\r\n")
-      return raw unless sep
-      head = text[0, sep]
-      body = text[(sep + 4)..]
-      lines = head.split("\r\n")
-      idx = lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
-      return raw unless idx
-      lines[idx] = "Content-Length: #{body.bytesize}"
-      "#{lines.join("\r\n")}\r\n\r\n#{body}".to_slice
+      Replay::FlowRequest.resync_content_length(raw)
     end
 
     # Mirror the auto-Content-Length resync into the visible REQUEST editor (^L on) so

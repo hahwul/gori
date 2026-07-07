@@ -53,6 +53,25 @@ module Gori
         end.to_slice
       end
 
+      # Rewrite an EXISTING Content-Length to match the actual body length of a wire-form
+      # request. Used after env-var expansion changes body bytes (a `$KEY` in the body):
+      # `build` framed the CL over the pre-expansion body, so re-sync it or the origin
+      # over/under-reads. Never ADDS a header (GETs stay clean) and leaves chunked/h2
+      # bodies (no Content-Length) untouched. Shared by the TUI Replay editor and the
+      # headless CLI/MCP replay-send paths so they can't disagree.
+      def self.resync_content_length(bytes : Bytes) : Bytes
+        text = String.new(bytes)
+        sep = text.index("\r\n\r\n")
+        return bytes unless sep
+        head = text[0, sep]
+        body = text[(sep + 4)..]
+        lines = head.split("\r\n")
+        idx = lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
+        return bytes unless idx
+        lines[idx] = "Content-Length: #{body.bytesize}"
+        "#{lines.join("\r\n")}\r\n\r\n#{body}".to_slice
+      end
+
       # "scheme://host[:port]", omitting the port when it's the scheme default —
       # matches ReplayView#build_target so the parsed {scheme,host,port} round-trips.
       def self.build_target(scheme : String, host : String, port : Int32) : String

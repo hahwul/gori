@@ -3739,6 +3739,10 @@ module Gori::Tui
       fuzzer_controller.fuzz_pretty_template
     end
 
+    def fuzz_clear_marks : Nil
+      fuzzer_controller.fuzz_clear_marks
+    end
+
     # --- Miner ExecContext / cross-tab mediators ---
     # CROSS-TAB: open the config popup for History's selected flow (space → Mine params).
     def mine_selected : Nil

@@ -616,7 +616,7 @@ module Gori
           j.field "sni", r.sni if r.sni
           emit_capped_text(j, "request", r.request)
 
-          if r.request.includes?("Upgrade: websocket") || r.request.includes?("upgrade: websocket")
+          if Replay::WsEngine.upgrade_request?(r.request)
             ws_msgs = @store.ws_messages_for_replay(r.id)
             j.field "ws_mode", true
             j.field "ws_messages" do
@@ -783,7 +783,8 @@ module Gori
           detail = @store.get_flow(id)
           raise Gori::Error.new("no flow with id #{id}") unless detail
           flow = Replay::FlowRequest.build(detail)
-          bytes = Env.expand_wire(String.new(flow.bytes))
+          # Re-sync Content-Length after expansion (a body `$KEY` changes its length).
+          bytes = Replay::FlowRequest.resync_content_length(Env.expand_wire(String.new(flow.bytes)))
           target = Env.expand(flow.target)
           scheme, host, port = Replay::FlowRequest.parse_target(target)
           raise Gori::Error.new("could not parse target from flow #{id}") if host.empty?
@@ -924,7 +925,7 @@ module Gori
         name = str(h, "name").try { |n| Env.mask_secrets(n) }
 
         # WebSocket mode check
-        is_ws = masked_request.includes?("Upgrade: websocket") || masked_request.includes?("upgrade: websocket")
+        is_ws = Replay::WsEngine.upgrade_request?(masked_request)
 
         id = @store.insert_replay(
           target: masked_target,
@@ -961,8 +962,9 @@ module Gori
           end
         end
 
-        # Derive summary
-        line = request.each_line.first?.try(&.strip) || ""
+        # Derive summary from the MASKED request — the raw request may carry a secret
+        # in the request-target (e.g. ?token=…), and this field is returned to the LLM.
+        line = masked_request.each_line.first?.try(&.strip) || ""
         parts = line.split(' ')
         s = "#{parts[0]?} #{parts[1]?}".strip
         s = line if s.empty?

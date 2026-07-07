@@ -253,6 +253,9 @@ module Gori
         "fuzz.pretty-template", "Pretty-print template", "Format the request template body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("u", ctrl: true)],
         available: in_fuzzer) { |ctx| ctx.fuzz_pretty_template; nil }
+      r.register Verb::Definition.new(
+        "fuzz.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain) from the template",
+        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'x') { |ctx| ctx.fuzz_clear_marks; nil }
     end
 
     # Param-miner verbs: the cross-tab "Mine parameters" entry (space menu in History,

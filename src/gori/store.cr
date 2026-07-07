@@ -725,12 +725,12 @@ module Gori
     # response (responses are personal per session). Response fields stay nil.
     def get_replay(id : Int64) : ReplayRecord?
       @db.query(
-        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform FROM replays WHERE id = ?",
+        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform, name FROM replays WHERE id = ?",
         id) do |rs|
         return ReplayRecord.new(
           rs.read(Int64), rs.read(String), rs.read(String),
           rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-          sni: rs.read(String?), mark_transform: rs.read(Int32) != 0) if rs.move_next
+          sni: rs.read(String?), mark_transform: rs.read(Int32) != 0, name: rs.read(String?)) if rs.move_next
       end
       nil
     end

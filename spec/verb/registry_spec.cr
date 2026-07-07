@@ -216,6 +216,10 @@ private class FakeContext < ExecContext
     @calls << :fuzz_pretty_template
   end
 
+  def fuzz_clear_marks : Nil
+    @calls << :fuzz_clear_marks
+  end
+
   def mine_selected : Nil
     @calls << :mine_selected
   end
@@ -654,6 +658,9 @@ describe Gori::Verb do
       keymap.lookup(Chord.new("right"), Scope::HistoryDetail).should eq("detail.next-pane")
       keymap.lookup(Chord.new("left"), Scope::HistoryDetail).should eq("detail.prev-pane")
       keymap.lookup(Chord.new("x"), Scope::HistoryDetail).should eq("detail.toggle-hex")
+      # ^U in the Fuzzer pretty-prints the template (must NOT be intercepted as clear-marks
+      # anymore — clear-marks moved to the space menu as fuzz.clear-marks).
+      keymap.lookup(Chord.new("u", ctrl: true), Scope::Fuzzer).should eq("fuzz.pretty-template")
       # a Global chord (^P palette) resolves from ANY scope
       keymap.lookup(Chord.new("p", ctrl: true), Scope::Body).should eq("app.palette")
       # 'q' (back to projects) is bound only on the tab bar (Sidebar), not in a body —

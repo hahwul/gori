@@ -36,4 +36,33 @@ describe Gori::Env do
   ensure
     Gori::Settings.env_vars = [] of {String, String}
   end
+
+  it "expand_wire normalizes both LF and already-CRLF input to single CRLF" do
+    Gori::Settings.env_prefix = "$"
+    Gori::Settings.env_vars = [] of {String, String}
+    Gori::Settings.project_env_vars = [] of {String, String}
+    # already-CRLF wire bytes (captured flow) must NOT double to \r\r\n
+    crlf = "GET / HTTP/1.1\r\nHost: x\r\n\r\nbody"
+    String.new(Gori::Env.expand_wire(crlf)).should eq(crlf)
+    # LF-only input is upgraded to CRLF
+    lf = "GET / HTTP/1.1\nHost: x\n\nbody"
+    String.new(Gori::Env.expand_wire(lf)).should eq(crlf)
+  ensure
+    Gori::Settings.env_prefix = "$"
+  end
+
+  it "mask_secrets does not corrupt a token an earlier replacement inserted" do
+    # ABCD's value contains Q's KEY name; a sequential gsub would mangle it to "$$Q".
+    vars = {"ABCD" => "s3cr3tXY", "Q" => "ABCD"}
+    masked = Gori::Env.mask_secrets("token=s3cr3tXY here", vars, "$")
+    masked.should eq("token=$ABCD here")
+    # and it round-trips back through expand
+    Gori::Env.expand(masked, vars, "$").should eq("token=s3cr3tXY here")
+  end
+
+  it "mask_secrets prefers the longest value at each position" do
+    vars = {"SHORT" => "secret", "LONG" => "secret_value"}
+    Gori::Env.mask_secrets("x=secret_value", vars, "$").should eq("x=$LONG")
+    Gori::Env.mask_secrets("x=secret!", vars, "$").should eq("x=$SHORT!")
+  end
 end
