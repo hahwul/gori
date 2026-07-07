@@ -21,7 +21,7 @@ module Gori
     MAX_PRETTY     = 1024 * 1024     # skip bodies larger than this (parse cost) → raw windowed
     MAX_OUT_PRETTY = 8 * 1024 * 1024 # cap reflowed output; larger → nil
     MAX_DEPTH      = 256             # indent-depth clamp (markup)
-    MAX_PARTS      =  256            # multipart parts shown
+    MAX_PARTS      = 256             # multipart parts shown
     PART_BODY_MAX  = 64 * 1024       # inline a multipart part body only if small + UTF-8
 
     # A single-token JWT (header.payload[.signature]); the header is additionally
@@ -44,7 +44,7 @@ module Gori
       return nil if body.size > MAX_PRETTY
 
       str = String.new(body)
-      ct = media_type(head)        # original case (boundary is case-sensitive), params kept
+      ct = media_type(head) # original case (boundary is case-sensitive), params kept
       ctl = ct.try(&.downcase)
 
       # Content sniffs FIRST — JWT/GraphQL masquerade under generic content-types.
@@ -71,7 +71,7 @@ module Gori
     private def media_type(head : Bytes?) : String?
       return nil unless head
       String.new(head).each_line do |line|
-        l = line.chomp # drops a trailing \r\n / \n / \r
+        l = line.chomp    # drops a trailing \r\n / \n / \r
         break if l.empty? # end of the header block
         if l.size >= 13 && l[0, 13].downcase == "content-type:"
           return l[13..].strip

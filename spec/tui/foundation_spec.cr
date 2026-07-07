@@ -161,7 +161,7 @@ describe Gori::Tui::Chrome do
     outer = Rect.new(0, 0, 80, 20)
     strip = BodyChrome.strip_rect(outer, strip: true).not_nil!
     content = BodyChrome.content_rect(outer, strip: true)
-    strip.y.should eq(1)      # inside the frame, not on the canvas
+    strip.y.should eq(1) # inside the frame, not on the canvas
     strip.h.should eq(BodyChrome::STRIP_H)
     content.y.should eq(strip.y + strip.h)
     content.h.should eq(outer.h - 2 - BodyChrome::STRIP_H) # frame inset + strip
@@ -173,10 +173,10 @@ describe Gori::Tui::Chrome do
     BodyChrome.render_subtab_strip(screen, Rect.new(0, 0, 60, 2),
       ["1:alpha", "2:beta"], 0, focused: true)
 
-    backend.bg_at(12, 0).should eq(Theme.bg)       # inactive label, no pill
+    backend.bg_at(12, 0).should eq(Theme.bg) # inactive label, no pill
     backend.bg_at(12, 0).should_not eq(Theme.elevated)
     backend.bg_at(2, 0).should eq(Theme.focus_gold) # active pill when focused
-    backend.row(1).should contain("─")             # hairline under the chips
+    backend.row(1).should contain("─")              # hairline under the chips
   end
 
   it "settles the active sub-tab chip to selection_dim when the strip is unfocused" do

@@ -551,7 +551,7 @@ module Gori::Tui
       when :note_pick     then @note_picker.try(&.set_preedit(text))
       when :settings      then @settings_view.set_preedit(text)
       when :hosts         then @hosts_overlay.set_preedit(text)
-      when :env          then @env_overlay.set_preedit(text)
+      when :env           then @env_overlay.set_preedit(text)
       when :fuzz_set      then @fuzz_set_overlay.try(&.set_preedit(text))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.set_preedit(text))
       when :none          then apply_preedit_body(text)
@@ -883,7 +883,7 @@ module Gori::Tui
       when :settings      then click_settings(area, mx, my)
       when :tabs          then click_tabs(area, mx, my)
       when :hosts         then click_hosts(area, mx, my)
-      when :env          then click_env(area, mx, my)
+      when :env           then click_env(area, mx, my)
       when :hotkeys       then click_hotkeys(area, mx, my)
       when :notifications then click_notifications(area, mx, my)
       when :mine_config   then click_mine_config(area, mx, my)
@@ -1085,7 +1085,7 @@ module Gori::Tui
       when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs          then @tabs_overlay.select_move(step)
       when :hosts         then @hosts_overlay.select_move(step)
-      when :env          then @env_overlay.select_move(step)
+      when :env           then @env_overlay.select_move(step)
       when :hotkeys       then @hotkeys_overlay.select_move(step)
       when :notifications then @notifications_overlay.select_move(step)
       when :mine_config   then @mine_config_overlay.try(&.move(step))
@@ -2580,7 +2580,7 @@ module Gori::Tui
       when :settings      then "SETTINGS"
       when :tabs          then "TAB BAR"
       when :hosts         then "HOSTNAME OVERRIDES"
-      when :env          then "ENVIRONMENT"
+      when :env           then "ENVIRONMENT"
       when :hotkeys       then "HOTKEYS"
       when :notifications then "NOTIFICATIONS"
       when :mine_config   then "MINE PARAMS"
@@ -2624,7 +2624,7 @@ module Gori::Tui
       when :settings      then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
       when :tabs          then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
       when :hosts         then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
-      when :env          then env_overlay_hints
+      when :env           then env_overlay_hints
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"

@@ -5,10 +5,10 @@ module Gori
   module Links
     struct Resolved
       getter link : Store::EntityLink
-      getter tag : String       # short kind tag, e.g. "hist"
-      getter label : String     # primary line (method + path, session name, …)
-      getter url : String       # absolute URL or best-effort location string
-      getter? stale : Bool      # true when the referenced row no longer exists
+      getter tag : String   # short kind tag, e.g. "hist"
+      getter label : String # primary line (method + path, session name, …)
+      getter url : String   # absolute URL or best-effort location string
+      getter? stale : Bool  # true when the referenced row no longer exists
 
       def initialize(@link, @tag, @label, @url, @stale = false)
       end

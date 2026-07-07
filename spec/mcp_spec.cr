@@ -20,7 +20,7 @@ end
 # Runs the server over the given request lines and returns each emitted line as a
 # parsed JSON::Any (also proves STDOUT purity — a non-JSON line would raise here).
 private def drive(store, *lines, allow_actions = true, verify_upstream = true,
-                project_name : String? = nil, project_slug : String? = nil) : Array(JSON::Any)
+                  project_name : String? = nil, project_slug : String? = nil) : Array(JSON::Any)
   input = IO::Memory.new(lines.join('\n') + "\n")
   output = IO::Memory.new
   Gori::MCP::Server.new(store,

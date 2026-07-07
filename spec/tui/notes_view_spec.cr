@@ -180,8 +180,8 @@ describe Gori::Tui::NotesView do
       view.count.should eq(1)
       id_before = view.current_note_id
       closed_id = view.close_note
-      view.count.should eq(1)          # closing the last note leaves a fresh empty one
-      closed_id.should eq(id_before)   # the closed note's stable id is returned for link cleanup
+      view.count.should eq(1)                       # closing the last note leaves a fresh empty one
+      closed_id.should eq(id_before)                # the closed note's stable id is returned for link cleanup
       view.current_note_id.should_not eq(id_before) # the replacement is a distinct note
     end
   end

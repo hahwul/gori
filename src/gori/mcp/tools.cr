@@ -167,7 +167,12 @@ module Gori
             "The Replay workbench state: persisted replay sessions (target, request, http2, last " \
             "response status) plus, when the TUI is on the Replay tab, a live snapshot of the active " \
             "sub-tab (including ephemeral WebSocket/gRPC tabs that are not stored in `replays`). " \
-            "Use this instead of guessing from History when the user is editing a replay." { }
+            "Use this instead of guessing from History when the user is editing a replay. " \
+            "Supports pagination and query filtering." do |s|
+            s.field "limit", intprop("max rows to return (default 50, max 500)")
+            s.field "offset", intprop("start row (default 0)")
+            s.field "query", strprop("filter replays by name or target URL (case-insensitive substring match)")
+          end
 
           if @allow_actions
             tool j, "send_request",
@@ -185,6 +190,37 @@ module Gori
               s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
               s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
+              s.field "save_as_replay", boolprop("save this request and its response to the Replay workbench (default false)")
+              s.field "name", strprop("optional custom name for the saved replay tab (only when save_as_replay=true)")
+            end
+
+            tool j, "create_replay", "Create a new replay tab/session in the database." do |s|
+              s.field "target", strprop("absolute target URL (scheme+host+optional port), e.g. https://api.example.com"), required: true
+              s.field "request", strprop("verbatim raw HTTP request bytes/text"), required: true
+              s.field "http2", boolprop("use HTTP/2 (default false)")
+              s.field "auto_content_length", boolprop("auto-calculate Content-Length header (default true)")
+              s.field "flow_id", intprop("optional original flow id this replay stems from")
+              s.field "position", intprop("tab position order index (optional, defaults to appending at end)")
+              s.field "sni", strprop("optional TLS Server Name Indication override")
+              s.field "mark_transform", boolprop("optional boolean indicating token substitution replacement is active (default false)")
+              s.field "name", strprop("optional custom name for the replay tab")
+              s.field "ws_out_messages", jsonprop("optional array of strings (or a newline-separated string) representing outbound WebSocket messages")
+            end
+
+            tool j, "update_replay", "Update an existing replay tab's properties by database id." do |s|
+              s.field "id", intprop("replay database id"), required: true
+              s.field "target", strprop("absolute target URL")
+              s.field "request", strprop("verbatim raw HTTP request")
+              s.field "http2", boolprop("use HTTP/2")
+              s.field "auto_content_length", boolprop("auto-calculate Content-Length")
+              s.field "sni", strprop("TLS SNI override")
+              s.field "mark_transform", boolprop("token substitution replacement active")
+              s.field "name", strprop("custom name for the replay tab")
+              s.field "ws_out_messages", jsonprop("optional array of strings (or a newline-separated string) representing outbound WebSocket messages")
+            end
+
+            tool j, "delete_replay", "Delete a replay tab by database id." do |s|
+              s.field "id", intprop("replay database id"), required: true
             end
 
             tool j, "create_finding", "Record a new finding in the project." do |s|
@@ -308,7 +344,7 @@ module Gori
         when "list_scope"          then list_scope
         when "project_info"        then project_info
         when "get_current_context" then get_current_context
-        when "get_replay_context"  then get_replay_context
+        when "get_replay_context"  then get_replay_context(h)
         when "ql_reference"        then ql_reference
         end
       end
@@ -318,6 +354,9 @@ module Gori
       private def action_tool(name : String, h) : Result?
         case name
         when "send_request"   then gated { send_request(h) }
+        when "create_replay"  then gated { create_replay(h) }
+        when "update_replay"  then gated { update_replay(h) }
+        when "delete_replay"  then gated { delete_replay(h) }
         when "create_finding" then gated { create_finding(h) }
         when "update_finding" then gated { update_finding(h) }
         when "fuzz_start"     then gated { fuzz_start(h) }
@@ -491,8 +530,31 @@ module Gori
         end)
       end
 
-      private def get_replay_context : Result
+      private def get_replay_context(h) : Result
         ui = parse_ui_state
+        limit = clamp(int(h, "limit"), 50, 500)
+        offset = clamp_nonneg(int(h, "offset"))
+        query = str(h, "query").try(&.strip.downcase)
+
+        all_replays = @store.replays_mcp
+
+        filtered_replays = if query && !query.empty?
+                             all_replays.select do |r|
+                               r.target.downcase.includes?(query) ||
+                                 r.name.try(&.downcase.includes?(query)) ||
+                                 r.request.downcase.includes?(query)
+                             end
+                           else
+                             all_replays
+                           end
+
+        total_count = filtered_replays.size
+        paginated_replays = if offset >= filtered_replays.size
+                              [] of Store::ReplayRecord
+                            else
+                              filtered_replays[offset, Math.min(limit, filtered_replays.size - offset)]
+                            end
+
         Result.new(JSON.build do |j|
           j.object do
             j.field "project", @project_name
@@ -517,8 +579,15 @@ module Gori
                 j.field "tui_replay", replay
               end
             end
+            j.field "total_count", total_count
+            j.field "offset", offset
+            j.field "limit", limit
             j.field "sessions" do
-              j.array { emit_replay_sessions(j) }
+              j.array do
+                paginated_replays.each do |r|
+                  emit_replay_session(j, r)
+                end
+              end
             end
             unless on_replay
               j.field "note", "TUI is not on the Replay tab — `tui_replay` may be stale; use `sessions` for persisted tabs."
@@ -529,35 +598,56 @@ module Gori
 
       private def emit_replay_sessions(j : JSON::Builder) : Nil
         @store.replays_mcp.each do |r|
-          j.object do
-            j.field "db_id", r.id
-            j.field "position", r.position
-            j.field "target", r.target
-            j.field "http2", r.http2?
-            j.field "auto_content_length", r.auto_content_length?
-            j.field "mark_transform", r.mark_transform?
-            j.field "flow_id", r.flow_id if r.flow_id
-            j.field "name", r.name if r.name
-            j.field "sni", r.sni if r.sni
-            emit_capped_text(j, "request", r.request)
-            if err = r.response_error
-              j.field "last_error", err
-            end
-            if d = r.response_duration_us
-              j.field "last_duration_us", d
-            end
-            if head = r.response_head
-              resp = begin
-                Proxy::Codec::Http1.parse_response_head(head)
-              rescue
-                nil
+          emit_replay_session(j, r)
+        end
+      end
+
+      private def emit_replay_session(j : JSON::Builder, r : Store::ReplayRecord) : Nil
+        j.object do
+          j.field "db_id", r.id
+          j.field "position", r.position
+          j.field "target", r.target
+          j.field "http2", r.http2?
+          j.field "auto_content_length", r.auto_content_length?
+          j.field "mark_transform", r.mark_transform?
+          j.field "flow_id", r.flow_id if r.flow_id
+          j.field "name", r.name if r.name
+          j.field "sni", r.sni if r.sni
+          emit_capped_text(j, "request", r.request)
+
+          if r.request.includes?("Upgrade: websocket") || r.request.includes?("upgrade: websocket")
+            ws_msgs = @store.ws_messages_for_replay(r.id)
+            j.field "ws_mode", true
+            j.field "ws_messages" do
+              j.array do
+                ws_msgs.each do |m|
+                  j.object do
+                    j.field "direction", m.direction
+                    j.field "opcode", m.opcode
+                    j.field "payload", String.new(m.payload)
+                  end
+                end
               end
-              if resp
-                j.field "last_status", resp.status
-                j.field "last_reason", resp.reason
-              end
-              j.field "last_response_head", Serialize.head_text(head)
             end
+          end
+
+          if err = r.response_error
+            j.field "last_error", err
+          end
+          if d = r.response_duration_us
+            j.field "last_duration_us", d
+          end
+          if head = r.response_head
+            resp = begin
+              Proxy::Codec::Http1.parse_response_head(head)
+            rescue
+              nil
+            end
+            if resp
+              j.field "last_status", resp.status
+              j.field "last_reason", resp.reason
+            end
+            j.field "last_response_head", Serialize.head_text(head)
           end
         end
       end
@@ -606,8 +696,77 @@ module Gori
           end
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} -> #{result.ok? ? "ok" : result.error}" }
+
+        # Save as replay if requested
+        save = bool(h, "save_as_replay") || false
+        replay_id = nil.as(Int64?)
+        if save
+          port_suffix = ((built.scheme == "https" && built.port == 443) || (built.scheme == "http" && built.port == 80)) ? "" : ":#{built.port}"
+          target_url = "#{built.scheme}://#{built.host}#{port_suffix}"
+          pos = @store.replays_meta.size
+          flow_id = int(h, "flow_id")
+
+          # Mask secrets in request and target
+          masked_target = Env.mask_secrets(target_url)
+          masked_req = Env.mask_secrets(String.new(built.bytes))
+
+          replay_id = @store.insert_replay(
+            target: masked_target,
+            request: masked_req,
+            http2: http2,
+            auto_cl: true,
+            flow_id: flow_id,
+            position: pos.to_i32,
+            sni: nil,
+            mark_transform: false
+          )
+
+          if replay_id > 0
+            # If name is specified
+            name = str(h, "name")
+            if name && !name.empty?
+              @store.set_replay_name(replay_id, Env.mask_secrets(name))
+            end
+
+            # Update response
+            if result.ok?
+              head_bytes = result.head || Bytes.new(0)
+              body_bytes = result.body
+              duration = result.duration_us || 0_i64
+              @store.update_replay_response(replay_id, head_bytes, body_bytes, nil, duration)
+            else
+              duration = result.duration_us || 0_i64
+              @store.update_replay_response(replay_id, Bytes.new(0), nil, result.error, duration)
+            end
+          end
+        end
+
         return Result.new("send failed: #{result.error}", is_error: true) unless result.ok?
-        Result.new(Serialize.replay_result_json(result))
+
+        if save && replay_id && replay_id > 0
+          Result.new(JSON.build do |j|
+            j.object do
+              j.field "saved_replay_id", replay_id
+              if resp = result.response
+                j.field "status", resp.status
+                j.field "reason", resp.reason
+                j.field "http_version", resp.version
+                j.field "headers" do
+                  j.array do
+                    resp.headers.each do |hdr|
+                      j.object { j.field "name", hdr.name; j.field "value", hdr.value }
+                    end
+                  end
+                end
+              end
+              j.field "duration_us", result.duration_us
+              j.field "incomplete", true if result.incomplete?
+              Serialize.emit_body(j, "body", result.head, result.body, false)
+            end
+          end)
+        else
+          Result.new(Serialize.replay_result_json(result))
+        end
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
         # actionable message instead of letting call()'s generic "tool error:"
@@ -638,6 +797,9 @@ module Gori
       private def create_finding(h) : Result
         title = str(h, "title")
         return Result.new("missing required 'title'", is_error: true) if title.nil? || title.empty?
+        # Mask secrets in finding title
+        masked_title = Env.mask_secrets(title)
+
         # An unrecognised severity is rejected, not silently coerced to Info —
         # matching update_finding (a typo'd 'severity' shouldn't quietly become
         # an info finding). An absent/blank severity still defaults to Info.
@@ -651,7 +813,9 @@ module Gori
         # reject it, consistent with how get_flow rejects a non-integer id.
         flow_id = int(h, "flow_id")
         return Result.new("invalid 'flow_id' (expected an integer)", is_error: true) if flow_id.nil? && present?(h, "flow_id")
-        id = @store.insert_finding(title, severity, str(h, "host"), flow_id)
+
+        host = str(h, "host").try { |hst| Env.mask_secrets(hst) }
+        id = @store.insert_finding(masked_title, severity, host, flow_id)
         # insert_finding returns 0 (never raises) when the write batch fails — e.g.
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
@@ -674,9 +838,9 @@ module Gori
           return err
         end
 
-        title = str(h, "title")
+        title = str(h, "title").try { |t| Env.mask_secrets(t) }
         return Result.new("title must not be empty", is_error: true) if title && title.empty?
-        notes = str(h, "notes")
+        notes = str(h, "notes").try { |n| Env.mask_secrets(n) }
         severity = severity_from(sev_s)
         status = status_from(stat_s)
 
@@ -689,6 +853,143 @@ module Gori
 
         @store.update_finding(id, title: title, severity: severity, notes: notes, status: status)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "updated", true } })
+      end
+
+      private def create_replay(h) : Result
+        target = str(h, "target")
+        return Result.new("missing required 'target'", is_error: true) if target.nil? || target.empty?
+        request = str(h, "request")
+        return Result.new("missing required 'request'", is_error: true) if request.nil? || request.empty?
+
+        http2 = bool(h, "http2") || false
+        auto_cl_val = bool(h, "auto_content_length")
+        auto_cl = (auto_cl_val.nil? && !present?(h, "auto_content_length")) ? true : !!auto_cl_val
+
+        flow_id = int(h, "flow_id")
+        sni = str(h, "sni")
+        mark_transform = bool(h, "mark_transform") || false
+
+        position = int(h, "position")
+        if position.nil?
+          position = @store.replays_meta.size
+        end
+
+        # Apply Env.mask_secrets
+        masked_target = Env.mask_secrets(target)
+        masked_request = Env.mask_secrets(request)
+        masked_sni = sni.try { |s| Env.mask_secrets(s) }
+        name = str(h, "name").try { |n| Env.mask_secrets(n) }
+
+        # WebSocket mode check
+        is_ws = masked_request.includes?("Upgrade: websocket") || masked_request.includes?("upgrade: websocket")
+
+        id = @store.insert_replay(
+          target: masked_target,
+          request: masked_request,
+          http2: http2,
+          auto_cl: auto_cl,
+          flow_id: flow_id,
+          position: position.to_i32,
+          sni: masked_sni,
+          mark_transform: mark_transform
+        )
+
+        return Result.new("failed to persist replay (store busy or unwritable)", is_error: true) if id == 0
+
+        if name && !name.empty?
+          @store.set_replay_name(id, name)
+        end
+
+        # WebSocket messages handling
+        if is_ws && present?(h, "ws_out_messages")
+          messages = [] of String
+          if arr = h["ws_out_messages"]?.try(&.as_a?)
+            messages = arr.compact_map(&.as_s?)
+          elsif str_val = str(h, "ws_out_messages")
+            messages = str_val.split('\n').compact_map { |l| l.strip.empty? ? nil : l }
+          end
+
+          unless messages.empty?
+            @store.update_replay_ws_messages(id, messages)
+          end
+        end
+
+        Result.new(JSON.build { |j| j.object { j.field "id", id } })
+      end
+
+      private def update_replay(h) : Result
+        id = int(h, "id")
+        return Result.new("missing or invalid required 'id'", is_error: true) unless id
+
+        existing = @store.get_replay(id)
+        return Result.new("no replay with id #{id}", is_error: true) unless existing
+
+        target = str(h, "target") || existing.target
+        request = str(h, "request") || existing.request
+
+        http2 = if present?(h, "http2")
+                  bool(h, "http2") || false
+                else
+                  existing.http2?
+                end
+
+        auto_cl = if present?(h, "auto_content_length")
+                    bool(h, "auto_content_length") || false
+                  else
+                    existing.auto_content_length?
+                  end
+
+        sni = present?(h, "sni") ? str(h, "sni") : existing.sni
+
+        mark_transform = if present?(h, "mark_transform")
+                           bool(h, "mark_transform") || false
+                         else
+                           existing.mark_transform?
+                         end
+
+        masked_target = Env.mask_secrets(target)
+        masked_request = Env.mask_secrets(request)
+        masked_sni = sni.try { |s| Env.mask_secrets(s) }
+        name = str(h, "name").try { |n| Env.mask_secrets(n) }
+
+        @store.update_replay(
+          id: id,
+          target: masked_target,
+          request: masked_request,
+          http2: http2,
+          auto_cl: auto_cl,
+          sni: masked_sni,
+          mark_transform: mark_transform
+        )
+
+        if present?(h, "name")
+          @store.set_replay_name(id, name)
+        end
+
+        # WebSocket messages handling
+        if present?(h, "ws_out_messages")
+          messages = [] of String
+          if arr = h["ws_out_messages"]?.try(&.as_a?)
+            messages = arr.compact_map(&.as_s?)
+          elsif str_val = str(h, "ws_out_messages")
+            messages = str_val.split('\n').compact_map { |l| l.strip.empty? ? nil : l }
+          end
+
+          @store.update_replay_ws_messages(id, messages)
+        end
+
+        Result.new(JSON.build { |j| j.object { j.field "success", true } })
+      end
+
+      private def delete_replay(h) : Result
+        id = int(h, "id")
+        return Result.new("missing or invalid required 'id'", is_error: true) unless id
+
+        existing = @store.get_replay(id)
+        return Result.new("no replay with id #{id}", is_error: true) unless existing
+
+        @store.delete_replay(id)
+        Result.new(JSON.build { |j| j.object { j.field "success", true } })
       end
 
       # --- fuzz tools (gated, async job model) --------------------------------

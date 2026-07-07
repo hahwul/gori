@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 25
+      VERSION = 26
 
       # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
       # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
@@ -481,7 +481,13 @@ module Gori
         "UPDATE h2_frames SET payload = X'' WHERE type = 0",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25]
+      # Add replay_id column to ws_messages to support WebSocket Replay tab persistence
+      V26 = [
+        "ALTER TABLE ws_messages ADD COLUMN replay_id INTEGER",
+        "CREATE INDEX idx_ws_messages_replay ON ws_messages (replay_id)",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

@@ -188,7 +188,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      inner = rect.inset(1, 1) # framed insets 1,1
+      inner = rect.inset(1, 1)                        # framed insets 1,1
       if zone = @intercept.bar_zone_at(inner, mx, my) # click the top filter bar
         @host.focus_body
         zone == :direction ? intercept_cycle_direction : intercept_query

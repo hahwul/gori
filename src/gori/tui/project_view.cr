@@ -163,7 +163,7 @@ module Gori::Tui
       @desc_area.text
     end
 
-    PANES = [:scope, :overrides, :env, :desc, :settings]
+    PANES          = [:scope, :overrides, :env, :desc, :settings]
     ENV_MIN_BODY_H = 11
 
     # PROJECT SETTINGS pane rows: row 0 is the scope-lens toggle, rows 1-3 the network fields.

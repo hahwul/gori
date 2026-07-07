@@ -316,13 +316,13 @@ store.insert_h2_frame(greeter_conn, "in", 0x4_u8, 0x0_u8, 0_u32, Bytes[0x00, 0x0
 store.insert_h2_frame(greeter_conn, "out", 0x8_u8, 0x0_u8, 0_u32, Bytes[0x00, 0x00, 0x00, 0xff]) # WINDOW_UPDATE
 store.insert_h2_frame(greeter_conn, "out", 0x1_u8, 0x4_u8, 1_u32,
   Bytes[0x82, 0x87, 0x41, 0x8a, 0xa0, 0xe4, 0x1d, 0x13, 0x9d, 0x09, 0xb8, 0xf0, 0x1e, 0x07]) # HEADERS
-store.insert_h2_frame(greeter_conn, "out", 0x0_u8, 0x1_u8, 1_u32, req_msg)                    # DATA END_STREAM
+store.insert_h2_frame(greeter_conn, "out", 0x0_u8, 0x1_u8, 1_u32, req_msg)                   # DATA END_STREAM
 store.insert_h2_frame(greeter_conn, "in", 0x1_u8, 0x4_u8, 1_u32,
   Bytes[0x88, 0x5f, 0x10, 0x61, 0x70, 0x70, 0x6c, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e]) # HEADERS
-store.insert_h2_frame(greeter_conn, "in", 0x0_u8, 0x0_u8, 1_u32, resp_msg)                    # DATA
+store.insert_h2_frame(greeter_conn, "in", 0x0_u8, 0x0_u8, 1_u32, resp_msg)                   # DATA
 store.insert_h2_frame(greeter_conn, "in", 0x1_u8, 0x5_u8, 1_u32,
   Bytes[0x40, 0x0b, 0x67, 0x72, 0x70, 0x63, 0x2d, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x01, 0x30]) # trailers grpc-status:0
-store.flush # fire-and-forget frames committed before any close
+store.flush                                                                                        # fire-and-forget frames committed before any close
 
 grpc_req_head = String.build do |b|
   b << "POST /demo.Greeter/SayHello HTTP/2\r\n"
@@ -579,26 +579,26 @@ puts "• inserted 9 real, replayable flows against www.hahwul.com"
 f1 = store.insert_finding("Reflected XSS in /search `q` parameter", S::Severity::High,
   "shop.demo.test", ids[:xss])
 store.update_finding(f1, notes: "The `q` query parameter is reflected into the HTML " \
-  "response without output encoding.\n\nPoC: /search?q=<script>alert(1)</script>\n\n" \
-  "Impact: session theft via document.cookie (token is also exposed in the login JSON — see related finding).\n" \
-  "Fix: HTML-encode user input on output; add a CSP.")
+                                "response without output encoding.\n\nPoC: /search?q=<script>alert(1)</script>\n\n" \
+                                "Impact: session theft via document.cookie (token is also exposed in the login JSON — see related finding).\n" \
+                                "Fix: HTML-encode user input on output; add a CSP.")
 
 f2 = store.insert_finding("IDOR: /v1/users/{id} exposes other users' PII", S::Severity::High,
   "api.demo.test", ids[:idor])
 store.update_finding(f2, notes: "A customer token (user_id=1) can read /v1/users/2 and " \
-  "receives Bob's email, role=admin and phone.\n\nNo object-level authorization check.\n" \
-  "Fix: verify the authenticated subject owns (or may access) the requested id.")
+                                "receives Bob's email, role=admin and phone.\n\nNo object-level authorization check.\n" \
+                                "Fix: verify the authenticated subject owns (or may access) the requested id.")
 
 f3 = store.insert_finding("Verbose 500 leaks stack trace & framework version", S::Severity::Medium,
   "api.demo.test", ids[:err500])
 store.update_finding(f3, notes: "/v1/debug returns a full stack trace and 'DemoFramework 4.2.1' " \
-  "in the response body. Aids targeted exploitation.\nFix: disable debug error pages in production.")
+                                "in the response body. Aids targeted exploitation.\nFix: disable debug error pages in production.")
 
 f4 = store.insert_finding("Session token returned in JSON body", S::Severity::Low,
   "shop.demo.test", ids[:login])
 store.update_finding(f4, notes: "POST /api/login returns the bearer token in the JSON body in " \
-  "addition to the Set-Cookie. JS-readable tokens are exfiltratable via the XSS above.\n" \
-  "Fix: keep the session in an HttpOnly, Secure cookie only.")
+                                "addition to the Set-Cookie. JS-readable tokens are exfiltratable via the XSS above.\n" \
+                                "Fix: keep the session in an HttpOnly, Secure cookie only.")
 
 store.insert_finding("Inconsistent authz: /v1/orders 401 but /v1/cart open", S::Severity::Info,
   "api.demo.test", ids[:cart])
@@ -606,9 +606,9 @@ store.insert_finding("Inconsistent authz: /v1/orders 401 but /v1/cart open", S::
 f6 = store.insert_finding("GraphQL introspection enabled in production", S::Severity::Medium,
   "api.demo.test", ids[:gql])
 store.update_finding(f6, notes: "POST /graphql answers a full `__schema` introspection query for " \
-  "anonymous clients, exposing the entire type system (queries, mutations, types).\n\n" \
-  "Impact: accelerates API mapping and discovery of hidden/abusable mutations.\n" \
-  "Fix: disable introspection in production, or gate it behind authentication.")
+                                "anonymous clients, exposing the entire type system (queries, mutations, types).\n\n" \
+                                "Impact: accelerates API mapping and discovery of hidden/abusable mutations.\n" \
+                                "Fix: disable introspection in production, or gate it behind authentication.")
 
 puts "• inserted 6 findings"
 

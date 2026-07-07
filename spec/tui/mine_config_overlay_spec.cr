@@ -36,7 +36,7 @@ describe Gori::Tui::MineConfigOverlay do
     ov.move(1) # concurrency row
     ov.adjust(1)
     ov.build_config.concurrency.should eq(20) # default 10 → next choice
-    ov.move(1) # notification row
+    ov.move(1)                                # notification row
     ov.adjust(1)
     ov.build_config.notify.should eq(Gori::Miner::NotifyMode::Off)
     ov.move(1) # start row

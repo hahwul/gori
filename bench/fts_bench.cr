@@ -14,9 +14,9 @@
 require "db"
 require "sqlite3"
 
-N       = (ENV["BENCH_N"]? || "50000").to_i
-BODY    = (ENV["BENCH_BODY"]? || "4096").to_i
-CAP_D   = 16 * 1024
+N     = (ENV["BENCH_N"]? || "50000").to_i
+BODY  = (ENV["BENCH_BODY"]? || "4096").to_i
+CAP_D = 16 * 1024
 
 def body_text(n : Int32, seed : Int32) : String
   base = %({"id":#{seed},"token":"tok_#{seed}abcdef","name":"user#{seed}","note":"hello world "})

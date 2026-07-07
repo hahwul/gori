@@ -70,6 +70,27 @@ module Gori
       out.to_s
     end
 
+    # Scans the text for occurrences of any registered env var value and replaces
+    # it with the corresponding token (e.g. "$KEY"). Sorted by value size descending
+    # to avoid sub-string collisions (e.g. matching "secret_value" before "secret").
+    def self.mask_secrets(text : String, vars : Hash(String, String) = effective_vars,
+                          prefix : String = Settings.env_prefix) : String
+      return text if prefix.empty? || vars.empty?
+
+      # Filter out empty values and short/common values that might lead to false positives (e.g., single characters)
+      candidates = vars.to_a
+        .reject { |(k, v)| v.strip.empty? || v.size < 4 }
+        .sort_by { |(k, v)| -v.size }
+
+      return text if candidates.empty?
+
+      result = text
+      candidates.each do |key, value|
+        result = result.gsub(value, "#{prefix}#{key}")
+      end
+      result
+    end
+
     # Byte offsets [start, end) of each env-shaped token in `text` (end exclusive).
     # `known` is true when KEY is registered in `vars`.
     def self.token_regions(text : String, prefix : String = Settings.env_prefix,

@@ -45,13 +45,14 @@ module Gori
 
     struct InsertWs < WriteOp
       getter flow_id : Int64
+      getter replay_id : Int64?
       getter created_at : Int64
       getter direction : String
       getter opcode : Int32
       getter payload : Bytes
       getter reply : Channel(Nil)
 
-      def initialize(@flow_id, @created_at, @direction, @opcode, @payload, @reply)
+      def initialize(@flow_id, @replay_id, @created_at, @direction, @opcode, @payload, @reply)
       end
     end
 
@@ -229,9 +230,9 @@ module Gori
 
     # Records one captured WebSocket message for a flow. Blocks until committed
     # (the forward already happened, so the peer is not delayed).
-    def insert_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes) : Nil
+    def insert_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes, replay_id : Int64? = nil) : Nil
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
-      @writes.send(InsertWs.new(flow_id, now_us, direction, opcode, payload, reply))
+      @writes.send(InsertWs.new(flow_id, replay_id, now_us, direction, opcode, payload, reply))
       reply.receive
     rescue Channel::ClosedError
       nil
@@ -810,7 +811,26 @@ module Gori
     end
 
     def delete_replay(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM replays WHERE id = ?", id); nil }
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM ws_messages WHERE replay_id = ?", id)
+        c.exec("DELETE FROM replays WHERE id = ?", id)
+        nil
+      }
+    end
+
+    def update_replay_ws_messages(id : Int64, messages : Array(String)) : Nil
+      exec_task ->(conn : DB::Connection) {
+        conn.exec("DELETE FROM ws_messages WHERE replay_id = ?", id)
+        messages.each do |msg_text|
+          masked_msg = Env.mask_secrets(msg_text)
+          ts = now_us
+          conn.exec(
+            "INSERT INTO ws_messages (flow_id, replay_id, created_at, direction, opcode, payload) VALUES (?,?,?,?,?,?)",
+            0_i64, id, ts, "out", 1, masked_msg.to_slice
+          )
+        end
+        nil
+      }
     end
 
     # --- Fuzzer / Intruder (V16) ---------------------------------------------
@@ -1050,7 +1070,7 @@ module Gori
     # `limit` messages (ascending for display) to bound the detail view; nil = all.
     def ws_messages(flow_id : Int64, limit : Int32? = nil) : Array(WsMessage)
       msgs = [] of WsMessage
-      cols = "id, flow_id, created_at, direction, opcode, payload"
+      cols = "id, flow_id, replay_id, created_at, direction, opcode, payload"
       q, args = if lim = limit
                   {"SELECT * FROM (SELECT #{cols} FROM ws_messages WHERE flow_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
                    [flow_id, lim.to_i64] of DB::Any}
@@ -1059,7 +1079,25 @@ module Gori
                 end
       @db.query(q, args: args) do |rs|
         rs.each do
-          msgs << WsMessage.new(rs.read(Int64), rs.read(Int64), rs.read(Int64),
+          msgs << WsMessage.new(rs.read(Int64), rs.read(Int64), rs.read(Int64?), rs.read(Int64),
+            rs.read(String), rs.read(Int32), rs.read(Bytes))
+        end
+      end
+      msgs
+    end
+
+    def ws_messages_for_replay(replay_id : Int64, limit : Int32? = nil) : Array(WsMessage)
+      msgs = [] of WsMessage
+      cols = "id, flow_id, replay_id, created_at, direction, opcode, payload"
+      q, args = if lim = limit
+                  {"SELECT * FROM (SELECT #{cols} FROM ws_messages WHERE replay_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
+                   [replay_id, lim.to_i64] of DB::Any}
+                else
+                  {"SELECT #{cols} FROM ws_messages WHERE replay_id = ? ORDER BY id", [replay_id] of DB::Any}
+                end
+      @db.query(q, args: args) do |rs|
+        rs.each do
+          msgs << WsMessage.new(rs.read(Int64), rs.read(Int64), rs.read(Int64?), rs.read(Int64),
             rs.read(String), rs.read(Int32), rs.read(Bytes))
         end
       end
@@ -1580,8 +1618,8 @@ module Gori
 
     private def insert_ws_one(conn : DB::Connection, op : InsertWs) : Nil
       conn.exec(
-        "INSERT INTO ws_messages (flow_id, created_at, direction, opcode, payload) VALUES (?,?,?,?,?)",
-        op.flow_id, op.created_at, op.direction, op.opcode, op.payload)
+        "INSERT INTO ws_messages (flow_id, replay_id, created_at, direction, opcode, payload) VALUES (?,?,?,?,?,?)",
+        op.flow_id, op.replay_id, op.created_at, op.direction, op.opcode, op.payload)
     end
 
     private def now_us : Int64

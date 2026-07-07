@@ -121,12 +121,13 @@ module Gori
     struct WsMessage
       getter id : Int64
       getter flow_id : Int64
+      getter replay_id : Int64?
       getter created_at : Int64
       getter direction : String
       getter opcode : Int32
       getter payload : Bytes
 
-      def initialize(@id, @flow_id, @created_at, @direction, @opcode, @payload)
+      def initialize(@id, @flow_id, @replay_id, @created_at, @direction, @opcode, @payload)
       end
 
       def text? : Bool

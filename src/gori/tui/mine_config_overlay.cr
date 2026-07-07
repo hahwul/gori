@@ -23,7 +23,7 @@ module Gori::Tui
   # plumbing). Restores the last confirmed overlay choices from Settings when present.
   # On Start the Runner reads build_config + seed and hands them to the MinerController.
   class MineConfigOverlay
-    CONC_CHOICES = [5, 10, 20, 40]
+    CONC_CHOICES   = [5, 10, 20, 40]
     NOTIFY_CHOICES = Miner::NotifyMode.values
 
     getter seed : MineSeed

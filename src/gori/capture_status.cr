@@ -57,7 +57,7 @@ module Gori
     def self.format_endpoint(host : String, port : Int32) : String
       display_host = case host
                      when "127.0.0.1", "::1" then "localhost"
-                     else host
+                     else                         host
                      end
       "#{display_host}:#{port}"
     end

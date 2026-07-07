@@ -31,9 +31,15 @@ module Gori::Tui
       @replays = [] of ReplayTab
       @host.session.store.replays.each do |r|
         view = ReplayView.new
+        ws_msgs = nil.as(Array(String)?)
+        if r.request.includes?("Upgrade: websocket") || r.request.includes?("upgrade: websocket")
+          ws_msgs = @host.session.store.ws_messages_for_replay(r.id).compact_map do |m|
+            m.direction == "out" ? String.new(m.payload) : nil
+          end
+        end
         view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us,
-          sni: r.sni || "", mark_transform: r.mark_transform?)
+          sni: r.sni || "", mark_transform: r.mark_transform?, ws_messages: ws_msgs)
         view.name = r.name # custom sub-tab label survives reopen
         seed_replay_original(view, r.flow_id)
         @replays << ReplayTab.new(view, r.flow_id, r.id)
@@ -514,8 +520,14 @@ module Gori::Tui
         # Live cross-session sync carries only the REQUEST (a response is personal to
         # each session's view); restore() is response-less so a peer's resend never
         # clobbers the local response/scroll/focus.
+        ws_msgs = nil.as(Array(String)?)
+        if row.request.includes?("Upgrade: websocket") || row.request.includes?("upgrade: websocket")
+          ws_msgs = @host.session.store.ws_messages_for_replay(row.id).compact_map do |m|
+            m.direction == "out" ? String.new(m.payload) : nil
+          end
+        end
         v.restore(row.target, row.request, row.http2?, row.auto_content_length?,
-          sni: row.sni || "", mark_transform: row.mark_transform?)
+          sni: row.sni || "", mark_transform: row.mark_transform?, ws_messages: ws_msgs)
         seed_replay_original(v, row.flow_id) # restore() drops the baseline; re-seed it
       end
 
@@ -523,8 +535,14 @@ module Gori::Tui
       rows.each do |row|
         next if local_ids.includes?(row.id)
         view = ReplayView.new
+        ws_msgs = nil.as(Array(String)?)
+        if row.request.includes?("Upgrade: websocket") || row.request.includes?("upgrade: websocket")
+          ws_msgs = @host.session.store.ws_messages_for_replay(row.id).compact_map do |m|
+            m.direction == "out" ? String.new(m.payload) : nil
+          end
+        end
         view.restore(row.target, row.request, row.http2?, row.auto_content_length?,
-          sni: row.sni || "", mark_transform: row.mark_transform?)
+          sni: row.sni || "", mark_transform: row.mark_transform?, ws_messages: ws_msgs)
         seed_replay_original(view, row.flow_id)
         @replays << ReplayTab.new(view, row.flow_id, row.id)
       end
@@ -724,8 +742,18 @@ module Gori::Tui
       return unless tab = current_replay_tab
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
-      @host.session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?,
-        v.sni_override, mark_transform: v.mark_transform?)
+      if v.ws_mode?
+        handshake_req = String.new(v.ws_upgrade_bytes)
+        @host.session.store.update_replay(id, v.target, handshake_req, v.http2?, v.auto_content_length?,
+          v.sni_override, mark_transform: v.mark_transform?)
+        
+        # Convert OutMsg array to String array
+        ws_texts = v.ws_out_messages.compact_map { |msg| String.new(msg.payload) }
+        @host.session.store.update_replay_ws_messages(id, ws_texts)
+      else
+        @host.session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?,
+          v.sni_override, mark_transform: v.mark_transform?)
+      end
       v.clear_dirty
     end
 

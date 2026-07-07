@@ -34,7 +34,7 @@ describe Gori::Pretty do
 
     it "falls back to raw (nil) on malformed / trailing / binary / empty" do
       pretty("application/json", "{bad").should be_nil
-      pretty("application/json", "{}{}" ).should be_nil
+      pretty("application/json", "{}{}").should be_nil
       pretty("application/json", Bytes[0xff, 0xfe, 0x00]).should be_nil
       pretty("application/json", "").should be_nil
     end

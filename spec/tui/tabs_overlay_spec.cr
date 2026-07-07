@@ -14,8 +14,8 @@ describe TabsOverlay do
   end
 
   it "windows a long catalog on a short area so row_at maps to the scrolled rows" do
-    o = TabsOverlay.new # 9 catalog tabs by default
-    o.select_move(100)  # selection clamps to the last index (8)
+    o = TabsOverlay.new                                 # 9 catalog tabs by default
+    o.select_move(100)                                  # selection clamps to the last index (8)
     box = o.overlay_box(Rect.new(0, 0, 60, 9)).not_nil! # short: only a few rows fit
     # the top visible row is scrolled past index 0 to keep the last-selected row on screen
     o.row_at(box, box.x + 5, box.y + 2).not_nil!.should be > 0

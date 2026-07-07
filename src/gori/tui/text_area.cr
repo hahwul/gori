@@ -27,10 +27,10 @@ module Gori::Tui
       @styled_kind = nil.as(Symbol?)
       @styled_rev = Theme.revision
       @styled_env_rev = Env.highlight_rev
-      @gutter = false              # left line-number gutter (on for the Replay request body)
-      @search_hl = ""              # active ^F query → matches highlighted in render
-      @reveal = false              # show whitespace (space ·, tab →) instead of syntax colours
-      @edits = 0                   # monotonic content-change counter — cheap cache key for owners
+      @gutter = false # left line-number gutter (on for the Replay request body)
+      @search_hl = "" # active ^F query → matches highlighted in render
+      @reveal = false # show whitespace (space ·, tab →) instead of syntax colours
+      @edits = 0      # monotonic content-change counter — cheap cache key for owners
       # Opt-in background tints: [start, end) FULL-buffer char offsets + colour, painted
       # UNDER the text (over syntax/plain, beneath search + cursor). Empty for every editor
       # except the Fuzzer template — Replay/Notes never set it, so they're unaffected. The

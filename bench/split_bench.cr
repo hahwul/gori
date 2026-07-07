@@ -11,8 +11,8 @@
 require "db"
 require "sqlite3"
 
-MAX  = (ENV["BENCH_MAX"]? || "100000").to_i
-BODY = (ENV["BENCH_BODY"]? || "4096").to_i
+MAX   = (ENV["BENCH_MAX"]? || "100000").to_i
+BODY  = (ENV["BENCH_BODY"]? || "4096").to_i
 HOSTS = ["api.example.com", "cdn.example.com", "auth.acme.io", "shop.acme.io", "img.static.net"]
 
 def body_bytes(n : Int32, seed : Int32) : Bytes
@@ -38,7 +38,7 @@ end
 
 # ---- build both schemas -------------------------------------------------
 inline_path = File.tempname("gori-inline", ".db")
-split_path  = File.tempname("gori-split", ".db")
+split_path = File.tempname("gori-split", ".db")
 
 a = open_db(inline_path)
 a.exec "CREATE TABLE flows (id INTEGER PRIMARY KEY, created_at INTEGER, host TEXT, method TEXT, target TEXT, status INTEGER, request_size INTEGER, response_size INTEGER, request_body BLOB, response_body BLOB)"
