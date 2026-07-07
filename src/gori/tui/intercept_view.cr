@@ -8,6 +8,7 @@ require "./text_area"
 require "./url"
 require "../interceptor"
 require "../fuzz/content_length"
+require "../env"
 
 module Gori::Tui
   # The Intercept tab: a queue of held requests/responses (P4 — the human decides
@@ -154,7 +155,8 @@ module Gori::Tui
     # still normalizes line endings — a text-editor limitation shared with Replay.)
     def forward_bytes(it : Interceptor::Item) : Bytes
       return it.raw unless @loaded_id == it.id && @editor_dirty
-      Fuzz::ContentLength.sync(@editor.to_bytes, add_when_missing: true)
+      raw = Env.expand(@editor.text).split('\n').join("\r\n").to_slice
+      Fuzz::ContentLength.sync(raw, add_when_missing: true)
     end
 
     # The method + target to DISPLAY for a held item — the EDITED values when this is

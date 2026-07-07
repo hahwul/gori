@@ -25,6 +25,7 @@ module Gori
     DEFAULT_THEME           = "goridark"
     DEFAULT_MOUSE           = true
     DEFAULT_PRETTY_BODIES   = true
+    DEFAULT_ENV_PREFIX      = "$"
 
     class_property bind_host : String = DEFAULT_BIND_HOST
     class_property bind_port : Int32 = DEFAULT_BIND_PORT
@@ -63,6 +64,9 @@ module Gori
     # UNDER each project's own HostOverrides, which wins on a host collision. Edited via
     # settings:network (the HostsOverlay).
     class_property hostname_overrides : Array({String, String}) = [] of {String, String}
+    class_property env_prefix : String = DEFAULT_ENV_PREFIX
+    class_property env_vars : Array({String, String}) = [] of {String, String}
+    class_property project_env_vars : Array({String, String}) = [] of {String, String}
     class_property editor : String = DEFAULT_EDITOR                     # external editor for ^E; "" = $VISUAL/$EDITOR/vi
     class_property editor_markdown : Bool = DEFAULT_EDITOR_MARKDOWN     # syntax-highlight markdown in Notes/Project
     class_property theme : String = DEFAULT_THEME                       # TUI colour theme name (settings:theme); applied by Theme.apply
@@ -129,6 +133,7 @@ module Gori
       end
       self.tab_prefs = parse_tab_prefs(root["tabs"]?)
       self.hostname_overrides = parse_hostname_overrides(root["hostname_overrides"]?)
+      parse_env(root["env"]?)
       parse_hotkeys(root["hotkeys"]?)
       if cv = root["convert"]?
         self.convert_input = cv["input"]?.try(&.as_s?) || convert_input
@@ -137,6 +142,7 @@ module Gori
         self.convert_chains = parse_convert_chains(cv["chains"]?)
       end
       parse_mine_prefs(root["mine"]?)
+      Env.bump_highlight_rev
     rescue
       # no file yet / unreadable / bad JSON — keep current values
     end
@@ -174,6 +180,33 @@ module Gori
         out << {name, spec}
       end
       out
+    end
+
+    private def self.parse_env(node : JSON::Any?) : Nil
+      return unless e = node.try(&.as_h?)
+      if pref = e["prefix"]?.try(&.as_s?)
+        self.env_prefix = pref.empty? ? Env::DEFAULT_PREFIX : pref
+      end
+      self.env_vars = parse_env_vars(e["vars"]?)
+    end
+
+    private def self.parse_env_vars(node : JSON::Any?) : Array({String, String})
+      arr = node.try(&.as_a?)
+      return [] of {String, String} unless arr
+      out = [] of {String, String}
+      arr.each do |entry|
+        next unless o = entry.as_h?
+        key = o["key"]?.try(&.as_s?)
+        val = o["value"]?.try(&.as_s?)
+        next if key.nil? || key.empty? || val.nil?
+        next unless valid_env_key?(key)
+        out << {key, val}
+      end
+      out
+    end
+
+    private def self.valid_env_key?(key : String) : Bool
+      !key.empty? && key.matches?(/\A[A-Za-z_][A-Za-z0-9_]*\z/)
     end
 
     # Tolerant hostname-override parse: a non-array (or absent) node keeps the current
@@ -365,6 +398,20 @@ module Gori
               end
             end
           end
+          unless env_vars.empty? && env_prefix == DEFAULT_ENV_PREFIX
+            j.field "env" do
+              j.object do
+                j.field "prefix", env_prefix unless env_prefix == DEFAULT_ENV_PREFIX
+                unless env_vars.empty?
+                  j.field "vars" do
+                    j.array do
+                      env_vars.each { |(key, val)| j.object { j.field "key", key; j.field "value", val } }
+                    end
+                  end
+                end
+              end
+            end
+          end
           # Omit when untouched (default profile + no overrides) so an untouched install
           # never writes a "hotkeys" block.
           unless keymap_overrides.empty? && keymap_os == "auto"
@@ -506,3 +553,5 @@ module Gori
     end
   end
 end
+
+require "./env"

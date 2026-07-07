@@ -531,6 +531,14 @@ module Gori::Tui
       end
     {% end %}
 
+    def self.env_known : Color
+      syn_string
+    end
+
+    def self.env_unknown : Color
+      muted
+    end
+
     # ── Per-marker tints (Fuzzer §…§ regions + the config Sets→marker chips) ──────
     # Derived at runtime from the ACTIVE palette so they re-theme for free (and need no
     # new Palette fields). `marker_bg` is a subtle background band; `marker_hue` is the

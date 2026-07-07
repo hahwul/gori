@@ -1,5 +1,6 @@
 require "../tab_controller"
 require "../project_view"
+require "../../env"
 
 module Gori::Tui
   # The Project tab: the two-pane card (SCOPE rule list + DESCRIPTION editor) plus
@@ -29,12 +30,14 @@ module Gori::Tui
       case @project_view.pane
       when :scope     then Verb::Scope::Project
       when :overrides then Verb::Scope::HostOverrides
+      when :env       then Verb::Scope::Project
       else                 Verb::Scope::Body
       end
     end
 
     def body_badge : Symbol # the description editor, add-row capture text, and settings text fields capture keys; the lists/toggle are nav
       editing = @project_view.pane == :desc || @project_view.adding? || @project_view.ov_adding? ||
+                @project_view.env_adding? ||
                 (@project_view.pane == :settings && @project_view.settings_text_row?)
       editing ? :editor : :body
     end
@@ -50,7 +53,11 @@ module Gori::Tui
       when :overrides
         @project_view.ov_adding? \
           ? "type \"IP host\" · ↵ save · esc cancel" \
-          : "↑/↓ move · ↑ scope · → desc · a add · ↵/e edit · d del · space cmds · esc"
+          : "↑/↓ move · ↑ scope · ↓ env · → desc · a add · ↵/e edit · d del · space cmds · esc"
+      when :env
+        @project_view.env_adding? \
+          ? "type \"KEY VALUE\" · ↵ save · esc cancel" \
+          : "↑/↓ move · ↑ overrides · → desc · a add · ↵/e edit · d del · esc"
       when :settings
         @project_view.settings_text_row? \
           ? "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc" \
@@ -76,6 +83,7 @@ module Gori::Tui
       case @project_view.pane
       when :scope     then handle_project_scope_key(ev)
       when :overrides then handle_project_overrides_key(ev)
+      when :env       then handle_project_env_key(ev)
       when :settings
         handle_project_settings_key(ev)
         true
@@ -102,6 +110,11 @@ module Gori::Tui
         if idx = @project_view.ov_row_at(rect, mx, my)
           @project_view.select_override(idx)
         end
+      when :env
+        @project_view.focus_pane(:env)
+        if idx = @project_view.env_row_at(rect, mx, my)
+          @project_view.select_env(idx)
+        end
       when :desc
         @project_view.focus_pane(:desc)
         @project_view.desc_click_to_cursor(rect, mx, my)
@@ -124,6 +137,7 @@ module Gori::Tui
       when :desc      then @project_view.desc_scroll(step)
       when :scope     then @project_view.scope_select(step)
       when :overrides then @project_view.ov_select(step)
+      when :env       then @project_view.env_select(step)
       when :settings  then @project_view.set_select(step)
       end # :overview band / outside → nothing to scroll
       true
@@ -162,7 +176,8 @@ module Gori::Tui
     # shell's focus ring keeps Tab inert then (the row owns it) instead of switching panes.
     def scope_adding? : Bool
       (@project_view.pane == :scope && @project_view.adding?) ||
-        (@project_view.pane == :overrides && @project_view.ov_adding?)
+        (@project_view.pane == :overrides && @project_view.ov_adding?) ||
+        (@project_view.pane == :env && @project_view.env_adding?)
     end
 
     def focus_scope : Nil
@@ -353,11 +368,15 @@ module Gori::Tui
           @project_view.ov_select(-1)
         end
       elsif key.down? || key.lower_j?
-        @project_view.ov_select(1)
+        if @project_view.ov_at_bottom? && @project_view.env_pane_enabled?
+          @project_view.focus_pane(:env)
+        else
+          @project_view.ov_select(1)
+        end
       elsif key.left?
-        @project_view.pane_advance(-1) # ← back to SCOPE (the pane above-left)
+        @project_view.pane_advance(-1)
       elsif key.right?
-        @project_view.pane_advance(1) # → across to the DESCRIPTION
+        @project_view.focus_pane(:desc)
       elsif key.enter?
         @project_view.ov_edit_start
       else
@@ -411,7 +430,75 @@ module Gori::Tui
       end
     end
 
-    # --- PROJECT SETTINGS pane: scope-lens toggle (row 0) + inline network fields (rows 1-3).
+    private def handle_project_env_key(ev : Termisu::Event::Key) : Bool
+      return (handle_project_env_add_key(ev); true) if @project_view.env_adding?
+      key = ev.key
+      c = ev.char || key.to_char
+      if ev.ctrl? && key.lower_p?
+        save
+        @host.open_palette
+      elsif key.escape?
+        save
+        @host.request_focus(:menu)
+      elsif key.up? || key.lower_k?
+        if @project_view.env_at_top?
+          @project_view.focus_pane(:overrides)
+        else
+          @project_view.env_select(-1)
+        end
+      elsif key.down? || key.lower_j?
+        @project_view.env_select(1)
+      elsif key.left?
+        @project_view.pane_advance(-1)
+      elsif key.right?
+        @project_view.focus_pane(:desc)
+      elsif key.enter? || c == 'e'
+        @project_view.env_edit_start
+      elsif c == 'a'
+        @project_view.env_add_start
+      elsif c == 'd'
+        if key_name = @project_view.env_delete
+          Env.save_project(@host.session.store, @project_view.env_vars)
+          @host.status("removed env: #{key_name}")
+        end
+      else
+        return false
+      end
+      true
+    end
+
+    private def handle_project_env_add_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        @project_view.cancel_env_add
+      elsif key.enter?
+        commit_project_env
+      elsif key.left?
+        @project_view.env_move_cursor(-1)
+      elsif key.right?
+        @project_view.env_move_cursor(1)
+      elsif key.backspace?
+        @project_view.cancel_env_add unless @project_view.env_backspace
+      elsif c && !ev.ctrl? && !ev.alt?
+        @project_view.env_input(c)
+        @project_view.set_preedit("")
+      end
+    end
+
+    private def commit_project_env : Nil
+      case @project_view.env_commit
+      when :empty   then @host.status("env var: empty")
+      when :invalid then @host.status(%(env var: need "KEY VALUE" or "KEY=value"))
+      when :dup     then @host.status("env var: KEY already defined")
+      when :ok
+        Env.save_project(@host.session.store, @project_view.env_vars)
+        n = @project_view.env_vars.size
+        @host.status("env var saved — #{n} total")
+      end
+    end
+
+    # --- NETWORK pane: scope-lens toggle (row 0) + inline network fields (rows 1-3).
     # handle_body_key returns true for it, so the pane OWNS every key — space toggles the lens
     # on its row, and the text fields accept letters, so nothing falls through to the keymap.
     private def handle_project_settings_key(ev : Termisu::Event::Key) : Nil
@@ -456,8 +543,8 @@ module Gori::Tui
       if key.enter? || key.space?
         @host.toggle_scope_lens
       elsif key.left?
-        @project_view.focus_pane(:overrides)
-      end # → is the rightmost column — nothing to cross to
+        @project_view.focus_pane(@project_view.env_pane_enabled? ? :env : :overrides)
+      end
     end
 
     # Rows 1-3 (bind IP / port / upstream): type to edit, ↵ applies, ← at the field start

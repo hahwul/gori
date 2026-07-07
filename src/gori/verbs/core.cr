@@ -84,6 +84,9 @@ module Gori
         "settings.host-overrides", "Settings: Hostnames", "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hosts); nil }
       r.register Verb::Definition.new(
+        "settings.env", "Settings: Env", "Global environment variables for $KEY substitution in requests",
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:env); nil }
+      r.register Verb::Definition.new(
         "settings.hotkeys", "Settings: Hotkeys", "Rebind keyboard shortcuts (press a key) + pick an OS default profile",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hotkeys); nil }
 

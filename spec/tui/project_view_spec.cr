@@ -204,24 +204,41 @@ describe "ProjectView AT A GLANCE Technologies" do
 end
 
 describe "ProjectView#pane_at" do
-  it "splits the body into the overview band + SCOPE/HOST-OVERRIDES (left) / DESCRIPTION over PROJECT SETTINGS (right)" do
+  it "hides the ENV pane on short terminals" do
+    tmp_store do |store|
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      rect = Rect.new(0, 0, 120, 14)
+      view.render(Screen.new(MemoryBackend.new(120, 14)), rect, focused: false)
+      view.env_pane_enabled?.should be_false
+      content_y = rect.y + 5
+      view.pane_at(rect, rect.x + 1, content_y).should eq(:scope)
+      view.pane_at(rect, rect.x + 1, rect.y + 10).should eq(:overrides)
+      (content_y...rect.y + rect.h).each do |y|
+        pane = view.pane_at(rect, rect.x + 1, y)
+        pane.should_not eq(:env) if pane
+      end
+    end
+  end
+
+  it "splits the body into overview + SCOPE/OVERRIDES/ENV (left) / DESCRIPTION over NETWORK (right)" do
     tmp_store do |store|
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
       rect = Rect.new(0, 0, 120, 30)
       view.render(Screen.new(MemoryBackend.new(120, 30)), rect, focused: false)
 
-      view.pane_at(rect, rect.x + 1, rect.y).should eq(:overview)          # top band
-      content_y = rect.y + 12                                              # below the capped overview (meta_h == 11)
-      view.pane_at(rect, rect.x + 1, content_y).should eq(:scope)          # top-left card
-      view.pane_at(rect, rect.x + 1, rect.y + 24).should eq(:overrides)    # bottom-left card
-      view.pane_at(rect, rect.right - 2, content_y).should eq(:desc)       # right-top card
-      view.pane_at(rect, rect.right - 2, rect.y + 26).should eq(:settings) # right-bottom card
-      view.pane_at(Rect.new(0, 0, 0, 0), 0, 0).should be_nil               # empty rect → nothing
+      view.pane_at(rect, rect.x + 1, rect.y).should eq(:overview)
+      content_y = rect.y + 12
+      view.pane_at(rect, rect.x + 1, content_y).should eq(:scope)
+      view.pane_at(rect, rect.x + 1, rect.y + 20).should eq(:overrides)
+      view.pane_at(rect, rect.x + 1, rect.y + 26).should eq(:env)
+      view.pane_at(rect, rect.right - 2, content_y).should eq(:desc)
+      view.pane_at(rect, rect.right - 2, rect.y + 26).should eq(:settings)
+      view.pane_at(Rect.new(0, 0, 0, 0), 0, 0).should be_nil
     end
   end
 end
 
-describe "ProjectView PROJECT SETTINGS pane" do
+describe "ProjectView NETWORK pane" do
   it "renders the scope-lens toggle + the three network fields with an inherit marker" do
     tmp_store do |store|
       reset_projnet
@@ -229,7 +246,8 @@ describe "ProjectView PROJECT SETTINGS pane" do
       view.refresh_settings
       b = MemoryBackend.new(120, 30)
       view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
-      b.contains?("PROJECT SETTINGS").should be_true
+      b.contains?("NETWORK").should be_true
+      b.contains?("ENVIRONMENT").should be_true
       b.contains?("Scope lens").should be_true
       b.contains?("Bind IP").should be_true
       b.contains?("Bind Port").should be_true

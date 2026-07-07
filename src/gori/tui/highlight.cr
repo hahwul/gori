@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "../env"
 require "termisu"
 
 module Gori::Tui
@@ -119,7 +120,7 @@ module Gori::Tui
     def self.from_lines(all : Array(String), request : Bool) : Array(Line)
       sep = all.index("")
       kind = body_kind(content_type_in(all))
-      all.map_with_index do |raw, i|
+      lines = all.map_with_index do |raw, i|
         if i == 0
           start_line(raw, request)
         elsif sep.nil?
@@ -132,6 +133,32 @@ module Gori::Tui
           body_line(raw, kind)
         end
       end
+      request ? lines.map { |line| with_env_tokens(line) } : lines
+    end
+
+    # Single-line env overlay (TARGET fields, ENV pane values).
+    def self.env_line(raw : String, base_fg : Color = Theme.text, attr : Attribute = Attribute::None) : Line
+      with_env_tokens([Span.new(raw, base_fg, attr)])
+    end
+
+    def self.with_env_tokens(line : Line) : Line
+      out = [] of Span
+      line.each { |span| env_spans_in(span.text, span.fg, span.attr).each { |s| out << s } }
+      out
+    end
+
+    private def self.env_spans_in(text : String, base_fg : Color, attr : Attribute = Attribute::None) : Line
+      regions = Env.token_regions(text)
+      return [Span.new(text, base_fg, attr)] if regions.empty?
+      spans = [] of Span
+      pos = 0
+      regions.each do |(a, b, known)|
+        spans << Span.new(text[pos...a], base_fg, attr) if a > pos
+        spans << Span.new(text[a...b], known ? Theme.env_known : Theme.env_unknown, known ? attr : (attr | Attribute::Italic))
+        pos = b
+      end
+      spans << Span.new(text[pos..], base_fg, attr) if pos < text.size
+      spans
     end
 
     # Windowed variant of `from_lines` for a combined-text message (Intercept's

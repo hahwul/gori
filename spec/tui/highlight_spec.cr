@@ -22,6 +22,17 @@ private def render(line : Highlight::Line, w = 80) : MemoryBackend
 end
 
 describe Gori::Tui::Highlight do
+  it "highlights known and unknown env tokens in request lines" do
+    Gori::Settings.env_vars = [{"HOST", "api.test"}]
+    Gori::Settings.project_env_vars = [] of {String, String}
+    src = ["GET http://$HOST/path HTTP/1.1", "X: $MISSING"]
+    lines = Highlight.from_lines(src, request: true)
+    lines[0].map(&.text).join.should eq(src[0])
+    has_span?(lines[0], "$HOST", Theme.env_known).should be_true
+    has_span?(lines[1], "$MISSING", Theme.env_unknown).should be_true
+  ensure
+    Gori::Settings.env_vars = [] of {String, String}
+  end
   # The cardinal invariant: highlighting is a pure colour overlay. It must never
   # add, drop, reorder, or duplicate a character, and the line count must match
   # the plain split exactly (so scroll bounds + editor cursor stay aligned).

@@ -7,6 +7,7 @@ require "../replay/h2_engine"
 require "../replay/flow_request"
 require "../fuzz"
 require "../convert"
+require "../env"
 require "../miner"
 require "./serialize"
 require "./request_builder"
@@ -44,6 +45,7 @@ module Gori
       def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool,
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil)
+        Env.load_project(@store)
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
         @job_seq = 0
@@ -621,10 +623,12 @@ module Gori
           detail = @store.get_flow(id)
           raise Gori::Error.new("no flow with id #{id}") unless detail
           flow = Replay::FlowRequest.build(detail)
-          scheme, host, port = Replay::FlowRequest.parse_target(flow.target)
+          bytes = Env.expand_wire(String.new(flow.bytes))
+          target = Env.expand(flow.target)
+          scheme, host, port = Replay::FlowRequest.parse_target(target)
           raise Gori::Error.new("could not parse target from flow #{id}") if host.empty?
           http2 = bool(h, "http2") || flow.http2
-          {RequestBuilder::Built.new(flow.bytes, scheme, host, port), http2}
+          {RequestBuilder::Built.new(bytes, scheme, host, port), http2}
         else
           built = RequestBuilder.build(h)
           {built, bool(h, "http2") || false}
@@ -927,13 +931,13 @@ module Gori
 
       private def mine_request_source(h) : {Bytes, String?, Bool}
         if t = str(h, "template")
-          return {t.gsub(/\r?\n/, "\r\n").to_slice, nil, false} unless t.strip.empty?
+          return {Env.expand_wire(t), nil, false} unless t.strip.empty?
         end
         if id = int(h, "flow_id")
           detail = @store.get_flow(id)
           raise FuzzArgError.new("no flow with id #{id}") unless detail
           built = Replay::FlowRequest.build(detail)
-          return {built.bytes, built.target, built.http2}
+          return {Env.expand_wire(String.new(built.bytes)), Env.expand(built.target), built.http2}
         end
         raise FuzzArgError.new("provide a 'template' (raw request) or a 'flow_id'")
       end
@@ -954,6 +958,8 @@ module Gori
       # FuzzArgError (clean message) on any malformed input.
       private def build_fuzz_job(h) : {Fuzz::Engine, Fuzz::Origin, Int64?}
         text, default_target, src_h2 = fuzz_template_source(h)
+        text = Env.expand(text)
+        default_target = default_target.try { |t| Env.expand(t) }
         use_h2 = (bool(h, "http2") || false) || src_h2
         text = Fuzz::Template.auto_mark(text) if bool(h, "auto") || false
         m = Fuzz::Template::MARKER
@@ -990,8 +996,9 @@ module Gori
       end
 
       private def fuzz_origin(h, default_target : String?) : Fuzz::Origin
-        url = str(h, "url").presence || default_target
-        raise FuzzArgError.new("provide a 'url' target (scheme://host) or a flow_id that carries one") unless url
+        url_raw = str(h, "url").presence || default_target
+        raise FuzzArgError.new("provide a 'url' target (scheme://host) or a flow_id that carries one") unless url_raw
+        url = Env.expand(url_raw)
         scheme, host, port = Replay::FlowRequest.parse_target(url)
         raise FuzzArgError.new("could not parse a host from '#{url}'") if host.empty?
         Fuzz::Origin.new(scheme, host, port)

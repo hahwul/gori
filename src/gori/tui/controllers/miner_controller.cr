@@ -3,6 +3,7 @@ require "../miner_view"
 require "../mine_config_overlay"
 require "../../store"
 require "../../miner"
+require "../../env"
 
 module Gori::Tui
   # One open mining session (a sub-tab under the Miner tab). `flow_id` is the source
@@ -296,7 +297,7 @@ module Gori::Tui
     # Normalize editor text to CRLF line endings (h2 reframing + injection boundary scan
     # expect them); captured flows are already CRLF.
     private def text_to_request(text : String) : Bytes
-      text.gsub(/\r?\n/, "\r\n").to_slice
+      Env.expand(text).gsub(/\r?\n/, "\r\n").to_slice
     end
 
     # --- start a session (called by the Runner after the config overlay confirms) ---

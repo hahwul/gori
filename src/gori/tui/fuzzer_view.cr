@@ -13,6 +13,8 @@ require "../convert"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
 require "../replay/flow_request"
+require "../env"
+require "./highlight"
 require "../saml"
 require "../jwt"
 require "../graphql"
@@ -642,10 +644,10 @@ module Gori::Tui
       if err = regex_error
         return {nil, err} # don't silently run match-everything on a bad pattern
       end
-      template = Fuzz::Template.parse(@editor.text, @http2)
+      template = Fuzz::Template.parse(Env.expand(@editor.text), @http2)
       return {nil, "mark a position first — ^A params · ^K word"} if template.position_count == 0
       return {nil, "add a payload set — ^O config · + Add set (^L for a List)"} if @sets.empty?
-      scheme, host, port = Replay::FlowRequest.parse_target(@target)
+      scheme, host, port = Replay::FlowRequest.parse_target(Env.expand(@target))
       return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       sets = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)) }
       gen_sets = @config.mode.per_position? ? sets : [sets.first]
@@ -659,7 +661,7 @@ module Gori::Tui
     end
 
     def target_origin : String
-      scheme, host, port = Replay::FlowRequest.parse_target(@target)
+      scheme, host, port = Replay::FlowRequest.parse_target(Env.expand(@target))
       "#{scheme}://#{host}:#{port}"
     end
 
@@ -1054,7 +1056,8 @@ module Gori::Tui
       end
       base = rect.x + 4
       screen.text(rect.x + 2, rect.y + 1, "›", focused ? Theme.accent : Theme.muted)
-      screen.text(base, rect.y + 1, @target, Theme.text_bright, width: {rect.right - base - 1, 1}.max)
+      tw = {rect.right - base - 1, 1}.max
+      Highlight.draw(screen, base, rect.y + 1, Highlight.env_line(@target, Theme.text_bright), width: tw)
       if focused
         cx = base + Screen.display_width(@target[0, @tcx])
         if cx < rect.right - 1

@@ -42,6 +42,7 @@ require "../notes"
 require "./settings_view"
 require "./tabs_overlay"
 require "./hosts_overlay"
+require "./env_overlay"
 require "./hotkeys_overlay"
 require "./palette"
 require "./space_menu"
@@ -80,7 +81,7 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -150,6 +151,7 @@ module Gori::Tui
       @tabs_overlay = TabsOverlay.new
       # The global hostname-overrides editor (settings → "Hostname overrides"); @overlay is :hosts.
       @hosts_overlay = HostsOverlay.new
+      @env_overlay = EnvOverlay.new
       # The hotkey rebinder (palette → settings:hotkeys); @overlay is :hotkeys.
       @hotkeys_overlay = HotkeysOverlay.new(@session.registry)
       # Shared background-job + notification layer (Miner is the first consumer). The
@@ -549,6 +551,7 @@ module Gori::Tui
       when :note_pick     then @note_picker.try(&.set_preedit(text))
       when :settings      then @settings_view.set_preedit(text)
       when :hosts         then @hosts_overlay.set_preedit(text)
+      when :env          then @env_overlay.set_preedit(text)
       when :fuzz_set      then @fuzz_set_overlay.try(&.set_preedit(text))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.set_preedit(text))
       when :none          then apply_preedit_body(text)
@@ -618,6 +621,7 @@ module Gori::Tui
       return handle_settings_key(ev) if @overlay == :settings
       return handle_tabs_key(ev) if @overlay == :tabs
       return handle_hosts_key(ev) if @overlay == :hosts
+      return handle_env_key(ev) if @overlay == :env
       return handle_hotkeys_key(ev) if @overlay == :hotkeys
       return handle_notifications_key(ev) if @overlay == :notifications
       return handle_mine_config_key(ev) if @overlay == :mine_config
@@ -879,6 +883,7 @@ module Gori::Tui
       when :settings      then click_settings(area, mx, my)
       when :tabs          then click_tabs(area, mx, my)
       when :hosts         then click_hosts(area, mx, my)
+      when :env          then click_env(area, mx, my)
       when :hotkeys       then click_hotkeys(area, mx, my)
       when :notifications then click_notifications(area, mx, my)
       when :mine_config   then click_mine_config(area, mx, my)
@@ -1011,6 +1016,14 @@ module Gori::Tui
       end
     end
 
+    private def click_env(area : Rect, mx : Int32, my : Int32) : Nil
+      box = @env_overlay.overlay_box(area)
+      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = @env_overlay.row_at(box, mx, my)
+        @env_overlay.set_selected(idx)
+      end
+    end
+
     # Hotkey editor: a click outside dismisses (discards the working copy, like esc); a
     # row click selects that binding (rebind/unbind/reset stay keyboard-driven).
     private def click_hotkeys(area : Rect, mx : Int32, my : Int32) : Nil
@@ -1072,6 +1085,7 @@ module Gori::Tui
       when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs          then @tabs_overlay.select_move(step)
       when :hosts         then @hosts_overlay.select_move(step)
+      when :env          then @env_overlay.select_move(step)
       when :hotkeys       then @hotkeys_overlay.select_move(step)
       when :notifications then @notifications_overlay.select_move(step)
       when :mine_config   then @mine_config_overlay.try(&.move(step))
@@ -1923,6 +1937,106 @@ module Gori::Tui
       Settings.save
     end
 
+    private def handle_env_key(ev : Termisu::Event::Key) : Nil
+      if @env_overlay.prefix_editing?
+        handle_env_prefix_key(ev)
+        return
+      end
+      if @env_overlay.adding?
+        handle_env_add_key(ev)
+        return
+      end
+      key = ev.key
+      c = ev.char || key.to_char
+      if ev.ctrl? && key.lower_p?
+        @overlay = :none
+        open_palette
+      elsif key.escape?
+        @overlay = :none
+      elsif key.up?
+        @env_overlay.select_move(-1)
+      elsif key.down?
+        @env_overlay.select_move(1)
+      elsif key.enter? || c == 'e'
+        @env_overlay.edit_start
+      elsif c == 'a'
+        @env_overlay.add_start
+      elsif c == 'p'
+        @env_overlay.prefix_edit_start
+      elsif c == 'd'
+        if key_name = @env_overlay.delete_selected
+          ok = save_env
+          @toast = ok ? "removed env: #{key_name}" : "removed #{key_name} — could not save to #{Settings.path}"
+        end
+      end
+    end
+
+    private def handle_env_prefix_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        @env_overlay.cancel_prefix_edit
+      elsif key.enter?
+        case @env_overlay.commit_prefix
+        when :empty then @toast = "env prefix: empty"
+        when :ok
+          ok = save_env
+          @toast = ok ? "env prefix saved — #{@env_overlay.to_config[0].inspect}" : "prefix applied — could not save to #{Settings.path}"
+        end
+      elsif key.left?
+        @env_overlay.move_cursor(-1)
+      elsif key.right?
+        @env_overlay.move_cursor(1)
+      elsif key.backspace?
+        @env_overlay.cancel_prefix_edit unless @env_overlay.backspace
+      elsif c && !ev.ctrl? && !ev.alt?
+        @env_overlay.input(c)
+        @env_overlay.set_preedit("")
+      end
+    end
+
+    private def handle_env_add_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        @env_overlay.cancel_add
+      elsif key.enter?
+        case @env_overlay.commit
+        when :empty   then @toast = "env var: empty"
+        when :invalid then @toast = %(env var: need "KEY VALUE" or "KEY=value" — KEY is [A-Za-z_][A-Za-z0-9_]*)
+        when :dup     then @toast = "env var: KEY already defined"
+        when :ok
+          ok = save_env
+          n = @env_overlay.to_config[1].size
+          @toast = ok ? "env var saved — #{n} total" : "env var applied — could not save to #{Settings.path}"
+        end
+      elsif key.left?
+        @env_overlay.move_cursor(-1)
+      elsif key.right?
+        @env_overlay.move_cursor(1)
+      elsif key.backspace?
+        @env_overlay.cancel_add unless @env_overlay.backspace
+      elsif c && !ev.ctrl? && !ev.alt?
+        @env_overlay.input(c)
+        @env_overlay.set_preedit("")
+      end
+    end
+
+    private def save_env : Bool
+      prefix, vars = @env_overlay.to_config
+      Settings.env_prefix = prefix
+      Settings.env_vars = vars.dup
+      ok = Settings.save
+      Env.bump_highlight_rev if ok
+      ok
+    end
+
+    private def env_overlay_hints : String
+      return "type prefix · ↵ save · esc cancel" if @env_overlay.prefix_editing?
+      return "type \"KEY VALUE\" · ↵ save · esc cancel" if @env_overlay.adding?
+      "↑/↓ select · a add · ↵/e edit · d delete · p prefix · esc close"
+    end
+
     # The hotkey rebinder (settings:hotkeys). Working copy: ↵ saves+applies, esc discards.
     # Two sub-modes — :browse navigates/edits the list, :capture records the next key as
     # the new binding (entered via e/space on a row; the capture early-return in handle_key
@@ -2372,6 +2486,7 @@ module Gori::Tui
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
       @hosts_overlay.render(screen, layout.body) if @overlay == :hosts
+      @env_overlay.render(screen, layout.body) if @overlay == :env
       @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
       @notifications_overlay.render(screen, layout.body) if @overlay == :notifications
       @mine_config_overlay.try(&.render(screen, layout.body)) if @overlay == :mine_config
@@ -2465,6 +2580,7 @@ module Gori::Tui
       when :settings      then "SETTINGS"
       when :tabs          then "TAB BAR"
       when :hosts         then "HOSTNAME OVERRIDES"
+      when :env          then "ENVIRONMENT"
       when :hotkeys       then "HOTKEYS"
       when :notifications then "NOTIFICATIONS"
       when :mine_config   then "MINE PARAMS"
@@ -2508,6 +2624,7 @@ module Gori::Tui
       when :settings      then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
       when :tabs          then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
       when :hosts         then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
+      when :env          then env_overlay_hints
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
@@ -3935,6 +4052,9 @@ module Gori::Tui
       when :hosts
         @hosts_overlay.reset # rebuild the working copy from persisted overrides
         @overlay = :hosts
+      when :env
+        @env_overlay.reset
+        @overlay = :env
       when :hotkeys
         @hotkeys_overlay.reset # rebuild the working copy from persisted overrides
         @overlay = :hotkeys

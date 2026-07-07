@@ -1,5 +1,6 @@
 require "json"
 require "uri"
+require "../env"
 
 module Gori
   module MCP
@@ -16,6 +17,7 @@ module Gori
       def self.build(args : Hash(String, JSON::Any)) : Built
         url = args["url"]?.try(&.as_s?)
         raise Gori::Error.new("'url' is required") if url.nil? || url.empty?
+        url = Env.expand(url)
 
         # URI.parse raises URI::Error on a malformed authority (e.g. a non-numeric
         # port "example.com:abc"); turn that into a clean Gori::Error so the caller
@@ -48,7 +50,7 @@ module Gori
 
         bytes =
           if (raw = args["raw"]?.try(&.as_s?)) && !raw.empty?
-            normalize_raw(raw)
+            normalize_raw(Env.expand(raw))
           else
             build_from_parts(uri, scheme, host, port, args)
           end
@@ -60,7 +62,7 @@ module Gori
                                         args : Hash(String, JSON::Any)) : Bytes
         method = (args["method"]?.try(&.as_s?) || "GET").upcase
         validate_method(method)
-        body = args["body"]?.try(&.as_s?)
+        body = args["body"]?.try(&.as_s?).try { |b| Env.expand(b) }
 
         path = uri.path
         path = "/" if path.empty?
@@ -72,7 +74,7 @@ module Gori
         headers = [] of {String, String}
         if h = args["headers"]?.try(&.as_h?)
           h.each do |k, v|
-            value = v.as_s? || v.to_s
+            value = Env.expand(v.as_s? || v.to_s)
             validate_header(k, value)
             headers << {k, value}
           end

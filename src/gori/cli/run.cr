@@ -4,6 +4,7 @@ require "base64"
 require "../config"
 require "../paths"
 require "../settings"
+require "../env"
 require "../app"
 require "../store"
 require "../project"
@@ -47,6 +48,7 @@ module Gori
       end
 
       private def self.dispatch_subcommand(args : Array(String)) : Nil
+        Settings.load # global env vars (and other persisted defaults) for all subcommands
         # No args / -h / --help all print help. `args[1..]` is only reached in the named
         # branches, where args[0] matched a subcommand string (so args is non-empty and the
         # tail slice is safe). Folding the empty case into this `when` keeps the dispatch
@@ -504,12 +506,14 @@ module Gori
 
         built = Replay::FlowRequest.build(detail)
         override = target_override # copy the closured flag into a plain local so || narrows
-        scheme, host, port = Replay::FlowRequest.parse_target(override || built.target)
+        bytes = Env.expand_wire(String.new(built.bytes))
+        target = Env.expand(override || built.target)
+        scheme, host, port = Replay::FlowRequest.parse_target(target)
         abort "gori run replay: could not determine a target host" if host.empty?
         abort "gori run replay: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
         use_h2 = force_h2 || built.http2
         verify = !insecure
-        result = use_h2 ? Replay::H2Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify) : Replay::Engine.send(built.bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
+        result = use_h2 ? Replay::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify) : Replay::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
 
         # Decode the response body once for TEXT display (--diff / plain print); only
         # build the diff lines when --diff asked for them (decoding the captured
@@ -641,7 +645,10 @@ module Gori
         abort "gori run fuzz: too many arguments (expected at most one <flow-id>)" if positional.size > 1
         flow_id ||= positional.first?.try { |s| parse_flow_id(s) }
 
+        hydrate_project_env(project_name, db_path) if (project_name || db_path) && flow_id.nil?
         text, default_target, src_h2 = fuzz_source(flow_id, request_file, project_name, db_path)
+        text = Env.expand(text)
+        default_target = default_target.try { |t| Env.expand(t) }
         template = build_fuzz_template(text, auto, marks, force_h2 || src_h2)
         scheme, host, port = resolve_fuzz_target(target_override, default_target)
 
@@ -777,8 +784,13 @@ module Gori
         Fuzz::Mode.parse?(v) || abort "gori run fuzz: invalid --mode '#{v}' (sniper|batteringram|pitchfork|clusterbomb)"
       end
 
+      private def self.hydrate_project_env(project_name : String?, db_path : String?) : Nil
+        store = open_store(resolve_read_project(project_name, db_path))
+        store.close
+      end
+
       private def self.resolve_fuzz_target(override : String?, default_target : String?) : {String, String, Int32}
-        target = override || default_target || abort("gori run fuzz: --target is required for --request/stdin")
+        target = Env.expand(override || default_target || abort("gori run fuzz: --target is required for --request/stdin"))
         scheme, host, port = Replay::FlowRequest.parse_target(target)
         abort "gori run fuzz: could not determine a target host" if host.empty?
         abort "gori run fuzz: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
@@ -872,7 +884,7 @@ module Gori
                                    project_name : String?, db_path : String?) : {Bytes, String?, Bool}
         if file = request_file
           abort "gori run mine: not a readable file: #{file}" unless File.file?(file)
-          {File.read(file).to_slice, nil, false}
+          {Env.expand_wire(File.read(file)), nil, false}
         elsif id = flow_id
           store = open_store(resolve_read_project(project_name, db_path))
           detail = begin
@@ -882,16 +894,16 @@ module Gori
           end
           abort "gori run mine: no flow ##{id}" unless detail
           built = Replay::FlowRequest.build(detail)
-          {built.bytes, built.target, built.http2}
+          {Env.expand_wire(String.new(built.bytes)), built.target, built.http2}
         elsif !STDIN.tty?
-          {STDIN.gets_to_end.to_slice, nil, false}
+          {Env.expand_wire(STDIN.gets_to_end), nil, false}
         else
           abort "gori run mine: no source — give a <flow-id>, --request FILE, or pipe a request on stdin"
         end
       end
 
       private def self.resolve_mine_target(override : String?, default_target : String?) : {String, String, Int32}
-        target = override || default_target || abort("gori run mine: --target is required for --request/stdin")
+        target = Env.expand(override || default_target || abort("gori run mine: --target is required for --request/stdin"))
         scheme, host, port = Replay::FlowRequest.parse_target(target)
         abort "gori run mine: could not determine a target host" if host.empty?
         abort "gori run mine: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
@@ -1478,7 +1490,9 @@ module Gori
       # Opening a non-SQLite file (or a path we can't read) raises deep in the driver;
       # turn that into a clean CLI error instead of an unhandled backtrace.
       private def self.open_store(project : Project) : Store
-        Store.open(project.db_path)
+        store = Store.open(project.db_path)
+        Env.load_project(store)
+        store
       rescue ex : DB::Error | SQLite3::Exception
         abort "gori run: cannot open database #{project.db_path}: #{ex.message.presence || "not a valid SQLite database (or unreadable)"}"
       end

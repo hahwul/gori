@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./highlight"
+require "../env"
 require "./gutter"
 require "./search_hi"
 require "./reveal"
@@ -24,7 +25,8 @@ module Gori::Tui
       # which highlight symbol it was built for.
       @styled = nil.as(Array(Highlight::Line)?)
       @styled_kind = nil.as(Symbol?)
-      @styled_rev = Theme.revision # the theme the cached (colour-baked) overlay was built under
+      @styled_rev = Theme.revision
+      @styled_env_rev = Env.highlight_rev
       @gutter = false              # left line-number gutter (on for the Replay request body)
       @search_hl = ""              # active ^F query → matches highlighted in render
       @reveal = false              # show whitespace (space ·, tab →) instead of syntax colours
@@ -374,9 +376,11 @@ module Gori::Tui
     # buffer content changes — so a held editor isn't re-tokenised 20×/sec.
     private def highlighted(kind : Symbol) : Array(Highlight::Line)
       cached = @styled
-      return cached if cached && @styled_kind == kind && @styled_rev == Theme.revision
+      env_rev = Env.highlight_rev
+      return cached if cached && @styled_kind == kind && @styled_rev == Theme.revision && @styled_env_rev == env_rev
       @styled_kind = kind
       @styled_rev = Theme.revision
+      @styled_env_rev = env_rev
       @styled = kind == :markdown ? Highlight.markdown(@lines) : Highlight.from_lines(@lines, kind == :request)
     end
 

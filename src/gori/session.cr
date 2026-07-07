@@ -6,6 +6,7 @@ require "./store"
 require "./rules"
 require "./scope"
 require "./host_overrides"
+require "./env"
 require "./interceptor"
 require "./prism"
 require "./proxy/server"
@@ -55,6 +56,7 @@ module Gori
         Settings.project_bind_host = store.setting(Settings::PROJECT_BIND_HOST_KEY)
         Settings.project_bind_port = store.setting(Settings::PROJECT_BIND_PORT_KEY).try(&.to_i?)
         Settings.project_upstream_proxy = store.setting(Settings::PROJECT_UPSTREAM_KEY)
+        Env.load_project(store)
         config.listen = Settings.effective_bind_host
         config.port = Settings.effective_bind_port
         lock = nil.as(CaptureLock?)

@@ -4,6 +4,7 @@ require "./theme"
 require "./frame"
 require "./traffic_empty_state"
 require "./highlight"
+require "../env"
 require "./hex_view"
 require "./hex_edit"
 require "./text_area"
@@ -642,7 +643,7 @@ module Gori::Tui
     # the envelope, then send the envelope (the authoritative request) with CL synced.
     private def decoded_request_bytes : Bytes
       commit_decoded
-      raw = @editor.to_bytes
+      raw = expanded_text_to_bytes(@editor.text)
       @auto_content_length ? sync_content_length(raw) : raw
     end
 
@@ -665,7 +666,7 @@ module Gori::Tui
     # CRLFCRLF terminator (what H2Engine.split_head_body keys on) + the pristine
     # framed body. Auto-Content-Length never applies (h2 frames by DATA/END_STREAM).
     private def grpc_request_bytes : Bytes
-      raw = @editor.to_bytes
+      raw = expanded_text_to_bytes(@editor.text)
       n = raw.size
       while n > 0 && (raw[n - 1] == 0x0A_u8 || raw[n - 1] == 0x0D_u8) # trim trailing CR/LF
         n -= 1
@@ -766,8 +767,16 @@ module Gori::Tui
       return grpc_request_bytes if @grpc_mode                 # edited head + verbatim framed body
       return decoded_request_bytes if @decode_kind            # envelope + re-encoded decoded payload
       return marked_request_bytes if @mark_transform          # §…§ inline Convert chains applied on send
-      raw = @editor.to_bytes
+      raw = expanded_editor_bytes
       @auto_content_length ? sync_content_length(raw) : raw
+    end
+
+    private def expanded_editor_bytes : Bytes
+      expanded_text_to_bytes(@editor.text)
+    end
+
+    private def expanded_text_to_bytes(text : String) : Bytes
+      Env.expand(text).split('\n').join("\r\n").to_slice
     end
 
     # MARK-transform mode: parse the CRLF wire form as a Fuzz template and render each
@@ -777,7 +786,7 @@ module Gori::Tui
     # sync_content_length works unchanged. A chain-less `§v§` renders `v`; a failing chain
     # passes the value through untransformed.
     private def marked_request_bytes : Bytes
-      raw = render_marked(@editor.to_bytes)
+      raw = render_marked(expanded_editor_bytes)
       @auto_content_length ? sync_content_length(raw) : raw
     end
 
@@ -972,7 +981,7 @@ module Gori::Tui
     # Delegate to the engine's parser so the TUI field and `gori run`/the replay engine never
     # disagree on host/port (they used to be byte-for-byte duplicate implementations).
     def parse_target : {String, String, Int32}
-      Replay::FlowRequest.parse_target(@target)
+      Replay::FlowRequest.parse_target(Env.expand(@target))
     end
 
     # The TARGET card grows to a second content row (4 high vs 3) whenever an SNI
@@ -1541,7 +1550,8 @@ module Gori::Tui
     private def draw_target_row(screen : Screen, rect : Rect, row : Int32, prefix : String, value : String, cx : Int32, active : Bool) : Nil
       screen.text(rect.x + 2, row, prefix, active ? Theme.accent : Theme.muted)
       base = field_base(rect, prefix)
-      screen.text(base, row, value, Theme.text_bright, width: {rect.right - base - 1, 1}.max)
+      w = {rect.right - base - 1, 1}.max
+      Highlight.draw(screen, base, row, Highlight.env_line(value, Theme.text_bright), width: w)
       if active
         cursor_x = base + Screen.display_width(value[0, cx])
         # Only paint the caret while it's inside the field (before the right border) —

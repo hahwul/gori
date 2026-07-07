@@ -10,6 +10,8 @@ require "../scope"
 require "../prism"
 require "../host_overrides"
 require "../settings"
+require "../env"
+require "./highlight"
 
 module Gori::Tui
   # The Project tab (new default home on entry after create/select). Shows static
@@ -70,7 +72,16 @@ module Gori::Tui
       @ov_icx = 0                  # add-row cursor index
       @ov_preedit = ""             # IME preedit for the add-row
 
-      # PROJECT SETTINGS pane: scope-lens toggle (row 0) + inline-editable network fields
+      @env_items = [] of {String, String}
+      @env_sel = 0
+      @env_adding = false
+      @env_edit_idx = nil.as(Int32?)
+      @env_input = ""
+      @env_icx = 0
+      @env_preedit = ""
+      @env_pane_enabled = false
+
+      # NETWORK pane: scope-lens toggle (row 0) + inline-editable network fields
       # (rows 1-3: bind IP / bind port / upstream proxy). @set_values holds the three text
       # fields; @set_overridden tracks whether each is a project override (vs inheriting global).
       @set_sel = 0
@@ -105,7 +116,9 @@ module Gori::Tui
 
       @desc_area.set_text(store.setting(DESC_KEY) || "")
       @desc_dirty = false
-      load_settings_values # refresh the network fields (Session.open loaded any project overrides)
+      load_settings_values
+      @env_items = Settings.project_env_vars.dup
+      @env_sel = @env_sel.clamp(0, {@env_items.size - 1, 0}.max)
     end
 
     # (Re)load the PROJECT SETTINGS network fields from the effective config — the project
@@ -137,6 +150,8 @@ module Gori::Tui
         @add_preedit = text
       elsif @pane == :overrides && @ov_adding
         @ov_preedit = text
+      elsif @pane == :env && @env_adding
+        @env_preedit = text
       elsif @pane == :settings && settings_text_row?
         @set_preedit = text
       else
@@ -148,9 +163,8 @@ module Gori::Tui
       @desc_area.text
     end
 
-    # --- focus ring (four panes: :scope → :overrides → :desc → :settings, cycled by the Tab
-    # ring). :settings is the PROJECT SETTINGS pane below DESCRIPTION (scope lens + network). ---
-    PANES = [:scope, :overrides, :desc, :settings]
+    PANES = [:scope, :overrides, :env, :desc, :settings]
+    ENV_MIN_BODY_H = 11
 
     # PROJECT SETTINGS pane rows: row 0 is the scope-lens toggle, rows 1-3 the network fields.
     SETTINGS_LABELS  = ["Scope lens", "Bind IP", "Bind Port", "Upstream proxy"]
@@ -170,16 +184,26 @@ module Gori::Tui
       @pane = :scope
       cancel_add
       cancel_ov_add
+      cancel_env_add
     end
 
     # Step between panes; false when there's no further pane in `dir` (the Runner ring
     # then wraps back to the tab bar). Mirrors ReplayView#pane_advance.
     def pane_advance(dir : Int32) : Bool
-      i = PANES.index(@pane) || 0
+      panes = enabled_panes
+      i = panes.index(@pane) || 0
       ni = i + dir
-      return false if ni < 0 || ni >= PANES.size
-      @pane = PANES[ni]
+      return false if ni < 0 || ni >= panes.size
+      @pane = panes[ni]
       true
+    end
+
+    private def enabled_panes : Array(Symbol)
+      PANES.reject { |p| p == :env && !@env_pane_enabled }
+    end
+
+    def env_pane_enabled? : Bool
+      @env_pane_enabled
     end
 
     # Mouse: focus a body pane directly (click-to-focus). Ignores unknown symbols.
@@ -207,42 +231,51 @@ module Gori::Tui
       vw < VIZ_MIN_W ? 0 : vw
     end
 
-    # The four body-pane rects below the OVERVIEW band: {SCOPE (top-left), HOST OVERRIDES
-    # (bottom-left), DESCRIPTION (right-top), PROJECT SETTINGS (right-bottom)}, or nil when the
-    # body is too small to split. The left column is halved vertically; the right column stacks
-    # DESCRIPTION over a PROJECT SETTINGS band pinned to the bottom (its card border + the scope
-    # row + 3 network rows ≈ SETTINGS_H), with DESCRIPTION keeping the remainder (≥ MIN_DESC_H).
-    SETTINGS_H = 6 # 2 border rows + scope-lens row + 3 network rows
-    MIN_DESC_H = 3 # never squeeze DESCRIPTION below this when the settings band can shrink
+    SETTINGS_H = 6
+    MIN_DESC_H = 3
 
-    private def body_panes(rect : Rect) : {Rect, Rect, Rect, Rect}?
+    private def env_pane_enabled?(content_h : Int32) : Bool
+      content_h >= ENV_MIN_BODY_H
+    end
+
+    private def body_panes(rect : Rect) : {Rect, Rect, Rect, Rect, Rect}?
       oh = overview_h(rect)
       content = Rect.new(rect.x, rect.y + oh, rect.w, {rect.h - oh, 0}.max)
       return nil if content.h < 2 || content.w < 4
       left_w = {(content.w - 1) // 2, 1}.max
-      scope_h = {content.h // 2, 1}.max
+      if env_pane_enabled?(content.h)
+        third = {content.h // 3, 2}.max
+        scope_h = third
+        ov_h = third
+        env_h = {content.h - scope_h - ov_h, 2}.max
+        env_rect = Rect.new(content.x, content.y + scope_h + ov_h, left_w, env_h)
+      else
+        scope_h = {content.h // 2, 1}.max
+        ov_h = {content.h - scope_h, 0}.max
+        env_rect = Rect.new(content.x, content.y + content.h, left_w, 0)
+      end
       scope_rect = Rect.new(content.x, content.y, left_w, scope_h)
-      ov_rect = Rect.new(content.x, content.y + scope_h, left_w, {content.h - scope_h, 0}.max)
+      ov_rect = Rect.new(content.x, content.y + scope_h, left_w, ov_h)
       right_x = content.x + left_w + 1
       right_w = {content.w - left_w - 1, 0}.max
-      set_h = {SETTINGS_H, {content.h - MIN_DESC_H, 1}.max}.min # settings ≤ its full height, desc keeps its min
+      set_h = {SETTINGS_H, {content.h - MIN_DESC_H, 1}.max}.min
       desc_h = {content.h - set_h, 0}.max
       desc_rect = Rect.new(right_x, content.y, right_w, desc_h)
       set_rect = Rect.new(right_x, content.y + desc_h, right_w, set_h)
-      {scope_rect, ov_rect, desc_rect, set_rect}
+      {scope_rect, ov_rect, env_rect, desc_rect, set_rect}
     end
 
     # --- mouse hit-testing (inverts render's offset math; coords are 0-based) ---
 
-    # The pane symbol under (mx,my): :scope, :overrides, :desc, :settings, or :overview (band).
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if rect.empty? || !rect.contains?(mx, my)
       return :overview if my < rect.y + overview_h(rect)
       return nil unless panes = body_panes(rect)
       return :scope if panes[0].contains?(mx, my)
       return :overrides if panes[1].contains?(mx, my)
-      return :desc if panes[2].contains?(mx, my)
-      panes[3].contains?(mx, my) ? :settings : nil
+      return :env if panes[2].h > 0 && panes[2].contains?(mx, my)
+      return :desc if panes[3].contains?(mx, my)
+      panes[4].contains?(mx, my) ? :settings : nil
     end
 
     # Index of the scope-rule row clicked, or nil outside the populated list.
@@ -258,6 +291,12 @@ module Gori::Tui
       return nil unless pane_at(rect, mx, my) == :overrides
       return nil unless panes = body_panes(rect)
       row_at(ov_list_inner(panes[1].inset(1, 1)), mx, my, @ov_adding, @ov_sel, @host_overrides.entries.size)
+    end
+
+    def env_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
+      return nil unless pane_at(rect, mx, my) == :env
+      return nil unless panes = body_panes(rect)
+      row_at(env_list_inner(panes[2].inset(1, 1)), mx, my, @env_adding, @env_sel, @env_items.size)
     end
 
     # Shared row hit-test for the SCOPE/HOST-OVERRIDES list interiors: account for the
@@ -291,7 +330,7 @@ module Gori::Tui
     # (the same geometry render uses), then map into the @desc_area editor.
     def desc_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless panes = body_panes(rect)
-      @desc_area.click_to_cursor(panes[2].inset(1, 1), mx, my)
+      @desc_area.click_to_cursor(panes[3].inset(1, 1), mx, my)
     end
 
     # --- PROJECT SETTINGS pane (delegated from ProjectController#handle_project_settings_key) ---
@@ -380,7 +419,7 @@ module Gori::Tui
     def set_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless pane_at(rect, mx, my) == :settings
       return nil unless panes = body_panes(rect)
-      inner = panes[3].inset(1, 1)
+      inner = panes[4].inset(1, 1)
       return nil if inner.h <= 0 || !inner.contains?(mx, my)
       row = my - inner.y
       (0 <= row < SETTINGS_LABELS.size) ? row : nil
@@ -390,7 +429,7 @@ module Gori::Tui
     def setting_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless settings_text_row?
       return unless panes = body_panes(rect)
-      inner = panes[3].inset(1, 1)
+      inner = panes[4].inset(1, 1)
       vx = inner.x + 1 + SETTINGS_LABEL_W + 1
       @set_cursor = (mx - vx).clamp(0, @set_values[@set_sel - 1].size)
     end
@@ -527,6 +566,11 @@ module Gori::Tui
       @ov_sel <= 0
     end
 
+    def ov_at_bottom? : Bool
+      n = @host_overrides.entries.size
+      n == 0 || @ov_sel >= n - 1
+    end
+
     def ov_add_start : Nil
       @ov_adding = true
       @ov_edit_id = nil
@@ -608,6 +652,105 @@ module Gori::Tui
       @ov_sel = @ov_sel.clamp(0, {@host_overrides.entries.size - 1, 0}.max)
     end
 
+    def env_adding? : Bool
+      @env_adding
+    end
+
+    def env_vars : Array({String, String})
+      @env_items
+    end
+
+    def env_select(d : Int32) : Nil
+      n = @env_items.size
+      return if n == 0
+      @env_sel = (@env_sel + d).clamp(0, n - 1)
+    end
+
+    def select_env(idx : Int32) : Nil
+      @env_sel = idx.clamp(0, {@env_items.size - 1, 0}.max)
+    end
+
+    def env_at_top? : Bool
+      @env_sel <= 0
+    end
+
+    def env_add_start : Nil
+      @env_adding = true
+      @env_edit_idx = nil
+      @env_input = ""
+      @env_icx = 0
+      @env_preedit = ""
+    end
+
+    def env_edit_start : Nil
+      entry = @env_items[@env_sel]?
+      return unless entry
+      key, val = entry
+      @env_adding = true
+      @env_edit_idx = @env_sel
+      @env_input = "#{key} #{val}"
+      @env_icx = @env_input.size
+      @env_preedit = ""
+    end
+
+    def cancel_env_add : Nil
+      @env_adding = false
+      @env_edit_idx = nil
+      @env_input = ""
+      @env_icx = 0
+      @env_preedit = ""
+    end
+
+    def env_input(ch : Char) : Nil
+      @env_input = "#{@env_input[0, @env_icx]}#{ch}#{@env_input[@env_icx..]}"
+      @env_icx += 1
+      @env_preedit = ""
+    end
+
+    def env_backspace : Bool
+      return false if @env_icx == 0
+      @env_input = "#{@env_input[0, @env_icx - 1]}#{@env_input[@env_icx..]}"
+      @env_icx -= 1
+      true
+    end
+
+    def env_move_cursor(d : Int32) : Nil
+      @env_icx = (@env_icx + d).clamp(0, @env_input.size)
+    end
+
+    def env_commit : Symbol
+      text = @env_input.strip
+      return :empty if text.empty?
+      parsed = Env.parse_line(text)
+      return :invalid unless parsed
+      key, val = parsed
+      idx = @env_edit_idx
+      return :dup if @env_items.each_with_index.any? { |(k, _), i| k == key && i != idx }
+      if idx
+        @env_items[idx] = {key, val}
+        @env_sel = idx
+      else
+        @env_items << {key, val}
+        @env_sel = @env_items.size - 1
+      end
+      cancel_env_add
+      clamp_env_sel
+      :ok
+    end
+
+    def env_delete : String?
+      entry = @env_items[@env_sel]?
+      return nil unless entry
+      key, _ = entry
+      @env_items.delete_at(@env_sel)
+      clamp_env_sel
+      key
+    end
+
+    private def clamp_env_sel : Nil
+      @env_sel = @env_sel.clamp(0, {@env_items.size - 1, 0}.max)
+    end
+
     # Replace the description (e.g. from the external editor); marks dirty so save
     # persists it on the next tab-exit.
     def replace_desc(text : String) : Nil
@@ -680,16 +823,18 @@ module Gori::Tui
     # three focusable panes. The focused pane's card lights gold.
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
+      oh = overview_h(rect)
+      @env_pane_enabled = env_pane_enabled?({rect.h - oh, 0}.max)
+      if @pane == :env && !@env_pane_enabled
+        @pane = :overrides
+      end
       scope_focused = focused && @pane == :scope
       ov_focused = focused && @pane == :overrides
+      env_focused = focused && @pane == :env
       desc_focused = focused && @pane == :desc
       settings_focused = focused && @pane == :settings
 
-      # OVERVIEW band on top; below it SCOPE (top-left) over HOST OVERRIDES (bottom-left),
-      # with DESCRIPTION filling the right column. The band splits into OVERVIEW (left) and
-      # a read-only AT A GLANCE viz pane (right) when there's room; the region below uses
-      # overview_h(rect) + full rect.w, so it's unaffected by the split.
-      band = Rect.new(rect.x, rect.y, rect.w, overview_h(rect))
+      band = Rect.new(rect.x, rect.y, rect.w, oh)
       vw = viz_width(band.w)
       ov_rect = vw > 0 ? Rect.new(band.x, band.y, band.w - vw - 1, band.h) : band
       render_overview(screen, ov_rect)
@@ -697,8 +842,9 @@ module Gori::Tui
       return unless panes = body_panes(rect)
       render_scope_card(screen, panes[0], scope_focused)
       render_overrides_card(screen, panes[1], ov_focused)
-      render_desc_card(screen, panes[2], desc_focused)
-      render_settings_card(screen, panes[3], settings_focused)
+      render_env_card(screen, panes[2], env_focused) if panes[2].h > 0
+      render_desc_card(screen, panes[3], desc_focused)
+      render_settings_card(screen, panes[4], settings_focused)
     end
 
     private def render_overview(screen : Screen, rect : Rect) : Nil
@@ -1001,6 +1147,73 @@ module Gori::Tui
       screen.input_line(x, y, @ov_input, @ov_icx, @ov_preedit, Theme.text_bright, Theme.bg, width: w)
     end
 
+    private def render_env_card(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "ENVIRONMENT", bg: Theme.bg, border: Frame.pane_border(focused))
+      n = @env_items.size
+      meta = "prefix #{Settings.env_prefix} · #{n}"
+      mx = {rect.right - meta.size - 1, rect.x + 14}.max
+      screen.text(mx, rect.y, meta, Theme.muted, Theme.bg, width: {rect.right - mx - 1, 1}.max) if rect.w > meta.size + 16
+      render_env_list(screen, rect.inset(1, 1), focused)
+    end
+
+    private def render_env_list(screen : Screen, inner : Rect, focused : Bool) : Nil
+      return if inner.h <= 0 || inner.w <= 0
+      screen.text(inner.x, inner.y, "KEY VALUE · e.g. HOST api.example.com", Theme.muted, width: inner.w)
+      list = env_list_inner(inner)
+      return if list.h <= 0
+      y = list.y
+      rows = list.h
+      if @env_adding
+        render_env_add_row(screen, list, y, focused)
+        y += 1
+        rows -= 1
+      end
+      return if rows <= 0
+      if @env_items.empty?
+        screen.text(list.x, y, "(no vars — a to add)", Theme.muted) unless @env_adding
+        return
+      end
+      scroll = scroll_for(@env_sel, @env_items.size, rows)
+      shown = {rows, @env_items.size - scroll}.min
+      shown.times do |i|
+        idx = scroll + i
+        key, val = @env_items[idx]
+        ry = y + i
+        selected = focused && idx == @env_sel && !@env_adding
+        bg = selected ? Theme.accent_bg : Theme.bg
+        if selected
+          screen.fill(Rect.new(list.x, ry, list.w, 1), bg)
+          screen.cell(list.x, ry, '▎', Theme.accent, bg)
+        end
+        render_env_row(screen, list, ry, key, val, selected, bg)
+      end
+    end
+
+    private def env_list_inner(inner : Rect) : Rect
+      Rect.new(inner.x, inner.y + 1, inner.w, {inner.h - 1, 0}.max)
+    end
+
+    private def render_env_row(screen : Screen, inner : Rect, y : Int32, key : String, val : String, selected : Bool, bg : Color) : Nil
+      x = inner.x + 1
+      kw = {inner.w * 2 // 5, 7}.max
+      screen.text(x, y, key, Theme.syn_header, bg, width: kw)
+      ax = x + kw
+      screen.text(ax, y, "→ ", Theme.muted, bg) if inner.right > ax
+      vx = ax + 2
+      if inner.right > vx
+        line = Highlight.env_line(val, selected ? Theme.text_bright : Theme.text)
+        Highlight.draw(screen, vx, y, line, width: {inner.right - vx, 1}.max)
+      end
+    end
+
+    private def render_env_add_row(screen : Screen, inner : Rect, y : Int32, _focused : Bool) : Nil
+      x = inner.x + 1
+      x = screen.text(x, y, @env_edit_idx ? "edit " : "add ", Theme.accent, Theme.bg)
+      w = {inner.right - x, 3}.max
+      screen.input_line(x, y, @env_input, @env_icx, @env_preedit, Theme.text_bright, Theme.bg, width: w)
+    end
+
     private def render_desc_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "DESCRIPTION", bg: Theme.bg, border: Frame.pane_border(focused))
@@ -1013,7 +1226,7 @@ module Gori::Tui
     # "· global" marker so a pinned override reads distinct from an inherited global value.
     private def render_settings_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "PROJECT SETTINGS", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.card(screen, rect, "NETWORK", bg: Theme.bg, border: Frame.pane_border(focused))
       inner = rect.inset(1, 1)
       return if inner.h <= 0 || inner.w <= 0
       SETTINGS_LABELS.each_with_index do |label, i|

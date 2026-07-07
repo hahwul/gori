@@ -50,6 +50,29 @@ describe Gori::Settings do
     end
   end
 
+  it "persists and reloads env settings as JSON" do
+    dir = File.tempname("gori-settings-env")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.env_prefix = "%"
+      Gori::Settings.env_vars = [{"HOST", "h.test"}, {"TOKEN", "t"}]
+      Gori::Settings.save.should be_true
+
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.load
+      Gori::Settings.env_prefix.should eq("%")
+      Gori::Settings.env_vars.should eq([{"HOST", "h.test"}, {"TOKEN", "t"}])
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [] of {String, String}
+    end
+  end
+
   it "persists and reloads the network settings as JSON" do
     dir = File.tempname("gori-settings")
     Dir.mkdir_p(dir)
