@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="{{ page_language }}">
+<head>
+  <script>
+    /* Set the color theme before first paint to avoid a flash. Default: dark. */
+    (function () {
+      try {
+        var t = localStorage.getItem("gori-theme");
+        document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark");
+      } catch (e) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    })();
+  </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="{{ page.description | default(site.description, true) | e }}">
+  <title>{% if page.title is present %}{{ page.title | e }} - {% endif %}{{ site.title | e }}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ base_url }}/favicon.svg">
+  {{ og_all_tags }}
+  {{ canonical_tag }}
+  {{ jsonld }}
+  {{ hreflang_tags }}
+  {{ pagination_seo_links }}
+  <link rel="stylesheet" href="{{ base_url }}/css/style.css">
+  {# The syntax theme is inlined in css/style.css, so no highlight theme
+     stylesheet link is emitted here (sub-path safe). Highlight.js itself
+     still loads from the footer. #}
+  {{ math_tags }}
+  {{ mermaid_tags }}
+  {{ auto_includes_css }}
+</head>
+<body class="{% if page.section == "" %}is-home{% else %}is-doc{% endif %}" data-section="{{ page.section }}">
+  <a class="skip-link" href="#main">Skip to content</a>

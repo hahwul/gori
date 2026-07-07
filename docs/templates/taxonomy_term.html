@@ -1,0 +1,12 @@
+{% include "header.html" %}
+{% include "partials/nav.html" %}
+{% include "partials/search.html" %}
+<div class="docs-container">
+{% include "partials/sidebar.html" %}
+  <main id="main" class="docs-main">
+    <h1>{{ page.title | e }}</h1>
+    <p class="taxonomy-desc">Pages tagged with this term:</p>
+    {{ content }}
+  </main>
+</div>
+{% include "footer.html" %}

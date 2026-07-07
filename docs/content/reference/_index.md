@@ -1,0 +1,12 @@
++++
+title = "Reference"
+description = "CLI commands, configuration keys, and the query language."
++++
+
+Technical reference for gori.
+
+## Contents
+
+- **[CLI Reference](/reference/cli/)** — every subcommand and flag: `tui`, `run`, `mcp`, `export`, `settings`, `wizard`, `update`.
+- **[Configuration](/reference/config/)** — `settings.json` keys and the `GORI_HOME` layout.
+- **[Query Language](/reference/query-language/)** — the filter syntax used across History, Prism, Sitemap, and the MCP tools.
