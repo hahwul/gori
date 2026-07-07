@@ -183,7 +183,7 @@ module Gori
               "When `flow_id` is set, url/method/headers/body/raw are ignored. " \
               "Host + Content-Length are auto-added when omitted on the url path." do |s|
               s.field "flow_id", intprop("replay a captured flow by id (no url needed; like TUI replay)")
-              s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x")
+              s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x"), required: true
               s.field "method", strprop("HTTP method (default GET)")
               s.field "headers", objprop("header name->value map")
               s.field "body", strprop("request body, sent as-is")
@@ -1447,9 +1447,13 @@ module Gori
 
       private def fuzz_numbers(v : String) : Fuzz::NumberRange
         range_part, _, step_part = v.partition(':')
-        from_s, _, to_s = range_part.partition('-')
-        from = from_s.to_i64?
-        to = to_s.to_i64?
+        if md = range_part.match(/^(-?\d+)-(-?\d+)$/)
+          from = md[1].to_i64?
+          to = md[2].to_i64?
+        else
+          from = nil
+          to = nil
+        end
         raise FuzzArgError.new("invalid numbers '#{v}' (use FROM-TO[:STEP])") unless from && to
         step = step_part.empty? ? 1_i64 : (step_part.to_i64? || raise FuzzArgError.new("invalid numbers step '#{step_part}'"))
         Fuzz::NumberRange.new(from, to, step)
