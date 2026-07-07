@@ -4,7 +4,7 @@ alias t := test
 alias vc := version-check
 alias vu := version-update
 alias bm := benchmark
-# alias ds := docs-serve
+alias ds := docs-serve
 
 # List available tasks.
 default:
@@ -79,9 +79,6 @@ benchmark:
 seed-demo:
     crystal run scripts/seed_demo.cr
 
-# Serve the docs site locally.
-# TODO: docs aren't set up yet. Once a `docs/` site exists, mirror the
-# hwaro/noir convention (built with hwaro) and uncomment this recipe + alias.
-# [group('documents')]
-# docs-serve:
-#     hwaro serve -i docs --base-url="http://localhost:3000"
+[group('documents')]
+docs-serve:
+    hwaro serve -i docs --base-url="http://localhost:3000"
