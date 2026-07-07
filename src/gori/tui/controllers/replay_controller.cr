@@ -145,9 +145,9 @@ module Gori::Tui
       v = current_view
       return "↹/esc tabs · ^N new" unless v
       return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit" if v.request_hex?
-      if v.ws_mode? # WS replay: MESSAGES editor + TRANSCRIPT (no hex/diff/pretty/CL)
+      if v.ws_mode? # WS replay: Handshake request + MESSAGES editor + TRANSCRIPT (no hex/diff/pretty/CL)
         return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" \
-                                    : "edit messages (one per line) · ^R replay · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
+                                    : ws_hint(v)
       end
       if v.grpc_mode? # gRPC replay: editable head + verbatim body; deframed response
         return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" \
@@ -234,7 +234,7 @@ module Gori::Tui
       true
     end
 
-    # The split-decode request hint: which sub-pane is being edited + how to switch.
+     # The split-decode request hint: which sub-pane is being edited + how to switch.
     private def decode_hint(v : ReplayView) : String
       sub = if v.req_pane != :decoded
               "edit request envelope"
@@ -244,6 +244,12 @@ module Gori::Tui
               "edit GraphQL query/vars"
             end
       "#{sub} · ^T switch envelope/decoded · ^R send (re-encodes) · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
+    end
+
+    # The websocket request hint: switch between handshake headers and messages.
+    private def ws_hint(v : ReplayView) : String
+      sub = v.req_pane == :envelope ? "edit handshake request" : "edit messages (one per line)"
+      "#{sub} · ^T switch handshake/messages · ^R replay · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
@@ -268,20 +274,24 @@ module Gori::Tui
       Graphql.from_flow(detail.row.target, detail.request_head, detail.request_body)
     end
 
-    # ^T is context-sensitive: a decode tab toggles the envelope/decoded split; a MARK tab
+    # ^T is context-sensitive: a decode tab or WS tab toggles the envelope/decoded split; a MARK tab
     # drops a single § at the cursor (Fuzzer parity — the direct-marker keystroke).
     def replay_toggle_decoded : Nil
       view = current_view
       return @host.status("no replay open") unless view
-      if view.decode_mode?
+      if view.decode_mode? || view.ws_mode?
         @host.request_focus(:body)
         view.focus_pane(:request)
         pane = view.toggle_req_pane
-        @host.status(pane == :decoded ? "editing the decoded payload — edits re-encode into the request on ^R send" : "editing the request envelope (headers · target · params)")
+        if view.ws_mode?
+          @host.status(pane == :decoded ? "editing messages (one per line)" : "editing handshake request headers")
+        else
+          @host.status(pane == :decoded ? "editing the decoded payload — edits re-encode into the request on ^R send" : "editing the request envelope (headers · target · params)")
+        end
       elsif view.mark_transform?
         @host.status(view.insert_marker)
       else
-        @host.status("not a decode flow — ^T inserts a § when MARK is on, or switches the SAML/GraphQL split")
+        @host.status("not a decode/WS flow — ^T inserts a § when MARK is on, or switches the split pane")
       end
     end
 

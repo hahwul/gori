@@ -31,9 +31,15 @@ module Gori::Tui
   class ReplayView
     getter? loaded : Bool
     getter? http2 : Bool
-    getter focus : Symbol   # :request | :response | :target
-    getter target : String  # the raw target URL (persistence + cross-session sync)
-    getter? dirty : Bool    # unsaved local edits — gates persistence + protects the tab from sync clobber
+    getter focus : Symbol  # :request | :response | :target
+    getter target : String # the raw target URL (persistence + cross-session sync)
+    # unsaved local edits — gates persistence + protects the tab from sync clobber
+    @dirty : Bool = false
+
+    def dirty? : Bool
+      @dirty || (@ws_mode && @decoded_dirty)
+    end
+
     property name : String? # custom sub-tab chip label (nil = derive from the request); set separately from restore()
 
     def initialize
@@ -210,15 +216,7 @@ module Gori::Tui
     # prompt: far more recognizable than the source flow's internal numeric id, and
     # it tracks live as the request is edited.
     def summary(max : Int32 = 28) : String
-      # For a WS tab the editor holds the MESSAGES, so derive the label from the upgrade
-      # request line ("GET /ws") instead of the first message. HTTP/gRPC/decode tabs keep
-      # the envelope editor's request/head line.
-      line =
-        if @ws_mode && (up = @ws_upgrade)
-          String.new(up).each_line.first?.try(&.strip) || ""
-        else
-          (@editor.first_nonblank_line || "").strip
-        end
+      line = (@editor.first_nonblank_line || "").strip
       parts = line.split(' ')
       s = "#{parts[0]?} #{parts[1]?}".strip # METHOD + request-target (drop the HTTP/x.y)
       s = line if s.empty?
@@ -255,6 +253,7 @@ module Gori::Tui
 
     def clear_dirty : Nil
       @dirty = false
+      @decoded_dirty = false
     end
 
     # The starting scaffold for a hand-authored request (Replay `^N`): a minimal
@@ -291,9 +290,9 @@ module Gori::Tui
     getter? ws_mode : Bool
 
     # Load a captured WebSocket flow (101) for replay. The request editor is seeded
-    # with the recorded client→server TEXT messages (one per line, editable); the
-    # upgrade-request bytes are kept for the handshake. Binary outbound messages
-    # aren't representable as editable text, so they're omitted from the seed.
+    # with the handshake upgrade request; the messages editor is seeded with the
+    # recorded client→server TEXT messages (one per line, editable). Binary outbound
+    # messages aren't representable as editable text, so they're omitted from the seed.
     def load_ws(detail : Store::FlowDetail, out_messages : Array(String)) : Nil
       @flow = detail
       @ws_mode = true
@@ -306,7 +305,8 @@ module Gori::Tui
       @sni = ""
       @scx = 0
       @target_field = :url
-      @editor.set_text(out_messages.join('\n'))
+      @editor.set_text(String.new(detail.request_head))
+      @decoded.set_text(out_messages.join('\n'))
       @original_lines = [] of String
       @result = nil
       @prev_result = nil
@@ -320,20 +320,21 @@ module Gori::Tui
       @dirty = false
       @req_hex_edit = nil
       @scroll_req = 0
+      @req_pane = :decoded
     end
 
     # The editable outbound messages, parsed from the editor — one TEXT frame per
-    # non-empty line. Uses @editor.text (LF-joined) NOT to_bytes (CRLF-joined), else
+    # non-empty line. Uses @decoded.text (LF-joined) NOT to_bytes (CRLF-joined), else
     # every frame but the last would carry a spurious trailing '\r'. (A captured frame
     # with an embedded newline can't be represented one-per-line — a known v1 limit.)
     def ws_out_messages : Array(Replay::WsEngine::OutMsg)
-      @editor.text.split('\n').compact_map do |line|
+      @decoded.text.split('\n').compact_map do |line|
         line.empty? ? nil : Replay::WsEngine::OutMsg.new(1, line.to_slice)
       end
     end
 
     def ws_upgrade_bytes : Bytes
-      @ws_upgrade || Bytes.empty
+      @ws_mode ? expanded_text_to_bytes(@editor.text) : (@ws_upgrade || Bytes.empty)
     end
 
     # Cross-process snapshot for `gori mcp get_replay_context` (written into ui_state
@@ -358,8 +359,8 @@ module Gori::Tui
         j.field "source_flow_id", fid
       end
       if @ws_mode
-        j.field "messages", @editor.text
-        unless (@ws_upgrade || Bytes.empty).empty?
+        j.field "messages", @decoded.text
+        unless ws_upgrade_bytes.empty?
           j.field "upgrade_request", String.new(ws_upgrade_bytes).scrub
         end
         if wr = @ws_result
@@ -503,7 +504,7 @@ module Gori::Tui
     # The editor the request column's input/cursor targets: the decoded payload when its
     # split sub-pane is active, else the envelope (the only editor in a non-decode tab).
     private def req_editor : TextArea
-      (@decode_kind && @req_pane == :decoded) ? @decoded : @editor
+      ((@decode_kind || @ws_mode) && @req_pane == :decoded) ? @decoded : @editor
     end
 
     # ^T: toggle the active request sub-pane (envelope ⇄ decoded). No-op outside a
@@ -525,9 +526,11 @@ module Gori::Tui
     # it); entering DECODED RE-DECODES the envelope's current param (so it reflects any
     # envelope edits). No-op outside a decode tab / when the pane is unchanged.
     private def switch_req_pane(to : Symbol) : Nil
-      return unless @decode_kind
+      return unless @decode_kind || @ws_mode
       return if to == @req_pane
-      to == :envelope ? commit_decoded : refresh_decoded
+      if @decode_kind
+        to == :envelope ? commit_decoded : refresh_decoded
+      end
       @req_pane = to
     end
 
@@ -702,8 +705,10 @@ module Gori::Tui
       if is_ws
         @ws_mode = true
         @ws_upgrade = request.to_slice
+        @editor.set_text(request)
         msgs = ws_messages || [] of String
-        @editor.set_text(msgs.join('\n'))
+        @decoded.set_text(msgs.join('\n'))
+        @req_pane = :decoded
       else
         @ws_mode = false
         @editor.set_text(request)
@@ -1082,7 +1087,7 @@ module Gori::Tui
       return if content.h <= 0
       half = {(content.w - 1) // 2, 1}.max
       col = Rect.new(content.x, content.y, half, content.h)
-      if @decode_kind # split: click selects the envelope or decoded sub-pane (syncing) + places its caret
+      if @decode_kind || @ws_mode # split: click selects the envelope/handshake or decoded/messages sub-pane + places its caret
         env, dec = decode_split(col)
         if my >= dec.y
           switch_req_pane(:decoded)
@@ -1148,7 +1153,7 @@ module Gori::Tui
       when :request
         if h = @req_hex_edit
           h.at_top?
-        elsif @decode_kind && @req_pane == :decoded
+        elsif (@decode_kind || @ws_mode) && @req_pane == :decoded
           false
         else
           @editor.at_top?
@@ -1180,7 +1185,7 @@ module Gori::Tui
     # dirties the right buffer — the envelope (persist/sync) or the decoded payload
     # (→ re-encode on send). Pure navigation dirties neither.
     private def mark_req_edit : Nil
-      if @decode_kind && @req_pane == :decoded
+      if (@decode_kind || @ws_mode) && @req_pane == :decoded
         @decoded_dirty = true
       else
         @dirty = true
@@ -1212,7 +1217,7 @@ module Gori::Tui
       # the other (↓ off the ENVELOPE bottom → DECODED top; ↑ off the DECODED top →
       # ENVELOPE bottom), syncing the two at the boundary — so the split feels like one
       # continuous column. (↑ off the ENVELOPE top pops to the tab bar via at_top?.)
-      if @decode_kind && dc == 0
+      if (@decode_kind || @ws_mode) && dc == 0
         if dr > 0 && @req_pane == :envelope && @editor.at_bottom?
           switch_req_pane(:decoded)
           @decoded.goto_line(1)
@@ -1468,7 +1473,7 @@ module Gori::Tui
       left = Rect.new(content.x, content.y, half, content.h)
       right = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
       req_focused = focused && @focus == :request
-      if @decode_kind # split the request column into ENVELOPE (top) + DECODED (bottom)
+      if @decode_kind || @ws_mode # split the request column into ENVELOPE/HANDSHAKE (top) + DECODED/MESSAGES (bottom)
         env, dec = decode_split(left)
         render_request(screen, env, req_focused && @req_pane == :envelope)
         render_decoded(screen, dec, req_focused && @req_pane == :decoded)
@@ -1528,14 +1533,20 @@ module Gori::Tui
     # with a badge naming the codec (+ the SAML param/binding) on the top border.
     private def render_decoded(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      label = @decode_kind == :saml ? "DECODED · SAML XML" : "DECODED · GraphQL"
+      label = if @ws_mode
+                "MESSAGES"
+              elsif @decode_kind == :saml
+                "DECODED · SAML XML"
+              else
+                "DECODED · GraphQL"
+              end
       Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused))
       if @decode_kind == :saml
         badge = " #{@saml_param} · #{@saml_binding == :redirect ? "redirect" : "post"} "
         bx = {rect.right - badge.size - 1, rect.x + label.size + 4}.max
         screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg) if bx > rect.x + label.size + 4
       end
-      # XML/JSON-ish payload → plain editing (no HTTP request/header colouring).
+      # XML/JSON-ish payload / WS messages → plain editing (no HTTP request/header colouring).
       @decoded.render(screen, rect.inset(1, 1), cursor: focused, highlight: nil)
     end
 
@@ -1604,7 +1615,7 @@ module Gori::Tui
     end
 
     private def render_request_label : String
-      return "MESSAGES" if @ws_mode
+      return "HANDSHAKE REQUEST" if @ws_mode
       return "GRPC REQUEST" if @grpc_mode
       return "ENVELOPE" if @decode_kind # the full request; the payload is the DECODED split below
       @http2 ? "REQUEST (h2)" : "REQUEST"
@@ -1614,15 +1625,14 @@ module Gori::Tui
       return if rect.w < 2 || rect.h < 2
       label = render_request_label
       Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused))
-      if @ws_mode || @grpc_mode # text editor for the head/messages; no CL/hex affordances
-        if @grpc_mode           # a badge: how many framed messages the verbatim body carries
-          n = @grpc_msg_count
-          badge = " body: #{n} msg#{n == 1 ? "" : "s"} · #{@grpc_body.size}b "
-          bx = {rect.right - badge.size - 1, rect.x + label.size + 4}.max
-          screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg) if bx > rect.x + label.size + 4
-        end
-        # gRPC's editor holds the HTTP head (→ request syntax); WS messages are plain.
-        @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: @grpc_mode ? :request : nil)
+      if @grpc_mode # text editor for the head; no CL/hex affordances
+        # gRPC's editor holds the HTTP head (→ request syntax)
+        @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
+        return
+      end
+      if @ws_mode
+        # WS editor is split: the envelope (@editor) is the upgrade request (highlight as :request)
+        @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
         return
       end
       min_x = rect.x + label.size + 4 # keep clear of the pane title on the top border

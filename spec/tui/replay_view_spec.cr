@@ -288,6 +288,33 @@ describe Gori::Tui::ReplayView do
       view.summary.should eq("GET /ws/chat")
     end
   end
+  it "allows editing both handshake request and messages in ws_mode" do
+    replay_tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
+        method: "GET", target: "/ws/chat", http_version: "HTTP/1.1",
+        head: "GET /ws/chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+      view = ReplayView.new
+      view.load_ws(store.get_flow(id).not_nil!, ["{\"a\":1}", "ping"])
+
+      view.ws_mode?.should be_true
+      view.req_pane.should eq(:decoded)
+
+      view.edit_insert('!')
+      view.dirty?.should be_true
+      msgs = view.ws_out_messages
+      msgs.size.should eq(2)
+      String.new(msgs[0].payload).should eq("!{\"a\":1}")
+
+      view.clear_dirty
+      view.dirty?.should be_false
+
+      view.toggle_req_pane.should eq(:envelope)
+      view.edit_insert('X')
+      view.dirty?.should be_true
+      String.new(view.ws_upgrade_bytes).should contain("XGET /ws/chat HTTP/1.1")
+    end
+  end
 
   it "renders a gRPC response as deframed messages + grpc-status" do
     replay_tmp_store do |store|
