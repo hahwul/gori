@@ -1,0 +1,25 @@
+<footer class="docs-footer">
+  <p>
+    <strong>gori</strong> — an HTTP intercepting proxy for the terminal.
+    <a href="https://github.com/hahwul/gori">GitHub</a> ·
+    Built with <a href="https://github.com/hahwul/hwaro">Hwaro</a>.
+  </p>
+</footer>
+<script>
+  /* Theme toggle: flip data-theme and remember the choice. */
+  (function () {
+    var btn = document.getElementById("themeToggle");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", next);
+      try { localStorage.setItem("gori-theme", next); } catch (e) {}
+    });
+  })();
+</script>
+{{ highlight_js }}
+<script src="{{ base_url }}/js/search.js"></script>
+<script src="{{ base_url }}/js/toc.js"></script>
+{{ auto_includes_js }}
+</body>
+</html>

@@ -1,0 +1,57 @@
+title = "gori"
+description = "A fast, keyboard-driven HTTP intercepting proxy and web-security toolkit for the terminal."
+base_url = "http://localhost:3000"
+[plugins]
+processors = ["markdown"]
+
+[content.files]
+allow_extensions = ["jpg", "jpeg", "png", "gif", "svg", "webp"]
+
+[highlight]
+enabled = true
+mode = "client"
+theme = "github"
+use_cdn = true
+
+[[taxonomies]]
+name = "tags"
+feed = true
+
+[[taxonomies]]
+name = "categories"
+
+[[taxonomies]]
+name = "authors"
+
+[sitemap]
+enabled = true
+
+[feeds]
+enabled = true
+type = "rss"
+limit = 10
+
+[search]
+enabled = true
+format = "fuse_json"
+
+# =============================================================================
+# OpenGraph & Twitter Cards (recommended for social sharing)
+# =============================================================================
+
+[og]
+type = "article"
+twitter_card = "summary_large_image"
+
+# =============================================================================
+# Markdown (commonly customized)
+# =============================================================================
+
+[markdown]
+emoji = true
+task_lists = true
+definition_lists = true
+footnotes = true
+mermaid = false        # Render ```mermaid code blocks as diagrams (loads mermaid.js)
+math = false           # Inline ($...$) and block ($$...$$) math (loads math_engine)
+math_engine = "katex"  # "katex" or "mathjax"

@@ -1,0 +1,17 @@
+{% include "header.html" %}
+{% include "partials/nav.html" %}
+{% include "partials/search.html" %}
+<div class="docs-container">
+{% include "partials/sidebar.html" %}
+  <main id="main" class="docs-main">
+    {% if page.title is present %}<h1>{{ page.title | e }}</h1>{% endif %}
+    {{ content }}
+
+    <h2>In This Section</h2>
+    <ul class="section-list">
+      {{ section.list }}
+    </ul>
+    {{ pagination }}
+  </main>
+</div>
+{% include "footer.html" %}

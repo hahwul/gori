@@ -1,0 +1,34 @@
+<header class="docs-header">
+  <a href="{{ base_url }}{{ lang_prefix }}/" class="logo" aria-label="{{ site.title | e }} home">
+    <img class="logo-img logo-dark" src="{{ base_url }}/images/gori.png" alt="" width="34" height="30">
+    <img class="logo-img logo-light" src="{{ base_url }}/images/gori_dark.png" alt="" width="34" height="30">
+    <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
+  </a>
+  <nav class="top-nav" aria-label="Primary">
+    <a href="{{ base_url }}{{ lang_prefix }}/getting-started/"{% if page.section == "getting-started" %} class="active" aria-current="true"{% endif %}>Start</a>
+    <a href="{{ base_url }}{{ lang_prefix }}/guide/"{% if page.section == "guide" %} class="active" aria-current="true"{% endif %}>Guide</a>
+    <a href="{{ base_url }}{{ lang_prefix }}/reference/"{% if page.section == "reference" %} class="active" aria-current="true"{% endif %}>Reference</a>
+  </nav>
+  <div class="header-right">
+    {% if page.translations | length > 0 %}
+    <nav class="lang-switcher" aria-label="Language">
+      {% for t in page.translations %}
+      <a href="{{ base_url }}{{ t.url }}" hreflang="{{ t.code }}"{% if t.is_current %} aria-current="true"{% endif %}>{{ t.code | upper }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
+    <button class="search-trigger" onclick="openSearch()" title="Search documentation">
+      <span>Search</span>
+      <kbd>&#8984;K</kbd>
+    </button>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2v2.2M12 19.8V22M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2 12h2.2M19.8 12H22M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/>
+      </svg>
+    </button>
+  </div>
+</header>

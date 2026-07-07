@@ -1,0 +1,91 @@
+{% include "header.html" %}
+{% include "partials/nav.html" %}
+{% include "partials/search.html" %}
+{% if page.section == "" %}
+<main id="main" class="home-main">
+  <section class="home-hero" aria-labelledby="home-title">
+    <div class="hero-copy reveal">
+      <p class="home-kicker">HTTP intercepting proxy · TUI</p>
+      <h1 id="home-title">Intercept the web from your terminal.</h1>
+      <p class="hero-lede">gori is a fast, keyboard-driven HTTP/HTTPS proxy and web-security toolkit. Capture traffic, replay and fuzz requests, run passive and active scans, and drive it all — including from an AI agent — without leaving the shell.</p>
+      <div class="home-actions" aria-label="Primary links">
+        <a class="button button-primary" href="{{ base_url }}{{ lang_prefix }}/getting-started/">Get started</a>
+        <a class="button button-secondary" href="https://github.com/hahwul/gori">View on GitHub</a>
+      </div>
+    </div>
+    <figure class="hero-art reveal">
+      <img src="{{ base_url }}/images/docs-hero-linework.png" alt="Golden orbital linework over a deep black field">
+    </figure>
+  </section>
+
+  <section class="home-paths" aria-label="Documentation paths">
+    <a class="path-card path-card-large" href="{{ base_url }}{{ lang_prefix }}/getting-started/">
+      <span>Start</span>
+      <h2>Capture your first request</h2>
+      <p>Install gori, trust the root CA, point your browser at the proxy, and watch flows land in History.</p>
+    </a>
+    <a class="path-card" href="{{ base_url }}{{ lang_prefix }}/guide/">
+      <span>Guide</span>
+      <h2>Proxy, Replay &amp; Fuzzer</h2>
+      <p>Learn the workbench — intercept, scope, replay, fuzz, and scan across HTTP/2, WebSocket, and gRPC.</p>
+    </a>
+    <a class="path-card" href="{{ base_url }}{{ lang_prefix }}/reference/">
+      <span>Reference</span>
+      <h2>CLI &amp; query language</h2>
+      <p>Every subcommand, config key, and query-language filter, ready when you need it.</p>
+    </a>
+  </section>
+
+  <section class="home-structure" aria-labelledby="structure-title">
+    <figure class="structure-art">
+      <img src="{{ base_url }}/images/docs-structure-linework.png" alt="Layered golden curves over black suggesting orbiting requests">
+    </figure>
+    <div class="structure-copy">
+      <h2 id="structure-title">One tool, the whole assessment.</h2>
+      <p>History, Intercept, Replay, Fuzzer, the Prism scanner, Param Miner, and Findings live in a single project — every flow one keystroke away.</p>
+      <div class="structure-grid" aria-label="What makes gori fast">
+        <div>
+          <strong>Keyboard-native</strong>
+          <span>A palette-driven TUI built with Crystal. No mouse required, no browser tab to babysit.</span>
+        </div>
+        <div>
+          <strong>Fast</strong>
+          <span>A compiled proxy with SQLite-backed projects that stay responsive under load.</span>
+        </div>
+        <div>
+          <strong>Scriptable</strong>
+          <span>Everything reachable headless via <code>gori run</code> and the built-in MCP server.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="home-flow" aria-labelledby="flow-title">
+    <h2 id="flow-title">From capture to finding.</h2>
+    <div class="flow-list">
+      <div>
+        <span>Capture</span>
+        <p>Run the proxy, trust the CA once, and every request flows into History with full HTTP/2, WebSocket, and gRPC detail.</p>
+      </div>
+      <div>
+        <span>Test</span>
+        <p>Send interesting flows to Replay or the Fuzzer, mine hidden parameters, and let Prism flag issues as you browse.</p>
+      </div>
+      <div>
+        <span>Report</span>
+        <p>Triage results into Findings, take notes, and export — or hand the whole project to an agent over MCP.</p>
+      </div>
+    </div>
+  </section>
+</main>
+{% else %}
+<div class="docs-container">
+{% include "partials/sidebar.html" %}
+  <main id="main" class="docs-main">
+    {% if page.title is present %}<h1>{{ page.title | e }}</h1>{% endif %}
+    {{ content }}
+  </main>
+  <aside class="docs-toc-rail" id="tocRail" aria-label="On this page"></aside>
+</div>
+{% endif %}
+{% include "footer.html" %}

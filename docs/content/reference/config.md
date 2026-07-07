@@ -1,0 +1,64 @@
++++
+title = "Configuration"
+description = "The settings.json keys and the GORI_HOME storage layout."
++++
+
+gori stores global preferences in `settings.json` and each project as its own SQLite database. See the [Configuration guide](/getting-started/configuration/) for a walkthrough; this page is the key-by-key reference.
+
+## Storage Layout
+
+Everything lives under `GORI_HOME` — `$GORI_HOME` if set and non-empty, otherwise `~/.gori`:
+
+| Path | Contents |
+|------|----------|
+| `settings.json` | Global preferences |
+| `gori.db` | Default project database |
+| `projects/` | One subdirectory per named project, each with its own DB |
+| `ca/` | Root CA — `root.crt.pem` and `root.key.pem` |
+| `themes/` | User themes |
+| `wordlists/` | Fuzzer / miner wordlists |
+| `active_project` | Marker for the most-recently-used project |
+
+## settings.json
+
+`settings.json` is JSON. Find or edit it with `gori settings` / `gori settings --edit`.
+
+### network
+
+```json
+{
+  "network": {
+    "bind_host": "127.0.0.1",
+    "bind_port": 8070,
+    "upstream_proxy": ""
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `bind_host` | string | `127.0.0.1` | Proxy listen address |
+| `bind_port` | integer | `8070` | Proxy listen port |
+| `upstream_proxy` | string | `""` | `host:port` HTTP proxy to chain through; empty = direct |
+
+### Other sections
+
+| Section | Description |
+|---------|-------------|
+| `theme` | Active theme name (default `goridark`) |
+| `mouse` | Mouse support toggle |
+| `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view |
+| `editor` | External editor `command` and Markdown handling |
+| `tabs` | Which TUI tabs are shown/hidden |
+| `hostname_overrides` | `/etc/hosts`-style host → IP overrides for dialing |
+| `env` | Environment-variable prefix and values injected into replays |
+| `hotkeys` | Keybinding overrides (`os` layer + `bindings`) |
+| `convert` / `mine` | Saved defaults for the Convert tool and Param Miner |
+
+## Per-Project Overrides
+
+A project can override the network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`) and edited from the **Project** tab's settings pane. When present, they take precedence over `settings.json` for that project.
+
+## Projects & Database
+
+Each project is a SQLite database (via `crystal-db` / `crystal-sqlite3`) holding flows, WebSocket messages, scope rules, findings, match rules, HTTP/2 frames, replay and fuzz sessions, host overrides, sitemap tags, miner sessions, and Prism issues, plus a full-text index over flow bodies. Request/response bodies are captured up to 8 MiB. Serve any project's database directly with `--db PATH`, or select a named project with `--project NAME`.
