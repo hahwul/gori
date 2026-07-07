@@ -847,9 +847,13 @@ module Gori::Tui
         Gutter.draw(screen, body.x, body.y + i, li, gw)
         shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
         Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
-        text = dv.line_text(li)
-        st = @detail_xscroll > 0 ? Highlight.slice_left_text(text, @detail_xscroll) : text
-        SearchHi.mark(screen, body.x + gw, body.y + i, st, @search_hl, body.x + gw + cw) unless @search_hl.empty?
+        # The plain-text line + its left-slice feed ONLY the search overlay, so skip both
+        # when no query is active (else every frame builds/scans discarded strings per row).
+        unless @search_hl.empty?
+          text = dv.line_text(li)
+          st = @detail_xscroll > 0 ? Highlight.slice_left_text(text, @detail_xscroll) : text
+          SearchHi.mark(screen, body.x + gw, body.y + i, st, @search_hl, body.x + gw + cw)
+        end
       end
     end
 

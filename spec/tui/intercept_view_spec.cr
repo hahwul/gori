@@ -85,6 +85,28 @@ describe Gori::Tui::InterceptView do
     end
   end
 
+  it "vscroll_detail scrolls a held body taller than the pane into view (shift+↑/↓)" do
+    tmp_interceptor do |ic|
+      filler = (1..20).map { |i| "X-#{i}: v#{i}" }.join("\r\n")
+      raw = "GET /login HTTP/1.1\r\nHost: acme.test\r\nX-Top: TOPMARK\r\n#{filler}\r\nX-Bot: BOTMARK\r\n\r\n"
+      hold_req(ic, "acme.test", "/login", raw)
+      view = InterceptView.new
+      view.reload(ic)
+
+      rect = Rect.new(0, 0, 100, 8) # short pane: the ~25-line held head overflows it
+      backend = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend), rect)
+      backend.contains?("TOPMARK").should be_true
+      backend.contains?("BOTMARK").should be_false # below the fold
+
+      30.times { view.vscroll_detail(1) } # scroll well past the end (render clamps)
+      backend2 = MemoryBackend.new(100, 8)
+      view.render(Screen.new(backend2), rect)
+      backend2.contains?("BOTMARK").should be_true
+      backend2.contains?("TOPMARK").should be_false # scrolled off the top
+    end
+  end
+
   it "edits a held request and forwards the edited bytes" do
     tmp_interceptor do |ic|
       hold_req(ic, "acme.test", "/", "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n")
