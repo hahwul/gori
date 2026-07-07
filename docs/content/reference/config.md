@@ -45,14 +45,14 @@ Everything lives under `GORI_HOME` — `$GORI_HOME` if set and non-empty, otherw
 
 | Section | Description |
 |---------|-------------|
-| `theme` | Active theme name (default `goridark`) |
+| `theme` | Active theme name (default `goridark`) — see the [Themes guide](/guide/themes/) |
 | `mouse` | Mouse support toggle |
 | `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view |
 | `editor` | External editor `command` and Markdown handling |
 | `tabs` | Which TUI tabs are shown/hidden |
 | `hostname_overrides` | `/etc/hosts`-style host → IP overrides for dialing |
 | `env` | Environment-variable prefix and values injected into replays |
-| `hotkeys` | Keybinding overrides (`os` layer + `bindings`) |
+| `hotkeys` | Keybinding overrides (`os` layer + `bindings`) — see the [Hotkeys guide](/guide/hotkeys/) |
 | `convert` / `mine` | Saved defaults for the Convert tool and Param Miner |
 
 ## Per-Project Overrides

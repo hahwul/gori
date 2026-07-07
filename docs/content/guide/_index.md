@@ -11,6 +11,8 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 - **[Replay & Fuzzer](/guide/replay-and-fuzzer/)** — the request workbench and the Intruder-style fuzzer.
 - **[Scanning & Findings](/guide/scanning/)** — the Prism scanner, the Param Miner, and triaging findings.
 - **[MCP Server](/guide/mcp/)** — drive gori from an AI agent or script.
+- **[Themes](/guide/themes/)** — switch between built-in colour themes or create your own.
+- **[Hotkeys](/guide/hotkeys/)** — rebind gori's keyboard shortcuts.
 
 ## The Interface at a Glance
 

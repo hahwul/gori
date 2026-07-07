@@ -61,7 +61,11 @@ Command-line flags such as `--listen` and `--port` override these per run.
 
 ### Theme
 
-gori ships **dark** (`goridark`, the default) and light themes. Switch it from the command palette (`Ctrl-P` → theme) or set `theme` in `settings.json`.
+gori ships thirteen built-in colour themes (`goridark` is the default) and supports your own JSON themes. Switch it from the command palette (`Ctrl-P` → `settings:theme`) or set `theme` in `settings.json` — see the [Themes guide](/guide/themes/).
+
+### Hotkeys
+
+Every keyboard shortcut is rebindable from the command palette (`Ctrl-P` → `settings:hotkeys`) and persisted under the `hotkeys` key — see the [Hotkeys guide](/guide/hotkeys/).
 
 ## Per-Project Network Overrides
 
