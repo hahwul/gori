@@ -100,14 +100,28 @@ module Gori::Proxy
       nil
     end
 
+    # Bounds on the upstream proxy's CONNECT reply so a hostile/broken proxy can't
+    # make us buffer unboundedly: a single status/header line is capped (gets splits
+    # an over-long line into chunks rather than growing one string forever), and the
+    # whole header section is capped too. Both are vastly larger than any real reply.
+    MAX_CONNECT_LINE    = 8 * 1024
+    MAX_CONNECT_HEADERS = 64 * 1024
+
     # Read the proxy's CONNECT reply: a 2xx status line, then drain headers to the
-    # blank line so the socket sits at the tunnel start. true on success.
+    # blank line so the socket sits at the tunnel start. true on success. A reply that
+    # blows past the line/section caps (an endless line with no CRLF, or endless
+    # headers — a memory-DoS shape) fails the CONNECT rather than pinning memory or
+    # proceeding onto a desynced tunnel.
     private def self.connect_established?(sock : TCPSocket) : Bool
-      status = sock.gets("\r\n", chomp: true)
+      status = sock.gets('\n', MAX_CONNECT_LINE)
       return false unless status
-      parts = status.split(' ', 3)
+      parts = status.chomp.split(' ', 3)
       ok = parts.size >= 2 && ((parts[1].to_i? || 0) // 100) == 2
-      while (line = sock.gets("\r\n", chomp: true)) && !line.empty?
+      read = 0
+      while line = sock.gets('\n', MAX_CONNECT_LINE)
+        read += line.bytesize
+        return false if read > MAX_CONNECT_HEADERS
+        break if line.chomp.empty?
       end
       ok
     end

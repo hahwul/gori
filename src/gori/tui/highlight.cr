@@ -148,7 +148,13 @@ module Gori::Tui
     end
 
     private def self.env_spans_in(text : String, base_fg : Color, attr : Attribute = Attribute::None) : Line
-      regions = Env.token_regions(text)
+      # Fast path: no prefix configured, or the line has no prefix char at all (most
+      # URLs/values carry no $TOKEN). token_regions returns [] in that case anyway, but
+      # its default `vars = Env.effective_vars` rebuilds a merged Hash on EVERY call
+      # first — wasted per-frame allocation on the TARGET rows that redraw each frame.
+      prefix = Settings.env_prefix
+      return [Span.new(text, base_fg, attr)] if prefix.empty? || !text.includes?(prefix)
+      regions = Env.token_regions(text, prefix)
       return [Span.new(text, base_fg, attr)] if regions.empty?
       spans = [] of Span
       pos = 0

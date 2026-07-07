@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 26
+      VERSION = 27
 
       # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
       # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
@@ -487,7 +487,16 @@ module Gori
         "CREATE INDEX idx_ws_messages_replay ON ws_messages (replay_id)",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26]
+      # Index h2_frames on created_at so the retention prune's orphan-connection reap
+      # (`SELECT conn_id FROM h2_frames WHERE created_at >= ?`) is answered index-only
+      # instead of full-scanning the frame log. The scan ran inside the writer's own
+      # transaction, so on an h2-heavy project it stalled ALL capture writes each sweep.
+      # (created_at, conn_id) is covering — no table lookup for the projected conn_id.
+      V27 = [
+        "CREATE INDEX idx_h2_frames_created ON h2_frames (created_at, conn_id)",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

@@ -68,9 +68,9 @@ module Gori::Tui
         handle_edit_key(ev)
         true
       else
-        # shift+←/→ (h-scroll the preview) checked here rather than inside
+        # shift+←/→/↑/↓ (scroll the read-only preview) checked here rather than inside
         # handle_queue_key — that dispatch is already at ameba's complexity ceiling.
-        queue_key_hscroll(ev) || handle_queue_key(ev) # false for c / / (and other unhandled keys) → defer to the keymap
+        queue_key_scroll(ev) || handle_queue_key(ev) # false for c / / (and other unhandled keys) → defer to the keymap
       end
     end
 
@@ -137,20 +137,26 @@ module Gori::Tui
       true
     end
 
-    # Shift+←/→ horizontal scroll for the read-only held-item preview — kept OUT of
-    # handle_queue_key (called from handle_body_key instead), since that dispatch is
-    # already at ameba's complexity ceiling.
-    private def queue_key_hscroll(ev : Termisu::Event::Key) : Bool
+    # Shift+←/→ (horizontal) and Shift+↑/↓ (vertical) scroll for the read-only held-item
+    # preview — kept OUT of handle_queue_key (called from handle_body_key instead), since
+    # that dispatch is already at ameba's complexity ceiling. Bare arrows still navigate the
+    # queue (handle_queue_key); only the shifted arrows scroll the preview, so a tall held
+    # body is fully readable without entering edit mode.
+    private def queue_key_scroll(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      if key.left? && ev.shift?
+      return false unless ev.shift?
+      if key.left?
         @intercept.hscroll_detail(-1)
-        true
-      elsif key.right? && ev.shift?
+      elsif key.right?
         @intercept.hscroll_detail(1)
-        true
+      elsif key.up?
+        @intercept.vscroll_detail(-1)
+      elsif key.down?
+        @intercept.vscroll_detail(1)
       else
-        false
+        return false
       end
+      true
     end
 
     # --- catch-condition filter bar (a text sub-mode; the shell claims it before the

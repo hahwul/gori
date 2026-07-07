@@ -53,6 +53,7 @@ module Gori::Tui
       @detail_win_id = nil.as(Int64?)
       @detail_win_rev = Theme.revision # the theme the cached (colour-baked) head was built under
       @detail_xscroll = 0              # horizontal scroll offset for the read-only held-item preview
+      @detail_scroll = 0               # vertical scroll offset (lines) for the read-only preview
     end
 
     # Fresh snapshot (cheap; called on enter AND every frame via the 50ms loop).
@@ -457,9 +458,14 @@ module Gori::Tui
       else
         win = detail_window_for(it)
         total = win.total
+        # Clamp the vertical offset so a body longer than the pane is scrollable but can
+        # never blank it (content may be shorter than a stale offset). Cap at total-inner.h
+        # so the LAST screenful stays visible at max scroll (not just one trailing line).
+        # Upper-bound clamp lives here (mirrors @detail_xscroll below).
+        @detail_scroll = @detail_scroll.clamp(0, {total - inner.h, 0}.max)
         # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
         # mirrors ReplayView#render_response_body / HistoryView#render_detail.
-        rows = (0...inner.h).compact_map { |i| i < total ? win.line_at(i) : nil }
+        rows = (0...inner.h).compact_map { |i| (li = @detail_scroll + i) < total ? win.line_at(li) : nil }
         @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + inner.w + 1) } || 0) - inner.w, 0}.max)
         rows.each_with_index do |styled, i|
           shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
@@ -475,6 +481,14 @@ module Gori::Tui
       @detail_xscroll = {@detail_xscroll + delta * 4, 0}.max
     end
 
+    # Vertical companion to hscroll_detail (shift+↑/↓): scroll the read-only preview so a
+    # held body taller than the pane is fully readable WITHOUT entering edit mode (which
+    # risks mutating byte-exact held bytes). Floored at 0 here; render clamps the upper bound.
+    def vscroll_detail(delta : Int32) : Nil
+      return if @editing
+      @detail_scroll = {@detail_scroll + delta, 0}.max
+    end
+
     # Windowed view of the held item's raw bytes, cached by item id (held bytes
     # never change; ids never repeat). The head is styled eagerly, the body kept RAW
     # and styled per visible line — a multi-MiB held body no longer freezes the UI
@@ -482,7 +496,10 @@ module Gori::Tui
     private def detail_window_for(it : Interceptor::Item) : Highlight::Windowed
       cached = @detail_win
       return cached if cached && @detail_win_id == it.id && @detail_win_rev == Theme.revision
-      @detail_xscroll = 0 if @detail_win_id != it.id # a newly-previewed item resets the scroll
+      if @detail_win_id != it.id # a newly-previewed item resets both scroll axes
+        @detail_xscroll = 0
+        @detail_scroll = 0
+      end
       @detail_win_id = it.id
       @detail_win_rev = Theme.revision
       @detail_win = Highlight.from_lines_windowed(String.new(it.raw).split('\n').map(&.rstrip('\r')), it.kind.request?)
