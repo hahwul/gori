@@ -165,6 +165,20 @@ class FakeExecContext < Gori::Verb::ExecContext
     @hostov_has_entry
   end
 
+  property env_has_var : Bool = false
+
+  def env_add_var : Nil; end
+
+  def env_edit_var : Nil; end
+
+  def env_delete_var : Nil; end
+
+  def env_edit_prefix : Nil; end
+
+  def env_var_selected? : Bool
+    @env_has_var
+  end
+
   def rules_open : Nil; end
 
   def finding_create : Nil; end

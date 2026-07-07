@@ -304,6 +304,26 @@ private class FakeContext < ExecContext
     true
   end
 
+  def env_add_var : Nil
+    @calls << :env_add_var
+  end
+
+  def env_edit_var : Nil
+    @calls << :env_edit_var
+  end
+
+  def env_delete_var : Nil
+    @calls << :env_delete_var
+  end
+
+  def env_edit_prefix : Nil
+    @calls << :env_edit_prefix
+  end
+
+  def env_var_selected? : Bool
+    true
+  end
+
   def rules_open : Nil
     @calls << :rules_open
   end

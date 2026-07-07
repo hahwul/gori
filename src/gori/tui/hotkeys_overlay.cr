@@ -31,6 +31,7 @@ module Gori::Tui
       Verb::Scope::Intercept      => "INTERCEPT",
       Verb::Scope::Comparer       => "COMPARER",
       Verb::Scope::Project        => "PROJECT SCOPE",
+      Verb::Scope::Env            => "PROJECT ENV",
       Verb::Scope::PaletteOpen    => "PALETTE",
     }
 

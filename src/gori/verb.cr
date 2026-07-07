@@ -26,6 +26,7 @@ module Gori
       Notes          # the Notes tab has focus (sub-tab strip space menu)
       Project        # the Project tab's SCOPE rule list has focus
       HostOverrides  # the Project tab's HOST OVERRIDES list has focus
+      Env            # the Project tab's ENVIRONMENT var list has focus
       PaletteOpen    # the command palette overlay is up
     end
 

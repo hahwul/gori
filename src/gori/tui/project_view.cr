@@ -75,6 +75,7 @@ module Gori::Tui
       @env_items = [] of {String, String}
       @env_sel = 0
       @env_adding = false
+      @env_prefix_editing = false # non-nil ⇒ the single-line prefix editor is up (shares @env_input)
       @env_edit_idx = nil.as(Int32?)
       @env_input = ""
       @env_icx = 0
@@ -150,7 +151,7 @@ module Gori::Tui
         @add_preedit = text
       elsif @pane == :overrides && @ov_adding
         @ov_preedit = text
-      elsif @pane == :env && @env_adding
+      elsif @pane == :env && (@env_adding || @env_prefix_editing)
         @env_preedit = text
       elsif @pane == :settings && settings_text_row?
         @set_preedit = text
@@ -185,6 +186,7 @@ module Gori::Tui
       cancel_add
       cancel_ov_add
       cancel_env_add
+      cancel_env_prefix_edit
     end
 
     # Step between panes; false when there's no further pane in `dir` (the Runner ring
@@ -656,6 +658,10 @@ module Gori::Tui
       @env_adding
     end
 
+    def env_prefix_editing? : Bool
+      @env_prefix_editing
+    end
+
     def env_vars : Array({String, String})
       @env_items
     end
@@ -675,6 +681,7 @@ module Gori::Tui
     end
 
     def env_add_start : Nil
+      cancel_env_prefix_edit
       @env_adding = true
       @env_edit_idx = nil
       @env_input = ""
@@ -686,6 +693,7 @@ module Gori::Tui
       entry = @env_items[@env_sel]?
       return unless entry
       key, val = entry
+      cancel_env_prefix_edit
       @env_adding = true
       @env_edit_idx = @env_sel
       @env_input = "#{key} #{val}"
@@ -699,6 +707,33 @@ module Gori::Tui
       @env_input = ""
       @env_icx = 0
       @env_preedit = ""
+    end
+
+    # --- prefix editor: a one-line field seeded with the current GLOBAL sigil.
+    # Reuses the add-row input buffer (mutually exclusive with @env_adding).
+    def env_prefix_edit_start : Nil
+      cancel_env_add
+      @env_prefix_editing = true
+      @env_input = Settings.env_prefix
+      @env_icx = @env_input.size
+      @env_preedit = ""
+    end
+
+    def cancel_env_prefix_edit : Nil
+      @env_prefix_editing = false
+      @env_input = ""
+      @env_icx = 0
+      @env_preedit = ""
+    end
+
+    # Commit the typed prefix: :empty rejects a blank sigil (the substitution engine
+    # treats an empty prefix as "disabled"), else :ok with the trimmed sigil. The
+    # caller persists it to global Settings.
+    def env_prefix_commit : {Symbol, String}
+      text = @env_input.strip
+      return {:empty, ""} if text.empty?
+      cancel_env_prefix_edit
+      {:ok, text}
     end
 
     def env_input(ch : Char) : Nil
@@ -1164,14 +1199,18 @@ module Gori::Tui
       return if list.h <= 0
       y = list.y
       rows = list.h
-      if @env_adding
+      if @env_prefix_editing
+        render_env_prefix_row(screen, list, y)
+        y += 1
+        rows -= 1
+      elsif @env_adding
         render_env_add_row(screen, list, y, focused)
         y += 1
         rows -= 1
       end
       return if rows <= 0
       if @env_items.empty?
-        screen.text(list.x, y, "(no vars — a to add)", Theme.muted) unless @env_adding
+        screen.text(list.x, y, "(no vars — a to add)", Theme.muted) unless @env_adding || @env_prefix_editing
         return
       end
       scroll = scroll_for(@env_sel, @env_items.size, rows)
@@ -1210,6 +1249,13 @@ module Gori::Tui
     private def render_env_add_row(screen : Screen, inner : Rect, y : Int32, _focused : Bool) : Nil
       x = inner.x + 1
       x = screen.text(x, y, @env_edit_idx ? "edit " : "add ", Theme.accent, Theme.bg)
+      w = {inner.right - x, 3}.max
+      screen.input_line(x, y, @env_input, @env_icx, @env_preedit, Theme.text_bright, Theme.bg, width: w)
+    end
+
+    private def render_env_prefix_row(screen : Screen, inner : Rect, y : Int32) : Nil
+      x = inner.x + 1
+      x = screen.text(x, y, "prefix ", Theme.accent, Theme.bg)
       w = {inner.right - x, 3}.max
       screen.input_line(x, y, @env_input, @env_icx, @env_preedit, Theme.text_bright, Theme.bg, width: w)
     end

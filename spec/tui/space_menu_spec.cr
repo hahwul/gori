@@ -71,6 +71,36 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('a').try(&.id).should eq("scope.add-rule")
   end
 
+  it "lists env-var actions (not scope rules) in the Project ENV pane, with change-prefix" do
+    ctx = FakeExecContext.new
+    ctx.env_has_var = true # edit/delete are gated on a selected var
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Env, ctx)
+
+    menu.entries.all?(&.scope.env?).should be_true # strictly scope-local — no scope-rule bleed
+    menu.entries.all?(&.menu_key).should be_true
+    ids = menu.entries.map(&.id)
+    ids.should contain("env.add-var")
+    ids.should contain("env.edit-var")
+    ids.should contain("env.delete-var")
+    ids.should contain("env.edit-prefix")
+    ids.should_not contain("scope.add-rule") # the old, wrong menu is gone
+    menu.verb_for('a').try(&.id).should eq("env.add-var")
+    menu.verb_for('p').try(&.id).should eq("env.edit-prefix")
+  end
+
+  it "hides the env-var edit/delete entries when no var is selected" do
+    ctx = FakeExecContext.new # env_has_var defaults to false
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+    menu.open(Gori::Verb::Scope::Env, ctx)
+
+    ids = menu.entries.map(&.id)
+    ids.should contain("env.add-var")     # always available
+    ids.should contain("env.edit-prefix") # always available
+    ids.should_not contain("env.edit-var")
+    ids.should_not contain("env.delete-var")
+  end
+
   it "lists the Notes tab's actions in the Notes scope (reachable from the sub-tab strip)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :notes
