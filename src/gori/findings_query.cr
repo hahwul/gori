@@ -50,7 +50,7 @@ module Gori
       # --- parsing -------------------------------------------------------------
 
       private def self.build_term(tok : String, negate : Bool) : Term
-        if (colon = tok.index(':'))
+        if colon = tok.index(':')
           field = tok[0...colon].downcase
           value = tok[(colon + 1)..]
           case field

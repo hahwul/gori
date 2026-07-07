@@ -256,13 +256,13 @@ module Gori::Convert
     # ---- gzip / zlib compress + bounded, tolerant decompress drains ----
     def gzip_compress(data : Bytes) : Bytes
       io = IO::Memory.new
-      Compress::Gzip::Writer.open(io) { |w| w.write(data) }
+      Compress::Gzip::Writer.open(io, &.write(data))
       io.to_slice
     end
 
     def zlib_compress(data : Bytes) : Bytes
       io = IO::Memory.new
-      Compress::Zlib::Writer.open(io) { |w| w.write(data) }
+      Compress::Zlib::Writer.open(io, &.write(data))
       io.to_slice
     end
 
