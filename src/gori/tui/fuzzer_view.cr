@@ -257,13 +257,19 @@ module Gori::Tui
     end
 
     def at_top? : Bool
-      case @focus
-      when :target   then true
-      when :template then @editor.at_top?
-      when :config   then @cfg_row == 0
-      when :results  then @sel == 0
-      else                false
-      end
+      @focus == :target
+    end
+
+    def template_at_top? : Bool
+      @editor.at_top?
+    end
+
+    def config_at_top? : Bool
+      @cfg_row == 0
+    end
+
+    def results_at_top? : Bool
+      @sel == 0
     end
 
     def set_preedit(text : String) : Nil

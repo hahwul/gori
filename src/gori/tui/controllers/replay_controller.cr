@@ -213,7 +213,12 @@ module Gori::Tui
         return false
       else
         view = current_view
-        return true if view.nil?
+        if view.nil?
+          if key.up? || key.lower_k?
+            @host.request_focus(:menu)
+          end
+          return true
+        end
         case view.focus
         when :request  then edit_replay_request(ev, view)
         when :target   then edit_replay_target(ev, view)

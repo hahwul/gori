@@ -121,11 +121,15 @@ module Gori::Tui
     # --- input ---
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       v = current_view
-      # No session yet (empty tab placeholder): there's nothing to edit or navigate, so
-      # defer EVERY key to the central handler rather than swallowing it. Otherwise the
-      # empty Fuzzer tab is an input dead-end — ^P (palette), escape (back to the bar),
-      # digit jumps and space all get eaten. ^N (new session) is intercepted upstream.
-      return false if v.nil?
+      if v.nil?
+        key = ev.key
+        if key.up? || key.lower_k?
+          @host.request_focus(:menu)
+          return true
+        end
+        # No session yet: defer other keys to the central handler (^P palette, esc, …).
+        return false
+      end
       # space opens the action menu in the navigable results pane; the editor panes
       # (target/template/config) take it as a literal char, so gate on :results.
       if v.focus == :results && ev.key.space? && !ev.ctrl? && !ev.alt?
@@ -269,7 +273,7 @@ module Gori::Tui
     end
 
     private def template_up(v : FuzzerView) : Nil
-      v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.template_move(-1, 0)
+      v.template_at_top? ? v.pane_advance(-1) : v.template_move(-1, 0)
     end
 
     # The CONFIG summary is a calm single-axis row list — no text entry (that drills into
@@ -298,14 +302,14 @@ module Gori::Tui
     end
 
     private def config_up(v : FuzzerView) : Nil
-      v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.form_move(-1)
+      v.config_at_top? ? v.pane_advance(-1) : v.form_move(-1)
     end
 
     private def handle_results(ev : Termisu::Event::Key, v : FuzzerView) : Nil
       key = ev.key
       case
       when key.enter?              then v.open_detail
-      when key.up?, key.lower_k?   then v.at_top? ? @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) : v.results_move(-1)
+      when key.up?, key.lower_k?   then v.results_at_top? ? v.pane_advance(-1) : v.results_move(-1)
       when key.down?, key.lower_j? then v.results_move(1)
       when key.lower_o?            then @host.status(v.cycle_sort)
       when key.lower_m?            then @host.status(v.toggle_matched_only)

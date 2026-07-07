@@ -114,6 +114,39 @@ describe Gori::Tui::FuzzerView do
     end
   end
 
+  it "verifies vertical navigation boundaries (template/config/results at_top)" do
+    view = loaded_fuzzer
+    view.focus_pane(:template)
+    view.template_at_top?.should be_true
+    view.config_at_top?.should be_true
+    view.results_at_top?.should be_true
+    view.at_top?.should be_false
+
+    view.focus_pane(:target)
+    view.at_top?.should be_true
+
+    view.focus_pane(:config)
+    view.config_at_top?.should be_true
+    view.form_move(1)
+    view.config_at_top?.should be_false
+
+    view.focus_pane(:results)
+    view.append_result(fuzz_result(0, 200, 1200))
+    view.append_result(fuzz_result(1, 200, 1200))
+    view.results_move(1)
+    view.results_at_top?.should be_false
+    view.results_move(-1)
+    view.results_at_top?.should be_true
+
+    view.focus_pane(:results)
+    view.pane_advance(-1).should be_true
+    view.focus.should eq(:config)
+    view.pane_advance(-1).should be_true
+    view.focus.should eq(:template)
+    view.pane_advance(-1).should be_true
+    view.focus.should eq(:target)
+  end
+
   it "label uses the custom name when set, else the template summary" do
     view = FuzzerView.new
     view.load_request("https://h", "GET /?x=1 HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
