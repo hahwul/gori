@@ -194,17 +194,18 @@ module Gori
               s.field "name", strprop("optional custom name for the saved replay tab (only when save_as_replay=true)")
             end
 
-            tool j, "create_replay", "Create a new replay tab/session in the database." do |s|
-              s.field "target", strprop("absolute target URL (scheme+host+optional port), e.g. https://api.example.com"), required: true
-              s.field "request", strprop("verbatim raw HTTP request bytes/text"), required: true
+            tool j, "create_replay", "Create a new replay tab/session in the database. Provide either ('target' and 'request') OR ('flow_id') OR ('finding_id')." do |s|
+              s.field "target", strprop("absolute target URL (scheme+host+optional port), e.g. https://api.example.com")
+              s.field "request", strprop("verbatim raw HTTP request bytes/text")
               s.field "http2", boolprop("use HTTP/2 (default false)")
               s.field "auto_content_length", boolprop("auto-calculate Content-Length header (default true)")
               s.field "flow_id", intprop("optional original flow id this replay stems from")
+              s.field "finding_id", intprop("optional finding id to populate target/request/messages from")
               s.field "position", intprop("tab position order index (optional, defaults to appending at end)")
               s.field "sni", strprop("optional TLS Server Name Indication override")
               s.field "mark_transform", boolprop("optional boolean indicating token substitution replacement is active (default false)")
               s.field "name", strprop("optional custom name for the replay tab")
-              s.field "ws_out_messages", jsonprop("optional array of strings (or a newline-separated string) representing outbound WebSocket messages")
+              s.field "ws_out_messages", arr_or_str_prop("optional array of strings (or a newline-separated string) representing outbound WebSocket messages")
             end
 
             tool j, "update_replay", "Update an existing replay tab's properties by database id." do |s|
@@ -216,7 +217,7 @@ module Gori
               s.field "sni", strprop("TLS SNI override")
               s.field "mark_transform", boolprop("token substitution replacement active")
               s.field "name", strprop("custom name for the replay tab")
-              s.field "ws_out_messages", jsonprop("optional array of strings (or a newline-separated string) representing outbound WebSocket messages")
+              s.field "ws_out_messages", arr_or_str_prop("optional array of strings (or a newline-separated string) representing outbound WebSocket messages")
             end
 
             tool j, "delete_replay", "Delete a replay tab by database id." do |s|
@@ -856,22 +857,64 @@ module Gori
       end
 
       private def create_replay(h) : Result
-        target = str(h, "target")
-        return Result.new("missing required 'target'", is_error: true) if target.nil? || target.empty?
-        request = str(h, "request")
-        return Result.new("missing required 'request'", is_error: true) if request.nil? || request.empty?
+        finding_id = int(h, "finding_id")
+        flow_id = int(h, "flow_id")
 
-        http2 = bool(h, "http2") || false
+        if finding_id
+          finding = @store.get_finding(finding_id)
+          return Result.new("no finding with id #{finding_id}", is_error: true) unless finding
+          unless fid = finding.flow_id
+            return Result.new("finding #{finding_id} has no associated flow_id", is_error: true)
+          end
+          flow_id = fid
+        end
+
+        target = str(h, "target")
+        request = str(h, "request")
+        http2_val = bool(h, "http2")
+        http2 = http2_val || false
         auto_cl_val = bool(h, "auto_content_length")
         auto_cl = (auto_cl_val.nil? && !present?(h, "auto_content_length")) ? true : !!auto_cl_val
+        ws_messages_override = nil.as(Array(String)?)
 
-        flow_id = int(h, "flow_id")
+        if flow_id
+          flow = @store.get_flow(flow_id)
+          return Result.new("no flow with id #{flow_id}", is_error: true) unless flow
+
+          if target.nil? || target.empty?
+            scheme = flow.row.scheme
+            host = flow.row.host
+            port = flow.row.port
+            default_port = (scheme == "https" ? 443 : 80)
+            target = port == default_port ? "#{scheme}://#{host}" : "#{scheme}://#{host}:#{port}"
+          end
+
+          if request.nil? || request.empty?
+            req_str = String.new(flow.request_head)
+            if body = flow.request_body
+              req_str += String.new(body)
+            end
+            request = req_str
+          end
+
+          if http2_val.nil?
+            http2 = (flow.http_version == "HTTP/2")
+          end
+
+          if flow.row.status == 101 && !present?(h, "ws_out_messages")
+            ws_messages_override = @store.ws_messages(flow_id).select { |m| m.direction == "out" && m.text? }.map { |m| String.new(m.payload).scrub }
+          end
+        end
+
+        return Result.new("missing required 'target'", is_error: true) if target.nil? || target.empty?
+        return Result.new("missing required 'request'", is_error: true) if request.nil? || request.empty?
+
         sni = str(h, "sni")
         mark_transform = bool(h, "mark_transform") || false
 
         position = int(h, "position")
         if position.nil?
-          position = @store.replays_meta.size
+          position = @store.replays_meta.size.to_i64
         end
 
         # Apply Env.mask_secrets
@@ -901,12 +944,16 @@ module Gori
         end
 
         # WebSocket messages handling
-        if is_ws && present?(h, "ws_out_messages")
+        if is_ws
           messages = [] of String
-          if arr = h["ws_out_messages"]?.try(&.as_a?)
-            messages = arr.compact_map(&.as_s?)
-          elsif str_val = str(h, "ws_out_messages")
-            messages = str_val.split('\n').compact_map { |l| l.strip.empty? ? nil : l }
+          if present?(h, "ws_out_messages")
+            if arr = h["ws_out_messages"]?.try(&.as_a?)
+              messages = arr.compact_map(&.as_s?)
+            elsif str_val = str(h, "ws_out_messages")
+              messages = str_val.split('\n').compact_map { |l| l.strip.empty? ? nil : l }
+            end
+          elsif ws_messages_override
+            messages = ws_messages_override
           end
 
           unless messages.empty?
@@ -914,7 +961,22 @@ module Gori
           end
         end
 
-        Result.new(JSON.build { |j| j.object { j.field "id", id } })
+        # Derive summary
+        line = request.each_line.first?.try(&.strip) || ""
+        parts = line.split(' ')
+        s = "#{parts[0]?} #{parts[1]?}".strip
+        s = line if s.empty?
+        summary = s.size > 80 ? "#{s[0, 79]}…" : s
+
+        Result.new(JSON.build { |j|
+          j.object do
+            j.field "id", id
+            j.field "name", name || ""
+            j.field "target", masked_target
+            j.field "summary", summary
+            j.field "position", position
+          end
+        })
       end
 
       private def update_replay(h) : Result
@@ -950,7 +1012,7 @@ module Gori
         masked_target = Env.mask_secrets(target)
         masked_request = Env.mask_secrets(request)
         masked_sni = sni.try { |s| Env.mask_secrets(s) }
-        name = str(h, "name").try { |n| Env.mask_secrets(n) }
+        name = present?(h, "name") ? str(h, "name").try { |n| Env.mask_secrets(n) } : existing.name
 
         @store.update_replay(
           id: id,
@@ -978,7 +1040,22 @@ module Gori
           @store.update_replay_ws_messages(id, messages)
         end
 
-        Result.new(JSON.build { |j| j.object { j.field "success", true } })
+        # Derive summary
+        line = request.each_line.first?.try(&.strip) || ""
+        parts = line.split(' ')
+        s = "#{parts[0]?} #{parts[1]?}".strip
+        s = line if s.empty?
+        summary = s.size > 80 ? "#{s[0, 79]}…" : s
+
+        Result.new(JSON.build { |j|
+          j.object do
+            j.field "id", id
+            j.field "name", name || ""
+            j.field "target", masked_target
+            j.field "summary", summary
+            j.field "position", existing.position
+          end
+        })
       end
 
       private def delete_replay(h) : Result
@@ -1594,6 +1671,11 @@ module Gori
 
       private def strarrprop(desc : String) : JSON::Any
         JSON.parse(%({"type":"array","description":#{desc.to_json},"items":{"type":"string"}}))
+      end
+
+      # Accepts a JSON array directly or a JSON-encoded string, or a string.
+      private def arr_or_str_prop(desc : String) : JSON::Any
+        JSON.parse(%({"description":#{desc.to_json},"oneOf":[{"type":"array","items":{"type":"string"}},{"type":"string"}]}))
       end
 
       # Accepts a JSON object directly or a JSON-encoded string (LLM clients vary).

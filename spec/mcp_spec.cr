@@ -392,6 +392,57 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "create_replay and update_replay" do
+    it "creates a new replay from raw payload and returns context fields" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_replay","arguments":{"target":"https://api.test","request":"GET /x HTTP/1.1\\r\\nHost: api.test\\r\\n\\r\\n","name":"My Replay Tab"}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"]?.should_not eq(true)
+        payload = tool_payload(resp)
+        payload["id"].as_i64.should_not eq(0)
+        payload["name"].as_s.should eq("My Replay Tab")
+        payload["target"].as_s.should eq("https://api.test")
+        payload["summary"].as_s.should eq("GET /x")
+        payload["position"].as_i64.should eq(0)
+
+        # Let's test update_replay
+        id = payload["id"].as_i64
+        upd_call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_replay","arguments":{"id":#{id},"target":"https://updated.test","name":"Updated Name"}}})
+        resp2 = drive(store, upd_call)[0]
+        resp2["result"]["isError"]?.should_not eq(true)
+        payload2 = tool_payload(resp2)
+        payload2["id"].as_i64.should eq(id)
+        payload2["name"].as_s.should eq("Updated Name")
+        payload2["target"].as_s.should eq("https://updated.test")
+        payload2["summary"].as_s.should eq("GET /x")
+      end
+    end
+
+    it "creates a new replay from a flow_id" do
+      with_store do |store|
+        flow_id = seed_flow(store, "ex.test", "GET", "/flow-endpoint", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_replay","arguments":{"flow_id":#{flow_id}}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload["target"].as_s.should eq("https://ex.test")
+        payload["summary"].as_s.should eq("GET /flow-endpoint")
+      end
+    end
+
+    it "creates a new replay from a finding_id" do
+      with_store do |store|
+        flow_id = seed_flow(store, "ex.test", "POST", "/submit", 200)
+        store.insert_finding("Vuln Title", Gori::Store::Severity::High, "ex.test", flow_id)
+        store.flush
+        finding_id = store.findings.first.id
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_replay","arguments":{"finding_id":#{finding_id}}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload["target"].as_s.should eq("https://ex.test")
+        payload["summary"].as_s.should eq("POST /submit")
+      end
+    end
+  end
+
   describe "get_replay_context" do
     it "lists persisted replay sessions with last response status" do
       with_store do |store|
