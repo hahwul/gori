@@ -30,14 +30,14 @@ module Gori::Tui
       case @project_view.pane
       when :scope     then Verb::Scope::Project
       when :overrides then Verb::Scope::HostOverrides
-      when :env       then Verb::Scope::Project
+      when :env       then Verb::Scope::Env
       else                 Verb::Scope::Body
       end
     end
 
     def body_badge : Symbol # the description editor, add-row capture text, and settings text fields capture keys; the lists/toggle are nav
       editing = @project_view.pane == :desc || @project_view.adding? || @project_view.ov_adding? ||
-                @project_view.env_adding? ||
+                @project_view.env_adding? || @project_view.env_prefix_editing? ||
                 (@project_view.pane == :settings && @project_view.settings_text_row?)
       editing ? :editor : :body
     end
@@ -55,9 +55,13 @@ module Gori::Tui
           ? "type \"IP host\" · ↵ save · esc cancel" \
           : "↑/↓ move · ↑ scope · ↓ env · → desc · a add · ↵/e edit · d del · space cmds · esc"
       when :env
-        @project_view.env_adding? \
-          ? "type \"KEY VALUE\" · ↵ save · esc cancel" \
-          : "↑/↓ move · ↑ overrides · → desc · a add · ↵/e edit · d del · esc"
+        if @project_view.env_prefix_editing?
+          "type prefix · ↵ save · esc cancel"
+        elsif @project_view.env_adding?
+          "type \"KEY VALUE\" · ↵ save · esc cancel"
+        else
+          "↑/↓ move · ↑ overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
+        end
       when :settings
         @project_view.settings_text_row? \
           ? "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc" \
@@ -177,7 +181,7 @@ module Gori::Tui
     def scope_adding? : Bool
       (@project_view.pane == :scope && @project_view.adding?) ||
         (@project_view.pane == :overrides && @project_view.ov_adding?) ||
-        (@project_view.pane == :env && @project_view.env_adding?)
+        (@project_view.pane == :env && (@project_view.env_adding? || @project_view.env_prefix_editing?))
     end
 
     def focus_scope : Nil
@@ -430,10 +434,14 @@ module Gori::Tui
       end
     end
 
+    # --- ENV pane: browse the var list (or route to an inline add/edit or prefix row).
+    # Returns true when consumed; false defers to the keymap — a/e/d fire the env.*-var
+    # verbs, space opens the action menu (Env scope: add/edit/delete + change prefix),
+    # and Global chords work here too. The add/prefix sub-modes swallow everything (text).
     private def handle_project_env_key(ev : Termisu::Event::Key) : Bool
       return (handle_project_env_add_key(ev); true) if @project_view.env_adding?
+      return (handle_project_env_prefix_key(ev); true) if @project_view.env_prefix_editing?
       key = ev.key
-      c = ev.char || key.to_char
       if ev.ctrl? && key.lower_p?
         save
         @host.open_palette
@@ -452,19 +460,36 @@ module Gori::Tui
         @project_view.pane_advance(-1)
       elsif key.right?
         @project_view.focus_pane(:desc)
-      elsif key.enter? || c == 'e'
+      elsif key.enter?
         @project_view.env_edit_start
-      elsif c == 'a'
-        @project_view.env_add_start
-      elsif c == 'd'
-        if key_name = @project_view.env_delete
-          Env.save_project(@host.session.store, @project_view.env_vars)
-          @host.status("removed env: #{key_name}")
-        end
       else
-        return false
+        return false # a/e/d (env.*-var verbs), space (action menu), Global chords
       end
       true
+    end
+
+    # --- ENV verbs (a/e/d via the keymap + the Env action menu) ---
+    def env_add_var : Nil
+      @project_view.env_add_start
+    end
+
+    def env_edit_var : Nil
+      @project_view.env_edit_start
+    end
+
+    def env_delete_var : Nil
+      if key_name = @project_view.env_delete
+        Env.save_project(@host.session.store, @project_view.env_vars)
+        @host.status("removed env: #{key_name}")
+      end
+    end
+
+    def env_edit_prefix : Nil
+      @project_view.env_prefix_edit_start
+    end
+
+    def env_var_selected? : Bool
+      @project_view.env_vars.size > 0
     end
 
     private def handle_project_env_add_key(ev : Termisu::Event::Key) : Nil
@@ -495,6 +520,43 @@ module Gori::Tui
         Env.save_project(@host.session.store, @project_view.env_vars)
         n = @project_view.env_vars.size
         @host.status("env var saved — #{n} total")
+      end
+    end
+
+    # The one-line prefix editor: type the sigil, ↵ commits, ⌫ on an empty input
+    # cancels, esc cancels. Mirrors the add-row, but the prefix is a GLOBAL setting.
+    private def handle_project_env_prefix_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        @project_view.cancel_env_prefix_edit
+      elsif key.enter?
+        commit_project_env_prefix
+      elsif key.left?
+        @project_view.env_move_cursor(-1)
+      elsif key.right?
+        @project_view.env_move_cursor(1)
+      elsif key.backspace?
+        @project_view.cancel_env_prefix_edit unless @project_view.env_backspace
+      elsif c && !ev.ctrl? && !ev.alt?
+        @project_view.env_input(c)
+        @project_view.set_preedit("")
+      end
+    end
+
+    # Persist the prefix to GLOBAL Settings (it's not per-project) + refresh highlight so
+    # every editor re-tints the new sigil immediately. Failure to write settings.json is
+    # surfaced but the in-memory prefix still applies for the session.
+    private def commit_project_env_prefix : Nil
+      kind, prefix = @project_view.env_prefix_commit
+      case kind
+      when :empty then @host.status("env prefix: empty")
+      when :ok
+        Settings.env_prefix = prefix
+        ok = Settings.save
+        Env.bump_highlight_rev if ok
+        @host.status(ok ? "env prefix saved — #{prefix.inspect}" \
+                        : "env prefix applied — could not save to #{Settings.path}")
       end
     end
 

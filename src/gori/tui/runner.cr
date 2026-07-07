@@ -3512,6 +3512,27 @@ module Gori::Tui
       @session.host_overrides.size > 0
     end
 
+    # Project ENV-pane var editing (the inline a/e/d keys + its space menu both route here).
+    def env_add_var : Nil
+      project_controller.env_add_var
+    end
+
+    def env_edit_var : Nil
+      project_controller.env_edit_var
+    end
+
+    def env_delete_var : Nil
+      project_controller.env_delete_var
+    end
+
+    def env_edit_prefix : Nil
+      project_controller.env_edit_prefix
+    end
+
+    def env_var_selected? : Bool
+      project_controller.env_var_selected?
+    end
+
     def sitemap_move(delta : Int32) : Nil
       sitemap_controller.sitemap_move(delta)
     end

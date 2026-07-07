@@ -125,6 +125,15 @@ module Gori
       abstract def hostov_delete_entry : Nil     # remove the selected override
       abstract def hostov_entry_selected? : Bool # an override exists (gates edit/delete in the menu)
 
+      # environment-variable editing (Project tab ENV pane — a DISTINCT pane; also
+      # drives its own "space" action menu). The token prefix ($) is a GLOBAL setting,
+      # so env.edit-prefix changes it app-wide (not just for this project).
+      abstract def env_add_var : Nil        # open the inline add-row for a new $KEY var
+      abstract def env_edit_var : Nil       # edit the selected env var in place
+      abstract def env_delete_var : Nil     # remove the selected env var
+      abstract def env_edit_prefix : Nil    # edit the global $KEY token prefix
+      abstract def env_var_selected? : Bool # a var exists (gates edit/delete in the menu)
+
       # match&replace lens
       abstract def rules_open : Nil # open the match&replace overlay editor
 
