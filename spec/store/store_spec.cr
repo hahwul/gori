@@ -49,6 +49,7 @@ describe Gori::Store do
       store.@db.exec("DROP INDEX idx_flows_sizes")                     # V23
       store.@db.exec("DROP INDEX idx_ws_messages_replay")              # V26
       store.@db.exec("ALTER TABLE ws_messages DROP COLUMN replay_id")  # V26
+      store.@db.exec("DROP INDEX idx_h2_frames_created")               # V27
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 
@@ -175,6 +176,28 @@ describe Gori::Store do
       store.flow_row(ids[0]).should be_nil      # flow 1 pruned
       store.ws_messages(ids[0]).should be_empty # cascade removed its ws message
       store.flow_row(ids[11]).should_not be_nil # flow 12 kept
+      store.write_failures.should eq(0)
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "retention prune spares saved WebSocket-Replay messages (flow_id=0 sentinel, keyed by replay_id)" do
+    path = File.tempname("gori-wsret", ".db")
+    db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
+    Gori::Store::Schema.migrate!(db)
+    store = Gori::Store.new(db, nil, retention_flows: 5, prune_interval: 10)
+    begin
+      rid = store.insert_replay("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n", false, false, nil, 0)
+      store.update_replay_ws_messages(rid, ["client frame 1", "client frame 2"])
+      # Churn flows well past retention so prune fires (cutoff = max_id - 5 > 0). The bug:
+      # DELETE ... WHERE flow_id <= cutoff also matched the replay rows (flow_id = 0), wiping them.
+      12.times { |i| store.insert_flow(sample_request(target: "/#{i}")) }
+      store.flush
+      store.ws_messages_for_replay(rid).size.should eq(2) # replay traffic survives flow retention
       store.write_failures.should eq(0)
     ensure
       store.close

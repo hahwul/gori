@@ -1420,7 +1420,12 @@ module Gori
       return if cutoff <= 0
       conn.transaction do |tx|
         c = tx.connection
-        c.exec("DELETE FROM ws_messages WHERE flow_id <= ?", cutoff)
+        # Only CAPTURED ws messages (replay_id IS NULL, real flow_id) cascade with their
+        # pruned flow. WebSocket-Replay output rows (update_replay_ws_messages) are stored
+        # with the sentinel flow_id = 0 and keyed by replay_id, so a bare `flow_id <= cutoff`
+        # (cutoff is always > 0 here) matched EVERY replay row and wiped saved replay traffic
+        # on each sweep. Gate on replay_id so replay-owned rows are never reaped by flow retention.
+        c.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND replay_id IS NULL", cutoff)
         c.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
         # h2 frames/connections key off conn_id, not flow id. Reap a connection's raw
