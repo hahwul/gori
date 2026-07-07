@@ -35,6 +35,17 @@ module Gori
       DRAIN_DEADLINE    = 60.seconds          # wall-clock ceiling: a sub-idle ping/fragment cadence can't pin a tab for hours
       MAX_CONTROL_BYTES = 125                 # RFC 6455 §5.5: control-frame payload limit (caps Pong echo)
 
+      # A request head declares a WebSocket upgrade. Matches the `Upgrade: websocket`
+      # header case-insensitively (RFC 6455: the token is case-insensitive; browsers
+      # send lowercase, but `Upgrade: WebSocket` and no-space forms are equally valid),
+      # tolerating flexible whitespace after the colon. The single source of truth for
+      # "is this replay a WebSocket flow?" across the TUI restore paths and MCP tools.
+      UPGRADE_HEADER = /(?:^|\n)upgrade:[ \t]*websocket/i
+
+      def self.upgrade_request?(request : String) : Bool
+        request.matches?(UPGRADE_HEADER)
+      end
+
       # An outbound message to replay (opcode 1=text, 2=binary).
       record OutMsg, opcode : Int32, payload : Bytes
 

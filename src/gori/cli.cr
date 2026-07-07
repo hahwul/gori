@@ -349,7 +349,9 @@ module Gori
 
       # Build args
       args = ["mcp"]
-      args << "--db=#{File.realpath(db_path)}" if db_path && !db_path.empty?
+      # expand_path (not realpath): the db need not exist yet — `gori mcp` creates it on
+      # first serve. realpath raises File::NotFoundError on a fresh path and aborts install.
+      args << "--db=#{File.expand_path(db_path)}" if db_path && !db_path.empty?
       args << "--project=#{project}" if project && !project.empty?
       args << "--read-only" if read_only
       args << "--insecure-upstream" if insecure_upstream
@@ -357,12 +359,21 @@ module Gori
       # Ensure config directory exists
       Dir.mkdir_p(config_dir) unless Dir.exists?(config_dir)
 
-      # Load existing config or initialize
+      # Load existing config or initialize. If the file exists but doesn't parse as a
+      # JSON object, REFUSE rather than clobber it — for `claude-code` this is
+      # ~/.claude.json (the user's entire CLI state: projects, auth, other MCP servers),
+      # so a transient/hand-edit parse error must never wipe it.
       config = if File.file?(config_path)
-                 begin
-                   JSON.parse(File.read(config_path)).as_h
-                 rescue
+                 raw = File.read(config_path)
+                 if raw.strip.empty?
                    Hash(String, JSON::Any).new
+                 else
+                   begin
+                     JSON.parse(raw).as_h
+                   rescue
+                     abort "Refusing to overwrite #{config_path}: it exists but isn't a valid JSON object. " \
+                           "Fix or remove it, then re-run the installer."
+                   end
                  end
                else
                  Hash(String, JSON::Any).new

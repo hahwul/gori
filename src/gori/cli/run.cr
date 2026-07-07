@@ -506,7 +506,9 @@ module Gori
 
         built = Replay::FlowRequest.build(detail)
         override = target_override # copy the closured flag into a plain local so || narrows
-        bytes = Env.expand_wire(String.new(built.bytes))
+        # Re-sync Content-Length after expansion — a `$KEY` in the body changes its length,
+        # and `build` framed CL over the pre-expansion bytes.
+        bytes = Replay::FlowRequest.resync_content_length(Env.expand_wire(String.new(built.bytes)))
         target = Env.expand(override || built.target)
         scheme, host, port = Replay::FlowRequest.parse_target(target)
         abort "gori run replay: could not determine a target host" if host.empty?

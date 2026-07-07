@@ -115,4 +115,21 @@ describe Gori::Replay::WsEngine do
     received.includes?(0xFF_u8).should be_true
     received.includes?(0xFE_u8).should be_true
   end
+
+  describe ".upgrade_request?" do
+    it "matches the Upgrade: websocket header case-insensitively with flexible spacing" do
+      WsEngine.upgrade_request?("GET /ws HTTP/1.1\r\nUpgrade: websocket\r\n\r\n").should be_true
+      WsEngine.upgrade_request?("GET /ws HTTP/1.1\nupgrade: websocket\n\n").should be_true
+      WsEngine.upgrade_request?("GET /ws HTTP/1.1\r\nUpgrade: WebSocket\r\n\r\n").should be_true
+      WsEngine.upgrade_request?("GET /ws HTTP/1.1\r\nUpgrade:websocket\r\n\r\n").should be_true
+    end
+
+    it "does not match a mid-line 'upgrade: websocket' inside another header value" do
+      WsEngine.upgrade_request?("GET / HTTP/1.1\r\nX-Note: please upgrade: websocket\r\n\r\n").should be_false
+    end
+
+    it "is false for an ordinary request" do
+      WsEngine.upgrade_request?("GET / HTTP/1.1\r\nHost: t\r\n\r\n").should be_false
+    end
+  end
 end

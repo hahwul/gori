@@ -152,7 +152,6 @@ module Gori::Tui
       when :close     then request_close
       when :markword  then @host.status(v.mark_word)
       when :markpoint then @host.status(v.insert_marker)
-      when :clear     then @host.status(v.clear_marks)
       when :config    then v.focus_config
       when :switch    then switch_subtab(c)
       else                 return false
@@ -170,7 +169,6 @@ module Gori::Tui
       when key.lower_w?         then :close
       when key.lower_k?         then :markword
       when key.lower_t?         then :markpoint
-      when key.lower_u?         then :clear
       when key.lower_o?         then :config
       when c && '1' <= c <= '9' then :switch
       end
@@ -211,6 +209,13 @@ module Gori::Tui
       else
         @host.status("pretty-printed template request body")
       end
+    end
+
+    # Strip every §…§ marker (and its chain) from the template. Space-menu only —
+    # `^U` now pretty-prints (matching Replay); clearing lives in the space menu here too.
+    def fuzz_clear_marks : Nil
+      return unless view = current_view
+      @host.status(view.clear_marks)
     end
 
     # The Runner calls these when an overlay applies (esc / ↵-on-last-field).
@@ -290,8 +295,10 @@ module Gori::Tui
     private def edit_config(ev : Termisu::Event::Key, v : FuzzerView) : Nil
       key = ev.key
       case
-      when key.up?                     then config_up(v)
-      when key.down?                   then v.form_move(1)
+      # CONFIG is a row list, not a text field, so j/k navigate here (like RESULTS and
+      # the Miner summary) — without this, `k` off the RESULTS top dead-ends in CONFIG.
+      when key.up?, key.lower_k?       then config_up(v)
+      when key.down?, key.lower_j?     then v.form_move(1)
       when key.left?                   then v.form_adjust(-1)
       when key.right?                  then v.form_adjust(1)
       when key.enter?                  then activate_config_row(v)

@@ -32,9 +32,12 @@ module Gori
     end
 
     # Expand env tokens in wire-form HTTP text (LF or CRLF) and return CRLF bytes.
+    # Uses `gsub(/\r?\n/, "\r\n")` — NOT `split('\n').join("\r\n")` — so already-CRLF
+    # input (captured flow bytes) isn't doubled into `\r\r\n`, which would destroy the
+    # head/body separator and break framing on every CLI/MCP replay+mine send path.
     def self.expand_wire(text : String, vars : Hash(String, String) = effective_vars,
                          prefix : String = Settings.env_prefix) : Bytes
-      expand(text, vars, prefix).split('\n').join("\r\n").to_slice
+      expand(text, vars, prefix).gsub(/\r?\n/, "\r\n").to_slice
     end
 
     # Substitute registered `prefix+KEY` tokens; unknown keys stay literal.
@@ -71,8 +74,13 @@ module Gori
     end
 
     # Scans the text for occurrences of any registered env var value and replaces
-    # it with the corresponding token (e.g. "$KEY"). Sorted by value size descending
-    # to avoid sub-string collisions (e.g. matching "secret_value" before "secret").
+    # it with the corresponding token (e.g. "$KEY"). Longest value wins at each
+    # position (avoids "secret_value" vs "secret" sub-string collisions).
+    #
+    # Single left-to-right pass (NOT sequential `gsub` per value): a `gsub` chain
+    # can re-match a token an earlier replacement inserted — e.g. value "OKEN"
+    # matching inside a just-inserted "$TOKEN" — silently corrupting the mask. The
+    # pass never re-scans replaced spans, so inserted tokens stay intact.
     def self.mask_secrets(text : String, vars : Hash(String, String) = effective_vars,
                           prefix : String = Settings.env_prefix) : String
       return text if prefix.empty? || vars.empty?
@@ -80,18 +88,33 @@ module Gori
       # Filter out empty values and short/common values that might lead to false positives (e.g., single characters)
       candidates = vars.to_a
         .reject { |(k, v)| v.strip.empty? || v.size < 4 }
-        .sort_by { |(k, v)| -v.size }
+        .sort_by! { |(k, v)| -v.size }
+        .map { |(k, v)| {k, v.chars} }
 
       return text if candidates.empty?
 
-      result = text
-      candidates.each do |key, value|
-        result = result.gsub(value, "#{prefix}#{key}")
+      chars = text.chars
+      n = chars.size
+      String.build do |io|
+        i = 0
+        while i < n
+          hit = candidates.find do |(_, vchars)|
+            i + vchars.size <= n && vchars.each_with_index.all? { |c, j| chars[i + j] == c }
+          end
+          if hit
+            io << prefix << hit[0]
+            i += hit[1].size
+          else
+            io << chars[i]
+            i += 1
+          end
+        end
       end
-      result
     end
 
-    # Byte offsets [start, end) of each env-shaped token in `text` (end exclusive).
+    # Char offsets [start, end) of each env-shaped token in `text` (end exclusive).
+    # Char-based (not byte) — the consumer (Highlight.env_spans_in) slices with
+    # `text[a...b]`, which is char-indexed in Crystal, so multi-byte text stays aligned.
     # `known` is true when KEY is registered in `vars`.
     def self.token_regions(text : String, prefix : String = Settings.env_prefix,
                            vars : Hash(String, String) = effective_vars) : Array({Int32, Int32, Bool})

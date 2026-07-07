@@ -202,4 +202,19 @@ describe Gori::Pretty do
       res.bytes.to_unsafe.should_not eq(body.to_unsafe)
     end
   end
+
+  describe "format_request (marker-preserving pretty)" do
+    it "restores every §…§ marker intact with ≥11 markers (no placeholder prefix-collision)" do
+      head = "POST /x HTTP/1.1\r\nContent-Type: application/json"
+      pairs = (0...12).map { |i| %("k#{i}":"§m#{i}§") }
+      body = "{#{pairs.join(",")}}"
+      out = Gori::Pretty.format_request(head, body)
+      out.should_not be_nil
+      formatted = out.not_nil!
+      # Under the old ascending-order gsub, marker 10 became "§m1§0" (idx-1 placeholder
+      # is a prefix of idx-10's). Every marker must survive verbatim.
+      (0...12).each { |i| formatted.should contain("§m#{i}§") }
+      formatted.lines.size.should be > 1 # actually reflowed
+    end
+  end
 end

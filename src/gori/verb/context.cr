@@ -91,6 +91,7 @@ module Gori
       abstract def fuzz_automark : Nil     # auto-mark every request parameter
       abstract def fuzz_attach_chain : Nil # open the chain-edit prompt for the marker at the template cursor
       abstract def fuzz_list_paste : Nil   # open the payload-set editor pre-seeded to a List (multi-line, one value per line)
+      abstract def fuzz_clear_marks : Nil  # strip all §…§ markers (and their chains) from the template
 
       # param miner (cross-tab seeds open a config popup, then mining runs in background)
       abstract def mine_selected : Nil    # mine History's selected flow (opens the config popup)

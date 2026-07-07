@@ -489,9 +489,13 @@ module Gori
 
       formatted = String.new(res.bytes)
 
-      # 3. Restore the markers
-      markers.each_with_index do |m, idx|
-        formatted = formatted.gsub("876543210987600#{idx}", m)
+      # 3. Restore the markers — HIGHEST index first. Placeholders share the
+      # "876543210987600" prefix, so e.g. idx 1's "…6001" is a substring-prefix of idx
+      # 10's "…60010". A proper digit-prefix always has fewer digits (⇒ smaller value),
+      # so its collision partner always carries a larger index; replacing high→low
+      # consumes the longer placeholder before its prefix and avoids corrupting markers.
+      (markers.size - 1).downto(0) do |idx|
+        formatted = formatted.gsub("876543210987600#{idx}", markers[idx])
       end
 
       formatted

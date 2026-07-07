@@ -32,7 +32,7 @@ module Gori::Tui
       @host.session.store.replays.each do |r|
         view = ReplayView.new
         ws_msgs = nil.as(Array(String)?)
-        if r.request.includes?("Upgrade: websocket") || r.request.includes?("upgrade: websocket")
+        if Replay::WsEngine.upgrade_request?(r.request)
           ws_msgs = @host.session.store.ws_messages_for_replay(r.id).compact_map do |m|
             m.direction == "out" ? String.new(m.payload) : nil
           end
@@ -234,7 +234,7 @@ module Gori::Tui
       true
     end
 
-     # The split-decode request hint: which sub-pane is being edited + how to switch.
+    # The split-decode request hint: which sub-pane is being edited + how to switch.
     private def decode_hint(v : ReplayView) : String
       sub = if v.req_pane != :decoded
               "edit request envelope"
@@ -540,7 +540,7 @@ module Gori::Tui
         # each session's view); restore() is response-less so a peer's resend never
         # clobbers the local response/scroll/focus.
         ws_msgs = nil.as(Array(String)?)
-        if row.request.includes?("Upgrade: websocket") || row.request.includes?("upgrade: websocket")
+        if Replay::WsEngine.upgrade_request?(row.request)
           ws_msgs = @host.session.store.ws_messages_for_replay(row.id).compact_map do |m|
             m.direction == "out" ? String.new(m.payload) : nil
           end
@@ -555,7 +555,7 @@ module Gori::Tui
         next if local_ids.includes?(row.id)
         view = ReplayView.new
         ws_msgs = nil.as(Array(String)?)
-        if row.request.includes?("Upgrade: websocket") || row.request.includes?("upgrade: websocket")
+        if Replay::WsEngine.upgrade_request?(row.request)
           ws_msgs = @host.session.store.ws_messages_for_replay(row.id).compact_map do |m|
             m.direction == "out" ? String.new(m.payload) : nil
           end
@@ -762,13 +762,13 @@ module Gori::Tui
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
       if v.ws_mode?
-        handshake_req = String.new(v.ws_upgrade_bytes)
-        @host.session.store.update_replay(id, v.target, handshake_req, v.http2?, v.auto_content_length?,
+        # Persist the RAW handshake text (request_text = the editor's `$KEY` tokens, LF),
+        # NOT ws_upgrade_bytes (env-expanded + CRLF): baking the expanded form in would
+        # write secrets to the DB and defeat the reconcile guard (which compares LF text).
+        @host.session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?,
           v.sni_override, mark_transform: v.mark_transform?)
-        
-        # Convert OutMsg array to String array
-        ws_texts = v.ws_out_messages.compact_map { |msg| String.new(msg.payload) }
-        @host.session.store.update_replay_ws_messages(id, ws_texts)
+        # Raw message lines too — the store masks secrets; env tokens re-expand on send.
+        @host.session.store.update_replay_ws_messages(id, v.ws_out_texts_raw)
       else
         @host.session.store.update_replay(id, v.target, v.request_text, v.http2?, v.auto_content_length?,
           v.sni_override, mark_transform: v.mark_transform?)
