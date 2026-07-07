@@ -407,9 +407,9 @@ module Gori
       registry = ProjectRegistry.new(Paths.projects_dir)
       if d = db
         unless d.empty? # an empty --db= falls through to project/MRU (Crystal: "" is truthy)
-          # Validate like `gori run` does — else SQLite silently CREATEs a fresh empty DB on a
-          # typo'd path and the client queries an empty dataset believing it's the real capture.
-          abort "gori mcp: --db is not a readable file: #{d}" unless File.file?(d)
+          # Validate parent directory exists, allowing SQLite to auto-create the DB file on first serve
+          parent = File.dirname(d)
+          abort "gori mcp: --db directory does not exist: #{parent}" unless Dir.exists?(parent)
           proj = registry.list.find { |p| p.db_path == d }
           return {d, proj.try(&.name), proj.try { |p| registry.slug_of(p) }}
         end

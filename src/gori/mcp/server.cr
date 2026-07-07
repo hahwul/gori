@@ -51,8 +51,8 @@ module Gori
         id = nil.as(JSON::Any?)
         root = begin
           JSON.parse(line)
-        rescue JSON::ParseException
-          return write_error(nil, -32700, "Parse error")
+        rescue ex : JSON::ParseException
+          return write_error(nil, -32700, "Parse error: #{ex.message}")
         end
 
         obj = root.as_h?

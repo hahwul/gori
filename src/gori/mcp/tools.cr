@@ -1509,8 +1509,8 @@ module Gori
       private def fuzz_regex(s : String?, which : String) : Regex?
         return nil if s.nil? || s.empty?
         Regex.new(s)
-      rescue
-        raise FuzzArgError.new("invalid #{which} regex: #{s}")
+      rescue ex
+        raise FuzzArgError.new("invalid #{which} regex '#{s}': #{ex.message}")
       end
 
       private def fuzz_config(h, mode : Fuzz::Mode) : Fuzz::Config
