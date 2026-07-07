@@ -83,6 +83,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_toggle_mark_transform : Nil; end
 
+  def replay_pretty_request : Nil; end
+
+  def fuzz_pretty_template : Nil; end
+
   def replay_auto_mark : Nil; end
 
   def replay_mark_word : Nil; end

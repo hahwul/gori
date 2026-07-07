@@ -357,6 +357,15 @@ module Gori::Tui
       end
     end
 
+    def replay_pretty_request : Nil
+      return unless view = current_view
+      if err = view.pretty_print_request
+        @host.status(err)
+      else
+        @host.status("pretty-printed request body")
+      end
+    end
+
     def replay_auto_mark : Nil
       return unless view = current_view
       @host.status(view.auto_mark)

@@ -335,6 +335,25 @@ module Gori::Tui
       "auto-marked #{n} position#{n == 1 ? "" : "s"}"
     end
 
+    def pretty_print_template : String?
+      text = @editor.text
+      env_sep = text.index("\n\n")
+      return "no request body" unless env_sep
+
+      head = text[0, env_sep]
+      body = text[env_sep + 2..]
+      return "request body is empty" if body.strip.empty?
+
+      if formatted_body = Pretty.format_request(head, body)
+        new_text = "#{head}\n\n#{formatted_body}"
+        @editor.set_text(new_text)
+        @dirty = true
+        nil # success
+      else
+        "failed to pretty-print (unsupported or malformed body)"
+      end
+    end
+
     def mark_word : String
       return "mark word (^K) works on the TEMPLATE pane — ↹ to it" unless @focus == :template
       before = @editor.text
@@ -1081,7 +1100,9 @@ module Gori::Tui
       label = @http2 ? "TEMPLATE (h2)" : "TEMPLATE"
       Frame.card(screen, rect, label, bg: Theme.bg, border: Frame.pane_border(focused))
       badge = " §#{pc} "
-      screen.text({rect.right - badge.size - 1, rect.x + label.size + 4}.max, rect.y, badge,
+      min_x = rect.x + label.size + 4
+      pretty_x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "alt-p", "PRETTY", false)
+      screen.text({pretty_x - badge.size, min_x}.max, rect.y, badge,
         pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg)
       # Marker i ↔ position i ↔ generator.set_for(i). The value gets the position hue; a
       # trailing ¦chain (Convert transform-on-send) is over-painted with a neutral band so

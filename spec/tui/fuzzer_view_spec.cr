@@ -467,3 +467,15 @@ describe "FuzzerView result-detail decode panes" do
     backend.contains?("params").should be_false
   end
 end
+
+describe "FuzzerView pretty-printing" do
+  it "pretty-prints JSON request template body in-place and preserves markers" do
+    view = FuzzerView.new
+    view.load_request("https://h", "POST / HTTP/1.1\r\nHost: h\r\nContent-Type: application/json\r\n\r\n{\"a\":\"§val§\",\"b\":§age§}", false, "")
+
+    view.pretty_print_template.should be_nil # success
+    view.template_text.should contain("\"a\": \"§val§\"")
+    view.template_text.should contain("\"b\": §age§")
+    view.dirty?.should be_true
+  end
+end

@@ -156,6 +156,10 @@ private class FakeContext < ExecContext
     @calls << :replay_toggle_mark_transform
   end
 
+  def replay_pretty_request : Nil
+    @calls << :replay_pretty_request
+  end
+
   def replay_auto_mark : Nil
     @calls << :replay_auto_mark
   end
@@ -206,6 +210,10 @@ private class FakeContext < ExecContext
 
   def fuzz_list_paste : Nil
     @calls << :fuzz_list_paste
+  end
+
+  def fuzz_pretty_template : Nil
+    @calls << :fuzz_pretty_template
   end
 
   def mine_selected : Nil

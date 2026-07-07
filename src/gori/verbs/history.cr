@@ -95,6 +95,10 @@ module Gori
         Verb::Scope::Replay, [Verb::Chord.new("k", ctrl: true)],
         available: in_replay, mnemonic: 't') { |ctx| ctx.replay_toggle_mark_transform; nil }
       r.register Verb::Definition.new(
+        "replay.pretty-request", "Pretty-print request", "Format the request body in-place (JSON/XML/form-urlencoded)",
+        Verb::Scope::Replay, [Verb::Chord.new("p", alt: true)],
+        available: in_replay) { |ctx| ctx.replay_pretty_request; nil }
+      r.register Verb::Definition.new(
         "replay.auto-mark", "Auto-mark params", "Wrap every request parameter value in a §…§ marker",
         Verb::Scope::Replay, [Verb::Chord.new("a", ctrl: true)],
         available: in_replay, mnemonic: 'a') { |ctx| ctx.replay_auto_mark; nil }
@@ -245,6 +249,10 @@ module Gori
         "fuzz.list-paste", "Add List payload set", "Open the payload-set editor pre-seeded to a List — a multi-line editor, one value per line (paste splits automatically)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("l", ctrl: true)],
         available: in_fuzzer, mnemonic: 'l') { |ctx| ctx.fuzz_list_paste; nil }
+      r.register Verb::Definition.new(
+        "fuzz.pretty-template", "Pretty-print template", "Format the request template body in-place (JSON/XML/form-urlencoded)",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("p", alt: true)],
+        available: in_fuzzer) { |ctx| ctx.fuzz_pretty_template; nil }
     end
 
     # Param-miner verbs: the cross-tab "Mine parameters" entry (space menu in History,

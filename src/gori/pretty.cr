@@ -439,6 +439,64 @@ module Gori
       -1
     end
 
+    # Pretty-prints a raw HTTP request body in-place, preserving any §...§ markers.
+    # Returns the formatted body string on success, or nil on failure.
+    def format_request(head : String, body : String) : String?
+      markers = [] of String
+
+      # 1. Extract and replace all markers with unique safe numeric strings.
+      temp_body = String.build do |io|
+        chars = body.chars
+        n = chars.size
+        i = 0
+        while i < n
+          if chars[i] == '§'
+            if chars[i + 1]? == '§' # escaped §
+              io << "§§"
+              i += 2
+            else
+              start = i
+              i += 1
+              while i < n
+                if chars[i] == '§'
+                  if chars[i + 1]? == '§'
+                    i += 2
+                  else
+                    break
+                  end
+                else
+                  i += 1
+                end
+              end
+              if i < n && chars[i] == '§'
+                markers << chars[start..i].join
+                io << "876543210987600#{markers.size - 1}"
+                i += 1
+              else
+                io << chars[start...i].join
+              end
+            end
+          else
+            io << chars[i]
+            i += 1
+          end
+        end
+      end
+
+      # 2. Format using the standard formatter
+      res = format(head.to_slice, temp_body.to_slice)
+      return nil unless res
+
+      formatted = String.new(res.bytes)
+
+      # 3. Restore the markers
+      markers.each_with_index do |m, idx|
+        formatted = formatted.gsub("876543210987600#{idx}", m)
+      end
+
+      formatted
+    end
+
     private def downcase_byte(b : UInt8) : UInt8
       (0x41_u8 <= b <= 0x5A_u8) ? b + 0x20_u8 : b
     end

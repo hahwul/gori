@@ -204,6 +204,15 @@ module Gori::Tui
       @host.open_fuzz_set_editor(nil)
     end
 
+    def fuzz_pretty_template : Nil
+      return unless view = current_view
+      if err = view.pretty_print_template
+        @host.status(err)
+      else
+        @host.status("pretty-printed template request body")
+      end
+    end
+
     # The Runner calls these when an overlay applies (esc / ↵-on-last-field).
     def apply_fuzz_set(edit_index : Int32?, spec : SetSpec?) : Nil
       return unless v = current_view

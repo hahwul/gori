@@ -74,11 +74,13 @@ module Gori
       abstract def replay_toggle_auto_content_length : Nil # recompute Content-Length on send
       # mark-transform mode: mark request values (§…§) and attach Convert chains applied on send
       abstract def replay_toggle_mark_transform : Nil # toggle MARK mode on/off
-      abstract def replay_auto_mark : Nil             # wrap every request param value in §…§
-      abstract def replay_mark_word : Nil             # toggle a marker around the token at the cursor
-      abstract def replay_insert_marker : Nil         # drop a single § at the cursor (bracket by hand)
-      abstract def replay_clear_marks : Nil           # strip all markers (and their chains)
-      abstract def replay_attach_chain : Nil          # open the chain-edit prompt for the marker at the cursor
+      abstract def replay_pretty_request : Nil
+      abstract def fuzz_pretty_template : Nil
+      abstract def replay_auto_mark : Nil     # wrap every request param value in §…§
+      abstract def replay_mark_word : Nil     # toggle a marker around the token at the cursor
+      abstract def replay_insert_marker : Nil # drop a single § at the cursor (bracket by hand)
+      abstract def replay_clear_marks : Nil   # strip all markers (and their chains)
+      abstract def replay_attach_chain : Nil  # open the chain-edit prompt for the marker at the cursor
 
       # fuzzer workbench (run/stop/marking handled inline; these power the palette + cross-tab)
       abstract def fuzz_selected : Nil     # send History's selection to the Fuzzer tab

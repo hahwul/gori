@@ -849,6 +849,31 @@ module Gori::Tui
       @mark_transform = !@mark_transform
     end
 
+    def pretty_print_request : String?
+      return "hex mode active" if request_hex?
+      if @ws_mode && @req_pane == :decoded
+        return "websocket messages editor doesn't support pretty-printing"
+      end
+
+      text = @editor.text
+      env_sep = text.index("\n\n")
+      return "no request body" unless env_sep
+
+      head = text[0, env_sep]
+      body = text[env_sep + 2..]
+      return "request body is empty" if body.strip.empty?
+
+      if formatted_body = Pretty.format_request(head, body)
+        new_text = "#{head}\n\n#{formatted_body}"
+        @editor.set_text(new_text)
+        @dirty = true
+        reflect_content_length_in_editor if @auto_content_length
+        nil # success
+      else
+        "failed to pretty-print (unsupported or malformed body)"
+      end
+    end
+
     CHAIN_PLACEHOLDER = "put the cursor in a §…§ marker, then ^Y to add an encode chain (e.g. base64-encode)"
 
     # Whether the CHAIN sub-pane currently owns keyboard input (MARK mode + focused +
@@ -1648,7 +1673,8 @@ module Gori::Tui
       # when active and a muted no-background hint when off — ^L auto-Content-Length,
       # ^K MARK-transform.
       cl_x = Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
-      Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^K", "MARK", @mark_transform)
+      mark_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^K", "MARK", @mark_transform)
+      Frame.toggle_badge(screen, mark_x, rect.y, min_x, "alt-p", "PRETTY", false)
       update_request_mark_tint
       @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
     end

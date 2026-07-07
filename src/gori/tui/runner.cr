@@ -3643,6 +3643,10 @@ module Gori::Tui
       replay_controller.replay_toggle_mark_transform
     end
 
+    def replay_pretty_request : Nil
+      replay_controller.replay_pretty_request
+    end
+
     def replay_auto_mark : Nil
       replay_controller.replay_auto_mark
     end
@@ -3708,6 +3712,10 @@ module Gori::Tui
     # ^L: open the multi-line paste popup for the List payload's values (again = apply + close).
     def fuzz_list_paste : Nil
       fuzzer_controller.fuzz_list_paste
+    end
+
+    def fuzz_pretty_template : Nil
+      fuzzer_controller.fuzz_pretty_template
     end
 
     # --- Miner ExecContext / cross-tab mediators ---

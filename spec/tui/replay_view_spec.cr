@@ -568,4 +568,17 @@ describe Gori::Tui::ReplayView do
     backend2.contains?("TAIL").should be_true
     backend2.contains?("HEAD").should be_false # scrolled off the left edge
   end
+
+  describe "pretty_print_request" do
+    it "pretty-prints JSON request body in-place and preserves markers" do
+      view = ReplayView.new
+      view.restore("https://api.test", "POST /x HTTP/1.1\nHost: api.test\nContent-Type: application/json\nContent-Length: 30\n\n{\"a\":\"§val§\",\"b\":[1,2]}", false, true)
+
+      view.pretty_print_request.should be_nil # success
+      view.request_text.should contain("\"a\": \"§val§\"")
+      view.request_text.should contain("  \"b\": [\n    1,\n    2\n  ]")
+      view.dirty?.should be_true
+      view.request_text.should_not contain("Content-Length: 30")
+    end
+  end
 end
