@@ -1674,7 +1674,7 @@ module Gori::Tui
       # ^K MARK-transform.
       cl_x = Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
       mark_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^K", "MARK", @mark_transform)
-      Frame.toggle_badge(screen, mark_x, rect.y, min_x, "alt-p", "PRETTY", false)
+      Frame.toggle_badge(screen, mark_x, rect.y, min_x, "^U", "PRETTY", false)
       update_request_mark_tint
       @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
     end

@@ -1101,7 +1101,7 @@ module Gori::Tui
       Frame.card(screen, rect, label, bg: Theme.bg, border: Frame.pane_border(focused))
       badge = " §#{pc} "
       min_x = rect.x + label.size + 4
-      pretty_x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "alt-p", "PRETTY", false)
+      pretty_x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "^U", "PRETTY", false)
       screen.text({pretty_x - badge.size, min_x}.max, rect.y, badge,
         pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg)
       # Marker i ↔ position i ↔ generator.set_for(i). The value gets the position hue; a

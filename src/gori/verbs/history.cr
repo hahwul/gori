@@ -96,7 +96,7 @@ module Gori
         available: in_replay, mnemonic: 't') { |ctx| ctx.replay_toggle_mark_transform; nil }
       r.register Verb::Definition.new(
         "replay.pretty-request", "Pretty-print request", "Format the request body in-place (JSON/XML/form-urlencoded)",
-        Verb::Scope::Replay, [Verb::Chord.new("p", alt: true)],
+        Verb::Scope::Replay, [Verb::Chord.new("u", ctrl: true)],
         available: in_replay) { |ctx| ctx.replay_pretty_request; nil }
       r.register Verb::Definition.new(
         "replay.auto-mark", "Auto-mark params", "Wrap every request parameter value in a §…§ marker",
@@ -251,7 +251,7 @@ module Gori
         available: in_fuzzer, mnemonic: 'l') { |ctx| ctx.fuzz_list_paste; nil }
       r.register Verb::Definition.new(
         "fuzz.pretty-template", "Pretty-print template", "Format the request template body in-place (JSON/XML/form-urlencoded)",
-        Verb::Scope::Fuzzer, [Verb::Chord.new("p", alt: true)],
+        Verb::Scope::Fuzzer, [Verb::Chord.new("u", ctrl: true)],
         available: in_fuzzer) { |ctx| ctx.fuzz_pretty_template; nil }
     end
 
