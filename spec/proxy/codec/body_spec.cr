@@ -135,6 +135,26 @@ describe Gori::Proxy::Codec::Body do
       req = Http1.parse_request_head("POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\n\r\n".to_slice)
       Body.request_framing(req).should eq({BodyFraming::Chunked, 0_i64})
     end
+
+    it "rejects a request with a non-chunked Transfer-Encoding (unframeable → TE desync)" do
+      # `Transfer-Encoding: gzip` (final coding not chunked) has no reliable body length.
+      # A bare fall-through to None would strand the body as the next pipelined request.
+      req = Http1.parse_request_head("POST / HTTP/1.1\r\nTransfer-Encoding: gzip\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
+    it "rejects a non-chunked TE request even with a Content-Length (no CL fallback)" do
+      # TE outranks CL (RFC 7230 §3.3.3); a non-chunked TE must not silently be framed by CL.
+      req = Http1.parse_request_head("POST / HTTP/1.1\r\nTransfer-Encoding: gzip\r\nContent-Length: 5\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
+    it "leaves a response with a non-chunked Transfer-Encoding as close-delimited (not rejected)" do
+      # Responses may legitimately be close-delimited under a non-chunked TE — only the
+      # request path (which must know the body boundary to keep-alive) rejects.
+      resp = Http1.parse_response_head("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n".to_slice)
+      Body.response_framing(resp, "GET").should eq({BodyFraming::CloseDelimited, 0_i64})
+    end
   end
 
   describe ".stream" do

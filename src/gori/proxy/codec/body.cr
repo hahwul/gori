@@ -89,9 +89,19 @@ module Gori::Proxy::Codec
 
     # RFC 7230 §3.3.3 framing for a request body.
     def self.request_framing(req : RawRequest) : {BodyFraming, Int64}
-      if chunked?(req.headers.get_all("Transfer-Encoding"))
+      te = req.headers.get_all("Transfer-Encoding")
+      if chunked?(te)
         reject_te_with_cl(req.headers)
         {BodyFraming::Chunked, 0_i64}
+      elsif te_present?(te)
+        # A REQUEST whose Transfer-Encoding's final coding isn't `chunked` (e.g.
+        # `Transfer-Encoding: gzip`) has no reliable body length — RFC 7230 §3.3.3 rule 3.
+        # A proxy MUST NOT guess: falling through to Content-Length (or a body-less frame)
+        # would leave the real body on the wire to be misframed as the next pipelined
+        # request — a TE desync / request-smuggling vector. Reject + close, like the
+        # non-final-chunked case. (Responses differ: a non-chunked TE there legitimately
+        # means close-delimited, so response_framing keeps that path.)
+        raise Gori::Error.new("non-chunked Transfer-Encoding on request")
       elsif cl = content_length(req.headers)
         {BodyFraming::Length, cl}
       else
@@ -158,6 +168,12 @@ module Gori::Proxy::Codec
     # error a proxy MUST reject — a TE-desync / request-smuggling vector — so raise
     # to close the connection rather than guess. (A token like `xchunked` simply
     # isn't `chunked` and yields no body framing here.)
+    # Whether any non-empty transfer-coding token is present (an empty/blank
+    # Transfer-Encoding header carries none, so it isn't "present" for framing).
+    private def self.te_present?(transfer_encodings : Array(String)) : Bool
+      transfer_encodings.any? { |v| v.split(',').any? { |t| !t.strip.empty? } }
+    end
+
     private def self.chunked?(transfer_encodings : Array(String)) : Bool
       tokens = transfer_encodings.flat_map(&.split(',')).map(&.strip.downcase).reject(&.empty?)
       return false if tokens.empty?

@@ -51,6 +51,31 @@ describe Gori::Proxy::Upstream do
         proxy.close rescue nil
       end
     end
+
+    it "fails the dial (rather than buffering unboundedly) when the proxy floods the CONNECT reply headers" do
+      proxy = TCPServer.new("127.0.0.1", 0)
+      pport = proxy.local_address.port
+      spawn do
+        conn = proxy.accept
+        while (h = conn.gets("\r\n", chomp: true)) && !h.empty?
+        end
+        # A "200" status then a runaway header section with no terminating blank line:
+        # past the section cap the CONNECT must fail instead of draining forever.
+        conn << "HTTP/1.1 200 Connection established\r\n"
+        line = "X-Pad: #{"a" * 512}\r\n"
+        (200).times { conn << line } # ~100 KiB > MAX_CONNECT_HEADERS (64 KiB)
+        conn.flush rescue nil
+        conn.close rescue nil
+      end
+
+      Gori::Settings.upstream_proxy = "127.0.0.1:#{pport}"
+      begin
+        Gori::Proxy::Upstream.dial("example.test", 443).should be_nil
+      ensure
+        Gori::Settings.upstream_proxy = ""
+        proxy.close rescue nil
+      end
+    end
   end
 
   describe ".split_host_port" do

@@ -299,7 +299,7 @@ module Gori::Proxy
       # also holds its response when a Match&Replace rule changed the request line.
       if (ic = @interceptor) && ic.intercepts_response?(scope_url,
            method: sent_req.method, host: host, target: sent_req.target, scheme: scheme, status: resp.status) &&
-         !resp_framing.close_delimited? && !sse?(resp) && !websocket_upgrade?(resp)
+         !resp_framing.close_delimited? && !sse?(resp) && resp.status != 101
         return handle_held_response(ic, upstream, req, flow_id, host, port, scheme,
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
@@ -311,14 +311,23 @@ module Gori::Proxy
       completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
         resp_framing, resp_len, resp_capture, flow_id, ttfb, started)
 
-      if completed && websocket_upgrade?(resp)
-        # Ownership of the upstream transfers to the relay (it cross-closes on
-        # teardown); detach it from the reuse slot so `run`'s ensure won't also
-        # touch it.
+      if completed && resp.status == 101
+        # A 101 Switching Protocols turns the connection into a bidirectional tunnel of the
+        # upgraded protocol — it is NOT more HTTP. Ownership of the upstream transfers to the
+        # relay/tunnel (which cross-closes on teardown); detach it from the reuse slot so
+        # `run`'s ensure won't also touch it. A WebSocket upgrade gets the frame-aware relay
+        # (captures messages, P6/P7); any OTHER upgrade (h2c, or a proprietary protocol) gets
+        # a blind byte tunnel. Either way we must NOT fall through to keep-alive/reuse:
+        # parsing the post-upgrade bytes as the next HTTP response (upstream) or request
+        # (client) would desync both directions and corrupt the tunnel.
         @upstream = nil
         @up_host = nil
         @up_port = 0
-        WS::Relay.run(@io, upstream, flow_id, @sink) # frames until close (P6/P7)
+        if websocket_upgrade?(resp)
+          WS::Relay.run(@io, upstream, flow_id, @sink) # frames until close (P6/P7)
+        else
+          Pump.blind_tunnel(@io, upstream) # non-WS upgrade: raw pipe until close
+        end
         return false
       end
 

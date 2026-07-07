@@ -262,6 +262,51 @@ describe "WebSocket through the proxy (end-to-end)" do
     sink.ws.should contain({"out", "ping"})
     sink.ws.should contain({"in", "ping"})
   end
+
+  it "blind-tunnels a NON-WebSocket 101 upgrade instead of parsing the post-upgrade bytes as HTTP (desync)" do
+    # origin: accept the upgrade, answer 101 with a non-websocket Upgrade, then speak a
+    # raw post-upgrade protocol (read the client's bytes, answer with SRV:<echo>).
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn do
+      conn = origin.accept
+      Gori::Proxy::Codec::Http1.read_head(conn) # the upgrade GET
+      conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: raftproto\r\nConnection: Upgrade\r\n\r\n"
+      conn.flush
+      buf = Bytes.new(64)
+      n = conn.read(buf)
+      conn.write("SRV:".to_slice)
+      conn.write(buf[0, n])
+      conn.flush
+    rescue
+    end
+
+    ws_chan = Channel(Nil).new(4)
+    sink = IntegSink.new(ws_chan)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client.read_timeout = 3.seconds # a broken tunnel must fail fast, not hang the suite
+    client << "GET /up HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n" \
+              "Upgrade: raftproto\r\nConnection: Upgrade\r\n\r\n"
+    client.flush
+
+    resp_head = Gori::Proxy::Codec::Http1.read_head(client).not_nil!
+    String.new(resp_head).should contain("101")
+
+    # Post-upgrade raw bytes must flow both ways THROUGH the tunnel. Without the fix the
+    # proxy kept the connection HTTP keep-alive and read "PING" as the next request head,
+    # so it never reached the origin and no SRV:PING ever came back.
+    client.write("PING".to_slice)
+    client.flush
+    buf = Bytes.new(64)
+    n = client.read(buf)
+    String.new(buf[0, n]).should eq("SRV:PING")
+
+    client.close
+    proxy.stop
+  end
 end
 
 describe "Gori::Store WebSocket messages" do
