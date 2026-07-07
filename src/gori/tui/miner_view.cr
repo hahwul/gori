@@ -131,7 +131,11 @@ module Gori::Tui
     end
 
     def at_top? : Bool
-      @focus == :summary || (@focus == :results && @sel == 0)
+      @focus == :summary
+    end
+
+    def results_at_top? : Bool
+      @sel == 0
     end
 
     def pane_advance(dir : Int32) : Bool

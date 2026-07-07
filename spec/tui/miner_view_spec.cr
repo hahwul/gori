@@ -22,4 +22,27 @@ describe Gori::Tui::MinerView do
     view.label(18).should contain("login")
     view.label(18).should_not eq(auto) # the custom name overrides the derived summary
   end
+
+  it "verifies at_top? and results_at_top? behavior for vertical navigation" do
+    view = Gori::Tui::MinerView.new
+    view.focus_pane(:summary)
+    view.at_top?.should be_true
+    view.results_at_top?.should be_true
+
+    view.focus_pane(:results)
+    view.at_top?.should be_false
+    view.results_at_top?.should be_true
+
+    view.results_move(1)
+    view.results_at_top?.should be_true # remains true when results empty
+
+    # seed results and move
+    view.append_finding(Gori::Miner::Finding.new("p1", Gori::Miner::Location::Query, Gori::Miner::Evidence::Status, Gori::Miner::Confidence::Confirmed, nil, nil, 0_i64))
+    view.append_finding(Gori::Miner::Finding.new("p2", Gori::Miner::Location::Query, Gori::Miner::Evidence::Status, Gori::Miner::Confidence::Confirmed, nil, nil, 0_i64))
+    view.results_move(1)
+    view.results_at_top?.should be_false
+
+    view.results_move(-1)
+    view.results_at_top?.should be_true
+  end
 end
