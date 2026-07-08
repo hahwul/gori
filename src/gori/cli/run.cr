@@ -94,7 +94,7 @@ module Gori
           capture            Start the proxy and stream captured flows to STDOUT
           history (ls)       List / QL-query captured flows
           show <id>          Print a flow's request/response (text, json, or raw bytes)
-          replay <id>        Re-send a captured flow to its origin (optionally diff it)
+          replay             Re-send a captured flow, or list/create replay sessions
           fuzz [<id>]        Fuzz/intrude a request: mark §…§ positions, sweep payloads
           mine [<id>]        Discover hidden parameters (query/body/json/header/cookie)
           sitemap            Print the host → path endpoint tree (text, json, paths)
@@ -464,6 +464,162 @@ module Gori
       # --- replay ------------------------------------------------------------
 
       private def self.cmd_replay(args : Array(String)) : Nil
+        sub = args.first?
+        if sub == "list"
+          cmd_replay_list(args[1..])
+          return
+        elsif sub == "create"
+          cmd_replay_create(args[1..])
+          return
+        end
+
+        cmd_replay_single(args)
+      end
+
+      private def self.cmd_replay_list(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        format = :text
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run replay list [options]"
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run replay list: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run replay list: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          replays = store.replays_mcp
+          if format == :json
+            puts(JSON.build do |j|
+              j.array do
+                replays.each do |r|
+                  j.object do
+                    j.field "id", r.id
+                    j.field "position", r.position
+                    j.field "name", r.name || "Untitled"
+                    j.field "target", r.target
+                    j.field "http2", r.http2?
+                    j.field "auto_content_length", r.auto_content_length?
+                    j.field "flow_id", r.flow_id
+                    j.field "sni", r.sni
+                    j.field "mark_transform", r.mark_transform?
+                    j.field "last_error", r.response_error
+                    j.field "last_duration_us", r.response_duration_us
+                  end
+                end
+              end
+            end)
+          else
+            if replays.empty?
+              puts "No replay sessions in the workbench."
+            else
+              replays.each do |r|
+                name = r.name || "Untitled"
+                h2 = r.http2? ? "H2" : "H1"
+                puts "##{r.id}  [#{h2}]  #{name.ljust(20)}  → #{r.target}"
+              end
+            end
+          end
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_replay_create(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        target : String? = nil
+        request_file : String? = nil
+        request_raw : String? = nil
+        name : String? = nil
+        http2 = false
+        auto_cl = true
+        flow_id : Int64? = nil
+        sni : String? = nil
+        mark_transform = false
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run replay create [options]"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-tURL", "--target=URL", "Target URL (scheme://host[:port])") { |v| target = v }
+          p.on("-fFILE", "--request-file=FILE", "Read raw HTTP request from FILE") { |v| request_file = v }
+          p.on("-rRAW", "--request-raw=RAW", "Verbatim raw HTTP request string") { |v| request_raw = v }
+          p.on("--name=NAME", "Custom replay tab name") { |v| name = v }
+          p.on("--http2", "Use HTTP/2 (default: false)") { http2 = true }
+          p.on("--no-auto-cl", "Do not auto-calculate Content-Length header") { auto_cl = false }
+          p.on("--flow=ID", "Optional original flow ID this replay stems from") { |v| flow_id = parse_flow_id(v) }
+          p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
+          p.on("--mark-transform", "Enable token substitution replacement (default: false)") { mark_transform = true }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run replay create: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run replay create: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        req_content = ""
+        if file = request_file
+          abort "gori run replay create: request-file '#{file}' is not readable" unless File.file?(file)
+          req_content = File.read(file)
+        elsif raw = request_raw
+          req_content = raw
+        else
+          if flow_id.nil?
+            abort "gori run replay create: either --request-file, --request-raw, or --flow is required"
+          end
+        end
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          tgt_val = target
+          tgt_str : String = tgt_val ? tgt_val : ""
+          if fid = flow_id
+            detail = store.get_flow(fid)
+            abort "gori run replay create: no flow ##{fid} to clone" unless detail
+            built = Replay::FlowRequest.build(detail)
+            req_content = String.new(built.bytes)
+            if tgt_str.empty?
+              bt = built.target
+              tgt_str = bt ? bt : ""
+            end
+          end
+
+          abort "gori run replay create: --target is required" if tgt_str.empty?
+
+          pos = store.replays_meta.size
+          
+          id = store.insert_replay(
+            target: Env.mask_secrets(tgt_str),
+            request: Env.mask_secrets(req_content),
+            http2: http2,
+            auto_cl: auto_cl,
+            flow_id: flow_id,
+            position: pos.to_i32,
+            sni: sni,
+            mark_transform: mark_transform
+          )
+          
+          abort "gori run replay create: failed to create replay session" if id == 0
+          
+          if n = name
+            store.set_replay_name(id, Env.mask_secrets(n))
+          end
+
+          puts "Replay session ##{id} created successfully."
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_replay_single(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         target_override : String? = nil
