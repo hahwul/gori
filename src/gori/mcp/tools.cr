@@ -9,6 +9,7 @@ require "../fuzz"
 require "../convert"
 require "../env"
 require "../miner"
+require "../notes"
 require "./serialize"
 require "./request_builder"
 
@@ -174,7 +175,26 @@ module Gori
             s.field "query", strprop("filter replays by name or target URL (case-insensitive substring match)")
           end
 
+          tool j, "list_notes", "List all project notes (markdown/text documents) with metadata like title and line count." { }
+
+          tool j, "get_note", "Get the full text and metadata of a specific note by its database ID." do |s|
+            s.field "id", intprop("database note ID"), required: true
+          end
+
           if @allow_actions
+            tool j, "create_note", "Create a new note with optional text content." do |s|
+              s.field "text", strprop("initial text content for the new note")
+            end
+
+            tool j, "update_note", "Update the text content of an existing note by its database ID." do |s|
+              s.field "id", intprop("database note ID to update"), required: true
+              s.field "text", strprop("new text content for the note"), required: true
+            end
+
+            tool j, "delete_note", "Delete a note by its database ID." do |s|
+              s.field "id", intprop("database note ID to delete"), required: true
+            end
+
             tool j, "send_request",
               "Send/replay an HTTP request to its origin and return the response. " \
               "ACTIVE: makes a real outbound request from this host. Either pass " \
@@ -347,6 +367,8 @@ module Gori
         when "get_current_context" then get_current_context
         when "get_replay_context"  then get_replay_context(h)
         when "ql_reference"        then ql_reference
+        when "list_notes"          then list_notes
+        when "get_note"            then get_note(h)
         end
       end
 
@@ -368,6 +390,9 @@ module Gori
         when "mine_status"    then gated { mine_status(h) }
         when "mine_results"   then gated { mine_results(h) }
         when "mine_stop"      then gated { mine_stop(h) }
+        when "create_note"    then gated { create_note(h) }
+        when "update_note"    then gated { update_note(h) }
+        when "delete_note"    then gated { delete_note(h) }
         end
       end
 
@@ -684,6 +709,44 @@ module Gori
           is_error: true)
       end
 
+      private def list_notes : Result
+        doc = Notes.load(@store)
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "cur", doc.cur
+            j.field "notes" do
+              j.array do
+                doc.notes.each_with_index do |entry, idx|
+                  j.object do
+                    j.field "id", entry.id
+                    j.field "title", Notes.title(entry.text) || "Untitled"
+                    j.field "line_count", Notes.line_count(entry.text)
+                    j.field "current", doc.cur == idx
+                  end
+                end
+              end
+            end
+          end
+        end)
+      end
+
+      private def get_note(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        doc = Notes.load(@store)
+        entry = doc.notes.find { |n| n.id == id }
+        return Result.new("no note with id #{id}", is_error: true) unless entry
+        idx = doc.notes.index(entry).not_nil!
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", entry.id
+            j.field "text", entry.text
+            j.field "title", Notes.title(entry.text) || "Untitled"
+            j.field "current", doc.cur == idx
+          end
+        end)
+      end
+
       # --- action / write tools (gated) ---------------------------------------
 
       private def send_request(h) : Result
@@ -855,6 +918,74 @@ module Gori
 
         @store.update_finding(id, title: title, severity: severity, notes: notes, status: status)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "updated", true } })
+      end
+
+      private def create_note(h) : Result
+        text = str(h, "text") || ""
+        doc = Notes.load(@store)
+        new_id = doc.next_id
+        new_entry = Notes::NoteEntry.new(new_id, text)
+        new_notes = doc.notes + [new_entry]
+        new_cur = new_notes.size - 1
+        new_next_id = new_id + 1
+
+        serialized = Notes.serialize(new_cur, new_notes, new_next_id)
+        @store.set_setting(Notes::DOCS_KEY, serialized)
+
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", new_id
+            j.field "message", "Note created successfully"
+          end
+        end)
+      end
+
+      private def update_note(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        text = str(h, "text")
+        return Result.new("missing 'text' parameter", is_error: true) unless text
+
+        doc = Notes.load(@store)
+        entry_idx = doc.notes.index { |n| n.id == id }
+        return Result.new("no note with id #{id}", is_error: true) unless entry_idx
+
+        updated_entry = Notes::NoteEntry.new(id, text)
+        new_notes = doc.notes.dup
+        new_notes[entry_idx] = updated_entry
+
+        serialized = Notes.serialize(doc.cur, new_notes, doc.next_id)
+        @store.set_setting(Notes::DOCS_KEY, serialized)
+
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", id
+            j.field "message", "Note updated successfully"
+          end
+        end)
+      end
+
+      private def delete_note(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+
+        doc = Notes.load(@store)
+        entry_idx = doc.notes.index { |n| n.id == id }
+        return Result.new("no note with id #{id}", is_error: true) unless entry_idx
+
+        new_notes = doc.notes.dup
+        new_notes.delete_at(entry_idx)
+        new_cur = doc.cur.clamp(0, {new_notes.size - 1, 0}.max)
+
+        serialized = Notes.serialize(new_cur, new_notes, doc.next_id)
+        @store.set_setting(Notes::DOCS_KEY, serialized)
+
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", id
+            j.field "message", "Note deleted successfully"
+          end
+        end)
       end
 
       private def create_replay(h) : Result
