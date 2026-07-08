@@ -4,6 +4,7 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./layout"
+require "./tutorial"
 require "../settings"
 
 module Gori::Tui
@@ -49,6 +50,10 @@ module Gori::Tui
       @theme_scroll = 0
       @resized = false # forces a full repaint (resize OR a live theme swap)
       @running = false
+      # Review step — offer a guided TUI tour after setup. `@launch_tutorial` is set
+      # on finish and read by `run` (below) to launch the tour in this same terminal.
+      @offer = :tour # :tour | :skip
+      @launch_tutorial = false
     end
 
     # Run the wizard to completion (finish) or skip. Returns when the user is done;
@@ -72,6 +77,9 @@ module Gori::Tui
         end
         break unless @running
       end
+      # Opted into the tour on the Review step → run it now, reusing this terminal
+      # (already enhanced-keyboard + mouse enabled). Skip/Esc leaves it false.
+      Tutorial.new(@term).run if @launch_tutorial
     end
 
     # --- input ---------------------------------------------------------------
@@ -132,11 +140,14 @@ module Gori::Tui
       end
     end
 
-    # Review step: ↵ finishes (commit + persist); ⇧⇥ back.
+    # Review step: ↑/↓ pick the tour offer; ↵ finishes (commit + persist, then
+    # launch the tour iff selected); ⇧⇥ back.
     private def handle_review_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.enter?
         finish
+      elsif key.up? || key.down?
+        @offer = @offer == :tour ? :skip : :tour
       elsif key.back_tab?
         @step = Step::Appearance
       end
@@ -215,6 +226,7 @@ module Gori::Tui
       Settings.bind_port = @port.strip.to_i? || Settings.bind_port
       Settings.theme = @theme_name
       Settings.save
+      @launch_tutorial = @offer == :tour # `run` launches the tour after the loop
       @running = false
     end
 
@@ -288,7 +300,7 @@ module Gori::Tui
     private def content_rows : Int32
       case @step
       when Step::Bind   then 7 # heading, gap, ip, port, gap, info, status
-      when Step::Review then 7 # title, gap, 2 recap rows, gap, 2 reminder rows
+      when Step::Review then 8 # title, gap, 2 recap rows, gap, offer prompt, 2 offer rows
       # ≥7 so the preview panel (header + 3 status rows) is never clipped, capped so a
       # long theme list scrolls (the list viewport derives from the card height) instead
       # of demanding the whole screen.
@@ -375,7 +387,7 @@ module Gori::Tui
       hint = case @step
              when Step::Bind       then "↵ next · ↑/↓ field · esc skip"
              when Step::Appearance then "↑/↓ pick theme · ↵ next · ⇧⇥ back · esc skip"
-             else                       "↵ finish · ⇧⇥ back · esc skip"
+             else                       "↑/↓ choose · ↵ confirm · ⇧⇥ back · esc skip"
              end
       screen.text({(w - hint.size) // 2, 0}.max, h - 1, hint, Theme.muted, Theme.bg)
     end
@@ -506,15 +518,25 @@ module Gori::Tui
       y += 2
       recap(screen, box, ix, y, "Proxy", "#{effective_ip}:#{@port.strip}"); y += 1
       recap(screen, box, ix, y, "Theme", @theme_name); y += 2
-      screen.text(ix, y, "Change anytime from the command palette (^P):", Theme.muted, Theme.panel, width: {box.w - 6, 1}.max)
+      screen.text(ix, y, "New to gori? Take a quick tour of the TUI:", Theme.muted, Theme.panel, width: {box.w - 6, 1}.max)
       y += 1
-      screen.text(ix, y, "Settings: Network · Settings: Theme", Theme.text, Theme.panel, width: {box.w - 6, 1}.max)
+      render_offer_row(screen, box, y, "Take the guided tour", @offer == :tour); y += 1
+      render_offer_row(screen, box, y, "Skip — finish setup", @offer == :skip)
     end
 
     private def recap(screen : Screen, box : Rect, ix : Int32, y : Int32, key : String, value : String) : Nil
       screen.text(ix, y, key, Theme.muted, Theme.panel)
       vx = ix + 14
       screen.text(vx, y, value, Theme.text_bright, Theme.panel, width: {box.right - vx - 1, 1}.max)
+    end
+
+    # A selectable offer row (radio-style), mirroring the theme list's accent band.
+    private def render_offer_row(screen : Screen, box : Rect, ry : Int32, label : String, selected : Bool) : Nil
+      bg = selected ? Theme.accent_bg : Theme.panel
+      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
+      screen.cell(box.x + 1, ry, selected ? '▎' : ' ', Theme.accent, bg)
+      screen.cell(box.x + 3, ry, selected ? '◉' : '◯', selected ? Theme.accent : Theme.muted, bg)
+      screen.text(box.x + 5, ry, label, selected ? Theme.text_bright : Theme.text, bg, width: {box.right - (box.x + 5) - 1, 1}.max)
     end
   end
 end

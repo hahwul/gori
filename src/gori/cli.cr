@@ -19,6 +19,7 @@ module Gori
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
   # - `gori wizard`                 → interactive first-run setup wizard (bind/theme)
+  # - `gori tutorial`               → guided TUI tour (navigation, palette, menu, edit)
   # - `gori update`                 → print how to update gori (no built-in self-update yet)
   #
   # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
@@ -53,6 +54,8 @@ module Gori
         run_run(subargs)
       when "wizard"
         run_wizard(subargs)
+      when "tutorial"
+        run_tutorial(subargs)
       when "mcp"
         run_mcp(subargs)
       when "update"
@@ -75,6 +78,7 @@ module Gori
       puts "  export    Export things (currently only ca-cert)"
       puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
       puts "  wizard    Interactive setup wizard (bind, theme) — also runs on first launch"
+      puts "  tutorial  Guided tour of the TUI (navigation, palette, menu, edit mode)"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
       puts "  update    Show how to update gori to the latest version"
       puts ""
@@ -247,6 +251,33 @@ module Gori
       term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav
       begin
         Tui::SetupWizard.new(term).run
+      ensure
+        term.close # restore the terminal even on error
+      end
+    end
+
+    # `gori tutorial` launches the guided TUI tour — tab/pane navigation, the
+    # command palette (^P), the action menu (space), and edit mode (READ/INS) —
+    # on a harmless mock of the UI. It is also offered at the end of `gori wizard`
+    # / first launch; this command replays it anytime. Like the wizard it drives
+    # /dev/tty directly, so it sets up its own terminal instead of going through App.
+    private def self.run_tutorial(args : Array(String)) : Nil
+      if args.any? { |a| ["-h", "--help"].includes?(a) }
+        puts "Usage: gori tutorial"
+        puts "  Interactive tour of gori's TUI: tab/pane navigation, the command"
+        puts "  palette (^P), the action menu (space), and edit mode (READ/INS)."
+        puts "  Also offered at the end of `gori wizard`; use this to replay it."
+        return
+      end
+      Paths.ensure_dirs
+      Settings.load
+      Tui::Theme.load_custom           # honour user themes so the mock matches the real UI
+      Tui::Theme.apply(Settings.theme) # render the tour in the persisted theme
+      term = Tui.open_terminal("run the tutorial directly, not under CI or a detached/background job")
+      term.enable_enhanced_keyboard       # Kitty disambiguation (mirrors the wizard)
+      term.enable_mouse if Settings.mouse # a click advances the tour
+      begin
+        Tui::Tutorial.new(term).run
       ensure
         term.close # restore the terminal even on error
       end
