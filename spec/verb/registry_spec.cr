@@ -140,6 +140,14 @@ private class FakeContext < ExecContext
     0
   end
 
+  def replay_rename_subtab : Nil
+    @calls << :replay_rename_subtab
+  end
+
+  def replay_close_subtab : Nil
+    @calls << :replay_close_subtab
+  end
+
   def replay_toggle_hex : Nil
     @calls << :replay_toggle_hex
   end
@@ -154,6 +162,14 @@ private class FakeContext < ExecContext
 
   def replay_toggle_auto_content_length : Nil
     @calls << :replay_toggle_auto_content_length
+  end
+
+  def replay_toggle_resp_diff : Nil
+    @calls << :replay_toggle_resp_diff
+  end
+
+  def replay_toggle_resp_hex : Nil
+    @calls << :replay_toggle_resp_hex
   end
 
   def replay_toggle_mark_transform : Nil
@@ -234,6 +250,14 @@ private class FakeContext < ExecContext
 
   def fuzz_clear_marks : Nil
     @calls << :fuzz_clear_marks
+  end
+
+  def fuzzer_rename_subtab : Nil
+    @calls << :fuzzer_rename_subtab
+  end
+
+  def fuzzer_close_subtab : Nil
+    @calls << :fuzzer_close_subtab
   end
 
   def fuzzer_copy : Nil
@@ -600,6 +624,10 @@ private class FakeContext < ExecContext
     @calls << :convert_close
   end
 
+  def convert_rename_subtab : Nil
+    @calls << :convert_rename_subtab
+  end
+
   def convert_clear : Nil
     @calls << :convert_clear
   end
@@ -610,6 +638,10 @@ private class FakeContext < ExecContext
 
   def convert_copy_selection : Nil
     @calls << :convert_copy_selection
+  end
+
+  def convert_copy_all : Nil
+    @calls << :convert_copy_all
   end
 
   def convert_read_mode? : Bool
@@ -690,6 +722,10 @@ private class FakeContext < ExecContext
 
   def read_clear_selection : Nil
     @calls << :read_clear_selection
+  end
+
+  def read_copy : Nil
+    @calls << :read_copy
   end
 
   def detail_navigable? : Bool
@@ -847,6 +883,28 @@ describe Gori::Verb do
       ctx.calls.should contain(:replay_toggle_decoded)
       ctx.calls.should contain(:replay_toggle_sni)
       ctx.calls.should contain(:replay_toggle_auto_content_length)
+    end
+
+    it "routes the Round-4 Replay :subtab/:response verbs through the matching ExecContext methods" do
+      reg = Gori::Verbs.registry
+      ctx = FakeContext.new
+      reg["replay.rename-subtab"].call(ctx)
+      reg["replay.close-subtab"].call(ctx)
+      reg["replay.toggle-diff"].call(ctx)
+      reg["replay.toggle-resp-hex"].call(ctx)
+      ctx.calls.should contain(:replay_rename_subtab)
+      ctx.calls.should contain(:replay_close_subtab)
+      ctx.calls.should contain(:replay_toggle_resp_diff)
+      ctx.calls.should contain(:replay_toggle_resp_hex)
+    end
+
+    it "routes the Round-4 Fuzzer :subtab verbs through the matching ExecContext methods" do
+      reg = Gori::Verbs.registry
+      ctx = FakeContext.new
+      reg["fuzz.rename-subtab"].call(ctx)
+      reg["fuzz.close-subtab"].call(ctx)
+      ctx.calls.should contain(:fuzzer_rename_subtab)
+      ctx.calls.should contain(:fuzzer_close_subtab)
     end
 
     it "routes the palette-only Refresh screen verb (no chord) to refresh_screen" do

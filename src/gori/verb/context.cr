@@ -70,10 +70,14 @@ module Gori
       abstract def replay_send : Nil                       # resend the (edited) request to the target
       abstract def replay_find_subtab : Nil                # open the sub-tab search picker (filter + jump)
       abstract def replay_subtab_count : Int32             # open replay session count (gates the search menu entry)
+      abstract def replay_rename_subtab : Nil              # open the rename prompt for the active sub-tab
+      abstract def replay_close_subtab : Nil               # close the active sub-tab (confirm-gated)
       abstract def replay_toggle_hex : Nil                 # toggle byte-exact hex editing of the request pane
       abstract def replay_toggle_decoded : Nil             # toggle the envelope/decoded split sub-pane (SAML/GraphQL)
       abstract def replay_toggle_sni : Nil                 # toggle the SNI-override sub-field (target pane)
       abstract def replay_toggle_auto_content_length : Nil # recompute Content-Length on send
+      abstract def replay_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
+      abstract def replay_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
       # mark-transform mode: mark request values (§…§) and attach Convert chains applied on send
       abstract def replay_toggle_mark_transform : Nil # toggle MARK mode on/off
       abstract def replay_pretty_request : Nil
@@ -88,15 +92,17 @@ module Gori
       abstract def replay_read_mode? : Bool   # focused pane is READ (y/copy verbs gate on this)
 
       # fuzzer workbench (run/stop/marking handled inline; these power the palette + cross-tab)
-      abstract def fuzz_selected : Nil     # send History's selection to the Fuzzer tab
-      abstract def fuzz_from_replay : Nil  # turn the current Replay request into a fuzz template
-      abstract def fuzz_run : Nil          # start the fuzz run
-      abstract def fuzz_stop : Nil         # stop the running fuzz
-      abstract def fuzz_new : Nil          # open a blank fuzz session
-      abstract def fuzz_automark : Nil     # auto-mark every request parameter
-      abstract def fuzz_attach_chain : Nil # open the chain-edit prompt for the marker at the template cursor
-      abstract def fuzz_list_paste : Nil   # open the payload-set editor pre-seeded to a List (multi-line, one value per line)
-      abstract def fuzz_clear_marks : Nil  # strip all §…§ markers (and their chains) from the template
+      abstract def fuzz_selected : Nil        # send History's selection to the Fuzzer tab
+      abstract def fuzz_from_replay : Nil     # turn the current Replay request into a fuzz template
+      abstract def fuzz_run : Nil             # start the fuzz run
+      abstract def fuzz_stop : Nil            # stop the running fuzz
+      abstract def fuzz_new : Nil             # open a blank fuzz session
+      abstract def fuzz_automark : Nil        # auto-mark every request parameter
+      abstract def fuzz_attach_chain : Nil    # open the chain-edit prompt for the marker at the template cursor
+      abstract def fuzz_list_paste : Nil      # open the payload-set editor pre-seeded to a List (multi-line, one value per line)
+      abstract def fuzz_clear_marks : Nil     # strip all §…§ markers (and their chains) from the template
+      abstract def fuzzer_rename_subtab : Nil # open the rename prompt for the active sub-tab
+      abstract def fuzzer_close_subtab : Nil  # close the active sub-tab (confirm-gated)
       abstract def fuzzer_copy : Nil          # copy selection or current line (READ panes)
       abstract def fuzzer_copy_all : Nil      # copy the whole focused pane text
       abstract def fuzzer_read_mode? : Bool   # focused pane is READ (y/copy verbs gate on this)
@@ -223,28 +229,30 @@ module Gori
 
       # convert: the encode/decode/hash workbench (sub-tab + output actions; the body's
       # text editing + focus nav stay inline, these power the space menu + palette)
-      abstract def convert_new : Nil        # open a fresh blank conversion sub-tab
-      abstract def convert_close : Nil      # close the active conversion sub-tab (keeps ≥1)
-      abstract def convert_clear : Nil      # clear the current input + chain
-      abstract def convert_copy : Nil            # copy the entire current output to the clipboard
-      abstract def convert_copy_selection : Nil    # copy selection from INPUT/OUTPUT (READ)
-      abstract def convert_read_mode? : Bool       # INPUT READ or OUTPUT pane (gates y/copy)
-      abstract def convert_cycle_mode : Nil # cycle the output display (text/hex/base64)
-      abstract def convert_save : Nil       # save the current chain by name (in-body prompt)
-      abstract def convert_load : Nil       # load a saved chain by name (in-body prompt)
+      abstract def convert_new : Nil            # open a fresh blank conversion sub-tab
+      abstract def convert_close : Nil          # close the active conversion sub-tab (keeps ≥1)
+      abstract def convert_rename_subtab : Nil  # open the rename prompt for the active sub-tab
+      abstract def convert_clear : Nil          # clear the current input + chain
+      abstract def convert_copy : Nil           # copy the entire current output to the clipboard
+      abstract def convert_copy_selection : Nil # copy selection from INPUT/OUTPUT (READ)
+      abstract def convert_copy_all : Nil       # copy the whole focused pane text (space menu / palette fallback)
+      abstract def convert_read_mode? : Bool    # INPUT READ or OUTPUT pane (gates y/copy)
+      abstract def convert_cycle_mode : Nil     # cycle the output display (text/hex/base64)
+      abstract def convert_save : Nil           # save the current chain by name (in-body prompt)
+      abstract def convert_load : Nil           # load a saved chain by name (in-body prompt)
 
       # notes: the multi-note scratchpad (sub-tab actions; the body's text editing
       # stays inline, these power the space menu reachable from the sub-tab strip)
-      abstract def notes_new : Nil   # open a fresh blank note sub-tab
-      abstract def notes_close : Nil # close the active note sub-tab (keeps ≥1)
-      abstract def notes_copy : Nil       # copy selection or current line (READ mode)
-      abstract def notes_copy_all : Nil   # copy the entire current note to the clipboard
+      abstract def notes_new : Nil         # open a fresh blank note sub-tab
+      abstract def notes_close : Nil       # close the active note sub-tab (keeps ≥1)
+      abstract def notes_copy : Nil        # copy selection or current line (READ mode)
+      abstract def notes_copy_all : Nil    # copy the entire current note to the clipboard
       abstract def notes_read_mode? : Bool # READ vs INS (gates y/copy verbs)
-      abstract def notes_clear : Nil # clear the current note's text
-      abstract def notes_edit : Nil  # open the current note in the external editor
-      abstract def notes_goto : Nil  # open the go-to-line prompt
-      abstract def notes_find : Nil  # open the find-in-note prompt
-      abstract def notes_links : Nil # open the links overlay for the current note
+      abstract def notes_clear : Nil       # clear the current note's text
+      abstract def notes_edit : Nil        # open the current note in the external editor
+      abstract def notes_goto : Nil        # open the go-to-line prompt
+      abstract def notes_find : Nil        # open the find-in-note prompt
+      abstract def notes_links : Nil       # open the links overlay for the current note
 
       # project: description pane copy actions (READ mode on the DESCRIPTION card)
       abstract def project_desc_read_mode? : Bool
@@ -255,6 +263,10 @@ module Gori
       abstract def read_selection_active? : Bool
       abstract def read_select_line : Nil
       abstract def read_clear_selection : Nil
+      # The unified "Copy" verb's fallback: selection if one is active, else the
+      # whole focused pane. Routes to the active tab's existing copy delegators
+      # (not new copy logic) — mirrors read_selection_active?'s per-tab dispatch.
+      abstract def read_copy : Nil
       abstract def detail_navigable? : Bool # History detail text pane (not hex)
       # Override a verb's space-menu title (nil → use the registered default).
       abstract def space_menu_title(verb_id : String) : String?

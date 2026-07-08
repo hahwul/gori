@@ -126,15 +126,25 @@ module Gori
         "scope.delete-rule", "Delete scope rule", "Remove the selected scope rule",
         Verb::Scope::Project, [Verb::Chord.new("d")], available: scope_rule) { |ctx| ctx.scope_delete_rule; nil }
 
+      # The single smart Copy (see replay.copy in verbs/history.cr) — copy-all is gone.
+      # Was `hidden: true` (the menu only ever showed "Copy description"); now that
+      # this IS the one Copy action, it needs to be visible. Project shares
+      # Verb::Scope::Body with the History list (Body is the generic "content pane
+      # focus" scope), so plain 'y' would collide with history.copy — both in the
+      # SAME (scope, :common) space-menu view (validate_menu_keys! doesn't know the
+      # two are gated to different tabs at runtime) AND as a raw Chord in the SAME
+      # scope (keymap_spec's rebindable-conflict guard: two verbs can't default-bind
+      # the same chord in one scope). Dropping the chord resolves both — the direct
+      # 'y' keypress in the Project description pane is already raw-dispatched by
+      # ProjectController (`when c == 'y' then project_copy`, never touching the
+      # shared Keymap), so the chord here was vestigial. Capital 'Y' keeps a
+      # "copy"-flavored mnemonic for the space menu while staying distinct from
+      # history.copy's 'y' (mirrors fuzzer.select-line's 'S' dodging lowercase 's').
       in_project_desc_read = ->(ctx : Verb::ExecContext) { ctx.project_desc_read_mode? }
       r.register Verb::Definition.new(
-        "project.copy", "Copy selection", "Copy the selected description text (or current line) to the clipboard",
-        Verb::Scope::Body, [Verb::Chord.new("y")],
-        available: in_project_desc_read, hidden: true) { |ctx| ctx.project_copy; nil }
-
-      r.register Verb::Definition.new(
-        "project.copy-all", "Copy description", "Copy the entire project description to the clipboard",
-        Verb::Scope::Body, available: in_project_desc_read, mnemonic: 'O') { |ctx| ctx.project_copy_all; nil }
+        "project.copy", "Copy", "Copy the selected description text, or the whole description if nothing is selected, to the clipboard",
+        Verb::Scope::Body,
+        available: in_project_desc_read, mnemonic: 'Y') { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "rules.edit", "Match & Replace", "Edit in-flight request/response head rewrite rules", Verb::Scope::Global,

@@ -149,6 +149,14 @@ module Gori::Tui
     abstract def tab : Symbol                # the registry key (== Chrome::TABS symbol)
     abstract def command_scope : Verb::Scope # the space-menu scope when this tab + body has focus
 
+    # The space menu's CONTEXT section when this tab's body holds focus — the current
+    # focus-area within the tab (e.g. Replay :request/:response/:target). Default
+    # :common: single-region tabs (History, Sitemap, …) have no sub-area to single
+    # out, so their menu is just the one COMMON group, identical to today.
+    def command_section : Symbol
+      :common
+    end
+
     # --- rendering --- (`focus` is the shell's @focus: :menu | :subtabs | :body)
     abstract def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
 

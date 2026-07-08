@@ -63,6 +63,12 @@ module Gori::Tui
       Verb::Scope::Replay
     end
 
+    # The space menu's CONTEXT section: whichever pane the active session's editor
+    # is focused on. :common when no session is open (empty state).
+    def command_section : Symbol
+      current_view.try(&.focus) || :common
+    end
+
     # --- shell-facing accessors (strip machinery + orthogonal prompts read these) ---
     def count : Int32
       @replays.size
@@ -241,7 +247,7 @@ module Gori::Tui
         elsif (view = current_view) && view.focus == :target && view.target_insert?
           view.exit_target_insert!
         else
-          @host.request_focus(:menu)
+          @host.request_focus(:subtabs)
         end
       elsif ev.ctrl? || ev.alt?
         # Any OTHER modified chord (^R send, ^X hex, ^S SNI, ^L auto-CL, …) defers to the
@@ -427,10 +433,8 @@ module Gori::Tui
         @host.focus_body
         case pane
         when :request
-          v.enter_request_insert! unless v.request_insert?
           v.request_click_to_cursor(body, mx, my)
         when :target
-          v.enter_target_insert! unless v.target_insert?
           v.target_click_to_cursor(body, mx, my)
         when :response
           v.resp_click_to_cursor(body, mx, my)

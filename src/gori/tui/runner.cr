@@ -2455,6 +2455,30 @@ module Gori::Tui
       end
     end
 
+    # The (scope, section) the space menu renders for, captured at the space
+    # keystroke. Deliberately DISTINCT from current_scope (the keymap's resolver,
+    # unchanged above) — the tab bar keeps Sidebar for keybindings (so Replay's
+    # chords don't fire while navigating tabs) but the space menu on the tab bar
+    # should show that TAB's own top actions instead. By the time this is read,
+    # @overlay is always :none or :detail — every other overlay handles its own
+    # keys earlier in handle_key and returns before space is ever checked.
+    private def space_menu_context : {Verb::Scope, Symbol}
+      if @overlay == :detail
+        {Verb::Scope::HistoryDetail, :common}
+      else
+        scope = @tabs[@active_tab]?.try(&.command_scope) || Verb::Scope::Body
+        case @focus
+        when :menu
+          section = @session.registry.has_section?(scope, :tab) ? :tab : :common
+          {scope, section}
+        when :subtabs
+          {scope, :subtab}
+        else
+          {scope, @tabs[@active_tab]?.try(&.command_section) || :common}
+        end
+      end
+    end
+
     private def format_status_message(message : String?) : String?
       return nil unless message
       if message.starts_with?("replaying →") || message.starts_with?("ws replay →") ||
@@ -2830,7 +2854,8 @@ module Gori::Tui
     # scope reflects where space was pressed — the History list → Body, an open
     # detail → HistoryDetail, the Replay response → Replay, the tab bar → Sidebar.
     def open_space_menu : Nil
-      @space_menu.open(current_scope, self) # captures the scope + populates entries
+      scope, section = space_menu_context
+      @space_menu.open(scope, section, self) # captures the scope+section + populates entries
       # Don't open an empty popup: some focus areas (the tab bar, an open detail)
       # have only hidden nav verbs, so the entry list is empty. Opening there would
       # trap input behind an empty box — keep space a no-op (with a hint) instead.
@@ -3686,6 +3711,16 @@ module Gori::Tui
       replay_controller.count
     end
 
+    # Space-menu (:subtab) counterparts of the strip's `r` rename chord / ^W close —
+    # reuse the SAME shell-owned rename prompt / confirm-gated close, not a new path.
+    def replay_rename_subtab : Nil
+      open_rename(current_subtab_index)
+    end
+
+    def replay_close_subtab : Nil
+      replay_controller.request_close
+    end
+
     def replay_toggle_hex : Nil
       replay_controller.replay_toggle_hex
     end
@@ -3700,6 +3735,16 @@ module Gori::Tui
 
     def replay_toggle_auto_content_length : Nil
       replay_controller.replay_toggle_auto_content_length
+    end
+
+    # Space-menu (:response) counterparts of the response pane's raw `d`/`x` keys —
+    # same ReplayView toggles, just reachable without memorizing the key.
+    def replay_toggle_resp_diff : Nil
+      replay_controller.current_view.try(&.toggle_resp_mode)
+    end
+
+    def replay_toggle_resp_hex : Nil
+      replay_controller.current_view.try(&.toggle_resp_hex)
     end
 
     def replay_toggle_mark_transform : Nil
@@ -3795,6 +3840,16 @@ module Gori::Tui
 
     def fuzz_clear_marks : Nil
       fuzzer_controller.fuzz_clear_marks
+    end
+
+    # Space-menu (:subtab) counterparts of the strip's `r` rename chord / ^W close —
+    # reuse the SAME shell-owned rename prompt / confirm-gated close, not a new path.
+    def fuzzer_rename_subtab : Nil
+      open_rename(current_subtab_index)
+    end
+
+    def fuzzer_close_subtab : Nil
+      fuzzer_controller.request_close
     end
 
     def fuzzer_copy : Nil
@@ -4021,6 +4076,13 @@ module Gori::Tui
       resolve_subtab_focus_after_close # don't strand on a now-hidden strip
     end
 
+    # Space-menu (:subtab) counterpart of the strip's `r` rename chord — reuses the
+    # SAME shell-owned rename prompt as Replay/Fuzzer (open_rename already handles
+    # Convert generically via view_at).
+    def convert_rename_subtab : Nil
+      open_rename(current_subtab_index)
+    end
+
     def convert_clear : Nil
       convert_controller.clear_all
     end
@@ -4031,6 +4093,10 @@ module Gori::Tui
 
     def convert_copy_selection : Nil
       convert_controller.convert_copy_selection
+    end
+
+    def convert_copy_all : Nil
+      convert_controller.convert_copy_all
     end
 
     def convert_read_mode? : Bool
@@ -4086,23 +4152,30 @@ module Gori::Tui
       project_controller.project_copy_all
     end
 
+    # The unified Copy verbs whose base title is now plain "Copy" (routed through
+    # read_copy — selection if active, else the whole focused pane; copy-all is
+    # gone). detail.copy is DELIBERATELY excluded: History detail has no whole-pane
+    # alternative (read_copy's :history branch always falls back to
+    # detail_copy_selection), so its title stays the static "Copy selection" —
+    # flipping it here would be a no-op at best and misleading at worst (no
+    # selection ⇒ it still only copies the current line, not "the whole pane").
     READ_COPY_VERBS = %w(
-      notes.copy replay.copy convert.copy finding.copy project.copy detail.copy fuzzer.copy
+      notes.copy replay.copy convert.copy finding.copy project.copy fuzzer.copy
     )
 
     def space_menu_title(verb_id : String) : String?
-      return "Copy selected" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?
+      return "Copy selection" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?
       nil
     end
 
     def read_selection_active? : Bool
       case @active_tab
       when :notes    then notes_controller.view.selection?
-      when :replay    then replay_controller.replay_selection_active?
-      when :fuzzer    then fuzzer_controller.fuzzer_selection_active?
-      when :convert   then convert_controller.convert_selection_active?
-      when :findings  then findings_controller.findings_notes_selection_active?
-      when :project   then project_controller.project_desc_selection_active?
+      when :replay   then replay_controller.replay_selection_active?
+      when :fuzzer   then fuzzer_controller.fuzzer_selection_active?
+      when :convert  then convert_controller.convert_selection_active?
+      when :findings then findings_controller.findings_notes_selection_active?
+      when :project  then project_controller.project_desc_selection_active?
       when :history
         @overlay == :detail && history_controller.detail_selection_active?
       else
@@ -4113,11 +4186,11 @@ module Gori::Tui
     def read_select_line : Nil
       case @active_tab
       when :notes    then notes_controller.view.select_line
-      when :replay    then replay_controller.replay_select_line
-      when :fuzzer    then fuzzer_controller.fuzzer_select_line
-      when :convert   then convert_controller.convert_select_line
-      when :findings  then findings_controller.findings_notes_select_line
-      when :project   then project_controller.project_desc_select_line
+      when :replay   then replay_controller.replay_select_line
+      when :fuzzer   then fuzzer_controller.fuzzer_select_line
+      when :convert  then convert_controller.convert_select_line
+      when :findings then findings_controller.findings_notes_select_line
+      when :project  then project_controller.project_desc_select_line
       when :history
         history_controller.detail_select_line if @overlay == :detail
       end
@@ -4126,13 +4199,32 @@ module Gori::Tui
     def read_clear_selection : Nil
       case @active_tab
       when :notes    then notes_controller.view.clear_selection
-      when :replay    then replay_controller.replay_clear_selection
-      when :fuzzer    then fuzzer_controller.fuzzer_clear_selection
-      when :convert   then convert_controller.convert_clear_selection
-      when :findings  then findings_controller.findings_notes_clear_selection
-      when :project   then project_controller.project_desc_clear_selection
+      when :replay   then replay_controller.replay_clear_selection
+      when :fuzzer   then fuzzer_controller.fuzzer_clear_selection
+      when :convert  then convert_controller.convert_clear_selection
+      when :findings then findings_controller.findings_notes_clear_selection
+      when :project  then project_controller.project_desc_clear_selection
       when :history
         history_controller.detail_clear_selection if @overlay == :detail
+      end
+    end
+
+    # The unified "Copy" fallback: selection if one is active, else the whole
+    # focused pane. Mirrors read_selection_active?'s per-@active_tab dispatch and
+    # reuses the existing copy delegators — no new copy logic. Wired to each tab's
+    # `*.copy` verb (verbs/*.cr) — the *.copy-all verbs are gone.
+    def read_copy : Nil
+      case @active_tab
+      when :notes    then read_selection_active? ? notes_copy : notes_copy_all
+      when :replay   then read_selection_active? ? replay_copy : replay_copy_all
+      when :fuzzer   then read_selection_active? ? fuzzer_copy : fuzzer_copy_all
+      when :convert  then read_selection_active? ? convert_copy_selection : convert_copy_all
+      when :findings then read_selection_active? ? findings_copy : findings_copy_all
+      when :project  then read_selection_active? ? project_copy : project_copy_all
+      when :history
+        # No whole-rendered-pane delegator exists for the detail text pane — both
+        # branches fall back to the selection-or-current-line copy.
+        detail_copy_selection if @overlay == :detail
       end
     end
 

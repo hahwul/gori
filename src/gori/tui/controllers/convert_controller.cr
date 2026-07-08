@@ -69,6 +69,11 @@ module Gori::Tui
       Verb::Scope::Convert
     end
 
+    # The space menu's CONTEXT section: the current session's focused pane.
+    def command_section : Symbol
+      cur.pane
+    end
+
     # INPUT INS or CHAIN editing → EDITOR; INPUT READ and OUTPUT are navigable.
     def body_badge : Symbol
       s = cur
@@ -219,7 +224,7 @@ module Gori::Tui
           s.input_read.sync_from(s.input)
         else
           commit
-          @host.request_focus(:menu)
+          @host.request_focus(:subtabs)
         end
       else
         case cur.pane
@@ -259,8 +264,8 @@ module Gori::Tui
       if regions.input.contains?(mx, my)
         s.pane = :input
         @popup.close
-        s.input_mode = InputMode::Insert
         s.input.click_to_cursor(regions.input.inset(1, 1), mx, my)
+        s.input_read.sync_from(s.input) unless s.input_mode == InputMode::Insert
       elsif regions.chain.contains?(mx, my)
         s.pane = :chain
         field = regions.chain.inset(1, 1)
@@ -287,9 +292,9 @@ module Gori::Tui
     def set_preedit(text : String) : Bool
       s = cur
       case s.pane
-      when :input  then s.input.set_preedit(text) if s.input_mode == InputMode::Insert
-      when :chain  then @chain_pre = text
-      else              nil
+      when :input then s.input.set_preedit(text) if s.input_mode == InputMode::Insert
+      when :chain then @chain_pre = text
+      else             nil
       end
       true
     end
@@ -396,6 +401,27 @@ module Gori::Tui
       end
     end
 
+    # The no-selection fallback for the space-menu/palette "Copy" verb (convert.copy):
+    # routes on the FOCUSED pane like convert_copy_selection, but copies the WHOLE pane
+    # content rather than always OUTPUT (that was the bug — copy_output ignored focus
+    # entirely). Mirrors Replay/Fuzzer's pane_copy_all_text pattern.
+    def convert_copy_all : Nil
+      s = cur
+      text = case s.pane
+             when :output then s.view.output_copy(s.result)
+             when :input  then s.input_read.copy_all(s.input)
+             else              s.chain
+             end
+      if text.empty?
+        @host.status("nothing to copy")
+      else
+        written = Clipboard.copy(text)
+        msg = "copied all (#{written}b)"
+        msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
+        @host.status(msg)
+      end
+    end
+
     def convert_read_mode? : Bool
       s = cur
       s.pane == :output || (s.pane == :input && s.input_mode == InputMode::Read)
@@ -406,7 +432,7 @@ module Gori::Tui
       case s.pane
       when :input  then s.input_mode == InputMode::Read && s.input_read.selection?
       when :output then s.view.output_selection?
-      else             false
+      else              false
       end
     end
 
@@ -547,8 +573,8 @@ module Gori::Tui
       when key.up?, key.lower_k?
         s.view.output_at_top? ? (s.pane = :chain) : out_nav_step(s, -1, 0, selecting)
       when key.down?, key.lower_j? then out_nav_step(s, 1, 0, selecting)
-      when key.left?  then out_nav_step(s, 0, -1, selecting)
-      when key.right? then out_nav_step(s, 0, 1, selecting)
+      when key.left?               then out_nav_step(s, 0, -1, selecting)
+      when key.right?              then out_nav_step(s, 0, 1, selecting)
       when (c = ev.char || key.to_char) == 'x'
         s.view.output_select_line(s.result)
       when c == 'y'
