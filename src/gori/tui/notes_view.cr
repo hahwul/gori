@@ -1,7 +1,11 @@
 require "./screen"
 require "./theme"
+require "./frame"
 require "./traffic_empty_state"
 require "./text_area"
+require "./input_mode"
+require "./text_read_state"
+require "./gutter"
 require "../store"
 require "../notes"
 require "../settings"
@@ -10,7 +14,7 @@ module Gori::Tui
   # The Notes tab (DESIGN.md: notes/report — the running scratchpad/report).
   # Multiple free-form, per-project documents kept as sub-tabs (like Replay):
   # `^N` opens a new note, `^W` closes the current one, `^1-9` switches. Each
-  # note is edited inline (no edit mode — typing edits directly). The whole set
+  # note defaults to READ (navigate/select/copy); i/↵ enters INS to type. The whole set
   # is persisted in the project's settings KV as JSON (key "notes.docs") and
   # saved when you leave the editor, so it survives reopening the project.
   #
@@ -57,6 +61,8 @@ module Gori::Tui
       @dirty = false
       @link_preview = ""            # resolved first-link line for the bottom strip (set by controller)
       @deleted_ids = Set(Int64).new # notes closed this session — so a merge-on-save doesn't resurrect them
+      @mode = InputMode::Read
+      @read = TextReadState.new
     end
 
     # Allocate a cross-session-unique note id. A random 63-bit id (not a shared
@@ -134,6 +140,44 @@ module Gori::Tui
       @dirty = true
     end
 
+    getter mode : InputMode
+
+    def insert_mode? : Bool
+      @mode == InputMode::Insert
+    end
+
+    def enter_insert! : Nil
+      @mode = InputMode::Insert
+      @read.sync_from(current.area)
+    end
+
+    def exit_insert! : Nil
+      @mode = InputMode::Read
+      @read.sync_from(current.area)
+    end
+
+    def read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      return if insert_mode?
+      @read.move(current.area, dr, dc, selecting: selecting)
+    end
+
+    def copy_text : String
+      @read.copy_text(current.area)
+    end
+
+    def selection? : Bool
+      !insert_mode? && @read.selection?
+    end
+
+    def select_line : Nil
+      return if insert_mode?
+      @read.select_line(current.area)
+    end
+
+    def clear_selection : Nil
+      @read.clear_selection
+    end
+
     def insert(ch : Char) : Nil
       current.area.insert(ch)
       @dirty = true
@@ -158,6 +202,10 @@ module Gori::Tui
       current.area.move(dr, dc)
     end
 
+    def scroll_view(step : Int32) : Nil
+      current.area.scroll_view(step)
+    end
+
     # Home/End: caret to line start/end — pure navigation, does not dirty.
     def home : Nil
       current.area.home
@@ -177,6 +225,7 @@ module Gori::Tui
     # passes to render; re-apply render's 1-col side inset so the editor geometry matches.
     def click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       area = Rect.new(rect.x + 1, rect.y, {rect.w - 2, 0}.max, rect.h)
+      enter_insert!
       current.area.click_to_cursor(area, mx, my)
     end
 
@@ -250,8 +299,61 @@ module Gori::Tui
       # the editor body renders exactly where it did, now filling the freed height.
       area = Rect.new(rect.x + 1, rect.y, {rect.w - 2, 0}.max, rect.h)
       TrafficEmptyState.render(screen, area, variant: :notes) if current_blank?
-      current.area.render(screen, area, cursor: focused,
+      ins = focused && insert_mode?
+      if focused
+        render_mode_badge(screen, rect.right - 1, rect.y, rect.x + 1, ins)
+      end
+      ed = current.area
+      ed.render(screen, area, cursor: ins,
         highlight: Settings.editor_markdown ? :markdown : nil)
+      paint_read_chrome(screen, area, ed, focused && !insert_mode?) if !insert_mode?
+    end
+
+    private def render_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
+      if insert
+        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
+      else
+        x = right_edge - " NOR ".size
+        screen.text(x, y, " NOR ", Theme.muted, Theme.bg) if x >= min_x
+      end
+    end
+
+    private def paint_read_chrome(screen : Screen, rect : Rect, ed : TextArea, focused : Bool) : Nil
+      return unless focused
+      lines = ed.lines_snapshot
+      return if lines.empty?
+      scr = ed.scroll
+      sel_bg = Theme.accent_bg
+      @read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
+        next unless li >= scr && li < scr + rect.h
+        row = li - scr
+        gw = ed.gutter? ? Gutter.width(lines.size) : 0
+        paint_char_span_bg(screen, rect.x + gw, rect.y + row, lines[li], x0, x1, sel_bg)
+      end
+      cy, cx = @read.cursor.cy, @read.cursor.cx
+      return unless cy >= scr && cy < scr + rect.h
+      row = cy - scr
+      gw = ed.gutter? ? Gutter.width(lines.size) : 0
+      line = lines[cy]
+      px = rect.x + gw + Screen.column_width(line[0, cx])
+      if px < rect.x + rect.w
+        ch = cx < line.size ? line[cx] : ' '
+        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
+        screen.cursor(px, rect.y + row)
+      end
+    end
+
+    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
+                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
+      return if x0 >= x1
+      px = x
+      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (x0...x1).each do |i|
+        break if i >= line.size
+        w = Screen.column_width(line[i].to_s)
+        screen.text(px, y, line[i].to_s, Theme.text, bg)
+        px += w
+      end
     end
 
     # Sub-tab chip labels (one per note), sourced by the Runner's shared strip: each

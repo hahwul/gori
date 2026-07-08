@@ -91,19 +91,22 @@ describe Gori::Tui::FindingsView do
       view = FindingsView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      view.editing_notes?.should be_false # read-only preview — hscroll_notes applies here
+      view.enter_notes_insert!
+      view.exit_notes_insert!
+      view.notes_focused?.should be_true
+      view.editing_notes?.should be_false
 
       rect = Rect.new(0, 0, 80, 24)
       backend = MemoryBackend.new(80, 24)
       view.render(Screen.new(backend), rect, focused: true)
       backend.contains?("HEAD").should be_true
-      backend.contains?("TAIL").should be_false # off the right edge, clipped
+      backend.contains?("TAIL").should be_false
 
-      20.times { view.hscroll_notes(1) } # scroll well past the line's width
+      30.times { view.hscroll_notes(1) }
       backend2 = MemoryBackend.new(80, 24)
       view.render(Screen.new(backend2), rect, focused: true)
       backend2.contains?("TAIL").should be_true
-      backend2.contains?("HEAD").should be_false # scrolled off the left edge
+      backend2.contains?("HEAD").should be_false
     end
   end
 

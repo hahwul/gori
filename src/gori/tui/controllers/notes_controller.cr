@@ -74,42 +74,73 @@ module Gori::Tui
         notes_close
       elsif ev.ctrl? && c && '1' <= c <= '9'
         # Switch note sub-tab (the ctrl check keeps digits literal while editing).
-        @notes.switch_note(c.to_i - 1)
-      elsif key.escape?
         save_notes
-        @host.request_focus(:menu)
-      elsif key.enter?
-        @notes.newline
-      elsif ev.ctrl_z?
-        @notes.undo
-      elsif key.backspace?
-        @notes.backspace
-      elsif key.up?
-        if @notes.at_top? # ↑ on the first line pops up (to the sub-tab strip, else the tab bar)
+        @notes.switch_note(c.to_i - 1)
+        refresh_link_preview
+      elsif key.escape?
+        if @notes.insert_mode?
+          @notes.exit_insert!
+        else
           save_notes
-          @host.request_focus(:subtabs) # focus_pane downgrades to :menu when the strip is absent
+          @host.request_focus(:menu)
+        end
+      elsif @notes.insert_mode?
+        edit_insert(ev, c)
+      else
+        handle_read(ev, c)
+      end
+      true
+    end
+
+    private def handle_read(ev : Termisu::Event::Key, c : Char?) : Nil
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+      key = ev.key
+      selecting = ev.shift?
+      case
+      when key.enter?              then @notes.enter_insert!
+      when c == 'i'                then @notes.enter_insert!
+      when key.up?
+        if @notes.at_top?
+          save_notes
+          @host.request_focus(:subtabs)
+        else
+          @notes.read_move(-1, 0, selecting: selecting)
+        end
+      when key.down?               then @notes.read_move(1, 0, selecting: selecting)
+      when key.left?               then @notes.read_move(0, -1, selecting: selecting)
+      when key.right?              then @notes.read_move(0, 1, selecting: selecting)
+      when key.home?               then @notes.home
+      when key.end?                then @notes.end_of_line
+      when c == 'x'                then @notes.select_line
+      when c == 'y'                then notes_copy
+      end
+    end
+
+    private def edit_insert(ev : Termisu::Event::Key, c : Char?) : Nil
+      key = ev.key
+      case
+      when key.enter?     then @notes.newline
+      when ev.ctrl_z?     then @notes.undo
+      when key.backspace? then @notes.backspace
+      when key.up?
+        if @notes.at_top?
+          save_notes
+          @host.request_focus(:subtabs)
         else
           @notes.move(-1, 0)
         end
-      elsif key.down?
-        @notes.move(1, 0)
-      elsif key.left?
-        @notes.move(0, -1)
-      elsif key.right?
-        @notes.move(0, 1)
-      elsif key.home?
-        @notes.home
-      elsif key.end?
-        @notes.end_of_line
-      elsif key.delete?
-        @notes.delete
+      when key.down?      then @notes.move(1, 0)
+      when key.left?      then @notes.move(0, -1)
+      when key.right?     then @notes.move(0, 1)
+      when key.home?      then @notes.home
+      when key.end?       then @notes.end_of_line
+      when key.delete?    then @notes.delete
       else
         if c && !ev.ctrl? && !ev.alt?
           @notes.insert(c)
-          @notes.set_preedit("") # commit any preedit
+          @notes.set_preedit("")
         end
       end
-      true
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
@@ -120,9 +151,19 @@ module Gori::Tui
       true
     end
 
+    def handle_wheel(step : Int32) : Bool
+      @notes.scroll_view(step)
+      true
+    end
+
     def set_preedit(text : String) : Bool
+      return false unless @notes.insert_mode?
       @notes.set_preedit(text)
       true
+    end
+
+    def notes_read_mode? : Bool
+      !@notes.insert_mode?
     end
 
     def on_enter : Nil
@@ -153,12 +194,16 @@ module Gori::Tui
       true
     end
 
-    def body_badge : Symbol # the body is a single TextArea
-      :editor
+    def body_badge : Symbol
+      @notes.insert_mode? ? :editor : :body
     end
 
     def body_hint(focus : Symbol) : String
-      "type to edit · ^N new · ^W close · ^G goto · ^F find · ^1-9 · ↑ sub-tabs (space l links) · ↹/esc tabs"
+      if @notes.insert_mode?
+        "type to edit · esc read · ^N new · ^W close · ^G goto · ^F find · ^1-9 · ↑ sub-tabs"
+      else
+        "i/↵ edit · ⇧arrows select · y copy · space cmds · ^N new · ^W close · ^G goto · ^F find · esc tabs"
+      end
     end
 
     def goto_symbol : Symbol?
@@ -201,6 +246,7 @@ module Gori::Tui
     # changes (mirrors Replay's ^N).
     def notes_new : Nil
       @notes.new_note
+      @notes.enter_insert!
       @host.focus_body
       @host.status("new note (#{@notes.count}) — ^1-9 switch · ^W close · esc tabs")
     end
@@ -224,8 +270,19 @@ module Gori::Tui
       @host.status("closed note (#{@notes.count} open)")
     end
 
-    # Copy the entire current note to the system clipboard (OSC 52).
+    # Copy selection (or current line) in READ mode.
     def notes_copy : Nil
+      text = @notes.copy_text
+      if text.empty?
+        @host.status("nothing to copy")
+        return
+      end
+      written = Clipboard.copy(text)
+      @host.status("copied #{written}b to clipboard")
+    end
+
+    # Copy the entire current note (space menu).
+    def notes_copy_all : Nil
       text = @notes.current_text
       if text.empty?
         @host.status("nothing to copy")

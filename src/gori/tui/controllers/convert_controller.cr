@@ -1,6 +1,8 @@
 require "../tab_controller"
 require "../convert_view"
 require "../text_area"
+require "../input_mode"
+require "../text_read_state"
 require "../clipboard"
 require "../../convert"
 require "../../settings"
@@ -16,12 +18,15 @@ module Gori::Tui
   class ConvertSession
     property view : ConvertView
     property input : TextArea
+    property input_mode : InputMode
+    property input_read : TextReadState
     property chain : String
     property chain_cx : Int32
     property pane : Symbol # internal focus ring: :input <-> :chain
     property result : Convert::ChainResult
 
-    def initialize(@view, @input, @chain, @chain_cx, @pane, @result)
+    def initialize(@view, @input, @chain, @chain_cx, @pane, @result,
+                   @input_mode = InputMode::Read, @input_read = TextReadState.new)
     end
   end
 
@@ -64,9 +69,10 @@ module Gori::Tui
       Verb::Scope::Convert
     end
 
-    # INPUT + CHAIN capture text → EDITOR; the read-only OUTPUT pane is navigable.
+    # INPUT INS or CHAIN editing → EDITOR; INPUT READ and OUTPUT are navigable.
     def body_badge : Symbol
-      cur.pane == :output ? :body : :editor
+      s = cur
+      (s.pane == :chain || (s.pane == :input && s.input_mode == InputMode::Insert)) ? :editor : :body
     end
 
     # The current session (always valid: ≥1 session, @idx kept in range).
@@ -175,7 +181,8 @@ module Gori::Tui
         s.view.render(screen, content,
           input: s.input, chain: s.chain, chain_cx: s.chain_cx, chain_pre: @chain_pre,
           result: s.result, pane: s.pane, focused: body_focused,
-          popup: @popup, prompt: @prompt, prompt_buf: @prompt_buf)
+          popup: @popup, prompt: @prompt, prompt_buf: @prompt_buf,
+          input_mode: s.input_mode, input_read: s.input_read)
       end
     end
 
@@ -206,8 +213,14 @@ module Gori::Tui
         open_prompt(:load)
       elsif key.escape?
         @popup.close
-        commit
-        @host.request_focus(:menu)
+        s = cur
+        if s.pane == :input && s.input_mode == InputMode::Insert
+          s.input_mode = InputMode::Read
+          s.input_read.sync_from(s.input)
+        else
+          commit
+          @host.request_focus(:menu)
+        end
       else
         case cur.pane
         when :input  then edit_input(ev, c)
@@ -246,6 +259,7 @@ module Gori::Tui
       if regions.input.contains?(mx, my)
         s.pane = :input
         @popup.close
+        s.input_mode = InputMode::Insert
         s.input.click_to_cursor(regions.input.inset(1, 1), mx, my)
       elsif regions.chain.contains?(mx, my)
         s.pane = :chain
@@ -253,20 +267,30 @@ module Gori::Tui
         s.chain_cx = Screen.column_for(s.chain, mx - (field.x + 2))
         refilter_popup
       elsif regions.output.contains?(mx, my)
-        s.pane = :output # OUTPUT is navigable now — a click focuses it (wheel still scrolls)
+        s.pane = :output
         @popup.close
+        s.view.output_click_to_cursor(regions.output.inset(1, 1), mx, my, s.result)
       end
       true
     end
 
     def handle_wheel(step : Int32) : Bool
-      cur.view.scroll_output(step)
+      s = cur
+      if s.pane == :output
+        s.view.output_scroll_view(step, s.result)
+      elsif s.pane == :input && s.input_mode == InputMode::Read
+        s.input.scroll_view(step)
+      end
       true
     end
 
     def set_preedit(text : String) : Bool
       s = cur
-      s.pane == :input ? s.input.set_preedit(text) : (@chain_pre = text)
+      case s.pane
+      when :input  then s.input.set_preedit(text) if s.input_mode == InputMode::Insert
+      when :chain  then @chain_pre = text
+      else              nil
+      end
       true
     end
 
@@ -297,14 +321,21 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       return "type a name · ↵ save · esc cancel" if @prompt == :save_as
       return "type a name · ↵ load · esc cancel" if @prompt == :load
-      case cur.pane
+      s = cur
+      case s.pane
       when :chain
         return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if @popup.open?
         "chain (> | ,) · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc tabs"
       when :output
-        "↑/↓ scroll · ⇧←/→ h-scroll · ↑-top chain · ↹ next · space menu · ^X mode · ^Y copy · esc tabs"
+        "↑/↓ move · ⇧arrows select · y copy · ⇧←/→ h-scroll · ↑-top chain · space cmds · ^X mode · ^Y copy all · esc tabs"
+      when :input
+        if s.input_mode == InputMode::Insert
+          "type to edit · esc read · ↓/↹ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
+        else
+          "i/↵ edit · ⇧arrows select · y copy · space cmds · ↓/↹ chain · ^X mode · ^N new · esc tabs"
+        end
       else
-        "type to edit · ↓/↹ chain · ^L clear · ^Y copy · ^X mode · ^N new · ^W close · ↑ sub-tabs · esc tabs"
+        ""
       end
     end
 
@@ -350,9 +381,55 @@ module Gori::Tui
       end
     end
 
+    def convert_copy_selection : Nil
+      s = cur
+      text = case s.pane
+             when :output then s.view.output_copy_text(s.result)
+             when :input  then s.input_read.copy_text(s.input)
+             else              ""
+             end
+      if text.empty?
+        @host.status("nothing to copy")
+      else
+        Clipboard.copy(text)
+        @host.status("copied #{text.bytesize}b to clipboard")
+      end
+    end
+
+    def convert_read_mode? : Bool
+      s = cur
+      s.pane == :output || (s.pane == :input && s.input_mode == InputMode::Read)
+    end
+
+    def convert_selection_active? : Bool
+      s = cur
+      case s.pane
+      when :input  then s.input_mode == InputMode::Read && s.input_read.selection?
+      when :output then s.view.output_selection?
+      else             false
+      end
+    end
+
+    def convert_select_line : Nil
+      s = cur
+      case s.pane
+      when :input  then s.input_read.select_line(s.input) unless s.input_mode == InputMode::Insert
+      when :output then s.view.output_select_line(s.result)
+      end
+    end
+
+    def convert_clear_selection : Nil
+      s = cur
+      case s.pane
+      when :input  then s.input_read.clear_selection
+      when :output then s.view.output_clear_selection
+      end
+    end
+
     # ---- INPUT editor ----
     private def edit_input(ev : Termisu::Event::Key, c : Char?) : Nil
       s = cur
+      return handle_input_read(ev, c) unless s.input_mode == InputMode::Insert
       key = ev.key
       case
       when ev.ctrl_z?
@@ -372,6 +449,31 @@ module Gori::Tui
         s.input.at_bottom? ? (s.pane = :chain) : s.input.move(1, 0)
       else
         edit_input_caret(ev, s, c) # ←/→/Home/End/Delete + literal insert
+      end
+    end
+
+    private def handle_input_read(ev : Termisu::Event::Key, c : Char?) : Nil
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+      s = cur
+      key = ev.key
+      selecting = ev.shift?
+      case
+      when key.enter? then s.input_mode = InputMode::Insert
+      when c == 'i'   then s.input_mode = InputMode::Insert
+      when key.up?
+        if s.input.at_top?
+          commit
+          @host.request_focus(:subtabs)
+        else
+          s.input_read.move(s.input, -1, 0, selecting: selecting)
+        end
+      when key.down?  then s.input.at_bottom? ? (s.pane = :chain) : s.input_read.move(s.input, 1, 0, selecting: selecting)
+      when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
+      when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
+      when key.home?  then s.input.home
+      when key.end?   then s.input.end_of_line
+      when c == 'x'   then s.input_read.select_line(s.input)
+      when c == 'y'   then convert_copy_selection
       end
     end
 
@@ -437,14 +539,38 @@ module Gori::Tui
     # here), ↑/↓ scroll, and ↑ at the top pops focus up to the CHAIN field above.
     private def handle_output(ev : Termisu::Event::Key) : Nil
       return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+      return if handle_output_hscroll(ev)
       s = cur
       key = ev.key
+      selecting = ev.shift?
       case
-      when key.up?, key.lower_k?   then s.view.output_at_top? ? (s.pane = :chain) : s.view.scroll_output(-1)
-      when key.down?, key.lower_j? then s.view.scroll_output(1)
-      when key.left? && ev.shift?  then s.view.hscroll_output(-1)
-      when key.right? && ev.shift? then s.view.hscroll_output(1)
+      when key.up?, key.lower_k?
+        s.view.output_at_top? ? (s.pane = :chain) : out_nav_step(s, -1, 0, selecting)
+      when key.down?, key.lower_j? then out_nav_step(s, 1, 0, selecting)
+      when key.left?  then out_nav_step(s, 0, -1, selecting)
+      when key.right? then out_nav_step(s, 0, 1, selecting)
+      when (c = ev.char || key.to_char) == 'x'
+        s.view.output_select_line(s.result)
+      when c == 'y'
+        convert_copy_selection
       end
+    end
+
+    private def handle_output_hscroll(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if key.left? && ev.shift?
+        cur.view.hscroll_output(-1)
+        true
+      elsif key.right? && ev.shift?
+        cur.view.hscroll_output(1)
+        true
+      else
+        false
+      end
+    end
+
+    private def out_nav_step(s : ConvertSession, dr : Int32, dc : Int32, selecting : Bool) : Nil
+      s.view.output_move(dr, dc, s.result, selecting: selecting)
     end
 
     private def accept_completion : Nil

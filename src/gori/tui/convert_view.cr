@@ -2,6 +2,10 @@ require "./screen"
 require "./theme"
 require "./frame"
 require "./text_area"
+require "./input_mode"
+require "./read_cursor"
+require "./text_read_state"
+require "./gutter"
 require "../convert"
 
 module Gori::Tui
@@ -31,6 +35,8 @@ module Gori::Tui
     # controller on every recompute) + cycle_out_mode set the dirty flag.
     @out_lines : Array(String) = [] of String
     @out_dirty : Bool = true
+    @out_read = ReadCursor.new
+    @out_last_h : Int32 = 0
 
     # Card rects for the four sections, stacked top-to-bottom. Each is a full
     # `Frame.card` (border + interior), NOT a divided slice of one outer frame —
@@ -78,12 +84,15 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, *, input : TextArea, chain : String,
                chain_cx : Int32, chain_pre : String, result : Convert::ChainResult,
                pane : Symbol, focused : Bool, popup : ChainComplete, prompt : Symbol?,
-               prompt_buf : String) : Nil
+               prompt_buf : String, input_mode : InputMode = InputMode::Read,
+               input_read : TextReadState? = nil) : Nil
       return if rect.empty?
       @last_step_count = result.steps.size
       r = layout(rect)
 
-      render_input(screen, r.input, input, focused && pane == :input) unless r.input.empty?
+      input_ins = focused && pane == :input && input_mode == InputMode::Insert
+      input_reading = focused && pane == :input && input_mode == InputMode::Read
+      render_input(screen, r.input, input, input_ins, input_mode, input_read, input_reading) unless r.input.empty?
       render_chain(screen, r.chain, chain, chain_cx, chain_pre, focused && pane == :chain) unless r.chain.empty?
       render_pipeline(screen, r.pipeline, result) unless r.pipeline.empty?
       render_output_card(screen, r.output, result, focused && pane == :output) unless r.output.empty?
@@ -94,10 +103,49 @@ module Gori::Tui
       render_prompt(screen, r.output.inset(1, 1), prompt, prompt_buf) if prompt && !r.output.empty?
     end
 
-    # INPUT — a framed TextArea; gold border only when it holds focus.
-    private def render_input(screen : Screen, card : Rect, input : TextArea, active : Bool) : Nil
-      Frame.card(screen, card, "INPUT", bg: Theme.bg, border: Frame.pane_border(active))
-      input.render(screen, card.inset(1, 1), cursor: active)
+    # INPUT — a framed TextArea; gold border when focused; INS shows the block caret.
+    private def render_input(screen : Screen, card : Rect, input : TextArea, active : Bool,
+                             mode : InputMode, read : TextReadState?, reading : Bool) : Nil
+      Frame.card(screen, card, "INPUT", bg: Theme.bg, border: Frame.pane_border(active || reading))
+      if active || reading
+        render_mode_badge(screen, card.right - 1, card.y, card.x + 6, mode == InputMode::Insert)
+      end
+      body = card.inset(1, 1)
+      input.render(screen, body, cursor: active)
+      paint_input_read_chrome(screen, body, input, read, reading) if reading && read
+    end
+
+    private def paint_input_read_chrome(screen : Screen, rect : Rect, ed : TextArea,
+                                        read : TextReadState, focused : Bool) : Nil
+      return unless focused
+      lines = ed.lines_snapshot
+      return if lines.empty?
+      scr = ed.scroll
+      sel_bg = Theme.accent_bg
+      read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
+        next unless li >= scr && li < scr + rect.h
+        row = li - scr
+        paint_char_span_bg(screen, rect.x, rect.y + row, lines[li], x0, x1, sel_bg)
+      end
+      cy, cx = read.cursor.cy, read.cursor.cx
+      return unless cy >= scr && cy < scr + rect.h
+      row = cy - scr
+      line = lines[cy]
+      px = rect.x + Screen.column_width(line[0, cx])
+      if px < rect.x + rect.w
+        ch = cx < line.size ? line[cx] : ' '
+        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
+        screen.cursor(px, rect.y + row)
+      end
+    end
+
+    private def render_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
+      if insert
+        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
+      else
+        x = right_edge - " NOR ".size
+        screen.text(x, y, " NOR ", Theme.muted, Theme.bg) if x >= min_x
+      end
     end
 
     # CHAIN — a framed single-line spec field with a "›" prompt; gold when focused.
@@ -133,7 +181,7 @@ module Gori::Tui
       # old title-embedded mode label so the chord is discoverable in place.
       name, forced = out_mode_badge
       Frame.toggle_badge(screen, card.right - 1, card.y, card.x + header.size + 4, "^X", name, forced)
-      render_output(screen, card.inset(1, 1), result)
+      render_output(screen, card.inset(1, 1), result, focused: active)
     end
 
     private def render_steps(screen : Screen, rect : Rect, result : Convert::ChainResult) : Nil
@@ -161,16 +209,108 @@ module Gori::Tui
       end
     end
 
-    private def render_output(screen : Screen, rect : Rect, result : Convert::ChainResult) : Nil
+    private def render_output(screen : Screen, rect : Rect, result : Convert::ChainResult, focused : Bool = false) : Nil
       return if rect.h <= 0
       lines = output_lines(result)
+      @out_last_h = rect.h
       @out_scroll = @out_scroll.clamp(0, {lines.size - rect.h, 0}.max)
       fg = result.output.nil? ? Theme.red : Theme.text
+      gw = {Gutter.width(lines.size), rect.w}.min
+      cw = {rect.w - gw, 0}.max
       rows = (0...rect.h).compact_map { |i| lines[@out_scroll + i]? }
-      @out_xscroll = @out_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @out_xscroll + rect.w + 1) } || 0) - rect.w, 0}.max)
+      @out_xscroll = @out_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @out_xscroll + cw + 1) } || 0) - cw, 0}.max)
+      ensure_out_visible(rect.h) if focused
       rows.each_with_index do |line, i|
+        li = @out_scroll + i
+        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @out_read.cy)
         shown = @out_xscroll > 0 ? Highlight.slice_left_text(line, @out_xscroll) : line
-        screen.text(rect.x, rect.y + i, shown, fg, Theme.bg, width: rect.w)
+        screen.text(rect.x + gw, rect.y + i, shown, fg, Theme.bg, width: cw)
+        paint_out_line_chrome(screen, rect.x + gw, rect.y + i, li, line, lines, focused)
+      end
+    end
+
+    def output_move(dr : Int32, dc : Int32, result : Convert::ChainResult, selecting : Bool = false) : Nil
+      lines = output_lines(result)
+      return if lines.empty?
+      @out_read.move(dr, dc, lines, selecting: selecting)
+      ensure_out_visible(@out_last_h) if @out_last_h > 0
+    end
+
+    def output_scroll_view(step : Int32, result : Convert::ChainResult) : Nil
+      lines = output_lines(result)
+      return if @out_last_h <= 0 || lines.size <= @out_last_h
+      max = lines.size - @out_last_h
+      @out_scroll = (@out_scroll + step).clamp(0, max)
+      lo = @out_scroll
+      hi = {@out_scroll + @out_last_h - 1, lines.size - 1}.min
+      @out_read.sync(
+        @out_read.cy.clamp(lo, hi),
+        @out_read.cx.clamp(0, lines[@out_read.cy].size))
+    end
+
+    def output_click_to_cursor(rect : Rect, mx : Int32, my : Int32, result : Convert::ChainResult) : Nil
+      lines = output_lines(result)
+      return if rect.empty? || lines.empty?
+      gw = {Gutter.width(lines.size), rect.w}.min
+      @out_read.click_to_cursor(rect, mx, my, @out_scroll, lines, gw, @out_xscroll)
+      ensure_out_visible(rect.h)
+    end
+
+    def output_copy_text(result : Convert::ChainResult) : String
+      lines = output_lines(result)
+      return "" if lines.empty?
+      @out_read.selection_text(lines) || @out_read.current_line(lines)
+    end
+
+    def output_selection? : Bool
+      @out_read.selection?
+    end
+
+    def output_select_line(result : Convert::ChainResult) : Nil
+      lines = output_lines(result)
+      return if lines.empty?
+      @out_read.select_line(lines)
+      ensure_out_visible(@out_last_h) if @out_last_h > 0
+    end
+
+    def output_clear_selection : Nil
+      @out_read.clear_selection
+    end
+
+    private def ensure_out_visible(view_h : Int32) : Nil
+      return if view_h <= 0
+      cy = @out_read.cy
+      if cy < @out_scroll
+        @out_scroll = cy
+      elsif cy >= @out_scroll + view_h
+        @out_scroll = cy - view_h + 1
+      end
+    end
+
+    private def paint_out_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
+                                        lines : Array(String), focused : Bool) : Nil
+      return unless focused
+      @out_read.highlight_spans(lines).each do |(l, x0, x1)|
+        paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
+      end
+      return unless li == @out_read.cy
+      cx = @out_read.cx.clamp(0, line.size)
+      px = x + Screen.column_width(line[0, cx])
+      ch = cx < line.size ? line[cx] : ' '
+      screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
+      screen.cursor(px, y)
+    end
+
+    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
+                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
+      return if x0 >= x1
+      px = x
+      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (x0...x1).each do |i|
+        break if i >= line.size
+        w = Screen.column_width(line[i].to_s)
+        screen.text(px, y, line[i].to_s, Theme.text, bg)
+        px += w
       end
     end
 
@@ -256,7 +396,7 @@ module Gori::Tui
     # Whether the OUTPUT is scrolled to the top — ↑ here pops focus up to CHAIN
     # (render clamps @out_scroll on every frame, so this reads the true top).
     def output_at_top? : Bool
-      @out_scroll <= 0
+      @out_scroll <= 0 && @out_read.cy <= 0
     end
 
     # Invoked by the controller after every recompute: reset scroll AND invalidate
@@ -265,6 +405,7 @@ module Gori::Tui
       @out_scroll = 0
       @out_xscroll = 0
       @out_dirty = true
+      @out_read.reset
     end
   end
 

@@ -71,8 +71,19 @@ module Gori
       # palette stays Global-only, so this doesn't leak there). Each menu key derives
       # from its plain chord — the key you'd press directly. severity/status keep their
       # bracket chords ([ ] { }) hidden (awkward as menu mnemonics; discoverable in Help).
+      in_findings_notes_read = ->(ctx : Verb::ExecContext) { ctx.findings_notes_read_mode? }
+
       r.register Verb::Definition.new(
-        "finding.edit-notes", "Edit notes", "Edit the finding notes inline", Verb::Scope::FindingsDetail,
+        "finding.copy", "Copy selection", "Copy the selected notes text (or current line) to the clipboard",
+        Verb::Scope::FindingsDetail, [Verb::Chord.new("y")],
+        available: in_findings_notes_read, mnemonic: 'y') { |ctx| ctx.findings_copy; nil }
+
+      r.register Verb::Definition.new(
+        "finding.copy-all", "Copy notes", "Copy the entire finding notes to the clipboard",
+        Verb::Scope::FindingsDetail, available: in_findings_notes_read, mnemonic: 'O') { |ctx| ctx.findings_copy_all; nil }
+
+      r.register Verb::Definition.new(
+        "finding.edit-notes", "Edit notes", "Edit the finding notes inline (i/↵/e)", Verb::Scope::FindingsDetail,
         [Verb::Chord.new("e")]) { |ctx| ctx.finding_edit_notes; nil }
 
       # Shift+←/→ scroll a long notes line sideways. `finding.close` (registered

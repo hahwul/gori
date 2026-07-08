@@ -22,12 +22,16 @@ require "../replay/flow_request"
 require "../fuzz"
 require "../convert"
 require "./chain_pane"
+require "./input_mode"
+require "./read_cursor"
+require "./text_read_state"
+require "./line_field_read"
 
 module Gori::Tui
   # The Replay workbench (a tab). Layout: a target URL field on top, then a split
-  # of REQUEST (inline editor, origin-form) | RESPONSE (toggles to DIFF). Type to
-  # edit — no edit mode. Tab cycles focus (request → response → target); Ctrl-R
-  # resends byte-exact to the target and the diff compares against the original.
+  # of REQUEST (inline editor, origin-form) | RESPONSE (toggles to DIFF). Request
+  # and target default to READ (space cmds, select/copy); i/↵ enters INS. Tab
+  # cycles focus (target → request → response); Ctrl-R resends byte-exact.
   class ReplayView
     getter? loaded : Bool
     getter? http2 : Bool
@@ -128,6 +132,12 @@ module Gori::Tui
       @chain_focused = false
       @chain_marker_cursor = 0
       @dirty = false # set by every editor/target/flag mutator, cleared on save/restore
+      @request_mode = InputMode::Read
+      @target_mode = InputMode::Read
+      @resp_cursor = ReadCursor.new
+      @req_read = TextReadState.new
+      @target_read = LineFieldRead.new
+      @resp_last_h = 0 # viewport height from last response render (wheel clamp)
     end
 
     # --- hex edit (^X on the REQUEST pane) ---
@@ -192,6 +202,47 @@ module Gori::Tui
 
     def hex_delete : Nil
       @dirty = true if @req_hex_edit.try(&.delete)
+    end
+
+    # --- READ / INS input modes (request + target panes) ---
+    getter request_mode : InputMode
+    getter target_mode : InputMode
+    getter resp_cursor : ReadCursor
+
+    def request_insert? : Bool
+      @request_mode == InputMode::Insert
+    end
+
+    def target_insert? : Bool
+      @target_mode == InputMode::Insert
+    end
+
+    def pane_insert?(pane : Symbol) : Bool
+      case pane
+      when :request then request_insert? || request_hex? || chain_pane_active?
+      when :target   then target_insert? || editing_sni?
+      else               false
+      end
+    end
+
+    def enter_request_insert! : Nil
+      @request_mode = InputMode::Insert
+    end
+
+    def exit_request_insert! : Nil
+      @request_mode = InputMode::Read
+    end
+
+    def enter_target_insert! : Nil
+      @target_mode = InputMode::Insert
+    end
+
+    def exit_target_insert! : Nil
+      @target_mode = InputMode::Read
+    end
+
+    def resp_navigable? : Bool
+      @focus == :response && !@resp_hex
     end
 
     # --- persistence accessors (the Runner saves these + reconciles by them) ---
@@ -1365,6 +1416,7 @@ module Gori::Tui
       else
         @target_field = :sni
         @scx = @sni.size
+        @target_mode = InputMode::Insert
       end
     end
 
@@ -1462,6 +1514,186 @@ module Gori::Tui
 
     def scroll(delta : Int32) : Nil
       @scroll = (@scroll + delta).clamp(0, {resp_line_count - 1, 0}.max)
+    end
+
+    # Response READ: move caret (and optional selection). Scroll follows the caret.
+    def resp_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      return unless resp_navigable?
+      lines = resp_plain_lines
+      return if lines.empty?
+      @resp_cursor.move(dr, dc, lines, selecting: selecting)
+      ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
+    end
+
+    def request_scroll_view(step : Int32) : Nil
+      return if request_insert? || request_hex?
+      req_editor.scroll_view(step)
+    end
+
+    def resp_scroll_view(step : Int32) : Nil
+      return unless resp_navigable?
+      lines = resp_plain_lines
+      return if @resp_last_h <= 0 || lines.size <= @resp_last_h
+      max = lines.size - @resp_last_h
+      @scroll = (@scroll + step).clamp(0, max)
+      lo = @scroll
+      hi = {@scroll + @resp_last_h - 1, lines.size - 1}.min
+      @resp_cursor.sync(
+        @resp_cursor.cy.clamp(lo, hi),
+        @resp_cursor.cx.clamp(0, lines[@resp_cursor.cy].size))
+    end
+
+    def resp_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
+      return unless resp_navigable? && @loaded
+      target_h = {rect.h, target_card_h}.min
+      content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      return if content.h <= 0
+      half = {(content.w - 1) // 2, 1}.max
+      col = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 1}.max, content.h)
+      return unless col.contains?(mx, my)
+      body = response_body_rect(col)
+      gw = resp_gutter_w(body)
+      @resp_cursor.click_to_cursor(body, mx, my, @scroll, resp_plain_lines, gw, @xscroll)
+      ensure_resp_visible(body.h)
+    end
+
+    def request_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      return if request_insert? || request_hex?
+      lines = request_read_lines
+      return if lines.empty?
+      @req_read.move(req_editor, dr, dc, selecting: selecting)
+    end
+
+    def target_read_move(dc : Int32, selecting : Bool = false) : Nil
+      return if target_insert?
+      line = target_active_line
+      cx = @target_read.move_cx(target_active_cx, dc, line.size, selecting: selecting)
+      @target_field == :sni ? (@scx = cx) : (@tcx = cx)
+    end
+
+    private def target_active_line : String
+      @target_field == :sni ? @sni : @target
+    end
+
+    private def target_active_cx : Int32
+      @target_field == :sni ? @scx : @tcx
+    end
+
+    def request_read_lines : Array(String)
+      req_editor.lines_snapshot
+    end
+
+    def request_copy_text : String
+      @req_read.copy_text(req_editor)
+    end
+
+    def request_copy_all_text : String
+      @req_read.copy_all(req_editor)
+    end
+
+    def resp_plain_lines : Array(String)
+      if @ws_mode
+        ws_transcript_lines.map(&.[0])
+      elsif @grpc_mode
+        grpc_transcript_lines.map(&.[0])
+      elsif @resp_mode == :diff
+        diff_lines.map(&.text)
+      elsif @reveal && (rl = reveal_lines)
+        rl
+      else
+        rv = resp_view
+        (0...rv.total).map { |i| rv.line_text(i) }
+      end
+    end
+
+    def resp_copy_text : String
+      lines = resp_plain_lines
+      return "" if lines.empty?
+      @resp_cursor.selection_text(lines) || @resp_cursor.current_line(lines)
+    end
+
+    def resp_copy_all_text : String
+      resp_plain_lines.join("\n")
+    end
+
+    def target_copy_text : String
+      @target_read.copy_text(target_active_line, target_active_cx)
+    end
+
+    def pane_copy_text : String
+      case @focus
+      when :request  then request_copy_text
+      when :response then resp_copy_text
+      when :target   then target_copy_text
+      else                ""
+      end
+    end
+
+    def pane_copy_all_text : String
+      case @focus
+      when :request  then request_copy_all_text
+      when :response then resp_copy_all_text
+      when :target   then target_active_line
+      else                ""
+      end
+    end
+
+    def pane_selection? : Bool
+      case @focus
+      when :request  then !pane_insert?(:request) && @req_read.selection?
+      when :response then @resp_cursor.selection?
+      when :target   then !pane_insert?(:target) && @target_read.selection?
+      else               false
+      end
+    end
+
+    def pane_select_line : Nil
+      case @focus
+      when :request
+        return if pane_insert?(:request)
+        @req_read.select_line(req_editor)
+      when :response
+        lines = resp_plain_lines
+        return if lines.empty?
+        @resp_cursor.select_line(lines)
+        ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
+      when :target
+        return if pane_insert?(:target)
+        line = target_active_line
+        cx = @target_read.select_line(line.size)
+        @target_field == :sni ? (@scx = cx) : (@tcx = cx)
+      end
+    end
+
+    def pane_clear_selection : Nil
+      case @focus
+      when :request  then @req_read.clear_selection
+      when :response then @resp_cursor.clear_selection
+      when :target   then @target_read.clear_selection
+      end
+    end
+
+    private def resp_gutter_w(body : Rect) : Int32
+      {Gutter.width(resp_plain_lines.size), body.w}.min
+    end
+
+    private def response_body_rect(col : Rect) : Rect
+      if @ws_mode
+        _, transcript = ws_resp_split(col)
+        transcript.inset(1, 1)
+      else
+        col.inset(1, 1)
+      end
+    end
+
+    private def ensure_resp_visible(view_h : Int32) : Nil
+      return if view_h <= 0
+      cy = @resp_cursor.cy
+      if cy < @scroll
+        @scroll = cy
+      elsif cy >= @scroll + view_h
+        @scroll = cy - view_h + 1
+      end
     end
 
     # Horizontal companion to `scroll` (shift+←/→): nudges the response/diff/reveal/
@@ -1594,13 +1826,25 @@ module Gori::Tui
       @decoded.render(screen, rect.inset(1, 1), cursor: focused, highlight: nil)
     end
 
-    private def pane_border(focused : Bool) : Color
-      Frame.pane_border(focused)
+    private def pane_border(focused : Bool, insert : Bool = false) : Color
+      return Frame.pane_border(false) unless focused
+      insert ? Theme.accent : Theme.focus_gold
+    end
+
+    private def render_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
+      if insert
+        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
+      else
+        x = right_edge - " NOR ".size
+        screen.text(x, y, " NOR ", Theme.muted, Theme.bg) if x >= min_x
+      end
     end
 
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.h < 2
-      Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused))
+      ins = focused && target_insert?
+      Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused, insert: ins))
+      render_mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, ins)
       # An at-a-glance SNI marker on the top border (right of the title) whenever an
       # override is set, so a custom SNI is visible even before the row is reached.
       unless @sni.strip.empty?
@@ -1608,25 +1852,30 @@ module Gori::Tui
         bx = {rect.right - badge.size - 1, rect.x + 9}.max
         screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg)
       end
-      draw_target_row(screen, rect, rect.y + 1, TARGET_PREFIX, @target, @tcx, focused && @target_field == :url)
-      draw_target_row(screen, rect, rect.y + 2, SNI_PREFIX, @sni, @scx, focused && @target_field == :sni) if sni_active? && rect.h >= 4
+      url_active = focused && @target_field == :url
+      sni_active_row = focused && @target_field == :sni
+      draw_target_row(screen, rect, rect.y + 1, TARGET_PREFIX, @target, @tcx, url_active, target_insert?)
+      draw_target_row(screen, rect, rect.y + 2, SNI_PREFIX, @sni, @scx, sni_active_row, target_insert?) if sni_active? && rect.h >= 4
     end
 
     # One single-line field row of the TARGET card: a marker prefix, then the value,
     # with the block caret + terminal cursor when this row is the active field.
-    private def draw_target_row(screen : Screen, rect : Rect, row : Int32, prefix : String, value : String, cx : Int32, active : Bool) : Nil
+    private def draw_target_row(screen : Screen, rect : Rect, row : Int32, prefix : String, value : String,
+                                cx : Int32, active : Bool, insert : Bool) : Nil
       screen.text(rect.x + 2, row, prefix, active ? Theme.accent : Theme.muted)
       base = field_base(rect, prefix)
       w = {rect.right - base - 1, 1}.max
+      if active && !insert
+        if span = @target_read.selection_span(cx)
+          paint_char_span_bg(screen, base, row, value, span[0], span[1], Theme.accent_bg)
+        end
+      end
       Highlight.draw(screen, base, row, Highlight.env_line(value, Theme.text_bright), width: w)
       if active
         cursor_x = base + Screen.display_width(value[0, cx])
-        # Only paint the caret while it's inside the field (before the right border) —
-        # a value longer than the drawn width must not place the cursor over the
-        # border or into the neighbouring pane (mirrors Screen#input_line's guard).
         if cursor_x < rect.right - 1
           ch = cx < value.size ? value[cx] : ' '
-          screen.cell(cursor_x, row, ch, Theme.bg, Theme.accent)
+          screen.cell(cursor_x, row, ch, Theme.bg, insert ? Theme.accent : Theme.accent_bg)
           screen.cursor(cursor_x, row)
         end
       end
@@ -1668,34 +1917,71 @@ module Gori::Tui
     private def render_request(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       label = render_request_label
-      Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused))
+      ins = focused && request_insert?
+      Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused, insert: ins))
       if @grpc_mode # text editor for the head; no CL/hex affordances
-        # gRPC's editor holds the HTTP head (→ request syntax)
-        @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
+        @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request)
         return
       end
       if @ws_mode
-        # WS editor is split: the envelope (@editor) is the upgrade request (highlight as :request)
-        @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
+        @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request)
         return
       end
       min_x = rect.x + label.size + 4 # keep clear of the pane title on the top border
       right_edge = rect.right - 1     # leave the right border cell untouched
       if h = @req_hex_edit
-        # A single lit HEX badge — auto-CL/MARK don't apply to raw bytes (^X exits).
         Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^X", "HEX", true)
         @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
         return
       end
-      # Toggle indicators ride the top border, right-aligned: [^K:MARK][^L:CL]. Each is
-      # always shown (so the toggle is discoverable without the bottom hint bar), lit
-      # when active and a muted no-background hint when off — ^L auto-Content-Length,
-      # ^K MARK-transform.
       cl_x = Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
       mark_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^K", "MARK", @mark_transform)
-      Frame.toggle_badge(screen, mark_x, rect.y, min_x, "^U", "PRETTY", false)
+      mode_x = Frame.toggle_badge(screen, mark_x, rect.y, min_x, "^U", "PRETTY", false)
+      render_mode_badge(screen, mode_x, rect.y, min_x, ins)
       update_request_mark_tint
-      @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
+      inner = rect.inset(1, 1)
+      @editor.render(screen, inner, cursor: ins, highlight: :request)
+      paint_request_read_chrome(screen, inner, focused && !ins)
+    end
+
+    private def paint_request_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
+      return unless active
+      ed = req_editor
+      lines = ed.lines_snapshot
+      return if lines.empty?
+      @req_read.sync_from(ed)
+      sel_bg = Theme.accent_bg
+      scr = ed.scroll
+      @req_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
+        next unless li >= scr && li < scr + rect.h
+        row = li - scr
+        gw = ed.gutter? ? Gutter.width(lines.size) : 0
+        paint_char_span_bg(screen, rect.x + gw, rect.y + row, lines[li], x0, x1, sel_bg)
+      end
+      cy, cx = ed.cy, ed.cx
+      return unless cy >= scr && cy < scr + rect.h
+      row = cy - scr
+      gw = ed.gutter? ? Gutter.width(lines.size) : 0
+      line = lines[cy]
+      px = rect.x + gw + Screen.column_width(line[0, cx])
+      if px < rect.x + rect.w
+        ch = cx < line.size ? line[cx] : ' '
+        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
+        screen.cursor(px, rect.y + row)
+      end
+    end
+
+    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
+                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
+      return if x0 >= x1
+      px = x
+      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (x0...x1).each do |i|
+        break if i >= line.size
+        w = Screen.column_width(line[i].to_s)
+        screen.text(px, y, line[i].to_s, Theme.text, bg)
+        px += w
+      end
     end
 
     # MARK-transform tinting: colour each §…§ marker in the request editor — the value in
@@ -1755,11 +2041,11 @@ module Gori::Tui
       if @resp_hex
         (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to replay —", Theme.muted)
       elsif @resp_mode == :diff
-        render_diff(screen, body)
+        render_diff(screen, body, focused)
       elsif @reveal && (rl = reveal_lines)
-        render_reveal(screen, body, rl)
+        render_reveal(screen, body, rl, focused)
       else
-        render_response_body(screen, body)
+        render_response_body(screen, body, focused)
       end
     end
 
@@ -1783,13 +2069,16 @@ module Gori::Tui
       cw = {body.w - gw, 0}.max
       widest = (0...body.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |(t, _)| Screen.display_width(t) } || 0
       @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
+      @resp_last_h = body.h
+      plain = lines.map(&.[0])
       (0...body.h).each do |i|
         li = @scroll + i
         break if li >= lines.size
         text, color = lines[li]
-        Gutter.draw(screen, body.x, body.y + i, li, gw)
+        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @resp_cursor.cy)
         shown = @xscroll > 0 ? Highlight.slice_left_text(text, @xscroll) : text
         screen.text(body.x + gw, body.y + i, shown, color, width: cw)
+        paint_resp_line_chrome(screen, body.x + gw, body.y + i, li, plain[li], focused)
         SearchHi.mark(screen, body.x + gw, body.y + i, shown, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
     end
@@ -1888,8 +2177,9 @@ module Gori::Tui
     end
 
     # Windowed render of revealed (whitespace-visible) response lines.
-    private def render_reveal(screen : Screen, rect : Rect, lines : Array(String)) : Nil
+    private def render_reveal(screen : Screen, rect : Rect, lines : Array(String), focused : Bool) : Nil
       total = lines.size
+      @resp_last_h = rect.h
       gw = {Gutter.width(total), rect.w}.min
       cw = {rect.w - gw, 0}.max
       widest = (0...rect.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |l| Screen.display_width_upto(l, @xscroll + cw + 1) } || 0
@@ -1897,10 +2187,11 @@ module Gori::Tui
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= total
-        Gutter.draw(screen, rect.x, rect.y + i, li, gw)
+        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @resp_cursor.cy)
         styled = Reveal.styled(lines[li], li < total - 1, cw + @xscroll)
         styled = Highlight.slice_left(styled, @xscroll) if @xscroll > 0
         Highlight.draw(screen, rect.x + gw, rect.y + i, styled, width: cw)
+        paint_resp_line_chrome(screen, rect.x + gw, rect.y + i, li, lines[li], focused)
         st = @xscroll > 0 ? Highlight.slice_left_text(lines[li], @xscroll) : lines[li]
         SearchHi.mark(screen, rect.x + gw, rect.y + i, st, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
@@ -1916,31 +2207,43 @@ module Gori::Tui
       @reveal_lines = Reveal.lines(bytes)
     end
 
-    private def render_response_body(screen : Screen, rect : Rect) : Nil
+    private def render_response_body(screen : Screen, rect : Rect, focused : Bool) : Nil
       rv = resp_view
       total = rv.total
+      @resp_last_h = rect.h
       gw = {Gutter.width(total), rect.w}.min
       cw = {rect.w - gw, 0}.max
-      # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
-      # never re-styles just to measure width (see the class comment on RespView).
       rows = (0...rect.h).compact_map { |i| (li = @scroll + i) < total ? rv.line_at(li) : nil }
       @xscroll = @xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @xscroll + cw + 1) } || 0) - cw, 0}.max)
       rows.each_with_index do |styled, i|
         li = @scroll + i
-        Gutter.draw(screen, rect.x, rect.y + i, li, gw)
+        text = rv.line_text(li)
+        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @resp_cursor.cy)
         shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
         Highlight.draw(screen, rect.x + gw, rect.y + i, shown, width: cw)
-        # The plain-text line + its left-slice feed ONLY the search overlay, so skip both
-        # when no query is active (else every frame builds/scans discarded strings per row).
+        paint_resp_line_chrome(screen, rect.x + gw, rect.y + i, li, text, focused)
         unless @search_hl.empty?
-          text = rv.line_text(li)
           st = @xscroll > 0 ? Highlight.slice_left_text(text, @xscroll) : text
           SearchHi.mark(screen, rect.x + gw, rect.y + i, st, @search_hl, rect.x + gw + cw)
         end
       end
     end
 
-    private def render_diff(screen : Screen, rect : Rect) : Nil
+    private def paint_resp_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String, focused : Bool) : Nil
+      return unless focused && resp_navigable?
+      lines = resp_plain_lines
+      @resp_cursor.highlight_spans(lines).each do |(l, x0, x1)|
+        paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
+      end
+      return unless li == @resp_cursor.cy
+      cx = @resp_cursor.cx.clamp(0, line.size)
+      px = x + Screen.column_width(line[0, cx])
+      ch = cx < line.size ? line[cx] : ' '
+      screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
+      screen.cursor(px, y)
+    end
+
+    private def render_diff(screen : Screen, rect : Rect, focused : Bool) : Nil
       data = diff_lines
       gw = {Gutter.width(data.size), rect.w}.min
       cw = {rect.w - gw, 0}.max
@@ -1956,10 +2259,12 @@ module Gori::Tui
         {di, "#{prefix} #{d.text}", color, d.text}
       end
       @xscroll = @xscroll.clamp(0, {(rows.max_of? { |(_, full, _, _)| Screen.display_width(full) } || 0) - cw, 0}.max)
+      @resp_last_h = rect.h
       rows.each_with_index do |(di, full, color, text), i|
-        Gutter.draw(screen, rect.x, rect.y + i, di, gw)
+        Gutter.draw(screen, rect.x, rect.y + i, di, gw, current: focused && di == @resp_cursor.cy)
         shown = @xscroll > 0 ? Highlight.slice_left_text(full, @xscroll) : full
         screen.text(rect.x + gw, rect.y + i, shown, color, width: cw)
+        paint_resp_line_chrome(screen, rect.x + gw + 2, rect.y + i, di, text, focused)
         # Highlight only the line text (past the 2-col "+ "/"- " prefix, shifted left by
         # any horizontal scroll), so the marks match what response_search_lines counts
         # (d.text), not the diff decoration.

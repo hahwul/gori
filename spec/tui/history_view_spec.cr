@@ -439,7 +439,7 @@ describe Gori::Tui::HistoryView do
       view.open_detail(store).should be_true
 
       backend = MemoryBackend.new(80, 12)
-      view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 12))
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 80, 12), focused: false)
       # the request line: GET coloured by verb, host header name accented
       ry = (0...12).find { |y| backend.row(y).includes?("GET /secret HTTP") }.not_nil!
       gx = backend.row(ry).index("GET /secret HTTP").not_nil!

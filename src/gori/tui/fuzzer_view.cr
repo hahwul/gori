@@ -2,6 +2,11 @@ require "json"
 require "./screen"
 require "./theme"
 require "./frame"
+require "./input_mode"
+require "./text_read_state"
+require "./line_field_read"
+require "./read_cursor"
+require "./gutter"
 require "./traffic_empty_state"
 require "./text_area"
 require "./fmt"
@@ -122,6 +127,12 @@ module Gori::Tui
       @detail_scroll = 0
       @detail_xscroll = 0 # horizontal scroll offset for the RESULT detail (shift+←/→)
       @detail_pane = :response
+      @detail_cursor = ReadCursor.new
+      @detail_last_h = 0 # viewport height from last detail render (wheel clamp)
+      @target_mode = InputMode::Read
+      @template_mode = InputMode::Read
+      @template_read = TextReadState.new
+      @target_read = LineFieldRead.new
       # Decoded-protocol panes for the OPEN result detail (SAML/JWT/GraphQL/form),
       # parsed once per opened row (@decoded_index guards re-decode). Each nil/empty
       # one means that pane isn't offered — mirrors the History detail decode strip.
@@ -275,9 +286,50 @@ module Gori::Tui
     def set_preedit(text : String) : Nil
       if chain_pane_active?
         @chain_pane.set_preedit(text)
-      elsif @focus == :template
+      elsif @focus == :template && template_insert?
         @editor.set_preedit(text)
       end
+    end
+
+    # --- READ / INS input modes (target + template panes) ---
+    getter target_mode : InputMode
+    getter template_mode : InputMode
+    getter detail_cursor : ReadCursor
+
+    def target_insert? : Bool
+      @target_mode == InputMode::Insert
+    end
+
+    def template_insert? : Bool
+      @template_mode == InputMode::Insert
+    end
+
+    def pane_insert?(pane : Symbol) : Bool
+      case pane
+      when :template then template_insert? || chain_pane_active?
+      when :target   then target_insert?
+      else               false
+      end
+    end
+
+    def enter_target_insert! : Nil
+      @target_mode = InputMode::Insert
+    end
+
+    def exit_target_insert! : Nil
+      @target_mode = InputMode::Read
+    end
+
+    def enter_template_insert! : Nil
+      @template_mode = InputMode::Insert
+    end
+
+    def exit_template_insert! : Nil
+      @template_mode = InputMode::Read
+    end
+
+    def detail_navigable? : Bool
+      @focus == :detail
     end
 
     CHAIN_PLACEHOLDER = "put the cursor in a §…§ marker, then ^Y to add an encode chain (e.g. base64-encode)"
@@ -751,11 +803,49 @@ module Gori::Tui
       @detail_scroll = 0
       @detail_xscroll = 0
       @detail_pane = :response
+      @detail_cursor.reset
       decode_detail # parse the decoded-protocol panes for the row we're opening
     end
 
-    def detail_scroll(d : Int32) : Nil
-      @detail_scroll = {@detail_scroll + d, 0}.max
+    def detail_cursor_at_top? : Bool
+      @detail_cursor.cy == 0 && @detail_scroll == 0
+    end
+
+    def detail_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      return unless detail_navigable?
+      lines = detail_plain_lines
+      return if lines.empty?
+      @detail_cursor.move(dr, dc, lines, selecting: selecting)
+      ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
+    end
+
+    def detail_scroll_view(step : Int32) : Nil
+      return unless detail_navigable?
+      lines = detail_plain_lines
+      return if @detail_last_h <= 0 || lines.size <= @detail_last_h
+      max = lines.size - @detail_last_h
+      @detail_scroll = (@detail_scroll + step).clamp(0, max)
+      lo = @detail_scroll
+      hi = {@detail_scroll + @detail_last_h - 1, lines.size - 1}.min
+      @detail_cursor.sync(
+        @detail_cursor.cy.clamp(lo, hi),
+        @detail_cursor.cx.clamp(0, lines[@detail_cursor.cy].size))
+    end
+
+    def detail_plain_lines : Array(String)
+      r = selected_result
+      return [] of String unless r
+      detail_lines(r)
+    end
+
+    def detail_copy_text : String
+      lines = detail_plain_lines
+      return "" if lines.empty?
+      @detail_cursor.selection_text(lines) || @detail_cursor.current_line(lines)
+    end
+
+    def detail_copy_all_text : String
+      detail_plain_lines.join("\n")
     end
 
     # Horizontal companion to `detail_scroll` (shift+←/→). Floored at 0 here; the
@@ -774,6 +864,9 @@ module Gori::Tui
       @detail_pane = panes[i]
       @detail_scroll = 0
       @detail_xscroll = 0
+      @detail_cursor.reset
+      @detail_lines_cache = nil
+      @detail_lines_key = nil
     end
 
     # Parse the OPEN result's request/response into the optional protocol panes
@@ -874,6 +967,24 @@ module Gori::Tui
       @tcx = (@tcx + d).clamp(0, @target.size)
     end
 
+    def target_home : Nil
+      @tcx = 0
+    end
+
+    def target_end : Nil
+      @tcx = @target.size
+    end
+
+    def target_read_move(dc : Int32, selecting : Bool = false) : Nil
+      return if target_insert?
+      cx = @target_read.move_cx(@tcx, dc, @target.size, selecting: selecting)
+      @tcx = cx
+    end
+
+    def target_copy_text : String
+      @target_read.copy_text(@target, @tcx)
+    end
+
     # --- template editing ----------------------------------------------------
     def template_insert(ch : Char) : Nil
       @editor.insert(ch)
@@ -908,6 +1019,76 @@ module Gori::Tui
     def template_delete : Nil
       @editor.delete
       @dirty = true
+    end
+
+    def template_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      return if template_insert? || chain_pane_active?
+      @template_read.move(@editor, dr, dc, selecting: selecting)
+    end
+
+    def template_scroll_view(step : Int32) : Nil
+      return if template_insert? || chain_pane_active?
+      @editor.scroll_view(step)
+    end
+
+    def template_copy_text : String
+      @template_read.copy_text(@editor)
+    end
+
+    def template_copy_all_text : String
+      @template_read.copy_all(@editor)
+    end
+
+    def pane_copy_text : String
+      case @focus
+      when :template then template_copy_text
+      when :target   then target_copy_text
+      when :detail   then detail_copy_text
+      else                ""
+      end
+    end
+
+    def pane_copy_all_text : String
+      case @focus
+      when :template then template_copy_all_text
+      when :target   then @target
+      when :detail   then detail_copy_all_text
+      else                ""
+      end
+    end
+
+    def pane_selection? : Bool
+      case @focus
+      when :template then !pane_insert?(:template) && @template_read.selection?
+      when :target   then !pane_insert?(:target) && @target_read.selection?
+      when :detail   then detail_navigable? && @detail_cursor.selection?
+      else               false
+      end
+    end
+
+    def pane_select_line : Nil
+      case @focus
+      when :template
+        return if pane_insert?(:template)
+        @template_read.select_line(@editor)
+      when :target
+        return if pane_insert?(:target)
+        @tcx = @target_read.select_line(@target.size)
+      when :detail
+        return unless detail_navigable?
+        lines = detail_plain_lines
+        return if lines.empty?
+        @detail_cursor.select_line(lines)
+        ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
+      end
+    end
+
+    def pane_clear_selection : Nil
+      case @focus
+      when :template then @template_read.clear_selection
+      when :target   then @target_read.clear_selection
+      when :detail   then @detail_cursor.clear_selection
+      end
     end
 
     # --- config serialization ------------------------------------------------
@@ -1072,22 +1253,44 @@ module Gori::Tui
       @show_dist ? "distribution shown" : "distribution hidden"
     end
 
+    private def pane_border(focused : Bool, insert : Bool = false) : Color
+      return Frame.pane_border(false) unless focused
+      insert ? Theme.accent : Theme.focus_gold
+    end
+
+    private def render_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
+      if insert
+        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
+      else
+        x = right_edge - " NOR ".size
+        screen.text(x, y, " NOR ", Theme.muted, Theme.bg) if x >= min_x
+      end
+    end
+
     private def render_target(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.h < 2
-      Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: Frame.pane_border(focused))
+      ins = focused && target_insert?
+      Frame.card(screen, rect, "TARGET", bg: Theme.bg, border: pane_border(focused, insert: ins))
+      render_mode_badge(screen, rect.right - 1, rect.y, rect.x + 8, ins)
       unless @sni.strip.empty?
         badge = " SNI "
-        screen.text({rect.right - badge.size - 1, rect.x + 9}.max, rect.y, badge, Theme.text_bright, Theme.accent_bg)
+        bx = {rect.right - badge.size - 1, rect.x + 9}.max
+        screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg)
       end
       base = rect.x + 4
       screen.text(rect.x + 2, rect.y + 1, "›", focused ? Theme.accent : Theme.muted)
       tw = {rect.right - base - 1, 1}.max
+      if focused && !ins
+        if span = @target_read.selection_span(@tcx)
+          paint_char_span_bg(screen, base, rect.y + 1, @target, span[0], span[1], Theme.accent_bg)
+        end
+      end
       Highlight.draw(screen, base, rect.y + 1, Highlight.env_line(@target, Theme.text_bright), width: tw)
       if focused
         cx = base + Screen.display_width(@target[0, @tcx])
         if cx < rect.right - 1
           ch = @tcx < @target.size ? @target[@tcx] : ' '
-          screen.cell(cx, rect.y + 1, ch, Theme.bg, Theme.accent)
+          screen.cell(cx, rect.y + 1, ch, Theme.bg, ins ? Theme.accent : Theme.accent_bg)
           screen.cursor(cx, rect.y + 1)
         end
       end
@@ -1098,10 +1301,12 @@ module Gori::Tui
       spans = marker_spans
       pc = spans.size
       label = @http2 ? "TEMPLATE (h2)" : "TEMPLATE"
-      Frame.card(screen, rect, label, bg: Theme.bg, border: Frame.pane_border(focused))
+      ins = focused && (template_insert? || @chain_focused)
+      Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused, insert: ins))
       badge = " §#{pc} "
       min_x = rect.x + label.size + 4
       pretty_x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "^U", "PRETTY", false)
+      render_mode_badge(screen, pretty_x, rect.y, min_x, ins)
       screen.text({pretty_x - badge.size, min_x}.max, rect.y, badge,
         pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg)
       # Marker i ↔ position i ↔ generator.set_for(i). The value gets the position hue; a
@@ -1115,7 +1320,59 @@ module Gori::Tui
         bg << {sep, close + 1, Theme.elevated} if sep < close # dim the ¦chain segment
       end
       @editor.bg_regions = bg
-      @editor.render(screen, rect.inset(1, 1), cursor: focused, highlight: :request)
+      inner = rect.inset(1, 1)
+      read_active = focused && !ins
+      @editor.render(screen, inner, cursor: ins, highlight: :request)
+      paint_template_read_chrome(screen, inner, read_active)
+    end
+
+    private def paint_template_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
+      return unless active
+      lines = @editor.lines_snapshot
+      return if lines.empty?
+      @template_read.sync_from(@editor)
+      sel_bg = Theme.accent_bg
+      scr = @editor.scroll
+      @template_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
+        next unless li >= scr && li < scr + rect.h
+        row = li - scr
+        gw = @editor.gutter? ? Gutter.width(lines.size) : 0
+        paint_char_span_bg(screen, rect.x + gw, rect.y + row, lines[li], x0, x1, sel_bg)
+      end
+      cy, cx = @editor.cy, @editor.cx
+      return unless cy >= scr && cy < scr + rect.h
+      row = cy - scr
+      gw = @editor.gutter? ? Gutter.width(lines.size) : 0
+      line = lines[cy]
+      px = rect.x + gw + Screen.column_width(line[0, cx])
+      if px < rect.x + rect.w
+        ch = cx < line.size ? line[cx] : ' '
+        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
+        screen.cursor(px, rect.y + row)
+      end
+    end
+
+    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
+                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
+      return if x0 >= x1
+      px = x
+      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (x0...x1).each do |i|
+        break if i >= line.size
+        w = Screen.column_width(line[i].to_s)
+        screen.text(px, y, line[i].to_s, Theme.text, bg)
+        px += w
+      end
+    end
+
+    private def ensure_detail_visible(view_h : Int32) : Nil
+      return if view_h <= 0
+      cy = @detail_cursor.cy
+      if cy < @detail_scroll
+        @detail_scroll = cy
+      elsif cy >= @detail_scroll + view_h
+        @detail_scroll = cy - view_h + 1
+      end
     end
 
     # The calm CONFIG summary: a header, the payload-set rows + an Add row, then the
@@ -1437,20 +1694,40 @@ module Gori::Tui
         @focus = :results
         return
       end
-      Frame.card(screen, rect, "RESULT ##{r.index}", bg: Theme.bg, border: Frame.pane_border(focused))
+      Frame.card(screen, rect, "RESULT ##{r.index}", bg: Theme.bg, border: pane_border(focused))
       panes = detail_panes
       @detail_pane = :request unless panes.includes?(@detail_pane) # decode may have dropped a pane
       render_detail_chips(screen, rect, panes)
       inner = rect.inset(1, 1)
       lines = detail_lines(r)
-      # Clamp so ↓/wheel can't scroll past the last line into a blank void (keeps ≥1 row).
-      @detail_scroll = @detail_scroll.clamp(0, {lines.size - 1, 0}.max)
+      @detail_last_h = inner.h
+      ensure_detail_visible(inner.h) if focused
+      @detail_scroll = @detail_scroll.clamp(0, {lines.size - inner.h, 0}.max)
+      gw = {Gutter.width(lines.size), inner.w}.min
+      cw = {inner.w - gw, 0}.max
       rows = (0...inner.h).compact_map { |i| lines[@detail_scroll + i]? }
-      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @detail_xscroll + inner.w + 1) } || 0) - inner.w, 0}.max)
+      @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
       rows.each_with_index do |line, i|
+        li = @detail_scroll + i
+        Gutter.draw(screen, inner.x, inner.y + i, li, gw, current: focused && li == @detail_cursor.cy)
         shown = @detail_xscroll > 0 ? Highlight.slice_left_text(line, @detail_xscroll) : line
-        screen.text(inner.x, inner.y + i, shown, Theme.text, Theme.bg, width: inner.w)
+        screen.text(inner.x + gw, inner.y + i, shown, Theme.text, Theme.bg, width: cw)
+        paint_detail_line_chrome(screen, inner.x + gw, inner.y + i, li, line, focused, lines)
       end
+    end
+
+    private def paint_detail_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
+                                           focused : Bool, lines : Array(String)) : Nil
+      return unless focused && detail_navigable?
+      @detail_cursor.highlight_spans(lines).each do |(l, x0, x1)|
+        paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
+      end
+      return unless li == @detail_cursor.cy
+      cx = @detail_cursor.cx.clamp(0, line.size)
+      px = x + Screen.column_width(line[0, cx])
+      ch = cx < line.size ? line[cx] : ' '
+      screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
+      screen.cursor(px, y)
     end
 
     # The detail sub-panes in order: REQUEST → RESPONSE → decoded-protocol panes (each

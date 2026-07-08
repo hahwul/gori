@@ -3,6 +3,9 @@ require "./theme"
 require "./frame"
 require "./traffic_empty_state"
 require "./text_area"
+require "./input_mode"
+require "./text_read_state"
+require "./gutter"
 require "../store"
 require "../findings_query"
 require "../links"
@@ -25,8 +28,9 @@ module Gori::Tui
       @detail_resolved = [] of Links::Resolved
       @links_scroll = 0
       @selected_link = 0
-      @notes_xscroll = 0 # horizontal scroll offset for the read-only notes preview
-      @editing_notes = false
+      @detail_focus = :links # :links | :notes — which detail region owns plain arrows
+      @notes_mode = InputMode::Read
+      @notes_read = TextReadState.new
       @notes = TextArea.new
       @notes.follow_x = true # long note lines scroll horizontally to keep the cursor visible
       @loaded = false
@@ -74,10 +78,14 @@ module Gori::Tui
     # detail interior render() receives; the NOTES editor sits at rect.y + 6 (after
     # the badge/hint/meta/flow rows + divider + "NOTES" label), mirroring render_detail.
     def notes_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
-      return unless @editing_notes
-      notes_rect = Rect.new(rect.x + 1, rect.y + 6, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 6), 0}.max)
+      notes_rect = notes_body_rect(rect)
+      return if notes_rect.empty?
+      @detail_focus = :notes
+      enter_notes_insert!
       @notes.click_to_cursor(notes_rect, mx, my)
     end
+
+
 
     def select_index(idx : Int32) : Nil
       return if @findings.empty?
@@ -97,8 +105,23 @@ module Gori::Tui
       !@detail.nil?
     end
 
+    getter notes_mode : InputMode
+
+    def notes_insert_mode? : Bool
+      @notes_mode == InputMode::Insert
+    end
+
+    # Back-compat alias (specs / older call sites).
     def editing_notes? : Bool
-      @editing_notes
+      notes_insert_mode?
+    end
+
+    def notes_focused? : Bool
+      @detail_focus == :notes
+    end
+
+    def focus_links! : Nil
+      @detail_focus = :links
     end
 
     # --- `/` filter bar ------------------------------------------------------
@@ -178,23 +201,27 @@ module Gori::Tui
       reload_detail_links(store)
       @links_scroll = 0
       @selected_link = 0
-      @notes_xscroll = 0
-      @editing_notes = false
+      @detail_focus = :links
+      @notes_mode = InputMode::Read
+      @notes.set_text(finding.notes)
+      @notes_read.sync_from(@notes)
       true
     end
 
-    # Nudge the read-only notes preview sideways (shift+←/→). No-op while editing —
-    # the TextArea editor's own follow_x already handles that case.
+    # Nudge the notes viewport sideways (shift+←/→ in READ). Pans by moving the read
+    # cursor so follow_x keeps the window aligned (TextArea ensure_visible_x otherwise
+    # resets a bare @xscroll when the caret sits at column 0).
     def hscroll_notes(delta : Int32) : Nil
-      return if @editing_notes
-      @notes_xscroll = {@notes_xscroll + delta * 4, 0}.max
+      return if notes_insert_mode?
+      @notes_read.move(@notes, 0, delta * 4)
     end
 
     def close_detail : Nil
       @detail = nil
       @detail_links = [] of Store::EntityLink
       @detail_resolved = [] of Links::Resolved
-      @editing_notes = false
+      @detail_focus = :links
+      @notes_mode = InputMode::Read
     end
 
     def reload_detail_links(store : Store) : Nil
@@ -274,49 +301,98 @@ module Gori::Tui
       reload(store)
     end
 
-    # --- notes inline editing ---
+    # --- notes READ/INS (inline editor) ---
     def start_notes_edit : Nil
+      enter_notes_insert!
+    end
+
+    def enter_notes_insert! : Nil
       return unless finding = @detail
-      @notes.set_text(finding.notes)
-      @editing_notes = true
+      @detail_focus = :notes
+      if @notes_mode == InputMode::Read
+        @notes.set_text(finding.notes)
+      end
+      @notes_mode = InputMode::Insert
+      @notes_read.sync_from(@notes)
+    end
+
+    def exit_notes_insert! : Nil
+      @notes_mode = InputMode::Read
+      @notes_read.sync_from(@notes)
+    end
+
+    def notes_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      return if notes_insert_mode?
+      @notes_read.move(@notes, dr, dc, selecting: selecting)
+    end
+
+    def notes_scroll_wheel(step : Int32) : Nil
+      @notes.scroll_view(step)
+    end
+
+    def notes_copy_text : String
+      @notes_read.copy_text(@notes)
+    end
+
+    def notes_copy_all : String
+      @notes_read.copy_all(@notes)
+    end
+
+    def notes_selection? : Bool
+      notes_focused? && !notes_insert_mode? && @notes_read.selection?
+    end
+
+    def notes_select_line : Nil
+      return if notes_insert_mode?
+      @detail_focus = :notes
+      @notes_read.select_line(@notes)
+    end
+
+    def notes_clear_selection : Nil
+      @notes_read.clear_selection
     end
 
     def notes_undo : Nil
-      @notes.undo if @editing_notes
+      @notes.undo if notes_insert_mode?
     end
 
     def notes_insert(ch : Char) : Nil
-      @notes.insert(ch) if @editing_notes
+      @notes.insert(ch) if notes_insert_mode?
     end
 
     def notes_newline : Nil
-      @notes.insert_newline if @editing_notes
+      @notes.insert_newline if notes_insert_mode?
     end
 
     def notes_backspace : Nil
-      @notes.backspace if @editing_notes
+      @notes.backspace if notes_insert_mode?
     end
 
     def notes_move(dr : Int32, dc : Int32) : Nil
-      @notes.move(dr, dc) if @editing_notes
+      @notes.move(dr, dc) if notes_insert_mode?
     end
 
     # Live IME composing text for the notes editor (delegates to the TextArea).
     def set_preedit(text : String) : Nil
-      @notes.set_preedit(text) if @editing_notes
+      @notes.set_preedit(text) if notes_insert_mode?
     end
 
     def save_notes(store : Store) : Nil
       return unless finding = @detail
       store.update_finding(finding.id, notes: String.new(@notes.to_bytes))
-      @editing_notes = false
+      exit_notes_insert!
       refresh_detail(store)
+      @notes.set_text(@detail.not_nil!.notes)
+      @notes_read.sync_from(@notes)
     end
 
     # Leave the notes editor WITHOUT persisting (^W) — discards the in-buffer
-    # edits; the next edit re-seeds from the stored notes (start_notes_edit).
+    # edits; the next edit re-seeds from the stored notes (enter_notes_insert!).
     def cancel_notes_edit : Nil
-      @editing_notes = false
+      return unless finding = @detail
+      @notes.set_text(finding.notes)
+      exit_notes_insert!
+      @notes_read.sync_from(@notes)
     end
 
     # --- rendering -----------------------------------------------------------
@@ -434,7 +510,7 @@ module Gori::Tui
       Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
       rel_head = "RELATED (#{@detail_resolved.size})"
       screen.text(rect.x + 1, y + 1, rel_head, Theme.accent, attr: Attribute::Bold)
-      unless @editing_notes
+      unless notes_insert_mode?
         links_hint = "space l"
         screen.text(rect.right - links_hint.size - 1, y + 1, links_hint, Theme.muted)
       end
@@ -462,22 +538,82 @@ module Gori::Tui
       y = list_y + list_h
       Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
       screen.text(rect.x + 1, y + 1, "NOTES", Theme.accent, attr: Attribute::Bold)
-      unless @editing_notes
-        edit_hint = "e to edit"
+      if focused && notes_focused?
+        render_notes_mode_badge(screen, rect.right - 1, y + 1, rect.x + 7, notes_insert_mode?)
+      end
+      if !notes_insert_mode? && (!focused || !notes_focused?)
+        edit_hint = "i/↵ edit"
         screen.text(rect.right - edit_hint.size - 1, y + 1, edit_hint, Theme.muted)
       end
-      notes_y = y + 2
-      notes_rect = Rect.new(rect.x + 1, notes_y, {rect.w - 2, 0}.max, {rect.bottom - notes_y, 0}.max)
-      if @editing_notes
-        @notes.render(screen, notes_rect, cursor: focused)
+      notes_rect = notes_body_rect(rect)
+      ins = focused && notes_insert_mode?
+      draw_ins_border(screen, notes_rect) if ins
+      @notes.render(screen, notes_rect, cursor: ins)
+      paint_notes_read_chrome(screen, notes_rect, focused && !notes_insert_mode? && notes_focused?)
+    end
+
+    def notes_body_rect(rect : Rect) : Rect
+      y0 = rect.y + 4
+      list_y = y0 + 2
+      notes_y = list_y + links_visible_rows + 2 # links + divider + NOTES label
+      Rect.new(rect.x + 1, notes_y, {rect.w - 2, 0}.max, {rect.bottom - notes_y, 0}.max)
+    end
+
+    private def draw_ins_border(screen : Screen, rect : Rect) : Nil
+      return if rect.w < 2 || rect.h < 2
+      color = Theme.accent
+      (rect.x...rect.right).each do |x|
+        screen.cell(x, rect.y, '─', color, Theme.bg)
+        screen.cell(x, rect.bottom - 1, '─', color, Theme.bg)
+      end
+      (rect.y...rect.bottom).each do |y|
+        screen.cell(rect.x, y, '│', color, Theme.bg)
+        screen.cell(rect.right - 1, y, '│', color, Theme.bg)
+      end
+    end
+
+    private def render_notes_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
+      if insert
+        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
       else
-        visible_h = {rect.bottom - notes_y, 0}.max
-        rows = finding.notes.split('\n').first(visible_h)
-        @notes_xscroll = @notes_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @notes_xscroll + notes_rect.w + 1) } || 0) - notes_rect.w, 0}.max)
-        rows.each_with_index do |note_line, i|
-          shown = @notes_xscroll > 0 ? Highlight.slice_left_text(note_line, @notes_xscroll) : note_line
-          screen.text(notes_rect.x, notes_rect.y + i, shown, Theme.text, width: notes_rect.w)
-        end
+        bx = right_edge - " NOR ".size
+        screen.text(bx, y, " NOR ", Theme.muted, Theme.bg) if bx >= min_x
+      end
+    end
+
+    private def paint_notes_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
+      return unless active
+      lines = @notes.lines_snapshot
+      return if lines.empty?
+      scr = @notes.scroll
+      sel_bg = Theme.accent_bg
+      @notes_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
+        next unless li >= scr && li < scr + rect.h
+        row = li - scr
+        paint_char_span_bg(screen, rect.x, rect.y + row, lines[li], x0, x1, sel_bg)
+      end
+      cy, cx = @notes_read.cursor.cy, @notes_read.cursor.cx
+      return unless cy >= scr && cy < scr + rect.h
+      row = cy - scr
+      line = lines[cy]
+      px = rect.x + Screen.column_width(line[0, cx])
+      if px < rect.x + rect.w
+        ch = cx < line.size ? line[cx] : ' '
+        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
+        screen.cursor(px, rect.y + row)
+      end
+    end
+
+    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
+                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
+      return if x0 >= x1
+      px = x
+      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (x0...x1).each do |i|
+        break if i >= line.size
+        w = Screen.column_width(line[i].to_s)
+        screen.text(px, y, line[i].to_s, Theme.text, bg)
+        px += w
       end
     end
 
@@ -492,6 +628,10 @@ module Gori::Tui
         @detail = store.get_finding(finding.id)
         @detail_flow = @detail.try { |f| f.flow_id.try { |fid| store.flow_row(fid) } }
         reload_detail_links(store)
+        unless notes_insert_mode?
+          @notes.set_text(@detail.not_nil!.notes)
+          @notes_read.sync_from(@notes)
+        end
       end
       reload(store)
     end

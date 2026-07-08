@@ -4,6 +4,9 @@ require "./frame"
 require "./spark"
 require "./fmt"
 require "./text_area"
+require "./input_mode"
+require "./text_read_state"
+require "./gutter"
 require "../project"
 require "../store"
 require "../scope"
@@ -52,6 +55,8 @@ module Gori::Tui
       @desc_area = TextArea.new
       @desc_area.follow_x = true # long description lines scroll horizontally to keep the cursor visible
       @desc_dirty = false
+      @desc_mode = InputMode::Read
+      @desc_read = TextReadState.new
 
       @pane = :scope            # :scope | :overrides | :desc
       @sel = 0                  # selected rule row in the SCOPE list
@@ -116,6 +121,8 @@ module Gori::Tui
       @created = earliest ? Time.unix(earliest // 1_000_000) : project.created
 
       @desc_area.set_text(store.setting(DESC_KEY) || "")
+      @desc_mode = InputMode::Read
+      @desc_read.sync_from(@desc_area)
       @desc_dirty = false
       load_settings_values
       @env_items = Settings.project_env_vars.dup
@@ -155,13 +162,60 @@ module Gori::Tui
         @env_preedit = text
       elsif @pane == :settings && settings_text_row?
         @set_preedit = text
-      else
+      elsif @pane == :desc && desc_insert_mode?
         @desc_area.set_preedit(text)
       end
     end
 
     def desc_text : String
       @desc_area.text
+    end
+
+    getter desc_mode : InputMode
+
+    def desc_insert_mode? : Bool
+      @desc_mode == InputMode::Insert
+    end
+
+    def enter_desc_insert! : Nil
+      @desc_mode = InputMode::Insert
+      @desc_read.sync_from(@desc_area)
+    end
+
+    def exit_desc_insert! : Nil
+      @desc_mode = InputMode::Read
+      @desc_read.sync_from(@desc_area)
+    end
+
+    def desc_read_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      return if desc_insert_mode?
+      @desc_read.move(@desc_area, dr, dc, selecting: selecting)
+    end
+
+    def desc_copy_text : String
+      @desc_read.copy_text(@desc_area)
+    end
+
+    def desc_copy_all : String
+      @desc_read.copy_all(@desc_area)
+    end
+
+    def desc_selection? : Bool
+      @pane == :desc && !desc_insert_mode? && @desc_read.selection?
+    end
+
+    def desc_select_line : Nil
+      return if desc_insert_mode?
+      @desc_read.select_line(@desc_area)
+    end
+
+    def desc_clear_selection : Nil
+      @desc_read.clear_selection
+    end
+
+    def desc_hscroll(delta : Int32) : Nil
+      return if desc_insert_mode?
+      @desc_read.move(@desc_area, 0, delta * 4)
     end
 
     PANES          = [:scope, :overrides, :env, :desc, :settings]
@@ -332,6 +386,7 @@ module Gori::Tui
     # (the same geometry render uses), then map into the @desc_area editor.
     def desc_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
       return unless panes = body_panes(rect)
+      enter_desc_insert!
       @desc_area.click_to_cursor(panes[3].inset(1, 1), mx, my)
     end
 
@@ -1267,9 +1322,66 @@ module Gori::Tui
 
     private def render_desc_card(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, "DESCRIPTION", bg: Theme.bg, border: Frame.pane_border(focused))
-      @desc_area.render(screen, rect.inset(1, 1), cursor: focused,
+      ins = focused && desc_insert_mode?
+      border = desc_pane_border(focused, ins)
+      Frame.card(screen, rect, "DESCRIPTION", bg: Theme.bg, border: border)
+      if focused
+        render_desc_mode_badge(screen, rect.right - 1, rect.y, rect.x + 14, ins)
+      end
+      inner = rect.inset(1, 1)
+      @desc_area.render(screen, inner, cursor: ins,
         highlight: Settings.editor_markdown ? :markdown : nil)
+      paint_desc_read_chrome(screen, inner, focused && !ins)
+    end
+
+    private def desc_pane_border(focused : Bool, insert : Bool) : Color
+      return Frame.pane_border(false) unless focused
+      insert ? Theme.accent : Frame.pane_border(true)
+    end
+
+    private def render_desc_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil
+      if insert
+        Frame.toggle_badge(screen, right_edge, y, min_x, "i", "INS", true)
+      else
+        bx = right_edge - " NOR ".size
+        screen.text(bx, y, " NOR ", Theme.muted, Theme.bg) if bx >= min_x
+      end
+    end
+
+    private def paint_desc_read_chrome(screen : Screen, rect : Rect, active : Bool) : Nil
+      return unless active
+      lines = @desc_area.lines_snapshot
+      return if lines.empty?
+      scr = @desc_area.scroll
+      sel_bg = Theme.accent_bg
+      @desc_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|
+        next unless li >= scr && li < scr + rect.h
+        row = li - scr
+        paint_char_span_bg(screen, rect.x, rect.y + row, lines[li], x0, x1, sel_bg)
+      end
+      cy, cx = @desc_read.cursor.cy, @desc_read.cursor.cx
+      return unless cy >= scr && cy < scr + rect.h
+      row = cy - scr
+      line = lines[cy]
+      px = rect.x + Screen.column_width(line[0, cx])
+      if px < rect.x + rect.w
+        ch = cx < line.size ? line[cx] : ' '
+        screen.cell(px, rect.y + row, ch, Theme.bg, Theme.accent_bg)
+        screen.cursor(px, rect.y + row)
+      end
+    end
+
+    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
+                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
+      return if x0 >= x1
+      px = x
+      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (x0...x1).each do |i|
+        break if i >= line.size
+        w = Screen.column_width(line[i].to_s)
+        screen.text(px, y, line[i].to_s, Theme.text, bg)
+        px += w
+      end
     end
 
     # PROJECT SETTINGS card: the scope-lens toggle (row 0) over the three inline-editable network

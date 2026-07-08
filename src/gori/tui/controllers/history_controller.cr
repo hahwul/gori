@@ -61,6 +61,10 @@ module Gori::Tui
       if @host.overlay == :detail
         if pane = @history.detail_pane_at(inner, mx, my)
           @history.set_detail_pane_public(pane)
+        elsif my >= inner.y + 2
+          body = Rect.new(inner.x + 1, inner.y + 2, {inner.w - 2, 0}.max, {inner.bottom - (inner.y + 2), 0}.max)
+          @host.focus_body
+          @history.detail_click_to_cursor(body, mx, my, focused: true)
         end
         return true
       end
@@ -72,11 +76,73 @@ module Gori::Tui
     end
 
     def handle_wheel(step : Int32) : Bool
-      @host.overlay == :detail ? @history.scroll_detail(step) : @history.move(step)
+      if @host.overlay == :detail
+        @history.detail_navigable? ? @history.detail_scroll_view(step) : @history.scroll_detail(step)
+      else
+        @history.move(step)
+      end
       true
     end
 
+    # History detail drill-in: shift+arrows select, space opens the action menu.
+    # Plain ↑/↓/j/k stay verb-driven (detail.up/down → detail_move).
+    def handle_detail_key(ev : Termisu::Event::Key) : Bool
+      return false unless @host.overlay == :detail
+      if ev.key.space? && !ev.ctrl? && !ev.alt?
+        @host.open_space_menu
+        return true
+      end
+      return true if handle_detail_hscroll(ev)
+      key = ev.key
+      selecting = ev.shift?
+      nav = @history.detail_navigable?
+      case
+      when key.left? && selecting  then @history.detail_move(0, -1, selecting: true) if nav
+      when key.right? && selecting then @history.detail_move(0, 1, selecting: true) if nav
+      when key.up? && selecting, key.lower_k? && selecting
+        @history.detail_move(-1, 0, selecting: true) if nav
+      when key.down? && selecting, key.lower_j? && selecting
+        @history.detail_move(1, 0, selecting: true) if nav
+      when ev.key.lower_x? && nav
+        @history.detail_select_line
+      when ev.char == 'y' || ev.key.lower_y?
+        detail_copy_selection
+      else
+        return false
+      end
+      true
+    end
+
+    def detail_selection_active? : Bool
+      @history.detail_selection?
+    end
+
+    def detail_select_line : Nil
+      @history.detail_select_line
+    end
+
+    def detail_clear_selection : Nil
+      @history.detail_clear_selection
+    end
+
+    private def handle_detail_hscroll(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if key.left? && ev.shift?
+        @history.hscroll_detail(-1)
+        true
+      elsif key.right? && ev.shift?
+        @history.hscroll_detail(1)
+        true
+      else
+        false
+      end
+    end
+
     def body_hint(focus : Symbol) : String
+      if @host.overlay == :detail
+        nav = @history.detail_navigable? ? "↑/↓ move" : "↑/↓ scroll"
+        return "←/→ panes · #{nav} · ⇧arrows select · y copy · ⇧←/→ h-scroll · space cmds · esc back"
+      end
       @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" : "↑/↓ move · ↵ open · ^R replay · ⇧F finding · f follow · / filter · i hold-mode · space cmds · esc tabs"
     end
 
@@ -196,6 +262,16 @@ module Gori::Tui
 
     def scroll_detail(delta : Int32) : Nil
       @history.scroll_detail(delta)
+    end
+
+    def detail_copy_selection : Nil
+      text = @history.detail_copy_text
+      if text.empty?
+        @host.status("nothing to copy")
+        return
+      end
+      written = Clipboard.copy(text)
+      @host.status("copied #{written}b to clipboard")
     end
 
     def hscroll_detail(delta : Int32) : Nil

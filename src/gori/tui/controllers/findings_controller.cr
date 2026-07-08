@@ -1,5 +1,6 @@
 require "../tab_controller"
 require "../findings_view"
+require "../clipboard"
 require "../../store"
 require "../../findings_export"
 
@@ -8,8 +9,8 @@ module Gori::Tui
   # editor) + Markdown/JSON export. Owns FindingsView. The "new/edit finding" FORM is
   # a shell overlay (@overlay == :finding_new), so it stays in the Runner; the three
   # cross-tab jumps (finding → its flow in History, finding → Replay, new-from-flow)
-  # are shell mediators. The inline notes editor is a text sub-mode claimed by the
-  # shell before the focus ring (like the History QL bar) and routed here.
+  # are shell mediators. Detail notes use READ/INS (like Notes): the shell routes
+  # detail keys here before the focus ring when a finding is open.
   class FindingsController < TabController
     def initialize(host : Host)
       super(host)
@@ -28,13 +29,19 @@ module Gori::Tui
       @findings.detail_open? ? Verb::Scope::FindingsDetail : Verb::Scope::Findings
     end
 
-    def body_badge : Symbol # the inline notes editor captures text; else the list/read-only detail
-      @findings.editing_notes? ? :editor : :body
+    def body_badge : Symbol
+      @findings.notes_insert_mode? ? :editor : :body
     end
 
     def body_hint(focus : Symbol) : String
       if @findings.detail_open?
-        @findings.editing_notes? ? "esc save · ^W discard" : "↑/↓ links · ↵ open · e notes · o flow · r replay · space cmds · ⇧←/→ h-scroll · ←/esc back"
+        if @findings.notes_insert_mode?
+          "type to edit · esc save · ^W discard"
+        elsif @findings.notes_focused?
+          "↑/↓ move · ⇧arrows select · y copy · i/↵ edit · space cmds · ⇧←/→ h-scroll · esc links"
+        else
+          "↑/↓ links · ↵ open · i/↵ notes · o flow · r replay · space cmds · ←/esc back"
+        end
       elsif @findings.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       else
@@ -50,37 +57,83 @@ module Gori::Tui
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       inner = rect.inset(1, 1)
       if @findings.detail_open?
-        @findings.notes_click_to_cursor(inner, mx, my) if @findings.editing_notes? # place caret in the inline notes editor
+        notes_rect = @findings.notes_body_rect(inner)
+        if !notes_rect.empty? && mx >= notes_rect.x && mx < notes_rect.right &&
+           my >= notes_rect.y && my < notes_rect.bottom
+          @findings.notes_click_to_cursor(inner, mx, my)
+        end
         return true
       end
       @host.focus_body
-      # Click the top filter-bar row → start editing the filter (like History).
       if my == inner.y && !@findings.querying?
         @findings.start_query
         return true
       end
       return true unless idx = @findings.list_row_at(inner, mx, my)
-      # SELECT-FIRST (same as History): first click selects, second opens.
       idx == @findings.selected_index ? findings_open : @findings.select_index(idx)
       true
     end
 
     def handle_wheel(step : Int32) : Bool
-      if @findings.detail_open? && !@findings.editing_notes?
-        @findings.scroll_links_wheel(step)
+      if @findings.detail_open?
+        if @findings.notes_insert_mode? || @findings.notes_focused?
+          @findings.notes_scroll_wheel(step)
+        else
+          @findings.scroll_links_wheel(step)
+        end
       elsif !@findings.detail_open?
         @findings.move(step)
       end
       true
     end
 
-    # Findings notes inline editor — a text sub-mode the shell claims before the
-    # focus ring. Returns true (swallows), mirroring the old `return handle_…`.
-    def handle_notes_key(ev : Termisu::Event::Key) : Bool
+    # Finding detail: notes READ/INS routing (claimed before the focus ring).
+    def handle_detail_key(ev : Termisu::Event::Key) : Bool
+      return false unless @findings.detail_open?
       key = ev.key
       c = ev.char || key.to_char
+      if @findings.notes_insert_mode?
+        return handle_notes_insert_key(ev, key, c)
+      end
+      if !@findings.notes_focused? && c == 'i'
+        @findings.enter_notes_insert!
+        return true
+      end
+      if key.space? && !ev.ctrl? && !ev.alt?
+        @host.open_space_menu
+        return true
+      end
+      return true if handle_notes_hscroll(ev)
+      if @findings.notes_focused?
+        return handle_notes_read_key(ev, key, c)
+      end
+      false
+    end
+
+    private def handle_notes_read_key(ev : Termisu::Event::Key, key, c : Char?) : Bool
+      selecting = ev.shift?
       case
-      when ev.ctrl? && key.lower_w? then @findings.cancel_notes_edit # discard edits
+      when key.escape?
+        @findings.focus_links!
+      when key.enter?, c == 'i'
+        @findings.enter_notes_insert!
+      when key.up?   then @findings.notes_read_move(-1, 0, selecting: selecting)
+      when key.down? then @findings.notes_read_move(1, 0, selecting: selecting)
+      when key.left? && selecting  then @findings.notes_read_move(0, -1, selecting: true)
+      when key.right? && selecting then @findings.notes_read_move(0, 1, selecting: true)
+      when key.left? && !selecting  then @findings.notes_read_move(0, -1)
+      when key.right? && !selecting then @findings.notes_read_move(0, 1)
+      when c == 'x'                then @findings.notes_select_line
+      when c == 'y'                then findings_copy
+      else
+        return false
+      end
+      true
+    end
+
+    private def handle_notes_insert_key(ev : Termisu::Event::Key, key, c : Char?) : Bool
+      case
+      when ev.ctrl? && key.lower_w? then @findings.cancel_notes_edit
       when ev.ctrl_z?               then @findings.notes_undo
       when key.escape?              then @findings.save_notes(@host.session.store)
       when key.enter?               then @findings.notes_newline
@@ -92,19 +145,30 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @findings.notes_insert(c)
-          @findings.set_preedit("") # commit any preedit
+          @findings.set_preedit("")
         end
       end
       true
     end
 
-    # Live IME composition flows to the `/` filter bar (list) or the inline notes
-    # editor (detail) — whichever text field is active.
+    private def handle_notes_hscroll(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      if key.left? && ev.shift?
+        @findings.hscroll_notes(-1)
+        true
+      elsif key.right? && ev.shift?
+        @findings.hscroll_notes(1)
+        true
+      else
+        false
+      end
+    end
+
     def set_preedit(text : String) : Bool
       if @findings.querying?
         @findings.query_set_preedit(text)
         true
-      elsif @findings.editing_notes?
+      elsif @findings.notes_insert_mode?
         @findings.set_preedit(text)
         true
       else
@@ -116,15 +180,12 @@ module Gori::Tui
       @findings.querying?
     end
 
-    # The `/` filter bar — a text sub-mode the shell claims before the focus ring
-    # (mirrors History's QL bar). Returns true (swallows). Filtering is live, so
-    # every edit re-derives the visible list inside the view.
     def handle_query_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char
       case
-      when key.enter?     then @findings.stop_query   # keep the filter, leave edit mode
-      when key.escape?    then @findings.cancel_query # clear + revert
+      when key.enter?     then @findings.stop_query
+      when key.escape?    then @findings.cancel_query
       when key.tab?       then @findings.query_complete
       when key.backspace? then @findings.query_backspace
       when key.left?      then @findings.query_move(-1)
@@ -132,7 +193,7 @@ module Gori::Tui
       else
         if c && !ev.ctrl? && !ev.alt?
           @findings.query_insert(c)
-          @findings.query_set_preedit("") # commit any preedit
+          @findings.query_set_preedit("")
         end
       end
       true
@@ -147,13 +208,28 @@ module Gori::Tui
     end
 
     def commit : Nil
-      @findings.save_notes(@host.session.store) if @findings.editing_notes?
+      @findings.save_notes(@host.session.store) if @findings.notes_insert_mode?
     end
 
-    # --- ExecContext verbs (delegated from the Runner) ---
+    def findings_notes_read_mode? : Bool
+      @findings.detail_open? && @findings.notes_focused? && !@findings.notes_insert_mode?
+    end
+
+    def findings_notes_selection_active? : Bool
+      @findings.notes_selection?
+    end
+
+    def findings_notes_select_line : Nil
+      @findings.notes_select_line
+    end
+
+    def findings_notes_clear_selection : Nil
+      @findings.notes_clear_selection
+    end
+
     def findings_move(delta : Int32) : Nil
       if delta < 0 && @findings.at_top?
-        return @host.request_focus(:menu) # ↑ at the top finding pops up to the tab bar
+        return @host.request_focus(:menu)
       end
       @findings.move(delta)
     end
@@ -182,7 +258,7 @@ module Gori::Tui
     end
 
     def finding_edit_notes : Nil
-      @findings.start_notes_edit
+      @findings.enter_notes_insert!
     end
 
     def finding_hscroll(delta : Int32) : Nil
@@ -190,11 +266,32 @@ module Gori::Tui
     end
 
     def finding_link_move(delta : Int32) : Nil
-      return if @findings.editing_notes?
+      return if @findings.notes_insert_mode? || @findings.notes_focused?
       @findings.move_links(delta)
     end
 
-    # Write all findings to the project dir as Markdown (the report) or JSON.
+    def findings_copy : Nil
+      text = @findings.notes_copy_text
+      if text.empty?
+        @host.status("nothing to copy")
+        return
+      end
+      written = Clipboard.copy(text)
+      @host.status("copied #{written}b to clipboard")
+    end
+
+    def findings_copy_all : Nil
+      text = @findings.notes_copy_all
+      if text.empty?
+        @host.status("nothing to copy")
+        return
+      end
+      written = Clipboard.copy(text)
+      msg = "copied notes to clipboard (#{written}b)"
+      msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
+      @host.status(msg)
+    end
+
     def findings_export(format : Symbol) : Nil
       findings = @host.session.store.findings
       return @host.status("no findings to export") if findings.empty?
@@ -204,7 +301,6 @@ module Gori::Tui
       path = File.join(@host.session.project.dir, "findings.#{ext}")
       File.write(path, content)
       msg = "exported #{findings.size} finding#{findings.size == 1 ? "" : "s"} → #{path}"
-      # A temp project's dir is wiped on close — warn so the report isn't silently lost.
       msg += "  ⚠ temp project — copy it before closing" if @host.session.project.ephemeral?
       @host.status(msg)
     rescue ex

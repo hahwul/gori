@@ -47,6 +47,8 @@ module Gori
 
       # detail view
       abstract def scroll_detail(delta : Int32) : Nil
+      # Copy the selection (or current line) from the navigable detail text pane.
+      abstract def detail_copy_selection : Nil
       # Horizontal companion to scroll_detail (shift+←/→) — scrolls a long
       # request/response/decoded line sideways instead of right-clipping it.
       abstract def hscroll_detail(delta : Int32) : Nil
@@ -81,6 +83,9 @@ module Gori
       abstract def replay_insert_marker : Nil # drop a single § at the cursor (bracket by hand)
       abstract def replay_clear_marks : Nil   # strip all markers (and their chains)
       abstract def replay_attach_chain : Nil  # open the chain-edit prompt for the marker at the cursor
+      abstract def replay_copy : Nil          # copy selection or current line (READ panes)
+      abstract def replay_copy_all : Nil      # copy the whole focused pane text
+      abstract def replay_read_mode? : Bool   # focused pane is READ (y/copy verbs gate on this)
 
       # fuzzer workbench (run/stop/marking handled inline; these power the palette + cross-tab)
       abstract def fuzz_selected : Nil     # send History's selection to the Fuzzer tab
@@ -92,6 +97,9 @@ module Gori
       abstract def fuzz_attach_chain : Nil # open the chain-edit prompt for the marker at the template cursor
       abstract def fuzz_list_paste : Nil   # open the payload-set editor pre-seeded to a List (multi-line, one value per line)
       abstract def fuzz_clear_marks : Nil  # strip all §…§ markers (and their chains) from the template
+      abstract def fuzzer_copy : Nil          # copy selection or current line (READ panes)
+      abstract def fuzzer_copy_all : Nil      # copy the whole focused pane text
+      abstract def fuzzer_read_mode? : Bool   # focused pane is READ (y/copy verbs gate on this)
 
       # param miner (cross-tab seeds open a config popup, then mining runs in background)
       abstract def mine_selected : Nil    # mine History's selected flow (opens the config popup)
@@ -151,8 +159,10 @@ module Gori
       abstract def finding_set_severity : Nil            # open the severity colour picker
       abstract def finding_set_status : Nil              # open the triage-status colour picker
       abstract def finding_edit_notes : Nil
-      # Horizontal scroll (shift+←/→) for the read-only notes preview (no-op while
-      # editing — the notes TextArea's own follow_x handles that case).
+      abstract def findings_notes_read_mode? : Bool # detail open, notes not in INS (gates y/copy)
+      abstract def findings_copy : Nil              # copy selection from finding notes (READ)
+      abstract def findings_copy_all : Nil          # copy all finding notes (space menu)
+      # Horizontal scroll (shift+←/→) for notes in READ (no-op in INS — follow_x tracks the caret).
       abstract def finding_hscroll(delta : Int32) : Nil
       abstract def finding_edit_title : Nil               # rename + set severity via the form overlay
       abstract def finding_open_flow : Nil                # open the linked flow's detail in History
@@ -216,7 +226,9 @@ module Gori
       abstract def convert_new : Nil        # open a fresh blank conversion sub-tab
       abstract def convert_close : Nil      # close the active conversion sub-tab (keeps ≥1)
       abstract def convert_clear : Nil      # clear the current input + chain
-      abstract def convert_copy : Nil       # copy the current output to the clipboard
+      abstract def convert_copy : Nil            # copy the entire current output to the clipboard
+      abstract def convert_copy_selection : Nil    # copy selection from INPUT/OUTPUT (READ)
+      abstract def convert_read_mode? : Bool       # INPUT READ or OUTPUT pane (gates y/copy)
       abstract def convert_cycle_mode : Nil # cycle the output display (text/hex/base64)
       abstract def convert_save : Nil       # save the current chain by name (in-body prompt)
       abstract def convert_load : Nil       # load a saved chain by name (in-body prompt)
@@ -225,12 +237,27 @@ module Gori
       # stays inline, these power the space menu reachable from the sub-tab strip)
       abstract def notes_new : Nil   # open a fresh blank note sub-tab
       abstract def notes_close : Nil # close the active note sub-tab (keeps ≥1)
-      abstract def notes_copy : Nil  # copy the entire current note to the clipboard
+      abstract def notes_copy : Nil       # copy selection or current line (READ mode)
+      abstract def notes_copy_all : Nil   # copy the entire current note to the clipboard
+      abstract def notes_read_mode? : Bool # READ vs INS (gates y/copy verbs)
       abstract def notes_clear : Nil # clear the current note's text
       abstract def notes_edit : Nil  # open the current note in the external editor
       abstract def notes_goto : Nil  # open the go-to-line prompt
       abstract def notes_find : Nil  # open the find-in-note prompt
       abstract def notes_links : Nil # open the links overlay for the current note
+
+      # project: description pane copy actions (READ mode on the DESCRIPTION card)
+      abstract def project_desc_read_mode? : Bool
+      abstract def project_copy : Nil
+      abstract def project_copy_all : Nil
+
+      # READ editors: line select / selection state (space menu + x/v chords).
+      abstract def read_selection_active? : Bool
+      abstract def read_select_line : Nil
+      abstract def read_clear_selection : Nil
+      abstract def detail_navigable? : Bool # History detail text pane (not hex)
+      # Override a verb's space-menu title (nil → use the registered default).
+      abstract def space_menu_title(verb_id : String) : String?
 
       # settings: open the config editor for a section (:network | :editor | :theme |
       # :tabs | :hotkeys). :tabs opens the tab-bar customizer overlay.

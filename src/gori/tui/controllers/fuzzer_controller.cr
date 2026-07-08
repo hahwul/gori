@@ -1,6 +1,7 @@
 require "../tab_controller"
 require "../traffic_empty_state"
 require "../fuzzer_view"
+require "../clipboard"
 require "../../store"
 require "../../fuzz"
 
@@ -78,18 +79,29 @@ module Gori::Tui
     def body_badge : Symbol
       v = current_view
       return :body unless v
-      (v.focus == :template || v.focus == :target || v.focus == :config) ? :editor : :body
+      v.pane_insert?(v.focus) ? :editor : :body
     end
 
     def body_hint(focus : Symbol) : String
       v = current_view
       return "↹/esc tabs · ^N new" unless v
+      read_common = "⇧arrows select · y copy · space cmds"
       case v.focus
-      when :target   then "type URL · ↵/↓ template · ^R run · ↹ pane · esc tabs"
-      when :template then "type · ^A params · ^K word · ^T point · ^U clear · ^O config · ^R run · ^N new · ↹ pane"
+      when :target
+        if v.target_insert?
+          "type URL · ↵/↓ template · ^R run · ↹ pane · esc read"
+        else
+          "i/↵ edit · #{read_common} · ^R run · ↹ pane · esc tabs"
+        end
+      when :template
+        if v.template_insert?
+          "type · ^A params · ^K word · ^T point · ^O config · ^R run · esc read · ↹ pane"
+        else
+          "i/↵ edit · #{read_common} · ^A params · ^O config · ^R run · ↹ pane · esc tabs"
+        end
       when :config   then config_hint(v)
       when :results  then "↑/↓ select · ↵ detail · o sort · m matched · v dist · ^R run · ^X stop · space cmds · ↹ pane"
-      when :detail   then "↑/↓ scroll · ←/→ pane · ⇧←/→ h-scroll · esc back"
+      when :detail   then "↑/↓ move · #{read_common} · ←/→ pane · ⇧←/→ h-scroll · esc back"
       else                "↹/esc tabs"
       end
     end
@@ -129,12 +141,6 @@ module Gori::Tui
         end
         # No session yet: defer other keys to the central handler (^P palette, esc, …).
         return false
-      end
-      # space opens the action menu in the navigable results pane; the editor panes
-      # (target/template/config) take it as a literal char, so gate on :results.
-      if v.focus == :results && ev.key.space? && !ev.ctrl? && !ev.alt?
-        @host.open_space_menu
-        return true
       end
       c = ev.char || ev.key.to_char
       return true if dispatch_chord(chord_action(ev, c), v, c)
@@ -176,10 +182,15 @@ module Gori::Tui
 
     private def handle_escape(v : FuzzerView) : Nil
       return v.commit_chain_pane if v.chain_pane_active? # esc in the CHAIN pane → save + back
-      # The Set / Advanced overlays own esc themselves (they apply + close, handled by the
-      # Runner while @overlay is set) — so in-pane esc is a plain one-step exit, like every
-      # other pane: detail → results, else the whole CONFIG summary → the tab bar.
-      v.focus == :detail ? v.focus_pane(:results) : @host.request_focus(:menu)
+      if v.focus == :template && v.template_insert?
+        v.exit_template_insert!
+      elsif v.focus == :target && v.target_insert?
+        v.exit_target_insert!
+      elsif v.focus == :detail
+        v.focus_pane(:results)
+      else
+        @host.request_focus(:menu)
+      end
     end
 
     # ^Y: focus the CHAIN pane for the marker under the template cursor (again = save + back).
@@ -256,13 +267,42 @@ module Gori::Tui
     end
 
     private def edit_target(ev : Termisu::Event::Key, v : FuzzerView) : Nil
+      return handle_target_read(ev, v) unless v.target_insert?
       key = ev.key
       case
       when key.enter?, key.down? then v.pane_advance(1)
       when key.up?               then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
-      when key.backspace?        then v.target_backspace
-      when key.left?             then v.target_move(-1)
-      when key.right?            then v.target_move(1)
+      else                          edit_target_common(ev, v)
+      end
+    end
+
+    private def handle_target_read(ev : Termisu::Event::Key, v : FuzzerView) : Nil
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+      key = ev.key
+      c = ev.char || key.to_char
+      selecting = ev.shift?
+      case
+      when key.enter? then v.enter_target_insert!
+      when c == 'i'   then v.enter_target_insert!
+      when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
+      when key.down?  then v.pane_advance(1)
+      when key.left?  then v.target_read_move(-1, selecting: selecting)
+      when key.right? then v.target_read_move(1, selecting: selecting)
+      when key.home?  then v.target_home
+      when key.end?   then v.target_end
+      when c == 'x'   then v.pane_select_line
+      when c == 'y'   then fuzzer_copy
+      end
+    end
+
+    private def edit_target_common(ev : Termisu::Event::Key, v : FuzzerView) : Nil
+      key = ev.key
+      case
+      when key.backspace? then v.target_backspace
+      when key.left?      then v.target_move(-1)
+      when key.right?     then v.target_move(1)
+      when key.home?      then v.target_home
+      when key.end?       then v.target_end
       else
         printable(ev).try { |ch| v.target_insert(ch) }
       end
@@ -270,6 +310,7 @@ module Gori::Tui
 
     private def edit_template(ev : Termisu::Event::Key, v : FuzzerView) : Nil
       return v.handle_chain_pane_key(ev) if v.chain_pane_active? # CHAIN sub-pane owns typing
+      return handle_template_read(ev, v) unless v.template_insert?
       key = ev.key
       case
       when key.enter?     then v.template_newline
@@ -286,8 +327,33 @@ module Gori::Tui
       end
     end
 
-    private def template_up(v : FuzzerView) : Nil
-      v.template_at_top? ? v.pane_advance(-1) : v.template_move(-1, 0)
+    private def handle_template_read(ev : Termisu::Event::Key, v : FuzzerView) : Nil
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+      key = ev.key
+      c = ev.char || key.to_char
+      selecting = ev.shift?
+      case
+      when key.enter? then v.enter_template_insert!
+      when c == 'i'   then v.enter_template_insert!
+      when key.up?    then template_up(v, selecting)
+      when key.down?  then v.template_read_move(1, 0, selecting: selecting)
+      when key.left?  then v.template_read_move(0, -1, selecting: selecting)
+      when key.right? then v.template_read_move(0, 1, selecting: selecting)
+      when key.home?  then v.template_home
+      when key.end?   then v.template_end
+      when c == 'x'   then v.pane_select_line
+      when c == 'y'   then fuzzer_copy
+      end
+    end
+
+    private def template_up(v : FuzzerView, selecting : Bool = false) : Nil
+      if v.template_at_top?
+        v.pane_advance(-1)
+      elsif v.template_insert?
+        v.template_move(-1, 0)
+      else
+        v.template_read_move(-1, 0, selecting: selecting)
+      end
     end
 
     # The CONFIG summary is a calm single-axis row list — no text entry (that drills into
@@ -322,6 +388,7 @@ module Gori::Tui
     end
 
     private def handle_results(ev : Termisu::Event::Key, v : FuzzerView) : Nil
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       case
       when key.enter?              then v.open_detail
@@ -334,14 +401,31 @@ module Gori::Tui
     end
 
     private def handle_detail(ev : Termisu::Event::Key, v : FuzzerView) : Nil
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+      return if handle_detail_hscroll(ev, v)
       key = ev.key
+      selecting = ev.shift?
       case
-      when key.up?, key.lower_k?   then v.detail_scroll(-1)
-      when key.down?, key.lower_j? then v.detail_scroll(1)
-      when key.left? && ev.shift?  then v.hscroll_detail(-1)
-      when key.right? && ev.shift? then v.hscroll_detail(1)
+      when key.up?, key.lower_k?
+        v.detail_cursor_at_top? ? v.focus_pane(:results) : v.detail_move(-1, 0, selecting: selecting)
+      when key.down?, key.lower_j? then v.detail_move(1, 0, selecting: selecting)
       when key.left?               then v.detail_step_pane(-1)
       when key.right?              then v.detail_step_pane(1)
+      when ev.char == 'x'          then v.pane_select_line
+      when ev.char == 'y'          then fuzzer_copy
+      end
+    end
+
+    private def handle_detail_hscroll(ev : Termisu::Event::Key, v : FuzzerView) : Bool
+      key = ev.key
+      if key.left? && ev.shift?
+        v.hscroll_detail(-1)
+        true
+      elsif key.right? && ev.shift?
+        v.hscroll_detail(1)
+        true
+      else
+        false
       end
     end
 
@@ -355,8 +439,14 @@ module Gori::Tui
         click_results(v, body, mx, my)
       else
         v.focus_pane(pane)
-        v.template_click_to_cursor(body, mx, my) if pane == :template
-        v.target_click_to_cursor(body, mx, my) if pane == :target
+        case pane
+        when :template
+          v.enter_template_insert! unless v.template_insert?
+          v.template_click_to_cursor(body, mx, my)
+        when :target
+          v.enter_target_insert! unless v.target_insert?
+          v.target_click_to_cursor(body, mx, my)
+        end
       end
       true
     end
@@ -379,16 +469,64 @@ module Gori::Tui
     def handle_wheel(step : Int32) : Bool
       if v = current_view
         case v.focus
-        when :results then v.results_move(step)
-        when :detail  then v.detail_scroll(step)
+        when :results  then v.results_move(step)
+        when :detail   then v.detail_scroll_view(step)
+        when :template then v.template_scroll_view(step)
         end
       end
       true
     end
 
     def set_preedit(text : String) : Bool
-      current_view.try(&.set_preedit(text))
+      current_view.try do |v|
+        next unless v.pane_insert?(v.focus)
+        v.set_preedit(text)
+      end
       true
+    end
+
+    def fuzzer_copy : Nil
+      v = current_view
+      return unless v
+      text = v.pane_copy_text
+      return if text.empty?
+      written = Clipboard.copy(text)
+      @host.status("copied #{written}b to clipboard")
+    end
+
+    def fuzzer_copy_all : Nil
+      v = current_view
+      return unless v
+      text = v.pane_copy_all_text
+      return if text.empty?
+      written = Clipboard.copy(text)
+      msg = "copied all (#{written}b)"
+      msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
+      @host.status(msg)
+    end
+
+    def fuzzer_read_mode? : Bool
+      v = current_view
+      return false unless v
+      case v.focus
+      when :template then !v.pane_insert?(:template)
+      when :target   then !v.pane_insert?(:target)
+      when :detail   then true
+      when :results  then true
+      else               false
+      end
+    end
+
+    def fuzzer_selection_active? : Bool
+      current_view.try(&.pane_selection?) == true
+    end
+
+    def fuzzer_select_line : Nil
+      current_view.try(&.pane_select_line)
+    end
+
+    def fuzzer_clear_selection : Nil
+      current_view.try(&.pane_clear_selection)
     end
 
     def commit : Nil
@@ -397,7 +535,8 @@ module Gori::Tui
 
     def locked? : Bool
       return false unless v = current_view
-      v.running? || v.dirty? || (@host.active_tab == :fuzzer && @host.focus == :body)
+      v.running? || v.dirty? || v.pane_insert?(:template) || v.pane_insert?(:target) ||
+        (@host.active_tab == :fuzzer && @host.focus == :body)
     end
 
     # --- focus ring ---

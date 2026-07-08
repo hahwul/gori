@@ -114,7 +114,9 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("notes.new")
     ids.should contain("notes.close")
     ids.should contain("notes.copy")
+    ids.should contain("notes.select-line")
     menu.verb_for('y').try(&.id).should eq("notes.copy")
+    menu.verb_for('x').try(&.id).should eq("notes.select-line")
     menu.verb_for('n').try(&.id).should eq("notes.new")
     menu.verb_for('w').try(&.id).should eq("notes.close")
   end
@@ -149,10 +151,10 @@ describe Gori::Tui::SpaceMenu do
     ids = menu.entries.map(&.id)
     ids.should contain("convert.new")
     ids.should contain("convert.close")
-    ids.should contain("convert.copy")
+    ids.should contain("convert.copy-all")
     menu.verb_for('n').try(&.id).should eq("convert.new")
     menu.verb_for('w').try(&.id).should eq("convert.close")
-    menu.verb_for('y').try(&.id).should eq("convert.copy")
+    menu.verb_for('O').try(&.id).should eq("convert.copy-all")
   end
 
   it "hides the scope rule edit/delete entries when no rule is selected" do

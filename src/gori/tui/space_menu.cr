@@ -38,13 +38,20 @@ module Gori::Tui
       @entries
     end
 
+    @ctx = nil.as(Verb::ExecContext?)
+
     # Open scoped to `scope` (captured by the Runner at the space keystroke, before
     # the overlay/focus state can change). Seeds the entry list.
     def open(scope : Verb::Scope, ctx : Verb::ExecContext) : Nil
+      @ctx = ctx
       @selected = 0
       @scroll = 0
       @entries = @registry.for_scope(scope, ctx).select(&.menu_key)
-      @title_w = @entries.empty? ? 0 : @entries.max_of(&.title.size)
+      @title_w = @entries.empty? ? 0 : @entries.max_of { |v| menu_title(v, ctx).size }
+    end
+
+    private def menu_title(v : Verb::Definition, ctx : Verb::ExecContext) : String
+      ctx.space_menu_title(v.id) || v.title
     end
 
     def move(delta : Int32) : Nil
@@ -102,7 +109,8 @@ module Gori::Tui
         title_fg = active ? Theme.text_bright : Theme.text
         # Reserve the rightmost interior col for the scroll marker (below) so a
         # widest-title row can't paint over it.
-        screen.text(b.x + 4, ry, v.title, title_fg, bg, width: {b.w - 6, 0}.max)
+        title = @ctx.try { |c| menu_title(v, c) } || v.title
+        screen.text(b.x + 4, ry, title, title_fg, bg, width: {b.w - 6, 0}.max)
         if mark = scroll_marker(i, visible, rows)
           screen.cell(b.right - 2, ry, mark, Theme.muted, bg)
         end

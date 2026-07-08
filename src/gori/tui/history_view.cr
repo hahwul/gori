@@ -11,6 +11,7 @@ require "./reveal"
 require "./url"
 require "./fmt"
 require "./flow_status"
+require "./read_cursor"
 require "../store"
 require "../ql"
 require "../scope"
@@ -85,6 +86,8 @@ module Gori::Tui
       # instead of tokenising 100k+ off-screen lines up front.
       @detail_cache = nil.as(DetailView?)
       @detail_cache_rev = Theme.revision # the theme the cached (colour-baked) head/notes were built under
+      @detail_read = ReadCursor.new
+      @detail_last_h = 0
     end
 
     # head (styled, bounded) ++ body (raw, styled lazily per visible line) ++
@@ -332,6 +335,7 @@ module Gori::Tui
       @detail_cache = nil
       @detail_hex = false # hex is a deliberate per-open peek — don't carry it into the next flow
       @detail_hex_bytes = nil
+      @detail_read.reset
       true
     end
 
@@ -349,6 +353,7 @@ module Gori::Tui
       @detail_form = nil
       @decoded_id = nil
       @detail_hex_bytes = nil
+      @detail_read.reset
     end
 
     # Load @detail's WS/h2 logs as a bounded most-recent window + record full counts.
@@ -422,6 +427,7 @@ module Gori::Tui
       @detail_hex = !@detail_hex
       @detail_scroll = 0 # row-based offset differs from the line-based one
       @detail_xscroll = 0
+      @detail_read.reset
     end
 
     # Re-fetch the currently-open detail from the store (e.g. a peer instance filled
@@ -447,7 +453,97 @@ module Gori::Tui
     end
 
     def scroll_detail(delta : Int32) : Nil
-      @detail_scroll = (@detail_scroll + delta).clamp(0, detail_scroll_max)
+      if detail_navigable?
+        detail_move(delta, 0)
+      else
+        @detail_scroll = (@detail_scroll + delta).clamp(0, detail_scroll_max)
+      end
+    end
+
+    # READ-mode caret move (+ optional shift selection). Arrow keys / detail.up/down
+    # route here when the pane is navigable text (not a raw hex dump).
+    def detail_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
+      return unless detail_navigable?
+      lines = detail_plain_lines
+      return if lines.empty?
+      @detail_read.move(dr, dc, lines, selecting: selecting)
+      ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
+    end
+
+    # Wheel: scroll the viewport without moving the caret (READ panes).
+    def detail_scroll_view(step : Int32) : Nil
+      return unless detail_navigable?
+      lines = detail_plain_lines
+      return if @detail_last_h <= 0 || lines.size <= @detail_last_h
+      max = lines.size - @detail_last_h
+      @detail_scroll = (@detail_scroll + step).clamp(0, max)
+      lo = @detail_scroll
+      hi = {@detail_scroll + @detail_last_h - 1, lines.size - 1}.min
+      @detail_read.sync(
+        @detail_read.cy.clamp(lo, hi),
+        @detail_read.cx.clamp(0, lines[@detail_read.cy].size))
+    end
+
+    def detail_click_to_cursor(rect : Rect, mx : Int32, my : Int32, focused : Bool) : Nil
+      return unless focused && detail_navigable?
+      lines = detail_plain_lines
+      return if rect.empty? || lines.empty?
+      gw = detail_gutter_w(rect, lines.size)
+      @detail_read.click_to_cursor(rect, mx, my, @detail_scroll, lines, gw, @detail_xscroll)
+      ensure_detail_visible(rect.h)
+    end
+
+    def detail_copy_text : String
+      lines = detail_plain_lines
+      return "" if lines.empty?
+      @detail_read.selection_text(lines) || @detail_read.current_line(lines)
+    end
+
+    def detail_selection? : Bool
+      detail_navigable? && @detail_read.selection?
+    end
+
+    def detail_select_line : Nil
+      return unless detail_navigable?
+      lines = detail_plain_lines
+      return if lines.empty?
+      @detail_read.select_line(lines)
+      ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
+    end
+
+    def detail_clear_selection : Nil
+      @detail_read.clear_selection
+    end
+
+    def detail_navigable? : Bool
+      detail = @detail
+      return false unless detail
+      return false if detail_hex?(detail) # req/resp hex dump — scroll rows, no caret
+      true
+    end
+
+    # Plain text lines for the active detail pane (search, caret, copy).
+    private def detail_plain_lines : Array(String)
+      if @reveal && (rl = reveal_lines)
+        rl
+      else
+        dv = detail_view
+        (0...dv.total).map { |i| dv.line_text(i) }
+      end
+    end
+
+    private def detail_gutter_w(body : Rect, total : Int32) : Int32
+      {Gutter.width(total), body.w}.min
+    end
+
+    private def ensure_detail_visible(view_h : Int32) : Nil
+      return if view_h <= 0
+      cy = @detail_read.cy
+      if cy < @detail_scroll
+        @detail_scroll = cy
+      elsif cy >= @detail_scroll + view_h
+        @detail_scroll = cy - view_h + 1
+      end
     end
 
     # Horizontal companion to `scroll_detail` (shift+←/→). Floored at 0 here; the
@@ -476,6 +572,7 @@ module Gori::Tui
       @reveal = on
       @detail_scroll = 0
       @detail_xscroll = 0
+      @detail_read.reset
     end
 
     # Pretty toggle feeds `build_detail_view`, so a change must drop the windowed
@@ -487,6 +584,7 @@ module Gori::Tui
       @detail_cache = nil
       @detail_scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like hex/pane toggles)
       @detail_xscroll = 0
+      @detail_read.reset
     end
 
     # Revealed (whitespace-visible) lines of the current pane, cached + rebuilt only
@@ -594,6 +692,7 @@ module Gori::Tui
       @detail_xscroll = 0
       @detail_cache = nil     # pane switch changes the content
       @detail_hex_bytes = nil # …and the hex source bytes
+      @detail_read.reset
     end
 
     # Public wrapper around the private set_detail_pane — lets the Runner switch
@@ -814,7 +913,8 @@ module Gori::Tui
       # bytes as text, so gate it off there too — otherwise `b` re-triggers the very
       # cursor-desync corruption the placeholder exists to avoid. Pretty likewise n/a.
       ws = @reveal && !hex && !dv.binary
-      screen.text(x + 1, rect.y, "↑/↓ scroll · ⇧←/→ h-scroll · #{detail_mode_hint(hex, ws, dv)} · esc back", Theme.muted)
+      nav = detail_navigable? ? "↑/↓ · ⇧sel · y" : "↑/↓ scroll"
+      screen.text(x + 1, rect.y, "#{detail_mode_hint(hex, ws, dv)} · #{nav} · ⇧←/→ · space · esc", Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)
@@ -823,30 +923,34 @@ module Gori::Tui
         return
       end
       if ws && (rl = reveal_lines)
-        render_reveal(screen, body, rl)
+        render_reveal(screen, body, rl, focused: focused)
         return
       end
 
-      render_detail_body(screen, body)
+      render_detail_body(screen, body, focused: focused)
     end
 
     # The normal (non-hex, non-reveal) detail body: request/response/decoded-pane text,
     # windowed + horizontally scrollable. Split out of render_detail to keep that
     # dispatch's cyclomatic complexity under ameba's threshold.
-    private def render_detail_body(screen : Screen, body : Rect) : Nil
+    private def render_detail_body(screen : Screen, body : Rect, focused : Bool = true) : Nil
       dv = detail_view
       total = dv.total
+      @detail_last_h = body.h
       gw = {Gutter.width(total), body.w}.min
       cw = {body.w - gw, 0}.max
+      lines = detail_plain_lines
       # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
       # never re-styles just to measure width (mirrors ReplayView#render_response_body).
       rows = (0...body.h).compact_map { |i| (li = @detail_scroll + i) < total ? dv.line_at(li) : nil }
       @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
+      ensure_detail_visible(body.h) if detail_navigable? && focused
       rows.each_with_index do |styled, i|
         li = @detail_scroll + i
-        Gutter.draw(screen, body.x, body.y + i, li, gw)
+        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @detail_read.cy)
         shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
         Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
+        paint_detail_line_chrome(screen, body.x + gw, body.y + i, li, lines[li]?, focused)
         # The plain-text line + its left-slice feed ONLY the search overlay, so skip both
         # when no query is active (else every frame builds/scans discarded strings per row).
         unless @search_hl.empty?
@@ -859,21 +963,52 @@ module Gori::Tui
 
     # Windowed render of revealed (whitespace-visible) lines — mirrors the normal
     # detail body loop but styles each visible line via Reveal.
-    private def render_reveal(screen : Screen, body : Rect, lines : Array(String)) : Nil
+    private def render_reveal(screen : Screen, body : Rect, lines : Array(String), focused : Bool = true) : Nil
       total = lines.size
+      @detail_last_h = body.h
       gw = {Gutter.width(total), body.w}.min
       cw = {body.w - gw, 0}.max
       widest = (0...body.h).compact_map { |i| lines[@detail_scroll + i]? }.max_of? { |l| Screen.display_width_upto(l, @detail_xscroll + cw + 1) } || 0
       @detail_xscroll = @detail_xscroll.clamp(0, {widest - cw, 0}.max)
+      ensure_detail_visible(body.h) if detail_navigable? && focused
       (0...body.h).each do |i|
         li = @detail_scroll + i
         break if li >= total
-        Gutter.draw(screen, body.x, body.y + i, li, gw)
+        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @detail_read.cy)
         styled = Reveal.styled(lines[li], li < total - 1, cw + @detail_xscroll)
         styled = Highlight.slice_left(styled, @detail_xscroll) if @detail_xscroll > 0
         Highlight.draw(screen, body.x + gw, body.y + i, styled, width: cw)
+        paint_detail_line_chrome(screen, body.x + gw, body.y + i, li, lines[li], focused)
         st = @detail_xscroll > 0 ? Highlight.slice_left_text(lines[li], @detail_xscroll) : lines[li]
         SearchHi.mark(screen, body.x + gw, body.y + i, st, @search_hl, body.x + gw + cw) unless @search_hl.empty?
+      end
+    end
+
+    private def paint_detail_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32,
+                                         line : String?, focused : Bool) : Nil
+      return unless focused && detail_navigable? && line
+      lines = detail_plain_lines
+      @detail_read.highlight_spans(lines).each do |(l, x0, x1)|
+        paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
+      end
+      return unless li == @detail_read.cy
+      cx = @detail_read.cx.clamp(0, line.size)
+      px = x + Screen.column_width(line[0, cx])
+      ch = cx < line.size ? line[cx] : ' '
+      screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
+      screen.cursor(px, y)
+    end
+
+    private def paint_char_span_bg(screen : Screen, x : Int32, y : Int32, line : String,
+                                   x0 : Int32, x1 : Int32, bg : Color) : Nil
+      return if x0 >= x1
+      px = x
+      (0...x0).each { |i| px += Screen.column_width(line[i].to_s) } if x0 > 0
+      (x0...x1).each do |i|
+        break if i >= line.size
+        w = Screen.column_width(line[i].to_s)
+        screen.text(px, y, line[i].to_s, Theme.text, bg)
+        px += w
       end
     end
 

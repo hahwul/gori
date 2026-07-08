@@ -1,5 +1,6 @@
 require "../tab_controller"
 require "../project_view"
+require "../clipboard"
 require "../../env"
 
 module Gori::Tui
@@ -35,9 +36,9 @@ module Gori::Tui
       end
     end
 
-    def body_badge : Symbol # the description editor, add-row capture text, and settings text fields capture keys; the lists/toggle are nav
-      editing = @project_view.pane == :desc || @project_view.adding? || @project_view.ov_adding? ||
-                @project_view.env_adding? || @project_view.env_prefix_editing? ||
+    def body_badge : Symbol # the description INS editor, add-row capture text, and settings text fields capture keys; the lists/toggle are nav
+      editing = (@project_view.pane == :desc && @project_view.desc_insert_mode?) || @project_view.adding? ||
+                @project_view.ov_adding? || @project_view.env_adding? || @project_view.env_prefix_editing? ||
                 (@project_view.pane == :settings && @project_view.settings_text_row?)
       editing ? :editor : :body
     end
@@ -61,7 +62,11 @@ module Gori::Tui
       when :settings
         @project_view.settings_text_row? ? "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc" : "space/↵ toggle lens · ↑/↓ move · ← overrides · ↑ desc · esc"
       else
-        "type to edit · ↑/↓/↔ move · ← scope · ↓ settings · ^G goto · ^F find · esc tabs"
+        if @project_view.desc_insert_mode?
+          "type to edit · esc read · ↑/↓/↔ move · ← scope · ↓ settings · ^G goto · ^F find · ^E $EDITOR"
+        else
+          "i/↵ edit · ⇧arrows select · y copy · space cmds · ↑/↓ move · ← scope · ↓ settings · ^G goto · ^F find · esc tabs"
+        end
       end
     end
 
@@ -142,8 +147,28 @@ module Gori::Tui
     end
 
     def set_preedit(text : String) : Bool
+      return false unless @project_view.pane == :desc && @project_view.desc_insert_mode? ||
+                          @project_view.adding? || @project_view.ov_adding? ||
+                          @project_view.env_adding? || @project_view.env_prefix_editing? ||
+                          (@project_view.pane == :settings && @project_view.settings_text_row?)
       @project_view.set_preedit(text)
       true
+    end
+
+    def project_desc_read_mode? : Bool
+      @project_view.pane == :desc && !@project_view.desc_insert_mode?
+    end
+
+    def project_desc_selection_active? : Bool
+      @project_view.desc_selection?
+    end
+
+    def project_desc_select_line : Nil
+      @project_view.desc_select_line
+    end
+
+    def project_desc_clear_selection : Nil
+      @project_view.desc_clear_selection
     end
 
     # --- focus ring (SCOPE ◂▸ HOST OVERRIDES ◂▸ DESCRIPTION ◂▸ PROJECT SETTINGS) ---
@@ -197,7 +222,7 @@ module Gori::Tui
       @project_view.refresh_settings unless @project_view.settings_dirty?
     end
 
-    # --- DESCRIPTION pane: live multi-line editing ---
+    # --- DESCRIPTION pane: READ/INS multi-line editing ---
     private def handle_project_desc_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
@@ -205,38 +230,104 @@ module Gori::Tui
         save
         @host.open_palette
       elsif key.escape?
+        if @project_view.desc_insert_mode?
+          save
+          @project_view.exit_desc_insert!
+        else
+          save
+          @host.request_focus(:menu)
+        end
+      elsif @project_view.desc_insert_mode?
+        edit_desc_insert(ev, key, c)
+      else
+        handle_desc_read(ev, key, c)
+      end
+    end
+
+    private def handle_desc_read(ev : Termisu::Event::Key, key, c : Char?) : Nil
+      return @host.open_space_menu if key.space? && !ev.ctrl? && !ev.alt?
+      if key.left? && ev.shift?
+        @project_view.desc_hscroll(-1)
+        return
+      elsif key.right? && ev.shift?
+        @project_view.desc_hscroll(1)
+        return
+      end
+      selecting = ev.shift?
+      case
+      when key.enter?, c == 'i'
+        @project_view.enter_desc_insert!
+      when key.up?
+        if @project_view.at_top?
+          save
+          @host.request_focus(:menu)
+        else
+          @project_view.desc_read_move(-1, 0, selecting: selecting)
+        end
+      when key.down? && @project_view.desc_at_bottom?
         save
-        @host.request_focus(:menu)
-      elsif key.enter?
-        @project_view.newline
-      elsif ev.ctrl_z?
-        @project_view.undo
-      elsif key.backspace?
-        @project_view.backspace
-      elsif key.up?
-        if @project_view.at_top? # ↑ on the first line pops up to the tab bar
+        @project_view.focus_pane(:settings)
+      when key.down?
+        @project_view.desc_read_move(1, 0, selecting: selecting)
+      when key.left? && @project_view.desc_at_start?
+        @project_view.focus_pane(:scope)
+      when key.left? && selecting  then @project_view.desc_read_move(0, -1, selecting: true)
+      when key.right? && selecting then @project_view.desc_read_move(0, 1, selecting: true)
+      when key.left?               then @project_view.desc_read_move(0, -1)
+      when key.right?              then @project_view.desc_read_move(0, 1)
+      when c == 'x'                then @project_view.desc_select_line
+      when c == 'y'                then project_copy
+      end
+    end
+
+    private def edit_desc_insert(ev : Termisu::Event::Key, key, c : Char?) : Nil
+      case
+      when key.enter?     then @project_view.newline
+      when ev.ctrl_z?     then @project_view.undo
+      when key.backspace? then @project_view.backspace
+      when key.up?
+        if @project_view.at_top?
           save
           @host.request_focus(:menu)
         else
           @project_view.move(-1, 0)
         end
-      elsif key.left? && @project_view.desc_at_start?
-        @project_view.focus_pane(:scope) # ← at the very start of the description crosses back to SCOPE (left)
-      elsif key.down? && @project_view.desc_at_bottom?
+      when key.left? && @project_view.desc_at_start?
+        @project_view.focus_pane(:scope)
+      when key.down? && @project_view.desc_at_bottom?
         save
-        @project_view.focus_pane(:settings) # ↓ on the last line drops into PROJECT SETTINGS (the card below)
-      elsif key.down?
-        @project_view.move(1, 0)
-      elsif key.left?
-        @project_view.move(0, -1)
-      elsif key.right?
-        @project_view.move(0, 1)
+        @project_view.focus_pane(:settings)
+      when key.down?      then @project_view.move(1, 0)
+      when key.left?      then @project_view.move(0, -1)
+      when key.right?     then @project_view.move(0, 1)
       else
         if c && !ev.ctrl? && !ev.alt?
           @project_view.insert(c)
-          @project_view.set_preedit("") # commit any preedit
+          @project_view.set_preedit("")
         end
       end
+    end
+
+    def project_copy : Nil
+      text = @project_view.desc_copy_text
+      if text.empty?
+        @host.status("nothing to copy")
+        return
+      end
+      written = Clipboard.copy(text)
+      @host.status("copied #{written}b to clipboard")
+    end
+
+    def project_copy_all : Nil
+      text = @project_view.desc_copy_all
+      if text.empty?
+        @host.status("nothing to copy")
+        return
+      end
+      written = Clipboard.copy(text)
+      msg = "copied description to clipboard (#{written}b)"
+      msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
+      @host.status(msg)
     end
 
     # --- SCOPE pane: browse the rule list (or route to the inline add/edit row) ---

@@ -21,9 +21,15 @@ module Gori
         "convert.clear", "Clear input + chain", "Clear the current input and chain spec",
         Verb::Scope::Convert, available: in_convert, mnemonic: 'l') { |ctx| ctx.convert_clear; nil }
 
+      in_convert_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :convert && ctx.convert_read_mode? }
       r.register Verb::Definition.new(
-        "convert.copy", "Copy output", "Copy the current output to the clipboard",
-        Verb::Scope::Convert, available: in_convert, mnemonic: 'y') { |ctx| ctx.convert_copy; nil }
+        "convert.copy", "Copy selection", "Copy the selected text (or current line) from INPUT/OUTPUT",
+        Verb::Scope::Convert, [Verb::Chord.new("y")],
+        available: in_convert_read, mnemonic: 'y') { |ctx| ctx.convert_copy_selection; nil }
+
+      r.register Verb::Definition.new(
+        "convert.copy-all", "Copy output", "Copy the entire current output to the clipboard",
+        Verb::Scope::Convert, available: in_convert, mnemonic: 'O') { |ctx| ctx.convert_copy; nil }
 
       r.register Verb::Definition.new(
         "convert.mode", "Cycle output mode", "Cycle the output display: text / hex / base64",

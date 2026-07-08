@@ -126,6 +126,16 @@ module Gori
         "scope.delete-rule", "Delete scope rule", "Remove the selected scope rule",
         Verb::Scope::Project, [Verb::Chord.new("d")], available: scope_rule) { |ctx| ctx.scope_delete_rule; nil }
 
+      in_project_desc_read = ->(ctx : Verb::ExecContext) { ctx.project_desc_read_mode? }
+      r.register Verb::Definition.new(
+        "project.copy", "Copy selection", "Copy the selected description text (or current line) to the clipboard",
+        Verb::Scope::Body, [Verb::Chord.new("y")],
+        available: in_project_desc_read, hidden: true) { |ctx| ctx.project_copy; nil }
+
+      r.register Verb::Definition.new(
+        "project.copy-all", "Copy description", "Copy the entire project description to the clipboard",
+        Verb::Scope::Body, available: in_project_desc_read, mnemonic: 'O') { |ctx| ctx.project_copy_all; nil }
+
       r.register Verb::Definition.new(
         "rules.edit", "Match & Replace", "Edit in-flight request/response head rewrite rules", Verb::Scope::Global,
         [Verb::Chord.new("m")]) { |ctx| ctx.rules_open; nil }

@@ -50,6 +50,10 @@ module Gori::Tui
     # else, so those editors keep @xscroll == 0 and their hot render path unchanged.
     setter follow_x : Bool
     getter edits : Int32
+    getter cy : Int32
+    getter cx : Int32
+    getter scroll : Int32
+    getter? gutter : Bool
 
     def set_text(text : String) : Nil
       @lines = text.split('\n').map(&.rstrip('\r'))
@@ -82,6 +86,10 @@ module Gori::Tui
     # Plain text (LF-joined) for non-wire uses (e.g. the Notes document).
     def text : String
       @lines.join("\n")
+    end
+
+    def lines_snapshot : Array(String)
+      @lines.map(&.itself)
     end
 
     # First line with non-whitespace content — used to derive a label/preview
@@ -234,11 +242,23 @@ module Gori::Tui
       @cx = @cx.clamp(0, @lines[@cy].size)
     end
 
+    # Horizontal viewport nudge (shift+←/→ in READ panes). No-op unless @follow_x.
+    def hscroll_view(step : Int32) : Nil
+      return unless @follow_x
+      @xscroll = {@xscroll + step * 4, 0}.max
+    end
+
     # Jump the cursor to 1-based line `n`, column 0 (out-of-range clamps to the
     # first/last line). render's ensure_visible scrolls it into view next frame.
     def goto_line(n : Int32) : Nil
       @cy = (n - 1).clamp(0, @lines.size - 1)
       @cx = 0
+    end
+
+    # Place the caret without pushing undo (read-mode navigation / click-to-cursor).
+    def place_cursor(cy : Int32, cx : Int32) : Nil
+      @cy = cy.clamp(0, @lines.size - 1)
+      @cx = cx.clamp(0, @lines[@cy].size)
     end
 
     def line_count : Int32

@@ -1,6 +1,7 @@
 require "../tab_controller"
 require "../traffic_empty_state"
 require "../replay_view"
+require "../clipboard"
 require "../subtab_picker"
 require "../../store"
 require "../../replay/engine"
@@ -140,26 +141,49 @@ module Gori::Tui
       !@replays.empty?
     end
 
-    def body_badge : Symbol # request (incl. hex) + target URL are editable; response is read-only
-      (v = current_view) ? ((v.focus == :request || v.focus == :target) ? :editor : :body) : :body
+    def body_badge : Symbol # :editor only while INS (or hex/chain/SNI sub-modes)
+      (v = current_view) ? (v.pane_insert?(v.focus) ? :editor : :body) : :body
     end
 
-    # Hints depend on the focused pane: editable TARGET/REQUEST vs read-only RESPONSE.
+    # Hints depend on the focused pane and READ vs INS mode.
     def body_hint(focus : Symbol) : String
       v = current_view
       return "↹/esc tabs · ^N new" unless v
       return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit" if v.request_hex?
-      if v.ws_mode? # WS replay: Handshake request + MESSAGES editor + TRANSCRIPT (no hex/diff/pretty/CL)
-        return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" : ws_hint(v)
+      read_common = "⇧arrows select · y copy · space cmds"
+      if v.ws_mode?
+        return v.focus == :response ? "↑/↓ move · #{read_common} · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" : ws_hint(v)
       end
-      if v.grpc_mode? # gRPC replay: editable head + verbatim body; deframed response
-        return v.focus == :response ? "↑/↓ scroll · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" : "edit head/metadata · ^R replay · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
+      if v.grpc_mode?
+        return v.focus == :response ? "↑/↓ move · #{read_common} · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" : grpc_hint(v)
       end
-      return decode_hint(v) if v.decode_mode? && v.focus == :request # split: ENVELOPE + DECODED payload
+      return decode_hint(v) if v.decode_mode? && v.focus == :request
       case v.focus
-      when :target   then v.editing_sni? ? "type SNI host · ^S/↵/esc back to URL · ^R send" : "type URL · ^S SNI · ↵/↓ request · ^R send · ↹ pane · esc tabs"
-      when :response then "↑/↓ scroll · ←/→/d diff · ⇧←/→ h-scroll · x hex · p pretty · ^F find · ↵/^R send · space cmds · ↹ pane · esc tabs"
-      else                "type to edit · ^R send · ^G goto · ^F find · ^X hex · ^B ws · ^N new · ^W close · ↹ pane · esc tabs"
+      when :target
+        if v.target_insert?
+          v.editing_sni? ? "type SNI · ^S/↵/esc URL · ^R send" : "type URL · ^S SNI · ↵ request · ^R send · ↹ pane · esc read"
+        else
+          "i/↵ edit · #{read_common} · ^S SNI · ^R send · ↹ pane · esc tabs"
+        end
+      when :response
+        nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
+        "#{nav} · #{read_common} · d diff · ⇧←/→ h-scroll · x hex · p pretty · ^F find · ↵/^R send · ↹ pane · esc tabs"
+      when :request
+        if v.request_insert?
+          "type to edit · ^R send · ^G goto · ^F find · ^X hex · esc read · ↹ pane"
+        else
+          "i/↵ edit · #{read_common} · ^R send · ^G goto · ^F find · ^X hex · ↹ pane · esc tabs"
+        end
+      else
+        ""
+      end
+    end
+
+    private def grpc_hint(v : ReplayView) : String
+      if v.request_insert?
+        "type head/metadata · ^R replay · esc read · ↹ pane"
+      else
+        "i/↵ edit · ⇧arrows select · y copy · space cmds · ^R replay · ↹ pane"
       end
     end
 
@@ -211,7 +235,11 @@ module Gori::Tui
         elsif (view = current_view) && view.focus == :target && view.editing_sni?
           view.exit_sni_field # leave the SNI field, back to the URL (value kept)
         elsif (view = current_view) && view.focus == :request && view.request_hex?
-          view.toggle_request_hex # exit hex back to the text editor (only when on the request pane)
+          view.toggle_request_hex
+        elsif (view = current_view) && view.focus == :request && view.request_insert?
+          view.exit_request_insert!
+        elsif (view = current_view) && view.focus == :target && view.target_insert?
+          view.exit_target_insert!
         else
           @host.request_focus(:menu)
         end
@@ -240,19 +268,20 @@ module Gori::Tui
     # The split-decode request hint: which sub-pane is being edited + how to switch.
     private def decode_hint(v : ReplayView) : String
       sub = if v.req_pane != :decoded
-              "edit request envelope"
+              "request envelope"
             elsif v.decode_kind? == :saml
-              "edit SAML XML"
+              "SAML XML"
             else
-              "edit GraphQL query/vars"
+              "GraphQL query/vars"
             end
-      "#{sub} · ^T switch envelope/decoded · ^R send (re-encodes) · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
+      mode = v.request_insert? ? "type to edit" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
+      "#{mode} #{sub} · ^T switch · ^R send · ^G goto · ^F find · esc read · ↹ pane"
     end
 
-    # The websocket request hint: switch between handshake headers and messages.
     private def ws_hint(v : ReplayView) : String
-      sub = v.req_pane == :envelope ? "edit handshake request" : "edit messages (one per line)"
-      "#{sub} · ^T switch handshake/messages · ^R replay · ^G goto · ^F find · ^W close · ↹ pane · esc tabs"
+      sub = v.req_pane == :envelope ? "handshake request" : "messages"
+      mode = v.request_insert? ? "type to edit" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
+      "#{mode} #{sub} · ^T switch · ^R replay · ^G goto · ^F find · esc read · ↹ pane"
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
@@ -396,22 +425,81 @@ module Gori::Tui
         save_current_replay
         v.focus_pane(pane)
         @host.focus_body
-        v.request_click_to_cursor(body, mx, my) if pane == :request
-        v.target_click_to_cursor(body, mx, my) if pane == :target
+        case pane
+        when :request
+          v.enter_request_insert! unless v.request_insert?
+          v.request_click_to_cursor(body, mx, my)
+        when :target
+          v.enter_target_insert! unless v.target_insert?
+          v.target_click_to_cursor(body, mx, my)
+        when :response
+          v.resp_click_to_cursor(body, mx, my)
+        end
       end
       true
     end
 
     def handle_wheel(step : Int32) : Bool
-      if (v = current_view) && v.focus == :response
-        v.scroll(step)
+      v = current_view
+      return true unless v
+      case v.focus
+      when :response
+        v.resp_navigable? ? v.resp_scroll_view(step) : v.scroll(step)
+      when :request
+        v.request_scroll_view(step) unless v.request_insert?
       end
       true
     end
 
     def set_preedit(text : String) : Bool
-      current_view.try { |v| v.set_preedit(text) unless v.request_hex? }
+      current_view.try do |v|
+        next unless v.pane_insert?(v.focus)
+        v.set_preedit(text) unless v.request_hex?
+      end
       true
+    end
+
+    def replay_copy : Nil
+      v = current_view
+      return unless v
+      text = v.pane_copy_text
+      return if text.empty?
+      written = Clipboard.copy(text)
+      @host.status("copied #{written}b to clipboard")
+    end
+
+    def replay_copy_all : Nil
+      v = current_view
+      return unless v
+      text = v.pane_copy_all_text
+      return if text.empty?
+      written = Clipboard.copy(text)
+      msg = "copied all (#{written}b)"
+      msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
+      @host.status(msg)
+    end
+
+    def replay_read_mode? : Bool
+      v = current_view
+      return false unless v
+      case v.focus
+      when :request  then !v.pane_insert?(:request)
+      when :target   then !v.pane_insert?(:target)
+      when :response then true
+      else               false
+      end
+    end
+
+    def replay_selection_active? : Bool
+      current_view.try(&.pane_selection?) == true
+    end
+
+    def replay_select_line : Nil
+      current_view.try(&.pane_select_line)
+    end
+
+    def replay_clear_selection : Nil
+      current_view.try(&.pane_clear_selection)
     end
 
     def commit : Nil
@@ -786,10 +874,11 @@ module Gori::Tui
     # A tab a cross-session reload must NOT overwrite/remove: actively edited, mid
     # round-trip, or holding unsaved local edits.
     private def replay_tab_locked?(tab : ReplayTab) : Bool
+      v = tab.view
       # request_hex? too: a hex-edit session isn't necessarily dirty, and request_text
       # reads CRLF in hex mode vs the LF-persisted row, so the reconcile compare would
       # wrongly see a change and restore() — wiping the hex buffer. Lock it.
-      replay_tab_editing?(tab) || tab.view.inflight? || tab.view.dirty? || tab.view.request_hex?
+      v.inflight? || v.dirty? || v.request_hex? || v.pane_insert?(:request) || v.pane_insert?(:target)
     end
 
     # Re-seed a ^R-from-History tab's captured-original diff baseline after a restore()
@@ -803,7 +892,8 @@ module Gori::Tui
 
     private def edit_replay_request(ev : Termisu::Event::Key, view : ReplayView) : Nil
       return edit_replay_request_hex(ev, view) if view.request_hex?
-      return view.handle_chain_pane_key(ev) if view.chain_pane_active? # CHAIN sub-pane owns typing
+      return view.handle_chain_pane_key(ev) if view.chain_pane_active?
+      return handle_replay_request_read(ev, view) unless view.request_insert?
       key = ev.key
       c = ev.char || key.to_char
       case
@@ -845,13 +935,52 @@ module Gori::Tui
     end
 
     private def edit_replay_target(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return edit_replay_sni(ev, view) if view.editing_sni? # ^S sub-field of the TARGET pane
+      return edit_replay_sni(ev, view) if view.editing_sni?
+      return handle_replay_target_read(ev, view) unless view.target_insert?
       key = ev.key
       case
-      when key.enter? then view.pane_advance(1)                                        # ↵ confirms URL → Request (^R sends, not ↵)
-      when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu) # target is the top pane → ↑ pops up
-      when key.down?  then view.pane_advance(1)                                        # ↓ → drop into the Request pane below
+      when key.enter? then view.pane_advance(1)
+      when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
+      when key.down?  then view.pane_advance(1)
       else                 edit_target_common(ev, view)
+      end
+    end
+
+    private def handle_replay_request_read(ev : Termisu::Event::Key, view : ReplayView) : Nil
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+      key = ev.key
+      c = ev.char || key.to_char
+      selecting = ev.shift?
+      case
+      when key.enter?              then view.enter_request_insert!
+      when c == 'i'                then view.enter_request_insert!
+      when key.up?                  then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
+      when key.down?                then view.request_read_move(1, 0, selecting: selecting)
+      when key.left?                then view.request_read_move(0, -1, selecting: selecting)
+      when key.right?               then view.request_read_move(0, 1, selecting: selecting)
+      when key.home?                then view.edit_home
+      when key.end?                 then view.edit_end
+      when c == 'x'                 then view.pane_select_line
+      when c == 'y'                 then replay_copy
+      end
+    end
+
+    private def handle_replay_target_read(ev : Termisu::Event::Key, view : ReplayView) : Nil
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+      key = ev.key
+      c = ev.char || key.to_char
+      selecting = ev.shift?
+      case
+      when key.enter? then view.enter_target_insert!
+      when c == 'i'   then view.enter_target_insert!
+      when key.up?    then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
+      when key.down?  then view.pane_advance(1)
+      when key.left?  then view.target_read_move(-1, selecting: selecting)
+      when key.right? then view.target_read_move(1, selecting: selecting)
+      when key.home?  then view.target_home
+      when key.end?   then view.target_end
+      when c == 'x'   then view.pane_select_line
+      when c == 'y'   then replay_copy
       end
     end
 
@@ -887,26 +1016,32 @@ module Gori::Tui
       end
     end
 
-    # Response/Diff pane: read-only. ←/→ or d toggles response↔diff, ↑/↓ scroll, Enter re-sends.
+    # Response/Diff pane: read-only with cursor + selection. d toggles diff; Enter/^R send.
     private def handle_replay_response(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt? # space menu (response is navigable)
+      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
       return if handle_replay_response_hscroll(ev, view)
       key = ev.key
-      # A WS/gRPC TRANSCRIPT is scroll-only — the diff/hex/reveal/pretty toggles are
-      # meaningless there and have side effects (a stuck @resp_hex would silently break
-      # ^F search; pretty= resets the scroll), so gate them out after the nav keys.
+      selecting = ev.shift?
       transcript = view.ws_mode? || view.grpc_mode?
+      nav = view.resp_navigable?
       case
       when key.enter?              then replay_send
-      when key.up?, key.lower_k?   then view.at_top? ? view.focus_first : view.scroll(-1) # ↑/k-at-top → target field above
-      when key.down?, key.lower_j? then view.scroll(1)
+      when key.up?, key.lower_k?   then view.at_top? ? view.focus_first : resp_nav_step(view, -1, 0, selecting, nav)
+      when key.down?, key.lower_j? then resp_nav_step(view, 1, 0, selecting, nav)
+      when key.left? && !selecting then resp_nav_step(view, 0, -1, false, nav) unless transcript
+      when key.right? && !selecting then resp_nav_step(view, 0, 1, false, nav) unless transcript
+      when key.left? && selecting  then resp_nav_step(view, 0, -1, true, nav) unless transcript
+      when key.right? && selecting then resp_nav_step(view, 0, 1, true, nav) unless transcript
       when transcript              then nil
-      when key.left?, key.right?   then view.toggle_resp_mode
       when key.lower_d?            then view.toggle_resp_mode
       when key.lower_x?            then view.toggle_resp_hex
       when key.lower_b?            then @host.toggle_reveal
       when key.lower_p?            then @host.toggle_pretty
       end
+    end
+
+    private def resp_nav_step(view : ReplayView, dr : Int32, dc : Int32, selecting : Bool, nav : Bool) : Nil
+      nav ? view.resp_move(dr, dc, selecting: selecting) : view.scroll(dr)
     end
 
     # Shift+←/→ horizontal scroll, split out of handle_replay_response to keep its

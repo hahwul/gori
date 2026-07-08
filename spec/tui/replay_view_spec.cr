@@ -569,6 +569,43 @@ describe Gori::Tui::ReplayView do
     backend2.contains?("HEAD").should be_false # scrolled off the left edge
   end
 
+  it "defaults request and target to READ mode" do
+    view = ReplayView.new
+    view.load_blank
+    view.request_insert?.should be_false
+    view.target_insert?.should be_false
+  end
+
+  it "toggles INS mode and shows the badge on the request pane" do
+    view = ReplayView.new
+    view.load_blank
+    view.focus_pane(:request)
+    view.enter_request_insert!
+    backend = MemoryBackend.new(120, 24)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 24))
+    backend.contains?("i:INS").should be_true
+    view.exit_request_insert!
+    view.request_insert?.should be_false
+    backend2 = MemoryBackend.new(120, 24)
+    view.render(Screen.new(backend2), Rect.new(0, 0, 120, 24))
+    backend2.contains?("NOR").should be_true
+  end
+
+  it "resp_move + selection returns plain text for copy" do
+    view = ReplayView.new
+    view.load_blank
+    ok = Gori::Replay::Result.new(
+      "HTTP/1.1 200 OK\r\n\r\n".to_slice, "LINE1\nLINE2".to_slice, nil, 1000_i64)
+    view.apply(ok)
+    view.focus_pane(:response)
+    lines = view.resp_plain_lines
+    lines.should_not be_empty
+    view.resp_move(0, 0)
+    view.resp_copy_text.should eq(lines[0])
+    view.resp_move(0, 4, selecting: true)
+    view.resp_copy_text.should eq(lines[0][0, 4])
+  end
+
   describe "pretty_print_request" do
     it "pretty-prints JSON request body in-place and preserves markers" do
       view = ReplayView.new

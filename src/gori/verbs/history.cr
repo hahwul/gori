@@ -1,5 +1,6 @@
 require "../verb"
 require "./links"
+require "./read_edit"
 
 module Gori
   module Verbs
@@ -115,6 +116,15 @@ module Gori
         "replay.attach-chain", "Edit convert chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
         Verb::Scope::Replay, [Verb::Chord.new("y", ctrl: true)],
         available: in_replay, mnemonic: 'e') { |ctx| ctx.replay_attach_chain; nil }
+      in_replay_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_read_mode? }
+      r.register Verb::Definition.new(
+        "replay.copy", "Copy selection", "Copy the selected text (or current line) to the clipboard",
+        Verb::Scope::Replay, [Verb::Chord.new("y")],
+        available: in_replay_read, mnemonic: 'y') { |ctx| ctx.replay_copy; nil }
+      r.register Verb::Definition.new(
+        "replay.copy-all", "Copy all", "Copy the entire focused pane to the clipboard",
+        Verb::Scope::Replay,
+        available: in_replay_read, mnemonic: 'O') { |ctx| ctx.replay_copy_all; nil }
 
       # --- detail view ---
       # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and only
@@ -135,11 +145,11 @@ module Gori
         hidden: true) { |ctx| ctx.move_detail_pane(-1); nil }
 
       r.register Verb::Definition.new(
-        "detail.down", "Scroll detail down", "Scroll the detail view down", Verb::Scope::HistoryDetail,
+        "detail.down", "Move detail down", "Move the detail caret down (scroll in hex mode)", Verb::Scope::HistoryDetail,
         [Verb::Chord.new("j"), Verb::Chord.new("down")], hidden: true) { |ctx| ctx.scroll_detail(1); nil }
 
       r.register Verb::Definition.new(
-        "detail.up", "Scroll detail up", "Scroll the detail view up", Verb::Scope::HistoryDetail,
+        "detail.up", "Move detail up", "Move the detail caret up (scroll in hex mode)", Verb::Scope::HistoryDetail,
         [Verb::Chord.new("k"), Verb::Chord.new("up")], hidden: true) { |ctx| ctx.scroll_detail(-1); nil }
 
       # Shift+←/→ scroll a long line sideways instead of walking panes (plain ←/→,
@@ -193,10 +203,16 @@ module Gori
         "detail.compare", "Send to Comparer", "Send this flow to the Comparer (next slot A/B)",
         Verb::Scope::HistoryDetail, mnemonic: 'c') { |ctx| ctx.comparer_add_selected; nil }
 
-      # Copy the open flow (mirrors history.copy 'y' from the list) — stays in the detail.
+      # Copy the selection (or current line) from the navigable detail text — flow copy
+      # lives in the space menu only (history.copy / detail.copy-flow).
       r.register Verb::Definition.new(
-        "detail.copy", "Copy flow", "Copy this flow to the clipboard",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("y")]) { |ctx| ctx.copy_selection; nil }
+        "detail.copy", "Copy selection", "Copy the selected text (or current line) to the clipboard",
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("y")],
+        mnemonic: 'y') { |ctx| ctx.detail_copy_selection; nil }
+
+      r.register Verb::Definition.new(
+        "detail.copy-flow", "Copy flow", "Copy this flow's raw request to the clipboard",
+        Verb::Scope::HistoryDetail, mnemonic: 'O') { |ctx| ctx.copy_selection; nil }
 
       # Send the open flow to the Fuzzer (mirrors history.fuzz ⇧I/'z' from the list) —
       # close the detail first so it doesn't float over the Fuzzer tab.
@@ -256,6 +272,15 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain) from the template",
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'x') { |ctx| ctx.fuzz_clear_marks; nil }
+      in_fuzzer_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_read_mode? }
+      r.register Verb::Definition.new(
+        "fuzzer.copy", "Copy selection", "Copy the selected text (or current line) to the clipboard",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("y")],
+        available: in_fuzzer_read, mnemonic: 'y') { |ctx| ctx.fuzzer_copy; nil }
+      r.register Verb::Definition.new(
+        "fuzzer.copy-all", "Copy all", "Copy the entire focused pane to the clipboard",
+        Verb::Scope::Fuzzer,
+        available: in_fuzzer_read, mnemonic: 'O') { |ctx| ctx.fuzzer_copy_all; nil }
     end
 
     # Param-miner verbs: the cross-tab "Mine parameters" entry (space menu in History,
@@ -301,6 +326,7 @@ module Gori
       register_notes(r)
       register_host_overrides(r)
       register_env(r)
+      register_read_edit(r)
       r.validate_menu_keys! # fail fast if any scope has a colliding space-menu key
       r
     end

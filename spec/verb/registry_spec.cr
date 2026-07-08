@@ -92,6 +92,10 @@ private class FakeContext < ExecContext
     @calls << :scroll_detail
   end
 
+  def detail_copy_selection : Nil
+    @calls << :detail_copy_selection
+  end
+
   def hscroll_detail(delta : Int32) : Nil
     @calls << :hscroll_detail
   end
@@ -180,6 +184,18 @@ private class FakeContext < ExecContext
     @calls << :replay_attach_chain
   end
 
+  def replay_copy : Nil
+    @calls << :replay_copy
+  end
+
+  def replay_copy_all : Nil
+    @calls << :replay_copy_all
+  end
+
+  def replay_read_mode? : Bool
+    false
+  end
+
   def fuzz_selected : Nil
     @calls << :fuzz_selected
   end
@@ -218,6 +234,18 @@ private class FakeContext < ExecContext
 
   def fuzz_clear_marks : Nil
     @calls << :fuzz_clear_marks
+  end
+
+  def fuzzer_copy : Nil
+    @calls << :fuzzer_copy
+  end
+
+  def fuzzer_copy_all : Nil
+    @calls << :fuzzer_copy_all
+  end
+
+  def fuzzer_read_mode? : Bool
+    false
   end
 
   def mine_selected : Nil
@@ -408,6 +436,18 @@ private class FakeContext < ExecContext
     @calls << :finding_link_move
   end
 
+  def findings_notes_read_mode? : Bool
+    false
+  end
+
+  def findings_copy : Nil
+    @calls << :findings_copy
+  end
+
+  def findings_copy_all : Nil
+    @calls << :findings_copy_all
+  end
+
   def link_to_finding : Nil
     @calls << :link_to_finding
   end
@@ -568,6 +608,14 @@ private class FakeContext < ExecContext
     @calls << :convert_copy
   end
 
+  def convert_copy_selection : Nil
+    @calls << :convert_copy_selection
+  end
+
+  def convert_read_mode? : Bool
+    false
+  end
+
   def convert_cycle_mode : Nil
     @calls << :convert_cycle_mode
   end
@@ -592,6 +640,14 @@ private class FakeContext < ExecContext
     @calls << :notes_copy
   end
 
+  def notes_copy_all : Nil
+    @calls << :notes_copy_all
+  end
+
+  def notes_read_mode? : Bool
+    true
+  end
+
   def notes_clear : Nil
     @calls << :notes_clear
   end
@@ -610,6 +666,38 @@ private class FakeContext < ExecContext
 
   def notes_links : Nil
     @calls << :notes_links
+  end
+
+  def project_desc_read_mode? : Bool
+    false
+  end
+
+  def project_copy : Nil
+    @calls << :project_copy
+  end
+
+  def project_copy_all : Nil
+    @calls << :project_copy_all
+  end
+
+  def read_selection_active? : Bool
+    false
+  end
+
+  def read_select_line : Nil
+    @calls << :read_select_line
+  end
+
+  def read_clear_selection : Nil
+    @calls << :read_clear_selection
+  end
+
+  def detail_navigable? : Bool
+    false
+  end
+
+  def space_menu_title(verb_id : String) : String?
+    nil
   end
 
   def open_settings(section : Symbol) : Nil

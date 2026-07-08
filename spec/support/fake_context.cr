@@ -47,6 +47,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def scroll_detail(delta : Int32) : Nil; end
 
+  def detail_copy_selection : Nil; end
+
   def hscroll_detail(delta : Int32) : Nil; end
 
   def toggle_detail_pane : Nil; end
@@ -97,6 +99,14 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_attach_chain : Nil; end
 
+  def replay_copy : Nil; end
+
+  def replay_copy_all : Nil; end
+
+  def replay_read_mode? : Bool
+    false
+  end
+
   def fuzz_selected : Nil; end
 
   def fuzz_from_replay : Nil; end
@@ -114,6 +124,14 @@ class FakeExecContext < Gori::Verb::ExecContext
   def fuzz_list_paste : Nil; end
 
   def fuzz_clear_marks : Nil; end
+
+  def fuzzer_copy : Nil; end
+
+  def fuzzer_copy_all : Nil; end
+
+  def fuzzer_read_mode? : Bool
+    false
+  end
 
   def mine_selected : Nil; end
 
@@ -285,6 +303,12 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def convert_copy : Nil; end
 
+  def convert_copy_selection : Nil; end
+
+  def convert_read_mode? : Bool
+    false
+  end
+
   def convert_cycle_mode : Nil; end
 
   def convert_save : Nil; end
@@ -297,6 +321,12 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def notes_copy : Nil; end
 
+  def notes_copy_all : Nil; end
+
+  def notes_read_mode? : Bool
+    true
+  end
+
   def notes_clear : Nil; end
 
   def notes_edit : Nil; end
@@ -307,11 +337,43 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def notes_links : Nil; end
 
+  def project_desc_read_mode? : Bool
+    false
+  end
+
+  def project_copy : Nil; end
+
+  def project_copy_all : Nil; end
+
+  def read_selection_active? : Bool
+    false
+  end
+
+  def read_select_line : Nil; end
+
+  def read_clear_selection : Nil; end
+
+  def detail_navigable? : Bool
+    false
+  end
+
+  def space_menu_title(verb_id : String) : String?
+    nil
+  end
+
   def finding_links : Nil; end
 
   def finding_open_link : Nil; end
 
   def finding_link_move(delta : Int32) : Nil; end
+
+  def findings_notes_read_mode? : Bool
+    false
+  end
+
+  def findings_copy : Nil; end
+
+  def findings_copy_all : Nil; end
 
   def link_to_finding : Nil; end
 

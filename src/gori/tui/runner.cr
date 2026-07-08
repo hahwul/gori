@@ -647,8 +647,12 @@ module Gori::Tui
       if @active_tab == :prism && @overlay == :none && @focus == :body && prism_controller.view.querying?
         return if prism_controller.handle_query_key(ev)
       end
-      if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.editing_notes?
-        return if findings_controller.handle_notes_key(ev)
+      if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.detail_open?
+        return if findings_controller.handle_detail_key(ev)
+      end
+      # History detail drill-in: shift+arrows select, space opens the action menu.
+      if @active_tab == :history && @overlay == :detail && @focus == :body
+        return if history_controller.handle_detail_key(ev)
       end
       # The Convert chain autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
       # before the focus ring claims Tab. Non-popup keys fall through (return false).
@@ -2652,7 +2656,7 @@ module Gori::Tui
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
       when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
       when :fuzz_advanced then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
-      when :detail        then "←/→ panes · ↑/↓ scroll · ⇧←/→ h-scroll · ^R replay · ⇧F finding · x hex · p pretty · space cmds · ^G goto · ^F find · esc back"
+      when :detail        then history_controller.body_hint(:body)
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
@@ -3248,6 +3252,18 @@ module Gori::Tui
       findings_controller.finding_edit_notes
     end
 
+    def findings_notes_read_mode? : Bool
+      findings_controller.findings_notes_read_mode?
+    end
+
+    def findings_copy : Nil
+      findings_controller.findings_copy
+    end
+
+    def findings_copy_all : Nil
+      findings_controller.findings_copy_all
+    end
+
     def finding_hscroll(delta : Int32) : Nil
       findings_controller.finding_hscroll(delta)
     end
@@ -3616,6 +3632,10 @@ module Gori::Tui
       history_controller.scroll_detail(delta)
     end
 
+    def detail_copy_selection : Nil
+      history_controller.detail_copy_selection
+    end
+
     def hscroll_detail(delta : Int32) : Nil
       history_controller.hscroll_detail(delta)
     end
@@ -3712,6 +3732,18 @@ module Gori::Tui
       replay_controller.replay_focus_chain_pane
     end
 
+    def replay_copy : Nil
+      replay_controller.replay_copy
+    end
+
+    def replay_copy_all : Nil
+      replay_controller.replay_copy_all
+    end
+
+    def replay_read_mode? : Bool
+      replay_controller.replay_read_mode?
+    end
+
     def close_replay_tab : Nil
       replay_controller.close_replay_tab
     end
@@ -3763,6 +3795,18 @@ module Gori::Tui
 
     def fuzz_clear_marks : Nil
       fuzzer_controller.fuzz_clear_marks
+    end
+
+    def fuzzer_copy : Nil
+      fuzzer_controller.fuzzer_copy
+    end
+
+    def fuzzer_copy_all : Nil
+      fuzzer_controller.fuzzer_copy_all
+    end
+
+    def fuzzer_read_mode? : Bool
+      fuzzer_controller.fuzzer_read_mode?
     end
 
     # --- Miner ExecContext / cross-tab mediators ---
@@ -3985,6 +4029,14 @@ module Gori::Tui
       convert_controller.copy_output
     end
 
+    def convert_copy_selection : Nil
+      convert_controller.convert_copy_selection
+    end
+
+    def convert_read_mode? : Bool
+      convert_controller.convert_read_mode?
+    end
+
     def convert_cycle_mode : Nil
       convert_controller.cycle_output_mode
     end
@@ -4012,6 +4064,80 @@ module Gori::Tui
 
     def notes_copy : Nil
       notes_controller.notes_copy
+    end
+
+    def notes_copy_all : Nil
+      notes_controller.notes_copy_all
+    end
+
+    def notes_read_mode? : Bool
+      notes_controller.notes_read_mode?
+    end
+
+    def project_desc_read_mode? : Bool
+      project_controller.project_desc_read_mode?
+    end
+
+    def project_copy : Nil
+      project_controller.project_copy
+    end
+
+    def project_copy_all : Nil
+      project_controller.project_copy_all
+    end
+
+    READ_COPY_VERBS = %w(
+      notes.copy replay.copy convert.copy finding.copy project.copy detail.copy fuzzer.copy
+    )
+
+    def space_menu_title(verb_id : String) : String?
+      return "Copy selected" if READ_COPY_VERBS.includes?(verb_id) && read_selection_active?
+      nil
+    end
+
+    def read_selection_active? : Bool
+      case @active_tab
+      when :notes    then notes_controller.view.selection?
+      when :replay    then replay_controller.replay_selection_active?
+      when :fuzzer    then fuzzer_controller.fuzzer_selection_active?
+      when :convert   then convert_controller.convert_selection_active?
+      when :findings  then findings_controller.findings_notes_selection_active?
+      when :project   then project_controller.project_desc_selection_active?
+      when :history
+        @overlay == :detail && history_controller.detail_selection_active?
+      else
+        false
+      end
+    end
+
+    def read_select_line : Nil
+      case @active_tab
+      when :notes    then notes_controller.view.select_line
+      when :replay    then replay_controller.replay_select_line
+      when :fuzzer    then fuzzer_controller.fuzzer_select_line
+      when :convert   then convert_controller.convert_select_line
+      when :findings  then findings_controller.findings_notes_select_line
+      when :project   then project_controller.project_desc_select_line
+      when :history
+        history_controller.detail_select_line if @overlay == :detail
+      end
+    end
+
+    def read_clear_selection : Nil
+      case @active_tab
+      when :notes    then notes_controller.view.clear_selection
+      when :replay    then replay_controller.replay_clear_selection
+      when :fuzzer    then fuzzer_controller.fuzzer_clear_selection
+      when :convert   then convert_controller.convert_clear_selection
+      when :findings  then findings_controller.findings_notes_clear_selection
+      when :project   then project_controller.project_desc_clear_selection
+      when :history
+        history_controller.detail_clear_selection if @overlay == :detail
+      end
+    end
+
+    def detail_navigable? : Bool
+      @active_tab == :history && @overlay == :detail && history_controller.view.detail_navigable?
     end
 
     def notes_clear : Nil
