@@ -99,7 +99,7 @@ module Gori
           sitemap            Print the host → path endpoint tree (text, json, paths)
           prism [QL]         Passively scan captured flows for issues (zero requests)
           notes [<n>]        Read the project's notes (list, show one, or --all)
-          findings           List or export findings (text, json, markdown)
+          findings           List, export, create, or update findings (text, json, markdown)
           projects           List known projects
 
         Most read subcommands accept --project NAME or --db PATH; with neither they
@@ -1353,13 +1353,24 @@ module Gori
       # --- findings ----------------------------------------------------------
 
       private def self.cmd_findings(args : Array(String)) : Nil
+        if args.first? == "create"
+          cmd_findings_create(args[1..])
+          return
+        elsif args.first? == "update"
+          cmd_findings_update(args[1..])
+          return
+        end
+
         db_path : String? = nil
         project_name : String? = nil
         format = :text
         export_path : String? = nil
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run findings [options]"
+          p.banner = "Usage: gori run findings [options]\n\n" \
+                     "Or run with a subcommand:\n" \
+                     "  gori run findings create [options]\n" \
+                     "  gori run findings update <finding-id> [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json | markdown") { |v| format = parse_format(v, [:text, :json, :markdown]) }
@@ -1402,6 +1413,105 @@ module Gori
           STDERR.puts "exported #{count} finding#{count == 1 ? "" : "s"} → #{path}"
         else
           puts content
+        end
+      end
+
+      private def self.cmd_findings_create(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        title : String? = nil
+        sev_s = "info"
+        host : String? = nil
+        flow_id : Int64? = nil
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run findings create [options]"
+          p.on("--project=NAME", "Project to write (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to write") { |v| db_path = v }
+          p.on("-tTITLE", "--title=TITLE", "Finding title (required)") { |v| title = v }
+          p.on("-sSEVERITY", "--severity=SEVERITY", "Severity: info|low|medium|high|critical (default: info)") { |v| sev_s = v }
+          p.on("--host=HOST", "Host concerning the finding") { |v| host = v }
+          p.on("--flow=ID", "Associated flow ID") { |v| flow_id = parse_flow_id(v) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run findings create: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run findings create: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        abort "gori run findings create: --title is required" if (t = title).nil? || t.empty?
+
+        severity = Store::Severity.parse?(sev_s.strip) || abort("gori run findings create: invalid severity '#{sev_s}' (info|low|medium|high|critical)")
+        
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          masked_title = Env.mask_secrets(t)
+          masked_host = host.try { |h| Env.mask_secrets(h) }
+          id = store.insert_finding(masked_title, severity, masked_host, flow_id)
+          abort "gori run findings create: failed to persist finding (store busy or unwritable)" if id == 0
+          puts "Finding ##{id} created successfully."
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_findings_update(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        id : Int64? = nil
+        title : String? = nil
+        sev_s : String? = nil
+        notes : String? = nil
+        stat_s : String? = nil
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run findings update <finding-id> [options]"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-tTITLE", "--title=TITLE", "New finding title") { |v| title = v }
+          p.on("-sSEVERITY", "--severity=SEVERITY", "Severity: info|low|medium|high|critical") { |v| sev_s = v }
+          p.on("-nNOTES", "--notes=NOTES", "Free-form notes") { |v| notes = v }
+          p.on("--status=STATUS", "Status: open|confirmed|false-positive|resolved") { |v| stat_s = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run findings update: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run findings update: missing value for #{f}" }
+        end
+        
+        positional = [] of String
+        parser.unknown_args { |rest, _| positional = rest }
+        parser.parse(args)
+
+        abort "gori run findings update: missing <finding-id>" if positional.empty?
+        abort "gori run findings update: too many arguments (expected one <finding-id>)" if positional.size > 1
+        id = positional[0].to_i64? || abort("gori run findings update: invalid finding id '#{positional[0]}'")
+
+        severity = sev_s.try { |s| Store::Severity.parse?(s.strip) || abort("gori run findings update: invalid severity '#{s}'") }
+        status = stat_s.try do |s|
+          case s.strip.downcase
+          when "open"                                              then Store::Status::Open
+          when "confirmed"                                         then Store::Status::Confirmed
+          when "false-positive", "false_positive", "falsepositive" then Store::Status::FalsePositive
+          when "resolved"                                          then Store::Status::Resolved
+          else                                                          abort("gori run findings update: invalid status '#{s}' (open|confirmed|false-positive|resolved)")
+          end
+        end
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          abort "gori run findings update: no finding with id #{id}" unless store.get_finding(id)
+          
+          if title.nil? && severity.nil? && notes.nil? && status.nil?
+            abort "gori run findings update: no fields to update (provide at least one of --title/--severity/--notes/--status)"
+          end
+
+          masked_title = title.try { |t| Env.mask_secrets(t) }
+          masked_notes = notes.try { |n| Env.mask_secrets(n) }
+
+          store.update_finding(id, title: masked_title, severity: severity, notes: masked_notes, status: status)
+          puts "Finding ##{id} updated successfully."
+        ensure
+          store.close
         end
       end
 
