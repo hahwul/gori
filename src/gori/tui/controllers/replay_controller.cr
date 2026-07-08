@@ -71,6 +71,10 @@ module Gori::Tui
       @replays.empty?
     end
 
+    def any_inflight? : Bool
+      @replays.any?(&.view.inflight?)
+    end
+
     def current_idx : Int32
       @current_replay_idx
     end

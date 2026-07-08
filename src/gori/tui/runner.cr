@@ -347,7 +347,7 @@ module Gori::Tui
         # Animate the bottom-bar background-job spinner: while any job runs, advance the
         # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
         # CPU at zero when nothing is running.
-        if @jobs.any_active? && now - last_spin >= SPINNER_INTERVAL
+        if (@jobs.any_active? || replay_controller.any_inflight?) && now - last_spin >= SPINNER_INTERVAL
           last_spin = now
           @spinner_frame &+= 1
           dirty = true
@@ -2451,6 +2451,24 @@ module Gori::Tui
       end
     end
 
+    private def format_status_message(message : String?) : String?
+      return nil unless message
+      if message.starts_with?("replaying →") || message.starts_with?("ws replay →") ||
+         message.starts_with?("fuzzing ") || message.starts_with?("fuzz running") ||
+         message.starts_with?("stopping")
+        "#{SPINNER[@spinner_frame % SPINNER.size]} #{message}"
+      elsif message.starts_with?("replayed →") || message.starts_with?("ws replayed:") ||
+            message.starts_with?("Fuzzer:")
+        "✓ #{message}"
+      elsif message.starts_with?("replay error:") || message.starts_with?("ws replay error:") ||
+            message.starts_with?("fuzz error:") || message.starts_with?("fuzz:") ||
+            message.starts_with?("cannot run")
+        "✗ #{message}"
+      else
+        message
+      end
+    end
+
     # --- rendering -----------------------------------------------------------
 
     private def render : Nil
@@ -2472,7 +2490,7 @@ module Gori::Tui
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
         tabs: effective_tabs, intercept_count: @session.interceptor.pending_count)
       render_body(screen, layout.body)
-      Chrome.render_status(screen, layout.status, focus: focus_label, hints: @toast || key_hints,
+      Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
         capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,
         write_failures: @session.store.write_failures,
         activity: activity_chip, unread: @notifications.unread)
