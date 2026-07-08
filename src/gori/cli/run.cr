@@ -76,6 +76,7 @@ module Gori
         when "notes"    then cmd_notes(rest)
         when "findings" then cmd_findings(rest)
         when "projects" then cmd_projects(rest)
+        when "scope"    then cmd_scope(rest)
         else
           STDERR.puts "gori run: unknown subcommand '#{sub}'"
           print_help
@@ -101,6 +102,7 @@ module Gori
           notes [<n>]        Read the project's notes (list, show one, or --all)
           findings           List, export, create, or update findings (text, json, markdown)
           projects           List known projects
+          scope              Manage the project's scope rules (list, add, delete, enable/disable)
 
         Most read subcommands accept --project NAME or --db PATH; with neither they
         use the most-recently-active project. See 'gori run <subcommand> --help'.
@@ -1563,6 +1565,189 @@ module Gori
             ts = pr.last_modified.try(&.to_local.to_s("%Y-%m-%d %H:%M")) || "—"
             puts "#{pr.name.ljust(24)}  #{ts}  #{CLI::Output.human_size(pr.db_size)}"
           end
+        end
+      end
+
+      # --- scope -------------------------------------------------------------
+
+      private def self.cmd_scope(args : Array(String)) : Nil
+        sub = args.first?
+        if sub == "add"
+          cmd_scope_add(args[1..])
+          return
+        elsif sub == "delete"
+          cmd_scope_delete(args[1..])
+          return
+        elsif sub == "enable"
+          cmd_scope_set_enabled(true, args[1..])
+          return
+        elsif sub == "disable"
+          cmd_scope_set_enabled(false, args[1..])
+          return
+        end
+
+        cmd_scope_list(args)
+      end
+
+      private def self.cmd_scope_list(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        format = :text
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run scope [options]\n\n" \
+                     "Or run with a subcommand:\n" \
+                     "  gori run scope add --kind=include/exclude --type=host/string/regex --pattern=...\n" \
+                     "  gori run scope delete <rule-id>\n" \
+                     "  gori run scope enable\n" \
+                     "  gori run scope disable"
+          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run scope: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run scope: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          scope = Scope.load(store)
+          if format == :json
+            puts(JSON.build do |j|
+              j.object do
+                j.field "enabled", scope.enabled?
+                j.field "rules" do
+                  j.array do
+                    scope.rules.each do |r|
+                      j.object do
+                        j.field "id", r.id
+                        j.field "kind", r.kind
+                        j.field "type", r.match_type
+                        j.field "pattern", r.pattern
+                      end
+                    end
+                  end
+                end
+              end
+            end)
+          else
+            puts "Scope filtering: #{scope.enabled? ? "ENABLED" : "DISABLED"}"
+            if scope.rules.empty?
+              puts "No scope rules configured."
+            else
+              scope.rules.each do |r|
+                puts "##{r.id}  #{r.kind.ljust(8)}  #{r.match_type.ljust(6)}  #{r.pattern}"
+              end
+            end
+          end
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_scope_add(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        kind = "include"
+        match_type = "host"
+        pattern : String? = nil
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run scope add [options]"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-kKIND", "--kind=KIND", "Rule kind: include|exclude (default: include)") { |v| kind = v }
+          p.on("-tTYPE", "--type=TYPE", "Match type: host|string|regex (default: host)") { |v| match_type = v }
+          p.on("-pPATTERN", "--pattern=PATTERN", "Pattern to match (required)") { |v| pattern = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run scope add: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run scope add: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        abort "gori run scope add: --pattern is required" if (pat = pattern).nil? || pat.empty?
+        abort "gori run scope add: invalid kind '#{kind}' (must be include or exclude)" unless kind.in?(Scope::KINDS)
+        abort "gori run scope add: invalid type '#{match_type}' (must be host, string, or regex)" unless match_type.in?(Scope::TYPES)
+        abort "gori run scope add: invalid pattern for regex (failed to compile)" if match_type == "regex" && !Scope.valid?(match_type, pat)
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          scope = Scope.load(store)
+          success = scope.add(kind, match_type, pat)
+          if success
+            puts "Scope rule added successfully."
+          else
+            abort "gori run scope add: failed to add rule (duplicate, empty, or invalid)"
+          end
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_scope_delete(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        id : Int64? = nil
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run scope delete <rule-id> [options]"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run scope delete: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run scope delete: missing value for #{f}" }
+        end
+
+        positional = [] of String
+        parser.unknown_args { |rest, _| positional = rest }
+        parser.parse(args)
+
+        abort "gori run scope delete: missing <rule-id>" if positional.empty?
+        abort "gori run scope delete: too many arguments (expected one <rule-id>)" if positional.size > 1
+        id = positional[0].to_i64? || abort("gori run scope delete: invalid rule id '#{positional[0]}'")
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          scope = Scope.load(store)
+          abort "gori run scope delete: no scope rule with id #{id}" unless scope.rules.any? { |r| r.id == id }
+          scope.remove(id)
+          puts "Scope rule ##{id} deleted successfully."
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_scope_set_enabled(enable : Bool, args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run scope #{enable ? "enable" : "disable"} [options]"
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.invalid_option { |f| abort "gori run scope #{enable ? "enable" : "disable"}: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run scope #{enable ? "enable" : "disable"}: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        project = resolve_read_project(project_name, db_path)
+        store = open_store(project)
+        begin
+          scope = Scope.load(store)
+          if enable
+            scope.enable
+            puts "Scope filtering enabled."
+          else
+            scope.disable
+            puts "Scope filtering disabled."
+          end
+        ensure
+          store.close
         end
       end
 

@@ -251,6 +251,10 @@ module Gori
       @mutex.synchronize { set_enabled_unlocked(true) }
     end
 
+    def disable : Nil
+      @mutex.synchronize { set_enabled_unlocked(false) }
+    end
+
     # A regex pattern must compile — the SQLite REGEXP callback and the proxy hot path
     # both call `Regex.new` and would otherwise raise. host/string patterns always valid.
     def self.valid?(match_type : String, pattern : String) : Bool
