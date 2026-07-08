@@ -9,12 +9,15 @@ module Gori::Tui
   # full TextArea would be overkill. Rendering is the caller's job (the overlays
   # draw "label value" rows and place the block caret themselves).
   class TextField
+    record UndoState, value : String, caret : Int32
+
     property value : String
     getter caret : Int32
     getter preedit : String = ""
 
     def initialize(@value : String = "")
       @caret = @value.size
+      @undo_stack = [] of UndoState
     end
 
     # Replace the whole value, clamping the caret to the new end.
@@ -22,6 +25,7 @@ module Gori::Tui
       @value = v
       @caret = {@caret, v.size}.min
       @preedit = ""
+      @undo_stack.clear
     end
 
     def set_preedit(text : String) : Nil
@@ -29,6 +33,7 @@ module Gori::Tui
     end
 
     def insert(ch : Char) : Nil
+      push_undo
       c = @caret.clamp(0, @value.size)
       @value = "#{@value[0, c]}#{ch}#{@value[c..]}"
       @caret = c + 1
@@ -37,6 +42,7 @@ module Gori::Tui
 
     def backspace : Nil
       return if @caret == 0
+      push_undo
       c = @caret.clamp(0, @value.size)
       @value = "#{@value[0, c - 1]}#{@value[c..]}"
       @caret = c - 1
@@ -45,6 +51,7 @@ module Gori::Tui
     def delete : Nil
       c = @caret.clamp(0, @value.size)
       return if c >= @value.size
+      push_undo
       @value = "#{@value[0, c]}#{@value[c + 1..]}"
       @caret = c
     end
@@ -76,6 +83,7 @@ module Gori::Tui
       when key.end?       then end_of_line
       when key.backspace? then backspace
       when key.delete?    then delete
+      when ev.ctrl? && key.lower_z? then undo
       else
         ch = ev.char || key.to_char
         return false unless ch && !ev.ctrl? && !ev.alt?
@@ -97,6 +105,19 @@ module Gori::Tui
       ch = c < @value.size ? @value[c] : ' '
       screen.cell(cx, y, ch, Theme.bg, Theme.accent)
       screen.cursor(cx, y)
+    end
+
+    private def push_undo : Nil
+      @undo_stack << UndoState.new(@value, @caret)
+      @undo_stack.shift if @undo_stack.size > 100
+    end
+
+    def undo : Nil
+      return if @undo_stack.empty?
+      state = @undo_stack.pop
+      @value = state.value
+      @caret = state.caret.clamp(0, @value.size)
+      @preedit = ""
     end
   end
 end

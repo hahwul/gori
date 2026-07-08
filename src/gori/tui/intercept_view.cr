@@ -177,6 +177,12 @@ module Gori::Tui
       end
     end
 
+    def edit_undo : Nil
+      return unless @editing
+      @editor.undo
+      @editor_dirty = true
+    end
+
     def edit_insert(ch : Char) : Nil
       return unless @editing
       @editor.insert(ch)

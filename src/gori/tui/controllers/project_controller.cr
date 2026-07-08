@@ -209,6 +209,8 @@ module Gori::Tui
         @host.request_focus(:menu)
       elsif key.enter?
         @project_view.newline
+      elsif ev.ctrl? && key.lower_z?
+        @project_view.undo
       elsif key.backspace?
         @project_view.backspace
       elsif key.up?

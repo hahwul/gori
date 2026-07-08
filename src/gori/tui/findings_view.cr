@@ -281,6 +281,10 @@ module Gori::Tui
       @editing_notes = true
     end
 
+    def notes_undo : Nil
+      @notes.undo if @editing_notes
+    end
+
     def notes_insert(ch : Char) : Nil
       @notes.insert(ch) if @editing_notes
     end

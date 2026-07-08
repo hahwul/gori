@@ -84,6 +84,8 @@ module Gori::Tui
         intercept_forward
       elsif key.enter?
         @intercept.edit_newline
+      elsif ev.ctrl? && key.lower_z?
+        @intercept.edit_undo
       elsif key.backspace?
         @intercept.edit_backspace
       elsif key.up?

@@ -355,6 +355,8 @@ module Gori::Tui
       s = cur
       key = ev.key
       case
+      when ev.ctrl? && key.lower_z?
+        s.input.undo; touch
       when key.enter?
         s.input.insert_newline; touch
       when key.backspace?

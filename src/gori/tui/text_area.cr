@@ -11,6 +11,8 @@ module Gori::Tui
   # request). Holds lines + a cursor; no modes — typing edits directly. Converts
   # back to bytes with CRLF line endings (HTTP wire form).
   class TextArea
+    record UndoState, text : String, cy : Int32, cx : Int32
+
     def initialize(text : String = "")
       @lines = [""]
       @cy = 0
@@ -36,6 +38,7 @@ module Gori::Tui
       # except the Fuzzer template — Replay/Notes never set it, so they're unaffected. The
       # widget knows nothing about §-markers; the owner supplies offsets + resolved colours.
       @bg_regions = [] of {Int32, Int32, Color}
+      @undo_stack = [] of UndoState
       set_text(text)
     end
 
@@ -58,6 +61,7 @@ module Gori::Tui
       @preedit = ""
       @styled = nil
       @edits += 1
+      @undo_stack.clear
     end
 
     # Preedit/composing text from IME (e.g. current Hangul syllable while typing jamo).
@@ -88,6 +92,7 @@ module Gori::Tui
     end
 
     def insert(ch : Char) : Nil
+      push_undo
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = "#{line[0, cx]}#{ch}#{line[cx..]}"
@@ -95,8 +100,9 @@ module Gori::Tui
       @styled = nil
       @edits += 1
     end
-
+ 
     def insert_newline : Nil
+      push_undo
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       @lines[@cy] = line[0, cx]
@@ -106,14 +112,16 @@ module Gori::Tui
       @styled = nil
       @edits += 1
     end
-
+ 
     def backspace : Nil
       if @cx > 0
+        push_undo
         line = @lines[@cy]
         cx = @cx.clamp(0, line.size)
         @lines[@cy] = "#{line[0, cx - 1]}#{line[cx..]}"
         @cx = cx - 1
       elsif @cy > 0
+        push_undo
         prev = @lines[@cy - 1]
         @cx = prev.size
         @lines[@cy - 1] = prev + @lines[@cy]
@@ -140,8 +148,10 @@ module Gori::Tui
       line = @lines[@cy]
       cx = @cx.clamp(0, line.size)
       if cx < line.size
+        push_undo
         @lines[@cy] = "#{line[0, cx]}#{line[cx + 1..]}"
       elsif @cy < @lines.size - 1
+        push_undo
         @lines[@cy] = line + @lines[@cy + 1]
         @lines.delete_at(@cy + 1)
       else
@@ -240,6 +250,7 @@ module Gori::Tui
     def replace_line(idx : Int32, content : String) : Nil
       return if idx < 0 || idx >= @lines.size
       return if @lines[idx] == content
+      push_undo
       @lines[idx] = content
       @cx = @cx.clamp(0, content.size) if @cy == idx
       @styled = nil
@@ -438,6 +449,22 @@ module Gori::Tui
     # keep their columns. Identity when start_col <= 0.
     private def slice_left(s : String, start_col : Int32) : String
       Highlight.slice_left_text(s, start_col)
+    end
+
+    private def push_undo : Nil
+      @undo_stack << UndoState.new(text, @cy, @cx)
+      @undo_stack.shift if @undo_stack.size > 100
+    end
+
+    def undo : Nil
+      return if @undo_stack.empty?
+      state = @undo_stack.pop
+      @lines = state.text.split('\n')
+      @lines = [""] if @lines.empty?
+      @cy = state.cy.clamp(0, @lines.size - 1)
+      @cx = state.cx.clamp(0, @lines[@cy].size)
+      @styled = nil
+      @edits += 1
     end
   end
 end

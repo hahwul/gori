@@ -1231,6 +1231,12 @@ module Gori::Tui
       end
     end
 
+    def edit_undo : Nil
+      return unless @focus == :request
+      req_editor.undo
+      mark_req_edit
+    end
+
     def edit_insert(ch : Char) : Nil
       return unless @focus == :request
       req_editor.insert(ch)

@@ -805,6 +805,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
+      when ev.ctrl? && key.lower_z? then view.edit_undo
       when key.enter?     then view.edit_newline
       when key.backspace? then view.edit_backspace
       when key.up?        then view.at_top? ? view.focus_first : view.edit_move(-1, 0) # ↑-at-top → target field above

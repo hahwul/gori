@@ -811,6 +811,11 @@ module Gori::Tui
       @desc_dirty = true
     end
 
+    def undo : Nil
+      @desc_area.undo
+      @desc_dirty = true
+    end
+
     def backspace : Nil
       @desc_area.backspace
       @desc_dirty = true

@@ -80,6 +80,8 @@ module Gori::Tui
         @host.request_focus(:menu)
       elsif key.enter?
         @notes.newline
+      elsif ev.ctrl? && key.lower_z?
+        @notes.undo
       elsif key.backspace?
         @notes.backspace
       elsif key.up?

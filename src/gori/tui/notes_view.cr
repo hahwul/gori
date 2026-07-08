@@ -149,6 +149,11 @@ module Gori::Tui
       @dirty = true
     end
 
+    def undo : Nil
+      current.area.undo
+      @dirty = true
+    end
+
     def move(dr : Int32, dc : Int32) : Nil
       current.area.move(dr, dc)
     end
