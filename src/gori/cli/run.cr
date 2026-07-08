@@ -627,6 +627,8 @@ module Gori
         insecure = false
         do_diff = false
         format = :text
+        headers = [] of String
+        body_override : String? = nil
         positional = [] of String
 
         parser = OptionParser.new do |p|
@@ -637,6 +639,8 @@ module Gori
           p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { force_h2 = true }
           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
           p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
+          p.on("-HHEADER", "--header=HEADER", "Custom header to overwrite/add (repeatable)") { |v| headers << v }
+          p.on("-bBODY", "--body=BODY", "Request body override") { |v| body_override = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -663,10 +667,96 @@ module Gori
         end
 
         built = Replay::FlowRequest.build(detail)
+
+        raw_bytes = built.bytes
+        crlf_crlf_idx = -1
+        limit = raw_bytes.size - 3
+        (0..limit).each do |i|
+          if raw_bytes[i] == 0x0d_u8 && raw_bytes[i+1] == 0x0a_u8 && raw_bytes[i+2] == 0x0d_u8 && raw_bytes[i+3] == 0x0a_u8
+            crlf_crlf_idx = i
+            break
+          end
+        end
+
+        abort "gori run replay: malformed request bytes in captured flow" if crlf_crlf_idx == -1
+
+        head_bytes = raw_bytes[0, crlf_crlf_idx + 4]
+        body_bytes = raw_bytes[crlf_crlf_idx + 4..]
+
+        raw_req = Proxy::Codec::Http1.parse_request_head(head_bytes)
+        
+        custom_headers = {} of String => String
+        headers.each do |h_str|
+          name, _, val = h_str.partition(':')
+          next if name.strip.empty?
+          custom_headers[name.strip.downcase] = val.strip
+        end
+
+        new_headers = [] of Proxy::Codec::Header
+        raw_req.headers.each do |hdr|
+          lower_name = hdr.name.downcase
+          if custom_headers.has_key?(lower_name)
+            new_headers << Proxy::Codec::Header.new(hdr.name, custom_headers[lower_name])
+            custom_headers.delete(lower_name)
+          else
+            new_headers << hdr
+          end
+        end
+
+        custom_headers.each do |lower_name, val|
+          orig_name = ""
+          headers.each do |h_str|
+            name, _, _ = h_str.partition(':')
+            if name.strip.downcase == lower_name
+              orig_name = name.strip
+              break
+            end
+          end
+          orig_name = lower_name if orig_name.empty?
+          new_headers << Proxy::Codec::Header.new(orig_name, val)
+        end
+
+        final_body = if b_over = body_override
+                       b_over.to_slice
+                     else
+                       body_bytes
+                     end
+
+        has_cl = new_headers.any? { |h| h.name.compare("Content-Length", case_insensitive: true) == 0 }
+        if body_override || has_cl || final_body.size > 0
+          cl_idx = new_headers.index { |h| h.name.compare("Content-Length", case_insensitive: true) == 0 }
+          if cl_idx
+            new_headers[cl_idx] = Proxy::Codec::Header.new(new_headers[cl_idx].name, final_body.size.to_s)
+          else
+            new_headers << Proxy::Codec::Header.new("Content-Length", final_body.size.to_s)
+          end
+        end
+
+        if override = target_override
+          _, host_part, port_part = Replay::FlowRequest.parse_target(override)
+          host_hdr_val = port_part == 80 || port_part == 443 ? host_part : "#{host_part}:#{port_part}"
+          host_idx = new_headers.index { |h| h.name.compare("Host", case_insensitive: true) == 0 }
+          if host_idx
+            new_headers[host_idx] = Proxy::Codec::Header.new(new_headers[host_idx].name, host_hdr_val)
+          else
+            new_headers << Proxy::Codec::Header.new("Host", host_hdr_val)
+          end
+        end
+
+        new_head_str = String.build do |io|
+          io << raw_req.method << " " << raw_req.target << " " << raw_req.version << "\r\n"
+          new_headers.each do |hdr|
+            io << hdr.name << ": " << hdr.value << "\r\n"
+          end
+          io << "\r\n"
+        end
+
+        final_request_bytes = new_head_str.to_slice + final_body
+
         override = target_override # copy the closured flag into a plain local so || narrows
         # Re-sync Content-Length after expansion — a `$KEY` in the body changes its length,
         # and `build` framed CL over the pre-expansion bytes.
-        bytes = Replay::FlowRequest.resync_content_length(Env.expand_wire(String.new(built.bytes)))
+        bytes = Replay::FlowRequest.resync_content_length(Env.expand_wire(String.new(final_request_bytes)))
         target = Env.expand(override || built.target)
         scheme, host, port = Replay::FlowRequest.parse_target(target)
         abort "gori run replay: could not determine a target host" if host.empty?
