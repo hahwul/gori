@@ -6,6 +6,15 @@ module Gori
     # and copy verbs whose menu title flips to "Copy selected" when a selection is active
     # (see ExecContext#space_menu_title). Registered per scope so the space menu stays
     # strictly local to the focused pane.
+    #
+    # Round 5: these are low-frequency next to Send/Copy/New/etc., so on the
+    # multi-section tabs (Replay/Fuzzer/Convert) they're tagged into the single most
+    # relevant focus-area section instead of :common — available? still gates them by
+    # read-mode across ALL of that tab's read-mode panes, so the keybinding (mostly
+    # plain 'x'/'v') keeps working everywhere; only the SPACE-MENU listing is scoped to
+    # one section. Single-region tabs (Notes/Findings/Project/HistoryDetail) have
+    # nowhere else to put them, so they stay :common (their one and only group) —
+    # unchanged, no clutter concern since there's only ever one group to show.
     def self.register_read_edit(r : Verb::Registry) : Nil
       in_sel = ->(ctx : Verb::ExecContext) { ctx.read_selection_active? }
 
@@ -18,32 +27,43 @@ module Gori
         "notes.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Notes, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
 
+      # Tagged :response (not :common): select/clear are equally available in the
+      # REQUEST/TARGET panes (in_replay_read covers all three), but :response is
+      # where reading-then-copying a snippet is the natural flow, and :request is
+      # already the busiest section (9 marker/view-toggle actions) — keeping these
+      # out of it (and out of COMMON) keeps both lean. The plain 'x' keybinding still
+      # works in every read-mode pane regardless of where the menu lists it.
       in_replay_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_read_mode? }
       r.register Verb::Definition.new(
         "replay.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Replay, [Verb::Chord.new("x")],
-        available: in_replay_read, mnemonic: 'l') { |ctx| ctx.read_select_line; nil }
+        available: in_replay_read, mnemonic: 'l', section: :response) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "replay.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Replay, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Replay, available: in_sel, mnemonic: 'v', section: :response) { |ctx| ctx.read_clear_selection; nil }
 
+      # Tagged :input (Convert's read-mode panes are INPUT-read and OUTPUT; :input is
+      # the more relevant "editing" pane — OUTPUT keeps 'x' reachable by keybinding).
       in_convert_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :convert && ctx.convert_read_mode? }
       r.register Verb::Definition.new(
         "convert.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Convert, [Verb::Chord.new("x")],
-        available: in_convert_read, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        available: in_convert_read, mnemonic: 'x', section: :input) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "convert.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Convert, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Convert, available: in_sel, mnemonic: 'v', section: :input) { |ctx| ctx.read_clear_selection; nil }
 
+      # Tagged :template (Fuzzer's only section named for this in Round 5's spec —
+      # :target/:results/:detail are also read-mode-gated, but :template is the one
+      # focus area the user singled out; 'x'/'v' keep working by keybinding elsewhere).
       in_fuzzer_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_read_mode? }
       r.register Verb::Definition.new(
         "fuzzer.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Fuzzer, [Verb::Chord.new("x")],
-        available: in_fuzzer_read, mnemonic: 'S') { |ctx| ctx.read_select_line; nil }
+        available: in_fuzzer_read, mnemonic: 'S', section: :template) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "fuzzer.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Fuzzer, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        Verb::Scope::Fuzzer, available: in_sel, mnemonic: 'v', section: :template) { |ctx| ctx.read_clear_selection; nil }
 
       in_findings_notes = ->(ctx : Verb::ExecContext) { ctx.findings_notes_read_mode? }
       r.register Verb::Definition.new(

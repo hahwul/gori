@@ -9,7 +9,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64 # flow-gated Body actions available
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Body, ctx)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
 
     menu.entries.size.should be > 0
     menu.entries.all?(&.scope.body?).should be_true         # strictly scope-local
@@ -22,7 +22,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Body, ctx)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
 
     menu.verb_for('y').try(&.id).should eq("history.copy")
     menu.verb_for('r').try(&.id).should eq("history.replay")
@@ -33,7 +33,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Body, ctx)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
 
     menu.move(-5)
     menu.selected.should eq(0)
@@ -45,7 +45,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::HistoryDetail, ctx) # detail drill-in is navigable now
+    menu.open(Gori::Verb::Scope::HistoryDetail, :common, ctx) # detail drill-in is navigable now
 
     menu.entries.size.should be > 0
     menu.entries.all?(&.scope.history_detail?).should be_true # strictly scope-local
@@ -60,7 +60,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.scope_has_rule = true # edit/delete are gated on a selected rule
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Project, ctx)
+    menu.open(Gori::Verb::Scope::Project, :common, ctx)
 
     ids = menu.entries.map(&.id)
     ids.should contain("scope.lens-toggle") # the lens toggle is now a menu item, not a bare space key
@@ -75,7 +75,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.env_has_var = true # edit/delete are gated on a selected var
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Env, ctx)
+    menu.open(Gori::Verb::Scope::Env, :common, ctx)
 
     menu.entries.all?(&.scope.env?).should be_true # strictly scope-local — no scope-rule bleed
     menu.entries.all?(&.menu_key).should be_true
@@ -92,7 +92,7 @@ describe Gori::Tui::SpaceMenu do
   it "hides the env-var edit/delete entries when no var is selected" do
     ctx = FakeExecContext.new # env_has_var defaults to false
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Env, ctx)
+    menu.open(Gori::Verb::Scope::Env, :common, ctx)
 
     ids = menu.entries.map(&.id)
     ids.should contain("env.add-var")     # always available
@@ -105,7 +105,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.current_tab = :notes
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Notes, ctx)
+    menu.open(Gori::Verb::Scope::Notes, :common, ctx)
 
     menu.entries.size.should be > 0
     menu.entries.all?(&.scope.notes?).should be_true
@@ -124,7 +124,7 @@ describe Gori::Tui::SpaceMenu do
   it "lists the Prism list's detail-parity actions (promote, evidence, delete)" do
     ctx = FakeExecContext.new
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Prism, ctx)
+    menu.open(Gori::Verb::Scope::Prism, :common, ctx)
 
     ids = menu.entries.map(&.id)
     ids.should contain("prism.promote-selected")
@@ -141,26 +141,187 @@ describe Gori::Tui::SpaceMenu do
 
   it "lists the Convert tab's actions in the Convert scope (reachable from the sub-tab strip)" do
     ctx = FakeExecContext.new
-    ctx.current_tab = :convert # the Convert verbs gate on the active tab
+    ctx.current_tab = :convert   # the Convert verbs gate on the active tab
+    ctx.convert_read_mode = true # so COMMON's Copy is available too
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Convert, ctx)
+    menu.open(Gori::Verb::Scope::Convert, :common, ctx)
 
     menu.entries.size.should be > 0
     menu.entries.all?(&.scope.convert?).should be_true # strictly scope-local
     menu.entries.all?(&.menu_key).should be_true       # every shown entry has a key
     ids = menu.entries.map(&.id)
+    ids.should contain("convert.copy") # the single smart Copy (copy-all is gone)
+    menu.verb_for('y').try(&.id).should eq("convert.copy")
+  end
+
+  it "keeps Convert's New/Close in COMMON (Round 4) so they show from every context, not just the tab bar/strip" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :convert
+    ctx.convert_read_mode = true # so COMMON's Copy shows too, for a fuller COMMON+CONTEXT picture
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    # Tab-bar focus (@focus == :menu): Round 5 moved Save/Load to :tab (session-level),
+    # so this is now COMMON + a real TAB group — New/Close/Copy/Save/Load all present.
+    menu.open(Gori::Verb::Scope::Convert, :tab, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("convert.copy")
     ids.should contain("convert.new")
     ids.should contain("convert.close")
-    ids.should contain("convert.copy-all")
+    ids.should contain("convert.save")
+    ids.should contain("convert.load")
     menu.verb_for('n').try(&.id).should eq("convert.new")
     menu.verb_for('w').try(&.id).should eq("convert.close")
-    menu.verb_for('O').try(&.id).should eq("convert.copy-all")
+    menu.verb_for('s').try(&.id).should eq("convert.save")
+    menu.verb_for('o').try(&.id).should eq("convert.load")
+
+    # Sub-tab strip focus (@focus == :subtabs): Convert now has its OWN :subtab verb
+    # (rename, mirroring Replay/Fuzzer) — COMMON + SUBTAB, New/Close/Copy/Rename all
+    # reachable from the strip.
+    menu.open(Gori::Verb::Scope::Convert, :subtab, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("convert.copy")
+    ids.should contain("convert.new")
+    ids.should contain("convert.close")
+    ids.should contain("convert.rename-subtab")
+    menu.verb_for('e').try(&.id).should eq("convert.rename-subtab")
+    ids.should_not contain("convert.save") # :tab-only, not :subtab — no bleed
+
+    # Body-pane focus: OUTPUT gets Cycle output mode + COMMON's New/Close/Copy —
+    # the whole point of Round 4 is New/Close now show INSIDE the body panes too.
+    menu.open(Gori::Verb::Scope::Convert, :output, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("convert.mode")
+    ids.should contain("convert.new")
+    ids.should contain("convert.close")
+    ids.should_not contain("convert.save") # a DIFFERENT group (:tab) — no bleed
+
+    # CHAIN pane: Round 5 moved Save/Load OUT of :chain (into :tab), so CHAIN has no
+    # actions of its own left — falls back to a flat COMMON-only render (the
+    # single-group-omits-header rule), same as a single-region tab.
+    menu.open(Gori::Verb::Scope::Convert, :chain, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("convert.new")
+    ids.should contain("convert.close")
+    ids.should_not contain("convert.save")
+    ids.should_not contain("convert.mode")
+  end
+
+  it "yields COMMON + the focus-area's own group when opened with a non-common section (Replay), and a single flat group for :common" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :replay
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    menu.open(Gori::Verb::Scope::Replay, :request, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("replay.send")           # COMMON
+    ids.should contain("replay.insert-marker")  # :request
+    ids.should_not contain("replay.toggle-sni") # a DIFFERENT section (:target) — no bleed
+    menu.verb_for('i').try(&.id).should eq("replay.insert-marker")
+
+    backend = MemoryBackend.new(100, 30)
+    menu.render(Screen.new(backend), Rect.new(0, 0, 100, 28))
+    backend.contains?("SPACE · REQUEST").should be_true # card title carries the section label
+    backend.contains?("COMMON").should be_true          # dim group header
+    backend.contains?("REQUEST").should be_true
+
+    # :common alone → single flat group: no header, no :request bleed.
+    menu.open(Gori::Verb::Scope::Replay, :common, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("replay.send")
+    ids.should_not contain("replay.insert-marker")
+
+    backend2 = MemoryBackend.new(100, 30)
+    menu.render(Screen.new(backend2), Rect.new(0, 0, 100, 28))
+    backend2.contains?("SPACE · COMMON").should be_false # flat render — no section suffix
+  end
+
+  it "yields COMMON + the focus-area's own group when opened with a non-common section (Fuzzer)" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :fuzzer
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    menu.open(Gori::Verb::Scope::Fuzzer, :template, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("fuzz.run")      # COMMON
+    ids.should contain("fuzz.new")      # Round 5: New moved into COMMON, so it's here too
+    ids.should contain("fuzz.automark") # :template
+    menu.verb_for('m').try(&.id).should eq("fuzz.automark")
+
+    # Round 5: fuzz.new moved :tab → :common, so Fuzzer no longer has any :tab-only
+    # verbs — the tab bar now falls back to a flat COMMON-only render (same rule that
+    # already covered Convert's tab bar pre-Round-5), New/Run/Stop/Copy all present.
+    menu.open(Gori::Verb::Scope::Fuzzer, :tab, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("fuzz.run")
+    ids.should contain("fuzz.new")
+    ids.should_not contain("fuzz.automark") # :template-only — no bleed
+    menu.verb_for('n').try(&.id).should eq("fuzz.new")
+  end
+
+  it "populates Replay's :subtab group with rename/close (Round 4 — was raw key-dispatch)" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :replay
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    menu.open(Gori::Verb::Scope::Replay, :subtab, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("replay.send")              # COMMON
+    ids.should contain("replay.rename-subtab")     # :subtab
+    ids.should contain("replay.close-subtab")      # :subtab
+    ids.should_not contain("replay.insert-marker") # a DIFFERENT section (:request) — no bleed
+    menu.verb_for('e').try(&.id).should eq("replay.rename-subtab")
+    menu.verb_for('w').try(&.id).should eq("replay.close-subtab")
+  end
+
+  it "populates Replay's :response group with diff/hex alongside pretty (Round 4 — was raw key-dispatch)" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :replay
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    menu.open(Gori::Verb::Scope::Replay, :response, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("replay.send")            # COMMON
+    ids.should contain("replay.toggle-pretty")   # :response
+    ids.should contain("replay.toggle-diff")     # :response
+    ids.should contain("replay.toggle-resp-hex") # :response
+    menu.verb_for('p').try(&.id).should eq("replay.toggle-pretty")
+    menu.verb_for('d').try(&.id).should eq("replay.toggle-diff")
+    menu.verb_for('x').try(&.id).should eq("replay.toggle-resp-hex")
+  end
+
+  it "populates Fuzzer's :subtab group with rename/close (Round 4 — was raw key-dispatch)" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :fuzzer
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    menu.open(Gori::Verb::Scope::Fuzzer, :subtab, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("fuzz.run")           # COMMON
+    ids.should contain("fuzz.rename-subtab") # :subtab
+    ids.should contain("fuzz.close-subtab")  # :subtab
+    ids.should_not contain("fuzz.automark")  # a DIFFERENT section (:template) — no bleed
+    menu.verb_for('e').try(&.id).should eq("fuzz.rename-subtab")
+    menu.verb_for('w').try(&.id).should eq("fuzz.close-subtab")
+  end
+
+  it "populates Convert's :subtab group with rename (asymmetry fix — was flat COMMON, no way to rename from the strip)" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :convert
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    menu.open(Gori::Verb::Scope::Convert, :subtab, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("convert.new")           # COMMON
+    ids.should contain("convert.rename-subtab") # :subtab
+    ids.should_not contain("convert.save")      # a DIFFERENT section (:tab) — no bleed
+    ids.should_not contain("convert.mode")      # a DIFFERENT section (:output) — no bleed
+    menu.verb_for('e').try(&.id).should eq("convert.rename-subtab")
   end
 
   it "hides the scope rule edit/delete entries when no rule is selected" do
     ctx = FakeExecContext.new # scope_has_rule defaults to false
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Project, ctx)
+    menu.open(Gori::Verb::Scope::Project, :common, ctx)
 
     ids = menu.entries.map(&.id)
     ids.should contain("scope.lens-toggle") # always available
@@ -172,7 +333,7 @@ describe Gori::Tui::SpaceMenu do
   it "no-ops (empty entries) for a scope with only hidden nav verbs" do
     ctx = FakeExecContext.new
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Sidebar, ctx) # tab-bar nav verbs are all hidden
+    menu.open(Gori::Verb::Scope::Sidebar, :common, ctx) # tab-bar nav verbs are all hidden
     menu.entries.empty?.should be_true
   end
 
@@ -180,7 +341,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Body, ctx)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
 
     backend = MemoryBackend.new(80, 24)
     menu.render(Screen.new(backend), Rect.new(0, 3, 80, 20))
@@ -192,7 +353,7 @@ describe Gori::Tui::SpaceMenu do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Body, ctx)
+    menu.open(Gori::Verb::Scope::Body, :common, ctx)
     menu.entries.size.should be > 4 # Body has ~10 entries
 
     last = menu.entries.last.title
@@ -214,7 +375,7 @@ describe Gori::Tui::SpaceMenu do
         "demo.#{i}", "Item #{i}", "x", Gori::Verb::Scope::Body, mnemonic: ('a'.ord + i).unsafe_chr) { |_| nil })
     end
     menu = SpaceMenu.new(reg)
-    menu.open(Gori::Verb::Scope::Body, FakeExecContext.new)
+    menu.open(Gori::Verb::Scope::Body, :common, FakeExecContext.new)
     menu.entries.size.should eq(15)
 
     b = menu.box(Rect.new(0, 0, 60, 40)) # tall body — height is entry-bound, not body-bound
@@ -227,11 +388,37 @@ describe Gori::Tui::SpaceMenu do
     backend.contains?("▼").should be_false      # so no scroll marker
   end
 
+  it "still draws the scroll marker when the boundary viewport row lands on a group header" do
+    reg = Gori::Verb::Registry.new
+    2.times do |i|
+      reg.register(Gori::Verb::Definition.new(
+        "demo.common.#{i}", "Common #{i}", "x", Gori::Verb::Scope::Body,
+        mnemonic: ('a'.ord + i).unsafe_chr) { |_| nil }) # default section: :common
+    end
+    5.times do |i|
+      reg.register(Gori::Verb::Definition.new(
+        "demo.section.#{i}", "Section #{i}", "x", Gori::Verb::Scope::Body,
+        mnemonic: ('k'.ord + i).unsafe_chr, section: :demo) { |_| nil })
+    end
+    menu = SpaceMenu.new(reg)
+    menu.open(Gori::Verb::Scope::Body, :demo, FakeExecContext.new)
+
+    # display_rows: [header COMMON, Common 0, Common 1, header DEMO, Section 0..4]
+    # (9 rows). A 6-row body clamps the box to h=6 → viewport=4, so the visible
+    # window is rows 0..3 — row 3 (the LAST visible row) is the DEMO header, and
+    # "more below" is true (5 more rows past it). The ▼ affordance must still show
+    # there — it was previously swallowed by the header branch's early `next`.
+    backend = MemoryBackend.new(40, 8)
+    menu.render(Screen.new(backend), Rect.new(0, 0, 40, 6))
+    backend.contains?("─ DEMO ─").should be_true # confirms the header IS at that row
+    backend.contains?("▼").should be_true
+  end
+
   it "draws a ▼ scroll marker when entries are hidden below (short terminal)" do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Body, ctx) # selection at the top → list clipped at the bottom
+    menu.open(Gori::Verb::Scope::Body, :common, ctx) # selection at the top → list clipped at the bottom
 
     backend = MemoryBackend.new(40, 8)
     menu.render(Screen.new(backend), Rect.new(0, 0, 40, 6)) # ~4 rows fit, 13 entries
@@ -239,13 +426,20 @@ describe Gori::Tui::SpaceMenu do
     backend.contains?("▲").should be_false                  # nothing hidden above at the top
   end
 
-  # Per menu scope, the keyed entries must never collide, and any verb with NO chord
-  # at all must carry a mnemonic (else it's unreachable by ANY single key — the
-  # oversight this guards). A verb whose only chord is ctrl/shift (e.g. Replay's
-  # ^X/^S/^L toggles, rebindable since the hotkeys feature) legitimately has no
-  # single-key handle and is just excluded from the menu. Reads the registry
-  # directly to bypass the ctx-gated available?, so coverage is exhaustive.
-  it "gives every chordless menu verb a mnemonic, and never collides keys within a scope" do
+  # Per menu scope, any verb with NO chord at all must carry a mnemonic (else it's
+  # unreachable by ANY single key — the oversight this guards). A verb whose only
+  # chord is ctrl/shift (e.g. Replay's ^X/^S/^L toggles, rebindable since the
+  # hotkeys feature) legitimately has no single-key handle and is just excluded
+  # from the menu. Reads the registry directly to bypass the ctx-gated available?,
+  # so coverage is exhaustive.
+  #
+  # Key collisions are checked PER DISPLAYABLE VIEW (COMMON ∪ one section) rather
+  # than scope-wide: sections never render together (SpaceMenu#open shows at most
+  # COMMON + one context group), so two DIFFERENT sections may legitimately reuse a
+  # key (e.g. Replay's :target 's' and :tab 's') — only a clash WITHIN a view is a
+  # real collision. Mirrors Registry#validate_menu_keys! (registry.cr) as an
+  # independent spec-level check.
+  it "gives every chordless menu verb a mnemonic, and never collides keys within a displayable view (COMMON ∪ one section)" do
     registry = Gori::Verbs.registry
     menu_scopes = [
       Gori::Verb::Scope::Body, Gori::Verb::Scope::Replay, Gori::Verb::Scope::Findings,
@@ -255,11 +449,18 @@ describe Gori::Tui::SpaceMenu do
       Gori::Verb::Scope::Sitemap,
       Gori::Verb::Scope::Miner, Gori::Verb::Scope::Prism, Gori::Verb::Scope::PrismDetail,
     ]
+    no_collision = ->(view : Array(Gori::Verb::Definition)) {
+      keys = view.compact_map(&.menu_key)
+      keys.uniq.size.should eq(keys.size) # no two entries in this view collide on one key
+    }
     menu_scopes.each do |scope|
       verbs = registry.select { |v| v.scope == scope && !v.hidden? }
       verbs.select(&.chords.empty?).all?(&.menu_key).should be_true # chordless ⇒ keyed
-      keys = verbs.compact_map(&.menu_key)
-      keys.uniq.size.should eq(keys.size) # no two entries collide on one key
+
+      common = verbs.select { |v| v.section == :common }
+      no_collision.call(common)
+      sections = verbs.map(&.section).uniq.reject { |s| s == :common }
+      sections.each { |section| no_collision.call(common + verbs.select { |v| v.section == section }) }
     end
   end
 

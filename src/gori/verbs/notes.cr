@@ -17,15 +17,12 @@ module Gori
         "notes.close", "Close note", "Close the active note sub-tab (keeps at least one)",
         Verb::Scope::Notes, available: in_notes, mnemonic: 'w') { |ctx| ctx.notes_close; nil }
 
+      # The single smart Copy (see replay.copy in verbs/history.cr) — copy-all is gone.
       in_notes_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.notes_read_mode? }
       r.register Verb::Definition.new(
-        "notes.copy", "Copy selection", "Copy the selected text (or current line) to the clipboard",
+        "notes.copy", "Copy", "Copy the selected text, or the whole current note if nothing is selected, to the clipboard",
         Verb::Scope::Notes, [Verb::Chord.new("y")],
-        available: in_notes_read, mnemonic: 'y') { |ctx| ctx.notes_copy; nil }
-
-      r.register Verb::Definition.new(
-        "notes.copy-all", "Copy note", "Copy the entire current note to the clipboard",
-        Verb::Scope::Notes, available: in_notes, mnemonic: 'O') { |ctx| ctx.notes_copy_all; nil }
+        available: in_notes_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "notes.clear", "Clear note", "Clear the current note's text",

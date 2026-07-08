@@ -26,25 +26,52 @@ module Gori
         @by_id[id]? || raise Gori::Error.new("unknown verb id: #{id}")
       end
 
-      # Fail fast on a per-scope space-menu key collision. Two non-hidden verbs in the
-      # SAME scope deriving the same menu_key (an explicit mnemonic, else the first plain
-      # single-char chord) means the later one is silently unreachable by that key —
-      # SpaceMenu#verb_for is a first-match find, so the collision has no other symptom.
-      # Cross-scope reuse is fine (the space menu is scoped), so this checks WITHIN each
-      # scope only, mirroring Conflicts' same-scope rule. space_menu_spec asserts the same
-      # invariant; calling this at build time makes it a boot-time guarantee, like the
-      # duplicate verb-id raise in #register.
+      # True when scope has at least one non-hidden, MENU-KEYED verb tagged with
+      # `section` — lets the tab-bar space menu (@focus == :menu) decide whether a
+      # scope has its OWN :tab actions or should fall back to :common instead. Must
+      # match what open() actually renders (SpaceMenu#open only shows verbs carrying
+      # a menu_key), else this could report a section that would render empty.
+      def has_section?(scope : Scope, section : Symbol) : Bool
+        any? { |v| !v.hidden? && v.scope == scope && v.section == section && v.menu_key }
+      end
+
+      # Fail fast on a space-menu key collision WITHIN a displayable view. A view is
+      # COMMON ∪ one context section — that's everything the space menu can show at
+      # once (COMMON always renders; at most one section joins it, per #open in
+      # SpaceMenu). Two non-hidden verbs deriving the same menu_key (an explicit
+      # mnemonic, else the first plain single-char chord) that could appear in the
+      # SAME view means the later one is silently unreachable by that key —
+      # SpaceMenu#verb_for is a first-match find, so the collision has no other
+      # symptom. Two DIFFERENT sections may reuse a key freely (e.g. Replay's request
+      # `i` and response `i`) since they never render together. Cross-scope reuse is
+      # likewise fine (the space menu is scoped), mirroring Conflicts' same-scope
+      # rule. space_menu_spec asserts the same invariant; calling this at build time
+      # makes it a boot-time guarantee, like the duplicate verb-id raise in #register.
       def validate_menu_keys! : Nil
-        seen = Hash(Scope, Hash(Char, String)).new
-        each do |verb|
-          next if verb.hidden?
-          next unless key = verb.menu_key
-          scope_keys = (seen[verb.scope] ||= {} of Char => String)
-          if prior = scope_keys[key]?
-            raise Gori::Error.new(
-              "space-menu key collision: '#{key}' claimed by both #{prior} and #{verb.id} in #{verb.scope}")
+        by_scope = Hash(Scope, Array(Definition)).new { |h, k| h[k] = [] of Definition }
+        each { |v| by_scope[v.scope] << v unless v.hidden? }
+
+        by_scope.each do |scope, verbs|
+          common = verbs.select { |v| v.section == :common }
+          check_menu_keys!(scope, :common, common)
+          sections = verbs.map(&.section).uniq.reject { |s| s == :common }
+          sections.each do |section|
+            view = common + verbs.select { |v| v.section == section }
+            check_menu_keys!(scope, section, view)
           end
-          scope_keys[key] = verb.id
+        end
+      end
+
+      # Raise on the first key collision among `verbs` (one displayable view's worth).
+      private def check_menu_keys!(scope : Scope, section : Symbol, verbs : Array(Definition)) : Nil
+        seen = {} of Char => String
+        verbs.each do |v|
+          next unless key = v.menu_key
+          if prior = seen[key]?
+            raise Gori::Error.new(
+              "space-menu key collision: '#{key}' claimed by both #{prior} and #{v.id} in #{scope}/#{section}")
+          end
+          seen[key] = v.id
         end
       end
 

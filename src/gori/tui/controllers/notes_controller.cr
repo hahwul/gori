@@ -82,7 +82,7 @@ module Gori::Tui
           @notes.exit_insert!
         else
           save_notes
-          @host.request_focus(:menu)
+          @host.request_focus(:subtabs)
         end
       elsif @notes.insert_mode?
         edit_insert(ev, c)

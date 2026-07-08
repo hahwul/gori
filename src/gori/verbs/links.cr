@@ -2,15 +2,14 @@ require "../verb"
 
 module Gori
   module Verbs
+    # Replay's/Fuzzer's own "Link to finding/note" (link.replay.*/link.fuzzer.*) are
+    # registered in register_miner (history.cr) instead of here — Round 5 moved them
+    # there so their Replay/Fuzzer COMMON menu position lands AFTER Fuzz/Mine (see
+    # the comment at their new registration site for why). History's/HistoryDetail's/
+    # Miner's own link verbs are unaffected and stay below.
     def self.register_links(r : Verb::Registry) : Nil
       flow_available = ->(ctx : Verb::ExecContext) {
         ctx.current_tab == :history && !ctx.link_flow_id.nil?
-      }
-      replay_linkable = ->(ctx : Verb::ExecContext) {
-        ctx.current_tab == :replay && !ctx.link_replay_id.nil?
-      }
-      fuzz_linkable = ->(ctx : Verb::ExecContext) {
-        ctx.current_tab == :fuzzer && !ctx.link_fuzz_id.nil?
       }
       miner_linkable = ->(ctx : Verb::ExecContext) {
         ctx.current_tab == :miner && !ctx.link_miner_id.nil?
@@ -31,22 +30,6 @@ module Gori
       r.register Verb::Definition.new(
         "link.history-detail.to-note", "Link to note", "Attach this flow to a note",
         Verb::Scope::HistoryDetail, available: flow_available, mnemonic: 'u') { |ctx| ctx.link_to_note; nil }
-
-      r.register Verb::Definition.new(
-        "link.replay.to-finding", "Link to finding", "Attach this replay session to a finding",
-        Verb::Scope::Replay, available: replay_linkable, mnemonic: 'k') { |ctx| ctx.link_to_finding; nil }
-
-      r.register Verb::Definition.new(
-        "link.replay.to-note", "Link to note", "Attach this replay session to a note",
-        Verb::Scope::Replay, available: replay_linkable, mnemonic: 'u') { |ctx| ctx.link_to_note; nil }
-
-      r.register Verb::Definition.new(
-        "link.fuzzer.to-finding", "Link to finding", "Attach this fuzz session to a finding",
-        Verb::Scope::Fuzzer, available: fuzz_linkable, mnemonic: 'k') { |ctx| ctx.link_to_finding; nil }
-
-      r.register Verb::Definition.new(
-        "link.fuzzer.to-note", "Link to note", "Attach this fuzz session to a note",
-        Verb::Scope::Fuzzer, available: fuzz_linkable, mnemonic: 'u') { |ctx| ctx.link_to_note; nil }
 
       r.register Verb::Definition.new(
         "link.miner.to-finding", "Link to finding", "Attach this miner session to a finding",

@@ -106,12 +106,19 @@ module Gori
       # chord (y / f / / …) gets its menu key from that for free (see #menu_key);
       # this overrides for verbs whose only chord is ctrl/shift or none.
       getter mnemonic : Char?
+      # Which group within the scope's space menu shows this verb: :common (every
+      # displayable view, tab-wide) or a context section (a focus-area like
+      # :request/:response/:template, or :tab/:subtab for the tab-bar/strip tiers).
+      # Additive — `scope` still selects the tab; `section` subdivides it within
+      # that scope's menu. Defaults to :common so untouched registrations render
+      # exactly as they do today (one flat group).
+      getter section : Symbol
 
       def initialize(@id : String, @title : String, @description : String, @scope : Scope,
                      @chords : Array(Chord) = [] of Chord, @hidden : Bool = false,
                      @available : ExecContext -> Bool = ->(_ctx : ExecContext) { true },
                      @coming_soon : Bool = false, @category : Category = Category::Action,
-                     @mnemonic : Char? = nil,
+                     @mnemonic : Char? = nil, @section : Symbol = :common,
                      &@handler : ExecContext -> String?)
       end
 

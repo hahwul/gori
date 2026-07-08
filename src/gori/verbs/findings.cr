@@ -71,16 +71,13 @@ module Gori
       # palette stays Global-only, so this doesn't leak there). Each menu key derives
       # from its plain chord — the key you'd press directly. severity/status keep their
       # bracket chords ([ ] { }) hidden (awkward as menu mnemonics; discoverable in Help).
+      # The single smart Copy (see replay.copy in verbs/history.cr) — copy-all is gone.
       in_findings_notes_read = ->(ctx : Verb::ExecContext) { ctx.findings_notes_read_mode? }
 
       r.register Verb::Definition.new(
-        "finding.copy", "Copy selection", "Copy the selected notes text (or current line) to the clipboard",
+        "finding.copy", "Copy", "Copy the selected notes text, or the whole notes if nothing is selected, to the clipboard",
         Verb::Scope::FindingsDetail, [Verb::Chord.new("y")],
-        available: in_findings_notes_read, mnemonic: 'y') { |ctx| ctx.findings_copy; nil }
-
-      r.register Verb::Definition.new(
-        "finding.copy-all", "Copy notes", "Copy the entire finding notes to the clipboard",
-        Verb::Scope::FindingsDetail, available: in_findings_notes_read, mnemonic: 'O') { |ctx| ctx.findings_copy_all; nil }
+        available: in_findings_notes_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       r.register Verb::Definition.new(
         "finding.edit-notes", "Edit notes", "Edit the finding notes inline (i/↵/e)", Verb::Scope::FindingsDetail,

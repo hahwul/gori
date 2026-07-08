@@ -75,6 +75,10 @@ class FakeExecContext < Gori::Verb::ExecContext
     @replay_tab_count
   end
 
+  def replay_rename_subtab : Nil; end
+
+  def replay_close_subtab : Nil; end
+
   def replay_toggle_hex : Nil; end
 
   def replay_toggle_decoded : Nil; end
@@ -82,6 +86,10 @@ class FakeExecContext < Gori::Verb::ExecContext
   def replay_toggle_sni : Nil; end
 
   def replay_toggle_auto_content_length : Nil; end
+
+  def replay_toggle_resp_diff : Nil; end
+
+  def replay_toggle_resp_hex : Nil; end
 
   def replay_toggle_mark_transform : Nil; end
 
@@ -124,6 +132,10 @@ class FakeExecContext < Gori::Verb::ExecContext
   def fuzz_list_paste : Nil; end
 
   def fuzz_clear_marks : Nil; end
+
+  def fuzzer_rename_subtab : Nil; end
+
+  def fuzzer_close_subtab : Nil; end
 
   def fuzzer_copy : Nil; end
 
@@ -299,14 +311,20 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def convert_close : Nil; end
 
+  def convert_rename_subtab : Nil; end
+
   def convert_clear : Nil; end
 
   def convert_copy : Nil; end
 
   def convert_copy_selection : Nil; end
 
+  def convert_copy_all : Nil; end
+
+  property convert_read_mode : Bool = false # settable so grouped-menu specs can exercise COMMON's Copy
+
   def convert_read_mode? : Bool
-    false
+    @convert_read_mode
   end
 
   def convert_cycle_mode : Nil; end
@@ -352,6 +370,8 @@ class FakeExecContext < Gori::Verb::ExecContext
   def read_select_line : Nil; end
 
   def read_clear_selection : Nil; end
+
+  def read_copy : Nil; end
 
   def detail_navigable? : Bool
     false

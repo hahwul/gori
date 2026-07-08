@@ -41,6 +41,12 @@ module Gori::Tui
       Verb::Scope::Fuzzer
     end
 
+    # The space menu's CONTEXT section: whichever pane the active session is focused
+    # on (:target/:template/:config/:results/:detail). :common with no session open.
+    def command_section : Symbol
+      current_view.try(&.focus) || :common
+    end
+
     # --- shell-facing accessors ---
     def count : Int32
       @fuzzers.size
@@ -189,7 +195,7 @@ module Gori::Tui
       elsif v.focus == :detail
         v.focus_pane(:results)
       else
-        @host.request_focus(:menu)
+        @host.request_focus(:subtabs)
       end
     end
 
@@ -357,7 +363,12 @@ module Gori::Tui
     end
 
     # The CONFIG summary is a calm single-axis row list — no text entry (that drills into
-    # the Set / Advanced overlays), so ←/→ can only cycle Mode and typing is inert.
+    # the Set / Advanced overlays). TEMPLATE sits directly to CONFIG's left, so LEFT
+    # focuses it (mirrors Shift-Tab) rather than adjusting a row — RIGHT still cycles
+    # Mode forward, and Enter (activate_config_row) reaches every row's editor,
+    # including a forward-only re-cycle of Mode (cycle_mode_forward): with only 4
+    # modes, forward-only cycling still reaches every value, it just costs up to 3
+    # extra presses instead of a reverse step.
     private def edit_config(ev : Termisu::Event::Key, v : FuzzerView) : Nil
       key = ev.key
       case
@@ -365,7 +376,7 @@ module Gori::Tui
       # the Miner summary) — without this, `k` off the RESULTS top dead-ends in CONFIG.
       when key.up?, key.lower_k?       then config_up(v)
       when key.down?, key.lower_j?     then v.form_move(1)
-      when key.left?                   then v.form_adjust(-1)
+      when key.left?                   then v.focus_pane(:template)
       when key.right?                  then v.form_adjust(1)
       when key.enter?                  then activate_config_row(v)
       when key.delete?, key.backspace? then v.form_delete
@@ -441,10 +452,8 @@ module Gori::Tui
         v.focus_pane(pane)
         case pane
         when :template
-          v.enter_template_insert! unless v.template_insert?
           v.template_click_to_cursor(body, mx, my)
         when :target
-          v.enter_target_insert! unless v.target_insert?
           v.target_click_to_cursor(body, mx, my)
         end
       end
