@@ -540,6 +540,7 @@ module Gori
         request_raw : String? = nil
         name : String? = nil
         http2 = false
+        http2_given = false
         auto_cl = true
         flow_id : Int64? = nil
         sni : String? = nil
@@ -553,7 +554,7 @@ module Gori
           p.on("-fFILE", "--request-file=FILE", "Read raw HTTP request from FILE") { |v| request_file = v }
           p.on("-rRAW", "--request-raw=RAW", "Verbatim raw HTTP request string") { |v| request_raw = v }
           p.on("--name=NAME", "Custom replay tab name") { |v| name = v }
-          p.on("--http2", "Use HTTP/2 (default: false)") { http2 = true }
+          p.on("--http2", "Use HTTP/2 (default: false)") { http2 = true; http2_given = true }
           p.on("--no-auto-cl", "Do not auto-calculate Content-Length header") { auto_cl = false }
           p.on("--flow=ID", "Optional original flow ID this replay stems from") { |v| flow_id = parse_flow_id(v) }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
@@ -581,6 +582,9 @@ module Gori
         begin
           tgt_val = target
           tgt_str : String = tgt_val ? tgt_val : ""
+          ws_messages = [] of String
+          is_ws = false
+
           if fid = flow_id
             detail = store.get_flow(fid)
             abort "gori run replay create: no flow ##{fid} to clone" unless detail
@@ -589,6 +593,15 @@ module Gori
             if tgt_str.empty?
               bt = built.target
               tgt_str = bt ? bt : ""
+            end
+
+            unless http2_given
+              http2 = built.http2
+            end
+
+            if detail.row.status == 101
+              is_ws = true
+              ws_messages = store.ws_messages(fid).select { |m| m.direction == "out" && m.text? }.map { |m| String.new(m.payload).scrub }
             end
           end
 
@@ -611,6 +624,10 @@ module Gori
           
           if n = name
             store.set_replay_name(id, Env.mask_secrets(n))
+          end
+
+          if is_ws && !ws_messages.empty?
+            store.update_replay_ws_messages(id, ws_messages)
           end
 
           puts "Replay session ##{id} created successfully."

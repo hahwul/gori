@@ -560,15 +560,16 @@ module Gori
         ui = parse_ui_state
         limit = clamp(int(h, "limit"), 50, 500)
         offset = clamp_nonneg(int(h, "offset"))
-        query = str(h, "query").try(&.strip.downcase)
+        query_str = str(h, "query").try(&.strip)
+        query_rx = query_str.try { |q| q.empty? ? nil : Regex.new(Regex.escape(q), Regex::Options::IGNORE_CASE) }
 
         all_replays = @store.replays_mcp
 
-        filtered_replays = if query && !query.empty?
+        filtered_replays = if rx = query_rx
                              all_replays.select do |r|
-                               r.target.downcase.includes?(query) ||
-                                 r.name.try(&.downcase.includes?(query)) ||
-                                 r.request.downcase.includes?(query)
+                               r.target.matches?(rx) ||
+                                 r.name.try(&.matches?(rx)) ||
+                                 r.request.matches?(rx)
                              end
                            else
                              all_replays
