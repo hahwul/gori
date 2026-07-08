@@ -97,24 +97,25 @@ module Gori
     end
 
     # Full detail incl. truth bytes — loaded lazily when a row is selected.
-    struct FlowDetail
-      getter row : FlowRow
-      getter http_version : String
-      getter request_head : Bytes
-      getter request_body : Bytes?
-      getter response_head : Bytes?
-      getter response_body : Bytes?
-      getter? request_body_truncated : Bool
-      getter? response_body_truncated : Bool
-      getter h2_conn_id : Int64?
-      getter h2_stream_id : Int64?
-      getter error : String? # upstream/parse/tls failure message for Error/Aborted flows (response side is empty)
+     struct FlowDetail
+       getter row : FlowRow
+       getter http_version : String
+       getter request_head : Bytes
+       getter request_body : Bytes?
+       getter response_head : Bytes?
+       getter response_body : Bytes?
+       getter? request_body_truncated : Bool
+       getter? response_body_truncated : Bool
+       getter h2_conn_id : Int64?
+       getter h2_stream_id : Int64?
+       getter error : String? # upstream/parse/tls failure message for Error/Aborted flows (response side is empty)
+       getter sni : String?
 
-      def initialize(@row, @http_version, @request_head, @request_body,
-                     @response_head, @response_body, @h2_conn_id = nil, @h2_stream_id = nil,
-                     @request_body_truncated = false, @response_body_truncated = false, @error = nil)
-      end
-    end
+       def initialize(@row, @http_version, @request_head, @request_body,
+                      @response_head, @response_body, @h2_conn_id = nil, @h2_stream_id = nil,
+                      @request_body_truncated = false, @response_body_truncated = false, @error = nil, @sni = nil)
+       end
+     end
 
     # A captured WebSocket message belonging to a (101) flow. `direction` is
     # "out" (client→server) or "in" (server→client); opcode 1=text, 2=binary.

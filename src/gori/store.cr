@@ -1172,7 +1172,8 @@ module Gori
         SELECT id, created_at, scheme, method, host, port, target, status,
                request_size, response_size, state, duration_us, content_type,
                http_version, request_head, request_body, response_head, response_body,
-               h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error
+               h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
+               sni
         FROM flows WHERE id = ?
         SQL
         return nil unless rs.move_next
@@ -1187,8 +1188,9 @@ module Gori
         req_trunc = rs.read(Int64) != 0
         resp_trunc = rs.read(Int64) != 0
         err = rs.read(String?)
+        sni = rs.read(String?)
         return FlowDetail.new(row, http_version, req_head, req_body, resp_head, resp_body,
-          h2_conn, h2_stream, req_trunc, resp_trunc, err)
+          h2_conn, h2_stream, req_trunc, resp_trunc, err, sni)
       end
       nil
     end

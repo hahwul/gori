@@ -14,7 +14,7 @@ module Gori
     # The result feeds Replay::Engine.send / Replay::H2Engine.send, which take
     # `request, scheme:, host:, port:, verify_upstream:`.
     module FlowRequest
-      record Built, target : String, bytes : Bytes, http2 : Bool
+      record Built, target : String, bytes : Bytes, http2 : Bool, sni : String?
 
       def self.build(detail : Store::FlowDetail) : Built
         row = detail.row
@@ -30,6 +30,7 @@ module Gori
           target: build_target(row.scheme, row.host, row.port),
           bytes: origin_form_bytes(head, body),
           http2: detail.http_version == "HTTP/2",
+          sni: detail.sni,
         )
       end
 
