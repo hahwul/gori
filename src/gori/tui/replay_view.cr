@@ -411,6 +411,9 @@ module Gori::Tui
       @ws_lines_cache = nil
       @scroll = 0
       @xscroll = 0
+      # Seed @result so the HTTP response tab can render the handshake response
+      @result = Replay::Result.new(result.handshake_head, Bytes.empty, nil, result.duration_us, result.error)
+      reset_result_caches
     end
 
     getter? grpc_mode : Bool
@@ -1153,6 +1156,15 @@ module Gori::Tui
       {env, dec}
     end
 
+    private def ws_resp_split(col : Rect) : {Rect, Rect}
+      # The handshake response header is short (typically 4-5 lines of HTTP headers).
+      # We allocate a fixed height (7 rows) for the handshake card, and the rest for transcript.
+      handshake_h = 7.clamp(1, {col.h - 2, 1}.max)
+      handshake = Rect.new(col.x, col.y, col.w, handshake_h)
+      transcript = Rect.new(col.x, col.y + handshake_h, col.w, {col.h - handshake_h, 0}.max)
+      {handshake, transcript}
+    end
+
     # Mouse: focus the URL or SNI field of the TARGET band by which row was clicked,
     # and place that field's caret. The value bases mirror render_target (field_base).
     def target_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
@@ -1698,10 +1710,33 @@ module Gori::Tui
       @editor.bg_regions = bg
     end
 
+    private def render_ws_handshake(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.w < 2 || rect.h < 2
+      Frame.card(screen, rect, "HANDSHAKE RESPONSE", bg: Theme.bg, border: pane_border(focused))
+      if result = @result
+        meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}" : Fmt.dur(result.duration_us)
+        meta_x = rect.right - meta.size - 1
+        screen.text(meta_x, rect.y, meta, Theme.muted, Theme.bg) if meta_x > rect.x + 22
+      end
+      body = rect.inset(1, 1)
+      rv = resp_view
+      total = rv.total
+      gw = {Gutter.width(total), body.w}.min
+      cw = {body.w - gw, 0}.max
+      rows = (0...body.h).compact_map { |i| i < total ? rv.line_at(i) : nil }
+      rows.each_with_index do |styled, i|
+        Gutter.draw(screen, body.x, body.y + i, i, gw)
+        shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
+        Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
+      end
+    end
+
     private def render_response(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       if @ws_mode
-        render_transcript(screen, rect, focused, "TRANSCRIPT", ws_transcript_lines, @ws_result.try(&.duration_us))
+        handshake_rect, transcript_rect = ws_resp_split(rect)
+        render_ws_handshake(screen, handshake_rect, focused)
+        render_transcript(screen, transcript_rect, focused, "TRANSCRIPT", ws_transcript_lines, @ws_result.try(&.duration_us))
         return
       end
       if @grpc_mode
