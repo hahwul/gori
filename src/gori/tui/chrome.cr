@@ -188,8 +188,8 @@ module Gori::Tui
     # segment's `widths` and `avail` drawable columns (segments separated by `gap`).
     # Shared by the top tab menu + the Replay/Notes sub-tab strips so the active tab
     # is never scrolled off into the hidden overflow.
-    def self.scroll_start(widths : Array(Int32), active_idx : Int32, avail : Int32, gap : Int32 = 1) : Int32
-      start = 0
+    def self.scroll_start(widths : Array(Int32), active_idx : Int32, avail : Int32, prev_start : Int32 = 0, gap : Int32 = 1) : Int32
+      start = prev_start.clamp(0, active_idx)
       while start < active_idx
         used = (start..active_idx).sum { |i| widths[i] + (i > start ? gap : 0) }
         break if used <= avail
@@ -203,10 +203,10 @@ module Gori::Tui
     # chip is FOCUS_GOLD when the strip holds focus else a dim SELECTION_DIM band.
     # `‹` / `›` flag overflow.
     def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
-                              active : Int32, focused : Bool) : Nil
-      return if rect.empty? || labels.empty?
+                              active : Int32, focused : Bool, prev_start : Int32 = 0) : Int32
+      return prev_start if rect.empty? || labels.empty?
       active = active.clamp(0, labels.size - 1)
-      segs, start, last = strip_layout(rect, labels, active)
+      segs, start, last = strip_layout(rect, labels, active, prev_start)
       segs.each do |(i, label, seg)|
         if i == active
           abg = focused ? Theme.focus_gold : Theme.selection_dim
@@ -219,14 +219,15 @@ module Gori::Tui
       end
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0
       screen.cell(rect.right - 1, rect.y, '›', Theme.muted, Theme.bg) if last < labels.size - 1
+      start
     end
 
     # Pure: the visible sub-tab chips — {index, cell rect} — computed IDENTICALLY to
     # render_tab_strip (shares strip_layout) so a click hit-test can't drift. Used by
     # the Replay/Notes sub-tab strips.
-    def self.strip_segments(rect : Rect, labels : Array(String), active : Int32) : Array({Int32, Rect})
+    def self.strip_segments(rect : Rect, labels : Array(String), active : Int32, prev_start : Int32 = 0) : Array({Int32, Rect})
       return [] of {Int32, Rect} if rect.empty? || labels.empty?
-      strip_layout(rect, labels, active.clamp(0, labels.size - 1))[0].map { |(i, _, seg)| {i, seg} }
+      strip_layout(rect, labels, active.clamp(0, labels.size - 1), prev_start)[0].map { |(i, _, seg)| {i, seg} }
     end
 
     # The single source of sub-tab-chip geometry: each visible chip's {index, label,
@@ -234,12 +235,12 @@ module Gori::Tui
     # ‹ / › overflow markers). Mirrors the old inline render_tab_strip loop exactly —
     # reserves a column each edge (the `> rect.right - 1` break) for the markers.
     private def self.strip_layout(rect : Rect, labels : Array(String),
-                                  active : Int32) : {Array({Int32, String, Rect}), Int32, Int32}
+                                  active : Int32, prev_start : Int32 = 0) : {Array({Int32, String, Rect}), Int32, Int32}
       segs = [] of {Int32, String, Rect}
       widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
       # Reserve a column on each edge for the ‹ / › overflow markers, then advance
       # the start until the segments [start..active] fit in what remains.
-      start = scroll_start(widths, active, {rect.w - 2, 0}.max)
+      start = scroll_start(widths, active, {rect.w - 2, 0}.max, prev_start)
       x = rect.x + 1
       last = start - 1
       labels.each_with_index do |label, i|

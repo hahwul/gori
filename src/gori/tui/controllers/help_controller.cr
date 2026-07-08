@@ -51,7 +51,7 @@ module Gori::Tui
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       focused = focus == :body
       shell = BodyChrome.shell_focused(focus, multi_pane: false)
-      BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, PAGE_LABELS, @current) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, PAGE_LABELS, @current, @subtab_start) do |content|
         case @current
         when 1 then @help.render_links(screen, content)
         when 2 then @help.render_version(screen, content)

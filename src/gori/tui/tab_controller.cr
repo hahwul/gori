@@ -74,16 +74,19 @@ module Gori::Tui
     # Frame the tab body, carve the sub-tab strip from the interior top when
     # `labels` is given, then yield the remaining content rect.
     def framed_body(screen : Screen, rect : Rect, shell_focused : Bool,
-                    subtabs_focused : Bool, labels : Array(String)?, active : Int32, & : Rect ->) : Nil
+                    subtabs_focused : Bool, labels : Array(String)?, active : Int32,
+                    prev_start : Int32 = 0, & : Rect ->) : Int32
+      new_start = prev_start
       framed(screen, rect, shell_focused) do |inner|
         if labels
           sub_rect, content = carve_subtab_row(inner)
-          render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused)
+          new_start = render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused, prev_start)
           yield content
         else
           yield inner
         end
       end
+      new_start
     end
 
     # Content rect inside a framed body after optional sub-tab carving — keeps
@@ -121,12 +124,13 @@ module Gori::Tui
     # the strip itself holds focus (←/→ switch) → active chip lights FOCUS_GOLD and the
     # divider hairline matches.
     def render_subtab_strip(screen : Screen, rect : Rect, labels : Array(String),
-                            active : Int32, focused : Bool) : Nil
-      return if rect.empty?
-      Chrome.render_tab_strip(screen, tab_row(rect), labels, active, focused)
-      return if rect.h < 2
+                            active : Int32, focused : Bool, prev_start : Int32 = 0) : Int32
+      return prev_start if rect.empty?
+      new_start = Chrome.render_tab_strip(screen, tab_row(rect), labels, active, focused, prev_start)
+      return prev_start if rect.h < 2
       border = focused ? Theme.focus_gold : Theme.border
       screen.hline(rect.x, rect.y + 1, rect.w, fg: border, bg: Theme.bg)
+      new_start
     end
   end
 
@@ -136,6 +140,8 @@ module Gori::Tui
   # (Help) overrides only `tab`/`render_body`/`command_scope`, while a rich tab
   # (Replay) overrides the input/focus/lifecycle hooks too.
   abstract class TabController
+    property subtab_start : Int32 = 0
+
     def initialize(@host : Host)
     end
 

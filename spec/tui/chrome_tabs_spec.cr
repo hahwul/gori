@@ -82,3 +82,26 @@ describe "Chrome.visible_tabs" do
     Chrome.visible_tabs([] of {String, Bool}, force: :project).should eq(Chrome.visible_tabs([] of {String, Bool}))
   end
 end
+
+describe "Chrome.scroll_start" do
+  it "scrolls active_idx to the end when no prev_start is provided and it doesn't fit" do
+    widths = [10, 10, 10, 10, 10]
+    Chrome.scroll_start(widths, active_idx: 4, avail: 25).should eq(3)
+  end
+
+  it "stabilizes scroll when active_idx is already visible in the window starting at prev_start" do
+    widths = [10, 10, 10, 10, 10]
+    Chrome.scroll_start(widths, active_idx: 3, avail: 25, prev_start: 2).should eq(2)
+  end
+
+  it "scrolls left when active_idx is to the left of prev_start" do
+    widths = [10, 10, 10, 10, 10]
+    Chrome.scroll_start(widths, active_idx: 1, avail: 25, prev_start: 3).should eq(1)
+  end
+
+  it "scrolls right when active_idx is to the right of the window starting at prev_start" do
+    widths = [10, 10, 10, 10, 10]
+    Chrome.scroll_start(widths, active_idx: 4, avail: 25, prev_start: 1).should eq(3)
+  end
+end
+

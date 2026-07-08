@@ -770,7 +770,7 @@ module Gori::Tui
       return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !@rename_open && subtabs_shown?
       sub_rect = BodyChrome.strip_rect(layout.body, strip: true)
       return unless sub_rect && sub_rect.contains?(mx, my)
-      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
+      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start).find { |(_, r)| r.contains?(mx, my) }
         open_rename(seg[0])
       end
     end
@@ -822,7 +822,7 @@ module Gori::Tui
     private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
       sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?)
       return false unless sub_rect && sub_rect.contains?(mx, my)
-      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index).find { |(_, r)| r.contains?(mx, my) }
+      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start).find { |(_, r)| r.contains?(mx, my) }
         jump_subtab(seg[0])
         focus_pane(:subtabs)
       end
@@ -836,6 +836,10 @@ module Gori::Tui
 
     private def current_subtab_index : Int32
       @tabs[@active_tab]?.try(&.subtab_index) || 0
+    end
+
+    private def current_subtab_start : Int32
+      @tabs[@active_tab]?.try(&.subtab_start) || 0
     end
 
     # Per-tab body click. Every tab has a controller; the fallback just takes focus

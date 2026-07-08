@@ -109,7 +109,7 @@ module Gori::Tui
       body_focused = focus == :body
       labels = subtab_strip_shown? ? subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: !current_view.nil?)
-      BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @current_idx) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @current_idx, @subtab_start) do |content|
         if v = current_view
           v.render(screen, content, focused: body_focused)
         else
