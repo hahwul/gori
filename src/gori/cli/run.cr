@@ -636,35 +636,37 @@ module Gori
         end
       end
 
-      private def self.cmd_replay_single(args : Array(String)) : Nil
-        db_path : String? = nil
-        project_name : String? = nil
-        target_override : String? = nil
-        force_h2 = false
-        insecure = false
-        do_diff = false
-        format = :text
-        headers = [] of String
-        body_override : String? = nil
-        positional = [] of String
+       private def self.cmd_replay_single(args : Array(String)) : Nil
+         db_path : String? = nil
+         project_name : String? = nil
+         target_override : String? = nil
+         sni_override : String? = nil
+         force_h2 = false
+         insecure = false
+         do_diff = false
+         format = :text
+         headers = [] of String
+         body_override : String? = nil
+         positional = [] of String
 
-        parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run replay <flow-id> [options]"
-          p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
-          p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
-          p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept") { |v| target_override = v }
-          p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { force_h2 = true }
-          p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
-          p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
-          p.on("-HHEADER", "--header=HEADER", "Custom header to overwrite/add (repeatable)") { |v| headers << v }
-          p.on("-bBODY", "--body=BODY", "Request body override") { |v| body_override = v }
-          p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.unknown_args { |rest, _| positional = rest }
-          p.invalid_option { |f| abort "gori run replay: unknown option: #{f}\n#{p}" }
-          p.missing_option { |f| abort "gori run replay: missing value for #{f}" }
-        end
-        parser.parse(args)
+         parser = OptionParser.new do |p|
+           p.banner = "Usage: gori run replay <flow-id> [options]"
+           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
+           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
+           p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept") { |v| target_override = v }
+           p.on("--http2", "Force HTTP/2 (default follows how the flow was captured)") { force_h2 = true }
+           p.on("--sni=HOST", "TLS SNI override") { |v| sni_override = v }
+           p.on("-k", "--insecure-upstream", "Do not verify the upstream TLS certificate") { insecure = true }
+           p.on("--diff", "Diff the new response against the captured one") { do_diff = true }
+           p.on("-HHEADER", "--header=HEADER", "Custom header to overwrite/add (repeatable)") { |v| headers << v }
+           p.on("-bBODY", "--body=BODY", "Request body override") { |v| body_override = v }
+           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
+           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+           p.unknown_args { |rest, _| positional = rest }
+           p.invalid_option { |f| abort "gori run replay: unknown option: #{f}\n#{p}" }
+           p.missing_option { |f| abort "gori run replay: missing value for #{f}" }
+         end
+         parser.parse(args)
         id = take_flow_id(positional, "replay")
 
         # get_flow loads all the BLOBs, so the store can close before the send.
@@ -779,9 +781,12 @@ module Gori
         scheme, host, port = Replay::FlowRequest.parse_target(target)
         abort "gori run replay: could not determine a target host" if host.empty?
         abort "gori run replay: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
-        use_h2 = force_h2 || built.http2
-        verify = !insecure
-        result = use_h2 ? Replay::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify) : Replay::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify)
+         use_h2 = force_h2 || built.http2
+         verify = !insecure
+         sni_val = sni_override.presence || built.sni
+         result = use_h2 ?
+           Replay::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val) :
+           Replay::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val)
 
         # Decode the response body once for TEXT display (--diff / plain print); only
         # build the diff lines when --diff asked for them (decoding the captured
