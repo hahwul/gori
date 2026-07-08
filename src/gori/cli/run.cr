@@ -704,6 +704,7 @@ module Gori
         
         custom_headers = {} of String => String
         headers.each do |h_str|
+          next unless h_str.includes?(':')
           name, _, val = h_str.partition(':')
           next if name.strip.empty?
           custom_headers[name.strip.downcase] = val.strip
