@@ -81,7 +81,7 @@ module Gori::Tui
       c = ev.char || key.to_char
       case
       when ev.ctrl? && key.lower_w? then @findings.cancel_notes_edit # discard edits
-      when ev.ctrl? && key.lower_z? then @findings.notes_undo
+      when ev.ctrl_z?               then @findings.notes_undo
       when key.escape?              then @findings.save_notes(@host.session.store)
       when key.enter?               then @findings.notes_newline
       when key.backspace?           then @findings.notes_backspace

@@ -203,6 +203,8 @@ module Gori::Tui
         end
       elsif ev.ctrl? && key.lower_w?
         request_close
+      elsif ev.ctrl_z? && (view = current_view) && view.focus == :request
+        view.edit_undo
       elsif key.escape?
         if (view = current_view) && view.chain_pane_active?
           view.commit_chain_pane # esc in the CHAIN pane → save + back to the request editor
@@ -805,7 +807,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
-      when ev.ctrl? && key.lower_z? then view.edit_undo
+      when ev.ctrl_z? then view.edit_undo
       when key.enter?     then view.edit_newline
       when key.backspace? then view.edit_backspace
       when key.up?        then view.at_top? ? view.focus_first : view.edit_move(-1, 0) # ↑-at-top → target field above
