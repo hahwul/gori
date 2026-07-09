@@ -48,7 +48,7 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       case @project_view.pane
       when :scope
-        @project_view.adding? ? "type pattern · ^K kind · ^T type · ↵ save · esc cancel" : "↑/↓ move · ↓ host-overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
+        @project_view.adding? ? "pattern · chips/1-3 type · i/e kind · ↵ save · esc" : "↑/↓ move · ↓ host-overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
       when :overrides
         @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ move · ↑ scope · ↓ env · → desc · a add · ↵/e edit · d del · space cmds · esc"
       when :env
@@ -105,7 +105,9 @@ module Gori::Tui
       case pane
       when :scope
         @project_view.focus_pane(:scope)
-        if idx = @project_view.scope_row_at(rect, mx, my)
+        if @project_view.adding? && (chip = @project_view.scope_add_chip_hit(rect, mx, my))
+          apply_scope_add_chip(chip)
+        elsif idx = @project_view.scope_row_at(rect, mx, my)
           @project_view.select_scope(idx)
         end
       when :overrides
@@ -399,8 +401,9 @@ module Gori::Tui
       )
     end
 
-    # The inline add/edit row: type the pattern, ^K cycles include/exclude, ^T cycles
-    # host/string/regex, ↵ commits, ⌫ on an empty input cancels, esc cancels.
+    # The inline add/edit row: type the pattern; exclusive kind/type chips (click or
+    # i/e / 1-3 when pattern empty); ^K/^T still cycle for muscle memory; ↵ commits;
+    # ⌫ on empty cancels; esc cancels.
     private def handle_project_add_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
@@ -419,8 +422,39 @@ module Gori::Tui
       elsif key.backspace?
         @project_view.cancel_add unless @project_view.scope_backspace
       elsif c && !ev.ctrl? && !ev.alt?
+        # Direct chip shortcuts when the pattern is still empty so digits/i/e can
+        # still be typed into a non-empty pattern (e.g. regex `\d+`, host `i.com`).
+        if @project_view.scope_input_empty?
+          case c
+          when 'i', 'I'
+            @project_view.set_pend_kind("include")
+            return
+          when 'e', 'E'
+            @project_view.set_pend_kind("exclude")
+            return
+          when '1'
+            @project_view.set_pend_type("host")
+            return
+          when '2'
+            @project_view.set_pend_type("string")
+            return
+          when '3'
+            @project_view.set_pend_type("regex")
+            return
+          end
+        end
         @project_view.scope_input(c)
         @project_view.set_preedit("") # commit any preedit
+      end
+    end
+
+    private def apply_scope_add_chip(chip : Symbol) : Nil
+      case chip
+      when :kind_include then @project_view.set_pend_kind("include")
+      when :kind_exclude then @project_view.set_pend_kind("exclude")
+      when :type_host    then @project_view.set_pend_type("host")
+      when :type_string  then @project_view.set_pend_type("string")
+      when :type_regex   then @project_view.set_pend_type("regex")
       end
     end
 

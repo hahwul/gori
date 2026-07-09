@@ -173,6 +173,69 @@ describe "ProjectView created time" do
   end
 end
 
+describe "ProjectView SCOPE add-row chips" do
+  it "shows all kind and type chips on the add row" do
+    tmp_store do |store|
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      project = Gori::Project.new("t", File.tempname("gori-scope-chips"))
+      view.reload(project, store)
+      view.focus_pane(:scope)
+      view.scope_add_start
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: true)
+      b.contains?("incl").should be_true
+      b.contains?("excl").should be_true
+      b.contains?("host").should be_true
+      b.contains?("string").should be_true
+      b.contains?("regex").should be_true
+    end
+  end
+
+  it "set_pend_type / set_pend_kind update the pending chips and commit uses them" do
+    tmp_store do |store|
+      scope = Gori::Scope.load(store)
+      view = ProjectView.new(scope, Gori::HostOverrides.load(store))
+      view.scope_add_start
+      view.pend_type.should eq("host")
+      view.set_pend_type("regex")
+      view.pend_type.should eq("regex")
+      view.set_pend_kind("exclude")
+      view.pend_kind.should eq("exclude")
+      "api\\..*\\.test".each_char { |c| view.scope_input(c) }
+      view.scope_commit.should eq(:ok)
+      rule = scope.rules.last
+      rule.match_type.should eq("regex")
+      rule.kind.should eq("exclude")
+      rule.pattern.should eq("api\\..*\\.test")
+    end
+  end
+
+  it "scope_add_chip_hit maps clicks onto kind and type chips" do
+    tmp_store do |store|
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      project = Gori::Project.new("t", File.tempname("gori-scope-hit"))
+      view.reload(project, store)
+      view.focus_pane(:scope)
+      view.scope_add_start
+      rect = Rect.new(0, 0, 120, 30)
+      # Find the add-row y via a paint, then probe chips along the row.
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), rect, focused: true)
+      y = (0...30).find { |yy| b.row(yy).includes?("add ") && b.row(yy).includes?("host") }.not_nil!
+      row = b.row(y)
+      # Click near the lit "host" label → stay host; "regex" → switch type.
+      hx = row.index("host").not_nil!
+      view.scope_add_chip_hit(rect, hx + 1, y).should eq(:type_host)
+      rx = row.index("regex").not_nil!
+      view.scope_add_chip_hit(rect, rx + 1, y).should eq(:type_regex)
+      view.set_pend_type("regex")
+      view.pend_type.should eq("regex")
+      ex = row.index("excl").not_nil!
+      view.scope_add_chip_hit(rect, ex + 1, y).should eq(:kind_exclude)
+    end
+  end
+end
+
 describe "ProjectView AT A GLANCE Technologies" do
   it "drops tech facts fingerprinted only on out-of-scope hosts once the scope lens is ON" do
     tmp_store do |store|

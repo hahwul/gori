@@ -554,6 +554,67 @@ module Gori::Tui
       @pend_type = Scope::TYPES[(i + 1) % Scope::TYPES.size]
     end
 
+    # Direct set (chip click / 1-3 / i-e). Ignores unknown values.
+    def set_pend_kind(k : String) : Nil
+      @pend_kind = k if Scope::KINDS.includes?(k)
+    end
+
+    def set_pend_type(t : String) : Nil
+      @pend_type = t if Scope::TYPES.includes?(t)
+    end
+
+    def pend_kind : String
+      @pend_kind
+    end
+
+    def pend_type : String
+      @pend_type
+    end
+
+    # True when the add-row pattern buffer is empty (1-3 type shortcuts only then).
+    def scope_input_empty? : Bool
+      @input.empty?
+    end
+
+    # Hit-test exclusive chips on the open SCOPE add/edit row. Geometry matches
+    # `render_add_row` (prefix + kind chips + gap + type chips). Miss → nil.
+    def scope_add_chip_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil unless @adding
+      return nil unless panes = body_panes(rect)
+      inner = panes[0].inset(1, 1)
+      return nil if inner.w <= 0 || inner.h <= 0
+      y = inner.y
+      return nil if my != y
+      start_x = add_row_chips_start_x(inner)
+      if hit = Frame.left_chip_hit(mx, my, y, start_x, ADD_KIND_CHIPS)
+        return hit
+      end
+      type_x = start_x + chip_run_width(ADD_KIND_CHIPS) + 1 # group gap after kind pair
+      Frame.left_chip_hit(mx, my, y, type_x, ADD_TYPE_CHIPS)
+    end
+
+    # Labels include flanking spaces so Frame.chip matches Intercept-style chrome.
+    ADD_KIND_CHIPS = [
+      {:kind_include, " incl "},
+      {:kind_exclude, " excl "},
+    ] of {Symbol, String}
+
+    ADD_TYPE_CHIPS = [
+      {:type_host, " host "},
+      {:type_string, " string "},
+      {:type_regex, " regex "},
+    ] of {Symbol, String}
+
+    private def add_row_chips_start_x(inner : Rect) : Int32
+      prefix = @edit_id ? "edit " : "add "
+      inner.x + 1 + prefix.size
+    end
+
+    private def chip_run_width(chips : Array({Symbol, String})) : Int32
+      # sum(label) + 1-col gap after each chip (same as left_chip_hit / successive chip+1)
+      chips.sum { |(_, lab)| lab.size + 1 }
+    end
+
     def scope_input(ch : Char) : Nil
       @input = "#{@input[0, @icx]}#{ch}#{@input[@icx..]}"
       @icx += 1
@@ -1147,17 +1208,29 @@ module Gori::Tui
       screen.text(px, y, rule.pattern, fg, bg, width: {inner.right - px, 1}.max) if inner.right > px
     end
 
-    # The inline "add"/"edit" row: kind + match_type chips (cycled with ^K/^T) then
-    # the pattern input. Mirrors the old ScopeOverlay add line.
+    # The inline "add"/"edit" row: exclusive kind + match-type chips (all options
+    # visible; click / i-e / 1-3 select) then the pattern input.
     private def render_add_row(screen : Screen, inner : Rect, y : Int32, focused : Bool) : Nil
       x = inner.x + 1
       x = screen.text(x, y, @edit_id ? "edit " : "add ", Theme.accent, Theme.bg)
-      ktag, kcolor = @pend_kind == "include" ? {"incl", Theme.accent} : {"excl", Theme.yellow}
-      x = screen.text(x, y, "[", Theme.muted, Theme.bg)
-      x = screen.text(x, y, ktag, kcolor, Theme.bg, Attribute::Bold)
-      x = screen.text(x, y, "][", Theme.muted, Theme.bg)
-      x = screen.text(x, y, @pend_type, Theme.accent, Theme.bg)
-      x = screen.text(x, y, "] ", Theme.muted, Theme.bg)
+      ADD_KIND_CHIPS.each do |(id, label)|
+        lit = case id
+              when :kind_include then @pend_kind == "include"
+              when :kind_exclude then @pend_kind == "exclude"
+              else                    false
+              end
+        x = Frame.chip(screen, x, y, label, lit) + 1
+      end
+      x += 1 # group gap before type chips
+      ADD_TYPE_CHIPS.each do |(id, label)|
+        lit = case id
+              when :type_host   then @pend_type == "host"
+              when :type_string then @pend_type == "string"
+              when :type_regex  then @pend_type == "regex"
+              else                   false
+              end
+        x = Frame.chip(screen, x, y, label, lit) + 1
+      end
       w = {inner.right - x, 3}.max
       screen.input_line(x, y, @input, @icx, @add_preedit, Theme.text_bright, Theme.bg, width: w)
     end
