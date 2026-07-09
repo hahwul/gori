@@ -119,6 +119,10 @@ module Gori::Tui
         else
           @selected.clamp(0, {@issues.size - 1, 0}.max)
         end
+      # Keep the viewport valid when the list shrinks (dismiss/filter) or grows while
+      # scrolled — otherwise a live reload can leave @scroll past the last row and look
+      # like "nothing changed" until the next full enter.
+      @scroll = @scroll.clamp(0, {@issues.size - 1, 0}.max)
     end
 
     private def scope_active? : Bool

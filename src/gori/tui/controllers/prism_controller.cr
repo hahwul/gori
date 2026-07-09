@@ -15,7 +15,6 @@ module Gori::Tui
       super(host)
       @prism = PrismView.new
       @prism.set_scope(@host.session.scope) # honour the lens + show its chip on the bar
-      @reload_pending = false
     end
 
     def view : PrismView
@@ -139,17 +138,24 @@ module Gori::Tui
     end
 
     def on_enter : Nil
-      @prism.reload(@host.session.store)
-      @reload_pending = false
+      refresh_from_store
     end
 
     def on_external_change : Nil
+      refresh_from_store
+    end
+
+    # Re-query the issue list from the store. Called from on_enter, data_version
+    # soft-sync, IssueEvent drain, and Runner's per-tick Store#prism_generation poll.
+    def refresh_from_store : Nil
       @prism.reload(@host.session.store)
     end
 
-    # Drain the analyzer's events (called each main-loop tick from the Runner). Coalesces
-    # issue notifications into one list reload per tick; reflections raise a notification
-    # regardless of the active tab. Returns true if anything happened (forces a redraw).
+    # Drain the analyzer's events (called each main-loop tick from the Runner).
+    # List data is primarily refreshed via Runner's Store#prism_generation poll
+    # (channel events can be dropped when the buffer is full). Still refresh here so a
+    # delivered IssueEvent never leaves the in-memory view behind. Returns true when
+    # anything was drained (forces a redraw — badge/status even if Prism is not focused).
     def drain_events : Bool
       drained = false
       events = @host.session.prism.events
@@ -157,17 +163,16 @@ module Gori::Tui
         drained = true
         case ev
         when Prism::IssueEvent
-          @reload_pending = true
+          refresh_from_store
           if summary = ev.summary
             @host.notifications.push(:success, "Prism: #{summary}")
+            # Status toast is visible on every tab and pairs with the list paint.
+            @host.status("Prism: #{summary}")
           end
         when Prism::ErrorEvent
           @host.notifications.push(:warn, ev.message)
+          @host.status(ev.message)
         end
-      end
-      if @reload_pending && @host.active_tab == :prism
-        @prism.reload(@host.session.store)
-        @reload_pending = false
       end
       drained
     end
@@ -209,6 +214,11 @@ module Gori::Tui
     def prism_delete : Nil
       return unless i = @prism.target_issue
       @host.confirm("DELETE ISSUE", "Delete \"#{i.title}\" on #{i.host}?", confirm_label: "delete", danger: true) do
+        code, host = i.code, i.host
+        # Suppress FIRST: delete's exec_task yields to the store writer, and an
+        # in-flight Active/passive fiber can re-upsert the same (code, host) in
+        # that window if suppress runs after delete.
+        @host.session.prism.suppress(code, host)
         @prism.delete(@host.session.store)
       end
     end
@@ -218,6 +228,7 @@ module Gori::Tui
       @host.confirm("CLEAR ISSUES", "Delete ALL Prism issues for this project?\nThis can't be undone.",
         confirm_label: "clear", danger: true) do
         @prism.clear(@host.session.store)
+        @host.session.prism.clear_suppressions
       end
     end
 

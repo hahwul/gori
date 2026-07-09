@@ -176,10 +176,20 @@ module Gori
       @write_failures = Atomic(Int32).new(0)
       @h2_frames_dropped = Atomic(Int32).new(0)
       @inserts_since_prune = 0
+      # Bumped after every committed prism_issues mutation (upsert/delete/status).
+      # The TUI polls this every main-loop tick — more reliable than PRAGMA data_version
+      # (same-process writer visibility is flaky) or the droppable Prism event channel.
+      @prism_generation = 0_i64
       spawn(name: "gori-store-writer") do
         writer_loop
         @done.send(nil)
       end
+    end
+
+    # Monotonic counter of committed prism_issues writes. Single-threaded fiber
+    # scheduler: plain Int64 is enough (no -Dpreview_mt).
+    def prism_generation : Int64
+      @prism_generation
     end
 
     # --- write API (called from proxy fibers) --------------------------------
@@ -485,9 +495,15 @@ module Gori
     # Group-merge upsert keyed by (code, host): a read-modify-write run INSIDE the writer
     # closure (atomic — the writer is the only writer), which a plain ON CONFLICT can't do
     # because it must dedup+cap the affected-URL JSON and raise severity to the max seen.
+    # No-op when (code, host) is in prism_suppressions (hard-deleted this project).
     def upsert_prism_issue(d : Prism::Detection) : Nil
       ts = now_us
+      wrote = false
       exec_task ->(c : DB::Connection) {
+        if c.query_one?("SELECT 1 FROM prism_suppressions WHERE code = ? AND host = ?",
+             d.code, d.host, as: Int64)
+          return nil
+        end
         existing = c.query_one?(
           "SELECT id, affected, severity, evidence FROM prism_issues WHERE code = ? AND host = ?",
           d.code, d.host, as: {Int64, String, Int32, String?})
@@ -511,8 +527,10 @@ module Gori
             d.code, d.category, d.host, d.title, d.severity.value,
             [d.url].to_json, d.flow_id, d.evidence, ts, ts, d.replay_id)
         end
+        wrote = true
         nil
       }
+      bump_prism_generation if wrote # after commit (exec_task blocks until writer replies)
     end
 
     # Codes whose evidence is a TYPE label (not a one-off sample), so a (code, host)
@@ -566,6 +584,7 @@ module Gori
         c.exec("UPDATE prism_issues SET status = ?, last_seen = ? WHERE id = ?", status.value, now_us, id)
         nil
       }
+      bump_prism_generation
     end
 
     # Bulk-mute every OPEN issue sharing this code (or host) — mark false-positive so the
@@ -587,14 +606,56 @@ module Gori
           Status::FalsePositive.value, now_us, arg, Status::Open.value)
         nil
       }
+      bump_prism_generation
     end
 
+    # Hard-delete one issue and durably suppress (code, host) so Active backfill / passive
+    # re-hits cannot resurrect it after Project leave/re-open. Suppress + delete are one
+    # writer transaction (no window where a concurrent upsert re-inserts mid-delete).
     def delete_prism_issue(id : Int64) : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM prism_issues WHERE id = ?", id); nil }
+      ts = now_us
+      exec_task ->(c : DB::Connection) {
+        if row = c.query_one?("SELECT code, host FROM prism_issues WHERE id = ?", id, as: {String, String})
+          code, host = row
+          c.exec("INSERT OR IGNORE INTO prism_suppressions (code, host, created_at) VALUES (?,?,?)",
+            code, host, ts)
+          c.exec("DELETE FROM prism_issues WHERE id = ?", id)
+        end
+        nil
+      }
+      bump_prism_generation
     end
 
+    # Wipe every issue AND every hard-delete suppression so a full rescan can re-discover.
     def clear_prism_issues : Nil
-      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM prism_issues"); nil }
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM prism_issues")
+        c.exec("DELETE FROM prism_suppressions")
+        nil
+      }
+      bump_prism_generation
+    end
+
+    # (code, host) pairs hard-deleted this project — Analyzer reloads these on start.
+    def prism_suppressions : Array({String, String})
+      list = [] of {String, String}
+      @db.query("SELECT code, host FROM prism_suppressions") do |rs|
+        rs.each { list << {rs.read(String), rs.read(String)} }
+      end
+      list
+    rescue
+      [] of {String, String}
+    end
+
+    def prism_suppressed?(code : String, host : String) : Bool
+      !@db.query_one?("SELECT 1 FROM prism_suppressions WHERE code = ? AND host = ?",
+        code, host, as: Int64).nil?
+    rescue
+      false
+    end
+
+    private def bump_prism_generation : Nil
+      @prism_generation += 1
     end
 
     def count_prism_issues : Int32

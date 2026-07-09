@@ -502,7 +502,24 @@ module Gori
         "ALTER TABLE prism_issues ADD COLUMN sample_replay_id INTEGER",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28]
+      # Hard-deleted Prism issues must stay gone across Project leave/re-open. The analyzer
+      # used to keep an in-memory suppress set only for the current process — Active
+      # backfill on the next Session re-probed History and re-inserted the same (code, host).
+      # Durable suppressions are checked by Store#upsert_prism_issue and reloaded into the
+      # analyzer on start. Clear-all removes both issues and suppressions so a full rescan
+      # is still possible.
+      V29 = [
+        <<-SQL,
+        CREATE TABLE prism_suppressions (
+          code       TEXT    NOT NULL,
+          host       TEXT    NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (code, host)
+        )
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

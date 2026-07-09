@@ -19,11 +19,12 @@ module Gori
     # so the Replay tab / CLI / MCP can feed the same passive engine without going through
     # the History event channel.
     class Analyzer
-      ANALYZED_CAP    = 10_000     # bound the seen-flow set (memory plateaus on long runs)
-      ACTIVE_SEEN_CAP =  5_000     # bound the active dedup set
-      ACTIVE_QUEUE    =    128     # bounded active task queue (drop on overflow)
-      ACTIVE_TIMEOUT  = 10.seconds # per-probe socket timeout
-      WS_MSG_CAP      =    200     # max WS messages loaded per flow for passive scan
+      ANALYZED_CAP     = 10_000     # bound the seen-flow set (memory plateaus on long runs)
+      ACTIVE_SEEN_CAP  =  5_000     # bound the active dedup set
+      ACTIVE_QUEUE     =    128     # bounded active task queue (drop on overflow)
+      ACTIVE_TIMEOUT   = 10.seconds # per-probe socket timeout
+      ACTIVE_BACKFILL  =    300     # recent History rows to re-arm when Active is enabled
+      WS_MSG_CAP       =    200     # max WS messages loaded per flow for passive scan
 
       getter events : Channel(Event)
 
@@ -34,6 +35,7 @@ module Gori
         @analyzed = Set(Int64).new
         @active_seen = Set(String).new
         @active_error_hosts = Set(String).new # rate-limit probe-failure notifications per host
+        @suppressed = Set(String).new         # "code|host" hard-deleted this session
         @active_jobs = Channel(ActiveTask).new(ACTIVE_QUEUE)
         @events = Channel(Event).new(256)
         @running = false
@@ -44,17 +46,44 @@ module Gori
         @mode
       end
 
+      # After a hard delete from the Prism UI: refuse to re-upsert the same (code, host).
+      # Memory set is the fast path for in-flight probes this process; Store also writes
+      # prism_suppressions on delete so Project leave/re-open (new Analyzer) stays muted.
+      # Dismiss (false-positive) keeps the row for triage history; delete removes it.
+      def suppress(code : String, host : String) : Nil
+        @suppressed << "#{code}|#{host}"
+      end
+
+      def clear_suppressions : Nil
+        @suppressed.clear
+      end
+
+      # Load durable hard-deletes from the project DB (called on start / after Session open).
+      def load_suppressions : Nil
+        @store.prism_suppressions.each { |(code, host)| @suppressed << "#{code}|#{host}" }
+      end
+
       # Update the live mode AND persist it to the project DB (single source of truth).
+      # Transitioning INTO Active re-arms probes over recent History: live traffic alone
+      # misses flows that already completed passive analysis (passive_loop never re-enqueues
+      # them), and a restart clears both the event channel and @active_seen.
       def set_mode(m : Mode) : Nil
+        prev = @mode
         @mode = m
         @store.set_prism_mode(m)
+        arm_active_backfill if m.active? && !prev.active?
       end
 
       def start : Nil
         return if @running
         @running = true
+        # Re-arm durable hard-deletes before any passive/active fiber can upsert.
+        load_suppressions
         spawn(name: "gori-prism") { passive_loop }
         spawn(name: "gori-prism-active") { active_loop }
+        # Project already set to Active (persisted) — probe recent in-scope History now,
+        # not only traffic that arrives after this open.
+        arm_active_backfill if @mode.active?
       end
 
       # Winds the analyzer down BEFORE the store/channels close: stop accepting active work,
@@ -140,11 +169,17 @@ module Gori
       private def persist(detections : Array(Detection), *, flow_id : Int64, replay_id : Int64?) : Nil
         return if detections.empty?
         host = nil.as(String?)
+        wrote = false
         detections.each do |d|
+          next if suppressed?(d.code, d.host)
           stamped = Prism.with_source(d, flow_id: (flow_id > 0 ? flow_id : nil), replay_id: replay_id)
           @store.upsert_prism_issue(stamped)
           host ||= stamped.host
+          wrote = true
         end
+        return unless wrote
+        # Store#upsert already bumps prism_generation (TUI polls that). Event is for
+        # notifications; may be dropped when the channel is full.
         emit(IssueEvent.new(host || ""))
       end
 
@@ -159,6 +194,27 @@ module Gori
         # the ⇧S display lens is off.
         return unless @scope.matches_url?(url, row.host)
         Active::RULES.each { |rule| enqueue_probe(rule, detail) }
+      rescue Channel::ClosedError
+      end
+
+      # Fire-and-forget: walk recent History and enqueue active probes for in-scope surfaces.
+      # Dedup via @active_seen keeps this cheap when called more than once.
+      private def arm_active_backfill : Nil
+        return if @stopped
+        return unless @mode.active?
+        return unless @running # queue consumer must be up (start) or about to be (set_mode mid-session)
+        spawn(name: "gori-prism-active-backfill") { active_backfill }
+      end
+
+      private def active_backfill : Nil
+        @store.recent_flows(ACTIVE_BACKFILL).each do |row|
+          break if @stopped || !@mode.active?
+          next unless row.state.complete?
+          detail = @store.get_flow(row.id)
+          next unless detail
+          maybe_enqueue_active(detail)
+        end
+      rescue DB::Error | SQLite3::Exception
       rescue Channel::ClosedError
       end
 
@@ -204,7 +260,15 @@ module Gori
         end
         detections = task.rule.detections(task.plan, result, task.detail)
         return if detections.empty?
-        detections.each { |d| @store.upsert_prism_issue(d) }
+        wrote = false
+        detections.each do |d|
+          next if suppressed?(d.code, d.host)
+          @store.upsert_prism_issue(d)
+          wrote = true
+        end
+        return unless wrote
+        # Store#upsert already bumps prism_generation (TUI polls that). Event is for
+        # notifications; may be dropped when the channel is full.
         # Notification wording is rule-agnostic: the detection's own title + evidence (so a CORS
         # probe reads "CORS reflects an arbitrary origin…", not a hardcoded "reflected param").
         first = detections.first
@@ -224,6 +288,10 @@ module Gori
         @active_error_hosts << host
         trim(@active_error_hosts, ACTIVE_SEEN_CAP)
         emit(ErrorEvent.new("Prism active scan on #{host}: #{detail}"))
+      end
+
+      private def suppressed?(code : String, host : String) : Bool
+        @suppressed.includes?("#{code}|#{host}")
       end
 
       # --- helpers ----------------------------------------------------------------------

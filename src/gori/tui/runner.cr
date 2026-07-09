@@ -299,6 +299,7 @@ module Gori::Tui
       last_wf = @session.store.write_failures
       last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
       last_dv_poll = Time.instant
+      last_prism_gen = @session.store.prism_generation # committed prism_issues mutations
       last_spin = Time.instant        # advances the background-job spinner frame
       last_clock = clock_label        # top-bar wall clock; re-render only when the minute rolls over
       last_ui_ident = nil.as(String?) # last-written ui-state identity (see UI_STATE_THROTTLE)
@@ -333,6 +334,19 @@ module Gori::Tui
         if (wf = @session.store.write_failures) != last_wf
           last_wf = wf
           dirty = true
+        end
+        # Prism list live refresh: Store#prism_generation increments after every
+        # committed prism_issues write (upsert/delete/status). Poll every tick —
+        # do NOT rely on the droppable analyzer event channel or PRAGMA data_version.
+        # When Prism is visible, force a full terminal sync (not just cell-diff) so a
+        # new/removed row cannot stick as a stale paint.
+        if (pgen = @session.store.prism_generation) != last_prism_gen
+          last_prism_gen = pgen
+          prism_controller.refresh_from_store
+          if @active_tab == :prism
+            dirty = true
+            @resized = true
+          end
         end
         # Live store refresh: PRAGMA data_version bumps when the writer fiber (or a
         # second gori process) commits. Own captures/saves bump it too — soft-sync
@@ -1344,7 +1358,12 @@ module Gori::Tui
       when :prism_mode
         @session.prism.set_mode(Prism::Mode.new(p.selected_value))
         prism_controller.view.reload(@session.store)
-        @toast = "Prism mode: #{@session.prism.mode.title}"
+        mode = @session.prism.mode
+        @toast = if mode.active?
+                   "Prism mode: ACTIVE — probing recent in-scope traffic"
+                 else
+                   "Prism mode: #{mode.title}"
+                 end
       end
       close_choice_picker
     end

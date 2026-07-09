@@ -207,6 +207,117 @@ describe Gori::Prism::Active do
   end
 end
 
+describe Gori::Prism::Analyzer do
+  # Active only processes live channel events unless backfill re-arms recent History.
+  # Without that, switching Passive→Active (or reopening a project already on Active)
+  # never probes flows that already completed passive analysis.
+  it "set_mode Active and start(Active) re-arm without raising on stored flows" do
+    with_store do |store|
+      capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        target: "/search?q=hi", body: "<p>hi</p>")
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "acme.test")
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+
+      # start while already Active (persisted project) — backfill path
+      a = Gori::Prism::Analyzer.new(store, scope, feed, Gori::Prism::Mode::Active, true)
+      a.start
+      sleep 50.milliseconds # let the backfill fiber run (no network assert — queue may drop)
+      a.stop
+
+      # Passive → Active transition mid-session
+      feed2 = Channel(Gori::Store::FlowEvent).new(8)
+      b = Gori::Prism::Analyzer.new(store, scope, feed2, Gori::Prism::Mode::Passive, true)
+      b.start
+      b.set_mode(Gori::Prism::Mode::Active)
+      sleep 50.milliseconds
+      b.stop
+    end
+  end
+
+  it "bumps store.prism_generation on persist and honors session suppress after hard delete" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: x\r\n\r\n",
+        target: "/", body: "<p>hi</p>")
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Prism::Analyzer.new(store, scope, feed, Gori::Prism::Mode::Passive, true)
+      g0 = store.prism_generation
+
+      a.scan_detail(detail)
+      store.prism_generation.should be > g0
+      before = store.count_prism_issues
+      before.should be > 0
+
+      # Simulate UI hard-delete + suppress of one issue (suppress first, like the TUI)
+      issue = store.prism_issues.first
+      a.suppress(issue.code, issue.host)
+      store.delete_prism_issue(issue.id)
+      store.count_prism_issues.should eq(before - 1)
+
+      # Fresh flow on the same host: suppressed code must not resurrect
+      d2 = capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: x\r\n\r\n",
+        target: "/b", body: "<p>hi</p>")
+      a.scan_detail(d2)
+      store.prism_issues.count { |i| i.code == issue.code && i.host == issue.host }.should eq(0)
+    end
+  end
+
+  # Regression: delete used to only mute for the current process. Project leave/re-open
+  # built a new Analyzer (empty @suppressed) and Active backfill re-inserted the row.
+  it "hard-delete survives a new Analyzer (project re-open) via durable suppressions" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: nginx\r\n\r\n",
+        target: "/", body: "<p>hi</p>")
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Prism::Analyzer.new(store, scope, feed, Gori::Prism::Mode::Passive, true)
+      a.scan_detail(detail)
+      issue = store.prism_issues.find(&.code.==("tech_server")).not_nil!
+      code, host = issue.code, issue.host
+
+      # TUI delete path: memory suppress + store delete (store also writes prism_suppressions)
+      a.suppress(code, host)
+      store.delete_prism_issue(issue.id)
+      store.prism_suppressed?(code, host).should be_true
+      store.count_prism_issues.should eq(store.prism_issues.size)
+
+      # Simulate leave_project → open again: brand-new Analyzer loads durable suppressions
+      feed2 = Channel(Gori::Store::FlowEvent).new(8)
+      b = Gori::Prism::Analyzer.new(store, scope, feed2, Gori::Prism::Mode::Passive, true)
+      b.start # load_suppressions
+      d2 = capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: nginx\r\n\r\n",
+        target: "/again", body: "<p>hi</p>")
+      b.scan_detail(d2)
+      store.prism_issues.count { |i| i.code == code && i.host == host }.should eq(0)
+
+      # Store-level gate alone (no analyzer suppress) also blocks direct upsert
+      det = Gori::Prism::Detection.new(code, "tech", host, "https://#{host}/", "Server: nginx",
+        Gori::Store::Severity::Info, "nginx", d2.row.id)
+      store.upsert_prism_issue(det)
+      store.prism_issues.count { |i| i.code == code && i.host == host }.should eq(0)
+
+      b.stop
+    end
+  end
+
+  it "clear_prism_issues drops durable suppressions so a full rescan can re-find" do
+    with_store do |store|
+      d = Gori::Prism::Detection.new("reflected_param", "active", "xss.test", "https://xss.test/",
+        "Reflected parameter", Gori::Store::Severity::Medium, "q", 1_i64)
+      store.upsert_prism_issue(d)
+      id = store.prism_issues.first.id
+      store.delete_prism_issue(id)
+      store.prism_suppressed?("reflected_param", "xss.test").should be_true
+
+      store.clear_prism_issues
+      store.prism_suppressed?("reflected_param", "xss.test").should be_false
+      store.upsert_prism_issue(d)
+      store.count_prism_issues.should eq(1)
+    end
+  end
+end
+
 describe Gori::Prism::Mode do
   it "persists per-project and defaults to Passive" do
     with_store do |store|
