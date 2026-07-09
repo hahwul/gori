@@ -73,6 +73,7 @@ Capture and intercept still have global toggles:
 | `c` | Toggle **capture** (off = traffic passes through without being stored) |
 | `i` | Toggle **intercept** (hold matching requests for forward / drop / edit) |
 | `s` | Toggle the **scope lens** (filter views to in-scope traffic) |
+| `m` | Open **Match & Replace** (rewrite request/response heads in flight) |
 
 ## 4. Move around the TUI
 
@@ -147,7 +148,7 @@ Keep this table nearby until the chords stick:
 |-----|--------|--------|
 | `Ctrl-P` | Anywhere | Command palette |
 | `Space` | Focused pane | Area action menu |
-| `c` / `i` / `s` | Anywhere | Capture / intercept / scope lens |
+| `c` / `i` / `s` / `m` | Anywhere | Capture / intercept / scope lens / match & replace |
 | `[` `]` · `1`–`9` | Anywhere | Switch tabs |
 | `/` | History | Query-language filter |
 | `Enter` | History | Open flow detail |
@@ -177,7 +178,8 @@ It is also offered at the end of the first-run wizard.
 ## Next Steps
 
 - [Configuration](/getting-started/configuration/) — storage layout, network settings, and the CA
-- [Proxy & History](/guide/proxy/) — capture, intercept, scope, and protocols in depth
-- [Replay & Fuzzer](/guide/replay-and-fuzzer/) — the testing workbench
+- [Proxy & History](/guide/proxy/) — capture, intercept, scope, import, match & replace
+- [Replay & Fuzzer](/guide/replay-and-fuzzer/) — the testing workbench and env tokens
+- [Convert](/guide/convert/) — encode / decode / hash pipeline
 - [Query Language](/reference/query-language/) — full filter syntax
 - [Hotkeys](/guide/hotkeys/) — rebind any of the chords above

@@ -35,7 +35,7 @@ gori settings          # print the settings.json path
 gori settings --edit   # open it in your editor
 ```
 
-Persisted sections include `network`, `theme` (default `goridark`), `mouse`, `editor`, `tabs`, `hostname_overrides`, `env`, and `hotkeys`. See the [Configuration Reference](/reference/config/) for the full list of keys.
+Persisted sections include `network`, `theme` (default `goridark`), `mouse`, `editor`, `tabs`, `layout`, `hostname_overrides`, `env`, `hotkeys`, `convert`, and `mine`. See the [Configuration Reference](/reference/config/) for the full list of keys.
 
 ### Network
 

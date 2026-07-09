@@ -53,6 +53,7 @@ gori mcp --install-claude-code
 | `list_sitemap` | Distinct endpoints (host, method, path) |
 | `list_findings` / `get_finding` | Read triaged findings |
 | `list_scope` | Current scope include/exclude rules |
+| `list_notes` / `get_note` | Read project notes |
 | `project_info` | Flow / finding counts and which database is served |
 | `get_current_context` | What the user is viewing in the TUI right now |
 | `get_replay_context` | Replay workbench state and saved sessions |
@@ -62,9 +63,10 @@ gori mcp --install-claude-code
 
 | Tool | Purpose |
 |------|---------|
-| `send_request` | Send / replay an HTTP request (active) |
+| `send_request` | Send / replay an HTTP request (active; expands `$KEY` env tokens) |
 | `create_replay` / `update_replay` / `delete_replay` | Manage Replay sessions |
 | `create_finding` / `update_finding` | Record and update findings |
+| `create_note` / `update_note` / `delete_note` | Manage project notes |
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
 

@@ -59,8 +59,64 @@ Type a query in the History filter bar, or run it headless:
 gori run history -q 'status:5xx host:api.example.com'
 ```
 
+## Match & Replace
+
+Press `m` (or `Ctrl-P` → **Match & Replace**) to open the rewrite editor. Rules rewrite request or response **heads** in flight — the request line and headers — while bodies stream through unchanged.
+
+Syntax is one line per rule:
+
+```text
+req: User-Agent: x => User-Agent: gori
+resp: Set-Cookie => X-Stripped
+```
+
+| Prefix | Target |
+|--------|--------|
+| `req:` (default) | Request head |
+| `resp:` | Response head |
+
+An empty replacement deletes the matched text. Rules are per-project, can be toggled on/off individually, and apply as soon as you add them — no restart. Use them to strip cookies, inject headers, or normalize noisy values before traffic hits History or the scanners.
+
+## Import
+
+You don't have to capture everything live. From the command palette (`Ctrl-P`):
+
+| Action | Source |
+|--------|--------|
+| **Import: HAR** | Browser or proxy HAR export → full request/response flows |
+| **Import: URLs** | Text file, one URL per line → skeleton request flows |
+| **Import: OpenAPI** | OpenAPI/Swagger JSON or YAML → one request template per operation |
+
+Malformed entries are skipped rather than aborting the whole import. Imported flows land in History like captured traffic, so you can filter, Replay, Fuzz, and scan them the same way.
+
+## Host Overrides
+
+Host overrides are a `/etc/hosts`-style map: dial a specific IP for a hostname without changing DNS. Two layers exist:
+
+| Layer | Where | Precedence |
+|-------|-------|------------|
+| **Project** | **Project** tab → HOST OVERRIDES pane (`a` / `e` / `d`) | Wins on collision |
+| **Global** | `Ctrl-P` → **Settings: Hostnames**, or `hostname_overrides` in `settings.json` | Fallback |
+
+Useful for staging hosts, IP-based virtual hosts, or pointing a production hostname at a lab box while keeping the `Host` header intact.
+
+## Project Tab
+
+The **Project** home tab is more than a summary. Focusable panes (cycle with `Tab`):
+
+| Pane | Purpose |
+|------|---------|
+| **SCOPE** | Include/exclude rules (host, string, or regex) |
+| **HOST OVERRIDES** | Per-project dial map |
+| **ENV** | Per-project `$KEY` variables for outbound requests — see [Replay & Fuzzer](/guide/replay-and-fuzzer/#environment-variables) |
+| **DESCRIPTION** | Free-form project notes |
+| **SETTINGS** | Per-project network overrides (bind / upstream) |
+
+Scope rules are also scriptable: `gori run scope add --kind=include --type=host --pattern=api.example.com` — full flags in the [CLI Reference](/reference/cli/#run-scope).
+
 ## Next Steps
 
 - [Replay & Fuzzer](/guide/replay-and-fuzzer/) — act on the flows you capture
+- [Convert](/guide/convert/) — encode / decode / hash without leaving the TUI
 - [Scanning & Findings](/guide/scanning/) — automated and manual analysis
 - [Query Language](/reference/query-language/) — the full filter syntax

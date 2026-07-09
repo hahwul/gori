@@ -65,6 +65,42 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 | `history_list_order` | string | `"newest"` | List sort: `"newest"` (newest at top) or `"oldest"` (oldest at top) |
 | `sitemap_expand_depth` | integer | `-1` | How deep the Sitemap tree opens after reload: `-1` = all expanded; `0`–`3` = expand only nodes shallower than this depth |
 
+### hostname_overrides
+
+Global dial map (project-level overrides win on collision). Same idea as `/etc/hosts`:
+
+```json
+{
+  "hostname_overrides": [
+    { "host": "api.prod.internal", "ip": "10.0.0.42" }
+  ]
+}
+```
+
+Edit from `Ctrl-P` → **Settings: Hostnames**, or the Project tab for per-project entries. See [Proxy & History](/guide/proxy/#host-overrides).
+
+### env
+
+Tokens like `$TOKEN` expand at send time in Replay, Fuzzer, Miner, Intercept, CLI, and MCP:
+
+```json
+{
+  "env": {
+    "prefix": "$",
+    "vars": [
+      { "key": "TOKEN", "value": "eyJhbGciOi…" }
+    ]
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `prefix` | string | `"$"` | Token prefix (`$KEY`) |
+| `vars` | array | `[]` | Global key/value pairs; project vars (Project tab → ENV) override on collision |
+
+See [Environment Variables](/guide/replay-and-fuzzer/#environment-variables).
+
 ### Other sections
 
 | Section | Description |
@@ -74,11 +110,11 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 | `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view |
 | `editor` | External editor `command` and Markdown handling |
 | `tabs` | Which TUI tabs are shown/hidden |
-| `hostname_overrides` | `/etc/hosts`-style host → IP overrides for dialing |
-| `env` | Environment-variable prefix and values injected into replays |
+| `hostname_overrides` | Global host → IP dial map — see [hostname_overrides](#hostname_overrides) above |
+| `env` | Env-token prefix and global values — see [env](#env) above |
 | `hotkeys` | Keybinding overrides (`os` layer + `bindings`) — see the [Hotkeys guide](/guide/hotkeys/) |
 | `convert` / `mine` | Saved defaults for the Convert tool and Param Miner |
-| `layout` | History preview + Sitemap expand depth — see [layout](#layout) above |
+| `layout` | History / Prism / Findings previews + Sitemap expand depth — see [layout](#layout) above |
 
 ## Per-Project Overrides
 

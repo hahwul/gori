@@ -22,6 +22,27 @@ Replay from the command line, optionally against a new target:
 gori run replay <flow-id> --target https://staging.example.com --diff
 ```
 
+## Environment Variables
+
+Outbound requests support `$KEY`-style substitution. Tokens stay as literal text in the editor and expand **only at send time** — in Replay, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
+
+Define variables in two places (project wins on a key collision):
+
+| Layer | Where |
+|-------|-------|
+| **Global** | `Ctrl-P` → **Settings: Env**, or the `env` section of `settings.json` |
+| **Project** | **Project** tab → **ENV** pane (`a` add, `e` edit, `d` delete) |
+
+Default prefix is `$` (changeable via **Change prefix** in the ENV space menu, or `env.prefix` in settings). Keys are `A–Z a–z _` followed by `A–Z a–z 0–9 _`. Unknown tokens are left unchanged.
+
+```http
+GET /api/me HTTP/1.1
+Host: api.example.com
+Authorization: Bearer $TOKEN
+```
+
+Values that appear in captured traffic can be masked back to `$KEY` when copying or displaying, so secrets stay as tokens rather than raw strings.
+
 ## Fuzzer
 
 The Fuzzer is an Intruder-style engine: mark positions in a request, attach payload sets, and send the matrix of requests while matching on the responses.
@@ -58,6 +79,7 @@ Sources can be a captured flow (`--flow`), a raw request file (`--request`), or 
 
 ## Next Steps
 
+- [Convert](/guide/convert/) — local encode/decode/hash chains
 - [Scanning & Findings](/guide/scanning/) — Prism and the Param Miner
 - [CLI Reference](/reference/cli/) — every `run` flag
 - [MCP Server](/guide/mcp/) — drive fuzzing from an agent

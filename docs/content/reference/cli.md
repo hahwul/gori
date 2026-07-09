@@ -64,6 +64,7 @@ gori run <subcommand> [options]
 | `notes [<n>]` | Read project notes |
 | `findings` | List / export findings |
 | `projects` | List known projects |
+| `scope` | List / add / delete / enable / disable scope rules |
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`).
 
@@ -149,7 +150,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 gori run prism --severity high --category cors
 ```
 
-`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`; `-q`/`--query` filters with QL.
+`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors` (passive only — `active` probes run in the TUI); `-q`/`--query` filters with QL.
 
 ### run sitemap
 
@@ -166,6 +167,27 @@ gori run findings --format markdown --export report.md
 gori run notes --all
 gori run projects --format json
 ```
+
+### run scope
+
+Manage the project's include/exclude scope rules from scripts:
+
+```bash
+gori run scope                                          # list rules + enabled state
+gori run scope --format json
+gori run scope add --kind=include --type=host --pattern=api.example.com
+gori run scope add --kind=exclude --type=regex --pattern='.*\.(css|js)$'
+gori run scope delete 3
+gori run scope enable
+gori run scope disable
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| (default) | List rules; `--format` is `text` or `json` |
+| `add` | `--kind=include\|exclude`, `--type=host\|string\|regex`, `--pattern=…` |
+| `delete <rule-id>` | Remove a rule by id |
+| `enable` / `disable` | Toggle whether scope filtering is applied |
 
 ## gori mcp
 

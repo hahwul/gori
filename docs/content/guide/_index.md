@@ -7,9 +7,10 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 
 ## Topics
 
-- **[Proxy & History](/guide/proxy/)** — capture traffic, intercept requests, scope your target, and inspect protocols.
-- **[Replay & Fuzzer](/guide/replay-and-fuzzer/)** — the request workbench and the Intruder-style fuzzer.
-- **[Scanning & Findings](/guide/scanning/)** — the Prism scanner, the Param Miner, and triaging findings.
+- **[Proxy & History](/guide/proxy/)** — capture, intercept, scope, import, match & replace, host overrides.
+- **[Replay & Fuzzer](/guide/replay-and-fuzzer/)** — the request workbench, env tokens, and the Intruder-style fuzzer.
+- **[Convert](/guide/convert/)** — encode / decode / hash pipeline in the TUI.
+- **[Scanning & Findings](/guide/scanning/)** — Prism, Param Miner, Findings, Notes, Comparer.
 - **[MCP Server](/guide/mcp/)** — drive gori from an AI agent or script.
 - **[Themes](/guide/themes/)** — switch between built-in colour themes or create your own.
 - **[Hotkeys](/guide/hotkeys/)** — rebind gori's keyboard shortcuts.
@@ -20,16 +21,18 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 
 | Tab | Purpose |
 |-----|---------|
-| **Project** | Home tab — scope rules, per-project settings, totals |
+| **Project** | Home — scope, host overrides, env vars, description, network |
 | **Sitemap** | Deduplicated host → path endpoint tree |
-| **History** | Captured flows with full request/response detail |
+| **History** | Captured (and imported) flows with full request/response detail |
 | **Intercept** | Hold requests/responses for a manual decision |
 | **Replay** | Request workbench (incl. WebSocket & gRPC modes) |
 | **Fuzzer** | Intruder-style fuzzer with four attack modes |
 | **Miner** | Hidden-parameter discovery (hidden by default) |
-| **Convert** | Encode / decode / hash scratch tool |
+| **Convert** | Encode / decode / hash pipeline |
 | **Comparer** | Side-by-side diff of two flows |
 | **Prism** | Passive & active security scanner |
 | **Findings** | Triage results by severity and status |
-| **Notes** | Per-project notes |
+| **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links |
+
+Global lenses that are not tabs: **Match & Replace** (`m`) rewrites request/response heads in flight; **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.
