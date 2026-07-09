@@ -73,6 +73,7 @@ module Gori::Tui
       @editor = TextArea.new
       @editor.gutter = true
       @editor.follow_x = true # long lines (headers, URLs, §-marked params) scroll horizontally to keep the cursor visible
+      @last_synced_config = "" # last store config blob applied (reconcile equality)
       @config = Fuzz::Config.new(keep_bodies: :matched)
       @sets = [] of SetSpec
       @matcher = Fuzz::Matcher.new(keep_bodies: :matched)
@@ -195,9 +196,41 @@ module Gori::Tui
       @editor.set_text(rec.template)
       @name = rec.name
       apply_config_json(rec.config)
+      @last_synced_config = rec.config
       @focus = :template
       @loaded = true
       @dirty = false
+    end
+
+    # Live cross-session request-side sync. Updates target/template/config/flags
+    # WITHOUT wiping focus, in-memory results, scroll/selection, or a running job.
+    # Full restore() is project-open only (it forces focus=:template).
+    def apply_peer_session(rec : Store::FuzzSessionRecord) : Nil
+      @target = rec.target
+      @tcx = @target.size
+      @http2 = rec.http2?
+      @sni = rec.sni || ""
+      @editor.set_text(rec.template) if @editor.text != rec.template
+      @name = rec.name
+      apply_config_json(rec.config)
+      @last_synced_config = rec.config
+      @loaded = true
+      @dirty = false
+    end
+
+    # True when the live view matches a store row's request-side fields (reconcile skip).
+    # Template compare normalizes CRLF→LF (TextArea stores LF; the store may hold wire CRLF).
+    def session_side_matches?(rec : Store::FuzzSessionRecord) : Bool
+      @target == rec.target &&
+        template_text == normalize_lf(rec.template) &&
+        @http2 == rec.http2? &&
+        (sni_override || "") == (rec.sni || "") &&
+        (@name || "") == (rec.name || "") &&
+        @last_synced_config == rec.config
+    end
+
+    private def normalize_lf(s : String) : String
+      s.gsub("\r\n", "\n").gsub('\r', '\n')
     end
 
     # Content-only clone for sub-tab Duplicate: template + target + config/sets.
@@ -248,6 +281,12 @@ module Gori::Tui
 
     def clear_dirty : Nil
       @dirty = false
+    end
+
+    # After a successful save, record the config blob we just wrote so reconcile
+    # can equality-skip without re-serializing (JSON field order may differ).
+    def mark_config_synced(config : String) : Nil
+      @last_synced_config = config
     end
 
     # --- focus ring ----------------------------------------------------------

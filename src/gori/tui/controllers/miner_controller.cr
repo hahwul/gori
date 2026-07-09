@@ -472,13 +472,68 @@ module Gori::Tui
       return unless tab = current_tab_obj
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
-      @host.session.store.update_miner_session(id, v.target_origin, v.request_bytes, v.http2?, v.sni_override, v.config_json, v.name)
+      cfg = v.config_json
+      @host.session.store.update_miner_session(id, v.target_origin, v.request_bytes, v.http2?, v.sni_override, cfg, v.name)
+      v.mark_config_synced(cfg)
       v.clear_dirty
+    end
+
+    # Live converge with miner_sessions after a data_version bump. Soft-sync only —
+    # never full restore (would wipe findings + force focus defaults).
+    def reconcile : Nil
+      rows = @host.session.store.miner_sessions
+      by_id = rows.index_by(&.id)
+      cur_db = current_tab_obj.try(&.db_id)
+      cur_view = current_tab_obj.try(&.view)
+
+      @miners.each do |tab|
+        next unless (id = tab.db_id) && (row = by_id[id]?)
+        next if miner_tab_locked?(tab)
+        v = tab.view
+        next if v.session_side_matches?(row)
+        v.apply_peer_session(row)
+      end
+
+      local_ids = @miners.compact_map(&.db_id).to_set
+      rows.each do |row|
+        next if local_ids.includes?(row.id)
+        view = MinerView.new
+        view.restore(row)
+        @miners << MinerTab.new(view, row.flow_id, row.id)
+      end
+
+      @miners.reject! do |tab|
+        (id = tab.db_id) && !by_id.has_key?(id) && !miner_tab_locked?(tab)
+      end
+
+      @miners.sort_by! do |tab|
+        if (id = tab.db_id) && (row = by_id[id]?)
+          {row.position, id}
+        else
+          {Int32::MAX, Int64::MAX}
+        end
+      end
+
+      @current_idx =
+        if cur_db && (idx = @miners.index { |t| t.db_id == cur_db })
+          idx
+        elsif (cv = cur_view) && (idx = @miners.index { |t| t.view.same?(cv) })
+          idx
+        elsif @miners.empty?
+          -1
+        else
+          @current_idx.clamp(0, @miners.size - 1)
+        end
     end
 
     private def current_tab_obj : MinerTab?
       return nil if @current_idx < 0 || @current_idx >= @miners.size
       @miners[@current_idx]
+    end
+
+    private def miner_tab_locked?(tab : MinerTab) : Bool
+      v = tab.view
+      v.running? || v.dirty?
     end
   end
 end

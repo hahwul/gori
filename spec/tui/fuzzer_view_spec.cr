@@ -482,6 +482,28 @@ describe "FuzzerView result-detail decode panes" do
     backend.contains?("graphql").should be_false
     backend.contains?("params").should be_false
   end
+
+  it "apply_peer_session keeps focus and in-memory results (reconcile soft-sync)" do
+    # Regression: full restore() forced focus=:template and would wipe session UI;
+    # live data_version reconcile must soft-sync request side only.
+    view = FuzzerView.new
+    view.load_request("https://a.test", "GET /a HTTP/1.1\r\nHost: a.test\r\n\r\n", false, "")
+    view.focus_pane(:results)
+    view.append_result(fuzz_result(1, 200, 10))
+    view.append_result(fuzz_result(2, 404, 5))
+    n = view.@results.size
+
+    rec = Gori::Store::FuzzSessionRecord.new(
+      1_i64, "https://peer.test", "GET /peer HTTP/1.1\r\nHost: peer.test\r\n\r\n",
+      false, nil, %({"mode":"sniper","concurrency":20}), nil, 0, nil)
+    view.apply_peer_session(rec)
+
+    view.focus.should eq(:results)
+    view.target.should eq("https://peer.test")
+    view.template_text.should contain("/peer")
+    view.@results.size.should eq(n)
+    view.session_side_matches?(rec).should be_true
+  end
 end
 
 describe "FuzzerView pretty-printing" do

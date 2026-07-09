@@ -28,6 +28,7 @@ module Gori::Tui
       @http2 = false
       @sni = ""
       @config = Miner::Config.new
+      @last_synced_config = "" # last store config blob applied (reconcile equality)
       @name = nil.as(String?)
       @dirty = false
 
@@ -62,7 +63,30 @@ module Gori::Tui
       @sni = rec.sni || ""
       @name = rec.name
       apply_config_json(rec.config)
+      @last_synced_config = rec.config
       @dirty = false
+    end
+
+    # Live cross-session request-side sync. Updates seed request/config WITHOUT
+    # wiping focus, in-memory findings, scroll/selection, or a running job.
+    def apply_peer_session(rec : Store::MinerSessionRecord) : Nil
+      @target = rec.target
+      @request = rec.request
+      @http2 = rec.http2?
+      @sni = rec.sni || ""
+      @name = rec.name
+      apply_config_json(rec.config)
+      @last_synced_config = rec.config
+      @dirty = false
+    end
+
+    def session_side_matches?(rec : Store::MinerSessionRecord) : Bool
+      @target == rec.target &&
+        @request == rec.request &&
+        @http2 == rec.http2? &&
+        (sni_override || "") == (rec.sni || "") &&
+        (@name || "") == (rec.name || "") &&
+        @last_synced_config == rec.config
     end
 
     # Content-only clone for sub-tab Duplicate: request + config. No findings/progress.
@@ -111,6 +135,10 @@ module Gori::Tui
 
     def clear_dirty : Nil
       @dirty = false
+    end
+
+    def mark_config_synced(config : String) : Nil
+      @last_synced_config = config
     end
 
     def request_line : String

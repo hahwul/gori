@@ -811,8 +811,59 @@ module Gori::Tui
       return unless tab = current_tab_obj
       return unless (id = tab.db_id) && tab.view.dirty?
       v = tab.view
-      @host.session.store.update_fuzz_session(id, v.target, v.template_text, v.http2?, v.sni_override, v.config_json, v.name)
+      cfg = v.config_json
+      @host.session.store.update_fuzz_session(id, v.target, v.template_text, v.http2?, v.sni_override, cfg, v.name)
+      v.mark_config_synced(cfg)
       v.clear_dirty
+    end
+
+    # Live converge with fuzz_sessions after a data_version bump (own save or peer).
+    # Soft-sync request side only — never full restore() (would wipe results + force
+    # focus=:template).
+    def reconcile : Nil
+      rows = @host.session.store.fuzz_sessions
+      by_id = rows.index_by(&.id)
+      cur_db = current_tab_obj.try(&.db_id)
+      cur_view = current_tab_obj.try(&.view)
+
+      @fuzzers.each do |tab|
+        next unless (id = tab.db_id) && (row = by_id[id]?)
+        next if fuzz_tab_locked?(tab)
+        v = tab.view
+        next if v.session_side_matches?(row)
+        v.apply_peer_session(row)
+      end
+
+      local_ids = @fuzzers.compact_map(&.db_id).to_set
+      rows.each do |row|
+        next if local_ids.includes?(row.id)
+        view = FuzzerView.new
+        view.restore(row)
+        @fuzzers << FuzzerTab.new(view, row.flow_id, row.id)
+      end
+
+      @fuzzers.reject! do |tab|
+        (id = tab.db_id) && !by_id.has_key?(id) && !fuzz_tab_locked?(tab)
+      end
+
+      @fuzzers.sort_by! do |tab|
+        if (id = tab.db_id) && (row = by_id[id]?)
+          {row.position, id}
+        else
+          {Int32::MAX, Int64::MAX}
+        end
+      end
+
+      @current_idx =
+        if cur_db && (idx = @fuzzers.index { |t| t.db_id == cur_db })
+          idx
+        elsif (cv = cur_view) && (idx = @fuzzers.index { |t| t.view.same?(cv) })
+          idx
+        elsif @fuzzers.empty?
+          -1
+        else
+          @current_idx.clamp(0, @fuzzers.size - 1)
+        end
     end
 
     def current_session_db_id : Int64?
@@ -830,6 +881,12 @@ module Gori::Tui
     private def current_tab_obj : FuzzerTab?
       return nil if @current_idx < 0 || @current_idx >= @fuzzers.size
       @fuzzers[@current_idx]
+    end
+
+    # Don't clobber a tab mid-edit or mid-run (mirrors Replay).
+    private def fuzz_tab_locked?(tab : FuzzerTab) : Bool
+      v = tab.view
+      v.running? || v.dirty? || v.pane_insert?(:template) || v.pane_insert?(:target)
     end
   end
 end

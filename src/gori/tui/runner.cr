@@ -487,6 +487,8 @@ module Gori::Tui
       # while the user is elsewhere. Own-session captures also arrive via flow_events.
       @tabs[@active_tab]?.try(&.on_external_change) # migrated tabs refresh themselves
       replay_controller.reconcile
+      fuzzer_controller.reconcile
+      miner_controller.reconcile
       notes_controller.view.reload(@session.store) unless notes_locked?
       search_recompute # a ^F prompt open over the reloaded view keeps fresh hits
     end

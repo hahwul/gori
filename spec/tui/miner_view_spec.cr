@@ -45,4 +45,24 @@ describe Gori::Tui::MinerView do
     view.results_move(-1)
     view.results_at_top?.should be_true
   end
+
+  it "apply_peer_session keeps focus and in-memory findings (reconcile soft-sync)" do
+    view = Gori::Tui::MinerView.new
+    view.load("https://a.test", "GET /a HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice, false, nil,
+      Gori::Miner::Config.new)
+    view.focus_pane(:results)
+    view.append_finding(Gori::Miner::Finding.new("found", Gori::Miner::Location::Query,
+      Gori::Miner::Evidence::Status, Gori::Miner::Confidence::Confirmed, nil, nil, 0_i64))
+    n = view.@results.size
+
+    rec = Gori::Store::MinerSessionRecord.new(
+      1_i64, "https://peer.test", "GET /peer HTTP/1.1\r\nHost: peer.test\r\n\r\n".to_slice,
+      false, nil, %({"concurrency":10}), nil, 0, nil)
+    view.apply_peer_session(rec)
+
+    view.focus.should eq(:results)
+    view.target_origin.should contain("peer.test")
+    view.@results.size.should eq(n)
+    view.session_side_matches?(rec).should be_true
+  end
 end
