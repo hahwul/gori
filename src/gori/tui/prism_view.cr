@@ -102,6 +102,7 @@ module Gori::Tui
     # filter, or the show-closed toggle, opts back into the full set. The severity tallies
     # follow the same base (pre-text-filter) so dismissing visibly lowers them.
     private def apply_filter : Nil
+      prev_id = @issues[@selected]?.try(&.id)
       filter = Prism::Filter.parse(@query)
       base = (@show_closed || filter.has_status_term?) ? @all : @all.select(&.status.open?)
       # Remember whether the triage lens alone already emptied the list — render_empty
@@ -110,7 +111,14 @@ module Gori::Tui
       base = base.select { |i| @scope.try(&.host_in_scope?(i.host)) == true } if scope_active?
       recount(base)
       @issues = filter.apply(base)
-      @selected = @selected.clamp(0, {@issues.size - 1, 0}.max)
+      # Re-anchor by issue id (not index) so a data_version reload under live capture
+      # doesn't move the highlight to a different issue when the list order/count shifts.
+      @selected =
+        if prev_id && (idx = @issues.index { |i| i.id == prev_id })
+          idx
+        else
+          @selected.clamp(0, {@issues.size - 1, 0}.max)
+        end
     end
 
     private def scope_active? : Bool

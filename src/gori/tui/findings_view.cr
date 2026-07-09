@@ -80,10 +80,17 @@ module Gori::Tui
     end
 
     # Recompute the visible list from the raw list through the active filter, then
-    # keep the selection in range (called live as the query is edited).
+    # re-anchor selection by finding id (not index) so a data_version reload under
+    # live capture doesn't jump the highlight to a different row.
     private def apply_filter : Nil
+      prev_id = @findings[@selected]?.try(&.id)
       @findings = Findings::Filter.parse(@query).apply(@all)
-      @selected = @selected.clamp(0, {@findings.size - 1, 0}.max)
+      @selected =
+        if prev_id && (idx = @findings.index { |f| f.id == prev_id })
+          idx
+        else
+          @selected.clamp(0, {@findings.size - 1, 0}.max)
+        end
     end
 
     def move(delta : Int32) : Nil

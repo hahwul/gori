@@ -134,4 +134,22 @@ describe Gori::Tui::PrismView do
       b.contains?("gRPC").should be_false
     end
   end
+
+  it "re-anchors selection by issue id across reload (not by list index)" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test")
+      seed(store, "missing_csp", "b.test")
+      view = Gori::Tui::PrismView.new
+      view.reload(store)
+      first = view.target_issue.not_nil!.id
+      view.move(1)
+      second = view.target_issue.not_nil!
+      second.id.should_not eq(first)
+
+      # A new higher-severity (or newer) issue can reshuffle indices; id stays put.
+      seed(store, "cookie_secure", "c.test")
+      view.reload(store)
+      view.target_issue.not_nil!.id.should eq(second.id)
+    end
+  end
 end

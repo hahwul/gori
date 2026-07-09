@@ -185,6 +185,23 @@ describe Gori::Tui::FindingsView do
       store.count_findings.should eq(0)
     end
   end
+
+  it "re-anchors selection by finding id across reload (not by list index)" do
+    # severity DESC: Critical then Low. Selecting Low then inserting High between
+    # would leave index 1 on the new High if we only clamped — id-anchor keeps Low.
+    tmp_store do |store|
+      store.insert_finding("crit-row", Gori::Store::Severity::Critical, "h.test", nil)
+      store.insert_finding("low-row", Gori::Store::Severity::Low, "h.test", nil)
+      view = FindingsView.new
+      view.reload(store)
+      view.move(1)
+      view.target_finding.not_nil!.title.should eq("low-row")
+
+      store.insert_finding("high-row", Gori::Store::Severity::High, "h.test", nil)
+      view.reload(store)
+      view.target_finding.not_nil!.title.should eq("low-row")
+    end
+  end
 end
 
 describe "FindingForm" do
