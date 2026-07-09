@@ -291,6 +291,38 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  it "re-anchors selection, scroll, and manual collapse across reload (live capture poll)" do
+    # Regression: data_version polls used to zero @selected/@scroll every rebuild,
+    # so navigating deep under live traffic kept jumping back to the top host.
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users/1")
+      capture(store, "acme.test", "GET", "/api/users/2")
+      capture(store, "other.test", "GET", "/x")
+
+      view = SitemapView.new
+      view.reload(store)
+      # Walk down to a deep path row (not the host at index 0).
+      5.times { view.move(1) }
+      view.at_top?.should be_false
+      sel_before = view.@selected
+      # Collapse the host so children disappear — expand state must survive reload.
+      view.move(-view.@selected) # back to top host row
+      view.collapse.should be_true
+      view.move(1) # land on the next host (other.test) while acme is collapsed
+      other_sel = view.@selected
+
+      capture(store, "acme.test", "GET", "/api/users/3") # external-change style tree growth
+      view.reload(store)
+
+      view.@selected.should eq(other_sel)
+      # Collapsed acme should still hide its path children after reload.
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("other.test").should be_true
+      b.contains?("users").should be_false
+    end
+  end
+
   it "round-trips and clears a tag through the store" do
     tmp_store do |store|
       capture(store, "acme.test", "GET", "/api/users")

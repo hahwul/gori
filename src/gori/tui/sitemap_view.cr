@@ -63,9 +63,8 @@ module Gori::Tui
       @tag_buffer = ""
       @tag_cx = 0
       @tag_preedit = ""
-      # The (host, path) the open editor targets, PINNED at start_tag — a mid-edit external
-      # reload resets @selected to 0, so a selection-based lookup at commit would tag the
-      # wrong (usually top host) node. Pinning keeps the tag landing on the intended node.
+      # The (host, path) the open editor targets, PINNED at start_tag — belt-and-braces
+      # if a mid-edit rebuild drops the row; selection is also re-anchored by key on reload.
       @tag_host = ""
       @tag_path = ""
     end
@@ -76,7 +75,14 @@ module Gori::Tui
       @scope = scope
     end
 
+    # Rebuild the tree from the store. Selection, scroll, and manual expand/collapse
+    # are re-anchored by durable (host, path) keys so a data_version poll under live
+    # capture does not jump the cursor to the top host every ~750ms.
     def reload(store : Store) : Nil
+      prev_sel = resolve_target
+      prev_scroll = @scroll
+      prev_expand = collect_expand_state
+
       # `tag:`/`-tag:` are Sitemap-local (the shared QL has no tag column): split them
       # out, hand the residual to QL.parse, and apply the tag filter to the built tree.
       positives, negatives, residual = split_tag_terms(@query)
@@ -85,9 +91,10 @@ module Gori::Tui
       Sitemap.stamp_tags!(@hosts, store.sitemap_tags)
       filter_by_tags(positives, negatives)
       @hosts.each { |h| Sitemap.group_sequences!(h) } if @grouping
-      # settings:layout Sitemap expand depth — re-stamped every reload (manual expand
-      # is session-only until the next rebuild, same contract as the old "always open").
+      # settings:layout Sitemap expand depth seeds NEW nodes; prior session expand
+      # overrides are re-applied below for keys that still exist.
       Sitemap.apply_expand_depth!(@hosts, Settings.sitemap_expand_depth)
+      reapply_expand_state(prev_expand)
       # Stamp host-level scope state + endpoint counts on the FINAL tree, so the render
       # loop is a pure read (no per-frame Scope mutex hits). host_in_scope?/configured?
       # evaluate the rules regardless of the ⇧S enabled flag, so targets are marked even
@@ -97,10 +104,63 @@ module Gori::Tui
         h.in_scope = @scope_configured && (@scope.try(&.host_in_scope?(h.label)) == true)
         h.endpoints = Sitemap.endpoint_count(h)
       end
-      @selected = 0
-      @scroll = 0
       @visible_cache = nil
+      rows = visible_rows
+      @selected =
+        if (idx = index_of_target(rows, prev_sel))
+          idx
+        else
+          0
+        end
+      @selected = @selected.clamp(0, {rows.size - 1, 0}.max)
+      @scroll = prev_scroll.clamp(0, {rows.size - 1, 0}.max)
       @loaded = true
+    end
+
+    # Snapshot expanded? for every non-group, non-leaf node keyed by (host, path).
+    private def collect_expand_state : Hash({String, String}, Bool)
+      state = {} of {String, String} => Bool
+      @hosts.each { |h| walk_collect_expand(h, h.label, state) }
+      state
+    end
+
+    private def walk_collect_expand(node : Node, host : String, state : Hash({String, String}, Bool)) : Nil
+      return if node.grouped
+      state[{host, node.path}] = node.expanded unless node.leaf?
+      node.children.each { |c| walk_collect_expand(c, host, state) }
+    end
+
+    private def reapply_expand_state(prev : Hash({String, String}, Bool)) : Nil
+      return if prev.empty?
+      @hosts.each { |h| walk_reapply_expand(h, h.label, prev) }
+    end
+
+    private def walk_reapply_expand(node : Node, host : String, prev : Hash({String, String}, Bool)) : Nil
+      return if node.grouped
+      key = {host, node.path}
+      if !node.leaf? && prev.has_key?(key)
+        node.expanded = prev[key]
+      end
+      node.children.each { |c| walk_reapply_expand(c, host, prev) }
+    end
+
+    # Index of the row whose (host, path) matches `target`, or nil if gone.
+    private def index_of_target(rows : Array(VisibleRow), target : {String, String}?) : Int32?
+      return nil unless target
+      want_host, want_path = target
+      rows.each_with_index do |row, i|
+        next if row.node.grouped
+        host = host_label_for_row(rows, i)
+        return i if host == want_host && row.node.path == want_path
+      end
+      nil
+    end
+
+    private def host_label_for_row(rows : Array(VisibleRow), idx : Int32) : String
+      idx.downto(0) do |i|
+        return rows[i].node.label if rows[i].depth == 0
+      end
+      rows[idx].node.label
     end
 
     # --- tags: filter (stamping lives in Gori::Sitemap.stamp_tags!) ----------
@@ -375,19 +435,13 @@ module Gori::Tui
     end
 
     # Selection-based (host, path) for the row currently under the cursor — the LIVE
-    # target, used to seed the pin at start_tag and to detect a reload in apply_tag.
+    # target, used to seed the pin at start_tag, re-anchor selection on reload, and
+    # detect a reload in apply_tag.
     private def resolve_target : {String, String}?
       rows = visible_rows
       return nil unless row = rows[@selected]?
       return nil if row.node.grouped
-      host = row.node.label # fallback (selection IS a host row)
-      @selected.downto(0) do |i|
-        if rows[i].depth == 0
-          host = rows[i].node.label
-          break
-        end
-      end
-      {host, row.node.path}
+      {host_label_for_row(rows, @selected), row.node.path}
     end
 
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
