@@ -4,8 +4,10 @@ require "../replay_view"
 require "../clipboard"
 require "../subtab_picker"
 require "../../store"
+require "../../prism"
 require "../../replay/engine"
 require "../../replay/h2_engine"
+require "../../replay/ws_engine"
 
 module Gori::Tui
   # One open replay session (a "sub-tab" under the top-level Replay tab). Each carries
@@ -569,23 +571,64 @@ module Gori::Tui
         # reopen. Only on success: a later failed resend must not wipe a good response.
         if (id = tab.db_id) && result.ok?
           @host.session.store.update_replay_response(id, result.head, result.body, result.error, result.duration_us)
+          prism_scan_replay(id, result.head, result.body, result.duration_us, tab.flow_id, view)
         end
         @host.status(result.ok? ? "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}" : "replay error: #{result.error}")
         applied = true
       end
       while pair = nonblocking_ws_result
         view, result = pair
-        next unless @replays.find { |t| t.view.same?(view) } # sub-tab closed mid-flight
+        next unless tab = @replays.find { |t| t.view.same?(view) } # sub-tab closed mid-flight
         view.apply_ws(result)
         if result.ok?
           recv = result.messages.count(&.direction.==("in"))
           @host.status("ws replayed: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}")
+          # Feed the handshake + captured frames into Prism (WS payload secrets, tech).
+          if id = tab.db_id
+            @host.session.store.update_replay_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
+            prism_scan_ws_replay(id, result, tab.flow_id, view)
+          end
         else
           @host.status("ws replay error: #{result.error}")
         end
         applied = true
       end
       applied
+    end
+
+    # Passive-scan a successful HTTP Replay send into Prism (mode-gated by the analyzer).
+    private def prism_scan_replay(replay_id : Int64, head : Bytes, body : Bytes?,
+                                  duration_us : Int64, flow_id : Int64?, view : ReplayView) : Nil
+      return if head.empty?
+      rec = Store::ReplayRecord.new(
+        replay_id, view.target, view.request_text, view.http2?, view.auto_content_length?,
+        flow_id, 0, head, body, nil, duration_us, view.name, view.sni_override, view.mark_transform?)
+      return unless detail = Prism.detail_from_replay(rec)
+      @host.session.prism.scan_detail(detail, replay_id: replay_id)
+    rescue
+      # Prism must never break the Replay UX
+    end
+
+    # Passive-scan a successful WebSocket Replay transcript (handshake + text frames).
+    private def prism_scan_ws_replay(replay_id : Int64, result : Replay::WsEngine::Result,
+                                    flow_id : Int64?, view : ReplayView) : Nil
+      head = result.handshake_head
+      return if head.empty?
+      upgrade = view.ws_upgrade_bytes
+      req_text = upgrade.empty? ? view.request_text : String.new(upgrade).scrub
+      rec = Store::ReplayRecord.new(
+        replay_id, view.target, req_text, false, false,
+        flow_id, 0, head, Bytes.empty, nil, result.duration_us, view.name, view.sni_override, false)
+      return unless detail = Prism.detail_from_replay(rec)
+      # Synthetic WsMessage rows (id unused by the rule; opcode 1 = text).
+      now = Time.utc.to_unix_ms * 1000
+      msgs = result.messages.compact_map do |m|
+        next unless m.opcode == 1 # text frames only
+        next if m.payload.empty?
+        Store::WsMessage.new(0_i64, flow_id || 0_i64, replay_id, now, m.direction, 1, m.payload)
+      end
+      @host.session.prism.scan_detail(detail, replay_id: replay_id, ws_messages: msgs)
+    rescue
     end
 
     private def nonblocking_replay_result : {ReplayView, Replay::Result}?

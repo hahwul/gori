@@ -7,15 +7,15 @@ gori includes automated analysis that runs alongside your manual testing. **Pris
 
 ## Prism — the Scanner
 
-**Prism** groups security issues by type and severity. Its passive checks run as you browse — with zero extra requests — inspecting responses for things like missing or weak security headers, cookie flags, information leaks, technology fingerprints, and CORS misconfigurations. Active checks send a small, controlled number of probes (for example, a CORS arbitrary-origin reflection test) only when you ask for them.
+**Prism** groups security issues by type and severity. Its passive checks run as you browse — with zero extra requests — inspecting **History** flows and **Replay** send results for things like missing or weak security headers, cookie flags, information leaks, technology fingerprints (including WebSocket), CORS misconfigurations, and secrets in WebSocket text frames. Active checks send a small, controlled number of probes (for example, a CORS arbitrary-origin reflection test) only when you ask for them.
 
-Run passive analysis headless — it reads what's already captured and sends nothing:
+Run passive analysis headless — it reads what's already captured (History + Replay responses) and sends nothing:
 
 ```bash
 gori run prism                       # all issues
 gori run prism --severity high       # only high-severity
 gori run prism --category cors       # a single category
-gori run prism -q 'host:example.com' # filter with QL
+gori run prism -q 'host:example.com' # filter History with QL (Replay still scanned)
 ```
 
 Categories include `headers`, `cookies`, `tech`, `infoleak`, and `cors`; severities run `info`, `low`, `medium`, `high`, `critical`.

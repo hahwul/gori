@@ -8,18 +8,20 @@ module Gori
       # Everything a passive rule needs about one captured flow, parsed/decoded ONCE and
       # shared across rules (the request/response heads, the URL, and a lazily-decoded body
       # text). Passing this to every rule keeps each rule self-contained and avoids re-parsing.
+      # Optional `ws_messages` feeds the WebSocket payload rule (empty for plain HTTP).
       class Context
         BODY_CAP = 64 * 1024 # per-side ceiling on body text fed to the string scans
 
         getter detail : Store::FlowDetail
         getter req : Proxy::Codec::RawRequest
         getter url : String
+        getter ws_messages : Array(Store::WsMessage)
 
         @resp : Proxy::Codec::RawResponse?
         @body_text : String?
         @body_text_done = false
 
-        def initialize(@detail : Store::FlowDetail)
+        def initialize(@detail : Store::FlowDetail, @ws_messages = [] of Store::WsMessage)
           @req = Proxy::Codec::Http1.parse_request_head(@detail.request_head)
           @resp = @detail.response_head.try { |h| Proxy::Codec::Http1.parse_response_head(h) }
           @url = @detail.row.url
@@ -33,8 +35,11 @@ module Gori
           row.host
         end
 
-        def fid : Int64
-          row.id
+        # Source flow id for Detection.flow_id. Synthetic Replay details use id 0 when there
+        # is no parent History flow — treat that as nil so we never link to a non-existent row.
+        def fid : Int64?
+          id = row.id
+          id > 0 ? id : nil
         end
 
         def scheme : String

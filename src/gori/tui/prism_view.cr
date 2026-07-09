@@ -455,6 +455,8 @@ module Gori::Tui
              "evidence #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
            elsif fid = issue.sample_flow_id
              "evidence flow ##{fid} (no longer captured)"
+           elsif rid = issue.sample_replay_id
+             "evidence replay ##{rid}"
            else
              "evidence (none)"
            end

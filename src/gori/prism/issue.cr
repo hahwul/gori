@@ -23,7 +23,17 @@ module Gori
       title : String,
       severity : Store::Severity,
       evidence : String? = nil,
-      flow_id : Int64? = nil
+      flow_id : Int64? = nil,
+      replay_id : Int64? = nil
+
+    # Stamp source ids on a detection (Replay path, or normalize synthetic flow id 0 → nil).
+    def self.with_source(d : Detection, *, flow_id : Int64? = nil, replay_id : Int64? = nil) : Detection
+      fid = flow_id
+      fid = d.flow_id if fid.nil?
+      fid = nil if fid == 0
+      Detection.new(d.code, d.category, d.host, d.url, d.title, d.severity, d.evidence,
+        flow_id: fid, replay_id: replay_id || d.replay_id)
+    end
 
     # Display-only remediation hints, keyed by issue code (shown in the Prism detail pane).
     # Dynamic-titled codes (tech_server / tech_powered_by) share the generic tech hint.
@@ -48,6 +58,7 @@ module Gori
       "private_ip_leak"                => "Strip internal hostnames/IPs from responses; they aid network reconnaissance.",
       "error_stack_leak"               => "Return generic errors to clients; log stack traces server-side only.",
       "secret_in_body"                 => "Rotate the exposed credential and remove it from the response; never ship keys/tokens to clients.",
+      "secret_in_ws"                   => "Rotate the exposed credential and stop sending secrets over the WebSocket; treat frames like any other client-visible channel.",
       "mixed_content"                  => "Load all sub-resources over HTTPS; active http:// scripts/iframes on an HTTPS page are blocked and insecure.",
       "insecure_form_action"           => "Point the form action at an HTTPS URL; a form submitting to http:// sends everything the user enters (credentials included) in cleartext.",
       "reflected_param"                => "Context-encode reflected input; this parameter echoes attacker-controlled data and may enable XSS.",

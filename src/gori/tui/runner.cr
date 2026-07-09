@@ -3466,29 +3466,44 @@ module Gori::Tui
       prism_controller.prism_dismiss_host
     end
 
-    # Jump from an issue to its sample flow's request/response in History. CROSS-TAB
-    # mediator (mirrors finding_open_flow).
+    # Jump from an issue to its sample evidence: History flow when present, else the
+    # Replay tab that first produced the hit (Replay-sourced passive issues).
     def prism_open_flow : Nil
       return unless i = prism_controller.view.target_issue
-      return (@toast = "this issue has no sample flow") unless fid = i.sample_flow_id
-      if history_controller.view.open_detail_id(fid, @session.store)
-        @active_tab = :history
-        @focus = :body
-        @overlay = :detail
-      else
-        @toast = "evidence no longer captured (pruned)"
+      if fid = i.sample_flow_id
+        if history_controller.view.open_detail_id(fid, @session.store)
+          @active_tab = :history
+          @focus = :body
+          @overlay = :detail
+        else
+          @toast = "evidence no longer captured (pruned)"
+        end
+        return
       end
+      if rid = i.sample_replay_id
+        navigate_link_ref(Store::LinkRefKind::Replay, rid)
+        return
+      end
+      @toast = "this issue has no sample evidence"
     end
 
     # Send an issue's sample flow to Replay to re-test it (mirrors finding_replay_flow).
+    # When the only evidence is a Replay tab, jump there instead of re-spawning.
     def prism_replay_flow : Nil
       return unless i = prism_controller.view.target_issue
-      return (@toast = "this issue has no sample flow") unless fid = i.sample_flow_id
-      if @session.store.get_flow(fid)
-        replay_flow(fid)
-      else
-        @toast = "evidence no longer captured (pruned)"
+      if fid = i.sample_flow_id
+        if @session.store.get_flow(fid)
+          replay_flow(fid)
+        else
+          @toast = "evidence no longer captured (pruned)"
+        end
+        return
       end
+      if rid = i.sample_replay_id
+        navigate_link_ref(Store::LinkRefKind::Replay, rid)
+        return
+      end
+      @toast = "this issue has no sample evidence"
     end
 
     # Promote a machine-found Prism issue to a human-confirmed Finding (the bridge to the

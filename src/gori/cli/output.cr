@@ -148,6 +148,7 @@ module Gori
           j.field "affected_count", g.affected.size
           j.field "evidence", g.evidence
           j.field "sample_flow_id", g.sample_flow_id
+          j.field "sample_replay_id", g.sample_replay_id
           j.field "remediation", Prism.remediation(g.code)
         end
       end

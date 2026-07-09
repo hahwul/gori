@@ -9,6 +9,8 @@ require "./passive/cors"
 require "./passive/body_leaks"
 require "./passive/auth"
 require "./passive/graphql"
+require "./passive/ws_payloads"
+require "./passive/secrets"
 
 module Gori
   module Prism
@@ -29,12 +31,27 @@ module Gori
         BodyLeaks.new,
         Auth.new,
         GraphqlIntrospection.new,
+        WsPayloads.new,
       ] of Rule
 
-      def self.analyze(detail : Store::FlowDetail) : Array(Detection)
-        ctx = Context.new(detail)
+      # WS-only subset used when a flow was already fully analyzed and new WebSocket frames arrive.
+      WS_RULES = [WsPayloads.new] of Rule
+
+      def self.analyze(detail : Store::FlowDetail,
+                       ws_messages : Array(Store::WsMessage) = [] of Store::WsMessage) : Array(Detection)
+        ctx = Context.new(detail, ws_messages)
         acc = [] of Detection
         RULES.each(&.check(ctx, acc))
+        acc
+      end
+
+      # Re-scan only WebSocket text payloads (cheap path for post-101 message events).
+      def self.analyze_ws(detail : Store::FlowDetail,
+                          ws_messages : Array(Store::WsMessage)) : Array(Detection)
+        return [] of Detection if ws_messages.empty?
+        ctx = Context.new(detail, ws_messages)
+        acc = [] of Detection
+        WS_RULES.each(&.check(ctx, acc))
         acc
       end
     end

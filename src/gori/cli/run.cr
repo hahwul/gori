@@ -1329,9 +1329,11 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run prism [QL query] [options]\n\n" \
-                     "Passively scan captured flows (zero outbound requests) and report grouped\n" \
-                     "issues — the headless equivalent of the TUI Prism tab. Active/reflected-param\n" \
-                     "checks send requests and are intentionally excluded (use the TUI or fuzz/mine)."
+                     "Passively scan captured History flows AND Replay responses (zero outbound\n" \
+                     "requests) and report grouped issues — the headless equivalent of the TUI Prism\n" \
+                     "tab. QL filters apply to History only; all Replay tabs with a stored response\n" \
+                     "are scanned. Active/reflected-param checks send requests and are intentionally\n" \
+                     "excluded (use the TUI or fuzz/mine)."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }
@@ -1366,13 +1368,14 @@ module Gori
         end
 
         store = open_store(resolve_read_project(project_name, db_path))
-        groups, scanned = begin
+        groups, flow_n, replay_n = begin
           ids = begin
             prism_scan_ids(store, filter)
           rescue ex
             abort "gori run prism: query #{query.inspect} failed: #{ex.message}"
           end
-          {Prism.group(scan_flows(store, ids)), ids.size}
+          dets, rn = scan_all(store, ids)
+          {Prism.group(dets), ids.size, rn}
         ensure
           store.close
         end
@@ -1383,12 +1386,16 @@ module Gori
         if cat = category
           groups = groups.select { |g| g.category == cat }
         end
-        report_prism(groups, scanned, format, query, min_sev, category)
+        report_prism(groups, flow_n, replay_n, format, query, min_sev, category)
       end
 
-      private def self.report_prism(groups : Array(Prism::Group), scanned : Int32, format : Symbol,
-                                    query : String?, min_sev : Store::Severity?, category : String?) : Nil
-        STDERR.puts "scanned #{scanned} flow#{scanned == 1 ? "" : "s"} · #{groups.size} issue#{groups.size == 1 ? "" : "s"}"
+      private def self.report_prism(groups : Array(Prism::Group), flow_n : Int32, replay_n : Int32,
+                                    format : Symbol, query : String?, min_sev : Store::Severity?,
+                                    category : String?) : Nil
+        parts = [] of String
+        parts << "#{flow_n} flow#{flow_n == 1 ? "" : "s"}"
+        parts << "#{replay_n} replay#{replay_n == 1 ? "" : "s"}" if replay_n > 0 || query.nil?
+        STDERR.puts "scanned #{parts.join(" + ")} · #{groups.size} issue#{groups.size == 1 ? "" : "s"}"
         if format == :json
           puts CLI::Output.prism_array_json(groups)
         elsif groups.empty?
@@ -1408,6 +1415,15 @@ module Gori
         rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
       end
 
+      # Passively analyze History flows (with responses) + every Replay tab that has a stored
+      # response. Returns {detections, replay_count_scanned}. QL filters apply to History only.
+      private def self.scan_all(store : Store, ids : Array(Int64)) : {Array(Prism::Detection), Int32}
+        detections = scan_flows(store, ids)
+        replay_dets, replay_n = scan_replays(store)
+        detections.concat(replay_dets)
+        {detections, replay_n}
+      end
+
       # Passively analyze each flow THAT HAS A CAPTURED RESPONSE — mirroring the live analyzer,
       # which only scans on the `:updated` event (a response or WS upgrade exists), never on a
       # bare request. Skipping response-less flows (connect/TLS failures, still-pending) keeps
@@ -1419,7 +1435,10 @@ module Gori
         progress = STDERR.tty?
         ids.each_with_index do |id, i|
           detail = store.get_flow(id)
-          detections.concat(Prism::Passive.analyze(detail)) if detail && detail.response_head
+          if detail && detail.response_head
+            ws = detail.row.status == 101 ? store.ws_messages(id, 200) : [] of Store::WsMessage
+            detections.concat(Prism::Passive.analyze(detail, ws))
+          end
           if progress && (i & 0x3F) == 0
             STDERR.print "\r[prism] scanned #{i + 1}/#{ids.size} flows"
             STDERR.flush
@@ -1427,6 +1446,21 @@ module Gori
         end
         STDERR.print "\r\e[K" if progress # clear the in-place meter before the summary line
         detections
+      end
+
+      # Scan Replay tabs that have a persisted response head (V11). Stamps sample_replay_id.
+      private def self.scan_replays(store : Store) : {Array(Prism::Detection), Int32}
+        detections = [] of Prism::Detection
+        n = 0
+        store.replays.each do |rec|
+          next unless detail = Prism.detail_from_replay(rec)
+          n += 1
+          ws = store.ws_messages_for_replay(rec.id, 200)
+          Prism::Passive.analyze(detail, ws).each do |d|
+            detections << Prism.with_source(d, flow_id: rec.flow_id, replay_id: rec.id)
+          end
+        end
+        {detections, n}
       end
 
       private def self.parse_severity(v : String) : Store::Severity

@@ -10,6 +10,7 @@ require "../convert"
 require "../env"
 require "../miner"
 require "../notes"
+require "../prism"
 require "./serialize"
 require "./request_builder"
 
@@ -799,6 +800,9 @@ module Gori
               body_bytes = result.body
               duration = result.duration_us || 0_i64
               @store.update_replay_response(replay_id, head_bytes, body_bytes, nil, duration)
+              # Feed into Prism when scanning is on (mirrors the TUI Replay path).
+              prism_scan_saved_replay(replay_id, masked_target, masked_req, http2, flow_id,
+                head_bytes, body_bytes, duration)
             else
               duration = result.duration_us || 0_i64
               @store.update_replay_response(replay_id, Bytes.new(0), nil, result.error, duration)
@@ -1809,6 +1813,23 @@ module Gori
 
       private def strarrprop(desc : String) : JSON::Any
         JSON.parse(%({"type":"array","description":#{desc.to_json},"items":{"type":"string"}}))
+      end
+
+      # Passive-scan a just-saved Replay send into prism_issues when mode is Passive/Active.
+      private def prism_scan_saved_replay(replay_id : Int64, target : String, request : String,
+                                         http2 : Bool, flow_id : Int64?, head : Bytes, body : Bytes?,
+                                         duration_us : Int64) : Nil
+        return unless @store.prism_mode.scanning?
+        return if head.empty?
+        rec = Store::ReplayRecord.new(
+          replay_id, target, request, http2, true, flow_id, 0,
+          head, body, nil, duration_us, nil, nil, false)
+        return unless detail = Prism.detail_from_replay(rec)
+        Prism::Passive.analyze(detail).each do |d|
+          @store.upsert_prism_issue(Prism.with_source(d, flow_id: flow_id, replay_id: replay_id))
+        end
+      rescue
+        # Prism must never break send_request
       end
 
       # Accepts a JSON array directly or a JSON-encoded string, or a string.

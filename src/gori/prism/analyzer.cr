@@ -14,11 +14,16 @@ module Gori
     # single active-worker fiber that probes new in-scope flows for reflected params. The
     # store writer only does an extra non-blocking publish to feed us; the TUI render loop
     # is never touched. Single-threaded scheduler ⇒ plain ivars need no locks.
+    #
+    # Public `scan_detail` also accepts Replay-sourced details (and optional WS messages)
+    # so the Replay tab / CLI / MCP can feed the same passive engine without going through
+    # the History event channel.
     class Analyzer
       ANALYZED_CAP    = 10_000     # bound the seen-flow set (memory plateaus on long runs)
       ACTIVE_SEEN_CAP =  5_000     # bound the active dedup set
       ACTIVE_QUEUE    =    128     # bounded active task queue (drop on overflow)
       ACTIVE_TIMEOUT  = 10.seconds # per-probe socket timeout
+      WS_MSG_CAP      =    200     # max WS messages loaded per flow for passive scan
 
       getter events : Channel(Event)
 
@@ -62,6 +67,23 @@ module Gori
       rescue Channel::ClosedError
       end
 
+      # Public entry for History, Replay, and CLI/MCP: run passive checks, upsert issues,
+      # optionally enqueue active probes (History-only: when `enqueue_active` is true).
+      # `replay_id` stamps Detection.replay_id for evidence linking back to a Replay tab.
+      def scan_detail(detail : Store::FlowDetail, *, replay_id : Int64? = nil,
+                      ws_messages : Array(Store::WsMessage) = [] of Store::WsMessage,
+                      enqueue_active : Bool = false) : Nil
+        return if @stopped
+        return unless @mode.scanning?
+        detections = Passive.analyze(detail, ws_messages)
+        persist(detections, flow_id: detail.row.id, replay_id: replay_id)
+        maybe_enqueue_active(detail) if enqueue_active
+      rescue ex : DB::Error | SQLite3::Exception
+        raise ex
+      rescue
+        # a single detail's analysis blew up — skip it
+      end
+
       # --- passive fiber ----------------------------------------------------------------
 
       private def passive_loop : Nil
@@ -71,13 +93,19 @@ module Gori
           next if @stopped
           next unless @mode.scanning?
           next unless ev.kind == :updated # analyze when the response side exists
-          next if @analyzed.includes?(ev.id)
           begin
+            if @analyzed.includes?(ev.id)
+              # Already did the full pass — only re-scan WebSocket payloads if this is a 101
+              # flow that may have new frames (InsertWs republishes :updated).
+              rescan_ws(ev.id)
+              next
+            end
             detail = @store.get_flow(ev.id)
             next unless detail
             @analyzed << ev.id
             trim(@analyzed, ANALYZED_CAP)
-            process(detail)
+            ws = load_ws(detail)
+            scan_detail(detail, ws_messages: ws, enqueue_active: true)
           rescue DB::Error | SQLite3::Exception
             # A transient store error (e.g. SQLITE_BUSY) must NOT kill the scanner for the rest
             # of the session — skip this flow and keep draining. On real shutdown the input
@@ -89,17 +117,34 @@ module Gori
         # input closed during shutdown — exit quietly
       end
 
-      private def process(detail : Store::FlowDetail) : Nil
-        detections = Passive.analyze(detail)
-        unless detections.empty?
-          detections.each { |d| @store.upsert_prism_issue(d) }
-          emit(IssueEvent.new(detail.row.host))
-        end
-        maybe_enqueue_active(detail)
-      rescue ex : DB::Error | SQLite3::Exception
-        raise ex # bubble to passive_loop's per-flow rescue (skip this flow, keep scanning)
+      private def rescan_ws(flow_id : Int64) : Nil
+        detail = @store.get_flow(flow_id)
+        return unless detail
+        return unless detail.row.status == 101
+        msgs = @store.ws_messages(flow_id, WS_MSG_CAP)
+        return if msgs.empty?
+        detections = Passive.analyze_ws(detail, msgs)
+        persist(detections, flow_id: flow_id, replay_id: nil)
+      rescue DB::Error | SQLite3::Exception
       rescue
-        # a single flow's analysis blew up — skip it, keep scanning the rest
+      end
+
+      private def load_ws(detail : Store::FlowDetail) : Array(Store::WsMessage)
+        return [] of Store::WsMessage unless detail.row.status == 101
+        @store.ws_messages(detail.row.id, WS_MSG_CAP)
+      rescue
+        [] of Store::WsMessage
+      end
+
+      private def persist(detections : Array(Detection), *, flow_id : Int64, replay_id : Int64?) : Nil
+        return if detections.empty?
+        host = nil.as(String?)
+        detections.each do |d|
+          stamped = Prism.with_source(d, flow_id: (flow_id > 0 ? flow_id : nil), replay_id: replay_id)
+          @store.upsert_prism_issue(stamped)
+          host ||= stamped.host
+        end
+        emit(IssueEvent.new(host || ""))
       end
 
       private def maybe_enqueue_active(detail : Store::FlowDetail) : Nil

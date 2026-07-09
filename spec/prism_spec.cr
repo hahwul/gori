@@ -886,6 +886,78 @@ describe Gori::Prism do
   end
 end
 
+describe Gori::Prism, "WebSocket + Replay sources" do
+  it "fingerprints a WebSocket upgrade and includes the path in evidence" do
+    with_store do |store|
+      req_headers = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: chat\r\n"
+      head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+      detail = capture_flow(store, head, target: "/ws/chat", status: 101, content_type: nil,
+        req_headers: req_headers)
+      codes = codes_of(Gori::Prism::Passive.analyze(detail))
+      codes.should contain("tech_websocket")
+      det = Gori::Prism::Passive.analyze(detail).find!(&.code.==("tech_websocket"))
+      det.evidence.not_nil!.should contain("WebSocket")
+      det.evidence.not_nil!.should contain("/ws/chat")
+      det.evidence.not_nil!.should contain("chat")
+      store.upsert_prism_issue(det)
+      store.prism_tech_summary.should contain("WebSocket")
+    end
+  end
+
+  it "flags secrets in captured WebSocket text messages (type only, never the value)" do
+    with_store do |store|
+      head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+      detail = capture_flow(store, head, target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      secret = "AKIAIOSFODNN7EXAMPLE"
+      msgs = [
+        Gori::Store::WsMessage.new(1_i64, detail.row.id, nil, 1_i64, "in", 1, "token=#{secret}".to_slice),
+      ]
+      dets = Gori::Prism::Passive.analyze(detail, msgs)
+      hit = dets.find { |d| d.code == "secret_in_ws" }.not_nil!
+      hit.evidence.should eq("AWS access key id")
+      hit.evidence.not_nil!.should_not contain(secret)
+      # binary frames are ignored
+      bin = [Gori::Store::WsMessage.new(2_i64, detail.row.id, nil, 1_i64, "in", 2, secret.to_slice)]
+      Gori::Prism::Passive.analyze(detail, bin).map(&.code).should_not contain("secret_in_ws")
+    end
+  end
+
+  it "builds a FlowDetail from a ReplayRecord and passive-scans it" do
+    with_store do |store|
+      req = "GET /api HTTP/1.1\r\nHost: replay.test\r\n\r\n"
+      resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: nginx/1.25\r\n\r\n"
+      id = store.insert_replay("https://replay.test", req, false, true, nil, 0)
+      store.update_replay_response(id, resp.to_slice, "<html/>".to_slice, nil, 12_i64)
+      rec = store.get_replay(id).not_nil!
+      # get_replay may not load response blobs — use full replays list
+      rec = store.replays.find!(&.id.== id)
+      detail = Gori::Prism.detail_from_replay(rec).not_nil!
+      detail.row.host.should eq("replay.test")
+      detail.row.method.should eq("GET")
+      detail.row.status.should eq(200)
+      dets = Gori::Prism::Passive.analyze(detail).map { |d|
+        Gori::Prism.with_source(d, replay_id: id)
+      }
+      dets.map(&.code).should contain("tech_server")
+      dets.map(&.code).should contain("missing_csp")
+      dets.each { |d| store.upsert_prism_issue(d) }
+      issue = store.prism_issues.find!(&.code.==("tech_server"))
+      issue.sample_replay_id.should eq(id)
+      issue.sample_flow_id.should be_nil
+    end
+  end
+
+  it "skips Replay tabs with no response head" do
+    with_store do |store|
+      id = store.insert_replay("https://empty.test", "GET / HTTP/1.1\r\nHost: empty.test\r\n\r\n",
+        false, true, nil, 0)
+      rec = store.replays_meta.find!(&.id.== id)
+      Gori::Prism.detail_from_replay(rec).should be_nil
+    end
+  end
+end
+
 describe "Store bulk Prism dismiss" do
   it "mutes only OPEN issues matching the code/host, leaving already-triaged rows untouched" do
     with_store do |store|

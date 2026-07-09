@@ -480,7 +480,7 @@ module Gori
     PRISM_EVIDENCE_CAP = 12
 
     PRISM_COLS = "id, code, category, host, title, severity, status, hit_count, affected, " \
-                 "sample_flow_id, evidence, first_seen, last_seen"
+                 "sample_flow_id, evidence, first_seen, last_seen, sample_replay_id"
 
     # Group-merge upsert keyed by (code, host): a read-modify-write run INSIDE the writer
     # closure (atomic — the writer is the only writer), which a plain ON CONFLICT can't do
@@ -506,9 +506,10 @@ module Gori
             urls.to_json, new_sev, new_evidence, ts, id)
         else
           c.exec("INSERT INTO prism_issues (code, category, host, title, severity, status, hit_count, " \
-                 "affected, sample_flow_id, evidence, first_seen, last_seen) VALUES (?,?,?,?,?,0,1,?,?,?,?,?)",
+                 "affected, sample_flow_id, evidence, first_seen, last_seen, sample_replay_id) " \
+                 "VALUES (?,?,?,?,?,0,1,?,?,?,?,?,?)",
             d.code, d.category, d.host, d.title, d.severity.value,
-            [d.url].to_json, d.flow_id, d.evidence, ts, ts)
+            [d.url].to_json, d.flow_id, d.evidence, ts, ts, d.replay_id)
         end
         nil
       }
@@ -517,7 +518,7 @@ module Gori
     # Codes whose evidence is a TYPE label (not a one-off sample), so a (code, host)
     # group should list every distinct type seen rather than pin to the first.
     private def accumulate_evidence?(code : String) : Bool
-      code == "secret_in_body" || code == "error_stack_leak"
+      code == "secret_in_body" || code == "error_stack_leak" || code == "secret_in_ws"
     end
 
     # Union of distinct evidence labels for one issue group, ", "-joined and capped.
@@ -657,7 +658,7 @@ module Gori
         rs.read(Int64), rs.read(String), rs.read(String), rs.read(String), rs.read(String),
         Severity.new(rs.read(Int32)), Status.new(rs.read(Int32)), rs.read(Int64),
         parse_affected(rs.read(String)), rs.read(Int64?), rs.read(String?),
-        rs.read(Int64), rs.read(Int64))
+        rs.read(Int64), rs.read(Int64), rs.read(Int64?))
     end
 
     private def parse_affected(json : String) : Array(String)

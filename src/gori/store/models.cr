@@ -266,9 +266,11 @@ module Gori
       getter evidence : String?       # short snippet/header value/param name — NEVER a secret value
       getter first_seen : Int64       # unix micros
       getter last_seen : Int64
+      getter sample_replay_id : Int64? # representative Replay tab when the hit came from Replay
 
       def initialize(@id, @code, @category, @host, @title, @severity, @status, @hit_count,
-                     @affected, @sample_flow_id, @evidence, @first_seen, @last_seen)
+                     @affected, @sample_flow_id, @evidence, @first_seen, @last_seen,
+                     @sample_replay_id = nil)
       end
     end
 

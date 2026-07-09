@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 27
+      VERSION = 28
 
       # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
       # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
@@ -496,7 +496,13 @@ module Gori
         "CREATE INDEX idx_h2_frames_created ON h2_frames (created_at, conn_id)",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27]
+      # Prism issues can be sourced from a Replay tab (not only History). sample_replay_id
+      # is the first-seen Replay evidence link when there is no parent flow (or as a secondary).
+      V28 = [
+        "ALTER TABLE prism_issues ADD COLUMN sample_replay_id INTEGER",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

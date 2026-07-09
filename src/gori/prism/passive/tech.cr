@@ -20,8 +20,16 @@ module Gori
           req_ct = ctx.req.headers.get?("Content-Type")
           resp_ct = ctx.content_type
           resp = ctx.raw_response
-          if ctx.row.status == 101 && resp.try(&.headers.get?("Upgrade").try(&.downcase)) == "websocket"
-            acc << tech(ctx, "tech_websocket", "WebSocket endpoint")
+          if websocket?(ctx, resp)
+            path = websocket_path(ctx.req.target)
+            proto = ctx.req.headers.get?("Sec-WebSocket-Protocol").try(&.strip).presence
+            evidence = String.build do |io|
+              io << "WebSocket"
+              io << " " << path unless path.empty? || path == "/"
+              io << " (" << proto << ")" if proto
+            end
+            title = path.empty? || path == "/" ? "WebSocket endpoint" : "WebSocket endpoint #{path}"
+            acc << tech(ctx, "tech_websocket", title, evidence)
           end
           if Proxy::H2::Grpc.grpc?(req_ct) || Proxy::H2::Grpc.grpc?(resp_ct)
             acc << tech(ctx, "tech_grpc", "gRPC service")
@@ -31,6 +39,30 @@ module Gori
           if detail.http_version.starts_with?("HTTP/2") || !detail.h2_conn_id.nil?
             acc << tech(ctx, "tech_http2", "HTTP/2")
           end
+        end
+
+        # 101 Switching Protocols with Upgrade: websocket, or a request that asked for WS and
+        # got a matching upgrade response (covers slightly messy origins that omit/case-fold).
+        private def websocket?(ctx : Context, resp : Proxy::Codec::RawResponse?) : Bool
+          req_ws = ctx.req.headers.get?("Upgrade").try(&.downcase) == "websocket"
+          resp_ws = resp.try(&.headers.get?("Upgrade").try(&.downcase)) == "websocket"
+          status_ok = ctx.row.status == 101
+          (status_ok && (resp_ws || req_ws)) || (req_ws && resp_ws)
+        end
+
+        # Path-only form of the request target (strip query / absolute-form origin).
+        private def websocket_path(target : String) : String
+          t = target
+          if t.starts_with?("http://") || t.starts_with?("https://")
+            # absolute-form: keep path+query after authority
+            if slash = t.index('/', t.index("://").try(&.+(3)) || 0)
+              t = t[slash..]
+            else
+              t = "/"
+            end
+          end
+          qi = t.index('?')
+          qi ? t[0...qi] : t
         end
 
         # Response headers that name a framework/runtime (often with an exact version → a

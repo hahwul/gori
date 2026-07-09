@@ -1,4 +1,5 @@
 require "./rule"
+require "./secrets"
 
 module Gori
   module Prism
@@ -48,20 +49,8 @@ module Gori
           {/(?:\n|\A)Stack trace:\s*(?:\n|#\d)/, "stack trace"},
         ]
 
-        # High-confidence credential shapes leaked in a response body (anchored to keep FP low).
-        # The evidence is the credential TYPE — NEVER the matched value. {pattern, label}.
-        SECRET_PATTERNS = [
-          {/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/, "AWS access key id"},
-          {/\bAIza[0-9A-Za-z_\-]{35}\b/, "Google API key"},
-          {/\bgh[pousr]_[0-9A-Za-z]{36}\b/, "GitHub token"},
-          {/\bglpat-[0-9A-Za-z_\-]{20}\b/, "GitLab token"},
-          {/\bxox[baprs]-[0-9A-Za-z\-]{10,}/, "Slack token"},
-          # Stripe LIVE keys only (test keys aren't sensitive); the prefix is distinctive.
-          {/\b(?:sk|rk)_live_[0-9A-Za-z]{20,}\b/, "Stripe secret key"},
-          {/\bSG\.[\w\-]{16,}\.[\w\-]{16,}\b/, "SendGrid API key"},
-          {/\bnpm_[0-9A-Za-z]{36}\b/, "npm access token"},
-          {/-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/, "private key block"},
-        ]
+        # Alias for callers/tests that still reference BodyLeaks::SECRET_PATTERNS.
+        SECRET_PATTERNS = Secrets::PATTERNS
 
         # An active sub-resource (script/iframe) loaded over plain http on an https page —
         # genuine active mixed content (browsers block it; it signals an insecure dependency).
@@ -89,7 +78,7 @@ module Gori
           ERROR_SIGNATURES.each do |(pat, label)|
             acc << leak(ctx, "error_stack_leak", "Error/stack trace disclosed", Store::Severity::Medium, label) if pat.matches?(text)
           end
-          SECRET_PATTERNS.each do |(pat, label)|
+          Secrets::PATTERNS.each do |(pat, label)|
             acc << leak(ctx, "secret_in_body", "Credential/secret disclosed in response body", Store::Severity::High, label) if pat.matches?(text)
           end
           if ctx.html? && ctx.scheme == "https"
