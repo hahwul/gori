@@ -6,8 +6,8 @@ include Gori::Tui
 describe Gori::Tui::HelpView do
   it "renders the grouped shortcut sections" do
     view = HelpView.new
-    backend = MemoryBackend.new(90, 90) # tall enough for every row (grows as tabs are added)
-    view.render(Screen.new(backend), Rect.new(0, 0, 90, 90))
+    backend = MemoryBackend.new(100, 120) # tall enough for every row (grows as tabs are added)
+    view.render(Screen.new(backend), Rect.new(0, 0, 100, 120))
 
     backend.contains?("GLOBAL").should be_true
     backend.contains?("command palette").should be_true

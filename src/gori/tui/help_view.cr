@@ -9,7 +9,10 @@ module Gori::Tui
     # One rendered line: a section :head, a key/desc :item, or a blank :gap.
     record Row, kind : Symbol, a : String, b : String
 
-    KEY_W = 16 # left key column width before the description
+    # Left key column width + gap before the description. Long enough for labels like
+    # "palette / settings" / "Settings: Hotkeys" so they don't run into the desc text.
+    KEY_W = 20
+    KEY_GAP =  2
 
     # {section title, [{keys, description}, ...]} — the source of the rendered rows.
     SECTIONS = [
@@ -87,7 +90,8 @@ module Gori::Tui
         {"a · b", "pick flow A · flow B"},
         {"←/→", "compare requests ⟷ responses"},
         {"s", "swap A ⇄ B"},
-        {"Send to Comparer", "from History (space menu)"},
+        {"^N / ^W · r", "new / close / rename comparison sub-tab"},
+        {"Send to Comparer", "from History (space menu) — fills the active sub-tab"},
       ]},
       {"EDITORS", [
         {"^G · ^F", "go to line · find"},
@@ -164,8 +168,9 @@ module Gori::Tui
       when :head
         screen.text(rect.x + 1, y, row.a, Theme.accent, attr: Attribute::Bold, width: {rect.w - 2, 1}.max)
       when :item
-        screen.text(rect.x + 2, y, row.a, Theme.text_bright, width: {KEY_W, {rect.w - 3, 1}.max}.min)
-        dx = rect.x + 2 + KEY_W
+        kw = {KEY_W, {rect.w - 3 - KEY_GAP, 1}.max}.min
+        screen.text(rect.x + 2, y, row.a, Theme.text_bright, width: kw)
+        dx = rect.x + 2 + KEY_W + KEY_GAP
         screen.text(dx, y, row.b, Theme.muted, width: {rect.right - dx - 1, 1}.max) if dx < rect.right - 1
         # :gap → blank line
       end
@@ -191,8 +196,9 @@ module Gori::Tui
       LINKS.each_with_index do |(label, url), i|
         y = rect.y + 2 + i
         break if y >= rect.bottom
-        screen.text(rect.x + 2, y, label, Theme.text_bright, width: {KEY_W, {rect.w - 3, 1}.max}.min)
-        dx = rect.x + 2 + KEY_W
+        kw = {KEY_W, {rect.w - 3 - KEY_GAP, 1}.max}.min
+        screen.text(rect.x + 2, y, label, Theme.text_bright, width: kw)
+        dx = rect.x + 2 + KEY_W + KEY_GAP
         screen.text(dx, y, url, Theme.muted, width: {rect.right - dx - 1, 1}.max) if dx < rect.right - 1
       end
     end
