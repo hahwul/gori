@@ -181,39 +181,33 @@ module Gori::Tui
       @scroll = @scroll.clamp(0, max)
     end
 
-    # --- the "Links" sub-tab page ---------------------------------------------
-    # A small {label, url} table so more rows (issue tracker, docs, …) drop in
-    # here later without touching the renderer.
-    LINKS = [
-      {"GitHub", Gori::REPOSITORY_URL},
-    ]
+    # --- the "About" sub-tab page ---------------------------------------------
+    # Static centered brand block: same art as the project picker, plus version,
+    # author credit, and the repository URL (Links page removed — everything lives here).
+    ART_GAP = 1 # blank row between the art and the wordmark (mirrors ProjectPicker)
 
-    # Static (no scroll): a "LINKS" head + one row per link, reusing the same
-    # two-column key/desc layout idiom as draw_row so it lines up with Shortcuts.
-    def render_links(screen : Screen, rect : Rect) : Nil
+    def render_about(screen : Screen, rect : Rect) : Nil
       return if rect.empty?
-      screen.text(rect.x + 1, rect.y, "LINKS", Theme.accent, attr: Attribute::Bold, width: {rect.w - 2, 1}.max)
-      LINKS.each_with_index do |(label, url), i|
-        y = rect.y + 2 + i
-        break if y >= rect.bottom
-        kw = {KEY_W, {rect.w - 3 - KEY_GAP, 1}.max}.min
-        screen.text(rect.x + 2, y, label, Theme.text_bright, width: kw)
-        dx = rect.x + 2 + KEY_W + KEY_GAP
-        screen.text(dx, y, url, Theme.muted, width: {rect.right - dx - 1, 1}.max) if dx < rect.right - 1
+      # Text stack under the art: wordmark · version · blank · byline · github
+      text_h = 5
+      show_art = rect.h >= Brand::ART_H + ART_GAP + text_h + 1 && rect.w >= 32
+      block_h = show_art ? Brand::ART_H + ART_GAP + text_h : text_h
+      top = rect.y + {(rect.h - block_h) // 2, 0}.max
+
+      if show_art
+        Brand.draw_art(screen, Brand.art_origin_x(rect.x, rect.w), top)
+        top += Brand::ART_H + ART_GAP
       end
+
+      centered(screen, rect, top, "gori", Theme.accent, attr: Attribute::Bold)
+      centered(screen, rect, top + 1, "v#{Gori::VERSION}", Theme.text_bright)
+      centered(screen, rect, top + 3, Brand::BYLINE, Theme.muted) if top + 3 < rect.bottom
+      centered(screen, rect, top + 4, Gori::REPOSITORY_URL, Theme.muted) if top + 4 < rect.bottom
     end
 
-    # --- the "About" sub-tab page ---------------------------------------------
-    # Static, centered name + version. Future: an ASCII logo will sit above the
-    # version line (this block is the slot for it).
+    # Back-compat alias (HelpController used to call render_version).
     def render_version(screen : Screen, rect : Rect) : Nil
-      return if rect.empty?
-      lines = ["gori", "v#{Gori::VERSION}"]
-      top = rect.y + {(rect.h - lines.size) // 2, 0}.max
-      lines.each_with_index do |line, i|
-        centered(screen, rect, top + i, line, i == 0 ? Theme.accent : Theme.text_bright,
-          attr: i == 0 ? Attribute::Bold : Attribute::None)
-      end
+      render_about(screen, rect)
     end
 
     # Horizontally center `text` on row `y` within `rect` (mirrors ProjectPicker).

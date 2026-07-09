@@ -403,25 +403,16 @@ module Gori::Tui
     # painted when the terminal has rows/cols to spare (see `art_shown?`); short
     # screens fall back to the plain wordmark. Kept in sync with `brand_h` so the
     # card geometry reserves exactly these rows above the card.
-    BRAND_ART = [
-      "            ██    █",
-      "           █     █        █",
-      "            ████     ███████",
-      "         ██    ███        █",
-      "       █    ██          ██ █",
-      "      █  ██           ██  █",
-      "     █  █               █",
-      "     ██         █",
-      "      █ ████      ██ █",
-      "       ████████ █   ██",
-    ]
-    ART_H = BRAND_ART.size
+    # Shared with Help → About (see Brand). Aliased so the entrance timeline below
+    # keeps deriving from the same figure.
+    BRAND_ART = Brand::ART
+    ART_H     = Brand::ART_H
     # Ink extent of the art: leftmost stroke column and inked width. Centering
     # uses these — not raw line widths — so the visible figure (rather than its
     # leading indentation) is what centres over the wordmark; raw-width centering
     # pushed the figure a few cells right of the wordmark's optical centre.
-    ART_LEFT  = BRAND_ART.min_of { |line| line.size - line.lstrip.size }
-    ART_INK_W = BRAND_ART.max_of(&.rstrip.size) - ART_LEFT
+    ART_LEFT  = Brand::ART_LEFT
+    ART_INK_W = Brand::ART_INK_W
 
     # Entrance effect — three phases on one frame clock (~50 ms/frame, the idle poll):
     #   1. Wave reveal: a diagonal front (top-left → bottom-right) materialises the
@@ -456,7 +447,7 @@ module Gori::Tui
     # little breathing room instead of sitting flush on the text.
     ART_GAP = 1
     # The strapline under the wordmark (fades in last during the entrance).
-    TAGLINE = "free · open-source · human in the driver's seat"
+    TAGLINE = Brand::TAGLINE
 
     # The art is a nicety, not load-bearing — only show it when the terminal is
     # tall enough to keep a usable project list beneath this taller logo and wide

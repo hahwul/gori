@@ -31,22 +31,17 @@ describe Gori::Tui::HelpView do
     view.at_top?.should be_false
   end
 
-  it "renders the Links page with the GitHub repository URL" do
+  it "renders the About page with brand art, version, author, and GitHub URL" do
     view = HelpView.new
-    backend = MemoryBackend.new(90, 20)
-    view.render_links(Screen.new(backend), Rect.new(0, 0, 90, 20))
-
-    backend.contains?("LINKS").should be_true
-    backend.contains?("GitHub").should be_true
-    backend.contains?(Gori::REPOSITORY_URL).should be_true
-  end
-
-  it "renders the About page with the centered version" do
-    view = HelpView.new
-    backend = MemoryBackend.new(90, 20)
-    view.render_version(Screen.new(backend), Rect.new(0, 0, 90, 20))
+    backend = MemoryBackend.new(80, 40)
+    view.render_about(Screen.new(backend), Rect.new(0, 0, 80, 40))
 
     backend.contains?("gori").should be_true
     backend.contains?("v#{Gori::VERSION}").should be_true
+    backend.contains?("hahwul").should be_true
+    backend.contains?("Hwan Lee").should be_true
+    backend.contains?(Gori::REPOSITORY_URL).should be_true
+    # Same ink as the project-picker brand mark (a few solid blocks).
+    backend.contains?("█").should be_true
   end
 end

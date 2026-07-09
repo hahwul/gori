@@ -2,15 +2,15 @@ require "../tab_controller"
 require "../help_view"
 
 module Gori::Tui
-  # The Help tab: three read-only sub-tabs sharing one strip — Shortcuts (the
-  # scrollable cheat-sheet), Links (project URLs), About (version, later a logo).
+  # The Help tab: two read-only sub-tabs sharing one strip — Shortcuts (the
+  # scrollable cheat-sheet) and About (brand art, version, author, GitHub).
   # Unlike Replay/Notes the set is FIXED: no create/close/rename. The strip, focus
   # routing, ←/→, ^1-9 and click hit-testing all come free from the runner's shared
   # sub-tab machinery once we expose subtab_labels; we add only the page renderers.
   class HelpController < TabController
     # The fixed sub-tab strip. Index 0 (Shortcuts) is the default landing page,
     # preserving the tab's original behaviour.
-    PAGE_LABELS = ["Shortcuts", "Links", "About"]
+    PAGE_LABELS = ["Shortcuts", "About"]
 
     @current : Int32 = 0
 
@@ -52,10 +52,10 @@ module Gori::Tui
       focused = focus == :body
       shell = BodyChrome.shell_focused(focus, multi_pane: false)
       @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, PAGE_LABELS, @current, @subtab_start) do |content|
-        case @current
-        when 1 then @help.render_links(screen, content)
-        when 2 then @help.render_version(screen, content)
-        else        @help.render(screen, content, focused: focused) # Shortcuts
+        if @current == 1
+          @help.render_about(screen, content)
+        else
+          @help.render(screen, content, focused: focused) # Shortcuts
         end
       end
     end
