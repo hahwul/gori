@@ -80,7 +80,9 @@ gori export ca-cert                  # print the certificate path
 gori export ca-cert --ca-dir /path   # use a custom CA directory
 ```
 
-You can rotate the CA from the TUI command palette (**Regenerate CA certificate**) — this is confirm-gated because it invalidates all previously issued trust. The palette can also open a browser pre-trusting the CA and routed through the proxy.
+You can rotate the CA from the TUI command palette (**Regenerate CA certificate**) — this is confirm-gated because it invalidates all previously issued trust.
+
+The palette's **Open browser** action launches an installed browser with an isolated profile that already trusts the CA and routes through the proxy — the fastest path on a fresh machine (see the [Quick Start](/getting-started/quick-start/)).
 
 ## Full Reference
 

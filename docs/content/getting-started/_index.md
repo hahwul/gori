@@ -3,14 +3,16 @@ title = "Getting Started"
 description = "Install gori, trust its CA, and capture your first request."
 +++
 
-Welcome to gori. This section takes you from a clean machine to a live proxy session with traffic flowing into the TUI.
+Welcome to gori. This section takes you from a clean machine to a live proxy session — traffic in History, a few Day-1 keys under your fingers, and a first Replay.
 
 ## What You'll Learn
 
 1. How to install and build gori
-2. Starting the proxy and trusting the root CA
-3. Capturing and inspecting your first flows
-4. Where gori stores its data and how to configure it
+2. Starting the proxy and trusting the root CA (including a pre-trusted browser)
+3. Capturing, filtering, and inspecting your first flows
+4. The two discovery surfaces: command palette (`Ctrl-P`) and space menu (`Space`)
+5. Sending a flow to Replay / Fuzzer and running one send
+6. Where gori stores its data and how to configure it
 
 ## What Is gori?
 
@@ -21,5 +23,5 @@ It understands **HTTP/1.1, HTTP/2, WebSocket, gRPC, and Server-Sent Events**, an
 ## Next Steps
 
 - [Installation](/getting-started/installation/) — build gori from source
-- [Quick Start](/getting-started/quick-start/) — capture your first request
+- [Quick Start](/getting-started/quick-start/) — capture, keys, and your first Replay
 - [Configuration](/getting-started/configuration/) — settings, storage, and the CA

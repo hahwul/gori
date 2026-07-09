@@ -17,6 +17,7 @@ gori [command] [options]
 | `export` | Export the root CA certificate |
 | `settings` | Show or edit `settings.json` |
 | `wizard` | Interactive first-run setup |
+| `tutorial` | Guided TUI tour (navigation, palette, space menu, edit mode) |
 | `update` | Show how to update gori |
 
 Global flags: `-v` / `--version`, `-h` / `--help`.
@@ -200,6 +201,14 @@ gori wizard
 ```
 
 Runs the interactive setup (proxy bind address, then theme). Also runs automatically on first launch.
+
+## gori tutorial
+
+```bash
+gori tutorial
+```
+
+Interactive tour of the TUI on a mock UI: tab/pane navigation, the command palette (`Ctrl-P`), the space menu (`Space`), and READ/INS edit mode. Offered at the end of `gori wizard`; safe to re-run anytime without a live proxy session. See the [Quick Start](/getting-started/quick-start/).
 
 ## gori update
 

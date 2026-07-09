@@ -16,7 +16,7 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 
 ## The Interface at a Glance
 
-gori is organized into tabs; move between them with `[` / `]` or jump with number keys. `Ctrl-P` opens the command palette, which can reach every action and setting.
+gori is organized into tabs; move between them with `[` / `]` or jump with number keys. Two discovery surfaces cover almost everything: `Ctrl-P` opens the **command palette** (app-wide), and `Space` opens the **space menu** (actions for the focused pane). Day-1 chords live in the [Quick Start](/getting-started/quick-start/).
 
 | Tab | Purpose |
 |-----|---------|

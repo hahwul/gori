@@ -107,12 +107,13 @@ module Gori::Tui
     end
 
     # On the tab bar: ←/→ (h/l) switch tabs, ↓/↵ (j) descend into the body.
+    # ([ / ] are global in the real app; this mock keeps the bar-scoped arrows.)
     private def practice_menu_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
-      if key.left? || ev.char == 'h'
+      if key.left? || ev.char == 'h' || ev.char == '['
         @p_tab = (@p_tab - 1) % TABS.size
         @p_switch = true
-      elsif key.right? || ev.char == 'l'
+      elsif key.right? || ev.char == 'l' || ev.char == ']'
         @p_tab = (@p_tab + 1) % TABS.size
         @p_switch = true
       elsif key.down? || key.enter? || ev.char == 'j'
@@ -121,7 +122,8 @@ module Gori::Tui
       end
     end
 
-    # In the body: ↑ (k) back up to the tab bar, ⇥ cycle panes (bonus, not required).
+    # In the body: esc (via practice_escape) is the primary "back to tabs"; ↑ (k)
+    # also counts (real lists pop at the top). ⇥ cycles panes (bonus, not required).
     private def practice_body_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.up? || ev.char == 'k'
@@ -251,7 +253,7 @@ module Gori::Tui
       hint = case @step
              when Step::Welcome  then "↵ start · esc skip"
              when Step::Done     then "↵ finish"
-             when Step::Practice then practice_done? ? "✓ ↵ finish · esc skip" : "arrow keys move · ⇥ panes · esc skip"
+             when Step::Practice then practice_done? ? "✓ ↵ finish · esc skip" : "←/→ · ↓ · esc (or ↑) · ⇥ panes"
              else                     "↵ next · ⇧⇥ back · esc skip"
              end
       screen.text({(w - hint.size) // 2, 0}.max, h - 1, hint, Theme.muted, Theme.bg)
@@ -284,20 +286,23 @@ module Gori::Tui
       ix = box.x + 2
       iw = {box.w - 4, 1}.max
       y = box.y + 2
-      screen.text(ix, y, "The arrow keys roam everywhere — no Enter needed.", Theme.text_bright, Theme.panel, width: iw)
+      screen.text(ix, y, "The arrow keys roam the shell — no mouse required.", Theme.text_bright, Theme.panel, width: iw)
       y += 1
-      screen.text(ix, y, "←/→ switch tab · ↓ into the body · ↑ back to tabs · ⇥ cycle panes · 1-9 jump",
+      # Real app: ←/→ on the tab bar, [ / ] from anywhere, esc (not only ↑) back to tabs.
+      screen.text(ix, y, "←/→ on the bar · [ / ] cycle tabs anywhere · 1-9 jump",
+        Theme.muted, Theme.panel, width: iw)
+      y += 1
+      screen.text(ix, y, "↓ or ↵ into the body · esc back to tabs · ⇥ cycle panes",
         Theme.muted, Theme.panel, width: iw)
       y += 2
 
       shell = Rect.new(box.x + 2, y, box.w - 4, {box.bottom - 1 - y, 3}.max)
-      # A 5-phase loop showing arrows roam both axes: → switch tab, ↓ into the body,
-      # ⇥ cycle panes, ↑ back to the tab bar, then repeat.
+      # A 5-phase loop: → switch tab, ↓ into the body, ⇥ cycle panes, esc back to tabs.
       phase = (@tick // 12) % 5
       active = phase == 0 ? 0 : 1 # → moved History → Replay
       in_body = phase == 2 || phase == 3
       pane = phase == 3 ? 1 : 0 # ⇥ moved FLOWS → REQUEST
-      keyhint = ["", "→", "↓", "⇥", "↑"][phase]
+      keyhint = ["", "→", "↓", "⇥", "esc"][phase]
       render_shell(screen, shell, active, in_body, pane, keyhint)
     end
 
@@ -372,17 +377,18 @@ module Gori::Tui
       ix = box.x + 2
       iw = {box.w - 4, 1}.max
       y = box.y + 2
-      screen.text(ix, y, "Now you try! Roam this mock with the arrow keys.", Theme.text_bright, Theme.panel, width: iw)
+      screen.text(ix, y, "Now you try! Switch a tab, enter the body, then esc back.", Theme.text_bright, Theme.panel, width: iw)
       y += 1
       gx = draw_goal(screen, ix, y, "switch tab", @p_switch)
       gx = draw_goal(screen, gx + 3, y, "enter ↓", @p_enter)
-      draw_goal(screen, gx + 3, y, "back ↑", @p_up)
+      draw_goal(screen, gx + 3, y, "back esc", @p_up)
       y += 2
 
       shell = Rect.new(box.x + 2, y, box.w - 4, {box.bottom - 2 - y, 3}.max)
       render_shell(screen, shell, @p_tab, @p_level == :body, @p_pane, "")
 
-      msg = practice_done? ? "✓ Nicely done — press ↵ to finish the tour." : "Try: ←/→ , then ↓ , then ↑."
+      # Real app: esc is the reliable "back to tabs"; ↑ at a list top also works (practice accepts both).
+      msg = practice_done? ? "✓ Nicely done — press ↵ to finish the tour." : "Try: ←/→ , then ↓ , then esc (or ↑)."
       screen.text(ix, box.bottom - 2, msg, practice_done? ? Theme.green : Theme.muted, Theme.panel, width: iw)
     end
 
@@ -400,7 +406,7 @@ module Gori::Tui
       screen.text(ix, y, "That's the tour — you're ready to drive gori.", Theme.text_bright, Theme.panel, width: iw)
       y += 2
       [
-        {"move", "arrow keys: ←/→ tab · ↓ enter · ↑ back · ⇥ panes"},
+        {"move", "←/→ tab · [ / ] anywhere · ↓ enter · esc back · ⇥ panes"},
         {"palette", "^P — app-wide commands"},
         {"menu", "space — actions for the focused area"},
         {"edit", "i/↵ to type (INS) · esc back to READ"},
@@ -410,7 +416,10 @@ module Gori::Tui
         y += 1
       end
       y += 1
-      screen.text(ix, y, "Open the Help tab anytime for the full cheat-sheet.", Theme.muted, Theme.panel, width: iw)
+      # Bridge to the real session — this tour never starts the proxy.
+      screen.text(ix, y, "Next: run gori, capture a flow, then ^R in History to Replay.", Theme.text, Theme.panel, width: iw)
+      y += 1
+      screen.text(ix, y, "Help tab has the full cheat-sheet.", Theme.muted, Theme.panel, width: iw)
     end
 
     # --- mock UI -------------------------------------------------------------
