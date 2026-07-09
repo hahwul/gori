@@ -429,6 +429,13 @@ module Gori::Tui
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
       return true unless v = current_view
+      # Border chips/badges consume the click (no caret move) — same toggles as keys.
+      if chip = v.chrome_hit(body, mx, my)
+        save_current_replay
+        @host.focus_body
+        apply_chrome_click(v, chip)
+        return true
+      end
       if pane = v.pane_at(body, mx, my)
         save_current_replay
         v.focus_pane(pane)
@@ -443,6 +450,34 @@ module Gori::Tui
         end
       end
       true
+    end
+
+    # Map a ReplayView#chrome_hit id onto the same controller methods keyboard verbs use
+    # (toasts, guards for hex/MARK, host-level pretty).
+    private def apply_chrome_click(view : ReplayView, chip : Symbol) : Nil
+      case chip
+      when :diff
+        view.focus_pane(:response)
+        view.toggle_resp_mode
+      when :hex
+        view.focus_pane(:response)
+        view.toggle_resp_hex
+      when :pretty
+        view.focus_pane(:response)
+        @host.toggle_pretty
+      when :cl
+        view.focus_pane(:request)
+        replay_toggle_auto_content_length
+      when :mark
+        view.focus_pane(:request)
+        replay_toggle_mark_transform
+      when :pretty_req
+        view.focus_pane(:request)
+        replay_pretty_request
+      when :req_hex
+        view.focus_pane(:request)
+        replay_toggle_hex
+      end
     end
 
     def handle_wheel(step : Int32) : Bool

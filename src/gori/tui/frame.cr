@@ -101,5 +101,38 @@ module Gori::Tui
       screen.text(x, y, text, on ? Theme.text_bright : Theme.muted, on ? Theme.accent_bg : Theme.bg)
       x
     end
+
+    # Hit-test for a left-to-right run of `Frame.chip` labels. `chips` is
+    # `{id, label}` in draw order; each chip is followed by a 1-col gap (matching
+    # the `+ 1` callers use after `Frame.chip`). Miss → nil. Pure geometry — no Screen.
+    def self.left_chip_hit(mx : Int32, my : Int32, y : Int32, start_x : Int32,
+                           chips : Array({Symbol, String})) : Symbol?
+      return nil if my != y
+      x = start_x
+      chips.each do |(id, label)|
+        return id if mx >= x && mx < x + label.size
+        x += label.size + 1
+      end
+      nil
+    end
+
+    # Hit-test for a right-chained `Frame.toggle_badge` run. `badges` is
+    # `{id, chord, name}` in **right-to-left** order (first entry is rightmost,
+    # matching successive `toggle_badge` calls that pass the previous return as
+    # the next right_edge). Labels are `" #{chord}:#{name} "`. A badge that
+    # would sit left of `min_x` is skipped (same as draw). Miss → nil.
+    def self.right_badge_hit(mx : Int32, my : Int32, y : Int32, right_edge : Int32, min_x : Int32,
+                             badges : Array({Symbol, String, String})) : Symbol?
+      return nil if my != y
+      edge = right_edge
+      badges.each do |(id, chord, name)|
+        text = " #{chord}:#{name} "
+        x = edge - text.size
+        break if x < min_x
+        return id if mx >= x && mx < x + text.size
+        edge = x
+      end
+      nil
+    end
   end
 end

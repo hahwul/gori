@@ -383,6 +383,16 @@ module Gori::Tui
       @out_dirty = true # re-encode the output for the new mode
     end
 
+    # Hit-test the OUTPUT card's ` ^X:MODE ` badge (same geometry as render_output_card).
+    def output_mode_hit(card : Rect, mx : Int32, my : Int32, result : Convert::ChainResult) : Bool
+      return false if card.w < 2 || my != card.y
+      name, _ = out_mode_badge
+      min_x = card.x + output_header(result).size + 4
+      !Frame.right_badge_hit(mx, my, card.y, card.right - 1, min_x, [
+        {:mode, "^X", name},
+      ] of {Symbol, String, String}).nil?
+    end
+
     def scroll_output(step : Int32) : Nil
       @out_scroll += step
     end

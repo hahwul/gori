@@ -231,3 +231,91 @@ describe "ReplayView#pane_at" do
     view.pane_at(rect, rect.right - 2, content_y).should eq(:response) # right half
   end
 end
+
+describe "Frame.left_chip_hit / right_badge_hit" do
+  it "maps left-run chip labels with a 1-col gap between them" do
+    chips = [{:diff, " d:diff "}, {:hex, " x:hex "}, {:pretty, " p:pretty "}] of {Symbol, String}
+    y = 5
+    sx = 10
+    # " d:diff " is 8 cols → [10,18); gap at 18; " x:hex " [19,26); gap; " p:pretty " [27,37)
+    Frame.left_chip_hit(10, y, y, sx, chips).should eq(:diff)
+    Frame.left_chip_hit(17, y, y, sx, chips).should eq(:diff)
+    Frame.left_chip_hit(18, y, y, sx, chips).should be_nil # the 1-col gap
+    Frame.left_chip_hit(19, y, y, sx, chips).should eq(:hex)
+    Frame.left_chip_hit(27, y, y, sx, chips).should eq(:pretty)
+    Frame.left_chip_hit(10, y + 1, y, sx, chips).should be_nil # wrong row
+  end
+
+  it "maps right-chained badges right-to-left and skips ones past min_x" do
+    # Rightmost first (matches successive toggle_badge calls).
+    badges = [{:cl, "^L", "CL"}, {:mark, "^K", "MARK"}, {:pretty_req, "^U", "PRETTY"}] of {Symbol, String, String}
+    y = 3
+    right = 40
+    # " ^L:CL " = 7 → [33,40); " ^K:MARK " = 9 → [24,33); " ^U:PRETTY " = 11 → [13,24)
+    Frame.right_badge_hit(35, y, y, right, 0, badges).should eq(:cl)
+    Frame.right_badge_hit(28, y, y, right, 0, badges).should eq(:mark)
+    Frame.right_badge_hit(15, y, y, right, 0, badges).should eq(:pretty_req)
+    Frame.right_badge_hit(12, y, y, right, 0, badges).should be_nil
+    # min_x that clips the leftmost badge(s)
+    Frame.right_badge_hit(15, y, y, right, 20, badges).should be_nil # PRETTY would start at 13 < 20
+    Frame.right_badge_hit(28, y, y, right, 20, badges).should eq(:mark)
+  end
+end
+
+describe "ReplayView#chrome_hit" do
+  it "hits response d/x/p chips and request CL/MARK/PRETTY badges on the border row" do
+    view = ReplayView.new
+    view.load_blank
+    rect = Rect.new(0, 0, 100, 24)
+    view.render(Screen.new(MemoryBackend.new(100, 24)), rect, focused: false)
+
+    target_h = {rect.h, 3}.min
+    content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+    half = {(content.w - 1) // 2, 1}.max
+    resp = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
+    req = Rect.new(content.x, content.y, half, content.h)
+
+    # RESPONSE chips start at resp.x + 12
+    view.chrome_hit(rect, resp.x + 12, resp.y).should eq(:diff)
+    view.chrome_hit(rect, resp.x + 12 + 9, resp.y).should eq(:hex) # past " d:diff " + gap
+    view.chrome_hit(rect, resp.x + 12 + 9 + 8, resp.y).should eq(:pretty)
+
+    # REQUEST right-chain: rightmost is CL (" ^L:CL " ends at req.right - 1)
+    cl_label = " ^L:CL "
+    cl_x = (req.right - 1) - cl_label.size
+    view.chrome_hit(rect, cl_x + 1, req.y).should eq(:cl)
+    mark_label = " ^K:MARK "
+    mark_x = cl_x - mark_label.size
+    view.chrome_hit(rect, mark_x + 1, req.y).should eq(:mark)
+
+    # Body click (not on border chrome) → nil so caret path still runs
+    view.chrome_hit(rect, resp.x + 2, resp.y + 2).should be_nil
+  end
+end
+
+describe "InterceptView#bar_zone_at" do
+  it "maps i:CATCH / direction / condition to separate zones" do
+    view = InterceptView.new
+    rect = Rect.new(0, 0, 80, 1)
+    # " i:CATCH " at x+1 (cols 1..9), then gap, then "c:ALL" (default)
+    view.bar_zone_at(rect, 2, 0).should eq(:catch)
+    view.bar_zone_at(rect, 1 + " i:CATCH ".size + 1, 0).should eq(:direction) # start of c:ALL
+    view.bar_zone_at(rect, 40, 0).should eq(:condition)
+    view.bar_zone_at(rect, 2, 1).should be_nil # off the bar row
+  end
+end
+
+describe "ComparerView#pane_chip_at" do
+  it "hits REQ / RES chips on the divider row" do
+    view = ComparerView.new
+    rect = Rect.new(0, 0, 80, 10)
+    # geometry: sx = right - ("←/→ ".dw + 10) - 1; chips after the hint
+    hint = "←/→ "
+    total = Screen.display_width(hint) + 10
+    sx = rect.right - total - 1
+    start = sx + Screen.display_width(hint)
+    view.pane_chip_at(rect, start, rect.y + 1).should eq(:request)
+    view.pane_chip_at(rect, start + 6, rect.y + 1).should eq(:response) # past " REQ " + gap
+    view.pane_chip_at(rect, start, rect.y).should be_nil                # header row, not divider
+  end
+end

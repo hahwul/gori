@@ -443,6 +443,18 @@ module Gori::Tui
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
       return true unless v = current_view
+      # RESULTS border badges (DIST / MATCH / sort) before row select.
+      if chip = v.results_chrome_hit(body, mx, my)
+        save_current
+        @host.focus_body
+        v.focus_pane(:results)
+        case chip
+        when :dist  then @host.status(v.toggle_dist)
+        when :match then @host.status(v.toggle_matched_only)
+        when :sort  then @host.status(v.cycle_sort)
+        end
+        return true
+      end
       return true unless pane = v.pane_at(body, mx, my)
       save_current
       @host.focus_body

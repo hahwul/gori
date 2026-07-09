@@ -1919,6 +1919,26 @@ module Gori::Tui
       Rect.new(bottom.x, bottom.y, rw, bottom.h)
     end
 
+    # Hit-test RESULTS border badges (v:DIST / m:MATCH / o:sort). Geometry matches
+    # render_results: count text at x+11, badges right-chained from right_edge with
+    # min_x past the count. Miss → nil (caller falls through to row select).
+    def results_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil unless pane = results_rect(rect)
+      return nil if pane.w < 2 || my != pane.y
+      count = if @running
+                p = @progress
+                "running #{p ? p.sent : 0}/#{@run_total || "?"} · #{matched_count} hit"
+              else
+                "#{result_count} sent · #{matched_count} hit"
+              end
+      min_x = pane.x + 11 + count.size + 1
+      Frame.right_badge_hit(mx, my, pane.y, pane.right - 1, min_x, [
+        {:dist, "v", "DIST"},
+        {:match, "m", "MATCH"},
+        {:sort, "o", @sort.to_s},
+      ] of {Symbol, String, String})
+    end
+
     def pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil unless @loaded && rect.contains?(mx, my)
       target_h = {rect.h, 3}.min

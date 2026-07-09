@@ -288,15 +288,21 @@ module Gori::Tui
       {left, right}
     end
 
-    # Which catch direction (if any) the filter-bar click landed on: :direction (the
-    # catch chip), :condition (the rest of the bar), else nil. Only on the bar row and
-    # only while NOT editing the condition (then the bar is a plain input line).
+    # Filter-bar click zones, matching render_filter_bar left-to-right:
+    #   " i:CATCH " chip → :catch
+    #   direction label (c:ALL / c:REQ / c:RES) → :direction
+    #   rest of the bar → :condition (start query edit)
+    # Nil while the bar is an input line (@querying) or off the bar row.
     def bar_zone_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if @querying || my != rect.y
-      label, _ = direction_chip
-      cx = rect.x + 1
-      return :direction if mx >= cx && mx < cx + label.size
-      mx < rect.right ? :condition : nil
+      return nil if mx < rect.x || mx >= rect.right
+      catch_label = " i:CATCH "
+      x = rect.x + 1
+      return :catch if mx >= x && mx < x + catch_label.size
+      x += catch_label.size + 1 # render: Frame.chip(...) + 1
+      dir_label, _ = direction_chip
+      return :direction if mx >= x && mx < x + dir_label.size
+      :condition
     end
 
     # Which pane a click landed in: :list (left queue), :detail (right editor),

@@ -128,6 +128,29 @@ module Gori::Tui
       invalidate
     end
 
+    # Jump straight to a half (mouse chip); no-op when already there.
+    def set_pane(pane : Symbol) : Nil
+      return unless pane == :request || pane == :response
+      return if @pane == pane
+      @pane = pane
+      @scroll = 0
+      invalidate
+    end
+
+    # Hit-test the REQ / RES chips on the divider row (render_pane_selector geometry).
+    def pane_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if rect.h <= 2 || my != rect.y + 1
+      hint = "←/→ "
+      total = Screen.display_width(hint) + 10 # " REQ " + " RES "
+      sx = rect.right - total - 1
+      return nil if sx <= rect.x + 1
+      start = sx + Screen.display_width(hint)
+      Frame.left_chip_hit(mx, my, rect.y + 1, start, [
+        {:request, " REQ "},
+        {:response, " RES "},
+      ] of {Symbol, String})
+    end
+
     def both_set? : Bool
       !@slot_a.nil? && !@slot_b.nil?
     end

@@ -199,7 +199,11 @@ module Gori::Tui
       inner = rect.inset(1, 1)                        # framed insets 1,1
       if zone = @intercept.bar_zone_at(inner, mx, my) # click the top filter bar
         @host.focus_body
-        zone == :direction ? intercept_cycle_direction : intercept_query
+        case zone
+        when :catch     then intercept_toggle
+        when :direction then intercept_cycle_direction
+        else                 intercept_query
+        end
         return true
       end
       return true unless pane = @intercept.pane_at(inner, mx, my)

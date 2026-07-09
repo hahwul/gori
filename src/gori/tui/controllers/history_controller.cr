@@ -72,6 +72,13 @@ module Gori::Tui
       if @host.overlay == :detail
         if pane = @history.detail_pane_at(inner, mx, my)
           @history.set_detail_pane_public(pane)
+        elsif mode = @history.detail_mode_at(inner, mx, my)
+          @host.focus_body
+          case mode
+          when :hex    then @history.toggle_detail_hex
+          when :ws     then @host.toggle_reveal
+          when :pretty then @host.toggle_pretty
+          end
         elsif my >= inner.y + 2
           body = Rect.new(inner.x + 1, inner.y + 2, {inner.w - 2, 0}.max, {inner.bottom - (inner.y + 2), 0}.max)
           @host.focus_body

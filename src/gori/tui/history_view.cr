@@ -1072,13 +1072,46 @@ module Gori::Tui
       nil
     end
 
-    # The mode indicator + active toggle hints on the detail pane's top line. Hoisted
-    # out of render_detail to keep that method under the cyclomatic ceiling.
-    private def detail_mode_hint(hex : Bool, ws : Bool, dv : DetailView) : String
-      return "HEX · x:text" if hex
-      return "RAW · b:raw" if ws
-      return "BINARY · x:hex" if dv.binary # reveal / pretty don't apply to a binary placeholder
-      dv.pretty ? "PRETTY · x:hex · b:ws · p:raw" : "RAW · x:hex · b:ws · p:pretty"
+    # Mode chips after the pane strip + status word (x:hex / b:ws / p:pretty).
+    # Geometry matches render_detail. Miss → nil.
+    def detail_mode_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil if @detail.nil? || my != rect.y
+      x = rect.x + 1
+      detail_panes.each do |pane|
+        x += detail_pane_label(pane).size + 2 + 1
+      end
+      hex = detail_hex?(@detail.not_nil!)
+      dv = detail_view
+      ws = @reveal && !hex && !dv.binary
+      # status word + 1-col gap, then chips (same as render)
+      start = x + 1 + detail_mode_status(hex, ws, dv).size + 1
+      chips = detail_mode_chips(hex, ws, dv).map { |(id, label, _)| {id, label} }
+      Frame.left_chip_hit(mx, my, rect.y, start, chips)
+    end
+
+    # Compact mode word shown before the toggle chips (and asserted by specs).
+    private def detail_mode_status(hex : Bool, ws : Bool, dv : DetailView) : String
+      return "HEX" if hex
+      return "RAW" if ws
+      return "BINARY" if dv.binary
+      dv.pretty ? "PRETTY" : "RAW"
+    end
+
+    # Mode toggle chips for the detail strip: {id, label, lit}.
+    private def detail_mode_chips(hex : Bool, ws : Bool, dv : DetailView) : Array({Symbol, String, Bool})
+      if hex
+        [{:hex, " x:text ", true}] of {Symbol, String, Bool}
+      elsif ws
+        [{:ws, " b:raw ", true}] of {Symbol, String, Bool}
+      elsif dv.binary
+        [{:hex, " x:hex ", false}] of {Symbol, String, Bool}
+      else
+        [
+          {:hex, " x:hex ", false},
+          {:ws, " b:ws ", false},
+          {:pretty, dv.pretty ? " p:raw " : " p:pretty ", dv.pretty},
+        ] of {Symbol, String, Bool}
+      end
     end
 
     def render_detail(screen : Screen, rect : Rect, focused : Bool = true) : Nil
@@ -1105,7 +1138,12 @@ module Gori::Tui
       # cursor-desync corruption the placeholder exists to avoid. Pretty likewise n/a.
       ws = @reveal && !hex && !dv.binary
       nav = detail_navigable? ? "↑/↓ · ⇧sel · y" : "↑/↓ scroll"
-      screen.text(x + 1, rect.y, "#{detail_mode_hint(hex, ws, dv)} · #{nav} · ⇧←/→ · space · esc", Theme.muted)
+      # Status word + mode toggle chips (mouse + same chords as keys), then muted nav.
+      x = screen.text(x + 1, rect.y, detail_mode_status(hex, ws, dv), Theme.muted) + 1
+      detail_mode_chips(hex, ws, dv).each do |(_, label, lit)|
+        x = Frame.chip(screen, x, rect.y, label, lit) + 1
+      end
+      screen.text(x + 1, rect.y, "· #{nav} · ⇧←/→ · space · esc", Theme.muted)
       Frame.inner_divider(screen, rect, rect.y + 1, border: Frame.pane_border(focused))
 
       body = Rect.new(rect.x + 1, rect.y + 2, {rect.w - 2, 0}.max, {rect.bottom - (rect.y + 2), 0}.max)

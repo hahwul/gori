@@ -288,7 +288,12 @@ module Gori::Tui
       elsif regions.output.contains?(mx, my)
         s.pane = :output
         @popup.close
-        s.view.output_click_to_cursor(regions.output.inset(1, 1), mx, my, s.result)
+        # Border ` ^X:MODE ` badge cycles display mode (same as ^X); don't move caret.
+        if s.view.output_mode_hit(regions.output, mx, my, s.result)
+          cycle_output_mode
+        else
+          s.view.output_click_to_cursor(regions.output.inset(1, 1), mx, my, s.result)
+        end
       end
       true
     end

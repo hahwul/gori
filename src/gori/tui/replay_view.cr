@@ -1223,6 +1223,63 @@ module Gori::Tui
       mx >= content.x + half + 1 ? :response : nil
     end
 
+    # Border-chrome hit-test for REQUEST/RESPONSE toggle chips. Shares geometry with
+    # render_request / render_response_chrome (label strings + start_x / right chain).
+    # Returns a chip id, or nil so the caller can fall through to caret placement.
+    def chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil unless @loaded && rect.contains?(mx, my)
+      target_h = {rect.h, target_card_h}.min
+      content = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      return nil if content.h <= 0
+      half = {(content.w - 1) // 2, 1}.max
+      left = Rect.new(content.x, content.y, half, content.h)
+      right = Rect.new(content.x + half + 1, content.y, {content.w - half - 1, 0}.max, content.h)
+
+      # RESPONSE: d:diff / x:hex / p:pretty (not drawn in WS/gRPC transcript modes)
+      unless @ws_mode || @grpc_mode
+        if right.w >= 2 && my == right.y
+          if hit = Frame.left_chip_hit(mx, my, right.y, right.x + 12, [
+               {:diff, " d:diff "},
+               {:hex, " x:hex "},
+               {:pretty, " p:pretty "},
+             ] of {Symbol, String})
+            return hit
+          end
+        end
+      end
+
+      # REQUEST badges: CL / MARK / PRETTY (or HEX when hex-editing). Skip modes that
+      # don't draw them (WS handshake / gRPC). Decode/MARK splits keep badges on the
+      # top request/envelope card only.
+      unless @ws_mode || @grpc_mode
+        req_card = if @decode_kind
+                     decode_split(left)[0]
+                   elsif @mark_transform
+                     req_chain_split(left)[0]
+                   else
+                     left
+                   end
+        if req_card.w >= 2 && my == req_card.y
+          label = render_request_label
+          min_x = req_card.x + label.size + 4
+          right_edge = req_card.right - 1
+          badges = if @req_hex_edit
+                     [{:req_hex, "^X", "HEX"}] of {Symbol, String, String}
+                   else
+                     [
+                       {:cl, "^L", "CL"},
+                       {:mark, "^K", "MARK"},
+                       {:pretty_req, "^U", "PRETTY"},
+                     ] of {Symbol, String, String}
+                   end
+          if hit = Frame.right_badge_hit(mx, my, req_card.y, right_edge, min_x, badges)
+            return hit
+          end
+        end
+      end
+      nil
+    end
+
     # Mouse: place the request-editor caret (text) or nibble cursor (hex) at a click.
     # `rect` is the full body rect render() receives; re-derive the request half-pane
     # (target band + split, then the card's 1-cell inset) exactly as render_request does.

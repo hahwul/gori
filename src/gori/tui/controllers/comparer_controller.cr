@@ -130,6 +130,10 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
+      inner = rect.inset(1, 1)
+      if pane = view.pane_chip_at(inner, mx, my)
+        view.set_pane(pane)
+      end
       true
     end
 
