@@ -63,6 +63,57 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  it "soft-merge reload keeps caret when note text is unchanged (data_version poll)" do
+    # Regression: full reload rebuilt every TextArea, zeroing caret/scroll on every
+    # store write (capture, ui_state, …) even when the note body was identical.
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      view.enter_insert!
+      type(view, "hello world")
+      view.move(0, -5) # caret sits on the 'w' of "world"
+      cy = view.@notes[0].area.cy
+      cx = view.@notes[0].area.cx
+      cx.should be > 0
+      view.save(store)
+      view.dirty?.should be_false
+
+      view.reload(store) # soft-merge: same text → keep TextArea object
+      view.@notes[0].area.cy.should eq(cy)
+      view.@notes[0].area.cx.should eq(cx)
+      view.current_text.should eq("hello world")
+    end
+  end
+
+  it "reload is a no-op while dirty (never clobbers in-progress typing)" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "draft")
+      view.dirty?.should be_true
+      view.reload(store)
+      view.current_text.should eq("draft")
+      view.dirty?.should be_true
+    end
+  end
+
+  it "soft-merge picks up a peer note body change for a clean buffer" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "local")
+      view.save(store)
+      id = view.current_note_id
+
+      # Peer wrote a different body for the same note id.
+      store.set_setting("notes.docs",
+        %({"cur":0,"next_id":#{id + 1},"notes":[{"id":#{id},"text":"from-peer"}]}))
+      view.reload(store)
+      view.current_text.should eq("from-peer")
+      view.dirty?.should be_false
+    end
+  end
+
   it "keeps multiple notes as independent sub-tabs across a reload" do
     tmp_store do |store|
       view = NotesView.new

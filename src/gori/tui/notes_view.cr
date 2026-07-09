@@ -88,15 +88,50 @@ module Gori::Tui
       current.id
     end
 
-    # Load from the store. Re-entering the tab refreshes from disk; safe because
-    # edits are always saved before another tab can take focus.
+    # Load / soft-merge from the store. Re-entering the tab and data_version polls
+    # refresh peer changes WITHOUT rebuilding every TextArea when a note's text is
+    # unchanged — that preserves caret, scroll, and read-mode selection across
+    # capture/ui_state writes that falsely look like "external" commits.
+    # Dirty buffers are never touched (caller should also skip when dirty).
     def reload(store : Store) : Nil
-      @notes = load_notes(store)
-      if @notes.empty?
-        @notes << Note.new(alloc_note_id)
+      return if @dirty
+      soft_merge_from(Notes.load(store))
+    end
+
+    # Apply a loaded Doc onto the live note list by stable note id.
+    private def soft_merge_from(doc : Notes::Doc) : Nil
+      by_id = {} of Int64 => Note
+      @notes.each { |n| by_id[n.id] = n }
+
+      merged = [] of Note
+      doc.notes.each do |e|
+        if existing = by_id[e.id]?
+          if existing.area.text != e.text
+            # Peer (or our own saved) content changed — replace body; caret resets with set_text.
+            existing.area.set_text(e.text)
+          end
+          # Same text → keep the TextArea object (caret/scroll/undo stack intact).
+          merged << existing
+        else
+          merged << Note.new(e.id, e.text)
+        end
       end
-      @current = @current.clamp(0, @notes.size - 1)
+      if merged.empty?
+        merged << Note.new(alloc_note_id)
+      end
+
+      # Keep the active note by id when it still exists; else fall back to persisted cur.
+      cur_id = @notes[@current]?.try(&.id)
+      @notes = merged
+      @current =
+        if cur_id && (idx = @notes.index { |n| n.id == cur_id })
+          idx
+        else
+          doc.cur.clamp(0, @notes.size - 1)
+        end
+      @next_id = {@next_id, doc.next_id}.max
       @dirty = false
+      # Leave @mode / @read alone — soft merge must not force READ or drop selection.
     end
 
     def count : Int32
@@ -376,14 +411,5 @@ module Gori::Tui
       @notes[@current.clamp(0, @notes.size - 1)]
     end
 
-    # Read the persisted notes via the shared `Notes` reader (JSON set, with the
-    # legacy single-note fallback). `cur` becomes the active sub-tab; `reload`
-    # clamps it after this and seeds one empty note when the set is empty.
-    private def load_notes(store : Store) : Array(Note)
-      doc = Notes.load(store)
-      @current = doc.cur
-      @next_id = doc.next_id
-      doc.notes.map { |e| Note.new(e.id, e.text) }
-    end
   end
 end
