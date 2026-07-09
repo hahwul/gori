@@ -159,6 +159,14 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def miner_duplicate_subtab : Nil; end
 
+  property? miner_has_finding = false
+
+  def miner_finding_selected? : Bool
+    @miner_has_finding
+  end
+
+  def mine_replay_selected : Nil; end
+
   def sitemap_move(delta : Int32) : Nil; end
 
   def sitemap_toggle : Nil; end

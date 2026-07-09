@@ -69,6 +69,36 @@ describe Gori::Scope do
     end
   end
 
+  # matches_url? is the Prism Active gate: include rules define the probe target set
+  # even when the ⇧S display lens is off (in_scope_url? is permissive when inactive).
+  it "matches_url? evaluates include rules with the lens off; false without includes" do
+    with_store do |store|
+      scope = Gori::Scope.load(store)
+      scope.matches_url?(url_of("https", "xss-game.appspot.com", "/level1/frame?query=12"),
+        "xss-game.appspot.com").should be_false # no rules
+
+      # Excludes-only is a valid DISPLAY filter but must NOT arm Active (would probe everything).
+      scope.add("exclude", "host", "cdn.test")
+      scope.matches_url?(url_of("https", "acme.test", "/"), "acme.test").should be_false
+
+      scope.add("include", "host", "xss-game.appspot.com")
+      scope.active?.should be_false # lens OFF
+      # in_scope_url? is permissive when inactive (intercept/display semantics)…
+      scope.in_scope_url?(url_of("https", "other.test", "/"), "other.test").should be_true
+      # …but matches_url? still applies the include rules (Active probe semantics).
+      scope.matches_url?(url_of("https", "xss-game.appspot.com", "/level1/frame?query=12"),
+        "xss-game.appspot.com").should be_true
+      scope.matches_url?(url_of("https", "other.test", "/"), "other.test").should be_false
+      scope.matches_url?(url_of("https", "cdn.test", "/"), "cdn.test").should be_false # exclude
+
+      scope.enable
+      scope.matches_url?(url_of("https", "xss-game.appspot.com", "/x"),
+        "xss-game.appspot.com").should be_true
+      scope.in_scope_url?(url_of("https", "xss-game.appspot.com", "/x"),
+        "xss-game.appspot.com").should be_true # agrees when lens is on
+    end
+  end
+
   it "host include matches host + subdomain; a host exclude carves out" do
     with_store do |store|
       scope = Gori::Scope.load(store)

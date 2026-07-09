@@ -13,7 +13,8 @@ module Gori
 
     # Per-project scanning mode. Off = no analysis at all; Passive = zero-request checks on
     # observed traffic (the safe default); Active = Passive plus the lightweight reflected-
-    # params probe (in-scope hosts only, one probe per unique target).
+    # params probe (hosts/paths covered by Project scope rules only — the ⇧S display lens
+    # need not be on; one probe per unique target).
     enum Mode
       Off
       Passive

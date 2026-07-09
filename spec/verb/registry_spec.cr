@@ -300,6 +300,14 @@ private class FakeContext < ExecContext
     @calls << :miner_duplicate_subtab
   end
 
+  def miner_finding_selected? : Bool
+    false
+  end
+
+  def mine_replay_selected : Nil
+    @calls << :mine_replay_selected
+  end
+
   def sitemap_move(delta : Int32) : Nil
     @calls << :sitemap_move
   end

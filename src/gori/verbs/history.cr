@@ -376,8 +376,16 @@ module Gori
       r.register Verb::Definition.new(
         "mine.stop", "Stop mining", "Stop the running mine", Verb::Scope::Miner,
         [Verb::Chord.new("x", ctrl: true)], available: in_miner, mnemonic: 's') { |ctx| ctx.mine_stop; nil }
+      # Send the selected finding (injected into the session request) to Replay. COMMON so
+      # it's reachable from summary/results/detail; gated on a selected finding. 'p' is free
+      # in COMMON ∪ :subtab (COMMON: r/s/k/u; :subtab: d).
+      r.register Verb::Definition.new(
+        "mine.replay", "Send to Replay", "Open the selected finding as a request in Replay (param injected)",
+        Verb::Scope::Miner,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.miner_finding_selected? },
+        mnemonic: 'p') { |ctx| ctx.mine_replay_selected; nil }
       # Content-only clone of the active miner session (request + config; no findings).
-      # 'd' is free in COMMON ∪ :subtab (COMMON: r/s/k/u).
+      # 'd' is free in COMMON ∪ :subtab (COMMON: r/s/k/u/p).
       r.register Verb::Definition.new(
         "mine.duplicate-subtab", "Duplicate subtab", "Open a new miner session with the same request and config",
         Verb::Scope::Miner, available: in_miner, mnemonic: 'd', section: :subtab) { |ctx| ctx.miner_duplicate_subtab; nil }

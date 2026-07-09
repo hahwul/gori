@@ -38,6 +38,16 @@ module Gori::Tui
       Verb::Scope::Miner
     end
 
+    # Space menu CONTEXT section. Summary is a thin overview with no section-tagged
+    # verbs — map it to :common so the menu stays a flat COMMON list (no empty
+    # "SUMMARY" header). Results/detail keep their identity for future section verbs.
+    def command_section : Symbol
+      case current_view.try(&.focus)
+      when :results, :detail then :results
+      else                        :common
+      end
+    end
+
     # --- shell-facing accessors ---
     def count : Int32
       @miners.size
@@ -328,6 +338,30 @@ module Gori::Tui
       open_session(view, nil)
       @host.goto_tab(:miner)
       @host.status("duplicated miner session (#{@miners.size} open)")
+    end
+
+    # Seed handed to ReplayController for "Send to Replay" (Miner finding → injected request).
+    record ReplaySeed,
+      target : String,
+      request_text : String,
+      http2 : Bool,
+      sni : String?,
+      label : String # sub-tab chip + toast ("name (location)")
+
+    # True when the focused session has a selected finding (gates space → Send to Replay).
+    def finding_selected? : Bool
+      !current_view.try(&.selected_finding).nil?
+    end
+
+    # Inject the selected finding into the session request; nil when nothing is selected.
+    def selected_replay_seed : ReplaySeed?
+      return nil unless v = current_view
+      return nil unless f = v.selected_finding
+      injected = v.request_with_finding(f)
+      # Replay editors store LF text; send expands back to CRLF (ReplayView#expanded_text_to_bytes).
+      # Same LF shape as History→Replay (origin_form_text) and hand-authored tabs.
+      text = String.new(injected).scrub.gsub("\r\n", "\n")
+      ReplaySeed.new(v.target, text, v.http2?, v.sni_override, "#{f.name} (#{f.location.label})")
     end
 
     private def persist_new(view : MinerView, flow_id : Int64?) : Int64?

@@ -33,6 +33,7 @@ module Gori
                      @mode : Mode, @verify_upstream : Bool)
         @analyzed = Set(Int64).new
         @active_seen = Set(String).new
+        @active_error_hosts = Set(String).new # rate-limit probe-failure notifications per host
         @active_jobs = Channel(ActiveTask).new(ACTIVE_QUEUE)
         @events = Channel(Event).new(256)
         @running = false
@@ -152,9 +153,11 @@ module Gori
         return unless @mode.active?
         row = detail.row
         url = row.url
-        # Active probes ONLY configured+enabled in-scope hosts (in_scope_url? is permissive
-        # when scope is inactive, so gate on active? first) — the user's "in-scope only" rule.
-        return unless @scope.active? && @scope.in_scope_url?(url, row.host)
+        # Active probes only on hosts/paths covered by Project scope INCLUDE rules
+        # (matches_url? — lens-independent; requires ≥1 include so excludes-only never
+        # means "probe everything"). in_scope_url? is wrong here: it is permissive when
+        # the ⇧S display lens is off.
+        return unless @scope.matches_url?(url, row.host)
         Active::RULES.each { |rule| enqueue_probe(rule, detail) }
       rescue Channel::ClosedError
       end
@@ -192,6 +195,13 @@ module Gori
         http2 = task.detail.http_version.starts_with?("HTTP/2")
         sender = Fuzz::Sender.new(origin, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT)
         result = sender.send(task.plan.request)
+        # Surface send failures (TLS/DNS/timeout) so Active never fails silently — but
+        # only ONCE per host: a flapping origin with many distinct param sets would
+        # otherwise flood the notification tray (one event per unique plan.dedup_key).
+        unless result.ok?
+          emit_active_error(row.host, result.error || "send failed")
+          return
+        end
         detections = task.rule.detections(task.plan, result, task.detail)
         return if detections.empty?
         detections.each { |d| @store.upsert_prism_issue(d) }
@@ -204,7 +214,16 @@ module Gori
       rescue DB::Error | SQLite3::Exception
         # store closing — stop quietly (the worker will exit when the queue closes)
       rescue ex
-        emit(ErrorEvent.new("Prism active scan: #{ex.message}"))
+        emit_active_error(task.detail.row.host, ex.message || "error")
+      end
+
+      # First failure per host only (see run_active). Cap the set so a long-lived project
+      # that walks many broken hosts can't grow unbounded.
+      private def emit_active_error(host : String, detail : String) : Nil
+        return if @active_error_hosts.includes?(host)
+        @active_error_hosts << host
+        trim(@active_error_hosts, ACTIVE_SEEN_CAP)
+        emit(ErrorEvent.new("Prism active scan on #{host}: #{detail}"))
       end
 
       # --- helpers ----------------------------------------------------------------------

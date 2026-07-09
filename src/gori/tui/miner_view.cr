@@ -164,6 +164,20 @@ module Gori::Tui
       "#{scheme}://#{host}:#{port}"
     end
 
+    # The session target as stored (scheme://host[:port]) — feeds Replay seeds.
+    def target : String
+      @target
+    end
+
+    # Build a Replay-ready request with the selected finding's parameter injected at
+    # its discovered location. Uses the discovery canary when present (so a reflection
+    # finding still echoes on re-send); otherwise a short non-empty probe value.
+    def request_with_finding(f : Miner::Finding) : Bytes
+      value = f.canary.presence || "1"
+      Miner::Inject.apply(@request, f.location, [{f.name, value}],
+        @config.add_content_length_when_missing?)
+    end
+
     # --- focus ring ---
     def focus_pane(pane : Symbol) : Nil
       @focus = pane if PANE_ORDER.includes?(pane)

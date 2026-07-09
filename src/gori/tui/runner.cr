@@ -3958,6 +3958,19 @@ module Gori::Tui
       miner_controller.miner_duplicate
     end
 
+    def miner_finding_selected? : Bool
+      miner_controller.finding_selected?
+    end
+
+    # CROSS-TAB: inject the selected Miner finding into the session request and open Replay.
+    def mine_replay_selected : Nil
+      seed = miner_controller.selected_replay_seed
+      return (@toast = "select a finding first") unless seed
+      replay_controller.replay_from_request(seed.target, seed.request_text, seed.http2, seed.sni,
+        name: seed.label)
+      @toast = "replay ← miner: #{seed.label}"
+    end
+
     private def open_mine_config(seed : MineSeed?) : Nil
       unless seed
         @toast = "cannot mine this request"

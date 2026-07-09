@@ -172,10 +172,32 @@ module Gori
     def in_scope_url?(url : String, host : String) : Bool
       @mutex.synchronize do
         return true unless active_unlocked?
-        includes = @rules.select(&.include?)
-        inc_ok = includes.empty? || includes.any?(&.matches?(url, host))
-        inc_ok && @rules.none? { |r| r.exclude? && r.matches?(url, host) }
+        matches_url_unlocked?(url, host)
       end
+    end
+
+    # Evaluate include/exclude rules against a URL REGARDLESS of the ⇧S display lens.
+    # Used by Prism Active probes. Differs from the Burp display filter in one safety
+    # way: at least one INCLUDE rule is required (excludes-only would otherwise mean
+    # "probe the whole internet minus a few hosts" — too aggressive for an automatic
+    # outbound scanner). False when no includes exist or the URL is excluded.
+    def matches_url?(url : String, host : String) : Bool
+      @mutex.synchronize do
+        includes = @rules.select(&.include?)
+        return false if includes.empty?
+        includes.any?(&.matches?(url, host)) &&
+          @rules.none? { |r| r.exclude? && r.matches?(url, host) }
+      end
+    end
+
+    # Pure Burp evaluation (includes empty ⇒ match all; then carve excludes). Shared by
+    # in_scope_url? when the display lens is on. Rules must already be non-empty (active?
+    # requires that); still guards empty for defense-in-depth.
+    private def matches_url_unlocked?(url : String, host : String) : Bool
+      return false if @rules.empty?
+      includes = @rules.select(&.include?)
+      inc_ok = includes.empty? || includes.any?(&.matches?(url, host))
+      inc_ok && @rules.none? { |r| r.exclude? && r.matches?(url, host) }
     end
 
     # Conservative HOST-level check for the Tunnel's h2→h1 downgrade decision, made

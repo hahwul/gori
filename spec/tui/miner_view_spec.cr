@@ -65,4 +65,21 @@ describe Gori::Tui::MinerView do
     view.@results.size.should eq(n)
     view.session_side_matches?(rec).should be_true
   end
+
+  it "request_with_finding injects the selected param (canary or probe value)" do
+    req = "GET /search?q=hi HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice
+    view = Gori::Tui::MinerView.new
+    view.load("https://h.test", req, false, nil, Gori::Miner::Config.new)
+
+    with_canary = Gori::Miner::Finding.new("debug", Gori::Miner::Location::Query,
+      Gori::Miner::Evidence::Reflection, Gori::Miner::Confidence::Confirmed, "gqabcd1234", nil, 0_i64)
+    out = String.new(view.request_with_finding(with_canary))
+    out.should contain("debug=gqabcd1234")
+    out.should contain("q=hi") # original params preserved; miner appends candidates
+
+    no_canary = Gori::Miner::Finding.new("admin", Gori::Miner::Location::Query,
+      Gori::Miner::Evidence::Status, Gori::Miner::Confidence::Confirmed, nil, 200, 12_i64)
+    out2 = String.new(view.request_with_finding(no_canary))
+    out2.should contain("admin=1")
+  end
 end

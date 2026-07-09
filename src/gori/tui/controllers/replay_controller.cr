@@ -819,6 +819,28 @@ module Gori::Tui
       @host.status("new replay — edit the request & target · ^R send · ^1-9 switch · esc back")
     end
 
+    # Open a hand-authored replay session from an arbitrary request (Miner finding, etc.).
+    # No source flow_id — the request is the seed; same persistence path as ^N.
+    # `name` is an optional sub-tab chip label (e.g. the Miner param that was injected).
+    def replay_from_request(target : String, request_text : String, http2 : Bool, sni : String?,
+                            name : String? = nil) : Nil
+      view = ReplayView.new
+      view.restore(target, request_text, http2, true, sni: sni || "")
+      # restore leaves focus on :target (placeholder-friendly); a fully-built request
+      # from Miner should land in the editor so the user can send immediately.
+      view.focus_pane(:request)
+      if n = name.try(&.strip).presence
+        view.name = n
+      end
+      db_id = persist_new_replay(view, nil)
+      if (id = db_id) && (chip = view.name)
+        @host.session.store.set_replay_name(id, chip)
+      end
+      @replays << ReplayTab.new(view, nil, db_id)
+      @current_replay_idx = @replays.size - 1
+      @host.goto_tab(:replay)
+    end
+
     # Content-only clone of the active sub-tab (Space → Duplicate). No flow_id / links.
     # gRPC and split-decode tabs stay session-only (db_id nil), matching open-from-History.
     def replay_duplicate : Nil

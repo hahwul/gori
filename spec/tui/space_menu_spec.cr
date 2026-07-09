@@ -351,6 +351,20 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('d').try(&.id).should eq("mine.duplicate-subtab")
   end
 
+  it "offers Send to Replay on Miner when a finding is selected" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :miner
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    menu.open(Gori::Verb::Scope::Miner, :common, ctx)
+    menu.entries.map(&.id).should_not contain("mine.replay") # no finding yet
+
+    ctx.miner_has_finding = true
+    menu.open(Gori::Verb::Scope::Miner, :common, ctx)
+    menu.entries.map(&.id).should contain("mine.replay")
+    menu.verb_for('p').try(&.id).should eq("mine.replay")
+  end
+
   it "hides the scope rule edit/delete entries when no rule is selected" do
     ctx = FakeExecContext.new # scope_has_rule defaults to false
     menu = SpaceMenu.new(Gori::Verbs.registry)

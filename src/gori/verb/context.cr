@@ -115,6 +115,8 @@ module Gori
       abstract def mine_run : Nil                # re-run mining for the focused Miner session
       abstract def mine_stop : Nil               # stop the running mine
       abstract def miner_duplicate_subtab : Nil  # clone the active miner sub-tab's content into a new sibling
+      abstract def miner_finding_selected? : Bool # a finding is selected in the focused miner session
+      abstract def mine_replay_selected : Nil    # send the selected miner finding to Replay
 
       # sitemap tree
       abstract def sitemap_move(delta : Int32) : Nil
