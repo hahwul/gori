@@ -3,7 +3,8 @@ require "../fuzzy"
 module Gori
   module Verb
     # Holds all verb definitions; the single source the keymap and palette both
-    # read from (P1). Registration order is preserved for stable palette listing.
+    # read from (P1). Space-menu empty lists keep registration order; the Ctrl-P
+    # palette (Global, empty query) uses a curated browse order instead.
     class Registry
       include Enumerable(Definition)
 
@@ -100,7 +101,11 @@ module Gori
       # space menu, and area actions never clutter the palette. Per-verb available? gates
       # (e.g. history.copy only when current_tab == :history).
       def for_scope(scope : Scope, ctx : ExecContext, query : String = "") : Array(Definition)
-        rank(self.select { |v| !v.hidden? && v.scope == scope && v.available?(ctx) }, query)
+        candidates = self.select { |v| !v.hidden? && v.scope == scope && v.available?(ctx) }
+        # Empty Global browse: curated palette order (Settings → Go to → rest → exit).
+        # Other scopes keep registration order; fuzzy queries always rank by score.
+        return browse_palette(candidates) if query.empty? && scope == Scope::Global
+        rank(candidates, query)
       end
 
       # Shared filter→rank tail: an empty query keeps registration order (browsable);
@@ -114,6 +119,26 @@ module Gori
           end
         end
         scored.sort_by! { |(_, score)| -score }.map { |(v, _)| v }
+      end
+
+      # Ctrl-P empty-query order (stable within each group via registration index):
+      #   1. Settings
+      #   2. Go to … tab jumps, then other Navigation
+      #   3. Everything else (Action / System / …)
+      #   4. Back to projects, then Quit gori (exit paths always last)
+      private def browse_palette(candidates : Array(Definition)) : Array(Definition)
+        candidates.each_with_index.to_a.sort_by { |(v, i)| {palette_group(v), i} }.map { |(v, _)| v }
+      end
+
+      private def palette_group(v : Definition) : Int32
+        return 90 if v.id == "app.back"
+        return 99 if v.id == "app.quit"
+        case v.category
+        in Category::Settings   then 0
+        in Category::Navigation then v.id.starts_with?("tab.") ? 1 : 2
+        in Category::Action     then 10
+        in Category::System     then 10
+        end
       end
     end
   end
