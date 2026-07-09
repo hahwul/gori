@@ -3,6 +3,7 @@ require "./theme"
 require "./frame"
 require "./url"
 require "./flow_status"
+require "./subtab_clone"
 require "../store"
 require "../replay/diff"
 require "../replay/side_by_side"
@@ -14,12 +15,16 @@ module Gori::Tui
   # or the History "Send to Comparer" handoff; this view is pure state + rendering.
   # The diff reuses Replay's LCS engine (Replay::Diff) mapped to aligned columns
   # (Replay::SideBySide), memoized so a held tab isn't re-diffed every frame.
+  # Multiple views are held as session sub-tabs by ComparerController (in-memory;
+  # no project DB) so History handoffs don't clobber prior pairs.
   class ComparerView
     getter pane : Symbol # :request | :response — which half of the two flows we diff
+    property name : String? # custom sub-tab chip label (nil = auto from slots)
 
     SEP_W = 3 # the centre marker band between the A and B columns
 
     def initialize
+      @name = nil
       @slot_a = nil.as(Store::FlowDetail?)
       @slot_b = nil.as(Store::FlowDetail?)
       @pane = :response
@@ -28,6 +33,73 @@ module Gori::Tui
       @rows_cache = nil.as(Array(Replay::SideBySide::Row)?)
       @truncated = false
       @change_count = 0 # cached with @rows_cache so the footer doesn't recount each frame
+    end
+
+    # Chip label (custom name, or a compact A ⇄ B summary). Capped like Replay/Convert.
+    def label(max : Int32 = 18) : String
+      raw = if (n = @name) && !n.strip.empty?
+              n.strip
+            else
+              auto_label
+            end
+      raw.size > max ? raw[0, max - 1] + "…" : raw
+    end
+
+    # Identity for rename/apply (view object, not content) — mirrors MinerView/ReplayView.
+    def same?(other : ComparerView) : Bool
+      object_id == other.object_id
+    end
+
+    # Content-only clone: same slots/pane/fill ring + " copy" name. Shared FlowDetail
+    # refs (snapshots are treated as immutable after set).
+    def duplicate : ComparerView
+      v = ComparerView.new
+      v.copy_from(self)
+      v.name = SubtabClone.copy_name(@name)
+      v
+    end
+
+    # Copy slots/pane/fill ring from another view (does not copy scroll or name).
+    def copy_from(other : ComparerView) : Nil
+      @slot_a = other.@slot_a
+      @slot_b = other.@slot_b
+      @pane = other.@pane
+      @fill_next = other.@fill_next
+      @scroll = 0
+      invalidate
+    end
+
+    # Reset to a blank pair (used when closing the last sub-tab).
+    def reset! : Nil
+      @name = nil
+      @slot_a = nil
+      @slot_b = nil
+      @pane = :response
+      @scroll = 0
+      @fill_next = :a
+      invalidate
+    end
+
+    private def auto_label : String
+      a = @slot_a
+      b = @slot_b
+      case {a, b}
+      when {nil, nil}
+        "empty"
+      when {Store::FlowDetail, nil}
+        slot_short(a.not_nil!)
+      when {nil, Store::FlowDetail}
+        slot_short(b.not_nil!)
+      else
+        "#{slot_short(a.not_nil!)} ⇄ #{slot_short(b.not_nil!)}"
+      end
+    end
+
+    private def slot_short(d : Store::FlowDetail) : String
+      row = d.row
+      path = Url.origin_path(row.target)
+      path = path.size > 12 ? path[0, 11] + "…" : path
+      "#{row.method} #{path}"
     end
 
     # --- slot management (controller + cross-tab handoff) -------------------

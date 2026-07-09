@@ -224,11 +224,15 @@ module Gori
       # browser: open a system browser pre-trusting gori's CA + routed via the proxy
       abstract def open_browser_picker : Nil
 
-      # comparer: diff two arbitrary flows
+      # comparer: diff two arbitrary flows (multi-session sub-tabs)
       abstract def comparer_pick(slot : Symbol) : Nil # open the flow picker for slot :a / :b
       abstract def comparer_swap : Nil                # swap the A and B flows
       abstract def comparer_toggle_pane : Nil         # toggle the diff between the requests and the responses
       abstract def comparer_add_selected : Nil        # send History's selected flow to the next Comparer slot
+      abstract def comparer_new : Nil                 # open a fresh blank comparison sub-tab
+      abstract def comparer_close_subtab : Nil        # close the active comparison (keeps ≥1)
+      abstract def comparer_rename_subtab : Nil       # rename the active comparison chip
+      abstract def comparer_duplicate_subtab : Nil    # clone the active A/B pair
 
       # convert: the encode/decode/hash workbench (sub-tab + output actions; the body's
       # text editing + focus nav stay inline, these power the space menu + palette)

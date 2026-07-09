@@ -313,6 +313,14 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def comparer_add_selected : Nil; end
 
+  def comparer_new : Nil; end
+
+  def comparer_close_subtab : Nil; end
+
+  def comparer_rename_subtab : Nil; end
+
+  def comparer_duplicate_subtab : Nil; end
+
   def convert_new : Nil; end
 
   def convert_close : Nil; end

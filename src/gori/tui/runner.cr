@@ -107,7 +107,7 @@ module Gori::Tui
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove replay tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
-      @rename_view = nil.as(ReplayView | FuzzerView | ConvertView | MinerView | Nil)
+      @rename_view = nil.as(ReplayView | FuzzerView | ConvertView | MinerView | ComparerView | Nil)
       # The import path prompt (palette → import:har/urls/oas) — bottom-anchored like
       # ^G/^F, with filesystem tab-completion via PathComplete.
       @import_open = false
@@ -2159,10 +2159,11 @@ module Gori::Tui
     # body_hint never advertises it). Rename/close still work.
     private def subtab_new : Nil
       case @active_tab
-      when :replay  then replay_controller.replay_new
-      when :fuzzer  then fuzzer_controller.fuzz_new
-      when :convert then convert_controller.convert_new
-      when :notes   then notes_controller.notes_new
+      when :replay    then replay_controller.replay_new
+      when :fuzzer    then fuzzer_controller.fuzz_new
+      when :convert   then convert_controller.convert_new
+      when :notes     then notes_controller.notes_new
+      when :comparer  then comparer_controller.comparer_new
       end
     end
 
@@ -2170,18 +2171,19 @@ module Gori::Tui
     # — its sessions are seeded by a background job, not ^N — so the strip hint omits ^N new.
     private def subtab_new_supported? : Bool
       case @active_tab
-      when :replay, :fuzzer, :convert, :notes then true
-      else                                         false
+      when :replay, :fuzzer, :convert, :notes, :comparer then true
+      else                                                   false
       end
     end
 
     private def subtab_close : Nil
       case @active_tab
-      when :replay  then replay_controller.request_close
-      when :fuzzer  then fuzzer_controller.request_close
-      when :miner   then miner_controller.request_close
-      when :convert then convert_controller.convert_close
-      when :notes   then notes_controller.notes_close
+      when :replay    then replay_controller.request_close
+      when :fuzzer    then fuzzer_controller.request_close
+      when :miner     then miner_controller.request_close
+      when :convert   then convert_controller.convert_close
+      when :notes     then notes_controller.notes_close
+      when :comparer  then comparer_controller.comparer_close
       end
     end
 
@@ -2925,10 +2927,11 @@ module Gori::Tui
       renameable_subtabs? && ev.key.lower_r? && !ev.ctrl? && !ev.alt?
     end
 
-    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer + Convert + Miner).
+    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer + Convert + Miner + Comparer).
     # Notes derives its label from the body text, so it has no rename.
     private def renameable_subtabs? : Bool
-      @active_tab == :replay || @active_tab == :fuzzer || @active_tab == :convert || @active_tab == :miner
+      @active_tab == :replay || @active_tab == :fuzzer || @active_tab == :convert ||
+        @active_tab == :miner || @active_tab == :comparer
     end
 
     # Open the rename prompt for sub-tab `idx` on the active tab, seeding its current
@@ -2937,10 +2940,11 @@ module Gori::Tui
     # redirect it.
     private def open_rename(idx : Int32) : Nil
       view = case @active_tab
-             when :replay  then replay_controller.view_at(idx)
-             when :fuzzer  then fuzzer_controller.view_at(idx)
-             when :convert then convert_controller.view_at(idx)
-             when :miner   then miner_controller.view_at(idx)
+             when :replay    then replay_controller.view_at(idx)
+             when :fuzzer    then fuzzer_controller.view_at(idx)
+             when :convert   then convert_controller.view_at(idx)
+             when :miner     then miner_controller.view_at(idx)
+             when :comparer  then comparer_controller.view_at(idx)
              end
       return unless view
       @rename_view = view
@@ -2961,10 +2965,11 @@ module Gori::Tui
     # (the chip reverts to the request/template-derived summary).
     private def apply_rename(name : String) : Nil
       case v = @rename_view
-      when ReplayView  then replay_controller.apply_rename(v, name)
-      when FuzzerView  then fuzzer_controller.apply_rename(v, name)
-      when ConvertView then convert_controller.apply_rename(v, name)
-      when MinerView   then miner_controller.apply_rename(v, name)
+      when ReplayView    then replay_controller.apply_rename(v, name)
+      when FuzzerView    then fuzzer_controller.apply_rename(v, name)
+      when ConvertView   then convert_controller.apply_rename(v, name)
+      when MinerView     then miner_controller.apply_rename(v, name)
+      when ComparerView  then comparer_controller.apply_rename(v, name)
       end
     end
 
@@ -4080,8 +4085,25 @@ module Gori::Tui
       @toast = "comparer: comparing #{view.pane}s"
     end
 
+    def comparer_new : Nil
+      comparer_controller.comparer_new
+    end
+
+    def comparer_close_subtab : Nil
+      comparer_controller.comparer_close
+      resolve_subtab_focus_after_close
+    end
+
+    def comparer_rename_subtab : Nil
+      open_rename(current_subtab_index)
+    end
+
+    def comparer_duplicate_subtab : Nil
+      comparer_controller.comparer_duplicate
+    end
+
     # CROSS-TAB mediator: send History's selected flow to the next Comparer slot
-    # (rings A → B → A). Open the Comparer tab to view the diff.
+    # on the *active* comparison sub-tab (rings A → B → A).
     def comparer_add_selected : Nil
       id = history_controller.selected_flow_id
       return (@toast = "select a flow first") unless id

@@ -1,6 +1,6 @@
 module Gori::Tui
   # Shared helpers for the sub-tab strip "Duplicate" action (Replay / Fuzzer /
-  # Notes / Convert / Miner). Content-only clones — no entity links or source flow.
+  # Notes / Convert / Miner / Comparer). Content-only clones — no entity links or source flow.
   module SubtabClone
     # Custom chip name for a clone: append " copy" once (idempotent if already present).
     # Blank / nil names stay auto-derived from content.

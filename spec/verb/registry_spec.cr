@@ -628,6 +628,22 @@ private class FakeContext < ExecContext
     @calls << :comparer_add_selected
   end
 
+  def comparer_new : Nil
+    @calls << :comparer_new
+  end
+
+  def comparer_close_subtab : Nil
+    @calls << :comparer_close_subtab
+  end
+
+  def comparer_rename_subtab : Nil
+    @calls << :comparer_rename_subtab
+  end
+
+  def comparer_duplicate_subtab : Nil
+    @calls << :comparer_duplicate_subtab
+  end
+
   def convert_new : Nil
     @calls << :convert_new
   end
