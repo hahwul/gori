@@ -698,10 +698,11 @@ module Gori
     end
 
     # --- Replay workbench tabs (persisted + cross-session synced) -------------
-    # All writes route through exec_task (the single writer connection): this keeps
-    # them INVISIBLE to our own PRAGMA data_version poll (which only sees other
-    # connections), so a session never reconciles its own replay saves — only a
-    # peer's. A separate connection would break that and cause self-clobber.
+    # Writes go through exec_task on the long-lived writer connection. That IS a
+    # different connection from the read pool, so PRAGMA data_version (polled on a
+    # pool connection) DOES bump for our own commits — the TUI's apply_external_change
+    # / reconcile must soft-sync and skip unchanged rows, not assume "own writes are
+    # invisible". Callers that full-restore on every poll self-clobber.
 
     # Full replay rows INCLUDING the persisted response BLOBs. Used once at project
     # open to seed each tab's last response (V11). NOT for the recurring reconcile
@@ -801,8 +802,8 @@ module Gori
     # Persist a replay tab's LAST send result (V11) so it survives a reopen. Kept
     # separate from update_replay (the request side) — called once each send
     # completes. `head` is the response head bytes (empty on error), `error` is set
-    # only when the send failed. Routes through exec_task like the other replay
-    # writes, so it stays invisible to our own data_version poll.
+    # only when the send failed. Via exec_task (writer connection), so this DOES
+    # bump the TUI data_version poll; Replay reconcile soft-syncs around it.
     def update_replay_response(id : Int64, head : Bytes, body : Bytes?, error : String?, duration_us : Int64) : Nil
       exec_task ->(c : DB::Connection) {
         c.exec("UPDATE replays SET response_head = ?, response_body = ?, response_error = ?, response_duration_us = ?, updated_at = ? WHERE id = ?",
@@ -835,8 +836,9 @@ module Gori
     end
 
     # --- Fuzzer / Intruder (V16) ---------------------------------------------
-    # All writes route through exec_task (the single writer fiber), so they stay
-    # invisible to our own data_version poll — same as the replay writes.
+    # Writes go through exec_task (writer fiber). Own commits bump data_version on
+    # the read pool (see data_version docs); live TUI paths must soft-sync, not
+    # full-restore session UI on every poll.
 
     def fuzz_sessions : Array(FuzzSessionRecord)
       list = [] of FuzzSessionRecord
@@ -1239,9 +1241,12 @@ module Gori
     end
 
     # SQLite's per-connection change counter (PRAGMA data_version): it bumps when
-    # ANOTHER connection — including a second gori instance on the SAME project DB
-    # file — commits, but NOT for our own writes through this pool. The TUI polls
-    # it to live-refresh when another instance captures into the same project.
+    # another connection commits. In gori the long-lived writer fiber holds one
+    # pool connection, and this read uses a different pool connection — so own
+    # commits via exec_task/insert_flow/update_* ALSO bump the value seen here,
+    # not only a second gori process. The TUI polls this for live refresh and
+    # must treat bumps as "maybe us, maybe a peer": soft-sync and skip unchanged
+    # session state (never full-restore on every tick).
     def data_version : Int64
       @db.scalar("PRAGMA data_version").as(Int64)
     rescue

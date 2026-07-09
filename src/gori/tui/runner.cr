@@ -331,10 +331,9 @@ module Gori::Tui
           last_wf = wf
           dirty = true
         end
-        # Cross-process live refresh: a SECOND gori instance capturing into the same
-        # project DB commits rows we never see via our in-process flow_events. Poll
-        # SQLite's data_version (cheap) — throttled, not every 50ms tick — and reload
-        # the active view when another connection committed.
+        # Live store refresh: PRAGMA data_version bumps when the writer fiber (or a
+        # second gori process) commits. Own captures/saves bump it too — soft-sync
+        # in apply_external_change must not full-restore session UI every poll.
         now = Time.instant
         if now - last_dv_poll >= DV_POLL_INTERVAL
           last_dv_poll = now
@@ -378,9 +377,8 @@ module Gori::Tui
 
     # --- main loop helpers ---------------------------------------------------
 
-    # How often to poll SQLite's data_version for cross-process changes (another
-    # gori instance capturing into the same project DB). Cheap, but no need every
-    # 50ms tick — ~sub-second freshness is plenty.
+    # How often to poll SQLite's data_version (own writer commits + peer processes).
+    # Cheap; ~sub-second freshness is plenty — not every 50ms tick.
     DV_POLL_INTERVAL = 750.milliseconds
 
     # Minimum spacing between ui-state writes (get_current_context). Coalesces a fast
@@ -480,14 +478,13 @@ module Gori::Tui
       drained
     end
 
-    # Another instance committed to this project's DB — re-query the store-backed
-    # views so its work shows up here too. Read-only views (History/Sitemap/Findings)
-    # reload freely; the editable ones (Replay/Notes) reconcile WITHOUT clobbering
-    # in-progress local edits (guarded by dirty/active/inflight).
+    # Store data_version advanced (own writer and/or peer process). Re-query
+    # store-backed views. Active-tab reloads use id/path soft-anchors; Replay/Notes
+    # soft-merge and skip dirty buffers so session UI is not clobbered.
     private def apply_external_change : Nil
       # Reload a store-backed view only when it's the ACTIVE tab (others reload on
       # tab entry via on_enter_tab) — avoids re-querying History's page ~1.3×/sec
-      # while the user is elsewhere. Own-session captures stay live via flow_events.
+      # while the user is elsewhere. Own-session captures also arrive via flow_events.
       @tabs[@active_tab]?.try(&.on_external_change) # migrated tabs refresh themselves
       replay_controller.reconcile
       notes_controller.view.reload(@session.store) unless notes_locked?
