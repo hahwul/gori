@@ -263,7 +263,7 @@ describe "Frame.left_chip_hit / right_badge_hit" do
 end
 
 describe "ReplayView#chrome_hit" do
-  it "hits response d/x/p chips and request CL/MARK/PRETTY badges on the border row" do
+  it "hits response d/x/p chips and request SEND/CL/MARK badges on the border row" do
     view = ReplayView.new
     view.load_blank
     rect = Rect.new(0, 0, 100, 24)
@@ -280,9 +280,12 @@ describe "ReplayView#chrome_hit" do
     view.chrome_hit(rect, resp.x + 12 + 9, resp.y).should eq(:hex) # past " d:diff " + gap
     view.chrome_hit(rect, resp.x + 12 + 9 + 8, resp.y).should eq(:pretty)
 
-    # REQUEST right-chain: rightmost is CL (" ^L:CL " ends at req.right - 1)
+    # REQUEST right-chain: rightmost is SEND, then CL, MARK, PRETTY
+    send_label = " ^R:SEND "
+    send_x = (req.right - 1) - send_label.size
+    view.chrome_hit(rect, send_x + 1, req.y).should eq(:send)
     cl_label = " ^L:CL "
-    cl_x = (req.right - 1) - cl_label.size
+    cl_x = send_x - cl_label.size
     view.chrome_hit(rect, cl_x + 1, req.y).should eq(:cl)
     mark_label = " ^K:MARK "
     mark_x = cl_x - mark_label.size

@@ -1248,33 +1248,31 @@ module Gori::Tui
         end
       end
 
-      # REQUEST badges: CL / MARK / PRETTY (or HEX when hex-editing). Skip modes that
-      # don't draw them (WS handshake / gRPC). Decode/MARK splits keep badges on the
-      # top request/envelope card only.
-      unless @ws_mode || @grpc_mode
-        req_card = if @decode_kind
-                     decode_split(left)[0]
-                   elsif @mark_transform
-                     req_chain_split(left)[0]
-                   else
-                     left
-                   end
-        if req_card.w >= 2 && my == req_card.y
-          label = render_request_label
-          min_x = req_card.x + label.size + 4
-          right_edge = req_card.right - 1
-          badges = if @req_hex_edit
-                     [{:req_hex, "^X", "HEX"}] of {Symbol, String, String}
-                   else
-                     [
-                       {:cl, "^L", "CL"},
-                       {:mark, "^K", "MARK"},
-                       {:pretty_req, "^U", "PRETTY"},
-                     ] of {Symbol, String, String}
-                   end
-          if hit = Frame.right_badge_hit(mx, my, req_card.y, right_edge, min_x, badges)
-            return hit
+      # REQUEST badges: ^R:SEND is always rightmost (primary action). Then CL/MARK/
+      # PRETTY (or HEX) when drawn. Decode/MARK splits keep chrome on the top card.
+      req_card = if @decode_kind || @ws_mode
+                   decode_split(left)[0]
+                 elsif @mark_transform
+                   req_chain_split(left)[0]
+                 else
+                   left
+                 end
+      if req_card.w >= 2 && my == req_card.y
+        label = render_request_label
+        min_x = req_card.x + label.size + 4
+        right_edge = req_card.right - 1
+        badges = [{:send, "^R", "SEND"}] of {Symbol, String, String}
+        unless @ws_mode || @grpc_mode
+          if @req_hex_edit
+            badges << {:req_hex, "^X", "HEX"}
+          else
+            badges << {:cl, "^L", "CL"}
+            badges << {:mark, "^K", "MARK"}
+            badges << {:pretty_req, "^U", "PRETTY"}
           end
+        end
+        if hit = Frame.right_badge_hit(mx, my, req_card.y, right_edge, min_x, badges)
+          return hit
         end
       end
       nil
@@ -2042,6 +2040,11 @@ module Gori::Tui
       label = render_request_label
       ins = focused && request_insert?
       Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused, insert: ins))
+      min_x = rect.x + label.size + 4 # keep clear of the pane title on the top border
+      right_edge = rect.right - 1     # leave the right border cell untouched
+      # Primary action rides the REQUEST border (discoverable without the footer chord):
+      # rightmost, lit while idle, muted while a send is in flight.
+      send_edge = Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^R", "SEND", !@inflight)
       if @grpc_mode # text editor for the head; no CL/hex affordances
         @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request)
         return
@@ -2050,14 +2053,12 @@ module Gori::Tui
         @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request)
         return
       end
-      min_x = rect.x + label.size + 4 # keep clear of the pane title on the top border
-      right_edge = rect.right - 1     # leave the right border cell untouched
       if h = @req_hex_edit
-        Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^X", "HEX", true)
+        Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "HEX", true)
         @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
         return
       end
-      cl_x = Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
+      cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
       mark_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^K", "MARK", @mark_transform)
       mode_x = Frame.toggle_badge(screen, mark_x, rect.y, min_x, "^U", "PRETTY", false)
       render_mode_badge(screen, mode_x, rect.y, min_x, ins)

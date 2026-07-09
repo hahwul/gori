@@ -157,7 +157,9 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       v = current_view
       return "↹/esc tabs · ^N new" unless v
-      return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^R send · ^X/esc exit" if v.request_hex?
+      # ^R send lives on the REQUEST border chip (` ^R:SEND `) — not re-listed in the
+      # request-focus footer (discoverability is the border badge; keys still work).
+      return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^X/esc exit" if v.request_hex?
       read_common = "⇧arrows select · y copy · space cmds"
       if v.ws_mode?
         return v.focus == :response ? "↑/↓ move · #{read_common} · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" : ws_hint(v)
@@ -178,9 +180,9 @@ module Gori::Tui
         "#{nav} · #{read_common} · d diff · ⇧←/→ h-scroll · x hex · p pretty · ^F find · ↵/^R send · ↹ pane · esc tabs"
       when :request
         if v.request_insert?
-          "type to edit · ^R send · ^G goto · ^F find · ^X hex · esc read · ↹ pane"
+          "type to edit · ^G goto · ^F find · ^X hex · esc read · ↹ pane"
         else
-          "i/↵ edit · #{read_common} · ^R send · ^G goto · ^F find · ^X hex · ↹ pane · esc tabs"
+          "i/↵ edit · #{read_common} · ^G goto · ^F find · ^X hex · ↹ pane · esc tabs"
         end
       else
         ""
@@ -189,9 +191,9 @@ module Gori::Tui
 
     private def grpc_hint(v : ReplayView) : String
       if v.request_insert?
-        "type head/metadata · ^R replay · esc read · ↹ pane"
+        "type head/metadata · esc read · ↹ pane"
       else
-        "i/↵ edit · ⇧arrows select · y copy · space cmds · ^R replay · ↹ pane"
+        "i/↵ edit · ⇧arrows select · y copy · space cmds · ↹ pane"
       end
     end
 
@@ -283,13 +285,13 @@ module Gori::Tui
               "GraphQL query/vars"
             end
       mode = v.request_insert? ? "type to edit" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
-      "#{mode} #{sub} · ^T switch · ^R send · ^G goto · ^F find · esc read · ↹ pane"
+      "#{mode} #{sub} · ^T switch · ^G goto · ^F find · esc read · ↹ pane"
     end
 
     private def ws_hint(v : ReplayView) : String
       sub = v.req_pane == :envelope ? "handshake request" : "messages"
       mode = v.request_insert? ? "type to edit" : "i/↵ edit · ⇧arrows select · y copy · space cmds"
-      "#{mode} #{sub} · ^T switch · ^R replay · ^G goto · ^F find · esc read · ↹ pane"
+      "#{mode} #{sub} · ^T switch · ^G goto · ^F find · esc read · ↹ pane"
     end
 
     # --- request-pane toggles (keymap-driven verbs; carry the pane-gating + status) ---
@@ -477,6 +479,9 @@ module Gori::Tui
       when :req_hex
         view.focus_pane(:request)
         replay_toggle_hex
+      when :send
+        view.focus_pane(:request)
+        replay_send
       end
     end
 
