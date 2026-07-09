@@ -72,6 +72,7 @@ module Gori
       abstract def replay_subtab_count : Int32             # open replay session count (gates the search menu entry)
       abstract def replay_rename_subtab : Nil              # open the rename prompt for the active sub-tab
       abstract def replay_close_subtab : Nil               # close the active sub-tab (confirm-gated)
+      abstract def replay_duplicate_subtab : Nil           # clone the active sub-tab's content into a new sibling
       abstract def replay_toggle_hex : Nil                 # toggle byte-exact hex editing of the request pane
       abstract def replay_toggle_decoded : Nil             # toggle the envelope/decoded split sub-pane (SAML/GraphQL)
       abstract def replay_toggle_sni : Nil                 # toggle the SNI-override sub-field (target pane)
@@ -101,17 +102,19 @@ module Gori
       abstract def fuzz_attach_chain : Nil    # open the chain-edit prompt for the marker at the template cursor
       abstract def fuzz_list_paste : Nil      # open the payload-set editor pre-seeded to a List (multi-line, one value per line)
       abstract def fuzz_clear_marks : Nil     # strip all §…§ markers (and their chains) from the template
-      abstract def fuzzer_rename_subtab : Nil # open the rename prompt for the active sub-tab
-      abstract def fuzzer_close_subtab : Nil  # close the active sub-tab (confirm-gated)
+      abstract def fuzzer_rename_subtab : Nil    # open the rename prompt for the active sub-tab
+      abstract def fuzzer_close_subtab : Nil     # close the active sub-tab (confirm-gated)
+      abstract def fuzzer_duplicate_subtab : Nil # clone the active sub-tab's content into a new sibling
       abstract def fuzzer_copy : Nil          # copy selection or current line (READ panes)
       abstract def fuzzer_copy_all : Nil      # copy the whole focused pane text
       abstract def fuzzer_read_mode? : Bool   # focused pane is READ (y/copy verbs gate on this)
 
       # param miner (cross-tab seeds open a config popup, then mining runs in background)
-      abstract def mine_selected : Nil    # mine History's selected flow (opens the config popup)
-      abstract def mine_from_replay : Nil # mine the current Replay request
-      abstract def mine_run : Nil         # re-run mining for the focused Miner session
-      abstract def mine_stop : Nil        # stop the running mine
+      abstract def mine_selected : Nil           # mine History's selected flow (opens the config popup)
+      abstract def mine_from_replay : Nil        # mine the current Replay request
+      abstract def mine_run : Nil                # re-run mining for the focused Miner session
+      abstract def mine_stop : Nil               # stop the running mine
+      abstract def miner_duplicate_subtab : Nil  # clone the active miner sub-tab's content into a new sibling
 
       # sitemap tree
       abstract def sitemap_move(delta : Int32) : Nil
@@ -229,9 +232,10 @@ module Gori
 
       # convert: the encode/decode/hash workbench (sub-tab + output actions; the body's
       # text editing + focus nav stay inline, these power the space menu + palette)
-      abstract def convert_new : Nil            # open a fresh blank conversion sub-tab
-      abstract def convert_close : Nil          # close the active conversion sub-tab (keeps ≥1)
-      abstract def convert_rename_subtab : Nil  # open the rename prompt for the active sub-tab
+      abstract def convert_new : Nil               # open a fresh blank conversion sub-tab
+      abstract def convert_close : Nil             # close the active conversion sub-tab (keeps ≥1)
+      abstract def convert_rename_subtab : Nil     # open the rename prompt for the active sub-tab
+      abstract def convert_duplicate_subtab : Nil  # clone the active conversion into a new sibling
       abstract def convert_clear : Nil          # clear the current input + chain
       abstract def convert_copy : Nil           # copy the entire current output to the clipboard
       abstract def convert_copy_selection : Nil # copy selection from INPUT/OUTPUT (READ)
@@ -243,8 +247,9 @@ module Gori
 
       # notes: the multi-note scratchpad (sub-tab actions; the body's text editing
       # stays inline, these power the space menu reachable from the sub-tab strip)
-      abstract def notes_new : Nil         # open a fresh blank note sub-tab
-      abstract def notes_close : Nil       # close the active note sub-tab (keeps ≥1)
+      abstract def notes_new : Nil              # open a fresh blank note sub-tab
+      abstract def notes_close : Nil            # close the active note sub-tab (keeps ≥1)
+      abstract def notes_duplicate_subtab : Nil # clone the active note's text into a new sibling
       abstract def notes_copy : Nil        # copy selection or current line (READ mode)
       abstract def notes_copy_all : Nil    # copy the entire current note to the clipboard
       abstract def notes_read_mode? : Bool # READ vs INS (gates y/copy verbs)

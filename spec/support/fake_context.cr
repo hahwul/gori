@@ -79,6 +79,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_close_subtab : Nil; end
 
+  def replay_duplicate_subtab : Nil; end
+
   def replay_toggle_hex : Nil; end
 
   def replay_toggle_decoded : Nil; end
@@ -137,6 +139,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def fuzzer_close_subtab : Nil; end
 
+  def fuzzer_duplicate_subtab : Nil; end
+
   def fuzzer_copy : Nil; end
 
   def fuzzer_copy_all : Nil; end
@@ -152,6 +156,8 @@ class FakeExecContext < Gori::Verb::ExecContext
   def mine_run : Nil; end
 
   def mine_stop : Nil; end
+
+  def miner_duplicate_subtab : Nil; end
 
   def sitemap_move(delta : Int32) : Nil; end
 
@@ -313,6 +319,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def convert_rename_subtab : Nil; end
 
+  def convert_duplicate_subtab : Nil; end
+
   def convert_clear : Nil; end
 
   def convert_copy : Nil; end
@@ -336,6 +344,8 @@ class FakeExecContext < Gori::Verb::ExecContext
   def notes_new : Nil; end
 
   def notes_close : Nil; end
+
+  def notes_duplicate_subtab : Nil; end
 
   def notes_copy : Nil; end
 

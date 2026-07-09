@@ -98,6 +98,13 @@ module Gori
       r.register Verb::Definition.new(
         "replay.close-subtab", "Close subtab", "Close the active replay sub-tab",
         Verb::Scope::Replay, available: in_replay, mnemonic: 'w', section: :subtab) { |ctx| ctx.replay_close_subtab; nil }
+      # Duplicate the active session into a new sibling (content only — no flow/links).
+      # 'd' is free in COMMON ∪ :subtab (COMMON: r/y/n/f/m/k/u; :subtab already has e/w).
+      r.register Verb::Definition.new(
+        "replay.duplicate-subtab", "Duplicate subtab", "Open a new sub-tab with the same request content",
+        Verb::Scope::Replay,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_subtab_count >= 1 },
+        mnemonic: 'd', section: :subtab) { |ctx| ctx.replay_duplicate_subtab; nil }
 
       # --- REQUEST pane, mark-transform (mark request values, attach Convert chains
       # applied on send) — Round 5 order: the marker actions the user reaches for
@@ -314,6 +321,11 @@ module Gori
       r.register Verb::Definition.new(
         "fuzz.close-subtab", "Close subtab", "Close the active fuzz session",
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'w', section: :subtab) { |ctx| ctx.fuzzer_close_subtab; nil }
+      # Content-only clone of the active fuzz session (no run results / flow / links).
+      # 'd' is free in COMMON ∪ :subtab.
+      r.register Verb::Definition.new(
+        "fuzz.duplicate-subtab", "Duplicate subtab", "Open a new fuzz session with the same template and config",
+        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'd', section: :subtab) { |ctx| ctx.fuzzer_duplicate_subtab; nil }
       r.register Verb::Definition.new(
         "fuzz.automark", "Auto-mark params", "Mark every request parameter value", Verb::Scope::Fuzzer,
         [Verb::Chord.new("a", ctrl: true)], available: in_fuzzer, mnemonic: 'm', section: :template) { |ctx| ctx.fuzz_automark; nil }
@@ -364,6 +376,11 @@ module Gori
       r.register Verb::Definition.new(
         "mine.stop", "Stop mining", "Stop the running mine", Verb::Scope::Miner,
         [Verb::Chord.new("x", ctrl: true)], available: in_miner, mnemonic: 's') { |ctx| ctx.mine_stop; nil }
+      # Content-only clone of the active miner session (request + config; no findings).
+      # 'd' is free in COMMON ∪ :subtab (COMMON: r/s/k/u).
+      r.register Verb::Definition.new(
+        "mine.duplicate-subtab", "Duplicate subtab", "Open a new miner session with the same request and config",
+        Verb::Scope::Miner, available: in_miner, mnemonic: 'd', section: :subtab) { |ctx| ctx.miner_duplicate_subtab; nil }
 
       # Replay's/Fuzzer's "Link to finding/note" (Round 5 — relocated OUT of
       # register_links, which registers before register_fuzz/register_miner in

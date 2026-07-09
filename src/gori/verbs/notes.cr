@@ -17,6 +17,12 @@ module Gori
         "notes.close", "Close note", "Close the active note sub-tab (keeps at least one)",
         Verb::Scope::Notes, available: in_notes, mnemonic: 'w') { |ctx| ctx.notes_close; nil }
 
+      # Content-only clone (new note id; entity_links are not copied). Tagged :subtab so
+      # it fronts the strip's Space menu; 'd' is free in COMMON ∪ :subtab.
+      r.register Verb::Definition.new(
+        "notes.duplicate-subtab", "Duplicate subtab", "Open a new note sub-tab with the same text",
+        Verb::Scope::Notes, available: in_notes, mnemonic: 'd', section: :subtab) { |ctx| ctx.notes_duplicate_subtab; nil }
+
       # The single smart Copy (see replay.copy in verbs/history.cr) — copy-all is gone.
       in_notes_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.notes_read_mode? }
       r.register Verb::Definition.new(

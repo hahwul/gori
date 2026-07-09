@@ -24,6 +24,7 @@ require "../saml"
 require "../jwt"
 require "../graphql"
 require "../form_data"
+require "./subtab_clone"
 
 module Gori::Tui
   # One Fuzzer/Intruder session (a sub-tab under the Fuzzer tab). Holds the editable
@@ -197,6 +198,22 @@ module Gori::Tui
       @focus = :template
       @loaded = true
       @dirty = false
+    end
+
+    # Content-only clone for sub-tab Duplicate: template + target + config/sets.
+    # Does not copy run results, job state, or source flow linkage.
+    def duplicate_from(src : FuzzerView) : Nil
+      load_request(src.target, src.template_text, src.http2?, src.sni_override || "")
+      apply_config_json(src.config_json)
+      @name = SubtabClone.copy_name(src.name)
+      @dirty = true
+      @results.clear
+      @results_rev += 1
+      @sel = 0
+      @scroll = 0
+      @running = false
+      @stop_requested = false
+      @job_id = 0
     end
 
     # --- persistence accessors ----------------------------------------------

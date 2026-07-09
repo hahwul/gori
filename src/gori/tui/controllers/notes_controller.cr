@@ -251,6 +251,15 @@ module Gori::Tui
       @host.status("new note (#{@notes.count}) — ^1-9 switch · ^W close · esc tabs")
     end
 
+    # Content-only clone of the active note (new id; entity_links not copied).
+    def notes_duplicate : Nil
+      save_notes
+      @notes.duplicate_current
+      refresh_link_preview
+      @host.focus_body
+      @host.status("duplicated note (#{@notes.count} open)")
+    end
+
     # Close the current note (^W) — after a confirm, since the text is discarded. A
     # blank note has nothing to lose, so it closes immediately. NotesView keeps ≥1.
     def notes_close : Nil

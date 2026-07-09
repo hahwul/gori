@@ -36,6 +36,28 @@ describe Gori::Tui::ReplayView do
     backend.contains?("— not sent — press ^R to replay —").should be_true
   end
 
+  it "duplicate_from copies request content, flags, and last response (no source flow)" do
+    src = ReplayView.new
+    src.load_blank
+    src.name = "alpha"
+    ok = Gori::Replay::Result.new(
+      "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64)
+    src.apply(ok)
+
+    dst = ReplayView.new
+    dst.duplicate_from(src)
+    dst.loaded?.should be_true
+    dst.target.should eq(src.target)
+    dst.request_text.should eq(src.request_text)
+    dst.name.should eq("alpha copy")
+    dst.source_flow_id.should be_nil
+    dst.dirty?.should be_true
+
+    backend = MemoryBackend.new(120, 20)
+    dst.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("PONG").should be_true
+  end
+
   it "stays in plain response mode after sending a blank (nothing to diff against)" do
     view = ReplayView.new
     view.load_blank

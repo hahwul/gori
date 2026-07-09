@@ -28,6 +28,11 @@ module Gori
       r.register Verb::Definition.new(
         "convert.rename-subtab", "Rename subtab", "Rename the active conversion's sub-tab chip",
         Verb::Scope::Convert, available: in_convert, mnemonic: 'e', section: :subtab) { |ctx| ctx.convert_rename_subtab; nil }
+      # Content-only clone (input + chain + chip name). 'd' is free in COMMON ∪ :subtab
+      # (COMMON keys: n/w/y; :subtab has e).
+      r.register Verb::Definition.new(
+        "convert.duplicate-subtab", "Duplicate subtab", "Open a new conversion with the same input and chain",
+        Verb::Scope::Convert, available: in_convert, mnemonic: 'd', section: :subtab) { |ctx| ctx.convert_duplicate_subtab; nil }
 
       # Clears the INPUT text (and its chain spec) — the INPUT pane's own action.
       r.register Verb::Definition.new(

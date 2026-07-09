@@ -174,16 +174,18 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('s').try(&.id).should eq("convert.save")
     menu.verb_for('o').try(&.id).should eq("convert.load")
 
-    # Sub-tab strip focus (@focus == :subtabs): Convert now has its OWN :subtab verb
-    # (rename, mirroring Replay/Fuzzer) — COMMON + SUBTAB, New/Close/Copy/Rename all
-    # reachable from the strip.
+    # Sub-tab strip focus (@focus == :subtabs): Convert now has its OWN :subtab verbs
+    # (rename + duplicate, mirroring Replay/Fuzzer) — COMMON + SUBTAB, New/Close/Copy/
+    # Rename/Duplicate all reachable from the strip.
     menu.open(Gori::Verb::Scope::Convert, :subtab, ctx)
     ids = menu.entries.map(&.id)
     ids.should contain("convert.copy")
     ids.should contain("convert.new")
     ids.should contain("convert.close")
     ids.should contain("convert.rename-subtab")
+    ids.should contain("convert.duplicate-subtab")
     menu.verb_for('e').try(&.id).should eq("convert.rename-subtab")
+    menu.verb_for('d').try(&.id).should eq("convert.duplicate-subtab")
     ids.should_not contain("convert.save") # :tab-only, not :subtab — no bleed
 
     # Body-pane focus: OUTPUT gets Cycle output mode + COMMON's New/Close/Copy —
@@ -258,9 +260,10 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('n').try(&.id).should eq("fuzz.new")
   end
 
-  it "populates Replay's :subtab group with rename/close (Round 4 — was raw key-dispatch)" do
+  it "populates Replay's :subtab group with rename/close/duplicate (Round 4 — was raw key-dispatch)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :replay
+    ctx.replay_tab_count = 1 # gate duplicate availability
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     menu.open(Gori::Verb::Scope::Replay, :subtab, ctx)
@@ -268,9 +271,11 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("replay.send")              # COMMON
     ids.should contain("replay.rename-subtab")     # :subtab
     ids.should contain("replay.close-subtab")      # :subtab
+    ids.should contain("replay.duplicate-subtab")  # :subtab
     ids.should_not contain("replay.insert-marker") # a DIFFERENT section (:request) — no bleed
     menu.verb_for('e').try(&.id).should eq("replay.rename-subtab")
     menu.verb_for('w').try(&.id).should eq("replay.close-subtab")
+    menu.verb_for('d').try(&.id).should eq("replay.duplicate-subtab")
   end
 
   it "populates Replay's :response group with diff/hex alongside pretty (Round 4 — was raw key-dispatch)" do
@@ -289,33 +294,61 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('x').try(&.id).should eq("replay.toggle-resp-hex")
   end
 
-  it "populates Fuzzer's :subtab group with rename/close (Round 4 — was raw key-dispatch)" do
+  it "populates Fuzzer's :subtab group with rename/close/duplicate (Round 4 — was raw key-dispatch)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :fuzzer
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     menu.open(Gori::Verb::Scope::Fuzzer, :subtab, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("fuzz.run")           # COMMON
-    ids.should contain("fuzz.rename-subtab") # :subtab
-    ids.should contain("fuzz.close-subtab")  # :subtab
-    ids.should_not contain("fuzz.automark")  # a DIFFERENT section (:template) — no bleed
+    ids.should contain("fuzz.run")              # COMMON
+    ids.should contain("fuzz.rename-subtab")    # :subtab
+    ids.should contain("fuzz.close-subtab")     # :subtab
+    ids.should contain("fuzz.duplicate-subtab") # :subtab
+    ids.should_not contain("fuzz.automark")     # a DIFFERENT section (:template) — no bleed
     menu.verb_for('e').try(&.id).should eq("fuzz.rename-subtab")
     menu.verb_for('w').try(&.id).should eq("fuzz.close-subtab")
+    menu.verb_for('d').try(&.id).should eq("fuzz.duplicate-subtab")
   end
 
-  it "populates Convert's :subtab group with rename (asymmetry fix — was flat COMMON, no way to rename from the strip)" do
+  it "populates Convert's :subtab group with rename/duplicate (asymmetry fix — was flat COMMON, no way to rename from the strip)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :convert
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     menu.open(Gori::Verb::Scope::Convert, :subtab, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("convert.new")           # COMMON
-    ids.should contain("convert.rename-subtab") # :subtab
-    ids.should_not contain("convert.save")      # a DIFFERENT section (:tab) — no bleed
-    ids.should_not contain("convert.mode")      # a DIFFERENT section (:output) — no bleed
+    ids.should contain("convert.new")              # COMMON
+    ids.should contain("convert.rename-subtab")    # :subtab
+    ids.should contain("convert.duplicate-subtab") # :subtab
+    ids.should_not contain("convert.save")         # a DIFFERENT section (:tab) — no bleed
+    ids.should_not contain("convert.mode")         # a DIFFERENT section (:output) — no bleed
     menu.verb_for('e').try(&.id).should eq("convert.rename-subtab")
+    menu.verb_for('d').try(&.id).should eq("convert.duplicate-subtab")
+  end
+
+  it "populates Notes' :subtab group with duplicate (content-only clone from the strip)" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :notes
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    menu.open(Gori::Verb::Scope::Notes, :subtab, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("notes.new")              # COMMON
+    ids.should contain("notes.duplicate-subtab") # :subtab
+    menu.verb_for('d').try(&.id).should eq("notes.duplicate-subtab")
+  end
+
+  it "populates Miner's :subtab group with duplicate" do
+    ctx = FakeExecContext.new
+    ctx.current_tab = :miner
+    menu = SpaceMenu.new(Gori::Verbs.registry)
+
+    menu.open(Gori::Verb::Scope::Miner, :subtab, ctx)
+    ids = menu.entries.map(&.id)
+    ids.should contain("mine.run")              # COMMON
+    ids.should contain("mine.duplicate-subtab") # :subtab
+    menu.verb_for('d').try(&.id).should eq("mine.duplicate-subtab")
   end
 
   it "hides the scope rule edit/delete entries when no rule is selected" do

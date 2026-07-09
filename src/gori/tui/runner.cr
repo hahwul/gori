@@ -3721,6 +3721,10 @@ module Gori::Tui
       replay_controller.request_close
     end
 
+    def replay_duplicate_subtab : Nil
+      replay_controller.replay_duplicate
+    end
+
     def replay_toggle_hex : Nil
       replay_controller.replay_toggle_hex
     end
@@ -3852,6 +3856,10 @@ module Gori::Tui
       fuzzer_controller.request_close
     end
 
+    def fuzzer_duplicate_subtab : Nil
+      fuzzer_controller.fuzz_duplicate
+    end
+
     def fuzzer_copy : Nil
       fuzzer_controller.fuzzer_copy
     end
@@ -3885,6 +3893,10 @@ module Gori::Tui
 
     def mine_stop : Nil
       miner_controller.mine_stop
+    end
+
+    def miner_duplicate_subtab : Nil
+      miner_controller.miner_duplicate
     end
 
     private def open_mine_config(seed : MineSeed?) : Nil
@@ -4083,6 +4095,10 @@ module Gori::Tui
       open_rename(current_subtab_index)
     end
 
+    def convert_duplicate_subtab : Nil
+      convert_controller.convert_duplicate
+    end
+
     def convert_clear : Nil
       convert_controller.clear_all
     end
@@ -4126,6 +4142,10 @@ module Gori::Tui
     def notes_close : Nil
       notes_controller.notes_close
       resolve_subtab_focus_after_close
+    end
+
+    def notes_duplicate_subtab : Nil
+      notes_controller.notes_duplicate
     end
 
     def notes_copy : Nil

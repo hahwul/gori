@@ -9,6 +9,7 @@ require "./gutter"
 require "../store"
 require "../notes"
 require "../settings"
+require "./subtab_clone"
 
 module Gori::Tui
   # The Notes tab (DESIGN.md: notes/report — the running scratchpad/report).
@@ -249,6 +250,14 @@ module Gori::Tui
     # Open a fresh note and make it current (the new tab gets focus to type into).
     def new_note : Nil
       @notes << Note.new(alloc_note_id)
+      @current = @notes.size - 1
+      @dirty = true
+    end
+
+    # Content-only clone of the active note into a new sibling (new id; no entity_links).
+    def duplicate_current : Nil
+      text = current.area.text
+      @notes << Note.new(alloc_note_id, text)
       @current = @notes.size - 1
       @dirty = true
     end

@@ -735,6 +735,26 @@ module Gori::Tui
       @host.status("new replay — edit the request & target · ^R send · ^1-9 switch · esc back")
     end
 
+    # Content-only clone of the active sub-tab (Space → Duplicate). No flow_id / links.
+    # gRPC and split-decode tabs stay session-only (db_id nil), matching open-from-History.
+    def replay_duplicate : Nil
+      return @host.status("no replay open to duplicate") unless src = current_view
+      src.flush_decoded_edits if src.decode_mode?
+      view = ReplayView.new
+      view.duplicate_from(src)
+      db_id = if view.grpc_mode? || view.decode_mode?
+                nil
+              else
+                persist_new_replay(view, nil)
+              end
+      if (id = db_id) && view.ws_mode?
+        @host.session.store.update_replay_ws_messages(id, view.ws_out_texts_raw)
+      end
+      @replays << ReplayTab.new(view, nil, db_id)
+      @current_replay_idx = @replays.size - 1
+      @host.status("duplicated replay (#{@replays.size} open)")
+    end
+
     # Insert a freshly-opened replay tab into the store so it has a stable row id (the
     # reconcile key). A closing store returns 0 → nil, leaving the tab unsaved.
     private def persist_new_replay(view : ReplayView, flow_id : Int64?) : Int64?

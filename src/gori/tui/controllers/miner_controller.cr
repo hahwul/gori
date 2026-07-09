@@ -313,6 +313,16 @@ module Gori::Tui
       @current_idx = @miners.size - 1
     end
 
+    # Content-only clone of the active miner session (request + config; no findings/links).
+    def miner_duplicate : Nil
+      return @host.status("no miner session open to duplicate") unless src = current_view
+      view = MinerView.new
+      view.duplicate_from(src)
+      open_session(view, nil)
+      @host.goto_tab(:miner)
+      @host.status("duplicated miner session (#{@miners.size} open)")
+    end
+
     private def persist_new(view : MinerView, flow_id : Int64?) : Int64?
       id = @host.session.store.insert_miner_session(view.target_origin, view.request_bytes, view.http2?,
         view.sni_override, view.config_json, flow_id, @miners.size, view.name)

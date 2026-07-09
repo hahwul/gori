@@ -6,6 +6,7 @@ require "../text_read_state"
 require "../clipboard"
 require "../../convert"
 require "../../settings"
+require "../subtab_clone"
 
 module Gori::Tui
   # One open conversion — a "sub-tab" under the Convert tab. Each carries its own
@@ -144,6 +145,19 @@ module Gori::Tui
       @dirty = true
       @host.request_focus(:body)
       @host.status("new conversion (#{@sessions.size} open)")
+    end
+
+    # Content-only clone of the active conversion (input + chain + chip name).
+    def convert_duplicate : Nil
+      s = cur
+      name = SubtabClone.copy_name(s.view.name)
+      @sessions << make_session(s.input.text, s.chain, name)
+      @idx = @sessions.size - 1
+      @popup.close
+      @chain_pre = ""
+      @dirty = true
+      @host.request_focus(:body)
+      @host.status("duplicated conversion (#{@sessions.size} open)")
     end
 
     # Close the active conversion (^W / space menu). Keeps ≥1 — closing the last just

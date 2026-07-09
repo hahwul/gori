@@ -26,6 +26,7 @@ require "./input_mode"
 require "./read_cursor"
 require "./text_read_state"
 require "./line_field_read"
+require "./subtab_clone"
 
 module Gori::Tui
   # The Replay workbench (a tab). Layout: a target URL field on top, then a split
@@ -840,6 +841,71 @@ module Gori::Tui
       @dirty = false
       @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
       @scroll_req = 0
+    end
+
+    # Content-only clone for the sub-tab strip "Duplicate" action. Copies the editable
+    # request (all modes: HTTP / WS / gRPC / SAML / GraphQL), flags, last response, and
+    # chip name (+ " copy"). Drops source flow linkage, inflight state, and scroll/cursor.
+    def duplicate_from(src : ReplayView) : Nil
+      @flow = nil
+      @http2 = src.@http2
+      @target = src.@target
+      @tcx = @target.size
+      @sni = src.@sni
+      @scx = @sni.size
+      @target_field = :url
+      @auto_content_length = src.@auto_content_length
+      @mark_transform = src.@mark_transform
+      @name = SubtabClone.copy_name(src.@name)
+
+      @ws_mode = src.@ws_mode
+      @ws_upgrade = src.@ws_upgrade.try(&.dup)
+      @ws_result = nil
+      @ws_lines_cache = nil
+
+      @grpc_mode = src.@grpc_mode
+      @grpc_body = src.@grpc_body.dup
+      @grpc_msg_count = src.@grpc_msg_count
+      @grpc_lines_cache = nil
+
+      @decode_kind = src.@decode_kind
+      @saml_param = src.@saml_param
+      @saml_binding = src.@saml_binding
+      @saml_location = src.@saml_location
+      @graphql_location = src.@graphql_location
+      @req_pane = src.@req_pane
+      @decoded.set_text(src.@decoded.text)
+      @decoded_dirty = src.@decoded_dirty
+
+      # Hex-mode buffer is authoritative while set — snapshot it into the text editor
+      # so the clone is plain text (no shared hex cursor state).
+      @editor.set_text(src.request_text)
+      @req_hex_edit = nil
+      @scroll_req = 0
+
+      if res = src.@result
+        @result = Replay::Result.new(
+          res.head.dup, res.body.try(&.dup), res.response,
+          res.duration_us, res.error, res.incomplete?)
+      else
+        @result = nil
+      end
+      @prev_result = nil
+      @original_lines = [] of String
+      @diffable = false
+      reset_result_caches
+
+      @focus = :request
+      @resp_mode = :response
+      @scroll = 0
+      @xscroll = 0
+      @loaded = true
+      @dirty = true
+      @inflight = false
+      @chain_focused = false
+      @chain_marker_cursor = 0
+      @request_mode = InputMode::Read
+      @target_mode = InputMode::Read
     end
 
     def request_bytes : Bytes

@@ -161,6 +161,22 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  it "duplicate_current clones the active note's text into a new sibling (new id)" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "shared body")
+      src_id = view.current_note_id
+      view.duplicate_current
+      view.count.should eq(2)
+      view.current_index.should eq(1)
+      view.current_note_id.should_not eq(src_id)
+      view.current_text.should eq("shared body")
+      view.switch_note(0)
+      view.current_text.should eq("shared body")
+    end
+  end
+
   it "exposes current_index for arrow-key sub-tab navigation" do
     tmp_store do |store|
       view = NotesView.new

@@ -148,6 +148,10 @@ private class FakeContext < ExecContext
     @calls << :replay_close_subtab
   end
 
+  def replay_duplicate_subtab : Nil
+    @calls << :replay_duplicate_subtab
+  end
+
   def replay_toggle_hex : Nil
     @calls << :replay_toggle_hex
   end
@@ -260,6 +264,10 @@ private class FakeContext < ExecContext
     @calls << :fuzzer_close_subtab
   end
 
+  def fuzzer_duplicate_subtab : Nil
+    @calls << :fuzzer_duplicate_subtab
+  end
+
   def fuzzer_copy : Nil
     @calls << :fuzzer_copy
   end
@@ -286,6 +294,10 @@ private class FakeContext < ExecContext
 
   def mine_stop : Nil
     @calls << :mine_stop
+  end
+
+  def miner_duplicate_subtab : Nil
+    @calls << :miner_duplicate_subtab
   end
 
   def sitemap_move(delta : Int32) : Nil
@@ -628,6 +640,10 @@ private class FakeContext < ExecContext
     @calls << :convert_rename_subtab
   end
 
+  def convert_duplicate_subtab : Nil
+    @calls << :convert_duplicate_subtab
+  end
+
   def convert_clear : Nil
     @calls << :convert_clear
   end
@@ -666,6 +682,10 @@ private class FakeContext < ExecContext
 
   def notes_close : Nil
     @calls << :notes_close
+  end
+
+  def notes_duplicate_subtab : Nil
+    @calls << :notes_duplicate_subtab
   end
 
   def notes_copy : Nil

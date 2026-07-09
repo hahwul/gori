@@ -6,6 +6,7 @@ require "../store"
 require "../miner"
 require "../fuzz"
 require "../replay/flow_request"
+require "./subtab_clone"
 
 module Gori::Tui
   # The view for ONE mining session (a sub-tab under the Miner tab). Read-only: the
@@ -62,6 +63,24 @@ module Gori::Tui
       @name = rec.name
       apply_config_json(rec.config)
       @dirty = false
+    end
+
+    # Content-only clone for sub-tab Duplicate: request + config. No findings/progress.
+    def duplicate_from(src : MinerView) : Nil
+      @target = src.@target
+      @request = src.@request.dup
+      @http2 = src.@http2
+      @sni = src.@sni
+      apply_config_json(src.config_json)
+      @name = SubtabClone.copy_name(src.name)
+      @dirty = true
+      @running = false
+      @stop_requested = false
+      @results.clear
+      @progress = Miner::Progress.new(0, 0, 0, 0, 0)
+      @sel = 0
+      @scroll = 0
+      @job_id = 0
     end
 
     # --- persistence accessors ---

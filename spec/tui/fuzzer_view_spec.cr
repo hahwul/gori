@@ -31,6 +31,22 @@ describe Gori::Tui::FuzzerView do
     view.template_text.should contain("§x¦rot13§")
   end
 
+  it "duplicate_from copies template + config and clears run results" do
+    src = loaded_fuzzer
+    src.name = "probe"
+    src.apply_set(nil, Gori::Tui::SetSpec.new(:list, "a,b,c"))
+    src.template_text.should contain("x=1")
+
+    dst = FuzzerView.new
+    dst.duplicate_from(src)
+    dst.target.should eq(src.target)
+    dst.template_text.should eq(src.template_text)
+    dst.set_specs.size.should eq(1)
+    dst.set_specs[0].value.should eq("a,b,c")
+    dst.name.should eq("probe copy")
+    dst.running?.should be_false
+  end
+
   describe "CONFIG summary" do
     it "applies a payload set (from the Set overlay) and renders its row" do
       view = loaded_fuzzer

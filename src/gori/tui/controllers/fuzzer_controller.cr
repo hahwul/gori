@@ -734,6 +734,15 @@ module Gori::Tui
       @host.status("new fuzz session — type the target URL · ^A mark params · ^O config · ^R run")
     end
 
+    # Content-only clone of the active fuzz session (template + config; no results/links).
+    def fuzz_duplicate : Nil
+      return @host.status("no fuzz session open to duplicate") unless src = current_view
+      view = FuzzerView.new
+      view.duplicate_from(src)
+      open_session(view, nil)
+      @host.status("duplicated fuzz session (#{@fuzzers.size} open)")
+    end
+
     # ⇧I from History (or Findings evidence): open a captured flow as a fuzz session.
     def fuzz_flow(id : Int64) : Nil
       return unless detail = @host.session.store.get_flow(id)
