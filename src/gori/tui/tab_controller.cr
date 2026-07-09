@@ -28,6 +28,9 @@ module Gori::Tui
     # index) / the advanced-settings overlay. The Runner builds them from the current view.
     abstract def open_fuzz_set_editor(edit_index : Int32?) : Nil
     abstract def open_fuzz_advanced_editor : Nil
+    # Open the Project SCOPE rule popup (nil edit_id = add; else edit that rule id).
+    # Kind/type/pattern seed the form when editing (or defaults for add).
+    abstract def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
     # Destructive-action confirmation modal; `action` runs on confirm.
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, &action : -> Nil) : Nil
     abstract def session : Session             # store / scope / proxy / registry / interceptor

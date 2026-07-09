@@ -120,10 +120,10 @@ module Gori
         "scope.lens-toggle", "Toggle scope lens", "Filter History/Sitemap to in-scope flows on/off",
         Verb::Scope::Project, mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
       r.register Verb::Definition.new(
-        "scope.add-rule", "Add scope rule", "Open the inline row to add an include/exclude rule",
+        "scope.add-rule", "Add scope rule", "Open the popup to add an include/exclude rule",
         Verb::Scope::Project, [Verb::Chord.new("a")]) { |ctx| ctx.scope_add_rule; nil }
       r.register Verb::Definition.new(
-        "scope.edit-rule", "Edit scope rule", "Edit the selected scope rule in place",
+        "scope.edit-rule", "Edit scope rule", "Open the popup to edit the selected scope rule",
         Verb::Scope::Project, [Verb::Chord.new("e")], available: scope_rule) { |ctx| ctx.scope_edit_rule; nil }
       r.register Verb::Definition.new(
         "scope.delete-rule", "Delete scope rule", "Remove the selected scope rule",

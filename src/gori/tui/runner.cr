@@ -52,6 +52,7 @@ require "./notifications_overlay"
 require "./path_complete"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
+require "./scope_rule_overlay"
 require "../paths"
 require "../browser"
 require "../external_editor"
@@ -81,7 +82,7 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -169,6 +170,8 @@ module Gori::Tui
       # built fresh from the current fuzz session each time they open.
       @fuzz_set_overlay = nil.as(FuzzSetOverlay?)
       @fuzz_advanced_overlay = nil.as(FuzzAdvancedOverlay?)
+      # Project SCOPE add/edit popup (a/e on the rule list). Built fresh each open.
+      @scope_rule_overlay = nil.as(ScopeRuleOverlay?)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)         # transient action feedback; nil → show key hints
@@ -553,6 +556,7 @@ module Gori::Tui
       when :env           then @env_overlay.set_preedit(text)
       when :fuzz_set      then @fuzz_set_overlay.try(&.set_preedit(text))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.set_preedit(text))
+      when :scope_rule    then @scope_rule_overlay.try(&.set_preedit(text))
       when :none          then apply_preedit_body(text)
       end
     end
@@ -626,6 +630,7 @@ module Gori::Tui
       return handle_mine_config_key(ev) if @overlay == :mine_config
       return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
       return handle_fuzz_advanced_key(ev) if @overlay == :fuzz_advanced
+      return handle_scope_rule_key(ev) if @overlay == :scope_rule
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
@@ -803,8 +808,8 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced then true
-      else                                                                                                                                                                                                                          false
+      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule then true
+      else                                                                                                                                                                                                                                      false
       end
     end
 
@@ -896,6 +901,7 @@ module Gori::Tui
       when :mine_config   then click_mine_config(area, mx, my)
       when :fuzz_set      then click_fuzz_set(area, mx, my)
       when :fuzz_advanced then click_fuzz_advanced(area, mx, my)
+      when :scope_rule    then click_scope_rule(area, mx, my)
         # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
@@ -948,6 +954,16 @@ module Gori::Tui
       box = ov.overlay_box(area)
       return apply_close_fuzz_advanced(ov) if box.nil? || dismiss_zone?(box, mx, my)
       ov.handle_click(box, mx, my)
+    end
+
+    private def click_scope_rule(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @scope_rule_overlay || return
+      box = ov.overlay_box(area)
+      return close_scope_rule if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
+      if idx = ov.row_at(box, mx, my)
+        ov.set_selected(idx)
+        commit_scope_rule_overlay(ov) if ov.on_save_row?
+      end
     end
 
     private def click_palette(area : Rect, mx : Int32, my : Int32) : Nil
@@ -1098,6 +1114,7 @@ module Gori::Tui
       when :mine_config   then @mine_config_overlay.try(&.move(step))
       when :fuzz_set      then @fuzz_set_overlay.try(&.move(step))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.move(step))
+      when :scope_rule    then @scope_rule_overlay.try(&.move(step))
       end
     end
 
@@ -1153,6 +1170,25 @@ module Gori::Tui
     private def handle_fuzz_advanced_key(ev : Termisu::Event::Key) : Nil
       ov = @fuzz_advanced_overlay || return
       apply_close_fuzz_advanced(ov) if ov.handle_key(ev) == :apply
+    end
+
+    # Project SCOPE rule popup: ↑/↓ field · ←/→ kind/type · type pattern · ↵ save · esc cancel.
+    private def handle_scope_rule_key(ev : Termisu::Event::Key) : Nil
+      ov = @scope_rule_overlay || return
+      case ov.handle_key(ev)
+      when :cancel then close_scope_rule
+      when :commit then commit_scope_rule_overlay(ov)
+      end
+    end
+
+    private def commit_scope_rule_overlay(ov : ScopeRuleOverlay) : Nil
+      return unless project_controller.apply_scope_rule(ov.edit_id, ov.kind, ov.match_type, ov.pattern)
+      close_scope_rule
+    end
+
+    private def close_scope_rule : Nil
+      @overlay = :none
+      @scope_rule_overlay = nil
     end
 
     private def apply_close_fuzz_set(ov : FuzzSetOverlay) : Nil
@@ -2544,6 +2580,7 @@ module Gori::Tui
       @mine_config_overlay.try(&.render(screen, layout.body)) if @overlay == :mine_config
       @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
       @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_advanced
+      @scope_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :scope_rule
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
 
@@ -2638,6 +2675,7 @@ module Gori::Tui
       when :mine_config   then "MINE PARAMS"
       when :fuzz_set      then "PAYLOAD SET"
       when :fuzz_advanced then "ADVANCED"
+      when :scope_rule    then "SCOPE RULE"
       else
         case @focus
         when :menu    then "TABS"
@@ -2682,6 +2720,7 @@ module Gori::Tui
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
       when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
       when :fuzz_advanced then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
+      when :scope_rule    then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
       when :detail        then history_controller.body_hint(:body)
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
@@ -3562,7 +3601,7 @@ module Gori::Tui
       scope_toggle_lens
     end
 
-    # Project SCOPE-pane rule editing (the inline a/e/d keys + its space menu both route here).
+    # Project SCOPE-pane rule editing (a/e/d + space menu → popup overlay).
     def scope_add_rule : Nil
       project_controller.scope_add_rule
     end
@@ -3965,6 +4004,17 @@ module Gori::Tui
       return unless v = fuzzer_controller.current_view
       @fuzz_advanced_overlay = FuzzAdvancedOverlay.new(v.advanced_snapshot)
       @overlay = :fuzz_advanced
+    end
+
+    # Host: open the Project SCOPE rule popup (nil edit_id = add a new rule).
+    def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
+      @scope_rule_overlay =
+        if id = edit_id
+          ScopeRuleOverlay.editing(id, kind, match_type, pattern)
+        else
+          ScopeRuleOverlay.new(kind: kind, match_type: match_type, pattern: pattern)
+        end
+      @overlay = :scope_rule
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is

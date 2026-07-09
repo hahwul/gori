@@ -37,7 +37,7 @@ module Gori::Tui
     end
 
     def body_badge : Symbol # the description INS editor, add-row capture text, and settings text fields capture keys; the lists/toggle are nav
-      editing = (@project_view.pane == :desc && @project_view.desc_insert_mode?) || @project_view.adding? ||
+      editing = (@project_view.pane == :desc && @project_view.desc_insert_mode?) ||
                 @project_view.ov_adding? || @project_view.env_adding? || @project_view.env_prefix_editing? ||
                 (@project_view.pane == :settings && @project_view.settings_text_row?)
       editing ? :editor : :body
@@ -48,7 +48,7 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       case @project_view.pane
       when :scope
-        @project_view.adding? ? "pattern · chips/1-3 type · i/e kind · ↵ save · esc" : "↑/↓ move · ↓ host-overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
+        "↑/↓ move · ↓ host-overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
       when :overrides
         @project_view.ov_adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ move · ↑ scope · ↓ env · → desc · a add · ↵/e edit · d del · space cmds · esc"
       when :env
@@ -105,9 +105,7 @@ module Gori::Tui
       case pane
       when :scope
         @project_view.focus_pane(:scope)
-        if @project_view.adding? && (chip = @project_view.scope_add_chip_hit(rect, mx, my))
-          apply_scope_add_chip(chip)
-        elsif idx = @project_view.scope_row_at(rect, mx, my)
+        if idx = @project_view.scope_row_at(rect, mx, my)
           @project_view.select_scope(idx)
         end
       when :overrides
@@ -150,7 +148,7 @@ module Gori::Tui
 
     def set_preedit(text : String) : Bool
       return false unless @project_view.pane == :desc && @project_view.desc_insert_mode? ||
-                          @project_view.adding? || @project_view.ov_adding? ||
+                          @project_view.ov_adding? ||
                           @project_view.env_adding? || @project_view.env_prefix_editing? ||
                           (@project_view.pane == :settings && @project_view.settings_text_row?)
       @project_view.set_preedit(text)
@@ -197,11 +195,11 @@ module Gori::Tui
       commit_project_network(on_leave: true) # apply a pending network edit before the tab leaves/quits
     end
 
-    # True while EITHER inline add/edit row (SCOPE or HOST OVERRIDES) is composing — the
+    # True while an inline add/edit row (HOST OVERRIDES or ENV) is composing — the
     # shell's focus ring keeps Tab inert then (the row owns it) instead of switching panes.
+    # SCOPE uses a modal popup, so Tab is not owned by the list while that overlay is open.
     def scope_adding? : Bool
-      (@project_view.pane == :scope && @project_view.adding?) ||
-        (@project_view.pane == :overrides && @project_view.ov_adding?) ||
+      (@project_view.pane == :overrides && @project_view.ov_adding?) ||
         (@project_view.pane == :env && (@project_view.env_adding? || @project_view.env_prefix_editing?))
     end
 
@@ -332,12 +330,11 @@ module Gori::Tui
       @host.status(msg)
     end
 
-    # --- SCOPE pane: browse the rule list (or route to the inline add/edit row) ---
+    # --- SCOPE pane: browse the rule list; a/e open the Miner-style popup overlay ---
     # Returns true when consumed; false defers to the keymap — a/e/d fire the scope.*-rule
     # verbs, space opens the action menu, and Global chords (capture/rules/…) work here too
-    # (the list is navigable, like History). The add-row sub-mode swallows everything (text).
+    # (the list is navigable, like History).
     private def handle_project_scope_key(ev : Termisu::Event::Key) : Bool
-      return (handle_project_add_key(ev); true) if @project_view.adding?
       key = ev.key
       if ev.ctrl? && key.lower_p?
         save
@@ -361,7 +358,7 @@ module Gori::Tui
       elsif key.right?
         @project_view.focus_pane(:desc) # → crosses to the DESCRIPTION (right pane)
       elsif key.enter?
-        @project_view.scope_edit_start
+        scope_edit_rule # ↵ opens the same popup as 'e'
       else
         return false # a/e/d (scope.*-rule verbs), space (action menu), Global chords
       end
@@ -369,17 +366,50 @@ module Gori::Tui
     end
 
     # --- SCOPE rule verbs (a/e/d via the keymap + the Project action menu) ---
+    # Opens the centered popup (kind ←/→ · type ←/→ · pattern · Save), same model as Miner.
     def scope_add_rule : Nil
-      @project_view.scope_add_start
+      @project_view.focus_pane(:scope)
+      @host.open_scope_rule_editor(nil, "include", "host", "")
     end
 
     def scope_edit_rule : Nil
-      @project_view.scope_edit_start
+      rule = @project_view.selected_rule
+      return unless rule
+      @project_view.focus_pane(:scope)
+      @host.open_scope_rule_editor(rule.id, rule.kind, rule.match_type, rule.pattern)
     end
 
     def scope_delete_rule : Nil
       if pat = @project_view.scope_delete
         @host.status("removed scope rule: #{pat}")
+      end
+    end
+
+    # Apply a rule from the SCOPE popup. Returns true when the overlay should close
+    # (success); false keeps it open and toasts the reason (empty / invalid / dup).
+    def apply_scope_rule(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Bool
+      case @project_view.commit_scope_rule(kind, match_type, pattern, edit_id)
+      when :empty
+        @host.status("scope: empty pattern")
+        false
+      when :invalid
+        @host.status("scope: invalid regex")
+        false
+      when :dup
+        @host.status("scope: duplicate rule")
+        false
+      when :ok
+        n = @host.session.scope.size
+        edited = !edit_id.nil?
+        verb = edited ? "updated" : "added"
+        # Confirm the write AND surface that the lens is still off (the common "I added
+        # a rule but nothing filtered" confusion — the space menu's 's' enables it).
+        msg = "scope rule #{verb} — #{n} rule#{n == 1 ? "" : "s"}"
+        msg += " · space → s to enable the lens" unless @host.session.scope.enabled? || edited
+        @host.status(msg)
+        true
+      else
+        false
       end
     end
 
@@ -399,76 +429,6 @@ module Gori::Tui
           "scope lens ON — showing in-scope only (#{n} rule#{n == 1 ? "" : "s"})"
         end
       )
-    end
-
-    # The inline add/edit row: type the pattern; exclusive kind/type chips (click or
-    # i/e / 1-3 when pattern empty); ^K/^T still cycle for muscle memory; ↵ commits;
-    # ⌫ on empty cancels; esc cancels.
-    private def handle_project_add_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if key.escape?
-        @project_view.cancel_add
-      elsif key.enter?
-        commit_scope_rule
-      elsif ev.ctrl? && key.lower_k?
-        @project_view.cycle_kind
-      elsif ev.ctrl? && key.lower_t?
-        @project_view.cycle_type
-      elsif key.left?
-        @project_view.scope_move_cursor(-1)
-      elsif key.right?
-        @project_view.scope_move_cursor(1)
-      elsif key.backspace?
-        @project_view.cancel_add unless @project_view.scope_backspace
-      elsif c && !ev.ctrl? && !ev.alt?
-        # Direct chip shortcuts when the pattern is still empty so digits/i/e can
-        # still be typed into a non-empty pattern (e.g. regex `\d+`, host `i.com`).
-        if @project_view.scope_input_empty?
-          case c
-          when 'i', 'I'
-            @project_view.set_pend_kind("include")
-            return
-          when 'e', 'E'
-            @project_view.set_pend_kind("exclude")
-            return
-          when '1'
-            @project_view.set_pend_type("host")
-            return
-          when '2'
-            @project_view.set_pend_type("string")
-            return
-          when '3'
-            @project_view.set_pend_type("regex")
-            return
-          end
-        end
-        @project_view.scope_input(c)
-        @project_view.set_preedit("") # commit any preedit
-      end
-    end
-
-    private def apply_scope_add_chip(chip : Symbol) : Nil
-      case chip
-      when :kind_include then @project_view.set_pend_kind("include")
-      when :kind_exclude then @project_view.set_pend_kind("exclude")
-      when :type_host    then @project_view.set_pend_type("host")
-      when :type_string  then @project_view.set_pend_type("string")
-      when :type_regex   then @project_view.set_pend_type("regex")
-      end
-    end
-
-    private def commit_scope_rule : Nil
-      case @project_view.scope_commit
-      when :empty   then @host.status("scope: empty pattern")
-      when :invalid then @host.status("scope: invalid regex")
-      when :dup     then @host.status("scope: duplicate rule")
-      when :ok
-        n = @host.session.scope.size
-        # Confirm the add AND surface that the lens is still off (the common "I added
-        # a rule but nothing filtered" confusion — the space menu's 's' enables it).
-        @host.status(@host.session.scope.enabled? ? "scope rule added — #{n} rule#{n == 1 ? "" : "s"}" : "scope rule added — #{n} rule#{n == 1 ? "" : "s"} · space → s to enable the lens")
-      end
     end
 
     # --- HOST OVERRIDES pane: browse the override list (or route to the add/edit row) ---

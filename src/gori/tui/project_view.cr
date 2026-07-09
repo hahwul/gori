@@ -58,15 +58,9 @@ module Gori::Tui
       @desc_mode = InputMode::Read
       @desc_read = TextReadState.new
 
-      @pane = :scope            # :scope | :overrides | :desc
-      @sel = 0                  # selected rule row in the SCOPE list
-      @adding = false           # the inline add/edit row is open
-      @edit_id = nil.as(Int64?) # non-nil ⇒ the row is editing an existing rule
-      @input = ""               # add-row pattern text
-      @icx = 0                  # add-row cursor index
-      @add_preedit = ""         # IME preedit for the add-row
-      @pend_kind = "include"    # add-row kind chip
-      @pend_type = "host"       # add-row match_type chip
+      @pane = :scope # :scope | :overrides | :desc
+      @sel = 0       # selected rule row in the SCOPE list
+      # SCOPE add/edit is a centered popup (ScopeRuleOverlay), not an inline row.
 
       # HOST OVERRIDES pane: its own selection + inline add/edit row, fully independent
       # of the SCOPE pane above it (single-line "IP host" entry, /etc/hosts order).
@@ -151,12 +145,9 @@ module Gori::Tui
       Prism.tech_summary(rows.map { |(code, _, ev)| {code, ev} })
     end
 
-    # IME preedit routes to whichever pane is composing: the SCOPE add-row when it's
-    # open, else the DESCRIPTION editor.
+    # IME preedit routes to whichever pane is composing (SCOPE uses a popup overlay).
     def set_preedit(text : String) : Nil
-      if @pane == :scope && @adding
-        @add_preedit = text
-      elsif @pane == :overrides && @ov_adding
+      if @pane == :overrides && @ov_adding
         @ov_preedit = text
       elsif @pane == :env && (@env_adding || @env_prefix_editing)
         @env_preedit = text
@@ -237,7 +228,6 @@ module Gori::Tui
     # either list).
     def focus_scope : Nil
       @pane = :scope
-      cancel_add
       cancel_ov_add
       cancel_env_add
       cancel_env_prefix_edit
@@ -338,7 +328,7 @@ module Gori::Tui
     def scope_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       return nil unless pane_at(rect, mx, my) == :scope
       return nil unless panes = body_panes(rect)
-      row_at(panes[0].inset(1, 1), mx, my, @adding, @sel, @scope.rules.size)
+      row_at(panes[0].inset(1, 1), mx, my, false, @sel, @scope.rules.size)
     end
 
     # Index of the host-override row clicked, or nil outside the populated list. Uses the
@@ -491,11 +481,7 @@ module Gori::Tui
       @set_cursor = (mx - vx).clamp(0, @set_values[@set_sel - 1].size)
     end
 
-    # --- SCOPE pane editing (delegated from Runner#handle_project_scope_key) ---
-    def adding? : Bool
-      @adding
-    end
-
+    # --- SCOPE pane (list navigation; add/edit is ScopeRuleOverlay via the controller) ---
     def scope_select(d : Int32) : Nil
       n = @scope.rules.size
       return if n == 0
@@ -514,153 +500,33 @@ module Gori::Tui
       @sel >= @scope.rules.size - 1
     end
 
-    def scope_add_start : Nil
-      @adding = true
-      @edit_id = nil
-      @input = ""
-      @icx = 0
-      @add_preedit = ""
-      @pend_kind = "include"
-      @pend_type = "host"
+    # The currently selected rule (nil when the list is empty) — seeds the edit popup.
+    def selected_rule : Scope::Rule?
+      @scope.rules[@sel]?
     end
 
-    # Open the add-row pre-filled from the selected rule (edit-in-place).
-    def scope_edit_start : Nil
-      rule = current_rule
-      return unless rule
-      @adding = true
-      @edit_id = rule.id
-      @input = rule.pattern
-      @icx = rule.pattern.size
-      @add_preedit = ""
-      @pend_kind = rule.kind
-      @pend_type = rule.match_type
-    end
-
-    def cancel_add : Nil
-      @adding = false
-      @edit_id = nil
-      @input = ""
-      @icx = 0
-      @add_preedit = ""
-    end
-
-    def cycle_kind : Nil
-      @pend_kind = @pend_kind == "include" ? "exclude" : "include"
-    end
-
-    def cycle_type : Nil
-      i = Scope::TYPES.index(@pend_type) || 0
-      @pend_type = Scope::TYPES[(i + 1) % Scope::TYPES.size]
-    end
-
-    # Direct set (chip click / 1-3 / i-e). Ignores unknown values.
-    def set_pend_kind(k : String) : Nil
-      @pend_kind = k if Scope::KINDS.includes?(k)
-    end
-
-    def set_pend_type(t : String) : Nil
-      @pend_type = t if Scope::TYPES.includes?(t)
-    end
-
-    def pend_kind : String
-      @pend_kind
-    end
-
-    def pend_type : String
-      @pend_type
-    end
-
-    # True when the add-row pattern buffer is empty (1-3 type shortcuts only then).
-    def scope_input_empty? : Bool
-      @input.empty?
-    end
-
-    # Hit-test exclusive chips on the open SCOPE add/edit row. Geometry matches
-    # `render_add_row` (prefix + kind chips + gap + type chips). Miss → nil.
-    def scope_add_chip_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
-      return nil unless @adding
-      return nil unless panes = body_panes(rect)
-      inner = panes[0].inset(1, 1)
-      return nil if inner.w <= 0 || inner.h <= 0
-      y = inner.y
-      return nil if my != y
-      start_x = add_row_chips_start_x(inner)
-      if hit = Frame.left_chip_hit(mx, my, y, start_x, ADD_KIND_CHIPS)
-        return hit
-      end
-      type_x = start_x + chip_run_width(ADD_KIND_CHIPS) + 1 # group gap after kind pair
-      Frame.left_chip_hit(mx, my, y, type_x, ADD_TYPE_CHIPS)
-    end
-
-    # Labels include flanking spaces so Frame.chip matches Intercept-style chrome.
-    ADD_KIND_CHIPS = [
-      {:kind_include, " incl "},
-      {:kind_exclude, " excl "},
-    ] of {Symbol, String}
-
-    ADD_TYPE_CHIPS = [
-      {:type_host, " host "},
-      {:type_string, " string "},
-      {:type_regex, " regex "},
-    ] of {Symbol, String}
-
-    private def add_row_chips_start_x(inner : Rect) : Int32
-      prefix = @edit_id ? "edit " : "add "
-      inner.x + 1 + prefix.size
-    end
-
-    private def chip_run_width(chips : Array({Symbol, String})) : Int32
-      # sum(label) + 1-col gap after each chip (same as left_chip_hit / successive chip+1)
-      chips.sum { |(_, lab)| lab.size + 1 }
-    end
-
-    def scope_input(ch : Char) : Nil
-      @input = "#{@input[0, @icx]}#{ch}#{@input[@icx..]}"
-      @icx += 1
-      @add_preedit = ""
-    end
-
-    # Backspace the add-row input; false when it's already empty (the Runner then
-    # closes the row), so a stray ⌫ can't delete a rule mid-edit.
-    def scope_backspace : Bool
-      return false if @icx == 0
-      @input = "#{@input[0, @icx - 1]}#{@input[@icx..]}"
-      @icx -= 1
-      true
-    end
-
-    def scope_move_cursor(d : Int32) : Nil
-      @icx = (@icx + d).clamp(0, @input.size)
-    end
-
-    # Commit the add/edit row. Returns :ok | :empty | :invalid | :dup so the Runner toasts.
-    def scope_commit : Symbol
-      pattern = @input.strip
+    # Commit from the SCOPE popup. Returns :ok | :empty | :invalid | :dup for toasts.
+    def commit_scope_rule(kind : String, match_type : String, pattern : String, edit_id : Int64? = nil) : Symbol
+      pattern = pattern.strip
       return :empty if pattern.empty?
-      return :invalid unless Scope.valid?(@pend_type, pattern)
-      ok = if id = @edit_id
-             @scope.update(id, @pend_kind, @pend_type, pattern)
+      return :invalid unless Scope.valid?(match_type, pattern)
+      ok = if id = edit_id
+             @scope.update(id, kind, match_type, pattern)
            else
-             @scope.add(@pend_kind, @pend_type, pattern)
+             @scope.add(kind, match_type, pattern)
            end
       return :dup unless ok
-      cancel_add
       clamp_sel
       :ok
     end
 
     # Removes the selected rule, returning its pattern (for the Runner's toast) or nil.
     def scope_delete : String?
-      rule = current_rule
+      rule = selected_rule
       return nil unless rule
       @scope.remove(rule.id)
       clamp_sel
       rule.pattern
-    end
-
-    private def current_rule : Scope::Rule?
-      @scope.rules[@sel]?
     end
 
     private def clamp_sel : Nil
@@ -1163,22 +1029,16 @@ module Gori::Tui
       render_scope_list(screen, rect.inset(1, 1), focused)
     end
 
-    # The rule list (windowed around the selection) + the inline add/edit row, drawn
-    # inside the SCOPE card's interior `inner`.
+    # The rule list (windowed around the selection) inside the SCOPE card interior.
     private def render_scope_list(screen : Screen, inner : Rect, focused : Bool) : Nil
       return if inner.h <= 0 || inner.w <= 0
       rules = @scope.rules
       y = inner.y
       rows = inner.h
-      if @adding
-        render_add_row(screen, inner, y, focused)
-        y += 1
-        rows -= 1
-      end
       return if rows <= 0
 
       if rules.empty?
-        screen.text(inner.x, y, "(no rules — a to add)", Theme.muted) unless @adding
+        screen.text(inner.x, y, "(no rules — a to add)", Theme.muted)
         return
       end
 
@@ -1188,7 +1048,7 @@ module Gori::Tui
         idx = scroll + i
         rule = rules[idx]
         ry = y + i
-        selected = focused && idx == @sel && !@adding
+        selected = focused && idx == @sel
         bg = selected ? Theme.accent_bg : Theme.bg
         if selected
           screen.fill(Rect.new(inner.x, ry, inner.w, 1), bg)
@@ -1206,33 +1066,6 @@ module Gori::Tui
       screen.text(x + 5, y, rule.match_type, Theme.muted, bg)
       px = x + 12
       screen.text(px, y, rule.pattern, fg, bg, width: {inner.right - px, 1}.max) if inner.right > px
-    end
-
-    # The inline "add"/"edit" row: exclusive kind + match-type chips (all options
-    # visible; click / i-e / 1-3 select) then the pattern input.
-    private def render_add_row(screen : Screen, inner : Rect, y : Int32, focused : Bool) : Nil
-      x = inner.x + 1
-      x = screen.text(x, y, @edit_id ? "edit " : "add ", Theme.accent, Theme.bg)
-      ADD_KIND_CHIPS.each do |(id, label)|
-        lit = case id
-              when :kind_include then @pend_kind == "include"
-              when :kind_exclude then @pend_kind == "exclude"
-              else                    false
-              end
-        x = Frame.chip(screen, x, y, label, lit) + 1
-      end
-      x += 1 # group gap before type chips
-      ADD_TYPE_CHIPS.each do |(id, label)|
-        lit = case id
-              when :type_host   then @pend_type == "host"
-              when :type_string then @pend_type == "string"
-              when :type_regex  then @pend_type == "regex"
-              else                   false
-              end
-        x = Frame.chip(screen, x, y, label, lit) + 1
-      end
-      w = {inner.right - x, 3}.max
-      screen.input_line(x, y, @input, @icx, @add_preedit, Theme.text_bright, Theme.bg, width: w)
     end
 
     # HOST OVERRIDES card: title + count chip riding the top border, then the entry list
