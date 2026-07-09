@@ -106,6 +106,8 @@ module Gori::Tui
     getter preview_focus : Symbol
 
     # Load/refresh the preview cache for the selected flow (no-op when preview is off).
+    # Uses a capped body read (PREVIEW_BODY_CAP+1) so selecting through the list never
+    # pulls multi-MiB BLOBs from SQLite for a pane that only shows a short prefix.
     def refresh_preview(store : Store) : Nil
       return clear_preview unless preview_enabled?
       id = selected_id
@@ -114,7 +116,7 @@ module Gori::Tui
         @preview_scroll_req = 0
         @preview_scroll_res = 0
       end
-      @preview_detail = store.get_flow(id)
+      @preview_detail = store.get_flow(id, body_max: PREVIEW_BODY_CAP + 1)
       @preview_id = id
     end
 
@@ -160,7 +162,7 @@ module Gori::Tui
     # `head` (bounded); only a plain request/response body uses the windowed `body`.
     private record DetailView,
       head : Array(Highlight::Line),
-      body : Array(String),
+      body : Highlight::BodyLines,
       kind : Symbol,
       trailer : Array(Highlight::Line),
       pretty : Bool = false,   # whether Pretty actually reflowed this body (drives the indicator)
@@ -177,7 +179,7 @@ module Gori::Tui
       end
 
       # Plain text of line `i` for searching — joins head/trailer spans and returns
-      # body lines raw, so it never re-styles (keeps ^F cheap on a huge body).
+      # body lines raw (lazy materialise), so it never re-styles (keeps ^F cheap on a huge body).
       def line_text(i : Int32) : String
         return head[i].map(&.text).join if i < head.size
         j = i - head.size
@@ -567,41 +569,53 @@ module Gori::Tui
 
     # READ-mode caret move (+ optional shift selection). Arrow keys / detail.up/down
     # route here when the pane is navigable text (not a raw hex dump).
+    # Lazy (size + line_at): a vertical step only materialises the destination line —
+    # never every BodyLines entry on a multi-MiB body.
     def detail_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return unless detail_navigable?
-      lines = detail_plain_lines
-      return if lines.empty?
-      @detail_read.move(dr, dc, lines, selecting: selecting)
+      size, line_at = detail_line_source
+      return if size <= 0
+      @detail_read.move(dr, dc, size, line_at, selecting)
       ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
     end
 
     # Wheel: scroll the viewport without moving the caret (READ panes).
+    # Uses detail_view.total (O(1) line count from BodyLines offsets) rather than
+    # materialising every plain line just to know the scroll range.
     def detail_scroll_view(step : Int32) : Nil
       return unless detail_navigable?
-      lines = detail_plain_lines
-      return if @detail_last_h <= 0 || lines.size <= @detail_last_h
-      max = lines.size - @detail_last_h
+      total = if @reveal && (rl = reveal_lines)
+                rl.size
+              else
+                detail_view.total
+              end
+      return if @detail_last_h <= 0 || total <= @detail_last_h
+      max = total - @detail_last_h
       @detail_scroll = (@detail_scroll + step).clamp(0, max)
       lo = @detail_scroll
-      hi = {@detail_scroll + @detail_last_h - 1, lines.size - 1}.min
-      @detail_read.sync(
-        @detail_read.cy.clamp(lo, hi),
-        @detail_read.cx.clamp(0, lines[@detail_read.cy].size))
+      hi = {@detail_scroll + @detail_last_h - 1, total - 1}.min
+      cy = @detail_read.cy.clamp(lo, hi)
+      line_len = if @reveal && (rl = reveal_lines)
+                   rl[cy]?.try(&.size) || 0
+                 else
+                   detail_view.line_text(cy).size
+                 end
+      @detail_read.sync(cy, @detail_read.cx.clamp(0, line_len))
     end
 
     def detail_click_to_cursor(rect : Rect, mx : Int32, my : Int32, focused : Bool) : Nil
       return unless focused && detail_navigable?
-      lines = detail_plain_lines
-      return if rect.empty? || lines.empty?
-      gw = detail_gutter_w(rect, lines.size)
-      @detail_read.click_to_cursor(rect, mx, my, @detail_scroll, lines, gw, @detail_xscroll)
+      size, line_at = detail_line_source
+      return if rect.empty? || size <= 0
+      gw = detail_gutter_w(rect, size)
+      @detail_read.click_to_cursor(rect, mx, my, @detail_scroll, size, line_at, gw, @detail_xscroll)
       ensure_detail_visible(rect.h)
     end
 
     def detail_copy_text : String
-      lines = detail_plain_lines
-      return "" if lines.empty?
-      @detail_read.selection_text(lines) || @detail_read.current_line(lines)
+      size, line_at = detail_line_source
+      return "" if size <= 0
+      @detail_read.selection_text(size, line_at) || @detail_read.current_line(size, line_at)
     end
 
     def detail_selection? : Bool
@@ -610,9 +624,9 @@ module Gori::Tui
 
     def detail_select_line : Nil
       return unless detail_navigable?
-      lines = detail_plain_lines
-      return if lines.empty?
-      @detail_read.select_line(lines)
+      size, line_at = detail_line_source
+      return if size <= 0
+      @detail_read.select_line(size, line_at)
       ensure_detail_visible(@detail_last_h) if @detail_last_h > 0
     end
 
@@ -627,13 +641,25 @@ module Gori::Tui
       true
     end
 
-    # Plain text lines for the active detail pane (search, caret, copy).
+    # Plain text lines for the active detail pane. Prefer `detail_line_source` on hot
+    # paths (move/scroll/paint) so BodyLines stay lazy; this full array is for
+    # rare full-materialise callers (e.g. selection span rebuild when selecting).
     private def detail_plain_lines : Array(String)
       if @reveal && (rl = reveal_lines)
         rl
       else
         dv = detail_view
         (0...dv.total).map { |i| dv.line_text(i) }
+      end
+    end
+
+    # O(1) total + lazy line fetch for caret/scroll/copy on windowed req/resp bodies.
+    private def detail_line_source
+      if @reveal && (rl = reveal_lines)
+        {rl.size, ->(i : Int32) { rl[i] }}
+      else
+        dv = detail_view
+        {dv.total, ->(i : Int32) { dv.line_text(i) }}
       end
     end
 
@@ -1162,28 +1188,38 @@ module Gori::Tui
     # The normal (non-hex, non-reveal) detail body: request/response/decoded-pane text,
     # windowed + horizontally scrollable. Split out of render_detail to keep that
     # dispatch's cyclomatic complexity under ameba's threshold.
+    # Steady-scroll hot path: only materialises/styles VISIBLE lines — never the full
+    # multi-MiB body. Full plain-line materialisation is reserved for selection spans
+    # (rare) and caret/search helpers outside the every-frame loop.
     private def render_detail_body(screen : Screen, body : Rect, focused : Bool = true) : Nil
       dv = detail_view
       total = dv.total
       @detail_last_h = body.h
       gw = {Gutter.width(total), body.w}.min
       cw = {body.w - gw, 0}.max
-      lines = detail_plain_lines
       # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
       # never re-styles just to measure width (mirrors ReplayView#render_response_body).
       rows = (0...body.h).compact_map { |i| (li = @detail_scroll + i) < total ? dv.line_at(li) : nil }
       @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
       ensure_detail_visible(body.h) if detail_navigable? && focused
+      # Selection spans only fetch lines in the selected range (lazy line_at).
+      sel_spans = if focused && detail_navigable? && @detail_read.selection?
+                    size, line_at = detail_line_source
+                    @detail_read.highlight_spans(size, line_at)
+                  else
+                    nil
+                  end
       rows.each_with_index do |styled, i|
         li = @detail_scroll + i
         Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @detail_read.cy)
         shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
         Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
-        paint_detail_line_chrome(screen, body.x + gw, body.y + i, li, lines[li]?, focused)
+        need_plain = (focused && detail_navigable? && (li == @detail_read.cy || sel_spans)) || !@search_hl.empty?
+        plain = need_plain ? dv.line_text(li) : nil
+        paint_detail_line_chrome(screen, body.x + gw, body.y + i, li, plain, focused, sel_spans)
         # The plain-text line + its left-slice feed ONLY the search overlay, so skip both
         # when no query is active (else every frame builds/scans discarded strings per row).
-        unless @search_hl.empty?
-          text = dv.line_text(li)
+        if (text = plain) && !@search_hl.empty?
           st = @detail_xscroll > 0 ? Highlight.slice_left_text(text, @detail_xscroll) : text
           SearchHi.mark(screen, body.x + gw, body.y + i, st, @search_hl, body.x + gw + cw)
         end
@@ -1214,11 +1250,13 @@ module Gori::Tui
     end
 
     private def paint_detail_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32,
-                                         line : String?, focused : Bool) : Nil
+                                         line : String?, focused : Bool,
+                                         sel_spans : Array({Int32, Int32, Int32})? = nil) : Nil
       return unless focused && detail_navigable? && line
-      lines = detail_plain_lines
-      @detail_read.highlight_spans(lines).each do |(l, x0, x1)|
-        paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
+      if spans = sel_spans
+        spans.each do |(l, x0, x1)|
+          paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
+        end
       end
       return unless li == @detail_read.cy
       cx = @detail_read.cx.clamp(0, line.size)
@@ -1376,17 +1414,18 @@ module Gori::Tui
     end
 
     EMPTY_LINES = [] of Highlight::Line
+    EMPTY_BODY  = Highlight::BodyLines.empty
 
     private def build_detail_view : DetailView
       detail = @detail
-      return DetailView.new(EMPTY_LINES, [] of String, :text, EMPTY_LINES) unless detail
+      return DetailView.new(EMPTY_LINES, EMPTY_BODY, :text, EMPTY_LINES) unless detail
       if @detail_pane == :frames && (frames = @detail_frames)
         head = log_head(frame_lines(frames, detail.h2_stream_id), @detail_frames_total, frames.size, "frames")
-        return DetailView.new(head, [] of String, :text, EMPTY_LINES)
+        return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end
       if @detail_pane == :response && (msgs = @detail_ws)
         head = log_head(ws_lines(msgs), @detail_ws_total, msgs.size, "messages")
-        return DetailView.new(head, [] of String, :text, EMPTY_LINES)
+        return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end
       if @detail_pane == :events
         # Derived view: content-decode + split into SSE events at render time — no
@@ -1395,7 +1434,7 @@ module Gori::Tui
         dropped = {events.size - DETAIL_LOG_CAP, 0}.max # older events not shown (windowed)
         shown = dropped > 0 ? events[dropped..] : events
         head = log_head(sse_lines(shown, dropped), events.size, shown.size, "events")
-        return DetailView.new(head, [] of String, :text, EMPTY_LINES)
+        return DetailView.new(head, EMPTY_BODY, :text, EMPTY_LINES)
       end
       # Decoded-protocol panes (SAML/JWT/GRAPHQL/PARAMS) — derived projections styled
       # eagerly (bounded; shared with `gori run show` / MCP).
@@ -1415,7 +1454,7 @@ module Gori::Tui
                else
                  Highlight::Span.new("— no response —", Theme.muted)
                end
-        return DetailView.new([[span]], [] of String, :text, EMPTY_LINES)
+        return DetailView.new([[span]], EMPTY_BODY, :text, EMPTY_LINES)
       end
       head, body = request ? {detail.request_head, detail.request_body} : {detail.response_head, detail.response_body}
       truncated = request ? detail.request_body_truncated? : detail.response_body_truncated?
@@ -1431,13 +1470,13 @@ module Gori::Tui
         ls = Highlight.message(head, nil, request)
         ls << Highlight::Line.new
         ls.concat(wrap(grpc_lines(body)))
-        return DetailView.new(ls, [] of String, :text, trailer)
+        return DetailView.new(ls, EMPTY_BODY, :text, trailer)
       end
 
       # Plain body → WINDOWED. Decode compressed/chunked bodies for display
       # (gzip/deflate/br/zstd + de-chunk); storage stays the raw wire bytes. The head
-      # is styled eagerly; the (possibly multi-MiB) body stays RAW and is styled per
-      # visible line at render — so opening a huge response doesn't freeze the UI.
+      # is styled eagerly; the (possibly multi-MiB) body stays as lazy BodyLines and
+      # is styled per visible line at render — so opening a huge response doesn't freeze.
       display, decode_note = Proxy::Codec::ContentDecode.decode(head, body)
       src = display || body
       # Binary bodies (images/webp/fonts/media/…) are NOT text: decoding their raw
@@ -1450,7 +1489,7 @@ module Gori::Tui
         head_lines << Highlight::Line.new
         head_lines << [Highlight::Span.new(
           "— binary body (#{Fmt.size(b.size.to_i64)}) — not shown as text; press x for the hex view —", Theme.muted)]
-        return DetailView.new(head_lines, [] of String, :text, trailer, binary: true)
+        return DetailView.new(head_lines, EMPTY_BODY, :text, trailer, binary: true)
       end
       # Pretty-print AFTER decode (so JSON/XML/… are reflowed from the decoded bytes),
       # display only — storage is untouched. nil = leave raw. `pretty.kind` overrides
@@ -1595,7 +1634,7 @@ module Gori::Tui
         when :graphql then (op = @detail_graphql) ? graphql_detail_lines(op) : nil
         when :params  then (f = @detail_form) ? form_detail_lines(f) : nil
         end
-      lines ? DetailView.new(lines, [] of String, :text, EMPTY_LINES) : nil
+      lines ? DetailView.new(lines, EMPTY_BODY, :text, EMPTY_LINES) : nil
     end
 
     # Max styled lines a decoded-protocol pane renders, so a pathological document

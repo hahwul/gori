@@ -1168,32 +1168,56 @@ module Gori
     end
 
     # Full detail incl. raw BLOBs (the truth) for the detail view.
-    def get_flow(id : Int64) : FlowDetail?
-      @db.query(<<-SQL, id) do |rs|
-        SELECT id, created_at, scheme, method, host, port, target, status,
-               request_size, response_size, state, duration_us, content_type,
-               http_version, request_head, request_body, response_head, response_body,
-               h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
-               sni
-        FROM flows WHERE id = ?
-        SQL
-        return nil unless rs.move_next
-        row = read_row(rs)
-        http_version = rs.read(String)
-        req_head = rs.read(Bytes)
-        req_body = rs.read(Bytes?)
-        resp_head = rs.read(Bytes?)
-        resp_body = rs.read(Bytes?)
-        h2_conn = rs.read(Int64?)
-        h2_stream = rs.read(Int64?)
-        req_trunc = rs.read(Int64) != 0
-        resp_trunc = rs.read(Int64) != 0
-        err = rs.read(String?)
-        sni = rs.read(String?)
-        return FlowDetail.new(row, http_version, req_head, req_body, resp_head, resp_body,
-          h2_conn, h2_stream, req_trunc, resp_trunc, err, sni)
+    # `body_max`, when set, caps request/response body BLOBs via SQLite `substr`
+    # (byte-oriented on BLOBs) so list-preview paths never pull multi-MiB bodies
+    # that they would immediately re-truncate. Heads stay whole (small). Pass
+    # `body_max + 1` when the caller wants to detect "was larger than cap".
+    def get_flow(id : Int64, *, body_max : Int32? = nil) : FlowDetail?
+      if max = body_max
+        @db.query(<<-SQL, max, max, id) do |rs|
+          SELECT id, created_at, scheme, method, host, port, target, status,
+                 request_size, response_size, state, duration_us, content_type,
+                 http_version, request_head,
+                 CASE WHEN request_body IS NULL THEN NULL ELSE substr(request_body, 1, ?) END,
+                 response_head,
+                 CASE WHEN response_body IS NULL THEN NULL ELSE substr(response_body, 1, ?) END,
+                 h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
+                 sni
+          FROM flows WHERE id = ?
+          SQL
+          return read_flow_detail(rs)
+        end
+      else
+        @db.query(<<-SQL, id) do |rs|
+          SELECT id, created_at, scheme, method, host, port, target, status,
+                 request_size, response_size, state, duration_us, content_type,
+                 http_version, request_head, request_body, response_head, response_body,
+                 h2_conn_id, h2_stream_id, request_body_truncated, response_body_truncated, error,
+                 sni
+          FROM flows WHERE id = ?
+          SQL
+          return read_flow_detail(rs)
+        end
       end
       nil
+    end
+
+    private def read_flow_detail(rs : DB::ResultSet) : FlowDetail?
+      return nil unless rs.move_next
+      row = read_row(rs)
+      http_version = rs.read(String)
+      req_head = rs.read(Bytes)
+      req_body = rs.read(Bytes?)
+      resp_head = rs.read(Bytes?)
+      resp_body = rs.read(Bytes?)
+      h2_conn = rs.read(Int64?)
+      h2_stream = rs.read(Int64?)
+      req_trunc = rs.read(Int64) != 0
+      resp_trunc = rs.read(Int64) != 0
+      err = rs.read(String?)
+      sni = rs.read(String?)
+      FlowDetail.new(row, http_version, req_head, req_body, resp_head, resp_body,
+        h2_conn, h2_stream, req_trunc, resp_trunc, err, sni)
     end
 
     def count : Int64

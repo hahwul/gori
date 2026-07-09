@@ -59,13 +59,71 @@ module Gori::Tui
       out
     end
 
+    # Lazy line store for a (possibly multi-MiB) body. Scans once for LF offsets so
+    # open/scroll can index by line number without allocating N String objects up
+    # front; individual lines are materialised (scrub + rstrip CR) only when read.
+    # Matches `String#split('\n').map(&.rstrip('\r'))` semantics of `to_lines`.
+    struct BodyLines
+      # Shared empty instance — body-less windowed messages.
+      EMPTY = BodyLines.new(Bytes.empty, [] of Int32, nil)
+
+      def self.empty : BodyLines
+        EMPTY
+      end
+
+      # Build from wire/display bytes without splitting into strings.
+      def self.from_bytes(bytes : Bytes) : BodyLines
+        return empty if bytes.empty?
+        starts = Array(Int32).new
+        starts << 0
+        bytes.each_with_index do |b, i|
+          starts << (i + 1) if b == 0x0A_u8
+        end
+        new(bytes, starts, nil)
+      end
+
+      # Wrap an already-split body (Intercept `from_lines_windowed` path).
+      def self.from_array(lines : Array(String)) : BodyLines
+        return empty if lines.empty?
+        new(Bytes.empty, [] of Int32, lines)
+      end
+
+      def initialize(@bytes : Bytes, @starts : Array(Int32), @lines : Array(String)?)
+      end
+
+      def size : Int32
+        if lines = @lines
+          lines.size
+        else
+          @starts.size
+        end
+      end
+
+      def empty? : Bool
+        size == 0
+      end
+
+      # Materialise line `i` (0-based). Same scrub/rstrip rules as `to_lines`.
+      def [](i : Int32) : String
+        if lines = @lines
+          return lines[i]
+        end
+        start = @starts[i]
+        finish = (i + 1 < @starts.size) ? (@starts[i + 1] - 1) : @bytes.size
+        len = finish - start
+        return "" if len <= 0
+        String.new(@bytes[start, len]).scrub.rstrip('\r')
+      end
+    end
+
     # A message split for WINDOWED rendering: the head is small and pre-styled, but
-    # the body can be up to the 8 MiB capture cap (100k+ lines), so it's returned as
-    # RAW lines + the body `kind`. The caller styles only the visible window via
-    # `body_styled` — opening a huge response then never freezes the UI highlighting
-    # off-screen lines. `head` includes the blank head/body separator, so the styled
-    # output is `head ++ body.map { body_styled }` — identical to `message`.
-    record Windowed, head : Array(Line), body : Array(String), kind : Symbol do
+    # the body can be up to the capture cap (many 10k–100k+ lines), so it's returned as
+    # lazy `BodyLines` + the body `kind`. The caller styles only the visible window via
+    # `body_styled` — opening a huge response never freezes the UI highlighting
+    # off-screen lines, and never allocates a String per off-screen line on open.
+    # `head` includes the blank head/body separator, so the styled output is
+    # `head ++ body.map { body_styled }` — identical to `message`.
+    record Windowed, head : Array(Line), body : BodyLines, kind : Symbol do
       def total : Int32
         head.size + body.size
       end
@@ -104,7 +162,7 @@ module Gori::Tui
         end
       end
       styled << blank if has_body # the head/body separator
-      Windowed.new(styled, has_body ? to_lines(body) : [] of String, kind)
+      Windowed.new(styled, has_body ? BodyLines.from_bytes(body.not_nil!) : BodyLines.empty, kind)
     end
 
     # Style a single body line (the public seam for windowed rendering).
@@ -176,14 +234,14 @@ module Gori::Tui
       kind = body_kind(content_type_in(all))
       if sep.nil?
         head = all.map_with_index { |raw, i| i == 0 ? start_line(raw, request) : header_line(raw) }
-        return Windowed.new(head, [] of String, kind)
+        return Windowed.new(head, BodyLines.empty, kind)
       end
       head = [] of Line
       all.each_with_index do |raw, i|
         break if i > sep
         head << (i == 0 ? start_line(raw, request) : (i == sep ? blank : header_line(raw)))
       end
-      Windowed.new(head, all[(sep + 1)..], kind)
+      Windowed.new(head, BodyLines.from_array(all[(sep + 1)..]), kind)
     end
 
     # --- Markdown (Notes / Project description) ------------------------------

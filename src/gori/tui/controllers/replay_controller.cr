@@ -690,14 +690,17 @@ module Gori::Tui
     end
 
     # Converge local replay tabs with the project's `replays` rows after a peer
-    # committed. Keyed by db_id: update changed tabs in place (keeping the ReplayView
-    # object so an inflight result still matches by identity), append peer-created tabs,
-    # drop peer-deleted ones — but NEVER touch a locked tab (actively edited / inflight /
-    # locally dirty). The user's OWN saves don't reach here (data_version ignores our
-    # own pool writes), so this only ever applies a peer's changes.
+    # committed (or any writer-connection commit that bumps PRAGMA data_version —
+    # including our own update_replay_response after a successful send; the writer
+    # holds a dedicated pool connection, so own commits ARE visible to the poll).
+    # Keyed by db_id: update changed tabs in place (keeping the ReplayView object so
+    # an inflight result still matches by identity), append peer-created tabs, drop
+    # peer-deleted ones — but NEVER touch a locked tab (actively edited / inflight /
+    # locally dirty).
     def reconcile : Nil
-      # Metadata only (no response BLOBs): reconcile converges the request side and
-      # restores responses only at project-open.
+      # Metadata only (no response BLOBs): converge the request side. Responses are
+      # restored only at project-open (full restore with BLOBs) and otherwise live
+      # only in the session's ReplayView — apply_peer_request never wipes them.
       rows = @host.session.store.replays_meta # ORDER BY position, id
       by_id = rows.index_by(&.id)
       cur_db = current_replay_tab.try(&.db_id)
@@ -707,24 +710,22 @@ module Gori::Tui
         next unless (id = tab.db_id) && (row = by_id[id]?)
         next if replay_tab_locked?(tab)
         v = tab.view
-        # Only re-apply when the PERSISTED content actually changed (data_version bumps
-        # on ANY peer commit, so most polls touch an identical row — restoring then
-        # would needlessly wipe its on-screen response/scroll/focus).
-        next if v.target == row.target && v.request_text == row.request &&
-                v.http2? == row.http2? && v.auto_content_length? == row.auto_content_length? &&
-                v.mark_transform? == row.mark_transform? && v.sni_override == row.sni
-        # Live cross-session sync carries only the REQUEST (a response is personal to
-        # each session's view); restore() is response-less so a peer's resend never
-        # clobbers the local response/scroll/focus.
+        # Only re-apply when the PERSISTED request side actually changed (data_version
+        # also bumps on capture/response writes, so most polls touch an identical row).
+        next if v.request_side_matches?(row.target, row.request, row.http2?,
+          row.auto_content_length?, row.mark_transform?, row.sni)
+        # Soft sync: request/target/flags only. Full restore() would reset focus to
+        # :target and clear @result (no response BLOBs on this path) — that is the
+        # "send then response vanishes / focus jumps to Target" bug.
         ws_msgs = nil.as(Array(String)?)
         if Replay::WsEngine.upgrade_request?(row.request)
           ws_msgs = @host.session.store.ws_messages_for_replay(row.id).compact_map do |m|
             m.direction == "out" ? String.new(m.payload) : nil
           end
         end
-        v.restore(row.target, row.request, row.http2?, row.auto_content_length?,
+        v.apply_peer_request(row.target, row.request, row.http2?, row.auto_content_length?,
           sni: row.sni || "", mark_transform: row.mark_transform?, ws_messages: ws_msgs)
-        seed_replay_original(v, row.flow_id) # restore() drops the baseline; re-seed it
+        seed_replay_original(v, row.flow_id) # baseline may need re-seed if it was empty
       end
 
       local_ids = @replays.compact_map(&.db_id).to_set

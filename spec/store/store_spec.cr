@@ -346,4 +346,63 @@ describe Gori::Store do
       page2.map(&.id).should eq([ids[2], ids[1]])
     end
   end
+
+  it "recent_flows / search return metadata-only rows (no body BLOBs on the list path)" do
+    with_store do |store|
+      big = Bytes.new(200_000) { |i| ((i % 26) + 65).to_u8 }
+      id = store.insert_flow(sample_request(method: "POST", target: "/big"))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n".to_slice,
+        body: big, content_type: "application/octet-stream"))
+
+      rows = store.recent_flows(10)
+      rows.size.should eq(1)
+      rows.first.id.should eq(id)
+      # FlowRow has no body fields — list model is projections only (compile-time shape).
+      rows.first.responds_to?(:request_body).should be_false
+      rows.first.responds_to?(:response_body).should be_false
+      rows.first.size.should be > 200_000 # true wire size still on the row
+
+      filtered = store.search(Gori::QL.parse("status:200"), 10)
+      filtered.size.should eq(1)
+      filtered.first.responds_to?(:response_body).should be_false
+    end
+  end
+
+  it "get_flow body_max caps BLOB reads for list-preview (full get_flow still whole)" do
+    with_store do |store|
+      body = Bytes.new(100_000) { |i| ((i % 26) + 97).to_u8 }
+      id = store.insert_flow(sample_request(method: "POST", target: "/cap"))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+        body: body, content_type: "text/plain"))
+
+      full = store.get_flow(id).not_nil!
+      full.response_body.not_nil!.size.should eq(100_000)
+
+      cap = 64 * 1024 + 1
+      prev = store.get_flow(id, body_max: cap).not_nil!
+      prev.response_body.not_nil!.size.should eq(cap)
+      prev.response_body.not_nil!.should eq(body[0, cap])
+      # heads and metadata remain complete
+      prev.response_head.not_nil!.should eq(full.response_head)
+      prev.row.id.should eq(id)
+      prev.row.status.should eq(200)
+    end
+  end
+
+  it "list path stays page-limited under multi-thousand rows" do
+    with_store do |store|
+      2_500.times { |i| store.insert_flow(sample_request(target: "/p/#{i}")) }
+      page = store.recent_flows(1000)
+      page.size.should eq(1000)
+      # cursor into older pages — still bounded
+      older = store.recent_flows(1000, before_id: page.last.id)
+      older.size.should eq(1000)
+      older.first.id.should be < page.last.id
+      store.recent_flows(1000, before_id: older.last.id).size.should eq(500)
+    end
+  end
 end

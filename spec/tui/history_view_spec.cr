@@ -490,6 +490,92 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "reload is page-capped and list rows never carry body BLOBs" do
+    tmp_store do |store|
+      1_200.times { |i| add_flow(store, "GET", "/p/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.rows.size.should eq(HistoryView::PAGE)
+      view.rows.each do |r|
+        r.responds_to?(:request_body).should be_false
+        r.responds_to?(:response_body).should be_false
+      end
+    end
+  end
+
+  it "opens a large multi-line response detail and paints a scroll window without hang" do
+    tmp_store do |store|
+      # ~0.75 MiB of short lines — representative near-cap text body for open+scroll.
+      line = ("y" * 30) + "\n"
+      n = 25_000
+      io = IO::Memory.new(line.bytesize * n)
+      n.times { io << line }
+      body = io.to_slice
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+        method: "GET", target: "/big", http_version: "HTTP/1.1",
+        head: "GET /big HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+        body: body, content_type: "text/plain"))
+
+      view = HistoryView.new
+      view.reload(store)
+      t0 = Time.instant
+      view.open_detail(store).should be_true
+      open_ms = (Time.instant - t0).total_milliseconds
+      open_ms.should be < 3_000.0
+
+      backend = MemoryBackend.new(100, 30)
+      t1 = Time.instant
+      5.times do |frame|
+        view.scroll_detail(20) if frame > 0
+        view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 30), focused: true)
+      end
+      paint_ms = (Time.instant - t1).total_milliseconds
+      paint_ms.should be < 3_000.0
+      (backend.contains?("RESPONSE") || backend.contains?("REQUEST")).should be_true
+
+      # Caret steps must not rematerialise every BodyLines string (was detail_plain_lines).
+      t2 = Time.instant
+      200.times { view.detail_move(1, 0) }
+      move_ms = (Time.instant - t2).total_milliseconds
+      move_ms.should be < 500.0
+    end
+  end
+
+  it "preview refresh uses capped body load (not full multi-MiB BLOB)" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      tmp_store do |store|
+        big = Bytes.new(300_000) { 65_u8 }
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
+          method: "GET", target: "/preview-big", http_version: "HTTP/1.1",
+          head: "GET /preview-big HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+          body: big, content_type: "text/plain"))
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        # Render must not raise; preview path only needs a prefix of the body.
+        backend = MemoryBackend.new(100, 30)
+        view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 30))
+        backend.contains?("REQUEST").should be_true
+        backend.contains?("RESPONSE").should be_true
+        # Cap invariant: store API used by preview is body_max-aware
+        d = store.get_flow(id, body_max: HistoryView::PREVIEW_BODY_CAP + 1).not_nil!
+        d.response_body.not_nil!.size.should eq(HistoryView::PREVIEW_BODY_CAP + 1)
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
   it "syntax-highlights the request line and headers in the detail view" do
     tmp_store do |store|
       add_flow(store, "GET", "/secret", 200)

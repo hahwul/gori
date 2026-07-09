@@ -87,6 +87,61 @@ describe Gori::Tui::Highlight do
       # an empty body slice is treated as no body (no spurious separator line)
       Highlight.message(head, Bytes.new(0), request: true).size.should eq(expected.size)
     end
+
+    it "message_windowed matches message() line-for-line including lazy body" do
+      head = "GET /a HTTP/1.1\r\nContent-Type: text/plain\r\n\r\n".to_slice
+      body = "line-one\r\nline-two\r\nline-three".to_slice
+      full = Highlight.message(head, body, request: true).map { |l| l.map(&.text).join }
+      win = Highlight.message_windowed(head, body, request: true)
+      win.total.should eq(full.size)
+      (0...win.total).each { |i| win.line_at(i).map(&.text).join.should eq(full[i]) }
+    end
+
+    it "BodyLines matches split('\\n').map rstrip CR without eager full materialisation" do
+      raw = "a\r\nb\nc\r\n".to_slice
+      expected = String.new(raw).scrub.split('\n').map(&.rstrip('\r'))
+      bl = Highlight::BodyLines.from_bytes(raw)
+      bl.size.should eq(expected.size)
+      expected.each_with_index { |exp, i| bl[i].should eq(exp) }
+      # empty / no-newline / trailing-newline edge cases
+      Highlight::BodyLines.from_bytes(Bytes.empty).size.should eq(0)
+      Highlight::BodyLines.from_bytes("solo".to_slice).size.should eq(1)
+      Highlight::BodyLines.from_bytes("solo".to_slice)[0].should eq("solo")
+      Highlight::BodyLines.from_bytes("\n".to_slice).size.should eq(2)
+      Highlight::BodyLines.from_bytes("\n".to_slice)[0].should eq("")
+      Highlight::BodyLines.from_bytes("\n".to_slice)[1].should eq("")
+    end
+
+    it "message_windowed opens a multi-MiB many-line body without hang and styles only on demand" do
+      # Near capture-cap scale: ~1.5 MiB of short lines (~100k lines). Open must finish
+      # quickly; line_at for a visible window must not re-style the whole body.
+      line = "x" * 14 + "\n"
+      n_lines = 100_000
+      io = IO::Memory.new(line.bytesize * n_lines)
+      n_lines.times { io << line }
+      body = io.to_slice
+      # Trailing LF ⇒ split produces n_lines content lines + one empty trailer (matches to_lines).
+      expected_lines = String.new(body).split('\n').map(&.rstrip('\r'))
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
+
+      t0 = Time.instant
+      win = Highlight.message_windowed(head, body, request: false)
+      open_ms = (Time.instant - t0).total_milliseconds
+      win.body.size.should eq(expected_lines.size)
+      # Open only builds the LF index + styles the small head — not 100k body strings.
+      open_ms.should be < 2_000.0
+
+      # Steady "scroll": style a 40-line window twice (like two frames) — work is
+      # proportional to the window, not the full body.
+      t1 = Time.instant
+      2.times do
+        40.times { |i| win.line_at(win.head.size + 50_000 + i) }
+      end
+      scroll_ms = (Time.instant - t1).total_milliseconds
+      scroll_ms.should be < 500.0
+      # Spot-check content of a mid-body line
+      win.line_at(win.head.size + 10).map(&.text).join.should eq("x" * 14)
+    end
   end
 
   describe "HTTP structure" do

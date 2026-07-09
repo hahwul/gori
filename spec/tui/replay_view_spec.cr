@@ -628,6 +628,119 @@ describe Gori::Tui::ReplayView do
     view.resp_copy_text.should eq(lines[0][0, 4])
   end
 
+  it "apply_peer_request keeps live response + focus (reconcile must not wipe a send)" do
+    # Regression: reconcile used full restore() for request-side sync. restore() always
+    # sets focus=:target and clears @result when no response BLOBs are passed — so a
+    # post-send data_version poll (update_replay_response bumps it) looked like the
+    # response was reset and focus jumped to Target.
+    view = ReplayView.new
+    view.load_blank
+    view.focus_pane(:response)
+    ok = Gori::Replay::Result.new(
+      "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64)
+    view.apply(ok)
+    view.focus_pane(:response)
+
+    view.apply_peer_request("https://peer.example", "GET /peer HTTP/1.1\nHost: peer.example\n\n",
+      false, true, sni: "", mark_transform: false)
+
+    view.focus.should eq(:response)
+    view.target.should eq("https://peer.example")
+    view.request_text.should contain("GET /peer")
+    # Response still present and renderable
+    backend = MemoryBackend.new(120, 20)
+    view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+    backend.contains?("PONG").should be_true
+    backend.contains?("— not sent —").should be_false
+  end
+
+  it "request_side_matches? treats empty SNI nil and \"\" as equal" do
+    view = ReplayView.new
+    view.load_blank
+    view.request_side_matches?(view.target, view.request_text, view.http2?,
+      view.auto_content_length?, view.mark_transform?, nil).should be_true
+    view.request_side_matches?(view.target, view.request_text, view.http2?,
+      view.auto_content_length?, view.mark_transform?, "").should be_true
+    view.request_side_matches?(view.target, view.request_text, view.http2?,
+      view.auto_content_length?, view.mark_transform?, "evil.com").should be_false
+  end
+
+  it "post-send store response write + peer request sync keeps the applied result" do
+    # End-to-end shape of drain_results + reconcile without a full Host:
+    # apply → persist response → apply_peer_request (what reconcile does on mismatch).
+    path = File.tempname("gori-send-sync", ".db")
+    store = Gori::Store.open(path)
+    begin
+      view = ReplayView.new
+      view.load_blank
+      rid = store.insert_replay(view.target, view.request_text, view.http2?, view.auto_content_length?,
+        nil, 0, view.sni_override, mark_transform: view.mark_transform?)
+      view.clear_dirty
+      ok = Gori::Replay::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "KEEPME".to_slice, nil, 500_i64)
+      view.apply(ok)
+      view.focus_pane(:response)
+      store.update_replay_response(rid, ok.head, ok.body, nil, ok.duration_us)
+      store.flush
+
+      row = store.replays_meta.find { |r| r.id == rid }.not_nil!
+      # Own row still matches → reconcile would skip. Force a peer-like request edit.
+      store.update_replay(rid, "https://peer.test", "GET /from-peer HTTP/1.1\nHost: peer.test\n\n",
+        false, true, nil, false)
+      store.flush
+      row = store.replays_meta.find { |r| r.id == rid }.not_nil!
+      view.request_side_matches?(row.target, row.request, row.http2?,
+        row.auto_content_length?, row.mark_transform?, row.sni).should be_false
+
+      view.apply_peer_request(row.target, row.request, row.http2?, row.auto_content_length?,
+        sni: row.sni || "", mark_transform: row.mark_transform?)
+      view.focus.should eq(:response)
+      view.target.should eq("https://peer.test")
+      backend = MemoryBackend.new(120, 20)
+      view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
+      backend.contains?("KEEPME").should be_true
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
+  it "focused large-body paint + wheel scroll stay windowed (no full rematerialise)" do
+    # Regression: paint_resp_line_chrome used to call resp_plain_lines once per
+    # visible row every frame — with BodyLines that re-materialised ~N lines × H
+    # rows (~300ms+ for 50k). Focused render + resp_scroll_view must stay far below
+    # that full-body cost (same bar as History visible-only path).
+    view = ReplayView.new
+    view.load_blank
+    line = ("w" * 20) + "\n"
+    n = 30_000
+    io = IO::Memory.new(line.bytesize * n)
+    n.times { io << line }
+    body = io.to_slice
+    head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
+    view.apply(Gori::Replay::Result.new(head, body, nil, 1000_i64))
+    view.focus_pane(:response)
+    view.resp_line_source[0].should be > 25_000
+
+    rect = Rect.new(0, 0, 120, 30)
+    backend = MemoryBackend.new(120, 30)
+    t0 = Time.instant
+    5.times do |frame|
+      view.resp_scroll_view(40) if frame > 0
+      view.render(Screen.new(backend), rect)
+    end
+    paint_ms = (Time.instant - t0).total_milliseconds
+    paint_ms.should be < 2_000.0
+
+    t1 = Time.instant
+    200.times { view.resp_move(1, 0) }
+    move_ms = (Time.instant - t1).total_milliseconds
+    move_ms.should be < 500.0
+
+    backend.contains?("RESPONSE").should be_true
+  end
+
   describe "pretty_print_request" do
     it "pretty-prints JSON request body in-place and preserves markers" do
       view = ReplayView.new

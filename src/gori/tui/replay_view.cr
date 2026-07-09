@@ -752,12 +752,67 @@ module Gori::Tui
     # diff baseline via a follow-up seed_original (the Runner re-fetches it from the
     # persisted flow_id). Clears @dirty so a synced/restored tab is never re-saved by
     # us — that would echo back to the peer.
+    #
+    # Project-open / brand-new-tab only. Live cross-session request sync must use
+    # `apply_peer_request` — full restore resets focus to :target and drops the
+    # in-memory response (response BLOBs are intentionally not on the reconcile poll).
     def restore(target : String, request : String, http2 : Bool, auto_cl : Bool,
                 response_head : Bytes? = nil, response_body : Bytes? = nil,
                 response_error : String? = nil, response_duration_us : Int64? = nil,
                 sni : String = "", mark_transform : Bool = false,
                 ws_messages : Array(String)? = nil) : Nil
       @flow = nil
+      apply_request_fields(target, request, http2, auto_cl, sni, mark_transform, ws_messages)
+
+      @original_lines = [] of String
+      # Rebuild the persisted result: a head (success) or an error (failed send)
+      # marks a real stored response; both nil → never sent → empty pane.
+      @result =
+        if response_head || response_error
+          Replay::Result.new(response_head || Bytes.empty, response_body, nil,
+            response_duration_us || 0_i64, response_error)
+        end
+      @prev_result = nil
+      reset_result_caches
+      @focus = :target
+      @resp_mode = :response
+      @scroll = 0
+      @xscroll = 0
+      @diffable = false
+      @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
+      @scroll_req = 0
+      reflect_content_length_in_editor if @auto_content_length
+    end
+
+    # Live request-side sync (reconcile poll). Updates target/request/flags from the
+    # shared row WITHOUT wiping the session-local response, focus, scroll, or resp
+    # mode. Full restore() was wrong here: it always set focus=:target and cleared
+    # @result (reconcile never carries response BLOBs), so a post-send data_version
+    # bump or a peer request edit looked like "send reset the response to Target".
+    def apply_peer_request(target : String, request : String, http2 : Bool, auto_cl : Bool,
+                           sni : String = "", mark_transform : Bool = false,
+                           ws_messages : Array(String)? = nil) : Nil
+      apply_request_fields(target, request, http2, auto_cl, sni, mark_transform, ws_messages)
+      @req_hex_edit = nil
+      # Leave @result / @prev_result / @focus / @scroll / @resp_mode / @original_lines alone.
+      reflect_content_length_in_editor if @auto_content_length
+    end
+
+    # True when the live view's request-side fields match a store row (reconcile skip).
+    # Normalizes empty SNI: view.sni_override is nil when blank, but older/peer rows
+    # may store "" — those must compare equal or every poll re-applies needlessly.
+    def request_side_matches?(target : String, request : String, http2 : Bool, auto_cl : Bool,
+                              mark_transform : Bool, sni : String?) : Bool
+      @target == target && request_text == request &&
+        @http2 == http2 && @auto_content_length == auto_cl &&
+        @mark_transform == mark_transform &&
+        (sni_override || "") == (sni || "")
+    end
+
+    # Shared request/target/flag write used by restore (full) and apply_peer_request (soft).
+    private def apply_request_fields(target : String, request : String, http2 : Bool, auto_cl : Bool,
+                                     sni : String, mark_transform : Bool,
+                                     ws_messages : Array(String)?) : Nil
       @http2 = http2
       @target = target
       @tcx = @target.size
@@ -778,28 +833,10 @@ module Gori::Tui
         @editor.set_text(request)
       end
 
-      @original_lines = [] of String
-      # Rebuild the persisted result: a head (success) or an error (failed send)
-      # marks a real stored response; both nil → never sent → empty pane.
-      @result =
-        if response_head || response_error
-          Replay::Result.new(response_head || Bytes.empty, response_body, nil,
-            response_duration_us || 0_i64, response_error)
-        end
-      @prev_result = nil
-      reset_result_caches
-      @focus = :target
-      @resp_mode = :response
-      @scroll = 0
-      @xscroll = 0
-      @diffable = false
       @auto_content_length = auto_cl
       @mark_transform = mark_transform
       @loaded = true
       @dirty = false
-      @req_hex_edit = nil # a fresh load/restore replaces the request → drop any hex buffer
-      @scroll_req = 0
-      reflect_content_length_in_editor if @auto_content_length
     end
 
     # Re-seed the captured-original diff baseline for a ^R-from-History tab that was
@@ -1638,11 +1675,12 @@ module Gori::Tui
     end
 
     # Response READ: move caret (and optional selection). Scroll follows the caret.
+    # Lazy line source — vertical steps only materialise the destination line.
     def resp_move(dr : Int32, dc : Int32, selecting : Bool = false) : Nil
       return unless resp_navigable?
-      lines = resp_plain_lines
-      return if lines.empty?
-      @resp_cursor.move(dr, dc, lines, selecting: selecting)
+      size, line_at = resp_line_source
+      return if size <= 0
+      @resp_cursor.move(dr, dc, size, line_at, selecting)
       ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
     end
 
@@ -1651,17 +1689,17 @@ module Gori::Tui
       req_editor.scroll_view(step)
     end
 
+    # Wheel: O(1) total from BodyLines offsets; materialise only the caret line for cx clamp.
     def resp_scroll_view(step : Int32) : Nil
       return unless resp_navigable?
-      lines = resp_plain_lines
-      return if @resp_last_h <= 0 || lines.size <= @resp_last_h
-      max = lines.size - @resp_last_h
+      size, line_at = resp_line_source
+      return if @resp_last_h <= 0 || size <= @resp_last_h
+      max = size - @resp_last_h
       @scroll = (@scroll + step).clamp(0, max)
       lo = @scroll
-      hi = {@scroll + @resp_last_h - 1, lines.size - 1}.min
-      @resp_cursor.sync(
-        @resp_cursor.cy.clamp(lo, hi),
-        @resp_cursor.cx.clamp(0, lines[@resp_cursor.cy].size))
+      hi = {@scroll + @resp_last_h - 1, size - 1}.min
+      cy = @resp_cursor.cy.clamp(lo, hi)
+      @resp_cursor.sync(cy, @resp_cursor.cx.clamp(0, line_at.call(cy).size))
     end
 
     def resp_click_to_cursor(rect : Rect, mx : Int32, my : Int32) : Nil
@@ -1674,7 +1712,8 @@ module Gori::Tui
       return unless col.contains?(mx, my)
       body = response_body_rect(col)
       gw = resp_gutter_w(body)
-      @resp_cursor.click_to_cursor(body, mx, my, @scroll, resp_plain_lines, gw, @xscroll)
+      size, line_at = resp_line_source
+      @resp_cursor.click_to_cursor(body, mx, my, @scroll, size, line_at, gw, @xscroll)
       ensure_resp_visible(body.h)
     end
 
@@ -1727,14 +1766,36 @@ module Gori::Tui
       end
     end
 
+    # O(1) count + lazy line fetch for BodyLines-backed response panes.
+    def resp_line_source
+      if @ws_mode
+        lines = ws_transcript_lines
+        {lines.size, ->(i : Int32) { lines[i][0] }}
+      elsif @grpc_mode
+        lines = grpc_transcript_lines
+        {lines.size, ->(i : Int32) { lines[i][0] }}
+      elsif @resp_mode == :diff
+        data = diff_lines
+        {data.size, ->(i : Int32) { data[i].text }}
+      elsif @reveal && (rl = reveal_lines)
+        {rl.size, ->(i : Int32) { rl[i] }}
+      else
+        rv = resp_view
+        {rv.total, ->(i : Int32) { rv.line_text(i) }}
+      end
+    end
+
     def resp_copy_text : String
-      lines = resp_plain_lines
-      return "" if lines.empty?
-      @resp_cursor.selection_text(lines) || @resp_cursor.current_line(lines)
+      size, line_at = resp_line_source
+      return "" if size <= 0
+      @resp_cursor.selection_text(size, line_at) || @resp_cursor.current_line(size, line_at)
     end
 
     def resp_copy_all_text : String
-      resp_plain_lines.join("\n")
+      size, line_at = resp_line_source
+      return "" if size <= 0
+      # Rare full-copy path — still build once for clipboard, not per frame.
+      (0...size).map { |i| line_at.call(i) }.join("\n")
     end
 
     def target_copy_text : String
@@ -1774,9 +1835,9 @@ module Gori::Tui
         return if pane_insert?(:request)
         @req_read.select_line(req_editor)
       when :response
-        lines = resp_plain_lines
-        return if lines.empty?
-        @resp_cursor.select_line(lines)
+        size, line_at = resp_line_source
+        return if size <= 0
+        @resp_cursor.select_line(size, line_at)
         ensure_resp_visible(@resp_last_h) if @resp_last_h > 0
       when :target
         return if pane_insert?(:target)
@@ -1795,7 +1856,7 @@ module Gori::Tui
     end
 
     private def resp_gutter_w(body : Rect) : Int32
-      {Gutter.width(resp_plain_lines.size), body.w}.min
+      {Gutter.width(resp_line_count), body.w}.min
     end
 
     private def response_body_rect(col : Rect) : Rect
@@ -2194,7 +2255,7 @@ module Gori::Tui
       widest = (0...body.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |(t, _)| Screen.display_width(t) } || 0
       @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
       @resp_last_h = body.h
-      plain = lines.map(&.[0])
+      sel_spans = resp_sel_spans_if(focused)
       (0...body.h).each do |i|
         li = @scroll + i
         break if li >= lines.size
@@ -2202,7 +2263,7 @@ module Gori::Tui
         Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @resp_cursor.cy)
         shown = @xscroll > 0 ? Highlight.slice_left_text(text, @xscroll) : text
         screen.text(body.x + gw, body.y + i, shown, color, width: cw)
-        paint_resp_line_chrome(screen, body.x + gw, body.y + i, li, plain[li], focused)
+        paint_resp_line_chrome(screen, body.x + gw, body.y + i, li, text, focused, sel_spans)
         SearchHi.mark(screen, body.x + gw, body.y + i, shown, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
     end
@@ -2308,6 +2369,7 @@ module Gori::Tui
       cw = {rect.w - gw, 0}.max
       widest = (0...rect.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |l| Screen.display_width_upto(l, @xscroll + cw + 1) } || 0
       @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
+      sel_spans = resp_sel_spans_if(focused)
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= total
@@ -2315,7 +2377,7 @@ module Gori::Tui
         styled = Reveal.styled(lines[li], li < total - 1, cw + @xscroll)
         styled = Highlight.slice_left(styled, @xscroll) if @xscroll > 0
         Highlight.draw(screen, rect.x + gw, rect.y + i, styled, width: cw)
-        paint_resp_line_chrome(screen, rect.x + gw, rect.y + i, li, lines[li], focused)
+        paint_resp_line_chrome(screen, rect.x + gw, rect.y + i, li, lines[li], focused, sel_spans)
         st = @xscroll > 0 ? Highlight.slice_left_text(lines[li], @xscroll) : lines[li]
         SearchHi.mark(screen, rect.x + gw, rect.y + i, st, @search_hl, rect.x + gw + cw) unless @search_hl.empty?
       end
@@ -2331,6 +2393,8 @@ module Gori::Tui
       @reveal_lines = Reveal.lines(bytes)
     end
 
+    # Steady-scroll hot path: only materialises/styles VISIBLE lines. Selection spans
+    # are computed once per frame (lazy line_at over the selected range only).
     private def render_response_body(screen : Screen, rect : Rect, focused : Bool) : Nil
       rv = resp_view
       total = rv.total
@@ -2339,25 +2403,29 @@ module Gori::Tui
       cw = {rect.w - gw, 0}.max
       rows = (0...rect.h).compact_map { |i| (li = @scroll + i) < total ? rv.line_at(li) : nil }
       @xscroll = @xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @xscroll + cw + 1) } || 0) - cw, 0}.max)
+      sel_spans = resp_sel_spans_if(focused)
       rows.each_with_index do |styled, i|
         li = @scroll + i
-        text = rv.line_text(li)
+        need_plain = (focused && resp_navigable? && (li == @resp_cursor.cy || sel_spans)) || !@search_hl.empty?
+        text = need_plain ? rv.line_text(li) : nil
         Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @resp_cursor.cy)
         shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
         Highlight.draw(screen, rect.x + gw, rect.y + i, shown, width: cw)
-        paint_resp_line_chrome(screen, rect.x + gw, rect.y + i, li, text, focused)
-        unless @search_hl.empty?
-          st = @xscroll > 0 ? Highlight.slice_left_text(text, @xscroll) : text
+        paint_resp_line_chrome(screen, rect.x + gw, rect.y + i, li, text, focused, sel_spans) if text
+        if (t = text) && !@search_hl.empty?
+          st = @xscroll > 0 ? Highlight.slice_left_text(t, @xscroll) : t
           SearchHi.mark(screen, rect.x + gw, rect.y + i, st, @search_hl, rect.x + gw + cw)
         end
       end
     end
 
-    private def paint_resp_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String, focused : Bool) : Nil
+    private def paint_resp_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
+                                       focused : Bool, sel_spans : Array({Int32, Int32, Int32})? = nil) : Nil
       return unless focused && resp_navigable?
-      lines = resp_plain_lines
-      @resp_cursor.highlight_spans(lines).each do |(l, x0, x1)|
-        paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
+      if spans = sel_spans
+        spans.each do |(l, x0, x1)|
+          paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
+        end
       end
       return unless li == @resp_cursor.cy
       cx = @resp_cursor.cx.clamp(0, line.size)
@@ -2365,6 +2433,13 @@ module Gori::Tui
       ch = cx < line.size ? line[cx] : ' '
       screen.cell(px, y, ch, Theme.bg, Theme.accent_bg)
       screen.cursor(px, y)
+    end
+
+    # Selection spans once per frame (lazy line_at; only selected range materialised).
+    private def resp_sel_spans_if(focused : Bool) : Array({Int32, Int32, Int32})?
+      return nil unless focused && resp_navigable? && @resp_cursor.selection?
+      size, line_at = resp_line_source
+      @resp_cursor.highlight_spans(size, line_at)
     end
 
     private def render_diff(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -2384,11 +2459,12 @@ module Gori::Tui
       end
       @xscroll = @xscroll.clamp(0, {(rows.max_of? { |(_, full, _, _)| Screen.display_width(full) } || 0) - cw, 0}.max)
       @resp_last_h = rect.h
+      sel_spans = resp_sel_spans_if(focused)
       rows.each_with_index do |(di, full, color, text), i|
         Gutter.draw(screen, rect.x, rect.y + i, di, gw, current: focused && di == @resp_cursor.cy)
         shown = @xscroll > 0 ? Highlight.slice_left_text(full, @xscroll) : full
         screen.text(rect.x + gw, rect.y + i, shown, color, width: cw)
-        paint_resp_line_chrome(screen, rect.x + gw + 2, rect.y + i, di, text, focused)
+        paint_resp_line_chrome(screen, rect.x + gw + 2, rect.y + i, di, text, focused, sel_spans)
         # Highlight only the line text (past the 2-col "+ "/"- " prefix, shifted left by
         # any horizontal scroll), so the marks match what response_search_lines counts
         # (d.text), not the diff decoration.
@@ -2417,14 +2493,14 @@ module Gori::Tui
       end
     end
 
-    # Windowed response: the head is styled eagerly; the body stays RAW and is styled
-    # ONE VISIBLE LINE AT A TIME at render, so a multi-MiB replayed response opens
-    # instantly instead of tokenising every off-screen line. (For the not-sent /
-    # error placeholders the whole content is the bounded `head`.) Mirrors the
-    # History detail windowing.
+    # Windowed response: the head is styled eagerly; the body stays as lazy BodyLines
+    # and is styled ONE VISIBLE LINE AT A TIME at render, so a multi-MiB replayed
+    # response opens instantly instead of allocating/tokenising every off-screen line.
+    # (For the not-sent / error placeholders the whole content is the bounded `head`.)
+    # Mirrors the History detail windowing.
     private record RespView,
       head : Array(Highlight::Line),
-      body : Array(String),
+      body : Highlight::BodyLines,
       kind : Symbol do
       def total : Int32
         head.size + body.size
@@ -2468,9 +2544,9 @@ module Gori::Tui
         result = @result
         @resp_pretty_applied = false
         if !result
-          RespView.new([[Highlight::Span.new("— not sent — press ^R to replay —", Theme.muted)]], [] of String, :text)
+          RespView.new([[Highlight::Span.new("— not sent — press ^R to replay —", Theme.muted)]], Highlight::BodyLines.empty, :text)
         elsif !result.ok?
-          RespView.new([[Highlight::Span.new("replay error: #{result.error}", Theme.red)]], [] of String, :text)
+          RespView.new([[Highlight::Span.new("replay error: #{result.error}", Theme.red)]], Highlight::BodyLines.empty, :text)
         else
           src = display_body(result.head, result.body)
           # Pretty-print the response body (display only). The DIFF path uses
