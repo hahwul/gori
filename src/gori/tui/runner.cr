@@ -1778,6 +1778,7 @@ module Gori::Tui
         @toast = case @settings_view.section
                  when :network then apply_settings(msg).tap { project_controller.refresh_network } # re-sync the Project pane's inherited fields to the new global
                  when :theme   then apply_theme(msg)
+                 when :layout  then apply_layout(msg)
                  else               msg
                  end
         @theme_restore = Settings.theme if @settings_view.section == :theme # saved → don't revert this on esc
@@ -4349,7 +4350,7 @@ module Gori::Tui
 
     def open_settings(section : Symbol) : Nil
       case section
-      when :network, :editor, :theme
+      when :network, :editor, :theme, :layout
         @settings_view.reload(section)       # :theme reloads custom themes — may reconcile the live palette
         @resized = true if section == :theme # so force a full repaint (an edited/removed active theme just changed)
         @overlay = :settings
@@ -4369,6 +4370,14 @@ module Gori::Tui
       else
         @toast = "#{section} settings — coming soon (TODO)"
       end
+    end
+
+    # Layout prefs apply live: History reads history_preview each frame; Sitemap rebuilds
+    # so the expand-depth policy is re-stamped on the tree.
+    private def apply_layout(save_msg : String) : String
+      history_controller.refresh_preview
+      sitemap_controller.view.reload(@session.store) if sitemap_controller.view.loaded?
+      save_msg
     end
 
     # Apply the chosen theme: swap the active palette and force a full repaint (the

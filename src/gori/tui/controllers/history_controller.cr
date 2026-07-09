@@ -40,15 +40,26 @@ module Gori::Tui
       body_focused = focus == :body
       @history.reveal = @host.reveal? # propagate the global whitespace-reveal pref
       @history.pretty = @host.pretty? # propagate the global pretty-print pref
-      # Single body pane; the detail view is a drill-in within the same frame.
+      # List (optionally + bottom Req/Res preview) or full detail drill-in.
       proxy = @host.session.proxy
       if @host.overlay == :detail
         BodyChrome.framed(screen, rect, body_focused) { |inner| @history.render_detail(screen, inner, focused: body_focused) }
       else
+        @history.refresh_preview(@host.session.store) if @history.preview_enabled?
         BodyChrome.framed(screen, rect, body_focused) do |inner|
           @history.render_list(screen, inner, focused: body_focused,
             listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
         end
+      end
+    end
+
+    # Called after settings:layout save so the preview cache matches the new pref.
+    def refresh_preview : Nil
+      if @history.preview_enabled?
+        @history.refresh_preview(@host.session.store)
+      else
+        @history.clear_preview
+        @history.set_preview_focus(:list)
       end
     end
 
@@ -69,7 +80,13 @@ module Gori::Tui
         return true
       end
       @host.focus_body
+      # Preview pane click focuses that side (settings:layout).
+      if pane = @history.preview_pane_at(inner, mx, my)
+        @history.set_preview_focus(pane)
+        return true
+      end
       return true unless idx = @history.list_row_at(inner, mx, my)
+      @history.set_preview_focus(:list)
       # SELECT-FIRST: first click selects, a second click on the selected row opens.
       idx == @history.selected_index ? open_detail : @history.select_row(idx)
       true
@@ -78,10 +95,24 @@ module Gori::Tui
     def handle_wheel(step : Int32) : Bool
       if @host.overlay == :detail
         @history.detail_navigable? ? @history.detail_scroll_view(step) : @history.scroll_detail(step)
+      elsif @history.preview_enabled? && (@history.preview_focus == :req || @history.preview_focus == :res)
+        @history.scroll_preview(step)
       else
         @history.move(step)
       end
       true
+    end
+
+    # Tab cycles list ↔ Req/Res preview focus when the list+preview layout is active.
+    def handle_body_key(ev : Termisu::Event::Key) : Bool
+      return false if @host.overlay == :detail
+      return false unless @history.preview_enabled?
+      return false if ev.ctrl? || ev.alt?
+      if ev.key.tab?
+        @history.cycle_preview_focus
+        return true
+      end
+      false
     end
 
     # History detail drill-in: shift+arrows select, space opens the action menu.
@@ -143,7 +174,12 @@ module Gori::Tui
         nav = @history.detail_navigable? ? "↑/↓ move" : "↑/↓ scroll"
         return "←/→ panes · #{nav} · ⇧arrows select · y copy · ⇧←/→ h-scroll · space cmds · esc back"
       end
-      @history.querying? ? "type query · ↹ complete · ↵ apply · esc clear" : "↑/↓ move · ↵ open · ^R replay · ⇧F finding · f follow · / filter · i hold-mode · space cmds · esc tabs"
+      return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
+      if @history.preview_enabled?
+        return "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs" if @history.preview_focus != :list
+        return "↑/↓ move · ↵ open · ↹ preview · ^R replay · / filter · space cmds · esc tabs"
+      end
+      "↑/↓ move · ↵ open · ^R replay · ⇧F finding · f follow · / filter · i hold-mode · space cmds · esc tabs"
     end
 
     # Live IME composition only flows to the QL filter bar (the one text field).
@@ -210,6 +246,11 @@ module Gori::Tui
 
     # --- ExecContext verbs (delegated from the Runner) ---
     def move_selection(delta : Int32) : Nil
+      # Preview-focused: scroll the preview side (HistoryView#move handles it).
+      if @history.preview_enabled? && (@history.preview_focus == :req || @history.preview_focus == :res)
+        @history.move(delta)
+        return
+      end
       # ↑ at the top row pops focus up to the tab bar (natural upward keyboard flow).
       if delta < 0 && @history.at_top?
         @host.request_focus(:menu)

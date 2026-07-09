@@ -40,7 +40,22 @@ module Gori::Tui
     THEME_FIELDS = [
       Field.new("Theme", "TUI colour theme — ↑/↓ select, ↵ applies", choices: Theme.available),
     ]
-    SECTIONS = {:network => NETWORK_FIELDS, :editor => EDITOR_FIELDS, :theme => THEME_FIELDS}
+    # Layout: vertical list of per-area prefs (extend by appending fields + Settings keys).
+    LAYOUT_DEPTH_CHOICES = ["all", "0", "1", "2", "3"]
+    LAYOUT_FIELDS        = [
+      Field.new("History Req/Res preview",
+        "list page: bottom pane shows selected flow request + response — ←/→/space toggles",
+        bool: true),
+      Field.new("Sitemap expand depth",
+        "how deep the tree opens after reload — ←/→ cycles (all = fully expanded)",
+        choices: LAYOUT_DEPTH_CHOICES),
+    ]
+    SECTIONS = {
+      :network => NETWORK_FIELDS,
+      :editor  => EDITOR_FIELDS,
+      :theme   => THEME_FIELDS,
+      :layout  => LAYOUT_FIELDS,
+    }
 
     # Max theme rows shown at once before the list scrolls (the box also shrinks to the
     # terminal height — see overlay_box).
@@ -71,6 +86,7 @@ module Gori::Tui
       @values = case section
                 when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
                 when :theme  then [Theme.canonical(Settings.theme)]
+                when :layout then layout_values
                 else              [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, hostnames_summary]
                 end
       @focused = 0
@@ -89,12 +105,28 @@ module Gori::Tui
       @values = case @section
                 when :editor then [Settings::DEFAULT_EDITOR, Settings::DEFAULT_EDITOR_MARKDOWN ? "on" : "off", Settings::DEFAULT_MOUSE ? "on" : "off", Settings::DEFAULT_PRETTY_BODIES ? "on" : "off"]
                 when :theme  then [Theme.canonical(Settings::DEFAULT_THEME)]
-                else              [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, hostnames_summary]
+                when :layout then [
+                  Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
+                  depth_label(Settings::DEFAULT_SITEMAP_EXPAND_DEPTH),
+                ]
+                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
       @preedit = ""
       @status = nil
+    end
+
+    private def layout_values : Array(String)
+      [Settings.history_preview ? "on" : "off", depth_label(Settings.sitemap_expand_depth)]
+    end
+
+    private def depth_label(d : Int32) : String
+      d < 0 ? "all" : d.to_s
+    end
+
+    private def depth_from_label(s : String) : Int32
+      s == "all" ? -1 : (s.to_i? || Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
     end
 
     # ↑/↓: move between fields — except in the THEME section, whose single field IS a
@@ -223,6 +255,12 @@ module Gori::Tui
         Settings.mouse = @values[2] == "on"
         Settings.pretty_bodies_default = @values[3] == "on"
         @values = [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
+        return persist
+      end
+      if @section == :layout
+        Settings.history_preview = @values[0] == "on"
+        Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(depth_from_label(@values[1]))
+        @values = layout_values
         return persist
       end
       port = @values[1].strip.to_i?

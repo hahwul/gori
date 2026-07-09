@@ -164,5 +164,24 @@ module Gori
       node.children.each { |c| n += endpoint_count(c) }
       n
     end
+
+    # Apply the settings:layout expand-depth policy after build/grouping.
+    # depth < 0 → fully expanded (factory default). depth N → nodes with tree-depth < N
+    # are expanded (0 = hosts collapsed so only host rows show). Grouped sequence folds
+    # stay collapsed (they're noise until the user opens them).
+    def self.apply_expand_depth!(hosts : Array(Node), depth : Int32) : Nil
+      hosts.each { |h| apply_expand_depth_node!(h, 0, depth) }
+    end
+
+    private def self.apply_expand_depth_node!(node : Node, node_depth : Int32, depth : Int32) : Nil
+      if node.grouped
+        node.expanded = false
+      elsif depth < 0
+        node.expanded = true
+      else
+        node.expanded = node_depth < depth
+      end
+      node.children.each { |c| apply_expand_depth_node!(c, node_depth + 1, depth) }
+    end
   end
 end

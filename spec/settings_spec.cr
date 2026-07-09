@@ -100,6 +100,45 @@ describe Gori::Settings do
     end
   end
 
+  it "persists and reloads layout prefs; omits the layout section at factory defaults" do
+    dir = File.tempname("gori-settings-layout")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_layout = {Gori::Settings.history_preview, Gori::Settings.sitemap_expand_depth}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.history_preview = true
+      Gori::Settings.sitemap_expand_depth = 2
+      Gori::Settings.save.should be_true
+      raw = File.read(Gori::Settings.path)
+      raw.should contain(%("layout"))
+      raw.should contain(%("history_preview":true))
+
+      Gori::Settings.history_preview = false
+      Gori::Settings.sitemap_expand_depth = -1
+      Gori::Settings.load
+      Gori::Settings.history_preview.should be_true
+      Gori::Settings.sitemap_expand_depth.should eq(2)
+
+      # Back to defaults → section omitted
+      Gori::Settings.history_preview = Gori::Settings::DEFAULT_HISTORY_PREVIEW
+      Gori::Settings.sitemap_expand_depth = Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH
+      Gori::Settings.save
+      File.read(Gori::Settings.path).should_not contain(%("layout"))
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.history_preview, Gori::Settings.sitemap_expand_depth = prev_layout
+    end
+  end
+
+  it "normalizes invalid sitemap expand depths to the default" do
+    Gori::Settings.normalize_sitemap_depth(-1).should eq(-1)
+    Gori::Settings.normalize_sitemap_depth(0).should eq(0)
+    Gori::Settings.normalize_sitemap_depth(3).should eq(3)
+    Gori::Settings.normalize_sitemap_depth(99).should eq(Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
+  end
+
   it "merges a concurrent writer's unrelated change instead of clobbering it" do
     dir = File.tempname("gori-settings-merge")
     Dir.mkdir_p(dir)

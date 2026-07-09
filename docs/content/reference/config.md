@@ -41,6 +41,24 @@ Everything lives under `GORI_HOME` — `$GORI_HOME` if set and non-empty, otherw
 | `bind_port` | integer | `8070` | Proxy listen port |
 | `upstream_proxy` | string | `""` | `host:port` HTTP proxy to chain through; empty = direct |
 
+### layout
+
+Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted when both values are factory defaults.
+
+```json
+{
+  "layout": {
+    "history_preview": false,
+    "sitemap_expand_depth": -1
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `history_preview` | bool | `false` | History list page shows a bottom Req\|Res preview for the selected flow |
+| `sitemap_expand_depth` | integer | `-1` | How deep the Sitemap tree opens after reload: `-1` = all expanded; `0`–`3` = expand only nodes shallower than this depth |
+
 ### Other sections
 
 | Section | Description |
@@ -54,6 +72,7 @@ Everything lives under `GORI_HOME` — `$GORI_HOME` if set and non-empty, otherw
 | `env` | Environment-variable prefix and values injected into replays |
 | `hotkeys` | Keybinding overrides (`os` layer + `bindings`) — see the [Hotkeys guide](/guide/hotkeys/) |
 | `convert` / `mine` | Saved defaults for the Convert tool and Param Miner |
+| `layout` | History preview + Sitemap expand depth — see [layout](#layout) above |
 
 ## Per-Project Overrides
 

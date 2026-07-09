@@ -88,6 +88,69 @@ module Gori::Tui
       @detail_cache_rev = Theme.revision # the theme the cached (colour-baked) head/notes were built under
       @detail_read = ReadCursor.new
       @detail_last_h = 0
+      # settings:layout History Req/Res preview (list page bottom pane) — separate from full detail.
+      @preview_detail = nil.as(Store::FlowDetail?)
+      @preview_id = nil.as(Int64?)
+      @preview_scroll_req = 0
+      @preview_scroll_res = 0
+      @preview_focus = :list # :list | :req | :res
+    end
+
+    # True when the list page should reserve a bottom Req|Res preview pane.
+    def preview_enabled? : Bool
+      Settings.history_preview
+    end
+
+    getter preview_focus : Symbol
+
+    # Load/refresh the preview cache for the selected flow (no-op when preview is off).
+    def refresh_preview(store : Store) : Nil
+      return clear_preview unless preview_enabled?
+      id = selected_id
+      return clear_preview unless id
+      if @preview_id != id
+        @preview_scroll_req = 0
+        @preview_scroll_res = 0
+      end
+      @preview_detail = store.get_flow(id)
+      @preview_id = id
+    end
+
+    def clear_preview : Nil
+      @preview_detail = nil
+      @preview_id = nil
+      @preview_scroll_req = 0
+      @preview_scroll_res = 0
+    end
+
+    # Tab cycles list → request → response → list (only when preview is on).
+    def cycle_preview_focus : Nil
+      return unless preview_enabled?
+      @preview_focus = case @preview_focus
+                       when :list then :req
+                       when :req  then :res
+                       else            :list
+                       end
+    end
+
+    def set_preview_focus(f : Symbol) : Nil
+      @preview_focus = f if {:list, :req, :res}.includes?(f)
+    end
+
+    def scroll_preview(delta : Int32) : Nil
+      case @preview_focus
+      when :req then @preview_scroll_req = {@preview_scroll_req + delta, 0}.max
+      when :res then @preview_scroll_res = {@preview_scroll_res + delta, 0}.max
+      end
+    end
+
+    # Split geometry for the list page when preview is on. Returns {list_rect, preview_rect?}.
+    def list_split(rect : Rect) : {Rect, Rect?}
+      return {rect, nil} unless preview_enabled? && rect.h >= 12
+      list_h = (rect.h * 55 // 100).clamp(6, rect.h - 5)
+      list = Rect.new(rect.x, rect.y, rect.w, list_h)
+      prev = Rect.new(rect.x, rect.y + list_h, rect.w, rect.h - list_h)
+      {list, prev}
     end
 
     # head (styled, bounded) ++ body (raw, styled lazily per visible line) ++
@@ -185,9 +248,15 @@ module Gori::Tui
 
     def move(delta : Int32) : Nil
       return if @rows.empty?
+      # When the preview pane is focused, ↑/↓ scroll that side instead of the list.
+      if preview_enabled? && (@preview_focus == :req || @preview_focus == :res)
+        scroll_preview(delta)
+        return
+      end
       @selected = (@selected + delta).clamp(0, @rows.size - 1)
       # Newest-first: "following" the live tail means sitting on the top row (0).
       @follow = (@selected == 0)
+      @preview_id = nil # force refresh_preview to re-fetch on the next controller tick
     end
 
     getter selected : Int32
@@ -202,13 +271,29 @@ module Gori::Tui
     # Returns the @rows index under (mx,my), or nil outside the list / past the
     # last populated row. Mirrors list_top/list_h and the @scroll+i row math.
     def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      return nil if rect.empty? || !rect.contains?(mx, my)
-      lt = list_top(rect)
-      list_h = {rect.bottom - lt, 0}.max
+      list_rect, _ = list_split(rect)
+      return nil if list_rect.empty? || !list_rect.contains?(mx, my)
+      lt = list_top(list_rect)
+      list_h = {list_rect.bottom - lt, 0}.max
       i = my - lt
       return nil if i < 0 || i >= list_h
       ri = @scroll + i
       ri < @rows.size ? ri : nil
+    end
+
+    # Which preview sub-pane (if any) contains (mx,my). :req | :res | nil.
+    def preview_pane_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      _, prev = list_split(rect)
+      return nil unless prev && prev.contains?(mx, my)
+      return nil if prev.h < 2
+      body = Rect.new(prev.x, prev.y + 1, prev.w, prev.h - 1)
+      if body.w >= 60
+        mid = body.x + body.w // 2
+        mx < mid ? :req : :res
+      else
+        half = body.y + body.h // 2
+        my < half ? :req : :res
+      end
     end
 
     # The first flow-row screen-y — mirrors render_list: hdr_y = rect.y+1 (+1 for
@@ -226,6 +311,8 @@ module Gori::Tui
       return if @rows.empty?
       @selected = idx.clamp(0, @rows.size - 1)
       @follow = (@selected == 0)
+      @preview_id = nil # force preview refresh
+      @preview_focus = :list
     end
 
     # At the first (top) row — used by the Runner to pop focus up to the tab bar
@@ -724,6 +811,14 @@ module Gori::Tui
     def render_list(screen : Screen, rect : Rect, focused : Bool = true, *,
                     listen : String? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
+      list_rect, preview_rect = list_split(rect)
+      render_list_body(screen, list_rect, focused, listen: listen, capturing: capturing)
+      render_preview_pane(screen, preview_rect, focused) if preview_rect
+    end
+
+    private def render_list_body(screen : Screen, rect : Rect, focused : Bool, *,
+                                 listen : String? = nil, capturing : Bool = true) : Nil
+      return if rect.empty?
       render_ql_bar(screen, rect)
       hdr_y = rect.y + 1
       if @querying
@@ -826,6 +921,84 @@ module Gori::Tui
         screen.text(size_x, y, fmt_size(row.response_size), Theme.muted, bg, width: 6) if show_size
         screen.text(dur_x, y, fmt_dur(row.duration_us), Theme.muted, bg, width: 6) if show_dur
       end
+    end
+
+    # Bottom preview pane: REQUEST | RESPONSE for the selected flow (settings:layout).
+    private def render_preview_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.empty? || rect.h < 2
+      # Seam between list and preview: must use the same border colour as the enclosing
+      # framed card (pane_border(focused)), or ├ / ┤ sit as grey nubs on a gold frame.
+      border = Frame.pane_border(focused)
+      Frame.inner_divider(screen, rect, rect.y, border: border)
+      detail = @preview_detail
+      unless detail
+        screen.text(rect.x + 1, rect.y + 1, "preview — select a flow", Theme.muted, width: {rect.w - 2, 0}.max)
+        return
+      end
+      body = Rect.new(rect.x, rect.y + 1, rect.w, {rect.h - 1, 0}.max)
+      return if body.h < 1
+      if body.w >= 60
+        half = body.w // 2
+        left = Rect.new(body.x, body.y, half, body.h)
+        right = Rect.new(body.x + half, body.y, body.w - half, body.h)
+        # Vertical hairline between Req and Res; top cell sits on the horizontal seam as ┬.
+        screen.cell(body.x + half, rect.y, '┬', border)
+        (0...body.h).each { |i| screen.cell(body.x + half, body.y + i, '│', border) }
+        render_preview_side(screen, left, "REQUEST", detail.request_head, detail.request_body,
+          @preview_scroll_req, active: focused && @preview_focus == :req)
+        render_preview_side(screen, right, "RESPONSE", detail.response_head, detail.response_body,
+          @preview_scroll_res, active: focused && @preview_focus == :res)
+      else
+        # Stack Req above Res; reserve one row for a tee-joined mid seam when height allows.
+        if body.h >= 3
+          half_h = body.h // 2
+          mid_y = body.y + half_h
+          top = Rect.new(body.x, body.y, body.w, half_h)
+          bot = Rect.new(body.x, mid_y + 1, body.w, body.h - half_h - 1)
+          Frame.inner_divider(screen, rect, mid_y, border: border)
+          render_preview_side(screen, top, "REQUEST", detail.request_head, detail.request_body,
+            @preview_scroll_req, active: focused && @preview_focus == :req)
+          render_preview_side(screen, bot, "RESPONSE", detail.response_head, detail.response_body,
+            @preview_scroll_res, active: focused && @preview_focus == :res) if bot.h > 0
+        else
+          render_preview_side(screen, body, "REQUEST", detail.request_head, detail.request_body,
+            @preview_scroll_req, active: focused && @preview_focus == :req)
+        end
+      end
+    end
+
+    private def render_preview_side(screen : Screen, rect : Rect, title : String,
+                                    head : Bytes?, body : Bytes?, scroll : Int32, *, active : Bool) : Nil
+      return if rect.empty?
+      bg = active ? Theme.selection_dim : Theme.bg
+      screen.fill(rect, bg) if active
+      label = active ? " #{title} ▎" : " #{title} "
+      screen.text(rect.x + 1, rect.y, label, active ? Theme.accent : Theme.muted, bg, attr: Attribute::Bold)
+      lines = preview_text_lines(head, body)
+      content_y = rect.y + 1
+      content_h = {rect.bottom - content_y, 0}.max
+      return if content_h <= 0
+      sc = scroll.clamp(0, {lines.size - 1, 0}.max)
+      w = {rect.w - 2, 0}.max
+      (0...content_h).each do |i|
+        li = sc + i
+        break if li >= lines.size
+        screen.text(rect.x + 1, content_y + i, lines[li], Theme.text, bg, width: w)
+      end
+    end
+
+    PREVIEW_BODY_CAP = 64 * 1024
+
+    private def preview_text_lines(head : Bytes?, body : Bytes?) : Array(String)
+      return ["(empty)"] if head.nil? || head.empty?
+      io = IO::Memory.new
+      io.write(head)
+      if body && !body.empty?
+        n = {body.size, PREVIEW_BODY_CAP}.min
+        io.write(body[0, n])
+        io << "\n… [truncated]" if body.size > PREVIEW_BODY_CAP
+      end
+      String.new(io.to_slice).scrub.split('\n').map(&.rstrip('\r'))
     end
 
     # Local MM-DD HH:MM:SS for the captured-at micros (created_at is unix microseconds).

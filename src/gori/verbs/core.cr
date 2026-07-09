@@ -89,6 +89,9 @@ module Gori
       r.register Verb::Definition.new(
         "settings.hotkeys", "Settings: Hotkeys", "Rebind keyboard shortcuts (press a key) + pick an OS default profile",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hotkeys); nil }
+      r.register Verb::Definition.new(
+        "settings.layout", "Settings: Layout", "History list Req/Res preview and Sitemap default expand depth",
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:layout); nil }
 
       # `s` toggles the scope lens from anywhere (its original behavior — this used to jump to
       # the Project scope editor). Jumping there is now the palette-only `scope.edit` below.

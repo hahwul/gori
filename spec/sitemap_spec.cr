@@ -107,4 +107,40 @@ describe Gori::Sitemap do
       api.children.find! { |c| c.label == "users" }.tag.should be_nil
     end
   end
+
+  describe ".apply_expand_depth!" do
+    it "expands everything when depth is -1 (all)" do
+      hosts = Gori::Sitemap.build([{"h", "GET", "/a/b/c"}])
+      Gori::Sitemap.apply_expand_depth!(hosts, -1)
+      h = hosts.first
+      h.expanded.should be_true
+      a = h.children.find! { |c| c.label == "a" }
+      a.expanded.should be_true
+      a.children.first.expanded.should be_true
+    end
+
+    it "collapses hosts at depth 0 (hosts only)" do
+      hosts = Gori::Sitemap.build([{"h", "GET", "/a/b"}])
+      Gori::Sitemap.apply_expand_depth!(hosts, 0)
+      hosts.first.expanded.should be_false
+    end
+
+    it "expands only nodes shallower than the depth limit" do
+      hosts = Gori::Sitemap.build([{"h", "GET", "/a/b/c"}])
+      Gori::Sitemap.apply_expand_depth!(hosts, 1)
+      h = hosts.first
+      h.expanded.should be_true # depth 0 < 1
+      a = h.children.find! { |c| c.label == "a" }
+      a.expanded.should be_false # depth 1 is not < 1
+    end
+
+    it "keeps grouped sequence folds collapsed" do
+      hosts = Gori::Sitemap.build((1001..1012).map { |i| {"h", "GET", "/p/#{i}"} })
+      Gori::Sitemap.group_sequences!(hosts.first)
+      Gori::Sitemap.apply_expand_depth!(hosts, -1)
+      p = hosts.first.children.find! { |c| c.label == "p" }
+      group = p.children.find! &.grouped
+      group.expanded.should be_false
+    end
+  end
 end

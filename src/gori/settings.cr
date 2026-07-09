@@ -26,6 +26,9 @@ module Gori
     DEFAULT_MOUSE           = true
     DEFAULT_PRETTY_BODIES   = true
     DEFAULT_ENV_PREFIX      = "$"
+    # Layout (settings:layout): History list Req/Res preview off by default; Sitemap fully expanded.
+    DEFAULT_HISTORY_PREVIEW      = false
+    DEFAULT_SITEMAP_EXPAND_DEPTH = -1 # -1 = all
 
     class_property bind_host : String = DEFAULT_BIND_HOST
     class_property bind_port : Int32 = DEFAULT_BIND_PORT
@@ -72,6 +75,10 @@ module Gori
     class_property theme : String = DEFAULT_THEME                       # TUI colour theme name (settings:theme); applied by Theme.apply
     class_property mouse : Bool = DEFAULT_MOUSE                         # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
     class_property pretty_bodies_default : Bool = DEFAULT_PRETTY_BODIES # pretty-print JSON/XML/form/… bodies in History detail + Replay response (display only)
+    # Layout prefs (settings:layout). history_preview: list page shows a bottom Req|Res pane.
+    # sitemap_expand_depth: how deep the Sitemap tree opens after reload (-1 = all expanded).
+    class_property history_preview : Bool = DEFAULT_HISTORY_PREVIEW
+    class_property sitemap_expand_depth : Int32 = DEFAULT_SITEMAP_EXPAND_DEPTH
     # Top tab-bar layout: ordered {tab-id, visible?}. Empty = never customized → Chrome
     # reconciles to catalog defaults. Opaque String ids (Crystal has no runtime String→Symbol);
     # Chrome maps ids→catalog symbols. Only an EXPLICIT false hides a tab.
@@ -142,9 +149,30 @@ module Gori
         self.convert_chains = parse_convert_chains(cv["chains"]?)
       end
       parse_mine_prefs(root["mine"]?)
+      parse_layout(root["layout"]?)
       Env.bump_highlight_rev
     rescue
       # no file yet / unreadable / bad JSON — keep current values
+    end
+
+    # Tolerant layout section: absent/non-object keeps current; depth clamped to allowed set.
+    private def self.parse_layout(node : JSON::Any?) : Nil
+      return unless o = node.try(&.as_h?)
+      self.history_preview = load_bool_h(o, "history_preview", history_preview)
+      if d = o["sitemap_expand_depth"]?.try(&.as_i?)
+        self.sitemap_expand_depth = normalize_sitemap_depth(d)
+      end
+    end
+
+    # Allowed depths: -1 (all) or 0..3. Anything else falls back to default.
+    def self.normalize_sitemap_depth(d : Int32) : Int32
+      return d if d == -1 || (0 <= d <= 3)
+      DEFAULT_SITEMAP_EXPAND_DEPTH
+    end
+
+    # load_bool over a Hash (the layout object), same false-preserving semantics as load_bool.
+    private def self.load_bool_h(h : Hash(String, JSON::Any), key : String, current : Bool) : Bool
+      (v = h[key]?) && !(b = v.as_bool?).nil? ? b : current
     end
 
     # Tolerant sub-tab session parse: a non-array (or absent) node keeps the current
@@ -368,6 +396,15 @@ module Gori
           j.field "theme", theme
           j.field "mouse", mouse
           j.field "pretty_bodies", pretty_bodies_default
+          # Omit layout when both prefs are factory defaults (quiet install; merge-safe section).
+          unless history_preview == DEFAULT_HISTORY_PREVIEW && sitemap_expand_depth == DEFAULT_SITEMAP_EXPAND_DEPTH
+            j.field "layout" do
+              j.object do
+                j.field "history_preview", history_preview
+                j.field "sitemap_expand_depth", sitemap_expand_depth
+              end
+            end
+          end
           j.field "network" do
             j.object do
               j.field "bind_host", bind_host

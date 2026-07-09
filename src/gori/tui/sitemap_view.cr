@@ -34,6 +34,8 @@ module Gori::Tui
     METHODS_COL_W =  8
     COL_GAP       =  1 # minimum blank column between tag text and methods/aside
 
+    getter? loaded : Bool
+
     def initialize
       @hosts = [] of Node
       @selected = 0
@@ -83,6 +85,9 @@ module Gori::Tui
       Sitemap.stamp_tags!(@hosts, store.sitemap_tags)
       filter_by_tags(positives, negatives)
       @hosts.each { |h| Sitemap.group_sequences!(h) } if @grouping
+      # settings:layout Sitemap expand depth — re-stamped every reload (manual expand
+      # is session-only until the next rebuild, same contract as the old "always open").
+      Sitemap.apply_expand_depth!(@hosts, Settings.sitemap_expand_depth)
       # Stamp host-level scope state + endpoint counts on the FINAL tree, so the render
       # loop is a pure read (no per-frame Scope mutex hits). host_in_scope?/configured?
       # evaluate the rules regardless of the ⇧S enabled flag, so targets are marked even

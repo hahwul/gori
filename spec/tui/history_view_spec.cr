@@ -34,6 +34,48 @@ describe Gori::Tui::HistoryView do
   # so a (future) valid-JSON/XML fixture can't silently reflow and shift assertions.
   before_each { Gori::Settings.pretty_bodies_default = false }
 
+  it "splits the list rect for Req/Res preview when history_preview is on" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      view = HistoryView.new
+      list, prev_r = view.list_split(Rect.new(0, 0, 80, 24))
+      prev_r.should_not be_nil
+      list.h.should be < 24
+      list.h.should be >= 6
+      (list.h + prev_r.not_nil!.h).should eq(24)
+
+      Gori::Settings.history_preview = false
+      list2, prev2 = view.list_split(Rect.new(0, 0, 80, 24))
+      prev2.should be_nil
+      list2.h.should eq(24)
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
+  it "loads a preview detail for the selected flow" do
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      tmp_store do |store|
+        add_flow(store, "GET", "/preview-me", 200, "text/plain")
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store)
+        view.preview_enabled?.should be_true
+        # Render list with preview — must not raise and should paint REQUEST
+        backend = MemoryBackend.new(100, 30)
+        view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 30))
+        rows = (0...30).map { |y| backend.row(y) }.join("\n")
+        rows.should contain("REQUEST")
+        rows.should contain("RESPONSE")
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
   it "loads flows newest-first with the newest selected (follow)" do
     tmp_store do |store|
       add_flow(store, "GET", "/a", 200)
