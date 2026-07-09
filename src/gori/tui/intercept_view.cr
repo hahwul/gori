@@ -57,10 +57,18 @@ module Gori::Tui
     end
 
     # Fresh snapshot (cheap; called on enter AND every frame via the 50ms loop).
+    # Re-anchors selection by item id (not index) so forward/drop of an earlier
+    # queue entry does not silently move the highlight onto a different hold.
     # If the edited item vanished (forwarded/dropped/released), drop edit mode.
     def reload(interceptor : Interceptor) : Nil
+      prev_id = @items[@selected]?.try(&.id)
       @items = interceptor.pending
-      @selected = @selected.clamp(0, {@items.size - 1, 0}.max)
+      @selected =
+        if prev_id && (idx = @items.index { |it| it.id == prev_id })
+          idx
+        else
+          @selected.clamp(0, {@items.size - 1, 0}.max)
+        end
       @enabled = interceptor.enabled?
       @direction = interceptor.direction
       if @editing && (id = @loaded_id) && @items.none? { |it| it.id == id }

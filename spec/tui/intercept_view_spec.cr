@@ -240,6 +240,28 @@ describe "Intercept filter bar" do
       backend.contains?("acme.test/login").should be_true
     end
   end
+
+  it "re-anchors selection by item id when an earlier queue entry is dropped" do
+    # Index-only clamp would keep @selected=1 after dropping index 0, landing a
+    # different hold. Id re-anchor keeps the same item under the cursor.
+    tmp_interceptor do |ic|
+      hold_req(ic, "a.test", "/first", "GET /first HTTP/1.1\r\nHost: a.test\r\n\r\n")
+      hold_req(ic, "b.test", "/second", "GET /second HTTP/1.1\r\nHost: b.test\r\n\r\n")
+      hold_req(ic, "c.test", "/third", "GET /third HTTP/1.1\r\nHost: c.test\r\n\r\n")
+      view = InterceptView.new
+      view.reload(ic)
+      view.move(1) # select second
+      keep_id = view.selected_id.not_nil!
+      view.selected_item.not_nil!.target.should eq("/second")
+
+      first_id = ic.pending.first.id
+      ic.drop(first_id)
+      view.reload(ic)
+
+      view.selected_id.should eq(keep_id)
+      view.selected_item.not_nil!.target.should eq("/second")
+    end
+  end
 end
 
 describe "Intercept verbs (P1)" do
