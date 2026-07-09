@@ -4372,9 +4372,10 @@ module Gori::Tui
       end
     end
 
-    # Layout prefs apply live: History reads history_preview each frame; Sitemap rebuilds
+    # Layout prefs apply live: History reloads (list order) + preview; Sitemap rebuilds
     # so the expand-depth policy is re-stamped on the tree.
     private def apply_layout(save_msg : String) : String
+      history_controller.view.reload(@session.store)
       history_controller.refresh_preview
       sitemap_controller.view.reload(@session.store) if sitemap_controller.view.loaded?
       save_msg

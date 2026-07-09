@@ -71,33 +71,38 @@ describe SettingsView do
     end
   end
 
-  it "saves and resets the LAYOUT section (history preview + sitemap depth)" do
+  it "saves and resets the LAYOUT section (preview, list order, sitemap depth)" do
     dir = File.tempname("gori-settings-layout-view")
     Dir.mkdir_p(dir)
     prev_home = ENV["GORI_HOME"]?
-    prev = {Gori::Settings.history_preview, Gori::Settings.sitemap_expand_depth}
+    prev = {Gori::Settings.history_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.history_preview = false
+      Gori::Settings.history_list_order = "newest"
       Gori::Settings.sitemap_expand_depth = -1
       v = SettingsView.new
       v.reload(:layout)
       v.section.should eq(:layout)
-      # Toggle preview on (bool field) and cycle depth all → 0, then save
+      # Toggle preview on, cycle list order → oldest, cycle depth all → 0
       v.toggle_or_move(1)
+      v.move_field(1)
+      v.toggle_or_move(1) # newest first → oldest first
       v.move_field(1)
       v.toggle_or_move(1) # all → 0
       v.save
       Gori::Settings.history_preview.should be_true
+      Gori::Settings.history_list_order.should eq("oldest")
       Gori::Settings.sitemap_expand_depth.should eq(0)
 
       v.reset_to_defaults
       v.save
       Gori::Settings.history_preview.should eq(Gori::Settings::DEFAULT_HISTORY_PREVIEW)
+      Gori::Settings.history_list_order.should eq(Gori::Settings::DEFAULT_HISTORY_LIST_ORDER)
       Gori::Settings.sitemap_expand_depth.should eq(Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
-      Gori::Settings.history_preview, Gori::Settings.sitemap_expand_depth = prev
+      Gori::Settings.history_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth = prev
       FileUtils.rm_rf(dir)
     end
   end

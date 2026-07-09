@@ -87,6 +87,23 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "loads flows oldest-first when history_list_order is oldest" do
+    prev = Gori::Settings.history_list_order
+    begin
+      Gori::Settings.history_list_order = "oldest"
+      tmp_store do |store|
+        add_flow(store, "GET", "/a", 200)
+        last = add_flow(store, "POST", "/b", 500)
+        view = HistoryView.new
+        view.reload(store)
+        view.rows.map(&.target).should eq(["/a", "/b"]) # oldest at top
+        view.selected_id.should eq(last)                # follow still tracks newest (bottom)
+      end
+    ensure
+      Gori::Settings.history_list_order = prev
+    end
+  end
+
   it "prepends on :inserted (newest on top) and fills status on :updated" do
     tmp_store do |store|
       view = HistoryView.new

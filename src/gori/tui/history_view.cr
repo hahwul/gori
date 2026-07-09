@@ -47,7 +47,9 @@ module Gori::Tui
     getter query : String
 
     def initialize(@max_rows : Int32 = MAX_ROWS, @trim_slack : Int32 = TRIM_SLACK)
-      @rows = [] of Store::FlowRow # always kept id-DESCENDING (newest first)
+      # Display order follows Settings.history_list_order: newest-first (id DESC) or
+      # oldest-first (id ASC). index_of binary-searches the matching direction.
+      @rows = [] of Store::FlowRow
       @selected = 0
       @scroll = 0
       @follow = true
@@ -193,22 +195,33 @@ module Gori::Tui
       !@query.blank? || (@scope.try(&.active?) == true)
     end
 
-    # Load flows (newest-first so the latest sit at the top, like Burp/Caido),
-    # applying the Scope lens AND the QL query. store.search already returns
-    # newest-first (ORDER BY id DESC), so no reverse.
+    # Load flows applying the Scope lens AND the QL query. store.search returns
+    # newest-first (ORDER BY id DESC); reverse when the layout pref is oldest-first.
     def reload(store : Store) : Nil
       prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
       combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(@query))
       @rows = store.search(combined, PAGE)
+      @rows.reverse! unless newest_first?
       @filter_dirty = false
       @selected =
         if @follow
-          0
+          follow_index
         elsif prev_id && (idx = index_of(prev_id))
           idx # keep the highlight on the same flow across a reload
         else
           @selected.clamp(0, {@rows.size - 1, 0}.max)
         end
+    end
+
+    # settings:layout History list order — newest first (default) or oldest first.
+    private def newest_first? : Bool
+      Settings.history_newest_first?
+    end
+
+    # Index of the live tail (newest flow) in the current display order.
+    private def follow_index : Int32
+      return 0 if @rows.empty?
+      newest_first? ? 0 : @rows.size - 1
     end
 
     # Apply any filtered-view staleness accumulated during a drain cycle in ONE
@@ -226,16 +239,21 @@ module Gori::Tui
       when :inserted
         return if index_of(event.id)
         if row = store.flow_row(event.id)
-          # Newest-first: prepend so the latest sits at the top. Inserts arrive in
-          # increasing id order (committed FIFO), so @rows stays id-descending and
-          # no index rebuild is needed — lookups binary-search it.
-          @rows.unshift(row)
-          if @follow
-            @selected = 0
+          # Inserts arrive increasing-id (FIFO). Prepend for newest-first (id DESC),
+          # append for oldest-first (id ASC) so binary search stays valid.
+          if newest_first?
+            @rows.unshift(row)
+            if @follow
+              @selected = 0
+            else
+              # Keep the highlight + viewport on the same flows the user is looking at.
+              @selected += 1
+              @scroll += 1
+            end
           else
-            # Keep the highlight + viewport on the same flows the user is looking at.
-            @selected += 1
-            @scroll += 1
+            @rows << row
+            @selected = @rows.size - 1 if @follow
+            # Not following: selection/scroll stay put (new row is past the end).
           end
           trim_window if @rows.size > @max_rows + @trim_slack
         end
@@ -254,8 +272,8 @@ module Gori::Tui
         return
       end
       @selected = (@selected + delta).clamp(0, @rows.size - 1)
-      # Newest-first: "following" the live tail means sitting on the top row (0).
-      @follow = (@selected == 0)
+      # "Following" the live tail means sitting on the newest row (top or bottom).
+      @follow = (@selected == follow_index)
       @preview_id = nil # force refresh_preview to re-fetch on the next controller tick
     end
 
@@ -310,7 +328,7 @@ module Gori::Tui
     def select_row(idx : Int32) : Nil
       return if @rows.empty?
       @selected = idx.clamp(0, @rows.size - 1)
-      @follow = (@selected == 0)
+      @follow = (@selected == follow_index)
       @preview_id = nil # force preview refresh
       @preview_focus = :list
     end
@@ -323,7 +341,7 @@ module Gori::Tui
 
     def toggle_follow : Nil
       @follow = !@follow
-      @selected = 0 if @follow && !@rows.empty?
+      @selected = follow_index if @follow && !@rows.empty?
     end
 
     # The flow id currently open in the detail overlay (nil when the list is showing).
@@ -1266,33 +1284,45 @@ module Gori::Tui
       @scroll = 0 if @scroll < 0
     end
 
-    # Position of `id` in @rows, which is kept sorted by id DESCENDING (newest
-    # first) — so an O(log n) binary search replaces the per-insert O(n) hash
-    # rebuild that used to run on the UI fiber for every captured flow.
+    # Position of `id` in @rows. Sorted id-DESC (newest first) or id-ASC (oldest
+    # first) per Settings.history_list_order — O(log n) binary search either way.
     private def index_of(id : Int64) : Int32?
       lo = 0
       hi = @rows.size - 1
+      desc = newest_first?
       while lo <= hi
         mid = (lo + hi) // 2
         mid_id = @rows[mid].id
         return mid if mid_id == id
-        if mid_id > id
-          lo = mid + 1 # descending: smaller ids are to the right
+        if desc
+          if mid_id > id
+            lo = mid + 1 # descending: smaller ids to the right
+          else
+            hi = mid - 1
+          end
         else
-          hi = mid - 1
+          if mid_id < id
+            lo = mid + 1 # ascending: larger ids to the right
+          else
+            hi = mid - 1
+          end
         end
       end
       nil
     end
 
-    # Drop the oldest rows so the window stays at MAX_ROWS. Newest-first, so the
-    # oldest are at the END — pop them (keeps @rows id-descending; no reindex).
-    # Selection/scroll live near the top (newest) and are unaffected, but clamp in
-    # case the user had scrolled into the tail.
+    # Drop the oldest rows so the window stays at MAX_ROWS. Newest-first: oldest
+    # are at the END (pop). Oldest-first: oldest are at the START (shift).
     private def trim_window : Nil
       drop = @rows.size - @max_rows
       return if drop <= 0
-      @rows.pop(drop)
+      if newest_first?
+        @rows.pop(drop)
+      else
+        @rows.shift(drop)
+        @selected = {@selected - drop, 0}.max
+        @scroll = {@scroll - drop, 0}.max
+      end
       @selected = @selected.clamp(0, {@rows.size - 1, 0}.max)
       @scroll = @scroll.clamp(0, {@rows.size - 1, 0}.max)
     end

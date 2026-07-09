@@ -104,31 +104,36 @@ describe Gori::Settings do
     dir = File.tempname("gori-settings-layout")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
-    prev_layout = {Gori::Settings.history_preview, Gori::Settings.sitemap_expand_depth}
+    prev_layout = {Gori::Settings.history_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.history_preview = true
+      Gori::Settings.history_list_order = "oldest"
       Gori::Settings.sitemap_expand_depth = 2
       Gori::Settings.save.should be_true
       raw = File.read(Gori::Settings.path)
       raw.should contain(%("layout"))
       raw.should contain(%("history_preview":true))
+      raw.should contain(%("history_list_order":"oldest"))
 
       Gori::Settings.history_preview = false
+      Gori::Settings.history_list_order = "newest"
       Gori::Settings.sitemap_expand_depth = -1
       Gori::Settings.load
       Gori::Settings.history_preview.should be_true
+      Gori::Settings.history_list_order.should eq("oldest")
       Gori::Settings.sitemap_expand_depth.should eq(2)
 
       # Back to defaults → section omitted
       Gori::Settings.history_preview = Gori::Settings::DEFAULT_HISTORY_PREVIEW
+      Gori::Settings.history_list_order = Gori::Settings::DEFAULT_HISTORY_LIST_ORDER
       Gori::Settings.sitemap_expand_depth = Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH
       Gori::Settings.save
       File.read(Gori::Settings.path).should_not contain(%("layout"))
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.history_preview, Gori::Settings.sitemap_expand_depth = prev_layout
+      Gori::Settings.history_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth = prev_layout
     end
   end
 

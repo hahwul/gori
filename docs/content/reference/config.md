@@ -49,6 +49,7 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 {
   "layout": {
     "history_preview": false,
+    "history_list_order": "newest",
     "sitemap_expand_depth": -1
   }
 }
@@ -57,6 +58,7 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `history_preview` | bool | `false` | History list page shows a bottom Req\|Res preview for the selected flow |
+| `history_list_order` | string | `"newest"` | List sort: `"newest"` (newest at top) or `"oldest"` (oldest at top) |
 | `sitemap_expand_depth` | integer | `-1` | How deep the Sitemap tree opens after reload: `-1` = all expanded; `0`–`3` = expand only nodes shallower than this depth |
 
 ### Other sections

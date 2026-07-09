@@ -42,10 +42,14 @@ module Gori::Tui
     ]
     # Layout: vertical list of per-area prefs (extend by appending fields + Settings keys).
     LAYOUT_DEPTH_CHOICES = ["all", "0", "1", "2", "3"]
+    LAYOUT_ORDER_CHOICES = ["newest first", "oldest first"]
     LAYOUT_FIELDS        = [
       Field.new("History Req/Res preview",
         "list page: bottom pane shows selected flow request + response — ←/→/space toggles",
         bool: true),
+      Field.new("History list order",
+        "newest first (default, live tail at top) or oldest first — ←/→ cycles",
+        choices: LAYOUT_ORDER_CHOICES),
       Field.new("Sitemap expand depth",
         "how deep the tree opens after reload — ←/→ cycles (all = fully expanded)",
         choices: LAYOUT_DEPTH_CHOICES),
@@ -107,6 +111,7 @@ module Gori::Tui
                 when :theme  then [Theme.canonical(Settings::DEFAULT_THEME)]
                 when :layout then [
                   Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
+                  order_label(Settings::DEFAULT_HISTORY_LIST_ORDER),
                   depth_label(Settings::DEFAULT_SITEMAP_EXPAND_DEPTH),
                 ]
                 else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, hostnames_summary]
@@ -118,7 +123,11 @@ module Gori::Tui
     end
 
     private def layout_values : Array(String)
-      [Settings.history_preview ? "on" : "off", depth_label(Settings.sitemap_expand_depth)]
+      [
+        Settings.history_preview ? "on" : "off",
+        order_label(Settings.history_list_order),
+        depth_label(Settings.sitemap_expand_depth),
+      ]
     end
 
     private def depth_label(d : Int32) : String
@@ -127,6 +136,14 @@ module Gori::Tui
 
     private def depth_from_label(s : String) : Int32
       s == "all" ? -1 : (s.to_i? || Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
+    end
+
+    private def order_label(order : String) : String
+      order == "oldest" ? "oldest first" : "newest first"
+    end
+
+    private def order_from_label(s : String) : String
+      s.starts_with?("oldest") ? "oldest" : "newest"
     end
 
     # ↑/↓: move between fields — except in the THEME section, whose single field IS a
@@ -259,7 +276,8 @@ module Gori::Tui
       end
       if @section == :layout
         Settings.history_preview = @values[0] == "on"
-        Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(depth_from_label(@values[1]))
+        Settings.history_list_order = Settings.normalize_history_list_order(order_from_label(@values[1]))
+        Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(depth_from_label(@values[2]))
         @values = layout_values
         return persist
       end
