@@ -43,9 +43,15 @@ module Gori::Tui
     # Layout: vertical list of per-area prefs (extend by appending fields + Settings keys).
     LAYOUT_DEPTH_CHOICES = ["all", "0", "1", "2", "3"]
     LAYOUT_ORDER_CHOICES = ["newest first", "oldest first"]
-    LAYOUT_FIELDS        = [
+    LAYOUT_FIELDS = [
       Field.new("History Req/Res preview",
         "list page: bottom pane shows selected flow request + response — ←/→/space toggles",
+        bool: true),
+      Field.new("Prism issue preview",
+        "list page: bottom pane shows selected issue summary — ←/→/space toggles",
+        bool: true),
+      Field.new("Findings preview",
+        "list page: bottom pane shows selected finding summary — ←/→/space toggles",
         bool: true),
       Field.new("History list order",
         "newest first (default, live tail at top) or oldest first — ←/→ cycles",
@@ -111,6 +117,8 @@ module Gori::Tui
                 when :theme  then [Theme.canonical(Settings::DEFAULT_THEME)]
                 when :layout then [
                   Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
+                  Settings::DEFAULT_PRISM_PREVIEW ? "on" : "off",
+                  Settings::DEFAULT_FINDINGS_PREVIEW ? "on" : "off",
                   order_label(Settings::DEFAULT_HISTORY_LIST_ORDER),
                   depth_label(Settings::DEFAULT_SITEMAP_EXPAND_DEPTH),
                 ]
@@ -125,6 +133,8 @@ module Gori::Tui
     private def layout_values : Array(String)
       [
         Settings.history_preview ? "on" : "off",
+        Settings.prism_preview ? "on" : "off",
+        Settings.findings_preview ? "on" : "off",
         order_label(Settings.history_list_order),
         depth_label(Settings.sitemap_expand_depth),
       ]
@@ -276,8 +286,10 @@ module Gori::Tui
       end
       if @section == :layout
         Settings.history_preview = @values[0] == "on"
-        Settings.history_list_order = Settings.normalize_history_list_order(order_from_label(@values[1]))
-        Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(depth_from_label(@values[2]))
+        Settings.prism_preview = @values[1] == "on"
+        Settings.findings_preview = @values[2] == "on"
+        Settings.history_list_order = Settings.normalize_history_list_order(order_from_label(@values[3]))
+        Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(depth_from_label(@values[4]))
         @values = layout_values
         return persist
       end

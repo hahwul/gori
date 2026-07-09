@@ -38,6 +38,37 @@ module Gori::Tui
       @show_closed = false # default lens: open issues only (triaged ones drop out of view)
       @scope = nil.as(Scope?)
       @pre_scope_empty = false
+      # settings:layout Prism issue preview (list page bottom pane)
+      @preview_scroll = 0
+      @preview_focus = :list # :list | :preview
+    end
+
+    def preview_enabled? : Bool
+      Settings.prism_preview
+    end
+
+    getter preview_focus : Symbol
+
+    def set_preview_focus(f : Symbol) : Nil
+      @preview_focus = f if {:list, :preview}.includes?(f)
+    end
+
+    def cycle_preview_focus : Nil
+      return unless preview_enabled?
+      @preview_focus = @preview_focus == :list ? :preview : :list
+    end
+
+    def scroll_preview(delta : Int32) : Nil
+      return unless @preview_focus == :preview
+      @preview_scroll = {@preview_scroll + delta, 0}.max
+    end
+
+    def list_split(rect : Rect) : {Rect, Rect?}
+      return {rect, nil} unless preview_enabled? && rect.h >= 12
+      list_h = (rect.h * 55 // 100).clamp(6, rect.h - 5)
+      list = Rect.new(rect.x, rect.y, rect.w, list_h)
+      prev = Rect.new(rect.x, rect.y + list_h, rect.w, rect.h - list_h)
+      {list, prev}
     end
 
     # Wires the shared session Scope in (mirrors HistoryView/SitemapView) so the ⇧S
@@ -106,13 +137,20 @@ module Gori::Tui
     end
 
     def move(delta : Int32) : Nil
+      if preview_enabled? && @preview_focus == :preview
+        scroll_preview(delta)
+        return
+      end
       return if @issues.empty?
       @selected = (@selected + delta).clamp(0, @issues.size - 1)
+      @preview_scroll = 0
     end
 
     def select_index(idx : Int32) : Nil
       return if @issues.empty?
       @selected = idx.clamp(0, @issues.size - 1)
+      @preview_scroll = 0
+      @preview_focus = :list
     end
 
     def selected_index : Int32
@@ -154,13 +192,20 @@ module Gori::Tui
     # Click hit-test: the MODE band (y), filter bar (y+1), header (y+2), divider (y+3),
     # rows from y+4 — one row deeper than Findings because of the MODE band.
     def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      return nil if mx < rect.x || mx >= rect.right
-      top = rect.y + 4
-      list_h = {rect.bottom - top, 0}.max
+      list_rect, _ = list_split(rect)
+      return nil if mx < list_rect.x || mx >= list_rect.right
+      top = list_rect.y + 4
+      list_h = {list_rect.bottom - top, 0}.max
       i = my - top
       return nil if i < 0 || i >= list_h
       idx = @scroll + i
       idx < @issues.size ? idx : nil
+    end
+
+    # True when (mx,my) lands in the bottom preview pane.
+    def preview_at?(rect : Rect, mx : Int32, my : Int32) : Bool
+      _, prev = list_split(rect)
+      !!prev.try(&.contains?(mx, my))
     end
 
     # --- `/` filter bar (live, in memory — mirrors FindingsView) --------------
@@ -285,8 +330,14 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
                listen : String? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
-      @detail ? render_detail(screen, rect, focused) : render_list(screen, rect, focused,
-        listen: listen, capturing: capturing)
+      if @detail
+        render_detail(screen, rect, focused)
+      else
+        list_rect, preview_rect = list_split(rect)
+        render_list(screen, list_rect, focused && @preview_focus == :list,
+          listen: listen, capturing: capturing)
+        render_preview_pane(screen, preview_rect, focused) if preview_rect
+      end
     end
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool, *,
@@ -307,6 +358,49 @@ module Gori::Tui
         break if idx >= @issues.size
         draw_row(screen, rect, @issues[idx], top + i, idx == @selected, focused)
       end
+    end
+
+    # Bottom summary of the selected issue (settings:layout prism_preview).
+    private def render_preview_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.empty? || rect.h < 2
+      border = Frame.pane_border(focused)
+      Frame.inner_divider(screen, rect, rect.y, border: border)
+      issue = @issues[@selected]?
+      unless issue
+        screen.text(rect.x + 1, rect.y + 1, "preview — select an issue", Theme.muted,
+          width: {rect.w - 2, 0}.max)
+        return
+      end
+      active = focused && @preview_focus == :preview
+      body = Rect.new(rect.x, rect.y + 1, rect.w, {rect.h - 1, 0}.max)
+      return if body.h < 1
+      screen.fill(body, Theme.selection_dim) if active
+      bg = active ? Theme.selection_dim : Theme.bg
+      lines = preview_lines(issue)
+      sc = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
+      w = {body.w - 2, 0}.max
+      (0...body.h).each do |i|
+        li = sc + i
+        break if li >= lines.size
+        fg, text = lines[li]
+        screen.text(body.x + 1, body.y + i, text, fg, bg, width: w)
+      end
+    end
+
+    private def preview_lines(issue : Store::PrismIssue) : Array({Color, String})
+      lines = [] of {Color, String}
+      lines << {Theme.text_bright, "#{severity_badge(issue.severity)}  #{issue.title}"}
+      lines << {Theme.muted, "#{issue.host}  ·  #{issue.category}  ·  #{issue.status.label}  ·  ×#{Fmt.count(issue.hit_count)}"}
+      if ev = issue.evidence
+        lines << {Theme.muted, "detail  #{ev}"}
+      end
+      rem = Prism.remediation(issue.code)
+      lines << {Theme.muted, rem} unless rem.empty?
+      lines << {Theme.accent, "AFFECTED (#{issue.affected.size})"}
+      issue.affected.first(8).each { |u| lines << {Theme.text, u} }
+      more = issue.affected.size - 8
+      lines << {Theme.muted, "… +#{more} more"} if more > 0
+      lines
     end
 
     private def draw_row(screen : Screen, rect : Rect, issue : Store::PrismIssue,

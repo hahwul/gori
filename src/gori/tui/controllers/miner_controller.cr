@@ -103,7 +103,8 @@ module Gori::Tui
       v = current_view
       if v.nil?
         key = ev.key
-        if key.up? || key.lower_k?
+        # Empty placeholder: esc / ↑ pop to the tab bar (mirrors other empty multi-session tabs).
+        if key.escape? || key.up? || key.lower_k?
           @host.request_focus(:menu)
           return true
         end
@@ -144,8 +145,14 @@ module Gori::Tui
       end
     end
 
+    # esc focus ring: detail → results/summary area; else sub-tab strip (when shown)
+    # then tab bar — same body → subtabs → menu ladder as Replay/Fuzzer/Convert.
     private def handle_escape(v : MinerView) : Nil
-      v.focus == :detail ? v.close_detail : @host.request_focus(:menu)
+      if v.focus == :detail
+        v.close_detail
+      else
+        @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
+      end
     end
 
     private def switch_subtab(c : Char?) : Nil

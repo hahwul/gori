@@ -6,6 +6,7 @@ require "./text_area"
 require "./input_mode"
 require "./text_read_state"
 require "./gutter"
+require "../settings"
 require "../store"
 require "../findings_query"
 require "../links"
@@ -39,6 +40,37 @@ module Gori::Tui
       @qcx = 0
       @preedit_q = ""
       @querying = false
+      # settings:layout Findings preview (list page bottom pane)
+      @preview_scroll = 0
+      @preview_focus = :list # :list | :preview
+    end
+
+    def preview_enabled? : Bool
+      Settings.findings_preview
+    end
+
+    getter preview_focus : Symbol
+
+    def set_preview_focus(f : Symbol) : Nil
+      @preview_focus = f if {:list, :preview}.includes?(f)
+    end
+
+    def cycle_preview_focus : Nil
+      return unless preview_enabled?
+      @preview_focus = @preview_focus == :list ? :preview : :list
+    end
+
+    def scroll_preview(delta : Int32) : Nil
+      return unless @preview_focus == :preview
+      @preview_scroll = {@preview_scroll + delta, 0}.max
+    end
+
+    def list_split(rect : Rect) : {Rect, Rect?}
+      return {rect, nil} unless preview_enabled? && rect.h >= 12
+      list_h = (rect.h * 55 // 100).clamp(6, rect.h - 5)
+      list = Rect.new(rect.x, rect.y, rect.w, list_h)
+      prev = Rect.new(rect.x, rect.y + list_h, rect.w, rect.h - list_h)
+      {list, prev}
     end
 
     def reload(store : Store) : Nil
@@ -55,21 +87,32 @@ module Gori::Tui
     end
 
     def move(delta : Int32) : Nil
+      if preview_enabled? && @preview_focus == :preview
+        scroll_preview(delta)
+        return
+      end
       return if @findings.empty?
       @selected = (@selected + delta).clamp(0, @findings.size - 1)
+      @preview_scroll = 0
     end
 
     # Inverts render_list's row layout (filter bar at rect.y, header at +1, divider
     # at +2, rows from top = rect.y + 3 spanning @scroll..): maps a click to a
     # finding index, or nil past the last populated row / outside the list pane.
     def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
-      return nil if mx < rect.x || mx >= rect.right
-      top = rect.y + 3 # filter bar (y) + header (y+1) + divider (y+2)
-      list_h = {rect.bottom - top, 0}.max
+      list_rect, _ = list_split(rect)
+      return nil if mx < list_rect.x || mx >= list_rect.right
+      top = list_rect.y + 3 # filter bar (y) + header (y+1) + divider (y+2)
+      list_h = {list_rect.bottom - top, 0}.max
       i = my - top
       return nil if i < 0 || i >= list_h
       idx = @scroll + i
       idx < @findings.size ? idx : nil
+    end
+
+    def preview_at?(rect : Rect, mx : Int32, my : Int32) : Bool
+      _, prev = list_split(rect)
+      !!prev.try(&.contains?(mx, my))
     end
 
     # Sets the list selection (clamped like #move); render's ensure_visible then
@@ -90,6 +133,8 @@ module Gori::Tui
     def select_index(idx : Int32) : Nil
       return if @findings.empty?
       @selected = idx.clamp(0, @findings.size - 1)
+      @preview_scroll = 0
+      @preview_focus = :list
     end
 
     def selected_index : Int32
@@ -399,7 +444,13 @@ module Gori::Tui
 
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
-      @detail ? render_detail(screen, rect, focused) : render_list(screen, rect, focused)
+      if @detail
+        render_detail(screen, rect, focused)
+      else
+        list_rect, preview_rect = list_split(rect)
+        render_list(screen, list_rect, focused && @preview_focus == :list)
+        render_preview_pane(screen, preview_rect, focused) if preview_rect
+      end
     end
 
     private def render_list(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -448,6 +499,54 @@ module Gori::Tui
         tw = {right - title_x, 0}.max
         screen.text(title_x, y, ellipsize(f.title, tw), title_fg, bg, width: tw)
       end
+    end
+
+    private def render_preview_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
+      return if rect.empty? || rect.h < 2
+      border = Frame.pane_border(focused)
+      Frame.inner_divider(screen, rect, rect.y, border: border)
+      f = @findings[@selected]?
+      unless f
+        screen.text(rect.x + 1, rect.y + 1, "preview — select a finding", Theme.muted,
+          width: {rect.w - 2, 0}.max)
+        return
+      end
+      active = focused && @preview_focus == :preview
+      body = Rect.new(rect.x, rect.y + 1, rect.w, {rect.h - 1, 0}.max)
+      return if body.h < 1
+      screen.fill(body, Theme.selection_dim) if active
+      bg = active ? Theme.selection_dim : Theme.bg
+      lines = findings_preview_lines(f)
+      sc = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
+      w = {body.w - 2, 0}.max
+      (0...body.h).each do |i|
+        li = sc + i
+        break if li >= lines.size
+        fg, text = lines[li]
+        screen.text(body.x + 1, body.y + i, text, fg, bg, width: w)
+      end
+    end
+
+    private def findings_preview_lines(f : Store::Finding) : Array({Color, String})
+      lines = [] of {Color, String}
+      lines << {Theme.text_bright, "#{severity_badge(f.severity)}  #{f.title}"}
+      host = f.host.try(&.presence) || "—"
+      lines << {Theme.muted, "#{host}  ·  #{f.status.label}  ·  ##{f.id}"}
+      if fid = f.flow_id
+        lines << {Theme.muted, "evidence  flow ##{fid}"}
+      else
+        lines << {Theme.muted, "evidence  (none — standalone finding)"}
+      end
+      notes = f.notes.strip
+      if notes.empty?
+        lines << {Theme.muted, "notes  (empty)"}
+      else
+        lines << {Theme.accent, "NOTES"}
+        notes.split('\n').first(12).each { |ln| lines << {Theme.text, ln} }
+        more = notes.split('\n').size - 12
+        lines << {Theme.muted, "… +#{more} more lines"} if more > 0
+      end
+      lines
     end
 
     # The `/` filter bar on the list's top row: while editing, `filter › <input>`;
@@ -535,41 +634,37 @@ module Gori::Tui
           screen.text(row_x, list_y + i, res.line, fg, width: w - (row_x - rect.x - 1))
         end
       end
-      y = list_y + list_h
-      Frame.inner_divider(screen, rect, y, border: Frame.pane_border(focused))
-      screen.text(rect.x + 1, y + 1, "NOTES", Theme.accent, attr: Attribute::Bold)
-      if focused && notes_focused?
-        render_notes_mode_badge(screen, rect.right - 1, y + 1, rect.x + 7, notes_insert_mode?)
-      end
-      if !notes_insert_mode? && (!focused || !notes_focused?)
-        edit_hint = "i/↵ edit"
-        screen.text(rect.right - edit_hint.size - 1, y + 1, edit_hint, Theme.muted)
-      end
-      notes_rect = notes_body_rect(rect)
+      # NOTES — a real Frame.card (like Convert INPUT) so INS/READ borders are rounded
+      # and the editor body is inset, never colliding with the outline.
+      card = notes_card_rect(rect)
+      return if card.h < 2
+      notes_active = focused && notes_focused?
       ins = focused && notes_insert_mode?
-      draw_ins_border(screen, notes_rect) if ins
-      @notes.render(screen, notes_rect, cursor: ins)
-      paint_notes_read_chrome(screen, notes_rect, focused && !notes_insert_mode? && notes_focused?)
+      Frame.card(screen, card, "NOTES", bg: Theme.bg, border: Frame.pane_border(notes_active || ins))
+      if notes_active || ins
+        render_notes_mode_badge(screen, card.right - 1, card.y, card.x + 7, ins)
+      elsif !notes_insert_mode?
+        edit_hint = " i/↵ "
+        bx = card.right - edit_hint.size - 1
+        screen.text(bx, card.y, edit_hint, Theme.muted, Theme.bg) if bx >= card.x + 7
+      end
+      body = card.inset(1, 1)
+      return if body.empty?
+      @notes.render(screen, body, cursor: ins)
+      paint_notes_read_chrome(screen, body, notes_active && !notes_insert_mode?)
     end
 
-    def notes_body_rect(rect : Rect) : Rect
+    # Outer NOTES card geometry (full width of the detail pane, under RELATED).
+    def notes_card_rect(rect : Rect) : Rect
       y0 = rect.y + 4
       list_y = y0 + 2
-      notes_y = list_y + links_visible_rows + 2 # links + divider + NOTES label
-      Rect.new(rect.x + 1, notes_y, {rect.w - 2, 0}.max, {rect.bottom - notes_y, 0}.max)
+      top = list_y + links_visible_rows # immediately under the last RELATED row
+      Rect.new(rect.x, top, rect.w, {rect.bottom - top, 0}.max)
     end
 
-    private def draw_ins_border(screen : Screen, rect : Rect) : Nil
-      return if rect.w < 2 || rect.h < 2
-      color = Theme.accent
-      (rect.x...rect.right).each do |x|
-        screen.cell(x, rect.y, '─', color, Theme.bg)
-        screen.cell(x, rect.bottom - 1, '─', color, Theme.bg)
-      end
-      (rect.y...rect.bottom).each do |y|
-        screen.cell(rect.x, y, '│', color, Theme.bg)
-        screen.cell(rect.right - 1, y, '│', color, Theme.bg)
-      end
+    # Interior of the NOTES card (where TextArea draws) — matches Frame.card inset.
+    def notes_body_rect(rect : Rect) : Rect
+      notes_card_rect(rect).inset(1, 1)
     end
 
     private def render_notes_mode_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32, insert : Bool) : Nil

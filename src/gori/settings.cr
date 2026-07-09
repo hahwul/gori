@@ -26,8 +26,10 @@ module Gori
     DEFAULT_MOUSE           = true
     DEFAULT_PRETTY_BODIES   = true
     DEFAULT_ENV_PREFIX      = "$"
-    # Layout (settings:layout): History list Req/Res preview off by default; Sitemap fully expanded.
+    # Layout (settings:layout): list previews off by default; Sitemap fully expanded.
     DEFAULT_HISTORY_PREVIEW      = false
+    DEFAULT_PRISM_PREVIEW        = false
+    DEFAULT_FINDINGS_PREVIEW     = false
     DEFAULT_HISTORY_LIST_ORDER   = "newest" # "newest" | "oldest" — list sort direction
     DEFAULT_SITEMAP_EXPAND_DEPTH = -1       # -1 = all
 
@@ -76,9 +78,11 @@ module Gori
     class_property theme : String = DEFAULT_THEME                       # TUI colour theme name (settings:theme); applied by Theme.apply
     class_property mouse : Bool = DEFAULT_MOUSE                         # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
     class_property pretty_bodies_default : Bool = DEFAULT_PRETTY_BODIES # pretty-print JSON/XML/form/… bodies in History detail + Replay response (display only)
-    # Layout prefs (settings:layout). history_preview: list page shows a bottom Req|Res pane.
+    # Layout prefs (settings:layout). *_preview: list page shows a bottom detail pane.
     # history_list_order: "newest" (top) or "oldest" (top). sitemap_expand_depth: -1 = all.
     class_property history_preview : Bool = DEFAULT_HISTORY_PREVIEW
+    class_property prism_preview : Bool = DEFAULT_PRISM_PREVIEW
+    class_property findings_preview : Bool = DEFAULT_FINDINGS_PREVIEW
     class_property history_list_order : String = DEFAULT_HISTORY_LIST_ORDER
     class_property sitemap_expand_depth : Int32 = DEFAULT_SITEMAP_EXPAND_DEPTH
 
@@ -169,6 +173,8 @@ module Gori
     private def self.parse_layout(node : JSON::Any?) : Nil
       return unless o = node.try(&.as_h?)
       self.history_preview = load_bool_h(o, "history_preview", history_preview)
+      self.prism_preview = load_bool_h(o, "prism_preview", prism_preview)
+      self.findings_preview = load_bool_h(o, "findings_preview", findings_preview)
       if ord = o["history_list_order"]?.try(&.as_s?)
         self.history_list_order = normalize_history_list_order(ord)
       end
@@ -411,11 +417,15 @@ module Gori
           j.field "pretty_bodies", pretty_bodies_default
           # Omit layout when every pref is factory default (quiet install; merge-safe section).
           unless history_preview == DEFAULT_HISTORY_PREVIEW &&
+                 prism_preview == DEFAULT_PRISM_PREVIEW &&
+                 findings_preview == DEFAULT_FINDINGS_PREVIEW &&
                  history_list_order == DEFAULT_HISTORY_LIST_ORDER &&
                  sitemap_expand_depth == DEFAULT_SITEMAP_EXPAND_DEPTH
             j.field "layout" do
               j.object do
                 j.field "history_preview", history_preview
+                j.field "prism_preview", prism_preview
+                j.field "findings_preview", findings_preview
                 j.field "history_list_order", history_list_order
                 j.field "sitemap_expand_depth", sitemap_expand_depth
               end

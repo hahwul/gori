@@ -44,6 +44,10 @@ module Gori::Tui
         end
       elsif @findings.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
+      elsif @findings.preview_enabled? && @findings.preview_focus == :preview
+        "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs"
+      elsif @findings.preview_enabled?
+        "↑/↓ move · ↵ open · ↹ preview · / filter · n new · space cmds · esc tabs"
       else
         "↑/↓ move · ↵ open · / filter · n new · space cmds · esc tabs"
       end
@@ -65,11 +69,17 @@ module Gori::Tui
         return true
       end
       @host.focus_body
-      if my == inner.y && !@findings.querying?
+      if @findings.preview_enabled? && @findings.preview_at?(inner, mx, my)
+        @findings.set_preview_focus(:preview)
+        return true
+      end
+      list_rect, _ = @findings.list_split(inner)
+      if my == list_rect.y && !@findings.querying?
         @findings.start_query
         return true
       end
       return true unless idx = @findings.list_row_at(inner, mx, my)
+      @findings.set_preview_focus(:list)
       idx == @findings.selected_index ? findings_open : @findings.select_index(idx)
       true
     end
@@ -81,13 +91,23 @@ module Gori::Tui
         else
           @findings.scroll_links_wheel(step)
         end
-      elsif !@findings.detail_open?
+      else
         @findings.move(step)
       end
       true
     end
 
-    # Finding detail: notes READ/INS routing (claimed before the focus ring).
+    # List preview Tab + finding detail notes READ/INS (claimed before the focus ring).
+    def handle_body_key(ev : Termisu::Event::Key) : Bool
+      return false if @findings.detail_open?
+      return false if ev.ctrl? || ev.alt?
+      if @findings.preview_enabled? && ev.key.tab?
+        @findings.cycle_preview_focus
+        return true
+      end
+      false
+    end
+
     def handle_detail_key(ev : Termisu::Event::Key) : Bool
       return false unless @findings.detail_open?
       key = ev.key
@@ -228,6 +248,10 @@ module Gori::Tui
     end
 
     def findings_move(delta : Int32) : Nil
+      if @findings.preview_enabled? && @findings.preview_focus == :preview
+        @findings.move(delta)
+        return
+      end
       if delta < 0 && @findings.at_top?
         return @host.request_focus(:menu)
       end

@@ -41,6 +41,10 @@ module Gori::Tui
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @prism.mode.off?
         "m enable scanning · / filter · space cmds · esc tabs"
+      elsif @prism.preview_enabled? && @prism.preview_focus == :preview
+        "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs"
+      elsif @prism.preview_enabled?
+        "↑/↓ move · ↵ open · ↹ preview · m mode · / filter · space cmds"
       else
         "o flow · r replay · p promote · c dismiss · d delete · m mode · / filter · space cmds"
       end
@@ -59,35 +63,48 @@ module Gori::Tui
       inner = rect.inset(1, 1)
       return true if @prism.detail_open? # detail pane: clicks are inert (use keys)
       @host.focus_body
-      if my == inner.y + 1 && !@prism.querying? # the filter-bar row (below the MODE band)
+      if @prism.preview_enabled? && @prism.preview_at?(inner, mx, my)
+        @prism.set_preview_focus(:preview)
+        return true
+      end
+      list_rect, _ = @prism.list_split(inner)
+      if my == list_rect.y + 1 && !@prism.querying? # the filter-bar row (below the MODE band)
         @prism.start_query
         return true
       end
       return true unless idx = @prism.list_row_at(inner, mx, my)
+      @prism.set_preview_focus(:list)
       idx == @prism.selected_index ? prism_open : @prism.select_index(idx) # select-first, then open
       true
     end
 
     def handle_wheel(step : Int32) : Bool
-      @prism.detail_open? ? @prism.scroll_detail(step) : @prism.move(step)
+      if @prism.detail_open?
+        @prism.scroll_detail(step)
+      else
+        @prism.move(step)
+      end
       true
     end
 
-    # The issue detail (remediation + affected URLs) is read-only and can be long, so
-    # give it keyboard scroll (↑/↓/j/k) to match every other detail view — otherwise it
-    # was reachable only by the mouse wheel. Everything else (list nav, the o/r/p/c/d
-    # actions, space) defers to the central keymap by returning false. When the detail is
-    # closed we claim nothing, so the list's scoped verbs still run.
+    # Detail scroll + list preview Tab focus. List nav is verb-driven; when detail is
+    # closed we claim Tab (preview) only. When open, ↑/↓ scroll the detail pane.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
-      return false unless @prism.detail_open?
       return false if ev.ctrl? || ev.alt?
       key = ev.key
-      case
-      when key.up?, key.lower_k?   then @prism.scroll_detail(-1)
-      when key.down?, key.lower_j? then @prism.scroll_detail(1)
-      else                              return false
+      if @prism.detail_open?
+        case
+        when key.up?, key.lower_k?   then @prism.scroll_detail(-1)
+        when key.down?, key.lower_j? then @prism.scroll_detail(1)
+        else                              return false
+        end
+        return true
       end
-      true
+      if @prism.preview_enabled? && key.tab?
+        @prism.cycle_preview_focus
+        return true
+      end
+      false
     end
 
     # The `/` filter bar — a text sub-mode the shell claims before the focus ring (mirrors
@@ -169,6 +186,10 @@ module Gori::Tui
     # --- ExecContext delegates (from the Runner) ---
 
     def prism_move(delta : Int32) : Nil
+      if @prism.preview_enabled? && @prism.preview_focus == :preview
+        @prism.move(delta)
+        return
+      end
       return @host.request_focus(:menu) if delta < 0 && @prism.at_top? # ↑ at top pops to the tab bar
       @prism.move(delta)
     end
