@@ -531,6 +531,61 @@ describe "Gori::Prism::Passive (new patterns)" do
     end
   end
 
+  describe "cacheable JSON API responses" do
+    it "flags application/json without Cache-Control (sensitive data may be stored)" do
+      with_store do |store|
+        dets = analyze(store,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+          content_type: "application/json", body: %({"token":"x"}))
+        hit = dets.find(&.code.==("cacheable_json")).not_nil!
+        hit.severity.should eq(Gori::Store::Severity::Medium)
+        hit.title.should contain("missing Cache-Control")
+      end
+    end
+
+    it "flags public / positive max-age / s-maxage without no-store" do
+      with_store do |store|
+        [
+          "Cache-Control: public, max-age=60",
+          "Cache-Control: max-age=3600",
+          "Cache-Control: s-maxage=120, private",
+        ].each do |cc|
+          head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n#{cc}\r\n\r\n"
+          codes_of(analyze(store, resp_head: head, content_type: "application/json",
+            body: "{}")).should contain("cacheable_json")
+        end
+      end
+    end
+
+    it "does not flag when Cache-Control includes no-store" do
+      with_store do |store|
+        head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
+               "Cache-Control: no-store, no-cache, private, max-age=0\r\n\r\n"
+        codes_of(analyze(store, resp_head: head, content_type: "application/json",
+          body: %({"ok":true}))).should_not contain("cacheable_json")
+      end
+    end
+
+    it "does not flag HTML documents or empty JSON bodies" do
+      with_store do |store|
+        html = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+          content_type: "text/html", body: "<html></html>")
+        codes_of(html).should_not contain("cacheable_json")
+        empty = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+          content_type: "application/json", body: nil)
+        codes_of(empty).should_not contain("cacheable_json")
+      end
+    end
+
+    it "covers application/*+json (e.g. problem+json)" do
+      with_store do |store|
+        head = "HTTP/1.1 200 OK\r\nContent-Type: application/problem+json\r\n\r\n"
+        codes_of(analyze(store, resp_head: head, content_type: "application/problem+json",
+          body: %({"title":"err"}))).should contain("cacheable_json")
+      end
+    end
+  end
+
   it "flags SameSite=None cookies missing Secure" do
     with_store do |store|
       insecure = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=x; SameSite=None\r\n\r\n",

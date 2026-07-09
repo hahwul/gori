@@ -44,6 +44,7 @@ module Gori
       "missing_x_frame_options"        => "Set X-Frame-Options: DENY/SAMEORIGIN or a CSP frame-ancestors directive to prevent clickjacking.",
       "missing_x_content_type_options" => "Send X-Content-Type-Options: nosniff to stop MIME-type sniffing.",
       "missing_referrer_policy"        => "Set a Referrer-Policy (e.g. strict-origin-when-cross-origin) to limit referrer leakage.",
+      "cacheable_json"                 => "Send Cache-Control: no-store (and typically no-cache, private) on JSON/API responses so browsers and shared caches do not retain tokens, PII, or account data.",
       "cookie_no_secure"               => "Add the Secure attribute so the cookie is only sent over HTTPS.",
       "cookie_no_httponly"             => "Add HttpOnly so client-side script cannot read the cookie.",
       "cookie_no_samesite"             => "Add SameSite=Lax/Strict to reduce CSRF exposure.",
