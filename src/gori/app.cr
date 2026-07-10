@@ -51,10 +51,13 @@ module Gori
       # first-run wizard auto-launched below, so a no-tty run (CI/detached) gets a clean
       # message instead of a raw backtrace.
       term = Tui.open_terminal("run it directly, not under CI or a detached/background job, or use --headless for non-interactive capture")
-      term.enable_enhanced_keyboard       # Kitty 17u (disambig + report_text) for better IME/Unicode; avoids report_all_keys(31u) which can split Hangul jamo. Committed text via raw UTF-8 bytes (IME composed syllables) + CSI for specials; Preedit via 0-code CSI if terminal provides.
-      term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav; one enable covers both the picker and the runner (same term). Runner reconciles live on settings save; term.close disables on exit.
 
       begin
+        # enable_* run INSIDE the begin so `ensure term.close` restores the tty if either
+        # raises after open_terminal already switched it into raw mode (else the user's shell
+        # is left in raw/no-echo).
+        term.enable_enhanced_keyboard       # Kitty 17u (disambig + report_text) for better IME/Unicode; avoids report_all_keys(31u) which can split Hangul jamo. Committed text via raw UTF-8 bytes (IME composed syllables) + CSI for specials; Preedit via 0-code CSI if terminal provides.
+        term.enable_mouse if Settings.mouse # SGR-1006 click + scroll-wheel nav; one enable covers both the picker and the runner (same term). Runner reconciles live on settings save; term.close disables on exit.
         # First-run onboarding: no settings.json yet → walk the user through bind /
         # theme setup once. Inside `begin` so the `ensure term.close` restores
         # the terminal if it raises. The wizard persists settings.json (even on skip),
