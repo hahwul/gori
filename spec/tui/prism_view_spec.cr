@@ -152,4 +152,64 @@ describe Gori::Tui::PrismView do
       view.target_issue.not_nil!.id.should eq(second.id)
     end
   end
+
+  it "bulk-dismiss-by-code respects the scope lens (mutes only in-scope hosts)" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test") # in scope
+      seed(store, "missing_hsts", "b.test") # out of scope
+      scope = Gori::Scope.load(store)
+      scope.add("include", "host", "a.test")
+      scope.enable
+      view = Gori::Tui::PrismView.new
+      view.set_scope(scope)
+      view.reload(store)
+      view.dismiss_by_code(store).should eq(1) # only the in-scope host counted…
+      store.prism_issues.find! { |i| i.host == "b.test" }.status.open?.should be_true            # …and muted
+      store.prism_issues.find! { |i| i.host == "a.test" }.status.false_positive?.should be_true
+    end
+  end
+
+  it "bulk-dismiss-by-code mutes every host when the scope lens is off" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test")
+      seed(store, "missing_hsts", "b.test")
+      view = Gori::Tui::PrismView.new
+      view.reload(store)
+      view.dismiss_by_code(store).should eq(2)
+      store.prism_issues.select(&.code.== "missing_hsts").all?(&.status.false_positive?).should be_true
+    end
+  end
+
+  it "delete_by_id removes the chosen issue even after the selection has moved" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test")
+      seed(store, "missing_csp", "a.test")
+      view = Gori::Tui::PrismView.new
+      view.reload(store)
+      chosen = view.target_issue.not_nil!
+      view.move(1) # selection now points at the OTHER issue
+      view.target_issue.not_nil!.id.should_not eq(chosen.id)
+      view.delete_by_id(store, chosen.id) # deletes the captured id, not the current selection
+      store.prism_issues.map(&.id).should_not contain(chosen.id)
+      store.prism_issues.size.should eq(1)
+    end
+  end
+
+  it "keeps the MODE chip visible on a narrow band when all severities are present" do
+    view_store do |store|
+      sevs = [Gori::Store::Severity::Info, Gori::Store::Severity::Low, Gori::Store::Severity::Medium,
+              Gori::Store::Severity::High, Gori::Store::Severity::Critical]
+      sevs.each_with_index do |sv, si|
+        20.times do |k|
+          store.upsert_prism_issue(Gori::Prism::Detection.new("c#{si}x#{k}", "headers",
+            "h#{si}-#{k}.test", "https://h/", "t", sv))
+        end
+      end
+      view = Gori::Tui::PrismView.new
+      view.reload(store)
+      b = MemoryBackend.new(30, 20) # narrow: tallies would otherwise overpaint the mode chip
+      view.render(Gori::Tui::Screen.new(b), Gori::Tui::Rect.new(0, 0, 30, 20))
+      b.row(0).should contain("m:PASSIVE") # the mode chip text survives intact
+    end
+  end
 end

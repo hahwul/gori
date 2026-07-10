@@ -303,16 +303,20 @@ module Gori::Tui
       next_status
     end
 
-    # Bulk-mute every OPEN issue sharing the targeted issue's code / host. Returns how many
-    # rows were affected (counted in memory; the store UPDATE is fire-and-forget).
+    # Bulk-mute every OPEN issue sharing the targeted issue's code. Respects the ⇧S scope lens:
+    # dismissing "all with this code" from a scoped view must not silently mute issues on
+    # out-of-scope hosts the user can't see, and the returned count must equal what was muted.
+    # With the lens off this is every open issue carrying the code.
     def dismiss_by_code(store : Store) : Int32
       return 0 unless issue = target_issue
-      n = @all.count { |i| i.code == issue.code && i.status.open? }
-      store.dismiss_prism_by_code(issue.code)
+      targets = @all.select { |i| i.code == issue.code && i.status.open? && lens_admits?(i) }
+      targets.each { |i| store.update_prism_issue_status(i.id, Store::Status::FalsePositive) }
       reload(store)
-      n
+      targets.size
     end
 
+    # Mute every OPEN issue on the targeted issue's host. The host is a single visible row, so
+    # the scope lens (which filters by host) already admits it — no cross-scope leak here.
     def dismiss_by_host(store : Store) : Int32
       return 0 unless issue = target_issue
       n = @all.count { |i| i.host == issue.host && i.status.open? }
@@ -321,13 +325,18 @@ module Gori::Tui
       n
     end
 
-    def delete(store : Store) : Nil
-      if issue = @detail
-        store.delete_prism_issue(issue.id)
-        close_detail
-      elsif issue = @issues[@selected]?
-        store.delete_prism_issue(issue.id)
-      end
+    # A row is admitted by the active scope lens (always true when the lens is off).
+    private def lens_admits?(issue : Store::PrismIssue) : Bool
+      return true unless scope_active?
+      @scope.try(&.host_in_scope?(issue.host)) == true
+    end
+
+    # Delete a SPECIFIC issue by id. The controller captures the id when the confirm opens, so a
+    # background reload that shifts the selection between prompt and confirm can't make the delete
+    # (and its paired suppress) target a different issue than the one the user chose.
+    def delete_by_id(store : Store, id : Int64) : Nil
+      store.delete_prism_issue(id)
+      close_detail if @detail.try(&.id) == id
       reload(store)
     end
 
@@ -346,6 +355,9 @@ module Gori::Tui
         render_detail(screen, rect, focused)
       else
         list_rect, preview_rect = list_split(rect)
+        # No preview pane at this size (or after a resize down) ⇒ snap focus back to the list,
+        # or move()/scroll would route arrows to an invisible pane and freeze list navigation.
+        @preview_focus = :list if preview_rect.nil?
         render_list(screen, list_rect, focused && @preview_focus == :list,
           listen: listen, capturing: capturing)
         render_preview_pane(screen, preview_rect, focused) if preview_rect
@@ -389,7 +401,10 @@ module Gori::Tui
       screen.fill(body, Theme.selection_dim) if active
       bg = active ? Theme.selection_dim : Theme.bg
       lines = preview_lines(issue)
-      sc = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
+      # Write the clamp back (like render_detail) so overscrolling a short preview can't inflate
+      # @preview_scroll and leave later scroll-up presses dead until it drains back into range.
+      @preview_scroll = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
+      sc = @preview_scroll
       w = {body.w - 2, 0}.max
       (0...body.h).each do |i|
         li = sc + i
@@ -478,7 +493,7 @@ module Gori::Tui
     # `a:CLOSED` lens toggle + right-aligned severity tallies.
     private def render_mode_band(screen : Screen, rect : Rect) : Nil
       x = chip(screen, rect.x + 1, rect.y, " m:#{@mode.title} ", mode_color(@mode)) + 1
-      tallies_x = render_tallies(screen, rect) # leftmost x the tallies occupy (or rect.right-1)
+      tallies_x = render_tallies(screen, rect, x + 1) # right-aligned, but never left of the mode chip
       # The CLOSED lens toggle chains left of the tallies; lit when showing closed/dismissed
       # issues, muted (its default open-only) otherwise — so the `a` chord stays in view.
       cx = Frame.toggle_badge(screen, tallies_x, rect.y, x + 1, "a", "CLOSED", @show_closed)
@@ -489,7 +504,7 @@ module Gori::Tui
 
     # Draws the right-aligned severity tallies; returns the leftmost x they occupy (or
     # rect.right-1 when there are none) so the CLOSED lens badge can chain to their left.
-    private def render_tallies(screen : Screen, rect : Rect) : Int32
+    private def render_tallies(screen : Screen, rect : Rect, floor : Int32) : Int32
       labels = {4 => "C", 3 => "H", 2 => "M", 1 => "L", 0 => "I"}
       parts = [] of {String, Color}
       labels.each do |val, lab|
@@ -498,10 +513,15 @@ module Gori::Tui
       end
       return rect.right - 1 if parts.empty?
       total = parts.sum { |(s, _)| s.size + 1 } - 1
-      left = rx = rect.right - 1 - total
+      # Right-align, but never start left of `floor` (the mode chip): on a band too narrow to
+      # hold everything the tallies truncate at the right edge instead of overpainting the mode
+      # indicator. On a normal-width band `left` is unchanged and nothing truncates.
+      left = rx = {rect.right - 1 - total, floor}.max
       parts.each do |(s, color)|
-        rx = screen.text(rx, rect.y, s, color)
-        rx = screen.text(rx, rect.y, " ", Theme.muted)
+        break if rx >= rect.right
+        rx = screen.text(rx, rect.y, s, color, width: {rect.right - rx, 0}.max)
+        break if rx >= rect.right
+        rx = screen.text(rx, rect.y, " ", Theme.muted, width: 1)
       end
       left
     end
