@@ -42,6 +42,12 @@ module Gori
       # An active rule: build a probe for one flow (nil if nothing to test), then turn the
       # probe's response into Detections. The analyzer owns the send between the two calls.
       abstract class Rule
+        # The probe's dedup key WITHOUT building the probe — same value as `plan(detail).dedup_key`
+        # (nil exactly when `plan` returns nil). The analyzer checks this against the seen-set
+        # BEFORE calling `plan`, so a repeat surface (the common case in steady browsing) skips
+        # the expensive canary generation + request rebuild that `plan` does. MUST stay identical
+        # to the key `plan` produces or the seen-set would re-probe / skip (see the equivalence spec).
+        abstract def dedup_key(detail : Store::FlowDetail) : String?
         abstract def plan(detail : Store::FlowDetail) : Plan?
         abstract def detections(plan : Plan, result : Replay::Result, detail : Store::FlowDetail) : Array(Detection)
       end

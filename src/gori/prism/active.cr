@@ -15,6 +15,10 @@ module Gori
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.
+      def self.dedup_key(detail : Store::FlowDetail) : String?
+        PRIMARY.dedup_key(detail)
+      end
+
       def self.plan(detail : Store::FlowDetail) : Plan?
         PRIMARY.plan(detail)
       end

@@ -16,6 +16,31 @@ module Gori
       # parameters whose canary echoes back unencoded (XSS candidates). Gated to safe methods
       # so an automatic probe never mutates server state.
       class ReflectedParam < Rule
+        # The dedup key WITHOUT generating canaries or rebuilding the request — extracts the same
+        # (name, location) set `plan` derives from canary_pairs/canary_json (same skip rules), so
+        # the key is byte-identical to `plan(detail).dedup_key`. Returns nil in exactly the cases
+        # `plan` does (malformed / unsafe method / no params / too many). Verified against `plan`
+        # by the equivalence spec.
+        def dedup_key(detail : Store::FlowDetail) : String?
+          req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
+          return nil if req.malformed?
+          return nil unless SAFE_METHODS.includes?(req.method.upcase)
+          path, query = split_target(Active.origin_form(req.target))
+          names = [] of {String, String} # {name, location}, matching Param.{name, location}
+          each_param_name(query) { |raw| names << {decode_name(raw), "query"} }
+          body = detail.request_body
+          if body && !body.empty?
+            ct = (req.headers.get?("Content-Type") || "").downcase
+            if ct.includes?("x-www-form-urlencoded")
+              each_param_name(String.new(body).scrub) { |raw| names << {decode_name(raw), "form"} }
+            elsif ct.includes?("json")
+              each_json_string_key(body) { |k| names << {k, "json"} }
+            end
+          end
+          return nil if names.empty? || names.size > MAX_PARAMS
+          build_dedup_key(detail, req.method.upcase, path, names)
+        end
+
         # Build a probe from a captured flow, or nil if there is nothing reflectable.
         def plan(detail : Store::FlowDetail) : Plan?
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
@@ -50,12 +75,44 @@ module Gori
 
           return nil if params.empty? || params.size > MAX_PARAMS
           request = rebuild(detail.request_head, body, req.target, path, new_query, new_body)
-          # Key by rule + host:PORT + METHOD + path + (name@location) so the same host on a
-          # different port/service is a distinct surface. Length-prefix each name so a param
-          # name containing '@'/','/':' can't collide with a different multi-param set.
-          sig = params.map { |p| "#{p.name.bytesize}:#{p.name}@#{p.location}" }.sort!.join(",")
-          key = "reflected_param|#{detail.row.host}:#{detail.row.port}|#{req.method.upcase}|#{path}|#{sig}"
+          # Same key builder `dedup_key` uses, fed the built params — so the pre-build dedup key
+          # and this one can't drift.
+          key = build_dedup_key(detail, req.method.upcase, path, params.map { |p| {p.name, p.location} })
           Plan.new(request, params, key)
+        end
+
+        # Key by rule + host:PORT + METHOD + path + (name@location) so the same host on a different
+        # port/service is a distinct surface. Length-prefix each name so a param name containing
+        # '@'/','/':' can't collide with a different multi-param set. Sorted → order-independent.
+        private def build_dedup_key(detail : Store::FlowDetail, method_upcase : String, path : String,
+                                    names : Array({String, String})) : String
+          sig = names.map { |(name, loc)| "#{name.bytesize}:#{name}@#{loc}" }.sort!.join(",")
+          "reflected_param|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path}|#{sig}"
+        end
+
+        # The valid k=v names of an &-joined string — the SAME skip rules canary_pairs applies
+        # (empty pair / no '=' / empty name are skipped), yielding the RAW (pre-decode) name.
+        private def each_param_name(text : String, & : String ->)
+          return if text.empty?
+          text.split('&').each do |pair|
+            next if pair.empty?
+            eq = pair.index('=')
+            next unless eq
+            name = pair[0...eq]
+            next if name.empty?
+            yield name
+          end
+        end
+
+        # The top-level JSON keys with a STRING value — the SAME fields canary_json canaries.
+        private def each_json_string_key(body : Bytes, & : String ->)
+          h = begin
+            JSON.parse(String.new(body).scrub).as_h?
+          rescue JSON::ParseException
+            nil
+          end
+          return unless h
+          h.each { |k, v| yield k if v.as_s? }
         end
 
         # Interpret the probe's response: any reflected-parameter Detection (one grouped row per host).

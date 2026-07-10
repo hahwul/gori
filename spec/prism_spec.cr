@@ -251,6 +251,50 @@ describe Gori::Prism::Active do
     end
   end
 
+  # The analyzer now checks `rule.dedup_key(detail)` BEFORE building the full `plan`, to skip the
+  # canary generation + request rebuild on a repeat surface. This is only correct if the cheap key
+  # is IDENTICAL to `plan(detail).dedup_key` (and nil in exactly the same cases) — otherwise the
+  # seen-set would re-probe or wrongly suppress. Assert that equivalence across a broad corpus.
+  it "dedup_key equals plan.dedup_key across query/form/json/edge-case flows (both rules)" do
+    with_store do |store|
+      form_ct = "Content-Type: application/x-www-form-urlencoded\r\n"
+      json_ct = "Content-Type: application/json\r\n"
+      cors_resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://app.example\r\n\r\n"
+      plain_resp = "HTTP/1.1 200 OK\r\n\r\n"
+      many = (0..50).map { |i| "p#{i}=v" }.join("&") # 51 params → over MAX_PARAMS
+
+      cases = [
+        {target: "/search?q=hello&lang=en", method: "GET", rh: "", rb: nil, resp: plain_resp},
+        {target: "/a?x=1&x=2", method: "GET", rh: "", rb: nil, resp: plain_resp},            # duplicate name
+        {target: "/a?%6eame=v&z=2", method: "GET", rh: "", rb: nil, resp: plain_resp},       # URL-encoded name
+        {target: "/a?flag&y=2&=nope&w=3", method: "GET", rh: "", rb: nil, resp: plain_resp}, # bare flag / empty name
+        {target: "/nothing", method: "GET", rh: "", rb: nil, resp: plain_resp},              # no params → nil
+        {target: "/a?x=1", method: "POST", rh: "", rb: nil, resp: plain_resp},               # unsafe method → nil
+        {target: "/a?x=1", method: "HEAD", rh: "", rb: nil, resp: plain_resp},               # HEAD is safe
+        {target: "/submit", method: "GET", rh: form_ct, rb: "user=alice&pass=x&token=", resp: plain_resp},
+        {target: "/j", method: "GET", rh: json_ct, rb: %({"a":"s","b":2,"c":"t","d":null}), resp: plain_resp}, # str fields a,c
+        {target: "/j", method: "GET", rh: json_ct, rb: %({"a":1,"b":2}), resp: plain_resp},                    # no string field → nil
+        {target: "/j?q=1", method: "GET", rh: json_ct, rb: %({"a":1}), resp: plain_resp},                      # query only (json no str)
+        {target: "/j?q=1", method: "GET", rh: "", rb: %({"a":"s"}), resp: plain_resp},                         # body but non-json/form ct
+        {target: "/many?#{many}", method: "GET", rh: "", rb: nil, resp: plain_resp},                           # > MAX_PARAMS → nil
+        {target: "http://target.com/s?q=hello", method: "GET", rh: "", rb: nil, resp: plain_resp},             # absolute-form
+        {target: "/cors", method: "GET", rh: "", rb: nil, resp: cors_resp},                                    # CORS present
+        {target: "/cors?q=1", method: "GET", rh: "", rb: nil, resp: cors_resp},                                # CORS + query
+        {target: "/nocors", method: "GET", rh: "", rb: nil, resp: plain_resp},                                 # CORS absent → nil
+        {target: "/cors", method: "POST", rh: "", rb: nil, resp: cors_resp},                                   # CORS unsafe method → nil
+      ]
+
+      reflected = Gori::Prism::Active::ReflectedParam.new
+      cors = Gori::Prism::Active::CorsReflection.new
+      cases.each do |c|
+        d = capture_flow(store, c[:resp], scheme: "http", host: "t.example",
+          target: c[:target], method: c[:method], req_headers: c[:rh], req_body: c[:rb], content_type: nil)
+        reflected.dedup_key(d).should eq(reflected.plan(d).try(&.dedup_key)), "reflected_param #{c[:target]} #{c[:method]}"
+        cors.dedup_key(d).should eq(cors.plan(d).try(&.dedup_key)), "cors #{c[:target]} #{c[:method]}"
+      end
+    end
+  end
+
   it "normalizes an absolute-form target to origin-form, preserving a query on a PATHLESS URI" do
     # The authority ends at the first '/', '?' or '#': a pathless absolute-URI carrying a query
     # must keep it (was collapsed to "/", silently dropping the reflectable surface), and a '/'

@@ -294,9 +294,13 @@ module Gori
       end
 
       private def enqueue_probe(rule : Active::Rule, detail : Store::FlowDetail) : Nil
+        # Cheap dedup key FIRST: a repeat surface (the norm in steady browsing) is rejected here
+        # WITHOUT the full plan build (canary generation, JSON re-serialize, request rebuild).
+        key = rule.dedup_key(detail)
+        return unless key
+        return if @active_seen.includes?(key)
         plan = rule.plan(detail)
         return unless plan
-        return if @active_seen.includes?(plan.dedup_key)
         select
         when @active_jobs.send(ActiveTask.new(rule, plan, detail))
           # Record the dedup key ONLY once the task is actually queued, so a target dropped on
