@@ -124,17 +124,6 @@ body::before {
   mask-image: radial-gradient(circle at 52% 18%, black, transparent 62%);
 }
 
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.19;
-  background:
-    radial-gradient(ellipse 70% 50% at 72% 12%, transparent 49%, rgb(var(--accent-rgb) / 0.3) 50%, transparent 51%),
-    radial-gradient(ellipse 54% 38% at 85% 72%, transparent 49.6%, rgb(var(--ink-rgb) / 0.18) 50%, transparent 50.8%);
-}
-
 ::selection {
   background: var(--selection);
 }
@@ -343,10 +332,11 @@ img {
   display: none;
 }
 
+/* The path rings are deliberately absent here: nudging one breaks the weave
+   against its neighbours, so they answer a press with fill, not movement. */
 .search-trigger:active,
 .theme-toggle:active,
-.button:active,
-.path-card:active {
+.button:active {
   transform: translateY(1px) scale(0.99);
 }
 
@@ -366,35 +356,12 @@ kbd {
   line-height: 1;
 }
 
+/* No decorative rings in the background: every circle on this page is a real
+   object (the hero disc, the three path rings, the structure disc, the mark). */
 .home-main {
   position: relative;
   overflow: hidden;
   padding: var(--header-h) 1.25rem 0;
-}
-
-.home-main::before {
-  content: "";
-  position: absolute;
-  top: 5rem;
-  right: -18rem;
-  width: 58rem;
-  height: 58rem;
-  pointer-events: none;
-  border: 1px solid rgb(var(--accent-rgb) / 0.1);
-  border-radius: 48% 52% 46% 54%;
-  opacity: 0.75;
-}
-
-.home-main::after {
-  content: "";
-  position: absolute;
-  top: 19rem;
-  left: -17rem;
-  width: 42rem;
-  height: 42rem;
-  pointer-events: none;
-  border: 1px solid rgb(var(--ink-rgb) / 0.075);
-  border-radius: 45% 55% 62% 38%;
 }
 
 .home-hero,
@@ -508,136 +475,201 @@ kbd {
   background: rgb(var(--accent-rgb) / 0.12);
 }
 
+/* The disc lives in its own element so it can clip the drifting image, while
+   .hero-art stays unclipped and carries the two orbits around it. The width
+   stays under 100% of the column so those orbits never reach the page edge. */
 .hero-art {
   position: relative;
-  isolation: isolate;
-  min-height: 32rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  justify-self: center;
+  /* Under 100% of the column so the orbits below never reach the page edge,
+     which .home-main would clip. */
+  width: min(84%, 36rem);
+  aspect-ratio: 1;
+}
+
+/* Two concentric orbits: the border draws the inner one, the outline the
+   outer. An outline follows border-radius and ignores the element's own
+   overflow, which is why it can sit outside without a third element. */
+.hero-art::before {
+  content: "";
+  position: absolute;
+  inset: -1.7rem;
+  border: 1px solid rgb(var(--accent-rgb) / 0.24);
+  border-radius: 50%;
+  outline: 1px solid rgb(var(--accent-rgb) / 0.1);
+  outline-offset: 1.6rem;
+  pointer-events: none;
+}
+
+.hero-disc {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
+  border-radius: 50%;
   background: #0a0a0b;
   box-shadow: var(--shadow);
 }
 
-.hero-art::before {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  z-index: 1;
-  border-radius: calc(var(--radius) - 1px);
-  border: 1px solid rgb(var(--accent-rgb) / 0.14);
-  pointer-events: none;
-}
-
-.hero-art::after {
+.hero-disc::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 2;
   pointer-events: none;
-  background: linear-gradient(90deg, rgb(var(--scrim-rgb) / 0.18), transparent 36%, rgb(var(--accent-rgb) / 0.1));
+  border: 1px solid rgb(var(--accent-rgb) / 0.26);
+  border-radius: 50%;
+  background: linear-gradient(115deg, rgb(var(--scrim-rgb) / 0.2), transparent 40%, rgb(var(--accent-rgb) / 0.1));
 }
 
-.hero-art img {
+.hero-disc img {
+  display: block;
   width: 100%;
   height: 100%;
-  min-height: 32rem;
   object-fit: cover;
 }
 
+/* --- Paths: three links woven into a chain ----------------------------- */
+
 .home-paths {
-  display: grid;
-  grid-template-columns: 1.25fr 0.86fr;
-  gap: 1rem;
-  padding: 2rem 0 5.5rem;
+  display: flex;
+  justify-content: center;
+  padding: 1rem 0 6rem;
 }
 
-.path-card {
+/* --lead/--link/--lap size the whole chain; the breakpoints only resize
+   those three. --cut is the width of the background band each ring carries
+   to erase the stroke running beneath it. */
+.path-chain {
+  --lead: clamp(19rem, 27vw, 25rem);
+  --link: clamp(15.5rem, 22vw, 20rem);
+  --lap: clamp(2.8rem, 4.2vw, 4rem);
+  --cut: 5px;
   position: relative;
-  min-height: 13rem;
+  width: calc(var(--lead) + 2 * var(--link) - 2 * var(--lap));
+  height: var(--lead);
+}
+
+/* z-index stays auto on the rings themselves: no stacking context, so the
+   woven ::after halves below can rise above .path-ring-mid. */
+.path-ring {
+  position: absolute;
+  top: calc((var(--lead) - var(--link)) / 2);
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  overflow: hidden;
-  padding: 1.25rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background:
-    radial-gradient(circle at 92% 14%, rgb(var(--accent-rgb) / 0.14), transparent 18rem),
-    var(--bg-panel);
-  color: var(--text);
-  text-decoration: none;
-  box-shadow: var(--shadow-soft);
-  transition: transform var(--transition), border-color var(--transition), background var(--transition);
-}
-
-.path-card::before {
-  content: "";
-  position: absolute;
-  inset: auto -3rem -6rem auto;
-  width: 19rem;
-  height: 15rem;
-  border: 1px solid rgb(var(--accent-rgb) / 0.16);
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: var(--link);
+  height: var(--link);
+  /* Reserve --lap on both sides: that is exactly how far the neighbouring
+     ring reaches into this one, and a label must not sit on its stroke.
+     Not a percentage either, since padding percentages would resolve
+     against .path-chain rather than against the ring. */
+  padding: 0 calc(var(--lap) + 0.8rem);
+  border: 1.5px solid;
+  /* Opaque, so the half redrawn in ::after does not composite over itself
+     and read brighter than the half that is not. */
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--bg));
   border-radius: 50%;
-  transform: rotate(-22deg);
+  color: var(--text);
+  text-align: center;
+  text-decoration: none;
+  text-wrap: balance;
+  transition: border-color var(--transition), background var(--transition);
 }
 
-.path-card:hover {
-  transform: translateY(-3px);
-  border-color: var(--accent);
+.path-ring:focus-visible {
+  outline-offset: 8px;
 }
 
-.path-card-large {
-  min-height: 27rem;
-  grid-row: span 2;
-  background:
-    linear-gradient(120deg, rgb(var(--accent-rgb) / 0.16), transparent 45%),
-    url("../images/docs-structure-linework.png") center / cover,
-    #0a0a0b;
+.path-ring:hover,
+.path-ring:active {
+  border-color: var(--accent-strong);
+  background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.09), transparent 72%);
 }
 
-.path-card-large::after {
+.path-ring:active {
+  background: radial-gradient(circle, rgb(var(--accent-rgb) / 0.17), transparent 70%);
+}
+
+.path-ring:hover h2 {
+  color: var(--accent-strong);
+}
+
+/* The first link is the wide one, and the only one drawn at full strength.
+   Size and stroke carry the hierarchy; the weave carries the metaphor. */
+.path-ring-lead {
+  top: 0;
+  left: 0;
+  width: var(--lead);
+  height: var(--lead);
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--bg));
+}
+
+/* The middle ring rides above both neighbours and cuts them; each neighbour
+   then redraws one half of itself higher still and cuts the middle ring
+   back. So every pair crosses over on one side and under on the other,
+   which is what makes the three read as woven rather than stacked. */
+.path-ring-mid {
+  z-index: 1;
+  left: calc(var(--lead) - var(--lap));
+  box-shadow:
+    0 0 0 var(--cut) var(--bg),
+    inset 0 0 0 var(--cut) var(--bg);
+}
+
+.path-ring-tail {
+  left: calc(var(--lead) + var(--link) - 2 * var(--lap));
+}
+
+.path-ring-lead::after,
+.path-ring-tail::after {
   content: "";
   position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, transparent 0%, rgb(var(--scrim-rgb) / 0.5) 52%, rgb(var(--scrim-rgb) / 0.94) 100%);
+  z-index: 2;
+  inset: -1px;
+  border: inherit;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 var(--cut) var(--bg),
+    inset 0 0 0 var(--cut) var(--bg);
 }
 
-.path-card-large span,
-.path-card-large h2,
-.path-card-large p {
-  color: #f4f2ee;
+.path-ring-lead::after {
+  clip-path: inset(0 0 50% 0);
 }
 
-.path-card-large span {
-  color: #e2c583;
+.path-ring-tail::after {
+  clip-path: inset(50% 0 0 0);
 }
 
-.path-card > * {
-  position: relative;
-  z-index: 1;
-}
-
-.path-card span,
+.path-ring span,
 .flow-list span,
 .structure-grid strong {
   color: var(--accent-strong);
   font-weight: 760;
 }
 
-.path-card h2 {
-  max-width: 12em;
-  margin-top: 0.45rem;
+.path-ring h2 {
   color: var(--heading);
-  font-size: 1.55rem;
-  line-height: 1.2;
+  font-size: 1.2rem;
+  line-height: 1.24;
   letter-spacing: -0.01em;
+  transition: color var(--transition);
 }
 
-.path-card p {
-  max-width: 28rem;
-  margin-top: 0.6rem;
+.path-ring p {
   color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.path-ring-lead h2 {
+  font-size: 1.5rem;
+}
+
+.path-ring-lead p {
+  font-size: 0.95rem;
 }
 
 .home-structure {
@@ -649,16 +681,31 @@ kbd {
 }
 
 .structure-art {
+  position: relative;
+  justify-self: center;
+  width: min(92%, 30rem);
+  aspect-ratio: 1;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 50%;
   background: #0a0a0b;
   box-shadow: var(--shadow-soft);
+  outline: 1px solid rgb(var(--accent-rgb) / 0.2);
+  outline-offset: 1.5rem;
+}
+
+.structure-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 1px solid rgb(var(--accent-rgb) / 0.28);
+  border-radius: 50%;
 }
 
 .structure-art img {
+  display: block;
   width: 100%;
-  aspect-ratio: 1;
+  height: 100%;
   object-fit: cover;
 }
 
@@ -684,33 +731,24 @@ kbd {
   font-size: 1.02rem;
 }
 
+/* No boxes: a hairline and the space around it separate these three. */
 .structure-grid {
   display: grid;
-  grid-template-columns: 1.05fr 0.95fr;
-  gap: 0.8rem;
-  margin-top: 1.6rem;
+  grid-template-columns: 1.15fr 0.95fr 0.9fr;
+  gap: 1.5rem;
+  margin-top: 2rem;
 }
 
 .structure-grid div {
-  min-height: 8.5rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: rgb(var(--ink-rgb) / 0.045);
-}
-
-.structure-grid div:first-child {
-  grid-column: span 2;
-  background:
-    radial-gradient(circle at 88% 18%, rgb(var(--accent-rgb) / 0.12), transparent 16rem),
-    rgb(var(--ink-rgb) / 0.055);
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line-strong);
 }
 
 .structure-grid span {
   display: block;
-  margin-top: 0.48rem;
+  margin-top: 0.4rem;
   color: var(--muted);
-  font-size: 0.94rem;
+  font-size: 0.92rem;
 }
 
 .home-flow {
@@ -1593,23 +1631,24 @@ nav.pagination a:hover,
 
 @media (prefers-reduced-motion: no-preference) {
   .reveal,
-  .path-card,
+  .path-chain,
   .structure-art,
   .structure-copy,
   .flow-list div {
     animation: rise-in 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
-  .hero-art {
-    animation-delay: 120ms;
-  }
-
-  .path-card:nth-child(2),
+  /* The chain rises as one piece: staggering the rings would pull the weave
+     apart mid-animation. */
+  .path-chain,
   .structure-copy {
     animation-delay: 90ms;
   }
 
-  .path-card:nth-child(3),
+  .hero-art {
+    animation-delay: 120ms;
+  }
+
   .flow-list div:nth-child(2) {
     animation-delay: 160ms;
   }
@@ -1618,7 +1657,7 @@ nav.pagination a:hover,
     animation-delay: 230ms;
   }
 
-  .hero-art img {
+  .hero-disc img {
     animation: quiet-drift 16s cubic-bezier(0.16, 1, 0.3, 1) infinite alternate;
     transform-origin: 74% 45%;
   }
@@ -1653,9 +1692,8 @@ nav.pagination a:hover,
     font-size: 4.15rem;
   }
 
-  .hero-art,
-  .hero-art img {
-    min-height: 26rem;
+  .hero-art {
+    width: min(88%, 30rem);
   }
 
   .home-structure {
@@ -1696,27 +1734,66 @@ nav.pagination a:hover,
     font-size: 3rem;
   }
 
-  .hero-art,
-  .hero-art img {
-    min-height: 21rem;
+  .hero-art {
+    width: min(84%, 24rem);
+  }
+
+  .hero-art::before {
+    inset: -1.1rem;
+    outline-offset: 1rem;
+  }
+
+  .structure-art {
+    width: min(88%, 26rem);
+    outline-offset: 1.1rem;
   }
 
   .home-paths {
-    grid-template-columns: 1fr;
     padding-bottom: 4rem;
   }
 
-  .path-card-large {
-    min-height: 21rem;
-    grid-row: auto;
+  /* Narrow enough that the chain hangs vertically instead. The weave cuts
+     move from top/bottom halves to left/right halves to follow it. */
+  .path-chain {
+    --lead: min(84vw, 22rem);
+    --link: min(76vw, 19rem);
+    --lap: 2.6rem;
+    width: var(--lead);
+    height: calc(var(--lead) + 2 * var(--link) - 2 * var(--lap));
+  }
+
+  /* Stacked, the neighbours reach in from above and below, so the sides are
+     free again and --lap no longer belongs in the horizontal padding. */
+  .path-ring {
+    top: auto;
+    left: calc((var(--lead) - var(--link)) / 2);
+    padding: 0 calc(var(--link) * 0.14);
+  }
+
+  .path-ring-lead {
+    top: 0;
+    left: 0;
+    padding: 0 calc(var(--lead) * 0.15);
+  }
+
+  .path-ring-mid {
+    top: calc(var(--lead) - var(--lap));
+  }
+
+  .path-ring-tail {
+    top: calc(var(--lead) + var(--link) - 2 * var(--lap));
+  }
+
+  .path-ring-lead::after {
+    clip-path: inset(0 50% 0 0);
+  }
+
+  .path-ring-tail::after {
+    clip-path: inset(0 0 0 50%);
   }
 
   .structure-grid {
     grid-template-columns: 1fr;
-  }
-
-  .structure-grid div:first-child {
-    grid-column: auto;
   }
 
   .flow-list div {
