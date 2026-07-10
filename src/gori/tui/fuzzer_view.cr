@@ -557,12 +557,15 @@ module Gori::Tui
       @results << r
       if @results.size > RESULT_CAP
         @results.shift
-        # A front eviction shifts every remaining row's position down by one; pin the
-        # selection and scroll to the same logical rows (default index view) so an open
-        # detail doesn't silently swap to a different result under the user. Filtered /
-        # sorted views re-clamp @sel at render, so this never over-shoots.
-        @sel -= 1 if @sel > 0
-        @scroll -= 1 if @scroll > 0
+        # Only the raw index view (no filter, no re-sort) shifts 1:1 with @results, so only
+        # there does pinning selection/scroll by -1 keep the same logical rows. In a
+        # matched-only or re-sorted view the evicted (usually unmatched) front row isn't at
+        # this position — @sel should stay put (the render clamp bounds it); a blind -1 there
+        # would retarget the open detail to a different result.
+        if @sort == :index && !@matched_only
+          @sel -= 1 if @sel > 0
+          @scroll -= 1 if @scroll > 0
+        end
       end
       @results_rev += 1 # grow AND ring-evict both bump (size is pinned once full)
     end

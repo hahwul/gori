@@ -431,6 +431,9 @@ module Gori::Tui
       return false if @detail.nil?
       if idx = @rows.index { |r| r.id == id }
         @selected = idx
+        # A deep-linked OLDER flow must survive a live reload — otherwise follow mode snaps
+        # @selected back to the tail on the next data_version tick, losing the anchor.
+        @follow = false if idx != follow_index
       end
       # WebSocket flows (101) carry a captured message log; h2 flows link to their
       # connection's raw frame log. Both are loaded as a bounded most-recent window

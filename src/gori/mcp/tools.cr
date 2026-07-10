@@ -204,7 +204,7 @@ module Gori
               "When `flow_id` is set, url/method/headers/body/raw are ignored. " \
               "Host + Content-Length are auto-added when omitted on the url path." do |s|
               s.field "flow_id", intprop("replay a captured flow by id (no url needed; like TUI replay)")
-              s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x"), required: true
+              s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id is given)")
               s.field "method", strprop("HTTP method (default GET)")
               s.field "headers", objprop("header name->value map")
               s.field "body", strprop("request body, sent as-is")
@@ -998,7 +998,9 @@ module Gori
 
       private def create_replay(h) : Result
         finding_id = int(h, "finding_id")
+        return Result.new(id_error(h, "finding_id"), is_error: true) if finding_id.nil? && present?(h, "finding_id")
         flow_id = int(h, "flow_id")
+        return Result.new(id_error(h, "flow_id"), is_error: true) if flow_id.nil? && present?(h, "flow_id")
 
         if finding_id
           finding = @store.get_finding(finding_id)
@@ -1054,6 +1056,7 @@ module Gori
 
         position = int(h, "position")
         if position.nil?
+          return Result.new(id_error(h, "position"), is_error: true) if present?(h, "position") # present but non-integer
           position = @store.replays_meta.size.to_i64
         elsif position < Int32::MIN || position > Int32::MAX
           return Result.new("'position' out of range", is_error: true)
@@ -1753,7 +1756,17 @@ module Gori
       end
 
       private def bool(h, key : String) : Bool?
-        h[key]?.try(&.as_bool?)
+        v = h[key]?
+        return nil unless v
+        return v.as_bool? unless v.as_bool?.nil?
+        # Clients/LLMs often serialize tool args as strings (the schema's "boolean" is
+        # advisory, not enforced) — accept "true"/"false" so a stringified flag isn't
+        # silently coerced to false, mirroring int()'s leniency.
+        case v.as_s?.try(&.downcase)
+        when "true"  then true
+        when "false" then false
+        else              nil
+        end
       end
 
       private def clamp(n : Int64?, default : Int32, max : Int32) : Int32

@@ -587,7 +587,11 @@ module Gori::Tui
       # arms and hints in the status bar; any other key disarms. (Q no longer quits;
       # `q` still returns to the project picker.) Handled before everything else so
       # it works uniformly across tabs, editors and overlays.
-      if ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)
+      # In hotkey CAPTURE mode ^C/^D are capturable chords (reserved.cr rejects them inline
+      # with "Ctrl-C/D quits gori" while staying in capture) — exclude them from the global
+      # quit-arm so a stray ^D during a rebind can't silently arm an app quit.
+      capturing_hotkey = @overlay == :hotkeys && @hotkeys_overlay.capturing?
+      if (ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)) && !capturing_hotkey
         if @quit_armed
           quit!
         else
@@ -789,6 +793,15 @@ module Gori::Tui
     # Right-click: rename a Replay/Fuzzer/Convert/Miner sub-tab chip (the one context menu we have).
     # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
+      if @goto_open || @search_open || @rename_open || @import_open
+        # A right-click dismisses an open bottom prompt (like left-click/esc), so it can't
+        # stack a second orthogonal prompt on top of the first.
+        close_goto if @goto_open
+        close_search if @search_open
+        close_rename if @rename_open
+        close_import if @import_open
+        return
+      end
       return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !@rename_open && subtabs_shown?
       sub_rect = BodyChrome.strip_rect(layout.body, strip: true)
       return unless sub_rect && sub_rect.contains?(mx, my)
@@ -2848,6 +2861,7 @@ module Gori::Tui
     # view_focus_first (which would reload/reset). For ^R/^N-style "open this and land
     # in it" jumps that manage their own view state.
     def goto_tab(tab : Symbol) : Nil
+      flush_active_tab_edits # cross-tab "open this and land in it" jumps must persist the outgoing edit too
       @active_tab = tab
       @focus = :body
     end
@@ -3190,15 +3204,21 @@ module Gori::Tui
     # Switch the active tab. `focus` is where focus lands: :menu for a tab "select"
     # gesture (tab-bar click, number-key jump) which lands on the bar without descending
     # into the body, :body for the named "Go to …" palette jumps which drill into content.
-    def focus_tab(tab : Symbol, focus : Symbol = :body) : Nil
-      if @active_tab == :project
-        project_controller.commit
-      end
-      replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
+    # Flush the OUTGOING tab's in-progress edit to the store before switching away, so a
+    # tab jump/cycle/select never leaves a dirty buffer unpersisted (invisible to peers /
+    # lost on an abnormal exit). Every dirty-holding tab is dirty-guarded in its own commit.
+    private def flush_active_tab_edits : Nil
+      project_controller.commit if @active_tab == :project
+      replay_controller.save_current_replay if @active_tab == :replay
       fuzzer_controller.save_current if @active_tab == :fuzzer
       miner_controller.save_current if @active_tab == :miner
-      convert_controller.commit if @active_tab == :convert # flush sub-tab edits/renames (dirty-guarded)
-      notes_controller.save_notes if @active_tab == :notes # flush unsaved note edits (dirty-guarded)
+      convert_controller.commit if @active_tab == :convert
+      notes_controller.save_notes if @active_tab == :notes
+      findings_controller.commit if @active_tab == :findings
+    end
+
+    def focus_tab(tab : Symbol, focus : Symbol = :body) : Nil
+      flush_active_tab_edits
       @active_tab = tab
       @focus = focus
       @overlay = :none
@@ -3224,14 +3244,7 @@ module Gori::Tui
     end
 
     def cycle_tab(delta : Int32) : Nil
-      if @active_tab == :project
-        project_controller.commit
-      end
-      replay_controller.save_current_replay if @active_tab == :replay # persist the outgoing replay tab
-      fuzzer_controller.save_current if @active_tab == :fuzzer
-      miner_controller.save_current if @active_tab == :miner
-      convert_controller.commit if @active_tab == :convert # flush sub-tab edits/renames (dirty-guarded)
-      notes_controller.save_notes if @active_tab == :notes # flush unsaved note edits (dirty-guarded)
+      flush_active_tab_edits
       # Cycle within the VISIBLE strip (skips hidden tabs); effective_tabs force-includes
       # the active tab so the index is always found and never falls back to 0.
       tabs = effective_tabs

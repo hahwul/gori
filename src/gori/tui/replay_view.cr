@@ -624,6 +624,10 @@ module Gori::Tui
         end
       when :graphql
         if op = Graphql.from_flow(tgt, head, body)
+          # Recompute the re-encode target too (mirrors SAML): an envelope edit that moves the
+          # op from ?query=… (GET) to a JSON body (POST) must retarget the splice, else commit
+          # rewrites the wrong side and the origin reads the old, unedited query.
+          @graphql_location = Graphql.location(body)
           text = Graphql.display(op)
           @decoded.set_text(text) if text != @decoded.text
         end
@@ -1170,17 +1174,20 @@ module Gori::Tui
       synced_lines = synced_head.split("\r\n")
       cl_idx = synced_lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
       return unless cl_idx
+      new_line = synced_lines[cl_idx]
 
       env_sep = @editor.text.index("\n\n")
       return unless env_sep
 
       head_lines = @editor.text[0, env_sep].split('\n')
-      return unless cl_idx < head_lines.size
+      # Locate the Content-Length line in the RAW editor head by CONTENT, not by transplanting
+      # the expanded-space index — a multi-line $KEY expansion earlier can shift the line count,
+      # so cl_idx would otherwise point at (and overwrite) an unrelated raw header line.
+      raw_cl_idx = head_lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
+      return unless raw_cl_idx
+      return if head_lines[raw_cl_idx] == new_line
 
-      new_line = synced_lines[cl_idx]
-      return if head_lines[cl_idx] == new_line
-
-      @editor.replace_line(cl_idx, new_line)
+      @editor.replace_line(raw_cl_idx, new_line)
     end
 
     # {scheme, host, port} parsed from the target field.

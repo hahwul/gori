@@ -155,6 +155,13 @@ describe Gori::Proxy::Codec::Body do
       resp = Http1.parse_response_head("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n".to_slice)
       Body.response_framing(resp, "GET").should eq({BodyFraming::CloseDelimited, 0_i64})
     end
+
+    it "frames a response with a non-chunked TE AND a Content-Length as close-delimited, NOT by CL" do
+      # RFC 7230 §3.3.3 rule 3: TE outranks CL. Framing by CL would read only CL bytes and
+      # leave the rest on the wire to misframe the next response on a reused upstream (desync).
+      resp = Http1.parse_response_head("HTTP/1.1 200 OK\r\nTransfer-Encoding: identity\r\nContent-Length: 3\r\n\r\n".to_slice)
+      Body.response_framing(resp, "GET").should eq({BodyFraming::CloseDelimited, 0_i64})
+    end
   end
 
   describe ".stream" do

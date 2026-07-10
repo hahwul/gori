@@ -87,6 +87,12 @@ module Gori::Tui
         return true
       end
       @host.focus_body
+      # A click that selects a row / opens detail also exits QL edit mode (applying the query,
+      # like Enter) — otherwise @querying stays set and later keys are hijacked into the filter bar.
+      if @history.querying?
+        flush_query_reload
+        @history.stop_query
+      end
       # Preview pane click focuses that side (settings:layout).
       if pane = @history.preview_pane_at(inner, mx, my)
         @history.set_preview_focus(pane)

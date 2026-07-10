@@ -174,7 +174,6 @@ module Gori
       # (which would leak the flock + writer fiber + fibers) or, via a caller's `ensure`,
       # replace the real exception being unwound.
       (CaptureStatus.clear(@project.dir) if capturing_lock_held?) rescue nil
-      @capture_lock.try(&.close) # release the flock so a later open of this project can capture
       # Stop Prism FIRST so its active workers wind down and its passive fiber stops issuing
       # get_flow against a live DB; this also closes the prism_events channel it consumes.
       @prism.stop
@@ -187,6 +186,10 @@ module Gori
       # channel as defense-in-depth — incl. the now-closed prism_events.)
       @store.close
       @flow_events.close
+      # Release the capture flock LAST — only after this session's store + prism have torn
+      # down — so a second instance racing to reopen the same project can't become
+      # concurrently live (its own analyzer/store touching shared state) while ours winds down.
+      @capture_lock.try(&.close)
       @project.cleanup
     end
   end

@@ -707,6 +707,13 @@ module Gori::Tui
     end
 
     private def start_run(v : FuzzerView, engine : Fuzz::Engine, total : Int64?) : Nil
+      # A peer may have closed this session (reconcile evicted the tab) while its RUN FUZZ
+      # confirm dialog was pending — don't launch an unstoppable engine fiber + orphaned job
+      # into a detached view whose events drain_events would then drop forever.
+      unless @fuzzers.any?(&.view.same?(v))
+        @host.status("fuzz session no longer open — run cancelled")
+        return
+      end
       save_current
       v.begin_run(total)
       v.job_id = @host.jobs.start(:fuzz, v.summary, goto: goto_for(v))

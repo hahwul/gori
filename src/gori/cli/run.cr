@@ -713,17 +713,23 @@ module Gori
         end
 
         new_headers = [] of Proxy::Codec::Header
+        applied = Set(String).new # custom names whose FIRST occurrence was already replaced
         raw_req.headers.each do |hdr|
           lower_name = hdr.name.downcase
           if custom_headers.has_key?(lower_name)
+            # Replace the first matching line; DROP later duplicates (a captured h2 request
+            # can carry several `cookie:`/`set-cookie:` lines) so the override isn't left
+            # half-applied with a stale second occurrence.
+            next if applied.includes?(lower_name)
             new_headers << Proxy::Codec::Header.new(hdr.name, custom_headers[lower_name])
-            custom_headers.delete(lower_name)
+            applied << lower_name
           else
             new_headers << hdr
           end
         end
 
         custom_headers.each do |lower_name, val|
+          next if applied.includes?(lower_name) # already replaced an existing line
           orig_name = ""
           headers.each do |h_str|
             name, _, _ = h_str.partition(':')
@@ -761,7 +767,10 @@ module Gori
           end
         end
 
-        if override = target_override
+        # Sync Host from --target, UNLESS the user set an explicit `-H "Host: …"` — a
+        # host-header-confusion / vhost test deliberately pairs --target (where to connect)
+        # with a different claimed Host, so that override must win.
+        if (override = target_override) && !custom_headers.has_key?("host")
           scheme_part, host_part, port_part = Replay::FlowRequest.parse_target(override)
           default_port = scheme_part == "https" ? 443 : 80
           host_hdr_val = port_part == default_port ? host_part : "#{host_part}:#{port_part}"
@@ -812,7 +821,7 @@ module Gori
         if format == :json
           puts replay_json(result, diff)
         elsif result.ok?
-          STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}"
+          STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{result.incomplete? ? " (incomplete — origin closed before the framed body finished)" : ""}"
           if d = diff
             print_diff(d)
             n = Replay::Diff.change_count(d)
@@ -833,6 +842,7 @@ module Gori
             j.field "status", result.response.try(&.status)
             j.field "duration_us", result.duration_us
             j.field "error", result.error
+            j.field "incomplete", true if result.incomplete? # origin closed before the framed body finished
             j.field "head", scrub(result.head)
             emit_body_json(j, "body", result.head, result.body, false)
             if d = diff
