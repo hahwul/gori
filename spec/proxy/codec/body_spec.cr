@@ -33,6 +33,42 @@ describe Gori::Proxy::Codec::CaptureBuffer do
     cap.truncated?.should be_true
     cap.total.should eq(5000)
   end
+
+  it "captures nothing (no backing store) for a bodyless message" do
+    cap = CaptureBuffer.new(16)
+    cap.total.should eq(0)
+    cap.truncated?.should be_false
+    cap.to_slice.size.should eq(0) # empty, never allocated
+  end
+
+  it "is byte-exact whether or not a length hint presizes the store" do
+    body = Bytes.new(300 * 1024) { |i| (i % 251).to_u8 } # exceeds PRESIZE_CAP so growth still runs
+    hinted = CaptureBuffer.new(Body::CAPTURE_MAX, body.size.to_i64)
+    plain = CaptureBuffer.new(Body::CAPTURE_MAX)
+    hinted.write(body)
+    plain.write(body)
+    hinted.to_slice.should eq(body)
+    plain.to_slice.should eq(plain.to_slice) # stable
+    hinted.to_slice.should eq(plain.to_slice)
+    hinted.truncated?.should be_false
+  end
+
+  it "an over-large length hint does not force an over-large allocation, still correct" do
+    cap = CaptureBuffer.new(Body::CAPTURE_MAX, 8_i64 * 1024 * 1024) # lies: 8 MiB claimed
+    cap.write("tiny".to_slice)
+    String.new(cap.to_slice).should eq("tiny")
+    cap.total.should eq(4)
+  end
+
+  it "keeps an already-returned slice stable across a later write (copy-on-write)" do
+    cap = CaptureBuffer.new(64)
+    cap.write("first".to_slice)
+    published = cap.to_slice
+    String.new(published).should eq("first")
+    cap.write("-more".to_slice)                      # write after the read
+    String.new(published).should eq("first")         # the handed-out slice is untouched
+    String.new(cap.to_slice).should eq("first-more") # the live capture kept growing
+  end
 end
 
 describe "Gori::Proxy::Codec::Body.read_complete" do

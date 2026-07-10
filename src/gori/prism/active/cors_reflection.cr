@@ -21,6 +21,19 @@ module Gori
         # dialed. If the server reflects THIS, it reflects anything.
         PROBE_ORIGIN = "https://gori-cors-probe.example"
 
+        # The dedup key WITHOUT rebuilding the probe request — same gates as `plan` (safe method,
+        # response already did CORS), same key. nil exactly when `plan` returns nil.
+        def dedup_key(detail : Store::FlowDetail) : String?
+          req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
+          return nil if req.malformed?
+          return nil unless SAFE_METHODS.includes?(req.method.upcase)
+          rhead = detail.response_head
+          return nil unless rhead
+          resp = Proxy::Codec::Http1.parse_response_head(rhead)
+          return nil unless resp.headers.get?("Access-Control-Allow-Origin")
+          key_string(detail, req.method.upcase, req.target)
+        end
+
         def plan(detail : Store::FlowDetail) : Plan?
           req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
           return nil if req.malformed?
@@ -31,8 +44,12 @@ module Gori
           resp = Proxy::Codec::Http1.parse_response_head(rhead)
           return nil unless resp.headers.get?("Access-Control-Allow-Origin")
           request = rebuild_with_origin(detail.request_head, detail.request_body, PROBE_ORIGIN)
-          key = "cors_reflection|#{detail.row.host}:#{detail.row.port}|#{req.method.upcase}|#{path_key(req.target)}"
-          Plan.new(request, [] of Param, key)
+          Plan.new(request, [] of Param, key_string(detail, req.method.upcase, req.target))
+        end
+
+        # The single key expression both `plan` and `dedup_key` use, so they can't drift.
+        private def key_string(detail : Store::FlowDetail, method_upcase : String, target : String) : String
+          "cors_reflection|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path_key(target)}"
         end
 
         def detections(plan : Plan, result : Replay::Result, detail : Store::FlowDetail) : Array(Detection)

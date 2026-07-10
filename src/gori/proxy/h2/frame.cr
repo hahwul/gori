@@ -110,10 +110,16 @@ module Gori::Proxy::H2
     # byte (peer closed). Raises Gori::Error on a truncated frame or a length
     # exceeding `max_payload` (malformed / abusive).
     def self.read(io : IO, max_payload : Int32 = MAX_PAYLOAD) : Header?
-      header = Bytes.new(HEADER_SIZE)
-      first = io.read(header)
+      # The 9-byte frame header reads into a STACK buffer — this runs once per h2 frame
+      # (every DATA/HEADERS/WINDOW_UPDATE/PING/SETTINGS, both directions), so a heap
+      # `Bytes.new(9)` per frame was pure GC churn on the shared single thread. The
+      # contiguous `buf` (header + payload, forwarded verbatim as wire_bytes) is still the
+      # one unavoidable allocation; the header's 9 bytes are copied into its front below.
+      header = uninitialized UInt8[HEADER_SIZE]
+      hslice = header.to_slice
+      first = io.read(hslice)
       return nil if first == 0 # clean EOF at a frame boundary
-      read_exact(io, header + first) if first < HEADER_SIZE
+      read_exact(io, hslice + first) if first < HEADER_SIZE
 
       len = (header[0].to_i32 << 16) | (header[1].to_i32 << 8) | header[2].to_i32
       raise Gori::Error.new("h2 frame too large: #{len}") if len > max_payload
@@ -126,7 +132,7 @@ module Gori::Proxy::H2
       # frame verbatim (wire_bytes) without a second alloc + payload memcpy.
       # `payload` is a view into it (read directly into buf[9..]).
       buf = Bytes.new(HEADER_SIZE + len)
-      header.copy_to(buf)
+      hslice.copy_to(buf)
       payload = buf[HEADER_SIZE, len]
       read_exact(io, payload) if len > 0
       Header.new(type, flags, stream_id, payload, buf)

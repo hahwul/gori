@@ -49,6 +49,13 @@ module Gori::Proxy::Codec
       @entries.each { |h| result << h.value if h.name.compare(name, case_insensitive: true) == 0 }
       result
     end
+
+    # Whether any header carries this name (case-insensitive), allocation-free. Lets the
+    # framing hot path skip `get_all` — which always allocates an Array even when the
+    # header is absent — for the common no-Transfer-Encoding / no-Content-Length message.
+    def has?(name : String) : Bool
+      @entries.any? { |h| h.name.compare(name, case_insensitive: true) == 0 }
+    end
   end
 
   # A captured HTTP/1.1 request. `raw_head` is the byte-exact request-line +

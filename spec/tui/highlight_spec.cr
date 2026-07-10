@@ -261,4 +261,169 @@ describe Gori::Tui::Highlight do
       b.row(0).strip.should eq("")
     end
   end
+
+  # The body tokenizers were rewritten from `raw.chars` + `.join` to a byte-scan. These
+  # reference impls are the ORIGINAL char-based tokenizers, kept here to fuzz-verify the byte
+  # version is span-for-span identical (text + colour) across ASCII + multibyte inputs.
+  describe "body tokenizer byte-scan equivalence" do
+    ref_json = ->(raw : String) do
+      spans = [] of Highlight::Span
+      chars = raw.chars
+      n = chars.size
+      i = 0
+      while i < n
+        c = chars[i]
+        if c == '"'
+          start = i
+          i += 1
+          while i < n
+            if chars[i] == '\\'
+              i += 2
+            elsif chars[i] == '"'
+              i += 1
+              break
+            else
+              i += 1
+            end
+          end
+          str = chars[start...i].join
+          k = i
+          while k < n && chars[k].ascii_whitespace?
+            k += 1
+          end
+          key = k < n && chars[k] == ':'
+          spans << Highlight::Span.new(str, key ? Theme.syn_header : Theme.syn_string)
+        elsif c.ascii_number? || (c == '-' && i + 1 < n && chars[i + 1].ascii_number?)
+          start = i
+          i += 1
+          while i < n && (chars[i].ascii_number? || "+-.eE".includes?(chars[i]))
+            i += 1
+          end
+          spans << Highlight::Span.new(chars[start...i].join, Theme.syn_number)
+        elsif c.ascii_letter?
+          start = i
+          i += 1
+          while i < n && chars[i].ascii_letter?
+            i += 1
+          end
+          word = chars[start...i].join
+          spans << Highlight::Span.new(word, %w(true false null).includes?(word) ? Theme.syn_literal : Theme.text)
+        elsif "{}[]:,".includes?(c)
+          spans << Highlight::Span.new(c.to_s, Theme.muted)
+          i += 1
+        else
+          start = i
+          i += 1
+          while i < n
+            d = chars[i]
+            break if d == '"' || d.ascii_letter? || d.ascii_number? || "{}[]:,".includes?(d) ||
+                     (d == '-' && i + 1 < n && chars[i + 1].ascii_number?)
+            i += 1
+          end
+          spans << Highlight::Span.new(chars[start...i].join, Theme.text)
+        end
+      end
+      spans
+    end
+
+    ref_form = ->(raw : String) do
+      spans = [] of Highlight::Span
+      chars = raw.chars
+      n = chars.size
+      i = 0
+      expect_key = true
+      while i < n
+        c = chars[i]
+        if c == '&'
+          spans << Highlight::Span.new("&", Theme.muted)
+          i += 1
+          expect_key = true
+        elsif c == '='
+          spans << Highlight::Span.new("=", Theme.muted)
+          i += 1
+          expect_key = false
+        else
+          start = i
+          while i < n && chars[i] != '&' && chars[i] != '='
+            i += 1
+          end
+          spans << Highlight::Span.new(chars[start...i].join, expect_key ? Theme.syn_header : Theme.text)
+        end
+      end
+      spans
+    end
+
+    ref_markup = ->(raw : String) do
+      spans = [] of Highlight::Span
+      chars = raw.chars
+      n = chars.size
+      i = 0
+      while i < n
+        if chars[i] == '<'
+          gt = i + 1
+          while gt < n && chars[gt] != '>'
+            gt += 1
+          end
+          closed = gt < n
+          j = i + 1
+          j += 1 if j < n && chars[j] == '/'
+          spans << Highlight::Span.new(chars[i...j].join, Theme.muted)
+          name = j
+          while name < gt && (chars[name].ascii_letter? || chars[name].ascii_number? ||
+                chars[name] == '-' || chars[name] == '_' || chars[name] == ':')
+            name += 1
+          end
+          spans << Highlight::Span.new(chars[j...name].join, Theme.syn_header) if name > j
+          spans << Highlight::Span.new(chars[name...gt].join, Theme.text) if name < gt
+          spans << Highlight::Span.new(">", Theme.muted) if closed
+          i = closed ? gt + 1 : gt
+        else
+          start = i
+          i += 1
+          while i < n && chars[i] != '<'
+            i += 1
+          end
+          spans << Highlight::Span.new(chars[start...i].join, Theme.text)
+        end
+      end
+      spans
+    end
+
+    # A varied byte/char pool: ASCII structural + hex + letters + multibyte (Korean, accented,
+    # emoji), so tokens land next to multibyte content and near boundaries.
+    pool = %w(" \\ { } [ ] : , & = < > / - _ + . e E a Z 0 9 x   가 é 🚀 t r u e n l s f) + ["\t"]
+
+    it "matches the reference char tokenizer for :json / :form / :html over a fuzz corpus" do
+      rng = Random.new(0x9051) # fixed seed → deterministic
+      2000.times do
+        len = rng.rand(0..40)
+        raw = String.build { |io| len.times { io << pool[rng.rand(pool.size)] } }
+        Highlight.body_styled(raw, :json).should eq(ref_json.call(raw))
+        Highlight.body_styled(raw, :form).should eq(ref_form.call(raw))
+        Highlight.body_styled(raw, :html).should eq(ref_markup.call(raw))
+        # the load-bearing invariant: spans concat back to the exact line
+        Highlight.body_styled(raw, :json).map(&.text).join.should eq(raw)
+        Highlight.body_styled(raw, :html).map(&.text).join.should eq(raw)
+        Highlight.body_styled(raw, :form).map(&.text).join.should eq(raw)
+      end
+    end
+
+    it "matches on hand-picked edge cases (multibyte, trailing escape, unclosed tag)" do
+      cases = [
+        %({"이름": "값🚀", "n": -12.5e3, "ok": true}),
+        %(a=가&b=é🚀&=x&flag),
+        %(<div class="x">가나다</div><br/><b>té</b>),
+        %("trailing backslash\\),      # overshoot case
+        %(<unclosed tag 가),           # no '>'
+        "",                            # empty
+        "{}[],:",                      # all structural
+        "가나다라",                     # pure multibyte, no ASCII
+      ]
+      cases.each do |raw|
+        Highlight.body_styled(raw, :json).should eq(ref_json.call(raw))
+        Highlight.body_styled(raw, :form).should eq(ref_form.call(raw))
+        Highlight.body_styled(raw, :html).should eq(ref_markup.call(raw))
+      end
+    end
+  end
 end

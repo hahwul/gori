@@ -36,6 +36,10 @@ module Gori
                      @mode : Mode, @verify_upstream : Bool)
         @analyzed = Set(Int64).new
         @ws_hwm = {} of Int64 => Int64 # per-101-flow high-water-mark: max ws_message id already scanned
+        # Cache each 101 flow's handshake FlowDetail — it NEVER changes frame-to-frame, but
+        # InsertWs republishes :updated per frame, so rescan_ws re-read it from SQLite (heads +
+        # bodies) on every frame of a chatty socket. Evicted in lock-step with @ws_hwm.
+        @ws_detail = {} of Int64 => Store::FlowDetail
         @active_seen = Set(String).new
         @active_error_hosts = Set(String).new # rate-limit probe-failure notifications per host
         @suppressed = Set(String).new         # "code|host" hard-deleted this session
@@ -142,7 +146,7 @@ module Gori
             # gap-free rescan_ws so a 101 flow evicted from @analyzed and re-scanned (or one with a
             # backlog > WS_MSG_CAP) never re-detects already-scanned frames or skips a band of them.
             scan_detail(detail, enqueue_active: true)
-            rescan_ws(ev.id) if detail.row.status == 101
+            rescan_ws(ev.id, detail) if detail.row.status == 101 # reuse the detail just loaded
           rescue DB::Error | SQLite3::Exception
             # A transient store error (e.g. SQLITE_BUSY) must NOT kill the scanner for the rest
             # of the session — skip this flow and keep draining. On real shutdown the input
@@ -180,7 +184,7 @@ module Gori
           @analyzed << row.id
           trim(@analyzed, ANALYZED_CAP)
           scan_detail(detail, enqueue_active: true)
-          rescan_ws(row.id) if detail.row.status == 101
+          rescan_ws(row.id, detail) if detail.row.status == 101 # reuse the detail just loaded
         end
       rescue DB::Error | SQLite3::Exception
       rescue Channel::ClosedError
@@ -193,10 +197,17 @@ module Gori
       # last scanned id: with a hwm it reads the OLDEST unscanned frames (so a >WS_MSG_CAP backlog
       # from a dropped-event burst is covered without skipping a band, and an evicted-then-re-
       # scanned flow doesn't re-detect old frames); the first pass (no hwm) reads the last window.
-      private def rescan_ws(flow_id : Int64) : Nil
-        detail = @store.get_flow(flow_id)
-        return unless detail
+      private def rescan_ws(flow_id : Int64, detail : Store::FlowDetail? = nil) : Nil
+        # Reuse a detail the caller already loaded, else the per-flow cache, else read it once
+        # and cache it — the 101 handshake is immutable, so subsequent frames skip the DB read.
+        d = detail || @ws_detail[flow_id]? || @store.get_flow(flow_id)
+        return unless d
+        detail = d
         return unless detail.row.status == 101
+        # Cache the immutable handshake; note_ws_scanned evicts it with @ws_hwm, but a 101 flow
+        # that never delivers a new frame wouldn't hit that path, so bound it here too.
+        @ws_detail[flow_id] = detail
+        @ws_detail.delete(@ws_detail.first_key) if @ws_detail.size > ANALYZED_CAP
         # Page forward from the high-water-mark (0 on the first scan) through EVERY unscanned
         # frame in WS_MSG_CAP-sized batches. Starting from the OLDEST unscanned id — not the last
         # window — means a flow first scanned late (e.g. via catch_up) with a large buffered
@@ -224,7 +235,10 @@ module Gori
         @ws_hwm.delete(flow_id)
         @ws_hwm[flow_id] = msgs.max_of(&.id)
         return if @ws_hwm.size <= ANALYZED_CAP
-        @ws_hwm.keys.first(@ws_hwm.size - ANALYZED_CAP).each { |k| @ws_hwm.delete(k) }
+        @ws_hwm.keys.first(@ws_hwm.size - ANALYZED_CAP).each do |k|
+          @ws_hwm.delete(k)
+          @ws_detail.delete(k) # drop the cached handshake for evicted flows in lock-step
+        end
       end
 
       private def persist(detections : Array(Detection), *, flow_id : Int64, replay_id : Int64?) : Nil
@@ -280,9 +294,13 @@ module Gori
       end
 
       private def enqueue_probe(rule : Active::Rule, detail : Store::FlowDetail) : Nil
+        # Cheap dedup key FIRST: a repeat surface (the norm in steady browsing) is rejected here
+        # WITHOUT the full plan build (canary generation, JSON re-serialize, request rebuild).
+        key = rule.dedup_key(detail)
+        return unless key
+        return if @active_seen.includes?(key)
         plan = rule.plan(detail)
         return unless plan
-        return if @active_seen.includes?(plan.dedup_key)
         select
         when @active_jobs.send(ActiveTask.new(rule, plan, detail))
           # Record the dedup key ONLY once the task is actually queued, so a target dropped on

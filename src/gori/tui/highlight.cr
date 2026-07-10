@@ -605,90 +605,120 @@ module Gori::Tui
     # newline, so a line-local pass is sufficient for both pretty and minified
     # bodies). Object keys (a string immediately followed by ':') are accented
     # distinctly from string values.
+    # Byte-scanned (not `raw.chars`): all token boundaries are ASCII bytes, and every UTF-8
+    # multibyte byte is ≥0x80 (never a boundary byte), so it falls into the text/value/else
+    # runs exactly as a non-ASCII Char did — output is byte-identical, spans still concat to
+    # the exact line (a cut only ever lands on an ASCII byte = a char boundary, so byte_slice
+    # never splits a codepoint). Removes the per-line Array(Char) + the per-span sub-array+join.
     private def self.json_line(raw : String) : Line
       spans = [] of Span
-      chars = raw.chars
-      n = chars.size
+      b = raw.to_slice # view over the UTF-8 bytes, no copy
+      n = b.size
       i = 0
       while i < n
-        c = chars[i]
-        if c == '"'
+        c = b.unsafe_fetch(i)
+        if c == 0x22_u8 # '"'
           start = i
           i += 1
           while i < n
-            if chars[i] == '\\'
+            d = b.unsafe_fetch(i)
+            if d == 0x5c_u8 # backslash: skip the escaped byte
               i += 2
-            elsif chars[i] == '"'
+            elsif d == 0x22_u8
               i += 1
               break
             else
               i += 1
             end
           end
-          str = chars[start...i].join
+          str = raw.byte_slice(start, {i, n}.min - start) # i may overshoot on a trailing '\'
           k = i
-          while k < n && chars[k].ascii_whitespace?
+          while k < n && ascii_ws?(b.unsafe_fetch(k))
             k += 1
           end
-          key = k < n && chars[k] == ':'
+          key = k < n && b.unsafe_fetch(k) == 0x3a_u8 # ':'
           spans << Span.new(str, key ? Theme.syn_header : Theme.syn_string)
-        elsif c.ascii_number? || (c == '-' && i + 1 < n && chars[i + 1].ascii_number?)
+        elsif ascii_digit?(c) || (c == 0x2d_u8 && i + 1 < n && ascii_digit?(b.unsafe_fetch(i + 1)))
           start = i
           i += 1
-          while i < n && (chars[i].ascii_number? || "+-.eE".includes?(chars[i]))
+          while i < n && (ascii_digit?(b.unsafe_fetch(i)) || num_cont?(b.unsafe_fetch(i)))
             i += 1
           end
-          spans << Span.new(chars[start...i].join, Theme.syn_number)
-        elsif c.ascii_letter?
+          spans << Span.new(raw.byte_slice(start, i - start), Theme.syn_number)
+        elsif ascii_letter?(c)
           start = i
           i += 1
-          while i < n && chars[i].ascii_letter?
+          while i < n && ascii_letter?(b.unsafe_fetch(i))
             i += 1
           end
-          word = chars[start...i].join
+          word = raw.byte_slice(start, i - start)
           spans << Span.new(word, %w(true false null).includes?(word) ? Theme.syn_literal : Theme.text)
-        elsif "{}[]:,".includes?(c)
-          spans << Span.new(c.to_s, Theme.muted)
+        elsif json_struct?(c)
+          spans << Span.new(raw.byte_slice(i, 1), Theme.muted)
           i += 1
         else
           start = i
           i += 1
           while i < n
-            d = chars[i]
-            break if d == '"' || d.ascii_letter? || d.ascii_number? || "{}[]:,".includes?(d) ||
-                     (d == '-' && i + 1 < n && chars[i + 1].ascii_number?)
+            d = b.unsafe_fetch(i)
+            break if d == 0x22_u8 || ascii_letter?(d) || ascii_digit?(d) || json_struct?(d) ||
+                     (d == 0x2d_u8 && i + 1 < n && ascii_digit?(b.unsafe_fetch(i + 1)))
             i += 1
           end
-          spans << Span.new(chars[start...i].join, Theme.text)
+          spans << Span.new(raw.byte_slice(start, i - start), Theme.text)
         end
       end
       spans
+    end
+
+    # ASCII byte classifiers (mirror the Char#ascii_* predicates the tokenizers used).
+    private def self.ascii_digit?(x : UInt8) : Bool
+      x >= 0x30_u8 && x <= 0x39_u8
+    end
+
+    private def self.ascii_letter?(x : UInt8) : Bool
+      (x >= 0x41_u8 && x <= 0x5a_u8) || (x >= 0x61_u8 && x <= 0x7a_u8)
+    end
+
+    # Char#ascii_whitespace?: space or 0x09..0x0d.
+    private def self.ascii_ws?(x : UInt8) : Bool
+      x == 0x20_u8 || (x >= 0x09_u8 && x <= 0x0d_u8)
+    end
+
+    # JSON number continuation: one of `+ - . e E`.
+    private def self.num_cont?(x : UInt8) : Bool
+      x == 0x2b_u8 || x == 0x2d_u8 || x == 0x2e_u8 || x == 0x65_u8 || x == 0x45_u8
+    end
+
+    # JSON structural punctuation: one of `{ } [ ] : ,`.
+    private def self.json_struct?(x : UInt8) : Bool
+      x == 0x7b_u8 || x == 0x7d_u8 || x == 0x5b_u8 || x == 0x5d_u8 || x == 0x3a_u8 || x == 0x2c_u8
     end
 
     # `application/x-www-form-urlencoded` — keys accented, `=`/`&` muted, values
     # in body text.
     private def self.form_line(raw : String) : Line
       spans = [] of Span
-      chars = raw.chars
-      n = chars.size
+      b = raw.to_slice
+      n = b.size
       i = 0
       expect_key = true
       while i < n
-        c = chars[i]
-        if c == '&'
-          spans << Span.new("&", Theme.muted)
+        c = b.unsafe_fetch(i)
+        if c == 0x26_u8 # '&'
+          spans << Span.new(raw.byte_slice(i, 1), Theme.muted)
           i += 1
           expect_key = true
-        elsif c == '='
-          spans << Span.new("=", Theme.muted)
+        elsif c == 0x3d_u8 # '='
+          spans << Span.new(raw.byte_slice(i, 1), Theme.muted)
           i += 1
           expect_key = false
         else
           start = i
-          while i < n && chars[i] != '&' && chars[i] != '='
+          while i < n && b.unsafe_fetch(i) != 0x26_u8 && b.unsafe_fetch(i) != 0x3d_u8
             i += 1
           end
-          spans << Span.new(chars[start...i].join, expect_key ? Theme.syn_header : Theme.text)
+          spans << Span.new(raw.byte_slice(start, i - start), expect_key ? Theme.syn_header : Theme.text)
         end
       end
       spans
@@ -699,38 +729,42 @@ module Gori::Tui
     # the continuation line (cosmetic only; text is never altered).
     private def self.markup_line(raw : String) : Line
       spans = [] of Span
-      chars = raw.chars
-      n = chars.size
+      b = raw.to_slice
+      n = b.size
       i = 0
       while i < n
-        if chars[i] == '<'
+        if b.unsafe_fetch(i) == 0x3c_u8 # '<'
           gt = i + 1
-          while gt < n && chars[gt] != '>'
+          while gt < n && b.unsafe_fetch(gt) != 0x3e_u8 # '>'
             gt += 1
           end
           closed = gt < n # found a '>'
           j = i + 1
-          j += 1 if j < n && chars[j] == '/'                # closing tag
-          spans << Span.new(chars[i...j].join, Theme.muted) # '<' or '</'
+          j += 1 if j < n && b.unsafe_fetch(j) == 0x2f_u8          # '/' closing tag
+          spans << Span.new(raw.byte_slice(i, j - i), Theme.muted) # '<' or '</'
           name = j
-          while name < gt && (chars[name].ascii_letter? || chars[name].ascii_number? ||
-                chars[name] == '-' || chars[name] == '_' || chars[name] == ':')
+          while name < gt && tag_name?(b.unsafe_fetch(name))
             name += 1
           end
-          spans << Span.new(chars[j...name].join, Theme.syn_header) if name > j
-          spans << Span.new(chars[name...gt].join, Theme.text) if name < gt
-          spans << Span.new(">", Theme.muted) if closed
+          spans << Span.new(raw.byte_slice(j, name - j), Theme.syn_header) if name > j
+          spans << Span.new(raw.byte_slice(name, gt - name), Theme.text) if name < gt
+          spans << Span.new(raw.byte_slice(gt, 1), Theme.muted) if closed # '>'
           i = closed ? gt + 1 : gt
         else
           start = i
           i += 1
-          while i < n && chars[i] != '<'
+          while i < n && b.unsafe_fetch(i) != 0x3c_u8
             i += 1
           end
-          spans << Span.new(chars[start...i].join, Theme.text)
+          spans << Span.new(raw.byte_slice(start, i - start), Theme.text)
         end
       end
       spans
+    end
+
+    # A tag-name byte: ASCII letter/digit or one of `- _ :`.
+    private def self.tag_name?(x : UInt8) : Bool
+      ascii_letter?(x) || ascii_digit?(x) || x == 0x2d_u8 || x == 0x5f_u8 || x == 0x3a_u8
     end
 
     # --- helpers -------------------------------------------------------------

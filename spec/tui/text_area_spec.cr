@@ -37,4 +37,43 @@ describe Gori::Tui::TextArea do
       ta.edits.should eq(before)
     end
   end
+
+  describe "#undo (array-snapshot)" do
+    it "reverts a single-char insert" do
+      ta = TextArea.new("ab")
+      ta.end_of_line
+      ta.insert('c')
+      ta.text.should eq("abc")
+      ta.undo
+      ta.text.should eq("ab")
+    end
+
+    it "reverts a newline split and a subsequent line-join independently (multi-line ops)" do
+      ta = TextArea.new("hello world")
+      ta.move(0, 5)        # caret after "hello"
+      ta.insert_newline    # -> "hello\n world"
+      ta.text.should eq("hello\n world")
+      ta.backspace         # join back -> "hello world"
+      ta.text.should eq("hello world")
+      ta.undo              # undo the join -> split again
+      ta.text.should eq("hello\n world")
+      ta.undo              # undo the split -> original
+      ta.text.should eq("hello world")
+    end
+
+    it "keeps earlier snapshots intact after editing a restored buffer (no shared-array corruption)" do
+      ta = TextArea.new("a\nb\nc")
+      ta.end_of_line
+      ta.insert('X')       # "aX\nb\nc"
+      ta.insert('Y')       # "aXY\nb\nc"
+      ta.undo              # back to "aX\nb\nc"
+      ta.text.should eq("aX\nb\nc")
+      ta.insert('Z')       # edit the restored buffer -> "aXZ\nb\nc"
+      ta.text.should eq("aXZ\nb\nc")
+      ta.undo              # the Z edit
+      ta.text.should eq("aX\nb\nc")
+      ta.undo              # the X edit -> original
+      ta.text.should eq("a\nb\nc")
+    end
+  end
 end

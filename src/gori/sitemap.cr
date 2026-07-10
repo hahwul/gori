@@ -36,8 +36,14 @@ module Gori
       # collapsed by `group_sequences!`. Not a real path — never tagged, never keyed.
       property grouped : Bool
 
+      # Build-time label→child index so `child` is O(1) instead of a linear sibling scan —
+      # a path-param explosion (thousands of `/users/<id>` siblings under one parent) made
+      # the old `@children.find` O(n²) over a whole build. `@children` stays an ordered Array
+      # (insertion order = render order, unchanged), so the index only accelerates lookup and
+      # is never read after `build` (group_sequences! reshapes @children directly).
       def initialize(@label : String)
         @children = [] of Node
+        @child_index = {} of String => Node
         @methods = [] of String
         @expanded = true
         @in_scope = false
@@ -48,7 +54,7 @@ module Gori
       end
 
       def child(label : String) : Node
-        @children.find { |c| c.label == label } || begin
+        @child_index[label] ||= begin
           node = Node.new(label)
           @children << node
           node
@@ -65,18 +71,30 @@ module Gori
     # ID templating; numeric folding is a separate opt-in step (`group_sequences!`).
     def self.build(entries : Enumerable({String, String, String})) : Array(Node)
       hosts = [] of Node
-      entries.each { |(host, method, target)| add(hosts, host, normalize_path(target), method) }
+      host_index = {} of String => Node # O(1) host lookup (a scan can surface thousands of hosts)
+      entries.each { |(host, method, target)| add(hosts, host, normalize_path(target), method, host_index) }
       hosts
     end
 
     # Insert one endpoint into `hosts`, creating host/segment nodes as needed. The
-    # accumulated absolute path is stamped on each node (the durable tag key).
-    def self.add(hosts : Array(Node), host : String, path : String, method : String) : Nil
-      host_node = hosts.find { |h| h.label == host } || begin
-        node = Node.new(host)
-        hosts << node
-        node
-      end
+    # accumulated absolute path is stamped on each node (the durable tag key). `host_index`
+    # (optional) accelerates the host lookup to O(1); without it the host is found by scan.
+    def self.add(hosts : Array(Node), host : String, path : String, method : String,
+                 host_index : Hash(String, Node)? = nil) : Nil
+      host_node =
+        if host_index
+          host_index[host] ||= begin
+            node = Node.new(host)
+            hosts << node
+            node
+          end
+        else
+          hosts.find { |h| h.label == host } || begin
+            node = Node.new(host)
+            hosts << node
+            node
+          end
+        end
       # Segment the PATH only: an unencoded '/' in a query VALUE (e.g. ?redirect=/a/b)
       # must not fabricate path-tree nodes. The query rides on the leaf so /x?a=1 and
       # /x?a=2 stay distinct endpoints without corrupting the tree.

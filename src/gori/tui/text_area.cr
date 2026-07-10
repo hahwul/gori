@@ -11,7 +11,12 @@ module Gori::Tui
   # request). Holds lines + a cursor; no modes — typing edits directly. Converts
   # back to bytes with CRLF line endings (HTTP wire form).
   class TextArea
-    record UndoState, text : String, cy : Int32, cx : Int32
+    # Snapshot for undo. Holds the LINE ARRAY (a shallow copy), not a joined-buffer String:
+    # line Strings are immutable and every edit REPLACES `@lines[i]` (never mutates in place),
+    # so unchanged lines are structurally shared across all 100 snapshots. This turns push_undo
+    # from a whole-buffer String copy per keystroke (and up to 100 full-buffer copies retained)
+    # into an Array-of-pointers copy that shares the line data.
+    record UndoState, lines : Array(String), cy : Int32, cx : Int32
 
     def initialize(text : String = "")
       @lines = [""]
@@ -33,6 +38,8 @@ module Gori::Tui
       @search_hl = "" # active ^F query → matches highlighted in render
       @reveal = false # show whitespace (space ·, tab →) instead of syntax colours
       @edits = 0      # monotonic content-change counter — cheap cache key for owners
+      @lc_lines = [] of String # downcased lines for ^F search, memoized on @edits
+      @lc_lines_rev = -1
       # Opt-in background tints: [start, end) FULL-buffer char offsets + colour, painted
       # UNDER the text (over syntax/plain, beneath search + cursor). Empty for every editor
       # except the Fuzzer template — Replay/Notes never set it, so they're unaffected. The
@@ -286,13 +293,24 @@ module Gori::Tui
       off + @cx.clamp(0, @lines[@cy].size)
     end
 
-    # ^F search: 0-based indices of lines containing `query` (case-insensitive).
+    # ^F search: 0-based indices of lines containing `query` (case-insensitive). The
+    # downcased lines are cached on @edits, so each keystroke of an incremental search (and
+    # the re-scans on drain/poll while the prompt is open) reuses them instead of allocating a
+    # fresh `.downcase` per line every time — the buffer doesn't change while you type a query.
     def search_lines(query : String) : Array(Int32)
       hits = [] of Int32
       return hits if query.empty?
       q = query.downcase
-      @lines.each_with_index { |l, i| hits << i if l.downcase.includes?(q) }
+      lowercased_lines.each_with_index { |l, i| hits << i if l.includes?(q) }
       hits
+    end
+
+    private def lowercased_lines : Array(String)
+      if @edits != @lc_lines_rev
+        @lc_lines_rev = @edits
+        @lc_lines = @lines.map(&.downcase)
+      end
+      @lc_lines
     end
 
     # `highlight` overlays request/response syntax colours on the buffer while
@@ -476,14 +494,14 @@ module Gori::Tui
     end
 
     private def push_undo : Nil
-      @undo_stack << UndoState.new(text, @cy, @cx)
+      @undo_stack << UndoState.new(@lines.dup, @cy, @cx) # shallow: shares the immutable line Strings
       @undo_stack.shift if @undo_stack.size > 100
     end
 
     def undo : Nil
       return if @undo_stack.empty?
       state = @undo_stack.pop
-      @lines = state.text.split('\n')
+      @lines = state.lines           # the snapshot is popped/unreferenced, so no defensive dup
       @lines = [""] if @lines.empty?
       @cy = state.cy.clamp(0, @lines.size - 1)
       @cx = state.cx.clamp(0, @lines[@cy].size)
