@@ -25,8 +25,11 @@ module Gori
             if fid = f.flow_id
               io << "- **Flow:** "
               if flow
-                loc = flow.row.target.starts_with?("http") ? flow.row.target : "#{flow.row.host}#{flow.row.target}"
-                io << flow.row.method << " " << loc << " → " << (flow.row.status || "-") << " (#" << fid << ")\n"
+                # method/target/host are captured (attacker/server-controlled) data — an embedded
+                # newline (reachable via an h2 :path/:method pseudo-header) would break the one-line
+                # structure, so sanitize them like f.title/f.host above.
+                loc = flow.row.target.starts_with?("http") ? one_line(flow.row.target) : "#{one_line(flow.row.host)}#{one_line(flow.row.target)}"
+                io << one_line(flow.row.method) << " " << loc << " → " << (flow.row.status || "-") << " (#" << fid << ")\n"
               else
                 io << "#" << fid << " (no longer captured)\n"
               end

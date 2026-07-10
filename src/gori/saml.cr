@@ -58,7 +58,10 @@ module Gori
     # The response side: an IdP auto-POST HTML form carrying the SAMLResponse back.
     private def from_response_html(resp_body : Bytes?) : Doc?
       return nil if resp_body.nil? || resp_body.empty? || resp_body.size > MAX_XML
-      s = String.new(resp_body)
+      # scrub: String.new does NOT validate UTF-8, and Regex#match (below, in from_html_form)
+      # raises on an invalid byte — a hostile/binary response body with "SAMLResponse" in it
+      # would otherwise crash every surface that decodes SAML (TUI detail, `run show`, MCP).
+      s = String.new(resp_body).scrub
       s.includes?("SAMLResponse") ? from_html_form(s) : nil
     end
 
@@ -146,7 +149,9 @@ module Gori
         end
       end
       return nil unless param && raw
-      value = URI.decode_www_form(raw) rescue raw
+      # plus_to_space: false — '+' is a standard base64 alphabet char here; treating it as a
+      # space (then stripped by decode_value's whitespace gsub) would corrupt the payload.
+      value = URI.decode_www_form(raw, plus_to_space: false) rescue raw
       dec = decode_value(value) || return nil
       Doc.new(param, dec[1], location, relay, dec[0])
     end

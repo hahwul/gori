@@ -75,14 +75,14 @@ module Gori::Convert
 
     # ---------------- TOKEN ----------------
     r.register encode("jwt-decode", "jwt",
-      category: Category::Token,
+      category: Category::Token, direction: Direction::Decode,
       description: "Decode JWT header+payload (no signature verify)") { |b| Codecs.jwt_decode(b) }
 
     # ---------------- HASH ----------------
-    r.register encode("md5", category: Category::Hash, description: "MD5 digest (hex)") { |b| Digest::MD5.hexdigest(b) }
-    r.register encode("sha1", category: Category::Hash, description: "SHA-1 digest (hex)") { |b| Digest::SHA1.hexdigest(b) }
-    r.register encode("sha256", category: Category::Hash, description: "SHA-256 digest (hex)") { |b| Digest::SHA256.hexdigest(b) }
-    r.register encode("sha512", category: Category::Hash, description: "SHA-512 digest (hex)") { |b| Digest::SHA512.hexdigest(b) }
+    r.register encode("md5", category: Category::Hash, direction: Direction::Hash, description: "MD5 digest (hex)") { |b| Digest::MD5.hexdigest(b) }
+    r.register encode("sha1", category: Category::Hash, direction: Direction::Hash, description: "SHA-1 digest (hex)") { |b| Digest::SHA1.hexdigest(b) }
+    r.register encode("sha256", category: Category::Hash, direction: Direction::Hash, description: "SHA-256 digest (hex)") { |b| Digest::SHA256.hexdigest(b) }
+    r.register encode("sha512", category: Category::Hash, direction: Direction::Hash, description: "SHA-512 digest (hex)") { |b| Digest::SHA512.hexdigest(b) }
 
     # ---------------- ESCAPE ----------------
     r.register text("html-escape", "html-encode", "htmlentities", "html",

@@ -52,11 +52,13 @@ module Gori
       private def self.operation_to_flow(created_at : Int64, base : String, path : String,
                                          method : String, op : JSON::Any) : Builder::FlowPair
         url = join_url(base, path)
-        headers = {} of String => String
-        body = request_body(op)
-        if body
-          headers["Content-Type"] = body_content_type(op) || "application/json"
-        end
+        headers = Builder::Headers.new
+        ct = body_content_type(op) # nil when the operation declares no requestBody
+        # Only fabricate a JSON `{}` stub for a JSON media type — a `{}` body under a
+        # multipart/xml Content-Type is self-contradictory and useless as a seed request.
+        json = ct.try { |t| t == "application/json" || t.ends_with?("+json") } || false
+        body = json ? %({}).to_slice : nil
+        headers << {"Content-Type", ct} if ct
         Builder.pending_request(created_at, url, method.upcase, headers, body)
       end
 
@@ -64,15 +66,6 @@ module Gori
         b = base.chomp('/')
         p = path.starts_with?('/') ? path : "/#{path}"
         "#{b}#{p}"
-      end
-
-      private def self.request_body(op : JSON::Any) : Bytes?
-        rb = op["requestBody"]?
-        return nil unless rb
-        content = rb["content"]?
-        return nil unless content
-        return %({}).to_slice if content["application/json"]? || !content.as_h.empty?
-        nil
       end
 
       private def self.body_content_type(op : JSON::Any) : String?

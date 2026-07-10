@@ -68,6 +68,7 @@ module Gori
       display = name.strip
       slug = slugify(display)
       raise Gori::Error.new("invalid project name") if slug.empty?
+      slug = unique_slug(slug, display) # don't merge into a DIFFERENT project that slugifies alike
       dir = File.join(@root, slug)
       FileUtils.mkdir_p(dir)
       # Persist the verbatim display name so a later `list` shows "My Project", not
@@ -82,6 +83,28 @@ module Gori
         s.close
       end
       proj
+    end
+
+    # Keep `slug` when the directory is free OR already belongs to a project with the SAME
+    # display name (reopen-by-name, the documented behaviour); otherwise append -2/-3/… so two
+    # different names that slugify identically ("Test Project" vs "test!project") don't overwrite
+    # or merge each other's captured data.
+    private def unique_slug(slug : String, display : String) : String
+      candidate = slug
+      n = 2
+      while collides_with_other?(candidate, display)
+        candidate = "#{slug}-#{n}"
+        n += 1
+      end
+      candidate
+    end
+
+    # True when `slug` is an existing project WITH DATA (a real DB) whose stored display name
+    # differs from `display` — i.e. a genuine collision, not a same-name reopen or an empty dir.
+    private def collides_with_other?(slug : String, display : String) : Bool
+      dir = File.join(@root, slug)
+      return false unless Dir.exists?(dir) && File.exists?(File.join(dir, Project::DB_FILE))
+      display_name(dir, slug).downcase != display.downcase
     end
 
     # A throwaway workspace, deleted when its session closes.

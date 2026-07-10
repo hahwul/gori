@@ -87,10 +87,25 @@ module Gori
     def parse_display(text : String) : {String?, String, String?}
       lines = text.split('\n')
       vi = nil.as(Int32?)
-      lines.each_with_index do |l, i|
-        next unless l.strip == "# variables"
-        trailing = lines[(i + 1)..].join('\n').strip
-        vi = i if !trailing.empty? && json?(trailing)
+      # Scan BACKWARD for the last "# variables" whose remainder parses as JSON, breaking on the
+      # first (from-end) match, and only attempt the parse when the trailing plausibly starts
+      # with '{'/'[' — a forward re-join+parse per candidate is O(n²) on a query full of literal
+      # "# variables" comment lines. `rev` holds the trailing lines in reverse (cheap push).
+      rev = [] of String
+      tail_first = nil.as(Char?) # first non-blank char of the accumulated trailing
+      (lines.size - 1).downto(0) do |i|
+        line = lines[i]
+        if line.strip == "# variables" && (tail_first == '{' || tail_first == '[')
+          trailing = rev.reverse.join('\n').strip
+          if !trailing.empty? && json?(trailing)
+            vi = i
+            break
+          end
+        end
+        rev << line
+        if fnb = line.each_char.find { |c| !c.whitespace? }
+          tail_first = fnb # a non-blank line becomes the new first-non-blank of the trailing
+        end
       end
       vars = vi ? lines[(vi + 1)..].join('\n').strip : nil
       body = vi ? lines[0...vi] : lines

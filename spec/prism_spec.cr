@@ -72,6 +72,51 @@ describe Gori::Prism::Passive do
     end
   end
 
+  it "detects a GitHub fine-grained personal access token in a response body" do
+    with_store do |store|
+      body = %({"token":"github_pat_11ABCDEFGHIJKLMNOPQRSTUV_abcdefghijklmno"})
+      dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        content_type: "application/json", body: body)
+      codes_of(dets).should contain("secret_in_body")
+    end
+  end
+
+  it "does not flag a Spring class name in prose, but does flag a real Spring frame" do
+    with_store do |store|
+      prose = "See the JavaDoc at org.springframework.boot.SpringApplication for details."
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n", body: prose))
+        .should_not contain("error_stack_leak")
+      frame = "err\n\tat org.springframework.aop.framework.CglibAopProxy.intercept(Native Method)"
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n", body: frame))
+        .should contain("error_stack_leak")
+    end
+  end
+
+  it "does not treat a non-adjacent version word as version context for a private-IP leak" do
+    with_store do |store|
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        body: "Our firmware serves 10.0.0.5 today")).should contain("private_ip_leak")
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        body: "File version 10.0.1.2 released")).should_not contain("private_ip_leak")
+    end
+  end
+
+  it "flags cleartext Basic auth even behind a later duplicate Authorization header" do
+    with_store do |store|
+      dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        scheme: "http", req_headers: "Authorization: Basic dXNlcjpwYXNz\r\nAuthorization: Bearer tok\r\n")
+      codes_of(dets).should contain("insecure_basic_auth")
+    end
+  end
+
+  it "does not flag CORS when the response carries duplicate ACAO headers (browser blocks it)" do
+    with_store do |store|
+      head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n" \
+             "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Origin: https://x.test\r\n\r\n"
+      codes_of(analyze(store, resp_head: head)).should_not contain("cors_wildcard")
+    end
+  end
+
   it "does not flag document headers when they are present" do
     with_store do |store|
       head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n" \

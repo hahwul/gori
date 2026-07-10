@@ -3281,7 +3281,7 @@ module Gori::Tui
     # --- findings ExecContext ---
 
     def finding_create : Nil
-      id = history_controller.view.selected_id
+      id = history_target_flow_id
       return unless id
       if row = @session.store.flow_row(id)
         @finding_form = FindingForm.new("#{row.method} #{row.target}", row.host, id)
@@ -3422,6 +3422,14 @@ module Gori::Tui
       else
         history_controller.view.selected_id
       end
+    end
+
+    # The flow a History action targets: the one pinned in the OPEN detail overlay, else the
+    # list selection. Live capture can advance the list cursor (`@selected = 0` on a new flow)
+    # while the detail overlay stays on its flow, so detail.* verbs (replay/finding/fuzz/mine/
+    # comparer/copy/scope) must read the detail, not the cursor — or they act on the wrong flow.
+    def history_target_flow_id : Int64?
+      @overlay == :detail ? history_controller.view.detail_flow_id : history_controller.selected_flow_id
     end
 
     def link_replay_id : Int64?
@@ -3606,7 +3614,7 @@ module Gori::Tui
     end
 
     def scope_add_host : Nil
-      id = history_controller.view.selected_id
+      id = history_target_flow_id
       return unless id
       if row = @session.store.flow_row(id)
         @scope.add("include", "host", row.host)
@@ -3736,7 +3744,7 @@ module Gori::Tui
     end
 
     def copy_selection : Nil
-      history_controller.copy_selection
+      history_controller.copy_selection(history_target_flow_id)
     end
 
     def history_query : Nil
@@ -3770,7 +3778,7 @@ module Gori::Tui
     # --- Replay ExecContext --- (delegated to ReplayController; cross-tab mediators kept)
     # CROSS-TAB mediator: load History's selection into a new Replay tab.
     def replay_selected : Nil
-      id = history_controller.selected_flow_id
+      id = history_target_flow_id
       replay_controller.replay_flow(id) if id
     end
 
@@ -3890,7 +3898,7 @@ module Gori::Tui
     # --- Fuzzer ExecContext / cross-tab mediators ---
     # CROSS-TAB: open History's selection as a new Fuzzer session (⇧I).
     def fuzz_selected : Nil
-      id = history_controller.selected_flow_id
+      id = history_target_flow_id
       fuzzer_controller.fuzz_flow(id) if id
     end
 
@@ -3965,7 +3973,7 @@ module Gori::Tui
     # --- Miner ExecContext / cross-tab mediators ---
     # CROSS-TAB: open the config popup for History's selected flow (space → Mine params).
     def mine_selected : Nil
-      id = history_controller.selected_flow_id
+      id = history_target_flow_id
       return (@toast = "select a flow first") unless id
       open_mine_config(miner_controller.build_seed_from_flow(id))
     end
@@ -4198,7 +4206,7 @@ module Gori::Tui
     # CROSS-TAB mediator: send History's selected flow to the next Comparer slot
     # on the *active* comparison sub-tab (rings A → B → A).
     def comparer_add_selected : Nil
-      id = history_controller.selected_flow_id
+      id = history_target_flow_id
       return (@toast = "select a flow first") unless id
       detail = @session.store.get_flow(id)
       return (@toast = "flow no longer available") unless detail

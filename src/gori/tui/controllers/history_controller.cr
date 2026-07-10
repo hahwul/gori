@@ -286,8 +286,8 @@ module Gori::Tui
 
     # Copy the selected flow's raw request (head + body, byte-exact P7) to the
     # system clipboard via OSC 52.
-    def copy_selection : Nil
-      id = @history.selected_id
+    def copy_selection(id : Int64? = nil) : Nil
+      id ||= @history.selected_id
       return unless id
       detail = @host.session.store.get_flow(id)
       unless detail

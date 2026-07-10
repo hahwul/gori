@@ -98,7 +98,9 @@ module Gori
           return false unless req_ct.try(&.downcase.includes?("json"))
           body = ctx.detail.request_body
           return false unless body
-          text = String.new(body[0, {body.size, 8192}.min]).scrub
+          # 8 KB truncated mid-JSON on real GraphQL requests (a sizeable `variables` object),
+          # which then fails JSON.parse and mis-classified them as non-GraphQL; allow up to 256 KB.
+          text = String.new(body[0, {body.size, 256 * 1024}.min]).scrub
           q = begin
             JSON.parse(text).as_h?.try(&.["query"]?).try(&.as_s?)
           rescue JSON::ParseException

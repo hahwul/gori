@@ -44,34 +44,37 @@ module Gori
         created_at = parse_started(entry["startedDateTime"]?.to_s)
         duration_us = entry["time"]?.try { |t| (t.as_f * 1_000).to_i64 } # HAR time is ms → µs
 
-        req_headers = headers_hash(req["headers"]?)
+        req_headers = headers_list(req["headers"]?)
         req_body = post_body(req["postData"]?)
 
         resp = entry["response"]?
+        resp = nil if resp.try(&.raw).nil? # an explicit JSON `null` response is truthy as JSON::Any — treat it as absent
         return Builder.pending_request(created_at, url, method, req_headers, req_body, http_version) unless resp
 
         status = resp["status"]?.try(&.as_i).try(&.to_i32) || 0
         reason = resp["statusText"]?.to_s.presence || status_reason(status)
-        resp_headers = headers_hash(resp["headers"]?)
+        resp_headers = headers_list(resp["headers"]?)
         resp_body, content_type = response_body(resp)
-        content_type ||= resp_headers["Content-Type"]? || resp_headers["content-type"]?
+        content_type ||= resp_headers.find { |(k, _)| k.downcase == "content-type" }.try(&.[1])
 
         Builder.complete_flow(
           created_at, url, method, req_headers, req_body, http_version,
           status, reason, resp_headers, resp_body, content_type, duration_us)
       end
 
-      private def self.headers_hash(node : JSON::Any?) : Hash(String, String)
-        h = {} of String => String
+      # An ORDERED list of {name, value} — a HAR response commonly has several Set-Cookie
+      # entries (and Via/etc.); a Hash would keep only the last, dropping the rest.
+      private def self.headers_list(node : JSON::Any?) : Builder::Headers
+        list = Builder::Headers.new
         arr = node.try(&.as_a?)
-        return h unless arr
+        return list unless arr
         arr.each do |item|
           name = item["name"]?.to_s
           value = item["value"]?.to_s
           next if name.empty?
-          h[name] = value
+          list << {name, value}
         end
-        h
+        list
       end
 
       private def self.post_body(node : JSON::Any?) : Bytes?
