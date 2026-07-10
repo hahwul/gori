@@ -149,6 +149,33 @@ describe Gori::Proxy::Codec::Body do
       expect_raises(Gori::Error) { Body.request_framing(req) }
     end
 
+    it "rejects a request with whitespace before a header colon (TE hidden from framing → smuggling)" do
+      # `Transfer-Encoding : chunked` (space before colon) is invisible to the exact-match TE
+      # lookup, so the proxy would frame by CL and forward the head to a lenient backend that
+      # reads chunked — a CL.TE desync. Reject it like an explicit CL+TE conflict.
+      req = Http1.parse_request_head(
+        "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nTransfer-Encoding : chunked\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
+    it "rejects a request using an obs-fold header continuation line" do
+      # An obs-folded `Transfer-Encoding:\r\n chunked` hides the value from the framing lookup
+      # while a lenient backend unfolds it — RFC 7230 §3.2.4 forbids obs-fold in requests.
+      req = Http1.parse_request_head(
+        "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 5\r\nTransfer-Encoding:\r\n chunked\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
+    it "accepts an ordinary request whose header value contains a colon or spaces" do
+      # The rejection targets whitespace BEFORE the colon / obs-fold only — a normal header
+      # (colon in the value, spaces after the colon) must still frame cleanly.
+      req = Http1.parse_request_head(
+        "GET / HTTP/1.1\r\nHost: example.com:443\r\nUser-Agent: Mozilla/5.0 (X)\r\n\r\n".to_slice)
+      Body.request_framing(req).should eq({BodyFraming::None, 0_i64})
+      Http1.obfuscated_header?("GET / HTTP/1.1\r\nHost: example.com:443\r\n\r\n".to_slice).should be_false
+      Http1.obfuscated_header?("GET / HTTP/1.1\r\nX : y\r\n\r\n".to_slice).should be_true
+    end
+
     it "leaves a response with a non-chunked Transfer-Encoding as close-delimited (not rejected)" do
       # Responses may legitimately be close-delimited under a non-chunked TE — only the
       # request path (which must know the body boundary to keep-alive) rejects.
@@ -256,5 +283,23 @@ describe Gori::Proxy::Codec::Body do
 
       tee.to_s.should eq("abc")
     end
+  end
+end
+
+describe Gori::Proxy::Codec::ContentDecode do
+  head = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice
+
+  it "de-chunks a conformant CRLF chunked body" do
+    body = "5\r\nHELLO\r\n6\r\n WORLD\r\n0\r\n\r\n".to_slice
+    decoded, _ = ContentDecode.decode(head, body)
+    String.new(decoded.not_nil!).should eq("HELLO WORLD")
+  end
+
+  it "de-chunks a bare-LF chunked body without misaligning later chunks" do
+    # Non-conformant lone-LF delimiters: the old blind 2-byte skip ate the first byte
+    # of the next chunk-size line, dropping/garbling every chunk after the first.
+    body = "5\nHELLO\n6\n WORLD\n0\n\n".to_slice
+    decoded, _ = ContentDecode.decode(head, body)
+    String.new(decoded.not_nil!).should eq("HELLO WORLD")
   end
 end

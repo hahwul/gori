@@ -39,8 +39,13 @@ module Gori
           # actually restrictive (not '*').
           fa = dirs.try(&.["frame-ancestors"]?)
           framed_ok = fa && !fa.empty? && !fa.includes?("*")
-          if h.get?("X-Frame-Options").nil? && !framed_ok
-            acc << hdr(ctx, "missing_x_frame_options", "Missing X-Frame-Options", Store::Severity::Low)
+          # Only DENY / SAMEORIGIN actually restrict framing; the obsolete ALLOW-FROM (and any
+          # other value) is ignored by modern browsers, so a present-but-ineffective XFO is no
+          # protection — flag it too, not just a missing header (validate the value like XCTO).
+          xfo = h.get?("X-Frame-Options").try(&.downcase.strip)
+          xfo_ok = xfo == "deny" || xfo == "sameorigin"
+          if !xfo_ok && !framed_ok
+            acc << hdr(ctx, "missing_x_frame_options", "Missing or ineffective X-Frame-Options", Store::Severity::Low)
           end
           if h.get?("X-Content-Type-Options").try(&.downcase.strip) != "nosniff"
             acc << hdr(ctx, "missing_x_content_type_options", "Missing X-Content-Type-Options: nosniff", Store::Severity::Low)

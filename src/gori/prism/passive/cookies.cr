@@ -59,10 +59,12 @@ module Gori
         #   * Max-Age <= 0 is an UNCONDITIONAL delete regardless of value — a live cookie never
         #     sets it, and frameworks clear with a sentinel value (PHP emits `sid=deleted;
         #     Max-Age=0`), so requiring an empty value would miss the common logout pattern.
-        #   * Otherwise, an EMPTY value paired with an Expires attribute is the classic clear.
+        #   * A past Expires deletes the cookie regardless of value too — a logout that uses a
+        #     sentinel value (`auth=deleted; Expires=<past>`, no Max-Age) is still a clear, so
+        #     the value need not be empty (a live cookie never sets an already-expired date).
         private def deletion?(value : String, flags : Array(String), expires : String?) : Bool
           return true if flags.any? { |f| max_age_delete?(f) }
-          return false unless value.empty? && expires
+          return false unless expires
           expires_past?(expires)
         end
 

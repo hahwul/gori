@@ -71,9 +71,17 @@ module Gori
             return error("upstream closed after interim 1xx from #{host}:#{port}", started) unless head
             resp = Proxy::Codec::Http1.parse_response_head(head)
           end
-          framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
-          body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len)
-          Result.new(head, body, resp, elapsed(started), incomplete: !complete)
+          begin
+            framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
+            body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len)
+            Result.new(head, body, resp, elapsed(started), incomplete: !complete)
+          rescue ex
+            # The head was already read + parsed. A framing rejection (CL+TE — precisely the
+            # ambiguous response a smuggling/desync probe is hunting) or a mid-body read error
+            # must NOT throw the head away as a bare error string. Keep the head + parsed
+            # response, flag incomplete, and carry the reason so the workbench shows both.
+            Result.new(head, nil, resp, elapsed(started), error: ex.message || "response read failed", incomplete: true)
+          end
         rescue ex
           error(ex.message || "replay error", started)
         ensure

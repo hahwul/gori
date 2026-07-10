@@ -110,6 +110,39 @@ module Gori::Proxy::Codec::Http1
   # old `String.new(raw).split(CRLF)` projection: name is bytes-before-colon
   # (unstripped), value is bytes-after-colon stripped; an empty line ends headers;
   # a colon-less line is skipped (raw_head still keeps it).
+  # RFC 7230 §3.2.4: a field-name must be followed IMMEDIATELY by ':' with NO
+  # whitespace, and obs-fold (a header line beginning with SP/HTAB) is obsolete and
+  # forbidden in a request. Either form hides a header from parse_headers (whose name
+  # match is exact) while a whitespace-lenient backend still reads it — so `Transfer-
+  # Encoding : chunked` or an obs-folded TE slips past gori's CL/TE framing checks and
+  # smuggles a request past the proxy. Return true when the header block contains
+  # whitespace before a colon or an obs-fold continuation line, so the caller can reject
+  # the message (record + close) exactly like the other ambiguous-framing vectors.
+  def self.obfuscated_header?(raw : Bytes) : Bool
+    start_crlf = index_crlf(raw, 0)
+    return false if start_crlf.nil?
+    pos = start_crlf + 2 # first byte after the start-line's CRLF
+    while pos < raw.size
+      crlf = index_crlf(raw, pos)
+      line_end = crlf || raw.size
+      break if line_end == pos # empty line → end of headers
+      first = raw.unsafe_fetch(pos)
+      return true if first == 0x20_u8 || first == 0x09_u8 # obs-fold continuation line
+      # Whitespace between field-name and colon: the byte just before the first ':' is SP/HTAB.
+      i = pos
+      while i < line_end && raw.unsafe_fetch(i) != 0x3a_u8 # ':'
+        i += 1
+      end
+      if i < line_end && i > pos
+        prev = raw.unsafe_fetch(i - 1)
+        return true if prev == 0x20_u8 || prev == 0x09_u8
+      end
+      break if crlf.nil?
+      pos = crlf + 2
+    end
+    false
+  end
+
   private def self.parse_headers(raw : Bytes, start_crlf : Int32?) : HeaderList
     list = HeaderList.new
     return list if start_crlf.nil? # no CRLF → no header block

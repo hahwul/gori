@@ -1,4 +1,5 @@
 require "json"
+require "base64"
 require "log"
 require "../store"
 require "../ql"
@@ -652,7 +653,15 @@ module Gori
                   j.object do
                     j.field "direction", m.direction
                     j.field "opcode", m.opcode
-                    j.field "payload", String.new(m.payload)
+                    if m.text?
+                      j.field "payload", String.new(m.payload).scrub
+                    else
+                      # A binary frame carries arbitrary octets; emitting them as a raw
+                      # string would put invalid UTF-8 on the stdio JSON-RPC stream (which
+                      # must be well-formed UTF-8). Base64 it, like Serialize.emit_ws_messages.
+                      j.field "binary", true
+                      j.field "payload_base64", Base64.strict_encode(m.payload)
+                    end
                   end
                 end
               end
@@ -1443,7 +1452,7 @@ module Gori
         config.concurrency = clamp(int(h, "concurrency"), 10, MINE_MAX_CONCURRENCY)
         config.rps = int(h, "rate").try(&.to_f64)
         config.timeout = fuzz_timeout(h)
-        config.retries = (int(h, "retries") || 1_i64).to_i
+        config.retries = (int(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i # clamp before .to_i (Int32) so a huge value can't OverflowError past the clean-error handler
         cap = int(h, "max_requests")
         config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
         config.user_wordlist = str(h, "wordlist").presence
@@ -1586,7 +1595,7 @@ module Gori
         elsif nums = obj["numbers"]?.try(&.as_s?)
           fuzz_numbers(nums)
         elsif (nul = obj["null"]?) && (n = (nul.as_i64? || nul.as_s?.try(&.to_i64?)))
-          Fuzz::NullPayloads.new(n.to_i)
+          Fuzz::NullPayloads.new(n.clamp(0_i64, FUZZ_MAX_REQUESTS).to_i) # clamp before .to_i so a huge count can't OverflowError past the clean-error handler
         elsif br = obj["brute"]?.try(&.as_s?)
           fuzz_brute(br)
         else
@@ -1840,8 +1849,8 @@ module Gori
 
       # Passive-scan a just-saved Replay send into prism_issues when mode is Passive/Active.
       private def prism_scan_saved_replay(replay_id : Int64, target : String, request : String,
-                                         http2 : Bool, flow_id : Int64?, head : Bytes, body : Bytes?,
-                                         duration_us : Int64) : Nil
+                                          http2 : Bool, flow_id : Int64?, head : Bytes, body : Bytes?,
+                                          duration_us : Int64) : Nil
         return unless @store.prism_mode.scanning?
         return if head.empty?
         rec = Store::ReplayRecord.new(

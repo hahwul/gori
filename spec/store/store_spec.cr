@@ -208,6 +208,33 @@ describe Gori::Store do
     end
   end
 
+  it "stores a zero-length WebSocket frame without aborting the write batch (empty payload → X'', not NULL)" do
+    with_store do |store|
+      fid = store.insert_flow(sample_request(target: "/ws"))
+      # A valid empty WS text frame (RFC 6455): payload BLOB NOT NULL used to bind SQL
+      # NULL from an empty slice, aborting the whole transaction and losing the
+      # co-batched non-empty frame too. Both must survive with write_failures == 0.
+      store.insert_ws_message(fid, "out", 1, Bytes.empty)
+      store.insert_ws_message(fid, "in", 1, "hello".to_slice)
+      store.flush
+      msgs = store.ws_messages(fid)
+      msgs.size.should eq(2)
+      msgs[0].payload.empty?.should be_true
+      msgs[1].payload.should eq("hello".to_slice)
+      store.write_failures.should eq(0)
+    end
+  end
+
+  it "update_replay_ws_messages stores an empty frame text without aborting the batch" do
+    with_store do |store|
+      rid = store.insert_replay("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n", false, false, nil, 0)
+      store.update_replay_ws_messages(rid, ["", "frame"])
+      store.flush
+      store.ws_messages_for_replay(rid).size.should eq(2)
+      store.write_failures.should eq(0)
+    end
+  end
+
   it "insert_finding returns the finding's own id, not the entity_links row id, when linked to a flow" do
     with_store do |store|
       fid = store.insert_flow(sample_request(target: "/f"))

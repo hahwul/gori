@@ -953,6 +953,57 @@ describe "Gori::Prism::Passive (insecure form action)" do
   end
 end
 
+describe "Gori::Prism::Passive (round-2 detection fixes)" do
+  it "does not flag a data-src lazy-loading placeholder as active mixed content" do
+    with_store do |store|
+      # A hyphenated data-* attribute is not the real src attribute; `\b` alone treated
+      # the hyphen as a word boundary and false-matched `data-src="http://…"`.
+      lazy = analyze(store, scheme: "https", content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        body: %(<iframe data-src="http://cdn.acme.test/lazy" src="https://cdn.acme.test/ok"></iframe>))
+      codes_of(lazy).should_not contain("mixed_content")
+      # …a genuine active http:// sub-resource still trips it.
+      real = analyze(store, scheme: "https", content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        body: %(<script src="http://cdn.acme.test/evil.js"></script>))
+      codes_of(real).should contain("mixed_content")
+    end
+  end
+
+  it "does not flag a data-action attribute as an insecure form action" do
+    with_store do |store|
+      lazy = analyze(store, scheme: "https", content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+        body: %(<form data-action="http://acme.test/track" action="https://acme.test/login"></form>))
+      codes_of(lazy).should_not contain("insecure_form_action")
+    end
+  end
+
+  it "treats a cookie cleared with a non-empty sentinel value and a past Expires as a deletion" do
+    with_store do |store|
+      # `auth=deleted; Expires=<past>` (no Max-Age, non-empty value) is a logout clear —
+      # its missing flags are noise, not hygiene findings.
+      cleared = analyze(store,
+        resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: auth=deleted; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n\r\n",
+        content_type: "text/html")
+      codes_of(cleared).should_not contain("cookie_no_secure")
+      codes_of(cleared).should_not contain("cookie_no_httponly")
+    end
+  end
+
+  it "flags a present-but-ineffective X-Frame-Options value (obsolete ALLOW-FROM)" do
+    with_store do |store|
+      ineffective = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nX-Frame-Options: ALLOW-FROM https://x.test\r\n\r\n")
+      codes_of(ineffective).should contain("missing_x_frame_options")
+      # DENY / SAMEORIGIN actually restrict framing → no finding.
+      deny = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nX-Frame-Options: DENY\r\n\r\n")
+      codes_of(deny).should_not contain("missing_x_frame_options")
+    end
+  end
+end
+
 describe "Gori::Prism::Passive (insecure Basic auth)" do
   it "flags request Basic credentials over cleartext HTTP as High" do
     with_store do |store|
@@ -990,11 +1041,11 @@ describe "Gori::Prism::Passive (Round-1 hardening)" do
     with_store do |store|
       # First script-src is safe; the duplicate must be IGNORED, so this is not weak.
       safe = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n" \
-        "Content-Security-Policy: script-src 'self'; script-src 'unsafe-inline'\r\n\r\n")
+                                                                  "Content-Security-Policy: script-src 'self'; script-src 'unsafe-inline'\r\n\r\n")
       codes_of(safe).should_not contain("weak_csp")
       # First script-src is unsafe-inline; a later 'self' duplicate must not mask it.
       weak = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n" \
-        "Content-Security-Policy: script-src 'unsafe-inline'; script-src 'self'\r\n\r\n")
+                                                                  "Content-Security-Policy: script-src 'unsafe-inline'; script-src 'self'\r\n\r\n")
       codes_of(weak).should contain("weak_csp")
     end
   end
@@ -1003,7 +1054,7 @@ describe "Gori::Prism::Passive (Round-1 hardening)" do
     with_store do |store|
       # PHP clears cookies with the literal value "deleted" (not empty) + Max-Age=0.
       php = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n" \
-        "Set-Cookie: PHPSESSID=deleted; Max-Age=0; expires=Thu, 01-Jan-1970 00:00:00 GMT; path=/\r\n\r\n")
+                                                                 "Set-Cookie: PHPSESSID=deleted; Max-Age=0; expires=Thu, 01-Jan-1970 00:00:00 GMT; path=/\r\n\r\n")
       codes_of(php).should_not contain("cookie_no_secure")
       codes_of(php).should_not contain("cookie_no_httponly")
       neg = analyze(store, content_type: "text/html",
@@ -1391,7 +1442,7 @@ describe Gori::Prism, "WebSocket + Replay sources" do
       detail = Gori::Prism.detail_from_replay(rec).not_nil!
       detail.row.method.should eq("POST")
       codes = Gori::Prism::Passive.analyze(detail).map(&.code)
-      codes.should contain("insecure_basic_auth")  # Authorization header now visible over http
+      codes.should contain("insecure_basic_auth")   # Authorization header now visible over http
       codes.should contain("cors_reflected_origin") # Origin header now visible
     end
   end

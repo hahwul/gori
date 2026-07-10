@@ -19,11 +19,17 @@ module Gori
         {body[0, max].dup, true, size}
       end
 
+      # A scheme is `scheme://` at the very START of the string (RFC 3986 §3.1); a
+      # `://` later on (e.g. inside a query, `?next=http://x`) is NOT a scheme, so
+      # match the leading scheme only — else a scheme-less endpoint carrying a URL in
+      # its query was wrongly rejected as "missing scheme" and dropped from the import.
+      LEADING_SCHEME = /\A[a-z][a-z0-9+.-]*:\/\//
+
       def self.normalize_url(url : String) : String
         u = url.strip
         down = u.downcase # schemes are case-insensitive (RFC 3986 §3.1)
         return u if down.starts_with?("http://") || down.starts_with?("https://")
-        raise Gori::Error.new("invalid URL (missing scheme): #{url}") if u.includes?("://")
+        raise Gori::Error.new("invalid URL (missing scheme): #{url}") if down.matches?(LEADING_SCHEME)
         "https://#{u}"
       end
 

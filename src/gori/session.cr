@@ -66,9 +66,10 @@ module Gori
         host_overrides = HostOverrides.load(store) # per-project /etc/hosts; proxy reads, TUI edits (Mutex-guarded)
         interceptor = Interceptor.new(scope)       # shared: proxy fibers hold, TUI decides
         # Passive/active scanner: reads the parallel prism_events feed, gates active probes on
-        # the shared Scope. Starts now (idle until flows arrive); runs headless too.
+        # the shared Scope. Runs headless too — but ONLY on the capture-lock holder (started
+        # below), never on a view-only 2nd instance (which would send duplicate active probes to
+        # targets and race issue-writes on the shared DB against the real capturer).
         prism = Prism::Analyzer.new(store, scope, prism_events, store.prism_mode, !config.insecure_upstream?)
-        prism.start
         tunnel = Proxy::Tls::Tunnel.new(ca, verify_upstream: !config.insecure_upstream?,
           rewriter: rules, interceptor: interceptor, host_overrides: host_overrides)
         proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
@@ -103,6 +104,14 @@ module Gori
             lock = nil
             ex.message || "could not open the project capture lock"
           end
+        if lock
+          # Sole capturer for this project: clear any Pending rows orphaned by a previous
+          # session's crash/kill (nothing else will ever resolve them) before we capture, then
+          # run the scanner. Both are gated on the lock so a view-only 2nd instance touches
+          # neither the shared Pending rows nor the shared issue set.
+          store.abandon_pending!("orphaned by a previous session")
+          prism.start
+        end
         session = new(config, ca, registry, project, store, proxy, events, prism, rules, scope, host_overrides, interceptor, bind_error, lock)
         session.sync_capture_status!
         session
@@ -149,6 +158,7 @@ module Gori
         else
           @capture_lock ||= CaptureLock.try(@project.dir) # reuse if held, else try to take over
           return false unless @capture_lock               # still held by another instance
+          @prism.start                                    # we now hold the lock → run the scanner (idempotent if already running)
           @proxy.start(fallback: true)                    # cover a DIFFERENT project's port on resume
           true
         end

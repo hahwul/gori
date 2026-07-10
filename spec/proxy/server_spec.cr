@@ -486,6 +486,35 @@ describe Gori::Proxy::Server do
     resp.error.not_nil!.should contain("framing")
   end
 
+  it "rejects a request with whitespace before a header colon (obfuscated-TE smuggling)" do
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("never", seen)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    # `Transfer-Encoding : chunked` (space before the colon) hides the TE from the
+    # exact-match framing lookup; a lenient backend would still chunk-frame it → smuggling.
+    # gori must reject the attempt (record + close), not forward it framed by Content-Length.
+    client << "POST /obf HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n"
+    client << "Content-Length: 5\r\nTransfer-Encoding : chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    sink.requests.size.should eq(1)
+    sink.responses.size.should eq(1)
+    resp = sink.responses.first
+    resp.state.should eq(Gori::Store::FlowState::Error)
+    resp.error.not_nil!.should contain("obfuscated")
+  end
+
   it "records a visible error flow for a CL+TE response instead of leaving it Pending" do
     done = Channel(Nil).new(1)
     # Raw origin that replies with BOTH Content-Length and Transfer-Encoding.

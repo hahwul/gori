@@ -312,7 +312,7 @@ module Gori::Proxy
       if (ic = @interceptor) && ic.intercepts_response?(scope_url,
            method: sent_req.method, host: host, target: sent_req.target, scheme: scheme, status: resp.status) &&
          !resp_framing.close_delimited? && !sse?(resp) && resp.status != 101
-        return handle_held_response(ic, upstream, req, flow_id, host, port, scheme,
+        return handle_held_response(ic, upstream, req, sent_req, flow_id, host, port, scheme,
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
 
@@ -352,7 +352,8 @@ module Gori::Proxy
       end
       # Reuse this upstream for the next request iff the ORIGIN keeps its side
       # open; the return value is the CLIENT keep-alive decision (separate sides).
-      update_upstream_reuse(origin_keep_alive?(req, resp, resp_framing))
+      # The origin side keys on sent_req (what it received); the client side on req.
+      update_upstream_reuse(origin_keep_alive?(sent_req, resp, resp_framing))
       keep_alive?(req, resp, resp_framing)
     end
 
@@ -488,6 +489,7 @@ module Gori::Proxy
     # human edit/drop it, forward the result, and capture. Returns the CLIENT
     # keep-alive decision; the upstream is reused iff the ORIGIN kept its side.
     private def handle_held_response(ic : Gori::Interceptor, upstream : IO, req : Codec::RawRequest,
+                                     sent_req : Codec::RawRequest,
                                      flow_id : Int64, host : String, port : Int32, scheme : String,
                                      resp : Codec::RawResponse, sent_resp_head : Bytes,
                                      resp_framing : Codec::BodyFraming, resp_len : Int64,
@@ -524,14 +526,25 @@ module Gori::Proxy
       @sink.on_response(FlowMapper.response(sent_resp,
         flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
         body_truncated: trunc, body_size: size))
-      # Reuse the upstream iff we read the WHOLE body cleanly AND the origin kept
-      # its side alive. The CLIENT keep-alive (return value) uses the edited resp.
-      update_upstream_reuse(resp_complete && origin_keep_alive?(req, resp, resp_framing))
+      # Reuse the upstream iff we read the WHOLE body cleanly AND the origin kept its
+      # side alive. Origin side keys on sent_req (what the origin received); the CLIENT
+      # keep-alive (return value) uses the edited resp.
+      update_upstream_reuse(resp_complete && origin_keep_alive?(sent_req, resp, resp_framing))
       # A truncated upstream body was forwarded short — close the client connection so it
       # sees end-of-response instead of blocking for the missing bytes while we read its
       # next keep-alive request (mirrors the non-held path's resp_complete guard).
       return false unless resp_complete
-      keep_alive?(req, sent_resp, Codec::Body.response_framing(sent_resp, req.method)[0])
+      # The human may have edited the held response into conflicting framing (CL+TE); the
+      # response was already forwarded + recorded above, so recompute the client-side framing
+      # defensively — a raw response_framing raise here would unwind to run's blanket rescue
+      # and drop the client connection abruptly instead of a clean keep-alive decision.
+      client_framing =
+        begin
+          Codec::Body.response_framing(sent_resp, req.method)[0]
+        rescue Gori::Error
+          Codec::BodyFraming::CloseDelimited # unknowable framing → don't keep-alive
+        end
+      keep_alive?(req, sent_resp, client_framing)
     end
 
     # After a complete response, decide whether the live upstream can serve the
@@ -735,9 +748,9 @@ module Gori::Proxy
     private def keep_alive?(req : Codec::RawRequest, resp : Codec::RawResponse,
                             resp_framing : Codec::BodyFraming) : Bool
       return false if resp_framing.close_delimited? # body ends at close
-      return false if header_token(req.headers.get?("Connection")) == "close"
-      return false if header_token(resp.headers.get?("Connection")) == "close"
-      req.version == "HTTP/1.1" || header_token(req.headers.get?("Connection")) == "keep-alive"
+      return false if connection_lists?(req.headers.get?("Connection"), "close")
+      return false if connection_lists?(resp.headers.get?("Connection"), "close")
+      req.version == "HTTP/1.1" || connection_lists?(req.headers.get?("Connection"), "keep-alive")
     end
 
     # Whether the ORIGIN will keep its connection open after this response, so its
@@ -748,12 +761,15 @@ module Gori::Proxy
     # `Connection: close` on the request we forwarded upstream OR on the response,
     # all mean the origin closes. Parking a connection the origin will close just
     # wastes one stale-retry on the next request, so err toward NOT reusing.
-    private def origin_keep_alive?(req : Codec::RawRequest, resp : Codec::RawResponse,
+    # `sent_req` is the request ACTUALLY forwarded upstream (post Match&Replace /
+    # intercept edit), not the client's original — a rule that adds `Connection: close`
+    # to the upstream request means the origin closes, even if the client's request didn't.
+    private def origin_keep_alive?(sent_req : Codec::RawRequest, resp : Codec::RawResponse,
                                    resp_framing : Codec::BodyFraming) : Bool
       return false if resp_framing.close_delimited?
-      return false if header_token(req.headers.get?("Connection")) == "close"
-      return false if header_token(resp.headers.get?("Connection")) == "close"
-      resp.version == "HTTP/1.1" || header_token(resp.headers.get?("Connection")) == "keep-alive"
+      return false if connection_lists?(sent_req.headers.get?("Connection"), "close")
+      return false if connection_lists?(resp.headers.get?("Connection"), "close")
+      resp.version == "HTTP/1.1" || connection_lists?(resp.headers.get?("Connection"), "keep-alive")
     end
 
     # Whether a request may be transparently REPLAYED on a fresh connection after a
@@ -772,8 +788,13 @@ module Gori::Proxy
       end
     end
 
-    private def header_token(value : String?) : String?
-      value.try(&.downcase.strip)
+    # True when a Connection header field lists `token` (case-insensitive) as one of its
+    # comma-separated connection-options — e.g. `Connection: keep-alive, close` carries BOTH
+    # `keep-alive` and `close`. Comparing the whole value (the old header_token) missed a
+    # token embedded in such a list, so a peer signalling close would be parked as persistent.
+    private def connection_lists?(value : String?, token : String) : Bool
+      return false unless value
+      value.downcase.split(',').any? { |t| t.strip == token }
     end
 
     private def now_us : Int64

@@ -56,12 +56,15 @@ module Gori
 
         # An active sub-resource (script/iframe) loaded over plain http on an https page —
         # genuine active mixed content (browsers block it; it signals an insecure dependency).
-        MIXED_ACTIVE = /<(?:script|iframe)\b[^>]*\bsrc\s*=\s*["']?http:\/\//i
+        # The (?<![-\w]) guard requires a real attribute boundary before `src`, so a hyphenated
+        # data attribute (`data-src="http://…"`, a lazy-loading placeholder) doesn't false-match
+        # — `\b` alone treated the hyphen as a boundary.
+        MIXED_ACTIVE = /<(?:script|iframe)\b[^>]*(?<![-\w])src\s*=\s*["']?http:\/\//i
 
         # A form on an HTTPS page that SUBMITS to a plain-http action: everything the user types
         # (credentials included) is sent in cleartext. Browsers flag this for password fields;
         # it's a distinct, higher-impact case than a passively-loaded sub-resource.
-        INSECURE_FORM = /<form\b[^>]*\baction\s*=\s*["']?http:\/\//i
+        INSECURE_FORM = /<form\b[^>]*(?<![-\w])action\s*=\s*["']?http:\/\//i
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response

@@ -125,7 +125,12 @@ module Gori::Proxy::Codec
         out.write(body[pos, avail])
         break if avail < size # truncated mid-chunk
         pos += size
-        pos += 2 if pos + 2 <= body.size # skip the CRLF after the chunk data
+        # Skip the chunk-data terminator byte-accurately: an OPTIONAL CR then the LF.
+        # A blind 2-byte skip eats the first byte of the next chunk-size line when the
+        # wire form uses a bare LF (non-conformant but seen), misaligning every later
+        # chunk in this display/scan projection.
+        pos += 1 if pos < body.size && body[pos] == 0x0d_u8 # CR (optional)
+        pos += 1 if pos < body.size && body[pos] == 0x0a_u8 # LF
       end
       out.to_slice
     end

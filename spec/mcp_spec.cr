@@ -459,6 +459,25 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "base64-encodes a binary WebSocket frame (keeps the JSON-RPC stream valid UTF-8)" do
+      with_store do |store|
+        store.insert_replay("wss://ex.test/ws",
+          "GET /ws HTTP/1.1\r\nHost: ex.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", false, true, nil, 0)
+        id = store.replays_meta.last.id
+        store.insert_ws_message(0_i64, "out", 1, "ping".to_slice, replay_id: id)        # text frame
+        store.insert_ws_message(0_i64, "in", 2, Bytes[0x00, 0xff, 0x80], replay_id: id) # binary (invalid UTF-8)
+        store.flush
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{}}})
+        msgs = tool_payload(drive(store, call)[0])["sessions"][0]["ws_messages"].as_a
+        text = msgs.find { |m| m["opcode"].as_i == 1 }.not_nil!
+        text["payload"].as_s.should eq("ping")
+        bin = msgs.find { |m| m["opcode"].as_i == 2 }.not_nil!
+        bin["binary"].as_bool.should be_true
+        bin["payload_base64"].as_s.should eq(Base64.strict_encode(Bytes[0x00, 0xff, 0x80]))
+        bin.as_h.has_key?("payload").should be_false # raw bytes never emitted as a string
+      end
+    end
+
     it "includes the live TUI replay snapshot when ui_state carries it" do
       with_store do |store|
         ui = JSON.build do |j|

@@ -893,9 +893,15 @@ module Gori
         messages.each do |msg_text|
           masked_msg = Env.mask_secrets(msg_text)
           ts = now_us
+          # See insert_ws_one: an empty payload binds SQL NULL and violates the NOT NULL
+          # column (an empty replay message text hits this), so store X'' for it.
+          slice = masked_msg.to_slice
+          empty = slice.empty?
+          args = [0_i64, id, ts, "out", 1] of DB::Any
+          args << slice unless empty
           conn.exec(
-            "INSERT INTO ws_messages (flow_id, replay_id, created_at, direction, opcode, payload) VALUES (?,?,?,?,?,?)",
-            0_i64, id, ts, "out", 1, masked_msg.to_slice
+            "INSERT INTO ws_messages (flow_id, replay_id, created_at, direction, opcode, payload) " \
+            "VALUES (?,?,?,?,?,#{empty ? "X''" : "?"})", args: args
           )
         end
         nil
@@ -1747,9 +1753,17 @@ module Gori
     end
 
     private def insert_ws_one(conn : DB::Connection, op : InsertWs) : Nil
+      # payload is BLOB NOT NULL; binding an empty Bytes binds SQL NULL (empty slice ⇒
+      # null pointer) and violates the constraint, aborting the whole write batch. A
+      # zero-length WS text/binary frame (valid per RFC 6455 — e.g. an empty heartbeat)
+      # reaches here with an empty payload, so use the SQL literal X'' for it, mirroring
+      # insert_h2_frame_one's empty-DATA handling.
+      empty = op.payload.empty?
+      args = [op.flow_id, op.replay_id, op.created_at, op.direction, op.opcode] of DB::Any
+      args << op.payload unless empty
       conn.exec(
-        "INSERT INTO ws_messages (flow_id, replay_id, created_at, direction, opcode, payload) VALUES (?,?,?,?,?,?)",
-        op.flow_id, op.replay_id, op.created_at, op.direction, op.opcode, op.payload)
+        "INSERT INTO ws_messages (flow_id, replay_id, created_at, direction, opcode, payload) " \
+        "VALUES (?,?,?,?,?,#{empty ? "X''" : "?"})", args: args)
     end
 
     private def now_us : Int64

@@ -135,6 +135,14 @@ describe Gori::Convert do
       conv("unicode-unescape", conv("unicode-escape", "x🎉y")).should eq "x🎉y"
     end
 
+    it "unicode-unescape leaves a truncated \\u escape at end-of-string literal" do
+      # `\uAB` has only 2 hex digits — it must stay literal (like the mid-string case
+      # `\uABX`), not decode the short slice to U+00AB.
+      conv("unicode-unescape", "x\\uAB").should eq "x\\uAB"
+      conv("unicode-unescape", "\\uABC").should eq "\\uABC"
+      conv("unicode-unescape", "\\u00e9x").should eq "éx" # a full 4-digit escape still decodes
+    end
+
     it "unicode-unescape reports a lone/unpaired surrogate as a ConvertError (not a raw ArgumentError)" do
       expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\ud800") }
       expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\udc00") }

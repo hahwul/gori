@@ -113,14 +113,17 @@ module Gori::Fuzz
     end
 
     # `default` is returned when the spec is absent (a matcher with no spec passes;
-    # a filter with no spec never fires).
+    # a filter with no spec never fires). A BLANK spec ("" — the CLI/MCP `--ms=` etc.
+    # set the property to an empty string, unlike the TUI's blank_nil) counts as absent:
+    # otherwise `Predicate.any?("")` has no terms → false → a match dimension flips from
+    # "unconstrained" to "reject everything", silently returning zero matches.
     private def status_pass?(spec : String?, status : Int32?, default : Bool) : Bool
-      return default if spec.nil?
+      return default if spec.nil? || spec.blank?
       (s = status) ? Predicate.status_any?(spec, s) : false
     end
 
     private def num_pass?(spec : String?, value : Int64, default : Bool) : Bool
-      return default if spec.nil?
+      return default if spec.nil? || spec.blank?
       Predicate.any?(spec, value)
     end
 
