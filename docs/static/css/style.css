@@ -400,7 +400,8 @@ kbd {
 .home-hero,
 .home-paths,
 .home-structure,
-.home-flow {
+.home-flow,
+.home-meaning {
   position: relative;
   z-index: 1;
   width: min(100%, 1380px);
@@ -713,7 +714,7 @@ kbd {
 }
 
 .home-flow {
-  padding: 1.5rem 0 6rem;
+  padding: 1.5rem 0 4.5rem;
 }
 
 .home-flow h2 {
@@ -740,6 +741,119 @@ kbd {
 
 .flow-list p {
   color: var(--muted);
+}
+
+/* --- The name (dictionary entry) -------------------------------------- */
+
+.home-meaning {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3.5rem;
+  align-items: center;
+  padding: 4.5rem 0 6rem;
+  border-top: 1px solid var(--line);
+}
+
+.meaning-word {
+  color: var(--heading);
+  font-size: 3.05rem;
+  font-weight: 780;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+
+/* --muted, not --quiet: --quiet is 3.9:1 here and fails AA at this size. */
+.meaning-pron {
+  margin: 0.85rem 0 1.15rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+}
+
+.meaning-def {
+  max-width: 54ch;
+  color: var(--muted);
+  font-size: 1.02rem;
+  line-height: 1.85;
+  text-wrap: pretty;
+}
+
+.meaning-def + .meaning-def {
+  margin-top: 0.9rem;
+}
+
+/* Two plain rings woven onto a third. --link/--side/--lap drive the whole
+   mark; the breakpoints only resize those. */
+.meaning-chain {
+  --link: 160px;
+  --side: 138px;
+  --lap: 38px;
+  position: relative;
+  width: calc(2 * var(--side) + var(--link) - 2 * var(--lap));
+  height: var(--link);
+}
+
+/* z-index stays auto here: no stacking context, so the woven ::after below
+   can rise above .chain-ring-link. */
+.chain-ring {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.chain-ring-side {
+  top: calc((var(--link) - var(--side)) / 2);
+  width: var(--side);
+  height: var(--side);
+  border: 1px solid rgb(var(--accent-rgb) / 0.45);
+  /* Opaque, so the half redrawn in ::after does not composite over itself
+     and read brighter than the half that is not. */
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--bg));
+}
+
+.chain-ring-side:first-child {
+  left: 0;
+}
+
+.chain-ring-side:last-child {
+  left: calc(var(--side) + var(--link) - 2 * var(--lap));
+}
+
+/* Every ring carries a background-coloured band that cuts whatever stroke
+   runs beneath it. The link ring sits above both side rings and cuts them;
+   each side ring then redraws one half of itself higher still and cuts the
+   link ring back. So each pair crosses over on one side and under on the
+   other, which is what makes the three read as woven rather than stacked. */
+.chain-ring-link {
+  z-index: 1;
+  top: 0;
+  left: calc(var(--side) - var(--lap));
+  width: var(--link);
+  height: var(--link);
+  border: 1.5px solid var(--accent);
+  box-shadow:
+    0 0 0 3px var(--bg),
+    inset 0 0 0 3px var(--bg);
+}
+
+.chain-ring-side::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: -1px;
+  border: inherit;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 3px var(--bg),
+    inset 0 0 0 3px var(--bg);
+}
+
+.chain-ring-side:first-child::after {
+  clip-path: inset(0 0 50% 0);
+}
+
+.chain-ring-side:last-child::after {
+  clip-path: inset(50% 0 0 0);
 }
 
 .docs-container {
@@ -1610,6 +1724,16 @@ nav.pagination a:hover,
     gap: 0.35rem;
   }
 
+  .home-meaning {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+    padding-bottom: 4.5rem;
+  }
+
+  .meaning-chain {
+    justify-self: start;
+  }
+
   .docs-sidebar {
     display: none;
   }
@@ -1646,6 +1770,16 @@ nav.pagination a:hover,
   .structure-copy h2,
   .home-flow h2 {
     font-size: 2.45rem;
+  }
+
+  .meaning-word {
+    font-size: 2.6rem;
+  }
+
+  .meaning-chain {
+    --link: 116px;
+    --side: 100px;
+    --lap: 28px;
   }
 
   .hero-lede {
