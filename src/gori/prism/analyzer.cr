@@ -25,6 +25,8 @@ module Gori
       ACTIVE_TIMEOUT   = 10.seconds # per-probe socket timeout
       ACTIVE_BACKFILL  =    300     # recent History rows to re-arm when Active is enabled
       WS_MSG_CAP       =    200     # max WS messages loaded per flow for passive scan
+      CATCHUP_INTERVAL = 30.seconds # how often the passive catch-up sweep runs
+      CATCHUP_SCAN     =    500     # recent flows the catch-up sweep re-checks each tick
 
       getter events : Channel(Event)
 
@@ -82,6 +84,7 @@ module Gori
         load_suppressions
         spawn(name: "gori-prism") { passive_loop }
         spawn(name: "gori-prism-active") { active_loop }
+        spawn(name: "gori-prism-catchup") { catch_up_loop }
         # Project already set to Active (persisted) — probe recent in-scope History now,
         # not only traffic that arrives after this open.
         arm_active_backfill if @mode.active?
@@ -135,9 +138,11 @@ module Gori
             next unless detail
             @analyzed << ev.id
             trim(@analyzed, ANALYZED_CAP)
-            ws = load_ws(detail)
-            scan_detail(detail, ws_messages: ws, enqueue_active: true)
-            note_ws_scanned(detail.row.id, ws) # mark these frames scanned so rescans stay incremental
+            # HTTP/non-WS rules run once here; WS payloads are ALWAYS handled by the hwm-gated,
+            # gap-free rescan_ws so a 101 flow evicted from @analyzed and re-scanned (or one with a
+            # backlog > WS_MSG_CAP) never re-detects already-scanned frames or skips a band of them.
+            scan_detail(detail, enqueue_active: true)
+            rescan_ws(ev.id) if detail.row.status == 101
           rescue DB::Error | SQLite3::Exception
             # A transient store error (e.g. SQLITE_BUSY) must NOT kill the scanner for the rest
             # of the session — skip this flow and keep draining. On real shutdown the input
@@ -149,41 +154,69 @@ module Gori
         # input closed during shutdown — exit quietly
       end
 
-      # Re-scan ONLY the WS frames that arrived since the last scan. InsertWs republishes
-      # :updated on every frame, so scanning the whole (last-WS_MSG_CAP) buffer each time would
-      # re-detect a secret still buffered from an earlier frame — inflating its hit_count by 1
-      # per frame and re-running the regex over ×200 messages on every frame (O(n²) per socket).
-      # The per-flow high-water-mark keeps each frame scanned exactly once.
+      # Periodic catch-up for the LOSSY passive feed. Store#publish sends each flow's :updated to
+      # the bounded prism_events channel NON-blockingly (drop on full), and for a plain HTTP flow
+      # that lone :updated is its only trigger — a burst that overflows the channel makes
+      # passive_loop never see the flow, and nothing else re-scans captured flows (active_backfill
+      # re-arms ACTIVE probes only). This sweep re-checks recent flows and scans any the live path
+      # missed. @analyzed dedups, so a steady state where everything was delivered costs only a set
+      # lookup per row (no get_flow). Exits when the analyzer stops.
+      private def catch_up_loop : Nil
+        until @stopped
+          sleep CATCHUP_INTERVAL
+          catch_up
+        end
+      end
+
+      private def catch_up : Nil
+        return if @stopped
+        return unless @mode.scanning?
+        @store.recent_flows(CATCHUP_SCAN).each do |row|
+          break if @stopped || !@mode.scanning?
+          next if @analyzed.includes?(row.id)
+          next unless row.state.complete?
+          detail = @store.get_flow(row.id)
+          next unless detail && detail.response_head
+          @analyzed << row.id
+          trim(@analyzed, ANALYZED_CAP)
+          scan_detail(detail, enqueue_active: true)
+          rescan_ws(row.id) if detail.row.status == 101
+        end
+      rescue DB::Error | SQLite3::Exception
+      rescue Channel::ClosedError
+      end
+
+      # Scan the WS frames a 101 flow has accumulated since the last scan — each frame exactly
+      # once. InsertWs republishes :updated on every frame, so re-scanning the whole buffer each
+      # time would re-detect a still-buffered secret (inflating hit_count) and re-run the regex
+      # over ×WS_MSG_CAP messages per frame. The per-flow high-water-mark PAGES FORWARD from the
+      # last scanned id: with a hwm it reads the OLDEST unscanned frames (so a >WS_MSG_CAP backlog
+      # from a dropped-event burst is covered without skipping a band, and an evicted-then-re-
+      # scanned flow doesn't re-detect old frames); the first pass (no hwm) reads the last window.
       private def rescan_ws(flow_id : Int64) : Nil
         detail = @store.get_flow(flow_id)
         return unless detail
         return unless detail.row.status == 101
-        msgs = @store.ws_messages(flow_id, WS_MSG_CAP)
-        return if msgs.empty?
-        hwm = @ws_hwm[flow_id]?
-        fresh = hwm ? msgs.select { |m| m.id > hwm } : msgs
-        note_ws_scanned(flow_id, msgs) # advance past ALL loaded ids (ordered asc → last is max)
-        return if fresh.empty?
-        detections = Passive.analyze_ws(detail, fresh)
-        persist(detections, flow_id: flow_id, replay_id: nil)
+        loop do
+          hwm = @ws_hwm[flow_id]?
+          msgs = hwm ? @store.ws_messages_after(flow_id, hwm, WS_MSG_CAP) : @store.ws_messages(flow_id, WS_MSG_CAP)
+          break if msgs.empty?
+          note_ws_scanned(flow_id, msgs) # ordered asc → advance the hwm to the last id in the batch
+          detections = Passive.analyze_ws(detail, msgs)
+          persist(detections, flow_id: flow_id, replay_id: nil)
+          break if msgs.size < WS_MSG_CAP # fewer than a full page ⇒ backlog drained
+        end
       rescue DB::Error | SQLite3::Exception
       rescue
       end
 
-      # Record the newest ws_message id scanned for a flow so future rescans skip it. Bounded
+      # Advance the newest ws_message id scanned for a flow so future rescans page past it. Bounded
       # like @analyzed (only 101 flows ever get an entry, but cap it for long-lived projects).
       private def note_ws_scanned(flow_id : Int64, msgs : Array(Store::WsMessage)) : Nil
         return if msgs.empty?
         @ws_hwm[flow_id] = msgs.max_of(&.id)
         return if @ws_hwm.size <= ANALYZED_CAP
         @ws_hwm.keys.first(@ws_hwm.size - ANALYZED_CAP).each { |k| @ws_hwm.delete(k) }
-      end
-
-      private def load_ws(detail : Store::FlowDetail) : Array(Store::WsMessage)
-        return [] of Store::WsMessage unless detail.row.status == 101
-        @store.ws_messages(detail.row.id, WS_MSG_CAP)
-      rescue
-        [] of Store::WsMessage
       end
 
       private def persist(detections : Array(Detection), *, flow_id : Int64, replay_id : Int64?) : Nil
@@ -265,13 +298,17 @@ module Gori
       end
 
       private def run_active(task : ActiveTask) : Nil
-        # Don't fire outbound probes while winding down (@stopped) OR after the operator left
-        # Active mode. set_mode(Passive/Off) flips @mode but can't unqueue tasks already sitting
-        # in @active_jobs (up to ACTIVE_QUEUE deep); the enqueue side (maybe_enqueue_active /
-        # active_backfill) only gates NEW work, so the consumer MUST re-check the live mode too —
-        # otherwise buffered canary/CORS probes keep hitting the target for the minutes it takes
-        # the single worker to drain the backlog, violating the "Off ⇒ no probing" mode contract.
-        return if @stopped || !@mode.active?
+        return if @stopped # winding down: don't fire outbound probes (or touch a closing store)
+        # After the operator left Active mode, set_mode(Passive/Off) can't unqueue tasks already
+        # sitting in @active_jobs (up to ACTIVE_QUEUE deep) — the enqueue side only gates NEW work
+        # — so the consumer MUST re-check the live mode, or buffered canary/CORS probes keep hitting
+        # the target after Active was turned off. RELEASE the dedup key when dropping for this
+        # reason: it was recorded at enqueue, and keeping it would suppress the surface forever if
+        # Active is re-enabled (arm_active_backfill would skip it as already-seen).
+        unless @mode.active?
+          @active_seen.delete(task.plan.dedup_key)
+          return
+        end
         row = task.detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
         http2 = task.detail.http_version.starts_with?("HTTP/2")

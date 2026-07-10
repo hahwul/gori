@@ -1156,6 +1156,23 @@ module Gori
       msgs
     end
 
+    # Frames on a flow with id AFTER `after_id`, OLDEST-first, up to `limit`. Lets the Prism WS
+    # rescan page forward from its per-flow high-water-mark and cover every frame exactly once,
+    # even when more than a full window accumulated unscanned (a dropped-event burst) or the flow
+    # was evicted from the analyzed-set and re-scanned.
+    def ws_messages_after(flow_id : Int64, after_id : Int64, limit : Int32) : Array(WsMessage)
+      msgs = [] of WsMessage
+      cols = "id, flow_id, replay_id, created_at, direction, opcode, payload"
+      @db.query("SELECT #{cols} FROM ws_messages WHERE flow_id = ? AND id > ? ORDER BY id LIMIT ?",
+        args: [flow_id, after_id, limit.to_i64] of DB::Any) do |rs|
+        rs.each do
+          msgs << WsMessage.new(rs.read(Int64), rs.read(Int64), rs.read(Int64?), rs.read(Int64),
+            rs.read(String), rs.read(Int32), rs.read(Bytes))
+        end
+      end
+      msgs
+    end
+
     def ws_messages_for_replay(replay_id : Int64, limit : Int32? = nil) : Array(WsMessage)
       msgs = [] of WsMessage
       cols = "id, flow_id, replay_id, created_at, direction, opcode, payload"
@@ -1519,6 +1536,12 @@ module Gori
       return if cutoff <= 0
       conn.transaction do |tx|
         c = tx.connection
+        # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
+        # newer flows push its id below the cutoff is reaped here mid-stream, which also stops
+        # Prism WS scanning on it. A liveness guard like the h2 one below is the fix, but it must
+        # compare ws_message.created_at against a WS-relative recency floor (flows.created_at and
+        # ws_messages.created_at are set from different sources), so it is left for a focused
+        # retention change rather than bundled here.
         # Only CAPTURED ws messages (replay_id IS NULL, real flow_id) cascade with their
         # pruned flow. WebSocket-Replay output rows (update_replay_ws_messages) are stored
         # with the sentinel flow_id = 0 and keyed by replay_id, so a bare `flow_id <= cutoff`

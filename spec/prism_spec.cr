@@ -285,6 +285,33 @@ describe Gori::Prism::Analyzer do
     end
   end
 
+  it "pages a >WS_MSG_CAP WebSocket backlog without skipping a band (no missed secret)" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+        target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      fid = detail.row.id
+      store.insert_ws_message(fid, "in", 1, "hello".to_slice) # frame 1 (no secret) → sets hwm
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Prism::Analyzer.new(store, scope, feed, Gori::Prism::Mode::Passive, true)
+      a.start
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # initial scan; hwm = frame 1
+      sleep 120.milliseconds
+      # A burst of >WS_MSG_CAP(200) frames arrives with the secret in frame ~30 — the band a
+      # last-200-window rescan would drop (window would be frames ~52..251).
+      250.times do |k|
+        payload = k == 28 ? "token=AKIAIOSFODNN7EXAMPLE" : "frame#{k}"
+        store.insert_ws_message(fid, "in", 1, payload.to_slice)
+      end
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # one rescan must page the whole backlog
+      sleep 250.milliseconds
+      store.prism_issues.count(&.code.== "secret_in_ws").should eq(1) # the banded secret was caught
+      a.stop
+    end
+  end
+
   it "bumps store.prism_generation on persist and honors session suppress after hard delete" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: x\r\n\r\n",
