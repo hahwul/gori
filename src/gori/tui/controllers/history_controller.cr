@@ -87,6 +87,12 @@ module Gori::Tui
         return true
       end
       @host.focus_body
+      # A click that selects a row / opens detail also exits QL edit mode (applying the query,
+      # like Enter) — otherwise @querying stays set and later keys are hijacked into the filter bar.
+      if @history.querying?
+        flush_query_reload
+        @history.stop_query
+      end
       # Preview pane click focuses that side (settings:layout).
       if pane = @history.preview_pane_at(inner, mx, my)
         @history.set_preview_focus(pane)
@@ -286,8 +292,8 @@ module Gori::Tui
 
     # Copy the selected flow's raw request (head + body, byte-exact P7) to the
     # system clipboard via OSC 52.
-    def copy_selection : Nil
-      id = @history.selected_id
+    def copy_selection(id : Int64? = nil) : Nil
+      id ||= @history.selected_id
       return unless id
       detail = @host.session.store.get_flow(id)
       unless detail

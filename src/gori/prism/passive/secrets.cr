@@ -9,6 +9,7 @@ module Gori
           {/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/, "AWS access key id"},
           {/\bAIza[0-9A-Za-z_\-]{35}\b/, "Google API key"},
           {/\bgh[pousr]_[0-9A-Za-z]{36}\b/, "GitHub token"},
+          {/\bgithub_pat_[0-9A-Za-z_]{22,}\b/, "GitHub fine-grained token"},
           {/\bglpat-[0-9A-Za-z_\-]{20}\b/, "GitLab token"},
           {/\bxox[baprs]-[0-9A-Za-z\-]{10,}/, "Slack token"},
           # Stripe LIVE keys only (test keys aren't sensitive); the prefix is distinctive.

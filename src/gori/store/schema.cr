@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 28
+      VERSION = 29
 
       # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
       # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the

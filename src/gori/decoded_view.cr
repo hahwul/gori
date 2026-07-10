@@ -73,8 +73,10 @@ module Gori
     private def emit_text(j : JSON::Builder, name : String, text : String?, clip : Int32?) : Nil
       if text.nil?
         j.field name, nil
-      elsif clip && text.size > clip
-        j.field name, text[0, clip]
+      elsif clip && text.bytesize > clip
+        # clip is a BYTE budget (Serialize::DECODE_TEXT_MAX); compare/cut by bytes and scrub
+        # so a cut through a multi-byte UTF-8 sequence can't emit invalid JSON to the client.
+        j.field name, text.byte_slice(0, clip).scrub
         j.field "#{name}_truncated", true
       else
         j.field name, text

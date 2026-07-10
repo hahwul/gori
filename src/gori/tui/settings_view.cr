@@ -494,17 +494,19 @@ module Gori::Tui
 
     private def render_footer(screen : Screen, box : Rect) : Nil
       note_y = box.bottom - 2
+      iw = {box.right - (box.x + 3) - 1, 0}.max # interior width so long hints can't bleed past the box border
       if status = @status
         color = status.starts_with?("invalid") || status.starts_with?("save failed") ? Theme.yellow : Theme.green
-        screen.text(box.x + 3, note_y, "• #{status}", color, Theme.panel)
+        screen.text(box.x + 3, note_y, "• #{status}", color, Theme.panel, width: iw)
       elsif @section == :theme
         names = Theme.available
-        screen.text(box.x + 3, note_y, "theme #{(names.index(@values[0]) || 0) + 1}/#{names.size}", Theme.muted, Theme.panel)
+        screen.text(box.x + 3, note_y, "theme #{(names.index(@values[0]) || 0) + 1}/#{names.size}", Theme.muted, Theme.panel, width: iw)
       else
-        screen.text(box.x + 3, note_y, fields[@focused].hint, Theme.muted, Theme.panel)
+        screen.text(box.x + 3, note_y, fields[@focused].hint, Theme.muted, Theme.panel, width: iw)
       end
       hint = @section == :theme ? "↑/↓ select · ↵ apply · ^R reset · esc close" : "↑/↓ field · ↵ save · ^R reset · esc close"
-      screen.text(box.right - hint.size - 2, note_y, hint, Theme.muted, Theme.panel)
+      hx = {box.right - hint.size - 2, box.x + 1}.max # never start left of the box interior
+      screen.text(hx, note_y, hint, Theme.muted, Theme.panel, width: {box.right - hx - 1, 0}.max)
     end
   end
 end

@@ -204,7 +204,7 @@ module Gori
               "When `flow_id` is set, url/method/headers/body/raw are ignored. " \
               "Host + Content-Length are auto-added when omitted on the url path." do |s|
               s.field "flow_id", intprop("replay a captured flow by id (no url needed; like TUI replay)")
-              s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x"), required: true
+              s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id is given)")
               s.field "method", strprop("HTTP method (default GET)")
               s.field "headers", objprop("header name->value map")
               s.field "body", strprop("request body, sent as-is")
@@ -681,8 +681,11 @@ module Gori
       end
 
       private def emit_capped_text(j : JSON::Builder, field : String, text : String) : Nil
-        if text.size > MCP_REPLAY_REQUEST_MAX
-          j.field field, text.byte_slice(0, MCP_REPLAY_REQUEST_MAX)
+        if text.bytesize > MCP_REPLAY_REQUEST_MAX
+          # Compare and cut by BYTES (the cap is a byte budget), then scrub — a slice
+          # through a multi-byte UTF-8 sequence would otherwise emit invalid UTF-8 into
+          # the JSON-RPC stream, which must be well-formed UTF-8 over the stdio transport.
+          j.field field, text.byte_slice(0, MCP_REPLAY_REQUEST_MAX).scrub
           j.field "#{field}_truncated", true
         else
           j.field field, text
@@ -995,7 +998,9 @@ module Gori
 
       private def create_replay(h) : Result
         finding_id = int(h, "finding_id")
+        return Result.new(id_error(h, "finding_id"), is_error: true) if finding_id.nil? && present?(h, "finding_id")
         flow_id = int(h, "flow_id")
+        return Result.new(id_error(h, "flow_id"), is_error: true) if flow_id.nil? && present?(h, "flow_id")
 
         if finding_id
           finding = @store.get_finding(finding_id)
@@ -1051,7 +1056,10 @@ module Gori
 
         position = int(h, "position")
         if position.nil?
+          return Result.new(id_error(h, "position"), is_error: true) if present?(h, "position") # present but non-integer
           position = @store.replays_meta.size.to_i64
+        elsif position < Int32::MIN || position > Int32::MAX
+          return Result.new("'position' out of range", is_error: true)
         end
 
         # Apply Env.mask_secrets
@@ -1126,6 +1134,10 @@ module Gori
 
         target = str(h, "target") || existing.target
         request = str(h, "request") || existing.request
+        # An explicitly-passed empty string is truthy in Crystal, so guard it here to
+        # mirror create_replay's invariant — a blank target/request can't be sent.
+        return Result.new("target must not be empty", is_error: true) if target.empty?
+        return Result.new("request must not be empty", is_error: true) if request.empty?
 
         http2 = if present?(h, "http2")
                   bool(h, "http2") || false
@@ -1436,7 +1448,8 @@ module Gori
         config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
         config.user_wordlist = str(h, "wordlist").presence
         if b = int(h, "bucket")
-          config.locations.each { |loc| config.bucket_size[loc] = b.to_i }
+          bucket = b.clamp(Int32::MIN.to_i64, Int32::MAX.to_i64).to_i # avoid Int64->Int32 overflow
+          config.locations.each { |loc| config.bucket_size[loc] = bucket }
         end
         names = Miner::Wordlist.load(config.user_wordlist)
         engine = Miner::Engine.new(bytes, use_h2, names, sender, config)
@@ -1743,7 +1756,17 @@ module Gori
       end
 
       private def bool(h, key : String) : Bool?
-        h[key]?.try(&.as_bool?)
+        v = h[key]?
+        return nil unless v
+        return v.as_bool? unless v.as_bool?.nil?
+        # Clients/LLMs often serialize tool args as strings (the schema's "boolean" is
+        # advisory, not enforced) — accept "true"/"false" so a stringified flag isn't
+        # silently coerced to false, mirroring int()'s leniency.
+        case v.as_s?.try(&.downcase)
+        when "true"  then true
+        when "false" then false
+        else              nil
+        end
       end
 
       private def clamp(n : Int64?, default : Int32, max : Int32) : Int32

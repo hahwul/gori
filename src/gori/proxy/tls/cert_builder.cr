@@ -1,3 +1,4 @@
+require "socket"
 require "./key_pair"
 
 module Gori::Proxy::Tls
@@ -74,7 +75,9 @@ module Gori::Proxy::Tls
     # anything else skip it (the cert then lacks a SAN and fails verification for
     # that bogus host — the safe outcome) rather than minting an injected cert.
     private def self.safe_san?(host : String) : Bool
-      !host.empty? && host.bytesize <= 253 && (host =~ /\A[A-Za-z0-9.\-*]+\z/) != nil
+      return false if host.empty? || host.bytesize > 253
+      return true if (host =~ /\A[A-Za-z0-9.\-*]+\z/) != nil # hostname / IPv4 / wildcard labels
+      ipv6?(host) # IPv6 literals contain ':' (rejected by the DNS charset above)
     end
 
     # An IP-literal CONNECT/SNI target must get an iPAddress SAN, not a dNSName:
@@ -83,7 +86,7 @@ module Gori::Proxy::Tls
     # MITM of any HTTPS target addressed by IP. The IPv4 character set is a subset
     # of safe_san?'s, so this stays injection-safe.
     private def self.san_value(host : String) : String
-      ipv4?(host) ? "IP:#{host}" : "DNS:#{host}"
+      ipv4?(host) || ipv6?(host) ? "IP:#{host}" : "DNS:#{host}"
     end
 
     # CANONICAL dotted-quad only. OpenSSL's IP-SAN parser (a2i_GENERAL_NAME) rejects
@@ -99,6 +102,16 @@ module Gori::Proxy::Tls
         next false if o.size > 1 && o[0] == '0' # no leading zeros
         o.to_u8? != nil                         # 0..255
       end
+    end
+
+    # Canonical IPv6 literal (bare, no brackets / no %zone). An IP-literal HTTPS target
+    # needs an iPAddress SAN just like IPv4, or RFC-6125 clients reject the leaf. The
+    # charset guard excludes ',' (X509v3 nconf entry separator) and '%' (zone id), so the
+    # value stays injection-safe and parseable by OpenSSL's a2i_IPADDRESS; anything else
+    # falls through to a DNS SAN (won't verify for that odd literal, but never crashes).
+    private def self.ipv6?(host : String) : Bool
+      return false unless (host =~ /\A[0-9A-Fa-f:.]+\z/) != nil
+      Socket::IPAddress.valid_v6?(host)
     end
 
     private def self.add_ext(x : LibCrypto::X509, nid : Int32, value : String) : Nil

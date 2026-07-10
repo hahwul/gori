@@ -94,6 +94,11 @@ module Gori::Tui
       @run_count_sig = ""
       @results = [] of Fuzz::Result
       @results_rev = 0_i64 # bumped on every @results mutation — the DIST cache key
+      # The template snapshot the CURRENT run's results were generated from — the RESULT
+      # detail must reconstruct each request against this, not the live @editor buffer,
+      # which the user may have edited (adding/removing §…§ markers) since the run.
+      @run_template = nil.as(Fuzz::Template?)
+      @pending_template = nil.as(Fuzz::Template?)
       @sel = 0
       @scroll = 0
       @sort = :index
@@ -525,6 +530,7 @@ module Gori::Tui
 
     def begin_run(total : Int64?) : Nil
       @results.clear
+      @run_template = @pending_template # freeze the template these results are rendered against
       @results_rev += 1
       # A fresh run reuses result indices from 0, so drop the {pane, index}-keyed detail
       # cache — otherwise an old row's lines could survive under a colliding new index.
@@ -549,7 +555,18 @@ module Gori::Tui
 
     def append_result(r : Fuzz::Result) : Nil
       @results << r
-      @results.shift if @results.size > RESULT_CAP
+      if @results.size > RESULT_CAP
+        @results.shift
+        # Only the raw index view (no filter, no re-sort) shifts 1:1 with @results, so only
+        # there does pinning selection/scroll by -1 keep the same logical rows. In a
+        # matched-only or re-sorted view the evicted (usually unmatched) front row isn't at
+        # this position — @sel should stay put (the render clamp bounds it); a blind -1 there
+        # would retarget the open detail to a different result.
+        if @sort == :index && !@matched_only
+          @sel -= 1 if @sel > 0
+          @scroll -= 1 if @scroll > 0
+        end
+      end
       @results_rev += 1 # grow AND ring-evict both bump (size is pinned once full)
     end
 
@@ -778,6 +795,7 @@ module Gori::Tui
         return {nil, err} # don't silently run match-everything on a bad pattern
       end
       template = Fuzz::Template.parse(Env.expand(@editor.text), @http2)
+      @pending_template = template # committed to @run_template in begin_run (see detail_request_bytes)
       return {nil, "mark a position first — ^A params · ^K word"} if template.position_count == 0
       return {nil, "add a payload set — ^O config · + Add set (^L for a List)"} if @sets.empty?
       scheme, host, port = Replay::FlowRequest.parse_target(Env.expand(@target))
@@ -811,8 +829,12 @@ module Gori::Tui
 
     private def build_numbers(value : String) : Fuzz::NumberRange
       range, _, step = value.partition(':')
-      from, _, to = range.partition('-')
-      Fuzz::NumberRange.new(from.to_i64? || 0_i64, to.to_i64? || 0_i64, step.to_i64? || 1_i64)
+      # Match two (possibly negative) integers, so a leading '-' on From isn't mistaken
+      # for the from/to separator (partition('-') would split "-5-5" as "" / "5-5").
+      m = range.match(/\A(-?\d+)-(-?\d+)\z/)
+      from = (m.try(&.[1].to_i64?)) || 0_i64
+      to = (m.try(&.[2].to_i64?)) || 0_i64
+      Fuzz::NumberRange.new(from, to, step.to_i64? || 1_i64)
     end
 
     private def build_brute(value : String) : Fuzz::BruteForce
@@ -1479,9 +1501,13 @@ module Gori::Tui
         draw_add_row(screen, inner, y, focused)
       else
         visible = {set_rows - 1, 1}.max # 1 row for the overflow hint, 1 for Add
-        idx = current_set_index || 0
-        @cfg_scroll = idx if idx < @cfg_scroll
-        @cfg_scroll = idx - visible + 1 if idx >= @cfg_scroll + visible
+        # Only re-anchor scroll to the cursor when it's actually on a set row; on a tail
+        # row (Add/Mode/Advanced/Run) current_set_index is nil, and defaulting it to 0
+        # would snap a scrolled list back to the top on every render.
+        if idx = current_set_index
+          @cfg_scroll = idx if idx < @cfg_scroll
+          @cfg_scroll = idx - visible + 1 if idx >= @cfg_scroll + visible
+        end
         @cfg_scroll = @cfg_scroll.clamp(0, {@sets.size - visible, 0}.max)
         stop = {@cfg_scroll + visible, @sets.size}.min
         y = y0
@@ -1842,7 +1868,10 @@ module Gori::Tui
 
     # The reconstructed wire request for a result (template with its payloads spliced in).
     private def detail_request_bytes(r : Fuzz::Result) : Bytes
-      Fuzz::Template.parse(@editor.text, @http2).render(r.payloads)
+      # Render against the run's frozen template (env-expanded, as sent) so a post-run
+      # edit to the live buffer can't truncate/garble the reconstructed request.
+      tmpl = @run_template || Fuzz::Template.parse(Env.expand(@editor.text), @http2)
+      tmpl.render(r.payloads)
     end
 
     private def detail_request_lines(r : Fuzz::Result) : Array(String)

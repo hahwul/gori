@@ -215,6 +215,47 @@ describe Gori::Proxy::WS do
       sink.messages.any? { |(_, _, s)| s.includes?("too large to capture") }.should be_true
       sink.messages.should contain({"in", 1, "yo"})
     end
+
+    it "preserves a small leading fragment when a LATER fragment is oversized (was dropped)" do
+      big = Gori::Proxy::WS::MAX_FRAME.to_i + 16
+      f1 = Bytes[0x01_u8, 0x03_u8, 0x61_u8, 0x62_u8, 0x63_u8] # OP_TEXT, no FIN, len 3, "abc"
+      hdr = IO::Memory.new
+      hdr.write_byte(0x80_u8) # FIN | OP_CONT(0x0)
+      hdr.write_byte(0x7f_u8)
+      len = big.to_u64
+      (0..7).each { |i| hdr.write_byte((len >> (56 - i * 8)).to_u8!) }
+      f2_hdr = hdr.to_slice
+      payload = Bytes.new(big, 0x41_u8)
+
+      client_side, relay_client = UNIXSocket.pair
+      origin_side, relay_upstream = UNIXSocket.pair
+
+      drain = Channel(Nil).new
+      spawn do
+        buf = Bytes.new(64 * 1024)
+        while (n = client_side.read(buf)) > 0
+        end
+      rescue IO::Error
+      ensure
+        drain.send(nil)
+      end
+      spawn do
+        origin_side.write(f1)
+        origin_side.write(f2_hdr)
+        origin_side.write(payload)
+        origin_side.close
+      end
+
+      sink = WsSink.new
+      Gori::Proxy::WS::Relay.run(relay_client, relay_upstream, 11_i64, sink)
+      drain.receive
+      client_side.close rescue nil
+
+      # The leading "abc" fragment reaches the sink (not silently discarded because the
+      # message's final fragment turned out to be oversized), plus the oversized marker.
+      sink.messages.should contain({"in", 1, "abc"})
+      sink.messages.any? { |(_, _, s)| s.includes?("too large to capture") }.should be_true
+    end
   end
 end
 

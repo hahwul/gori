@@ -50,10 +50,11 @@ module Gori
 
           return nil if params.empty? || params.size > MAX_PARAMS
           request = rebuild(detail.request_head, body, req.target, path, new_query, new_body)
-          # Key by rule + host + METHOD + path + (name@location) so the same path on a different
-          # method or parameter location is a distinct surface (no collision across rules either).
-          sig = params.map { |p| "#{p.name}@#{p.location}" }.sort!.join(",")
-          key = "reflected_param|#{detail.row.host}|#{req.method.upcase}|#{path}|#{sig}"
+          # Key by rule + host:PORT + METHOD + path + (name@location) so the same host on a
+          # different port/service is a distinct surface. Length-prefix each name so a param
+          # name containing '@'/','/':' can't collide with a different multi-param set.
+          sig = params.map { |p| "#{p.name.bytesize}:#{p.name}@#{p.location}" }.sort!.join(",")
+          key = "reflected_param|#{detail.row.host}:#{detail.row.port}|#{req.method.upcase}|#{path}|#{sig}"
           Plan.new(request, params, key)
         end
 

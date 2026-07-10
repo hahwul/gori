@@ -27,8 +27,11 @@ module Gori
             name = (eq ? nv[0...eq] : nv).strip
             value = (eq ? nv[(eq + 1)..] : "").strip
             flags = segs[1..].map(&.strip.downcase)
+            # Keep the ORIGINAL-case Expires value for date parsing (flags are lowercased above,
+            # which would break HTTP_DATE's month/day names).
+            expires_val = segs[1..].map(&.strip).find { |f| f.downcase.starts_with?("expires=") }.try { |f| f.partition('=')[2].strip }
             # A cookie being deleted holds no secret — skip its hygiene (avoids logout/reset FPs).
-            next if deletion?(value, flags)
+            next if deletion?(value, flags, expires_val)
 
             has_secure = flags.includes?("secure")
             prefixed = check_prefix(ctx, name, flags, has_secure, acc)
@@ -57,9 +60,19 @@ module Gori
         #     sets it, and frameworks clear with a sentinel value (PHP emits `sid=deleted;
         #     Max-Age=0`), so requiring an empty value would miss the common logout pattern.
         #   * Otherwise, an EMPTY value paired with an Expires attribute is the classic clear.
-        private def deletion?(value : String, flags : Array(String)) : Bool
+        private def deletion?(value : String, flags : Array(String), expires : String?) : Bool
           return true if flags.any? { |f| max_age_delete?(f) }
-          value.empty? && flags.any?(&.starts_with?("expires="))
+          return false unless value.empty? && expires
+          expires_past?(expires)
+        end
+
+        # An Expires already at/before now is a real clear. An UNparsable/odd date is treated as a
+        # deletion too, so a framework clearing a cookie with a sentinel date isn't spammed with
+        # hygiene findings — only a genuinely FUTURE-dated empty cookie keeps its hygiene checks.
+        private def expires_past?(expires : String) : Bool
+          Time::Format::HTTP_DATE.parse(expires) <= Time.utc
+        rescue
+          true
         end
 
         # Max-Age with a non-positive value (0 or negative) — an immediate deletion (RFC 6265).

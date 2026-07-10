@@ -12,7 +12,7 @@ module Gori::Proxy::H2
     record Message, compressed : Bool, data : Bytes
 
     def self.grpc?(content_type : String?) : Bool
-      !!content_type.try(&.lstrip.starts_with?("application/grpc"))
+      !!content_type.try(&.lstrip.downcase.starts_with?("application/grpc")) # media types are case-insensitive
     end
 
     # gRPC status codes (https://grpc.io/docs/guides/status-codes/). 0 = OK; the

@@ -50,6 +50,7 @@ describe Gori::Store do
       store.@db.exec("DROP INDEX idx_ws_messages_replay")              # V26
       store.@db.exec("ALTER TABLE ws_messages DROP COLUMN replay_id")  # V26
       store.@db.exec("DROP INDEX idx_h2_frames_created")               # V27
+      store.@db.exec("DROP TABLE prism_suppressions")                  # V29
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 

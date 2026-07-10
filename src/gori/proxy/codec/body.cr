@@ -116,9 +116,16 @@ module Gori::Proxy::Codec
       s = resp.status
       return {BodyFraming::None, 0_i64} if (s >= 100 && s < 200) || s == 204 || s == 304
 
-      if chunked?(resp.headers.get_all("Transfer-Encoding"))
+      te = resp.headers.get_all("Transfer-Encoding")
+      if chunked?(te)
         reject_te_with_cl(resp.headers)
         {BodyFraming::Chunked, 0_i64}
+      elsif te_present?(te)
+        # RFC 7230 §3.3.3 rule 3: a response with a non-chunked Transfer-Encoding (e.g.
+        # `identity`/`gzip`) is close-delimited — TE takes precedence over any Content-Length
+        # (the CL.TE ambiguity). Framing by CL would leave the real body on the wire to
+        # misframe the next response on a reused upstream (a response-desync primitive).
+        {BodyFraming::CloseDelimited, 0_i64}
       elsif cl = content_length(resp.headers)
         {BodyFraming::Length, cl}
       else

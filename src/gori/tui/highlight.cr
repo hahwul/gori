@@ -409,18 +409,23 @@ module Gori::Tui
       ellipsis = overflow && limit > 1
 
       visual_col = 0
+      room = limit - (ellipsis ? 1 : 0)
+      done = false
       line.each do |span|
-        break if visual_col >= limit
+        break if done
         span.text.each_grapheme do |g|
           gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
-          room = limit - (ellipsis ? 1 : 0)
+          # The FIRST grapheme that doesn't fit terminates ALL rendering — a single
+          # continuous walk, so a later span can't resume into the leftover room and draw
+          # a narrower glyph in place of the skipped wide one (Screen#fit glyph parity).
           if visual_col + gw > room
+            done = true
             break
           end
           screen.cell(x + visual_col, y, g.to_s, span.fg, bg, span.attr)
           visual_col += gw
         end
-        break if visual_col >= limit
+        break if done || visual_col >= limit
       end
 
       if ellipsis && visual_col < limit

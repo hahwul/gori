@@ -8,8 +8,12 @@ module Gori
       class Cors < Rule
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
-          acao = resp.headers.get?("Access-Control-Allow-Origin").try(&.strip)
-          return unless acao
+          # The CORS algorithm requires EXACTLY one ACAO header; with zero or several the
+          # browser fails the check and blocks the response, so any "finding" would be a
+          # non-exploitable false positive (a common proxy+app double-add misconfig).
+          acao_all = resp.headers.get_all("Access-Control-Allow-Origin")
+          return unless acao_all.size == 1
+          acao = acao_all.first.strip
           creds = resp.headers.get?("Access-Control-Allow-Credentials").try(&.downcase.strip) == "true"
           if acao == "*"
             # `*` + Allow-Credentials is REJECTED by browsers (the credentialed request fails),

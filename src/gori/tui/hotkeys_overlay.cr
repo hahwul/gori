@@ -71,7 +71,10 @@ module Gori::Tui
 
     private def load_overrides : Hash(String, Verb::Chord?)
       out = {} of String => Verb::Chord?
-      Hotkeys.chord_overrides.each { |id, chords| out[id] = chords.first? }
+      # rebindable_overrides (not raw chord_overrides): drop stale overrides for now-FIXED/hidden
+      # verb ids that build_keymap ignores, so the editor's conflict check can't report a phantom
+      # "already bound" for a chord live dispatch never actually claims.
+      Hotkeys.rebindable_overrides(@registry).each { |id, chords| out[id] = chords.first? }
       out
     end
 
@@ -230,12 +233,15 @@ module Gori::Tui
         i = start + row
         break if i >= @rows.size
         r = @rows[i]
+        up = row == 0 && start > 0
+        down = row == cap - 1 && i < @rows.size - 1
         if r.kind == :header
           draw_header(screen, box, r, top + row)
+          # The boundary viewport row can land on a header; still show the ▲/▼ affordance
+          # (it was previously swallowed whenever the top/bottom row was a header).
+          draw_scroll_marker(screen, box.right - 2, top + row, Theme.panel, up: up, down: down)
         else
-          draw_binding(screen, box, i, top + row,
-            up: row == 0 && start > 0,
-            down: row == cap - 1 && i < @rows.size - 1)
+          draw_binding(screen, box, i, top + row, up: up, down: down)
         end
       end
       render_footer(screen, box)

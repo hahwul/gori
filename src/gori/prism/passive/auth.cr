@@ -16,7 +16,9 @@ module Gori
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.scheme == "http" # over TLS the credentials are transport-protected
 
-          if (a = ctx.req.headers.get?("Authorization")) && basic?(a)
+          if ctx.req.headers.get_all("Authorization").any? { |v| basic?(v) }
+            # get_all, not get? (last-only): a duplicated Authorization header could hide the
+            # real Basic credential behind a later Bearer, mirroring the response-side WWW-Auth check.
             acc << det(ctx, "HTTP Basic credentials sent over cleartext HTTP",
               Store::Severity::High, "request Authorization: Basic")
             return # one finding per flow is enough; the request side is the stronger signal
@@ -34,7 +36,25 @@ module Gori
         # the first. (Auth-param values can also carry commas, but a real Basic challenge's scheme
         # token still opens one of the comma segments.)
         private def offers_basic?(value : String) : Bool
-          value.split(',').any? { |seg| basic?(seg) }
+          split_challenges(value).any? { |seg| basic?(seg) }
+        end
+
+        # Split on TOP-LEVEL commas only — a comma inside a quoted auth-param value (e.g.
+        # `Digest realm="a, basic mode off"`) must not spawn a bogus "basic …" challenge segment.
+        private def split_challenges(value : String) : Array(String)
+          segs = [] of String
+          in_quote = false
+          start = 0
+          value.each_char_with_index do |c, i|
+            if c == '"'
+              in_quote = !in_quote
+            elsif c == ',' && !in_quote
+              segs << value[start...i]
+              start = i + 1
+            end
+          end
+          segs << value[start..]
+          segs
         end
 
         # An auth header/challenge whose scheme token is `Basic` (case-insensitive, leading

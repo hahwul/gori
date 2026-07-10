@@ -1511,7 +1511,10 @@ module Gori
           # branch can block or throw back into the loop.
           if committed
             deferred.each(&.call)
-            @inserts_since_prune += ops.count(&.is_a?(InsertFlow))
+            # Count bulk-import rows too — an InsertImportBatch inserts many flows in ONE op,
+            # so counting it as a single InsertFlow (or 0) let a large import bypass the
+            # retention sweep, keeping the DB far over its cap until enough live captures accrue.
+            @inserts_since_prune += ops.sum { |op| op.is_a?(InsertFlow) ? 1 : (op.is_a?(InsertImportBatch) ? op.pairs.size : 0) }
             if @inserts_since_prune >= @prune_interval
               prune(conn)
               @inserts_since_prune = 0

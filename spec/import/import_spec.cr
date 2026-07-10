@@ -59,6 +59,41 @@ describe Gori::Import do
     end
   end
 
+  it "preserves duplicate response headers (multiple Set-Cookie) on HAR import" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, <<-JSON)
+        {
+          "log": {
+            "entries": [
+              {
+                "startedDateTime": "2026-06-01T12:00:00.000Z", "time": 1,
+                "request": {"method": "GET", "url": "https://shop.test/x", "httpVersion": "HTTP/1.1", "headers": []},
+                "response": {
+                  "status": 200, "statusText": "OK", "httpVersion": "HTTP/1.1",
+                  "headers": [
+                    {"name": "Set-Cookie", "value": "session=abc"},
+                    {"name": "Set-Cookie", "value": "csrf=def"}
+                  ],
+                  "content": {"mimeType": "text/html", "text": "ok"}
+                }
+              }
+            ]
+          }
+        }
+        JSON
+
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har)
+        row = store.search(Gori::QL::EMPTY, 10).first
+        head = String.new(store.get_flow(row.id).not_nil!.response_head.not_nil!)
+        head.scan(/^set-cookie:/im).size.should eq(2) # both cookies survive, not collapsed to the last
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "imports pending flows from a URL list file" do
     urls = File.tempname("gori", ".txt")
     begin

@@ -62,6 +62,12 @@ describe Gori::Convert do
   end
 
   describe "more encodings" do
+    it "base58-decode counts leading zeros consistently across embedded whitespace" do
+      # "11 1abc" and "111abc" are numerically identical to the value parser (whitespace
+      # skipped); the leading-zero byte count must agree too.
+      Gori::Convert::Codecs.base58_decode("11 1abc").should eq Gori::Convert::Codecs.base58_decode("111abc")
+    end
+
     it "base32 round-trips and matches the RFC 4648 vector" do
       conv("base32-encode", "foobar").should eq "MZXW6YTBOI======"
       conv("base32-decode", "MZXW6YTBOI======").should eq "foobar"
@@ -127,6 +133,11 @@ describe Gori::Convert do
       conv("unicode-escape", "aé").should eq "a\\u00e9"
       conv("unicode-unescape", "a\\u00e9").should eq "aé"
       conv("unicode-unescape", conv("unicode-escape", "x🎉y")).should eq "x🎉y"
+    end
+
+    it "unicode-unescape reports a lone/unpaired surrogate as a ConvertError (not a raw ArgumentError)" do
+      expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\ud800") }
+      expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\udc00") }
     end
   end
 

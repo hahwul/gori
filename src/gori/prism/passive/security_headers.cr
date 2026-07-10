@@ -10,7 +10,7 @@ module Gori
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
           if ctx.scheme == "https"
-            hsts = resp.headers.get?("Strict-Transport-Security")
+            hsts = resp.headers.get_all("Strict-Transport-Security").first? # RFC 6797 §8.1: UA honours the FIRST STS header
             if hsts.nil? || hsts_disabled?(hsts)
               acc << hdr(ctx, "missing_hsts", "Missing or disabled HSTS header", Store::Severity::Medium)
             end

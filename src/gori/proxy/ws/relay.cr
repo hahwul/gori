@@ -46,8 +46,15 @@ module Gori::Proxy::WS
         message_opcode = h.opcode if h.data? && h.opcode != OP_CONT
 
         if h.len > WS::MAX_FRAME
+          # Flush any buffered leading fragments of this message before the oversized-frame
+          # marker, so captured prefix bytes aren't dropped and a later small FIN fragment
+          # can't be surfaced as if it were the whole message.
+          if h.data? && assembling.size > 0
+            sink.on_ws_message(flow_id, direction, message_opcode.to_i, assembling.to_slice.dup)
+            assembling = assembling.size > RESET_THRESHOLD ? IO::Memory.new : assembling.tap(&.clear)
+          end
           break unless forward_oversized_frame(src, dst, h, direction, flow_id, sink, message_opcode, scratch)
-          assembling = assembling.size > RESET_THRESHOLD ? IO::Memory.new : assembling.tap(&.clear) if h.data? && h.fin?
+          break if h.close? # an oversized CLOSE still terminates the tunnel, like a normal one
           next
         end
 
@@ -80,8 +87,8 @@ module Gori::Proxy::WS
     # Forwards a frame whose payload exceeds MAX_FRAME byte-exact (P7) by streaming
     # it rather than buffering — the capture cap bounds the projection, not the
     # forward. Returns false if the peer died mid-payload (caller ends the
-    # direction). A data frame's final fragment is surfaced as a marker (its payload
-    # is too large to capture) so it isn't silently lost.
+    # direction). ANY oversized data frame (final or not) is surfaced as a marker so
+    # it isn't silently lost — a non-final oversized fragment would leave no trace.
     private def self.forward_oversized_frame(src : IO, dst : IO, h : WS::Header, direction : String,
                                              flow_id : Int64, sink : FlowSink, message_opcode : UInt8,
                                              scratch : Bytes) : Bool
@@ -89,7 +96,7 @@ module Gori::Proxy::WS
       forwarded = WS.stream_payload(src, dst, h.len, scratch)
       dst.flush
       return false unless forwarded # peer died mid-payload
-      if h.data? && h.fin?
+      if h.data?
         marker = "[gori] #{h.len}-byte WebSocket frame forwarded; too large to capture".to_slice
         sink.on_ws_message(flow_id, direction, message_opcode.to_i, marker)
       end

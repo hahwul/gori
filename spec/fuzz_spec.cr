@@ -92,6 +92,14 @@ describe F::Template do
     F::Template.auto_mark("q=§hi§").should eq("q=§hi§")
   end
 
+  it "auto-marks JSON boolean and null values, not only strings/numbers" do
+    body = "POST / HTTP/1.1\r\nContent-Type: application/json\r\n\r\n{\"name\":\"bob\",\"admin\":true,\"age\":30,\"gone\":null}"
+    marked = F::Template.auto_mark(body)
+    marked.includes?("\"admin\":§true§").should be_true
+    marked.includes?("\"gone\":§null§").should be_true
+    F::Template.parse(marked).position_count.should eq(4) # name, admin, age, gone
+  end
+
   it "toggles a marker around the word at the cursor" do
     # cursor inside "admin"
     F::Template.mark_word("user=admin", 7).should eq("user=§admin§")

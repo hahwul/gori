@@ -94,9 +94,9 @@ module Gori
 
     # bytes-in / text-out (hashes, hex-encode, base64-encode).
     def self.encode(name : String, *aliases, category : Category,
-                    description : String, &fn : Bytes -> String) : Converter
+                    description : String, direction : Direction = Direction::Encode, &fn : Bytes -> String) : Converter
       wrapped = ->(input : Bytes) { fn.call(input).to_slice }
-      Converter.new(name, alias_list(aliases), category, Direction::Encode, description, wrapped)
+      Converter.new(name, alias_list(aliases), category, direction, description, wrapped)
     end
 
     # text-in / bytes-out (base64-decode, hex-decode). Decoders read text-encoded

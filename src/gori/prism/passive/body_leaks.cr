@@ -32,7 +32,9 @@ module Gori
           # A Java/.NET exception only counts as a disclosure when error-shaped: followed by a
           # `: message` or a newline-`at` frame — not when merely named in prose.
           {/\bjava\.lang\.[A-Z]\w+(?:Error|Exception)(?::|\r?\n\s*at )/, "Java exception"},
-          {/\bat org\.springframework\.[\w.]{4,}/, "Spring framework trace"},
+          # Require a real stack-frame shape (start-of-line `at …(` call site) like the sibling
+          # Java/Node frames — a bare "…at org.springframework.Foo…" in prose must NOT match.
+          {/(?:\n|\A)\s*at org\.springframework\.[\w.$]{4,}\(/, "Spring framework trace"},
           {/\bSystem\.[A-Z]\w+Exception(?::|\r?\n\s*at )/, ".NET exception"},
           # Rails: any ActiveRecord class, but only when error-shaped (`: message` / newline-
           # `at`), so a real error (RecordNotFound, Rollback, StatementInvalid, …) is caught
@@ -125,10 +127,14 @@ module Gori
         # sits immediately before it (within a short window of the text preceding the match), e.g.
         # `File version 10.0.1.2` or `{"version":"10.0.0.0"}`. Keeps a genuine leak (`backend at
         # 10.0.0.5`) flagged while dropping the ubiquitous 4-part-version false positive.
+        # The keyword must be the last token before the number (allowing quotes/`:`/`=`/space
+        # separators, as in `version: 10.0.1.2` or `{"version":"10.0.0.0"}`) — an incidental
+        # earlier mention ("Our firmware serves 10.0.0.5") must NOT suppress a genuine IP leak.
+        VERSION_CONTEXT = /(?:version|build|assembly|revision|firmware)["'\s:=]*\z/i
+
         private def version_context?(pre : String) : Bool
-          tail = (pre.size > 24 ? pre[(pre.size - 24)..] : pre).downcase
-          tail.includes?("version") || tail.includes?("build") || tail.includes?("assembly") ||
-            tail.includes?("revision") || tail.includes?("firmware")
+          tail = pre.size > 24 ? pre[(pre.size - 24)..] : pre
+          VERSION_CONTEXT.matches?(tail)
         end
       end
     end

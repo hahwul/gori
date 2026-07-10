@@ -218,6 +218,7 @@ module Gori::Fuzz
     # final 3xx (no implicit off-target sends).
     private def follow_redirects(raw : Replay::Result) : Replay::Result
       current = raw
+      total_us = raw.duration_us
       hops = 0
       while hops < @config.max_redirects
         resp = current.response
@@ -227,10 +228,13 @@ module Gori::Fuzz
         nxt = redirect_request(loc)
         break unless nxt
         current = @backend.send(nxt)
+        total_us += current.duration_us
         hops += 1
         break unless current.error.nil?
       end
-      current
+      # Report the whole chain's end-to-end time, not just the final hop's — otherwise a
+      # slow original request that 3xx's to a fast resource masks a time-based signal.
+      hops > 0 ? Replay::Result.new(current.head, current.body, current.response, total_us, current.error, current.incomplete?) : current
     end
 
     private def redirect_request(loc : String) : Bytes?

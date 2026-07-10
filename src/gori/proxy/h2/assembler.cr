@@ -152,9 +152,15 @@ module Gori::Proxy::H2
     # initial headers rather than clobbering them.
     private def finish_header_block(side : Side, decoder : HPACK::Decoder) : Nil
       decoded = decoder.decode(side.header_buf.to_slice)
-      if existing = side.headers
+      if (existing = side.headers) && !decoded.any? { |(n, _)| n == ":status" }
+        # Trailers (no :status) append to the existing header list — grpc-status et al.
         existing.concat(decoded)
       else
+        # First block, OR a status-bearing response block. An interim 1xx (100/103)
+        # response precedes the final one on the same stream; the final status block
+        # REPLACES the interim rather than concatenating (which would leave the 1xx
+        # :status first and mis-report the flow's status). This also bounds a stream's
+        # header list against a flood of repeated interim HEADERS blocks.
         side.headers = decoded
       end
     ensure

@@ -21,7 +21,8 @@ module Gori
 
       def self.normalize_url(url : String) : String
         u = url.strip
-        return u if u.starts_with?("http://") || u.starts_with?("https://")
+        down = u.downcase # schemes are case-insensitive (RFC 3986 §3.1)
+        return u if down.starts_with?("http://") || down.starts_with?("https://")
         raise Gori::Error.new("invalid URL (missing scheme): #{url}") if u.includes?("://")
         "https://#{u}"
       end
@@ -36,8 +37,13 @@ module Gori
         {scheme, host, port, target}
       end
 
+      # Headers are an ORDERED list of {name, value} pairs, not a map, so a repeated
+      # header (Set-Cookie, Via, …) survives import as its own line — a Hash would
+      # silently collapse duplicates to the last value.
+      alias Headers = Array({String, String})
+
       def self.request_head(method : String, target : String, http_version : String,
-                            host : String, headers : Hash(String, String),
+                            host : String, headers : Headers,
                             body : Bytes?) : Bytes
         String.build do |b|
           b << method.upcase << ' ' << target << ' ' << http_version << "\r\n"
@@ -47,7 +53,7 @@ module Gori
             b << k << ": " << v << "\r\n"
           end
           if body
-            unless headers.keys.any? { |k| k.downcase == "content-length" }
+            unless headers.any? { |(k, _)| k.downcase == "content-length" }
               b << "Content-Length: " << body.size << "\r\n"
             end
           end
@@ -56,11 +62,11 @@ module Gori
       end
 
       def self.response_head(http_version : String, status : Int32, reason : String,
-                             headers : Hash(String, String), body : Bytes?) : Bytes
+                             headers : Headers, body : Bytes?) : Bytes
         String.build do |b|
           b << http_version << ' ' << status << ' ' << reason << "\r\n"
           headers.each { |k, v| b << k << ": " << v << "\r\n" }
-          unless headers.keys.any? { |k| k.downcase == "content-length" }
+          unless headers.any? { |(k, _)| k.downcase == "content-length" }
             b << "Content-Length: " << (body.try(&.size) || 0) << "\r\n"
           end
           b << "\r\n"
@@ -68,7 +74,7 @@ module Gori
       end
 
       def self.pending_request(created_at : Int64, url : String, method : String = "GET",
-                               headers : Hash(String, String) = {} of String => String,
+                               headers : Headers = Headers.new,
                                body : Bytes? = nil, http_version : String = "HTTP/1.1") : FlowPair
         scheme, host, port, target = endpoint(url)
         head = request_head(method, target, http_version, host, headers, body)
@@ -81,10 +87,10 @@ module Gori
       end
 
       def self.complete_flow(created_at : Int64, url : String, method : String,
-                             req_headers : Hash(String, String),
+                             req_headers : Headers,
                              req_body : Bytes?, http_version : String,
                              status : Int32, reason : String,
-                             resp_headers : Hash(String, String),
+                             resp_headers : Headers,
                              resp_body : Bytes?, content_type : String?,
                              duration_us : Int64?) : FlowPair
         scheme, host, port, target = endpoint(url)

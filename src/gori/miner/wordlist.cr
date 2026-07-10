@@ -17,9 +17,9 @@ module Gori::Miner
     # preserved. A missing/unreadable user path raises File::Error → the frontend reports it.
     def self.load(user_path : String? = nil) : Array(String)
       names = builtin.dup
-      if path = user_path
-        unless path.strip.empty?
-          File.each_line(path) do |line|
+      if path = user_path.try(&.strip)
+        unless path.empty?
+          File.each_line(path) do |line| # open the STRIPPED path (the emptiness check used it too)
             stripped = line.strip
             names << stripped unless stripped.empty? || stripped.starts_with?('#')
           end

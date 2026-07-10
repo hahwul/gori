@@ -31,7 +31,7 @@ module Gori
           resp = Proxy::Codec::Http1.parse_response_head(rhead)
           return nil unless resp.headers.get?("Access-Control-Allow-Origin")
           request = rebuild_with_origin(detail.request_head, detail.request_body, PROBE_ORIGIN)
-          key = "cors_reflection|#{detail.row.host}|#{req.method.upcase}|#{path_key(req.target)}"
+          key = "cors_reflection|#{detail.row.host}:#{detail.row.port}|#{req.method.upcase}|#{path_key(req.target)}"
           Plan.new(request, [] of Param, key)
         end
 

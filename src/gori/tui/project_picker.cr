@@ -236,7 +236,10 @@ module Gori::Tui
     # Description is optional and passed through to init the project metadata.
     private def safe_create(name : String, description : String = "") : Project?
       @registry.create(name, description)
-    rescue Gori::Error
+    rescue Gori::Error | IO::Error | DB::Error | SQLite3::Exception
+      # An invalid name (Gori::Error) OR a filesystem/DB failure — mkdir_p on an
+      # unwritable root, Store.open on a full/locked disk — must keep the picker up
+      # instead of unwinding to the event loop and crashing the whole TUI.
       nil
     end
 
@@ -266,6 +269,11 @@ module Gori::Tui
           @selected = 2
         rescue Gori::Error
           # became live between confirm and here — leave it in place
+        rescue IO::Error
+          # rm_rf hit a real filesystem failure (permission, locked file) — keep the TUI
+          # alive; refresh the list since the directory may be partially removed.
+          @projects = @registry.list
+          invalidate_running_cache
         end
       end
       cancel_confirm

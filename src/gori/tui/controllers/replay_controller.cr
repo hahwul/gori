@@ -892,6 +892,7 @@ module Gori::Tui
 
     def replay_send : Nil
       return unless (tab = current_replay_tab) && (view = tab.view).loaded?
+      view.commit_chain_pane # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
       if view.inflight? # one outstanding round-trip per view — don't pile up fibers on ^R mashing
         @host.status("replay already in flight…")
         return

@@ -89,7 +89,7 @@ module Gori
     # The effective PRIMARY chord bound to `id` now (nil = unbound), honouring an optional
     # in-progress overrides map (the editor's working copy) and OS profile.
     def self.binding_for(registry : Verb::Registry, id : String,
-                         overrides : Hash(String, Array(Verb::Chord)) = chord_overrides,
+                         overrides : Hash(String, Array(Verb::Chord)) = rebindable_overrides(registry),
                          profile : String = Settings.keymap_os) : Verb::Chord?
       verb = registry[id]?
       return nil unless verb

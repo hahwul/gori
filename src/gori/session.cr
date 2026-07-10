@@ -161,14 +161,19 @@ module Gori
     def sync_capture_status! : Nil
       return unless capturing_lock_held?
       CaptureStatus.write(@project.dir, @proxy.host, @proxy.port, capturing?)
+    rescue
+      # The capture-status file is a purely informational sidecar; a write failure
+      # (disk full, dir vanished) must not abort session open / capture toggle / settings.
     end
 
     def close : Nil
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
       @store.abandon_pending!("proxy stopped before response")
-      CaptureStatus.clear(@project.dir) if capturing_lock_held?
-      @capture_lock.try(&.close) # release the flock so a later open of this project can capture
+      # Best-effort: a delete failure here must not skip the lock/prism/store teardown below
+      # (which would leak the flock + writer fiber + fibers) or, via a caller's `ensure`,
+      # replace the real exception being unwound.
+      (CaptureStatus.clear(@project.dir) if capturing_lock_held?) rescue nil
       # Stop Prism FIRST so its active workers wind down and its passive fiber stops issuing
       # get_flow against a live DB; this also closes the prism_events channel it consumes.
       @prism.stop
@@ -181,6 +186,10 @@ module Gori
       # channel as defense-in-depth — incl. the now-closed prism_events.)
       @store.close
       @flow_events.close
+      # Release the capture flock LAST — only after this session's store + prism have torn
+      # down — so a second instance racing to reopen the same project can't become
+      # concurrently live (its own analyzer/store touching shared state) while ours winds down.
+      @capture_lock.try(&.close)
       @project.cleanup
     end
   end

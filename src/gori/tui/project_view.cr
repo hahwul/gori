@@ -221,7 +221,7 @@ module Gori::Tui
     end
 
     def focus_last : Nil
-      @pane = :desc
+      @pane = enabled_panes.last? || :settings # last pane in the ring (PROJECT SETTINGS)
     end
 
     # The 's' / scope.edit jump target: focus the SCOPE pane fresh (no half-open row in
@@ -611,7 +611,9 @@ module Gori::Tui
       ok = if id = @ov_edit_id
              @host_overrides.update(id, host, ip)
            else
-             @host_overrides.add(host, ip)
+             added = @host_overrides.add(host, ip)
+             @ov_sel = @host_overrides.entries.size - 1 if added # select the new row, like ENV add
+             added
            end
       return :dup unless ok
       cancel_ov_add

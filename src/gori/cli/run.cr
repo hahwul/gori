@@ -689,7 +689,7 @@ module Gori
 
         raw_bytes = built.bytes
         crlf_crlf_idx = -1
-        limit = raw_bytes.size - 3
+        limit = raw_bytes.size - 4
         (0..limit).each do |i|
           if raw_bytes[i] == 0x0d_u8 && raw_bytes[i+1] == 0x0a_u8 && raw_bytes[i+2] == 0x0d_u8 && raw_bytes[i+3] == 0x0a_u8
             crlf_crlf_idx = i
@@ -713,17 +713,23 @@ module Gori
         end
 
         new_headers = [] of Proxy::Codec::Header
+        applied = Set(String).new # custom names whose FIRST occurrence was already replaced
         raw_req.headers.each do |hdr|
           lower_name = hdr.name.downcase
           if custom_headers.has_key?(lower_name)
+            # Replace the first matching line; DROP later duplicates (a captured h2 request
+            # can carry several `cookie:`/`set-cookie:` lines) so the override isn't left
+            # half-applied with a stale second occurrence.
+            next if applied.includes?(lower_name)
             new_headers << Proxy::Codec::Header.new(hdr.name, custom_headers[lower_name])
-            custom_headers.delete(lower_name)
+            applied << lower_name
           else
             new_headers << hdr
           end
         end
 
         custom_headers.each do |lower_name, val|
+          next if applied.includes?(lower_name) # already replaced an existing line
           orig_name = ""
           headers.each do |h_str|
             name, _, _ = h_str.partition(':')
@@ -743,7 +749,16 @@ module Gori
                      end
 
         has_cl = new_headers.any? { |h| h.name.compare("Content-Length", case_insensitive: true) == 0 }
-        if body_override || has_cl || final_body.size > 0
+        has_te = new_headers.any? { |h| h.name.compare("Transfer-Encoding", case_insensitive: true) == 0 }
+        # RFC 7230 §3.3.3 forbids sending Transfer-Encoding and Content-Length together.
+        # When the original request was chunked (TE present, no override), keep its wire
+        # framing byte-exact and don't inject a Content-Length. When the body is replaced
+        # via -b, drop Transfer-Encoding and self-frame the new bytes with Content-Length.
+        if has_te && body_override
+          new_headers.reject! { |h| h.name.compare("Transfer-Encoding", case_insensitive: true) == 0 }
+          has_te = false
+        end
+        if !has_te && (body_override || has_cl || final_body.size > 0)
           cl_idx = new_headers.index { |h| h.name.compare("Content-Length", case_insensitive: true) == 0 }
           if cl_idx
             new_headers[cl_idx] = Proxy::Codec::Header.new(new_headers[cl_idx].name, final_body.size.to_s)
@@ -752,9 +767,13 @@ module Gori
           end
         end
 
-        if override = target_override
-          _, host_part, port_part = Replay::FlowRequest.parse_target(override)
-          host_hdr_val = port_part == 80 || port_part == 443 ? host_part : "#{host_part}:#{port_part}"
+        # Sync Host from --target, UNLESS the user set an explicit `-H "Host: …"` — a
+        # host-header-confusion / vhost test deliberately pairs --target (where to connect)
+        # with a different claimed Host, so that override must win.
+        if (override = target_override) && !custom_headers.has_key?("host")
+          scheme_part, host_part, port_part = Replay::FlowRequest.parse_target(override)
+          default_port = scheme_part == "https" ? 443 : 80
+          host_hdr_val = port_part == default_port ? host_part : "#{host_part}:#{port_part}"
           host_idx = new_headers.index { |h| h.name.compare("Host", case_insensitive: true) == 0 }
           if host_idx
             new_headers[host_idx] = Proxy::Codec::Header.new(new_headers[host_idx].name, host_hdr_val)
@@ -802,7 +821,7 @@ module Gori
         if format == :json
           puts replay_json(result, diff)
         elsif result.ok?
-          STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}"
+          STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{result.incomplete? ? " (incomplete — origin closed before the framed body finished)" : ""}"
           if d = diff
             print_diff(d)
             n = Replay::Diff.change_count(d)
@@ -823,6 +842,7 @@ module Gori
             j.field "status", result.response.try(&.status)
             j.field "duration_us", result.duration_us
             j.field "error", result.error
+            j.field "incomplete", true if result.incomplete? # origin closed before the framed body finished
             j.field "head", scrub(result.head)
             emit_body_json(j, "body", result.head, result.body, false)
             if d = diff

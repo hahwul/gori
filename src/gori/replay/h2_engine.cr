@@ -250,9 +250,15 @@ module Gori
                                      port : Int32) : {Array({String, String}), Bytes?}
         head_bytes, body = split_head_body(request)
         lines = String.new(head_bytes).split('\n').map(&.rstrip('\r'))
-        parts = (lines[0]? || "GET / HTTP/2").split(' ')
-        method = parts[0]? || "GET"
-        path = parts[1]? || "/"
+        # The path may contain a raw (unencoded) space — common in fuzzer / smuggling
+        # captures — so bound it by the FIRST and LAST space rather than taking the
+        # second whitespace-split token (which would truncate at the first inner space).
+        line = lines[0]? || "GET / HTTP/2"
+        first_sp = line.index(' ')
+        last_sp = line.rindex(' ')
+        method = first_sp ? line[0...first_sp] : line
+        path = (first_sp && last_sp && last_sp > first_sp) ? line[(first_sp + 1)...last_sp] : "/"
+        path = "/" if path.empty?
 
         headers = [{":method", method}, {":path", path}, {":scheme", scheme},
                    {":authority", authority(host, port, scheme)}]

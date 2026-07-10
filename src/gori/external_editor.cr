@@ -53,7 +53,7 @@ module Gori
     # spurious empty last line. Strip exactly ONE trailing "\n" (or "\r\n").
     private def self.normalize(s : String) : String
       if s.ends_with?("\r\n")
-        s[0, s.bytesize - 2]
+        s.rchop.rchop # two single-byte ASCII chars; rchop avoids byte-vs-char arithmetic
       elsif s.ends_with?('\n')
         s.rchop
       else

@@ -122,6 +122,7 @@ module Gori::Tui
     end
  
     def backspace : Nil
+      return if @cx == 0 && @cy == 0 # buffer start — nothing to delete, don't dirty (mirrors delete)
       if @cx > 0
         push_undo
         line = @lines[@cy]
@@ -431,12 +432,15 @@ module Gori::Tui
       return if cw <= 0
       line = @lines[@cy]
       pw = Screen.display_width(@preedit)
-      if Screen.display_width(line) + pw <= cw
+      # column_width (not display_width) to match the actual draw at line 363: a raw
+      # control char occupies one drawn cell, so measuring it as width 0 here would let
+      # the caret render outside the window (cursor detaches / no scroll-into-view).
+      if Screen.column_width(line) + pw <= cw
         @xscroll = 0
         return
       end
       cx = @cx.clamp(0, line.size)
-      curx = Screen.display_width(line[0, cx]) + pw     # caret's display column in the full line
+      curx = Screen.column_width(line[0, cx]) + pw      # caret's column in the full line
       @xscroll = curx if curx < @xscroll                # caret left of the window → snap left
       @xscroll = curx - cw + 1 if curx >= @xscroll + cw # caret past the right edge → snap right
       @xscroll = 0 if @xscroll < 0

@@ -116,6 +116,9 @@ module Gori::Convert
     # (out-of-range) groups — garbage out, never a crash.
     private def flush_ascii85(sink : IO, group : Array(UInt8)) : Nil
       return if group.empty?
+      # A 1-char trailing group is structurally impossible (a partial group is ≥2 chars → ≥1
+      # byte); silently emitting 0 bytes would drop data — surface it like other malformed input.
+      raise ConvertError.new("truncated ascii85 group (1 leftover char is not decodable)") if group.size == 1
       v = 0_u32
       5.times { |k| v = v &* 85_u32 &+ (k < group.size ? group[k] : 84_u8).to_u32 }
       bytes = StaticArray(UInt8, 4).new(0_u8)
@@ -153,18 +156,23 @@ module Gori::Convert
       s = s.strip
       raise ConvertError.new("input too large for base58") if s.size > B58_MAX_IN * 2
       num = BigInt.new(0)
+      # Count leading '1' (zero) chars over the SAME whitespace-skipping pass as the value
+      # accumulation — a stray space inside the leading run would otherwise desync the two.
+      leading = 0
+      seen_nonzero = false
       s.each_char do |c|
         next if c.whitespace?
         v = B58.index(c) || raise ConvertError.new("invalid base58 char: #{c}")
+        if seen_nonzero || v != 0
+          seen_nonzero = true
+        else
+          leading += 1
+        end
         num = num * 58 + v
       end
       hex = num == 0 ? "" : num.to_s(16)
       hex = "0" + hex if hex.size.odd?
       body = hex.empty? ? Bytes.empty : hex.hexbytes
-      leading = 0
-      while leading < s.size && s[leading] == '1'
-        leading += 1
-      end
       sink = IO::Memory.new
       leading.times { sink.write_byte(0_u8) }
       sink.write(body)
@@ -201,6 +209,9 @@ module Gori::Convert
               i += 12
               next
             elsif hi
+              # A lone/unpaired surrogate (0xD800..0xDFFF) is not a scalar value; Int#chr
+              # would raise a raw ArgumentError, so surface a clean ConvertError instead.
+              raise ConvertError.new("invalid unicode escape: unpaired surrogate \\u#{hi.to_s(16)}") if 0xD800 <= hi <= 0xDFFF
               io << hi.chr
               i += 6
               next

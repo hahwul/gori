@@ -431,6 +431,9 @@ module Gori::Tui
       return false if @detail.nil?
       if idx = @rows.index { |r| r.id == id }
         @selected = idx
+        # A deep-linked OLDER flow must survive a live reload — otherwise follow mode snaps
+        # @selected back to the tail on the next data_version tick, losing the anchor.
+        @follow = false if idx != follow_index
       end
       # WebSocket flows (101) carry a captured message log; h2 flows link to their
       # connection's raw frame log. Both are loaded as a bounded most-recent window
@@ -1295,7 +1298,9 @@ module Gori::Tui
       chip, chip_color = scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted}
       rx = rect.right - 1
       if filtering?
-        count = @rows.size.to_s
+        # @rows is capped at PAGE by the search LIMIT; show "N+" at the cap so the count
+        # isn't silently misread as the exact match total when more actually match.
+        count = @rows.size >= PAGE ? "#{PAGE}+" : @rows.size.to_s
         screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
         rx -= count.size + 2
       end

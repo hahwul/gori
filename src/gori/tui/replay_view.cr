@@ -603,7 +603,10 @@ module Gori::Tui
     # ENVELOPE is always the authoritative wire request. Only when the payload changed.
     private def commit_decoded : Nil
       return unless @decode_kind && @decoded_dirty
-      @editor.set_text(sync_cl_text(splice_decoded_into(@editor.text)))
+      # Honour the Auto-Content-Length toggle like the plain / MARK send paths do; with
+      # Auto-CL off, an intentionally-desynced length (a smuggling test) must survive.
+      spliced = splice_decoded_into(@editor.text)
+      @editor.set_text(@auto_content_length ? sync_cl_text(spliced) : spliced)
       @decoded_dirty = false
     end
 
@@ -621,6 +624,10 @@ module Gori::Tui
         end
       when :graphql
         if op = Graphql.from_flow(tgt, head, body)
+          # Recompute the re-encode target too (mirrors SAML): an envelope edit that moves the
+          # op from ?query=… (GET) to a JSON body (POST) must retarget the splice, else commit
+          # rewrites the wrong side and the origin reads the old, unedited query.
+          @graphql_location = Graphql.location(body)
           text = Graphql.display(op)
           @decoded.set_text(text) if text != @decoded.text
         end
@@ -1150,7 +1157,10 @@ module Gori::Tui
       return if @req_hex_edit || @grpc_mode || @ws_mode
       return if @decode_kind && @req_pane == :decoded
 
-      raw = @editor.to_bytes
+      # Expand env tokens first (like the send path's expanded_editor_bytes) — a `$KEY`
+      # whose expansion changes the body length must reflect the SENT Content-Length, or
+      # the visible header goes stale and, once Auto-CL is toggled off, is sent mismatched.
+      raw = expanded_editor_bytes
       # In MARK-transform mode the CL that ^R actually sends is computed from the
       # RENDERED template (markers stripped, chains applied), not the raw marked text —
       # reflect THAT value so the visible header matches request_bytes.
@@ -1164,17 +1174,20 @@ module Gori::Tui
       synced_lines = synced_head.split("\r\n")
       cl_idx = synced_lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
       return unless cl_idx
+      new_line = synced_lines[cl_idx]
 
       env_sep = @editor.text.index("\n\n")
       return unless env_sep
 
       head_lines = @editor.text[0, env_sep].split('\n')
-      return unless cl_idx < head_lines.size
+      # Locate the Content-Length line in the RAW editor head by CONTENT, not by transplanting
+      # the expanded-space index — a multi-line $KEY expansion earlier can shift the line count,
+      # so cl_idx would otherwise point at (and overwrite) an unrelated raw header line.
+      raw_cl_idx = head_lines.index { |l| l.lstrip.downcase.starts_with?("content-length:") }
+      return unless raw_cl_idx
+      return if head_lines[raw_cl_idx] == new_line
 
-      new_line = synced_lines[cl_idx]
-      return if head_lines[cl_idx] == new_line
-
-      @editor.replace_line(cl_idx, new_line)
+      @editor.replace_line(raw_cl_idx, new_line)
     end
 
     # {scheme, host, port} parsed from the target field.

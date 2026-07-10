@@ -265,7 +265,10 @@ module Gori::Tui
 
     def intercept_forward_all : Nil
       n = @host.session.interceptor.pending_count
-      @host.session.interceptor.forward_all
+      # Carry the currently-loaded item's in-progress edit into the bulk forward, so
+      # "forward all" doesn't send its stale original bytes (single-forward already does).
+      overrides = @intercept.pending_edit.try { |e| {e[0] => e[1]} }
+      @host.session.interceptor.forward_all(overrides)
       @intercept.reload(@host.session.interceptor)
       @host.status("forwarded all (#{n})")
     end
