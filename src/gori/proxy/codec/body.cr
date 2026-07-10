@@ -1,4 +1,5 @@
 require "./message"
+require "./http1"
 
 # Byte-exact HTTP/1.1 message-body framing + streaming (P6/P7).
 #
@@ -89,6 +90,11 @@ module Gori::Proxy::Codec
 
     # RFC 7230 §3.3.3 framing for a request body.
     def self.request_framing(req : RawRequest) : {BodyFraming, Int64}
+      # A header written as `Transfer-Encoding : chunked` (whitespace before colon) or
+      # obs-folded is invisible to the exact-match framing lookups below, yet a lenient
+      # backend still honours it — a CL/TE request-smuggling primitive. Reject up front,
+      # like CL+TE, rather than framing on a header we can't see (RFC 7230 §3.2.4).
+      raise Gori::Error.new("obfuscated request header (whitespace before colon or obs-fold)") if Http1.obfuscated_header?(req.raw_head)
       te = req.headers.get_all("Transfer-Encoding")
       if chunked?(te)
         reject_te_with_cl(req.headers)
