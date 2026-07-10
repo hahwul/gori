@@ -79,9 +79,13 @@ module Gori::Fuzz
     private def pitchfork(emit_to : Job ->) : Nil
       count = @template.position_count
       return if count == 0
-      iters = (0...count).map { |p| set_for(p).open_iterator }
+      # Open inside the begin so a raise on the k-th open_iterator (e.g. a wordlist file
+      # removed after preflight) still closes the 0..k-1 already opened, rather than
+      # leaking their file descriptors.
+      iters = [] of SetIterator
       idx = 0_i64
       begin
+        (0...count).each { |p| iters << set_for(p).open_iterator }
         loop do
           payloads = [] of String
           iters.each do |it|

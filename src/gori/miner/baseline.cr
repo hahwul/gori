@@ -54,9 +54,14 @@ module Gori::Miner
       lengths = probes.map(&.metrics.length)
       words = probes.map(&.metrics.words)
       lines = probes.map(&.metrics.lines)
+      # Each band = 2× the observed calibration jitter, floored so a near-static page
+      # still tolerates small natural churn. The floor is size-PROPORTIONAL for all three
+      # metrics (not just length): a 50 KB / 8k-word page has word/line jitter that a fixed
+      # floor of 3/2 is far too tight for, so an ad slot or a "results: N" counter tripped a
+      # false Words/Lines finding while the proportional length band absorbed the same change.
       length_tol = {(lengths.max - lengths.min) * 2, {8_i64, base.metrics.length // 100}.max}.max
-      words_tol = {(words.max - words.min) * 2, 3}.max
-      lines_tol = {(lines.max - lines.min) * 2, 2}.max
+      words_tol = {(words.max - words.min) * 2, {3, base.metrics.words // 100}.max}.max
+      lines_tol = {(lines.max - lines.min) * 2, {2, base.metrics.lines // 100}.max}.max
 
       statuses = probes.compact_map(&.metrics.status).uniq!
       stable = statuses.size <= 1

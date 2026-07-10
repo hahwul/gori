@@ -51,6 +51,21 @@ private class HiddenParamBackend < F::Backend
   end
 end
 
+# Returns one fixed (large) body regardless of input — for exercising the baseline
+# tolerance floors on a big page.
+private class FixedBodyBackend < F::Backend
+  getter origin : F::Origin
+
+  def initialize(@origin : F::Origin, @body : String)
+  end
+
+  def send(bytes : Bytes) : Gori::Replay::Result
+    head = "HTTP/1.1 200 OK\r\nContent-Length: #{@body.bytesize}\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    Gori::Replay::Result.new(head, @body.to_slice, resp, 1000_i64)
+  end
+end
+
 private def mine(backend : F::Backend, names : Array(String), config : M::Config) : Array(M::Finding)
   base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
   engine = M::Engine.new(base, http2: false, names: names, backend: backend, config: config)
@@ -149,6 +164,18 @@ describe Gori::Miner::Engine do
     # entirely and mining overshot it by ~2x concurrency.
     backend.sent.should eq(2)
     findings.should be_empty
+  end
+
+  it "floors word/line tolerance proportionally to page size (not a fixed 3/2)" do
+    # A large, perfectly stable page: calibration jitter is 0, so each tolerance is
+    # its FLOOR. The floor must scale with page size, or a big page's natural word/line
+    # churn during mining trips a false Words/Lines finding that the length band absorbs.
+    body = (["word"] * 600).join("\n") # 600 words across 600 lines
+    backend = FixedBodyBackend.new(F::Origin.new("http", "h", 80), body)
+    base = "GET /api HTTP/1.1\r\nHost: h\r\n\r\n".to_slice
+    report = M::Baseline.new(backend, base, cfg).calibrate([M::Location::Query])
+    report.words_tol.should be > 3 # was fixed 3; now max(3, 600//100) = 6
+    report.lines_tol.should be > 2 # was fixed 2; now max(2, ~600//100)
   end
 
   it "does not overshoot max_requests under concurrency" do

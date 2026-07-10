@@ -340,6 +340,18 @@ describe F::Matcher do
     res = m.build(job, ok_result(200, "<x id=hunter2 />"))
     res.extracted.should eq("hunter2")
   end
+
+  it "treats a blank match spec as unconstrained (CLI --ms= etc.), not 'reject everything'" do
+    m = F::Matcher.new
+    job = F::Job.new(0_i64, ["x"], nil, "".to_slice)
+    # The CLI/MCP set the property to "" (not nil). A blank spec must mean 'no
+    # constraint' — the old code ran it through Predicate (no terms → false) and
+    # dropped every result.
+    m.match_size = ""
+    m.match_status = ""
+    m.match_words = ""
+    m.build(job, ok_result(200, "abcdef")).matched?.should be_true
+  end
 end
 
 describe F::Engine do

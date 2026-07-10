@@ -103,14 +103,26 @@ module Gori
         end
       end
 
+      # HAR startedDateTime is ISO 8601 / RFC 3339. Chrome emits `…596Z`, but
+      # Firefox/Safari/curl-style tools emit a numeric offset (`…596-07:00`) AND
+      # fractional seconds — a shape no single strptime format below covered, so
+      # those entries were silently dropped. Time.parse_rfc3339 handles both the `Z`
+      # and numeric-offset forms with or without fractional seconds; fall back to a
+      # bare offset-less datetime, then to "now", so a parse failure never drops the
+      # whole request.
       private def self.parse_started(s : String) : Int64
         return Time.utc.to_unix * 1_000_000 unless s.presence
-        Time.parse(s, "%FT%T%z", Time::Location::UTC).to_unix * 1_000_000
-      rescue Time::Format::Error
-        trimmed = s.gsub(/\.\d+/, "")
-        Time.parse(trimmed, "%Y-%m-%dT%H:%M:%SZ", Time::Location::UTC).to_unix * 1_000_000
-      rescue Time::Format::Error
-        Time.utc.to_unix * 1_000_000
+        time =
+          begin
+            Time.parse_rfc3339(s)
+          rescue Time::Format::Error
+            begin
+              Time.parse(s.gsub(/\.\d+/, ""), "%FT%T", Time::Location::UTC)
+            rescue Time::Format::Error
+              Time.utc
+            end
+          end
+        time.to_unix * 1_000_000
       end
 
       private def self.status_reason(status : Int32) : String

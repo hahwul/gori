@@ -302,4 +302,44 @@ describe Gori::Import do
       File.delete?(har)
     end
   end
+
+  it "imports a HAR entry whose startedDateTime has fractional seconds AND a numeric offset" do
+    har = File.tempname("gori", ".har")
+    begin
+      # Firefox/Safari-style timestamp (numeric offset + fraction) — the old
+      # strptime-only parser dropped this entry entirely.
+      File.write(har, <<-JSON)
+        {"log":{"entries":[
+          {"startedDateTime":"2024-06-01T10:20:30.123-07:00","time":1,
+           "request":{"method":"GET","url":"https://tz.test/x"},
+           "response":{"status":200,"content":{"text":"ok"}}}
+        ]}}
+        JSON
+      with_store do |store|
+        result = Gori::Import.import_file(store, :har, har)
+        result.count.should eq(1) # imported, not silently skipped
+        row = store.search(Gori::QL::EMPTY, 1).first
+        row.host.should eq("tz.test")
+        row.created_at.should eq(1_717_262_430_000_000_i64) # parsed absolute time, not "now"
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
+  it "imports a scheme-less URL whose query contains :// (not treated as a bad scheme)" do
+    urls = File.tempname("gori", ".txt")
+    begin
+      File.write(urls, "example.test/redirect?next=http://inner.test/x\n")
+      with_store do |store|
+        result = Gori::Import.import_file(store, :urls, urls)
+        result.count.should eq(1) # was rejected as "missing scheme" by a naive :// check
+        row = store.search(Gori::QL::EMPTY, 1).first
+        row.host.should eq("example.test")
+        row.target.should eq("/redirect?next=http://inner.test/x")
+      end
+    ensure
+      File.delete?(urls)
+    end
+  end
 end

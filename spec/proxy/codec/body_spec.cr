@@ -258,3 +258,21 @@ describe Gori::Proxy::Codec::Body do
     end
   end
 end
+
+describe Gori::Proxy::Codec::ContentDecode do
+  head = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice
+
+  it "de-chunks a conformant CRLF chunked body" do
+    body = "5\r\nHELLO\r\n6\r\n WORLD\r\n0\r\n\r\n".to_slice
+    decoded, _ = ContentDecode.decode(head, body)
+    String.new(decoded.not_nil!).should eq("HELLO WORLD")
+  end
+
+  it "de-chunks a bare-LF chunked body without misaligning later chunks" do
+    # Non-conformant lone-LF delimiters: the old blind 2-byte skip ate the first byte
+    # of the next chunk-size line, dropping/garbling every chunk after the first.
+    body = "5\nHELLO\n6\n WORLD\n0\n\n".to_slice
+    decoded, _ = ContentDecode.decode(head, body)
+    String.new(decoded.not_nil!).should eq("HELLO WORLD")
+  end
+end

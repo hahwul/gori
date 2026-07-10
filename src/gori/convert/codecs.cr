@@ -197,14 +197,22 @@ module Gori::Convert
       end
     end
 
+    # Parse EXACTLY 4 hex digits at `at`, or nil. A short slice near end-of-string
+    # (e.g. `\uAB`) must NOT decode — it stays literal, matching the mid-string case
+    # where `\uABX` is left alone because `to_i?` rejects the non-hex char.
+    private def hex4(s : String, at : Int32) : Int32?
+      h = s[at, 4]?
+      (h && h.size == 4) ? h.to_i?(16) : nil
+    end
+
     def unicode_unescape(s : String) : String
       String.build do |io|
         chars = s.chars
         i = 0
         while i < chars.size
           if chars[i] == '\\' && i + 1 < chars.size && chars[i + 1] == 'u'
-            hi = s[i + 2, 4]?.try(&.to_i?(16))
-            if hi && 0xD800 <= hi <= 0xDBFF && s[i + 6, 2]? == "\\u" && (lo = s[i + 8, 4]?.try(&.to_i?(16))) && 0xDC00 <= lo <= 0xDFFF
+            hi = hex4(s, i + 2)
+            if hi && 0xD800 <= hi <= 0xDBFF && s[i + 6, 2]? == "\\u" && (lo = hex4(s, i + 8)) && 0xDC00 <= lo <= 0xDFFF
               io << (0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)).chr
               i += 12
               next
