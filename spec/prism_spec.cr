@@ -312,6 +312,30 @@ describe Gori::Prism::Analyzer do
     end
   end
 
+  it "scans a WebSocket flow FIRST seen with a large backlog from its oldest frame" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+        target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      fid = detail.row.id
+      # A >WS_MSG_CAP backlog already exists before the FIRST scan (the live :updated was dropped
+      # and catch_up picks it up late); the secret is in an OLD frame the last-window would skip.
+      260.times do |k|
+        payload = k == 20 ? "token=AKIAIOSFODNN7EXAMPLE" : "frame#{k}"
+        store.insert_ws_message(fid, "in", 1, payload.to_slice)
+      end
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Prism::Analyzer.new(store, scope, feed, Gori::Prism::Mode::Passive, true)
+      a.start
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # first scan pages the whole backlog from frame 1
+      sleep 250.milliseconds
+      store.prism_issues.count(&.code.== "secret_in_ws").should eq(1)
+      a.stop
+    end
+  end
+
   it "bumps store.prism_generation on persist and honors session suppress after hard delete" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: x\r\n\r\n",

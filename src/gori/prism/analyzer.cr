@@ -197,9 +197,13 @@ module Gori
         detail = @store.get_flow(flow_id)
         return unless detail
         return unless detail.row.status == 101
+        # Page forward from the high-water-mark (0 on the first scan) through EVERY unscanned
+        # frame in WS_MSG_CAP-sized batches. Starting from the OLDEST unscanned id — not the last
+        # window — means a flow first scanned late (e.g. via catch_up) with a large buffered
+        # backlog is still covered from frame 1, never skipping a band.
         loop do
-          hwm = @ws_hwm[flow_id]?
-          msgs = hwm ? @store.ws_messages_after(flow_id, hwm, WS_MSG_CAP) : @store.ws_messages(flow_id, WS_MSG_CAP)
+          after = @ws_hwm[flow_id]? || 0_i64
+          msgs = @store.ws_messages_after(flow_id, after, WS_MSG_CAP)
           break if msgs.empty?
           note_ws_scanned(flow_id, msgs) # ordered asc → advance the hwm to the last id in the batch
           detections = Passive.analyze_ws(detail, msgs)
@@ -214,6 +218,10 @@ module Gori
       # like @analyzed (only 101 flows ever get an entry, but cap it for long-lived projects).
       private def note_ws_scanned(flow_id : Int64, msgs : Array(Store::WsMessage)) : Nil
         return if msgs.empty?
+        # delete + re-insert moves this flow to the END of the insertion order (LRU): trimming
+        # drops the OLDEST-touched keys first, so a long-lived, still-active socket is never
+        # evicted ahead of idle ones (a plain reassign keeps its original, front-most position).
+        @ws_hwm.delete(flow_id)
         @ws_hwm[flow_id] = msgs.max_of(&.id)
         return if @ws_hwm.size <= ANALYZED_CAP
         @ws_hwm.keys.first(@ws_hwm.size - ANALYZED_CAP).each { |k| @ws_hwm.delete(k) }

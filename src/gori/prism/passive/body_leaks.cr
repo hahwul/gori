@@ -73,7 +73,11 @@ module Gori
           # first genuine (non-version) private IP instead.
           if !scripty?(ctx.content_type)
             text.scan(PRIVATE_IP) do |m|
-              next if version_context?(m.pre_match)
+              # Only the few chars BEFORE the match decide version-context; slice a bounded window
+              # off the match index rather than m.pre_match (which allocates the whole prefix — over
+              # a body full of version-shaped candidates that is O(n²) transient memory).
+              start = m.begin(0) || 0
+              next if version_context?(text[{start - 24, 0}.max...start])
               acc << leak(ctx, "private_ip_leak", "Private IP address disclosed", Store::Severity::Low, m[0])
               break
             end
