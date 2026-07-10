@@ -128,6 +128,11 @@ describe Gori::Convert do
       conv("unicode-unescape", "a\\u00e9").should eq "aé"
       conv("unicode-unescape", conv("unicode-escape", "x🎉y")).should eq "x🎉y"
     end
+
+    it "unicode-unescape reports a lone/unpaired surrogate as a ConvertError (not a raw ArgumentError)" do
+      expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\ud800") }
+      expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\udc00") }
+    end
   end
 
   describe "text transforms" do

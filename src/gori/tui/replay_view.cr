@@ -603,7 +603,10 @@ module Gori::Tui
     # ENVELOPE is always the authoritative wire request. Only when the payload changed.
     private def commit_decoded : Nil
       return unless @decode_kind && @decoded_dirty
-      @editor.set_text(sync_cl_text(splice_decoded_into(@editor.text)))
+      # Honour the Auto-Content-Length toggle like the plain / MARK send paths do; with
+      # Auto-CL off, an intentionally-desynced length (a smuggling test) must survive.
+      spliced = splice_decoded_into(@editor.text)
+      @editor.set_text(@auto_content_length ? sync_cl_text(spliced) : spliced)
       @decoded_dirty = false
     end
 
@@ -1150,7 +1153,10 @@ module Gori::Tui
       return if @req_hex_edit || @grpc_mode || @ws_mode
       return if @decode_kind && @req_pane == :decoded
 
-      raw = @editor.to_bytes
+      # Expand env tokens first (like the send path's expanded_editor_bytes) — a `$KEY`
+      # whose expansion changes the body length must reflect the SENT Content-Length, or
+      # the visible header goes stale and, once Auto-CL is toggled off, is sent mismatched.
+      raw = expanded_editor_bytes
       # In MARK-transform mode the CL that ^R actually sends is computed from the
       # RENDERED template (markers stripped, chains applied), not the raw marked text —
       # reflect THAT value so the visible header matches request_bytes.

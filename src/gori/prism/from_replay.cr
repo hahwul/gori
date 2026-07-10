@@ -15,7 +15,10 @@ module Gori
       return nil if host.empty?
 
       req_text = record.request
-      sep = req_text.index("\r\n\r\n") || req_text.index("\n\n")
+      # Take whichever blank-line boundary occurs FIRST — the editor uses bare-LF, so a
+      # literal "\r\n\r\n" inside the body must not win over the true earlier "\n\n" head
+      # boundary (the naive `crlf || lf` fallback would snap to the body's sequence).
+      sep = [req_text.index("\r\n\r\n"), req_text.index("\n\n")].compact.min?
       req_head_s = sep ? req_text[0, sep] : req_text
       req_body_s = if sep
                      n = req_text[sep, 4]? == "\r\n\r\n" ? 4 : 2

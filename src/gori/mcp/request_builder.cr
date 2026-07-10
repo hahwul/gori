@@ -30,12 +30,17 @@ module Gori
             raise Gori::Error.new("invalid url #{url.inspect}: #{ex.message}")
           end
         scheme = (uri.scheme || "http").downcase
-        raise Gori::Error.new("unsupported scheme: #{scheme} (only http/https)") unless scheme.in?("http", "https")
         host = uri.host
+        # Check the host BEFORE the scheme allowlist: a scheme-less "host:port/path" parses
+        # with the bare hostname as `scheme` and a nil host, so a nil host is itself the
+        # signal to emit the friendlier "include a scheme" hint rather than a misleading
+        # "unsupported scheme: <host>". A genuine ftp://host still has a host and reaches
+        # the scheme error below.
         if host.nil? || host.empty?
           hint = url.includes?("://") ? "" : " — include a scheme, e.g. https://#{url}"
           raise Gori::Error.new("url has no host: #{url}#{hint}")
         end
+        raise Gori::Error.new("unsupported scheme: #{scheme} (only http/https)") unless scheme.in?("http", "https")
         # URI.parse keeps a CR/LF embedded in the authority as part of `host`
         # (e.g. "http://h.com\r\nEvil: x/"), which would otherwise be written into
         # the auto-generated Host header and inject. Reject it on BOTH paths (raw

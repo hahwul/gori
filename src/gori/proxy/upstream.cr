@@ -68,10 +68,17 @@ module Gori::Proxy
                                  connect_timeout : Time::Span = CONNECT_TIMEOUT,
                                  io_timeout : Time::Span = IO_TIMEOUT) : TCPSocket?
       sock = TCPSocket.new(host, port, connect_timeout: connect_timeout)
-      sock.sync = true # flush writes immediately (P6)
-      sock.tcp_nodelay = true
-      sock.read_timeout = io_timeout
-      sock.write_timeout = io_timeout
+      begin
+        sock.sync = true # flush writes immediately (P6)
+        sock.tcp_nodelay = true
+        sock.read_timeout = io_timeout
+        sock.write_timeout = io_timeout
+      rescue
+        # A peer RST between connect and option-setup would otherwise leak the open fd
+        # (the outer rescue returns nil without closing it) — close it first.
+        sock.close rescue nil
+        return nil
+      end
       sock
     rescue
       nil

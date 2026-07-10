@@ -142,9 +142,14 @@ module Gori::Tui
       if @editing
         @editing = false
       elsif it = selected_item
-        @editor.set_text(String.new(it.raw))
+        # Only reload from pristine bytes when switching to a DIFFERENT held item; re-entering
+        # edit on the same item (Esc/Shift-Tab then back) must preserve the in-progress edit,
+        # mirroring detail_window_for's @detail_win_id guard.
+        if @loaded_id != it.id
+          @editor.set_text(String.new(it.raw))
+          @editor_dirty = false # freshly loaded — not yet modified
+        end
         @loaded_id = it.id
-        @editor_dirty = false # freshly loaded — not yet modified
         @editing = true
       end
     end
@@ -163,9 +168,19 @@ module Gori::Tui
     # update-CL decision lives here, in the human's editor, not the wire path. (An edit
     # still normalizes line endings — a text-editor limitation shared with Replay.)
     def forward_bytes(it : Interceptor::Item) : Bytes
-      return it.raw unless @loaded_id == it.id && @editor_dirty
+      edit = pending_edit
+      (edit && edit[0] == it.id) ? edit[1] : it.raw
+    end
+
+    # The {id, edited-bytes} of the currently-loaded held item IFF it has an unsaved edit,
+    # else nil. Keyed by @loaded_id (the item the editor holds) rather than the queue
+    # selection, so "forward all" can pick up an in-progress edit for whichever item is
+    # loaded even when the cursor has since moved to a different row.
+    def pending_edit : {Int64, Bytes}?
+      id = @loaded_id
+      return nil unless id && @editor_dirty
       raw = Env.expand(@editor.text).split('\n').join("\r\n").to_slice
-      Fuzz::ContentLength.sync(raw, add_when_missing: true)
+      {id, Fuzz::ContentLength.sync(raw, add_when_missing: true)}
     end
 
     # The method + target to DISPLAY for a held item — the EDITED values when this is

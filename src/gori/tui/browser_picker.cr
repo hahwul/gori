@@ -13,6 +13,7 @@ module Gori::Tui
 
     def initialize(@browsers : Array(Browser::Found))
       @selected = 0
+      @scroll = 0
     end
 
     def move(delta : Int32) : Nil
@@ -42,7 +43,15 @@ module Gori::Tui
       i = my - list_top
       return nil if i < 0 || i >= list_h
       return nil if mx < box.x + 1 || mx >= box.right - 1
-      i < @browsers.size ? i : nil
+      ri = @scroll + i
+      ri < @browsers.size ? ri : nil
+    end
+
+    private def ensure_visible(list_h : Int32) : Nil
+      return if list_h <= 0
+      @scroll = @selected if @selected < @scroll
+      @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
+      @scroll = @scroll.clamp(0, {@browsers.size - list_h, 0}.max)
     end
 
     # Clamp + set the highlighted row (mirrors `move`'s clamp).
@@ -65,11 +74,13 @@ module Gori::Tui
 
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top
+      ensure_visible(list_h) # keep @selected on screen — the list can exceed list_h on a short terminal
       (0...list_h).each do |i|
-        break if i >= @browsers.size
-        b = @browsers[i]
+        ri = @scroll + i
+        break if ri >= @browsers.size
+        b = @browsers[ri]
         ry = list_top + i
-        active = i == @selected
+        active = ri == @selected
         bg = active ? Theme.accent_bg : Theme.panel
         screen.fill(Rect.new(box.x + 1, ry, w - 2, 1), bg)
         screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)

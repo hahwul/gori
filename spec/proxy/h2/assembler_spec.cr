@@ -84,6 +84,23 @@ describe Gori::Proxy::H2::Assembler do
     resp.ttfb_us.should_not be_nil # first response HEADERS frame anchors ttfb
   end
 
+  it "reports the FINAL status, not an interim 1xx, when a 100 precedes the 200" do
+    sink = RecSink.new
+    assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)
+    assembler.feed("out", headers_frame(1_u32, Frame::END_HEADERS | Frame::END_STREAM,
+      hexb("828684418cf1e3c2e5f23a6ba0ab90f4ff")))
+    # Interim 100 Continue (END_HEADERS, NO END_STREAM): HPACK literal :status = "100".
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS,
+      Bytes[0x48_u8, 0x03_u8, 0x31_u8, 0x30_u8, 0x30_u8]))
+    # Then the real 200 (static index 8) + body + END_STREAM.
+    assembler.feed("in", headers_frame(1_u32, Frame::END_HEADERS, Bytes[0x88_u8]))
+    assembler.feed("in", data_frame(1_u32, Frame::END_STREAM, "ok"))
+
+    sink.responses.size.should eq(1)
+    sink.responses.first.status.should eq(200) # was: 100 — the interim block merged ahead of the final
+    String.new(sink.responses.first.head).should contain("HTTP/2 200")
+  end
+
   it "carries a request body across DATA frames" do
     sink = RecSink.new
     assembler = Gori::Proxy::H2::Assembler.new(sink, "example.com", 443, 1_i64)

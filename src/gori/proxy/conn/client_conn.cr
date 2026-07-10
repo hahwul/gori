@@ -94,7 +94,16 @@ module Gori::Proxy
 
       started = Time.instant
       created_at = now_us
-      host, port, scheme, forward_head = resolve_forward(req)
+      # A client-supplied absolute-form target with a bad/oversized port makes URI.parse
+      # raise; keep the malformed attempt visible in History instead of letting it unwind
+      # to run's blanket rescue (which would silently drop the flow and kill the connection).
+      begin
+        host, port, scheme, forward_head = resolve_forward(req)
+      rescue ex : URI::Error | OverflowError
+        record_error(req, @scheme, req.host? || "", 0, created_at, "malformed absolute-form target: #{ex.message}")
+        write_gateway_error
+        return false
+      end
 
       # Refuse to forward a request whose (override-resolved) target is gori's own
       # listener — otherwise gori dials itself, accepts that as a new client, and
@@ -285,7 +294,10 @@ module Gori::Proxy
       # Match&Replace (response head). Framing/keep-alive/upgrade stay on the
       # ORIGINAL response so the upstream body is read correctly.
       sent_resp_head, sent_resp = apply_response_rewrite(resp_head, resp)
-      framing = response_framing_or_close(resp, req.method, flow_id)
+      # Body framing must reflect the method the ORIGIN actually received (HEAD/CONNECT
+      # are bodyless per RFC 7230 §3.3.3). A Match&Replace / intercept edit can rewrite
+      # the request-line method, so key off sent_req, not the client's original req.
+      framing = response_framing_or_close(resp, sent_req.method, flow_id)
       return false unless framing
       resp_framing, resp_len = framing
 

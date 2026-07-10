@@ -248,11 +248,13 @@ module Gori::Miner
         raw = send_with_retries(Inject.apply(@base, location, [{name, c}], @config.add_content_length_when_missing?))
         next if raw.error
         probe = Fingerprint.probe(raw)
-        last_status = probe.metrics.status
-        last_delta = probe.metrics.length - r.base_length
         decision = Miner.decide(r, probe, {c => name}, location)
         if matches_evidence?(decision, evidence, name)
           hits += 1
+          # Only record status/delta from a round that actually reproduced the signal, so a
+          # Confirmed finding's reported evidence can't come from a non-matching (flaky) round.
+          last_status = probe.metrics.status
+          last_delta = probe.metrics.length - r.base_length
           last_canary = c if evidence.reflection?
         end
       end

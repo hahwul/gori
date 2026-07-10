@@ -19,6 +19,7 @@ module Gori::Tui
     def initialize(@title : String, @choices : Array(Choice), @current : Int32, @kind : Symbol)
       # Open on the row that's currently set, so ↵ without moving is a no-op.
       @selected = @choices.index { |c| c.value == @current } || 0
+      @scroll = 0
     end
 
     # The coloured severity picker (Critical→Info), opened on the current level.
@@ -92,7 +93,15 @@ module Gori::Tui
       i = my - (box.y + 1)
       return nil if i < 0 || i >= rows
       return nil if mx <= box.x || mx >= box.right - 1
-      i
+      ci = @scroll + i
+      ci < @choices.size ? ci : nil
+    end
+
+    private def ensure_visible(rows : Int32) : Nil
+      return if rows <= 0
+      @scroll = @selected if @selected < @scroll
+      @scroll = @selected - rows + 1 if @selected >= @scroll + rows
+      @scroll = @scroll.clamp(0, {@choices.size - rows, 0}.max)
     end
 
     def render(screen : Screen, area : Rect) : Nil
@@ -102,10 +111,14 @@ module Gori::Tui
         return
       end
       Frame.card(screen, box, @title, border: Theme.border_focus)
-      @choices.each_with_index do |ch, i|
+      rows = {box.h - 2, @choices.size}.min
+      ensure_visible(rows) # keep the pre-selected 'current' row visible on a short terminal
+      (0...rows).each do |i|
+        ci = @scroll + i
+        break if ci >= @choices.size
+        ch = @choices[ci]
         ry = box.y + 1 + i
-        break if ry >= box.bottom - 1
-        active = i == @selected
+        active = ci == @selected
         bg = active ? Theme.accent_bg : Theme.panel
         screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
         screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)

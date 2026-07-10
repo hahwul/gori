@@ -689,7 +689,7 @@ module Gori
 
         raw_bytes = built.bytes
         crlf_crlf_idx = -1
-        limit = raw_bytes.size - 3
+        limit = raw_bytes.size - 4
         (0..limit).each do |i|
           if raw_bytes[i] == 0x0d_u8 && raw_bytes[i+1] == 0x0a_u8 && raw_bytes[i+2] == 0x0d_u8 && raw_bytes[i+3] == 0x0a_u8
             crlf_crlf_idx = i
@@ -743,7 +743,16 @@ module Gori
                      end
 
         has_cl = new_headers.any? { |h| h.name.compare("Content-Length", case_insensitive: true) == 0 }
-        if body_override || has_cl || final_body.size > 0
+        has_te = new_headers.any? { |h| h.name.compare("Transfer-Encoding", case_insensitive: true) == 0 }
+        # RFC 7230 §3.3.3 forbids sending Transfer-Encoding and Content-Length together.
+        # When the original request was chunked (TE present, no override), keep its wire
+        # framing byte-exact and don't inject a Content-Length. When the body is replaced
+        # via -b, drop Transfer-Encoding and self-frame the new bytes with Content-Length.
+        if has_te && body_override
+          new_headers.reject! { |h| h.name.compare("Transfer-Encoding", case_insensitive: true) == 0 }
+          has_te = false
+        end
+        if !has_te && (body_override || has_cl || final_body.size > 0)
           cl_idx = new_headers.index { |h| h.name.compare("Content-Length", case_insensitive: true) == 0 }
           if cl_idx
             new_headers[cl_idx] = Proxy::Codec::Header.new(new_headers[cl_idx].name, final_body.size.to_s)
@@ -753,8 +762,9 @@ module Gori
         end
 
         if override = target_override
-          _, host_part, port_part = Replay::FlowRequest.parse_target(override)
-          host_hdr_val = port_part == 80 || port_part == 443 ? host_part : "#{host_part}:#{port_part}"
+          scheme_part, host_part, port_part = Replay::FlowRequest.parse_target(override)
+          default_port = scheme_part == "https" ? 443 : 80
+          host_hdr_val = port_part == default_port ? host_part : "#{host_part}:#{port_part}"
           host_idx = new_headers.index { |h| h.name.compare("Host", case_insensitive: true) == 0 }
           if host_idx
             new_headers[host_idx] = Proxy::Codec::Header.new(new_headers[host_idx].name, host_hdr_val)

@@ -234,10 +234,16 @@ module Gori
       item.reply.send(Decision.new(Action::Drop, Bytes.empty))
     end
 
-    def forward_all : Nil
+    # `overrides` lets the caller supply edited bytes for specific held items (keyed by
+    # id) — e.g. an in-progress editor edit that would otherwise be lost when the whole
+    # queue is released at once. Items without an override forward their original bytes.
+    def forward_all(overrides : Hash(Int64, Bytes)? = nil) : Nil
       items = @mutex.synchronize { vals = @items.values; @items.clear; vals }
       @revision.add(1) unless items.empty?
-      items.each { |it| it.reply.send(Decision.new(Action::Forward, it.raw)) }
+      items.each do |it|
+        bytes = overrides.try(&.[it.id]?) || it.raw
+        it.reply.send(Decision.new(Action::Forward, bytes))
+      end
     end
 
     # Shutdown: latch so nothing re-enqueues, then auto-forward every held item

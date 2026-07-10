@@ -1295,7 +1295,9 @@ module Gori::Tui
       chip, chip_color = scope_on ? {"⇧S scope:#{@scope.try(&.size) || 0}", Theme.accent} : {"⇧S scope:off", Theme.muted}
       rx = rect.right - 1
       if filtering?
-        count = @rows.size.to_s
+        # @rows is capped at PAGE by the search LIMIT; show "N+" at the cap so the count
+        # isn't silently misread as the exact match total when more actually match.
+        count = @rows.size >= PAGE ? "#{PAGE}+" : @rows.size.to_s
         screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
         rx -= count.size + 2
       end

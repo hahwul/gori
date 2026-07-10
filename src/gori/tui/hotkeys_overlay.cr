@@ -230,12 +230,15 @@ module Gori::Tui
         i = start + row
         break if i >= @rows.size
         r = @rows[i]
+        up = row == 0 && start > 0
+        down = row == cap - 1 && i < @rows.size - 1
         if r.kind == :header
           draw_header(screen, box, r, top + row)
+          # The boundary viewport row can land on a header; still show the ▲/▼ affordance
+          # (it was previously swallowed whenever the top/bottom row was a header).
+          draw_scroll_marker(screen, box.right - 2, top + row, Theme.panel, up: up, down: down)
         else
-          draw_binding(screen, box, i, top + row,
-            up: row == 0 && start > 0,
-            down: row == cap - 1 && i < @rows.size - 1)
+          draw_binding(screen, box, i, top + row, up: up, down: down)
         end
       end
       render_footer(screen, box)

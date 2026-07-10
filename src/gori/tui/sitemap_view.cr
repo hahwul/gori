@@ -125,8 +125,10 @@ module Gori::Tui
     end
 
     private def walk_collect_expand(node : Node, host : String, state : Hash({String, String}, Bool)) : Nil
-      return if node.grouped
-      state[{host, node.path}] = node.expanded unless node.leaf?
+      # Skip recording only the synthetic fold node's OWN (unkeyed) state, but still recurse
+      # into its children — real descendants under a grouped numeric fold have stable keys
+      # and their expand state must survive a reload (which fires ~1.3x/sec during capture).
+      state[{host, node.path}] = node.expanded if !node.grouped && !node.leaf?
       node.children.each { |c| walk_collect_expand(c, host, state) }
     end
 
@@ -136,9 +138,8 @@ module Gori::Tui
     end
 
     private def walk_reapply_expand(node : Node, host : String, prev : Hash({String, String}, Bool)) : Nil
-      return if node.grouped
       key = {host, node.path}
-      if !node.leaf? && prev.has_key?(key)
+      if !node.grouped && !node.leaf? && prev.has_key?(key)
         node.expanded = prev[key]
       end
       node.children.each { |c| walk_reapply_expand(c, host, prev) }

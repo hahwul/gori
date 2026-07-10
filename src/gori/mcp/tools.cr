@@ -681,8 +681,11 @@ module Gori
       end
 
       private def emit_capped_text(j : JSON::Builder, field : String, text : String) : Nil
-        if text.size > MCP_REPLAY_REQUEST_MAX
-          j.field field, text.byte_slice(0, MCP_REPLAY_REQUEST_MAX)
+        if text.bytesize > MCP_REPLAY_REQUEST_MAX
+          # Compare and cut by BYTES (the cap is a byte budget), then scrub — a slice
+          # through a multi-byte UTF-8 sequence would otherwise emit invalid UTF-8 into
+          # the JSON-RPC stream, which must be well-formed UTF-8 over the stdio transport.
+          j.field field, text.byte_slice(0, MCP_REPLAY_REQUEST_MAX).scrub
           j.field "#{field}_truncated", true
         else
           j.field field, text
@@ -1052,6 +1055,8 @@ module Gori
         position = int(h, "position")
         if position.nil?
           position = @store.replays_meta.size.to_i64
+        elsif position < Int32::MIN || position > Int32::MAX
+          return Result.new("'position' out of range", is_error: true)
         end
 
         # Apply Env.mask_secrets
@@ -1126,6 +1131,10 @@ module Gori
 
         target = str(h, "target") || existing.target
         request = str(h, "request") || existing.request
+        # An explicitly-passed empty string is truthy in Crystal, so guard it here to
+        # mirror create_replay's invariant — a blank target/request can't be sent.
+        return Result.new("target must not be empty", is_error: true) if target.empty?
+        return Result.new("request must not be empty", is_error: true) if request.empty?
 
         http2 = if present?(h, "http2")
                   bool(h, "http2") || false
@@ -1436,7 +1445,8 @@ module Gori
         config.max_requests = cap ? {cap, MINE_MAX_REQUESTS}.min : MINE_MAX_REQUESTS
         config.user_wordlist = str(h, "wordlist").presence
         if b = int(h, "bucket")
-          config.locations.each { |loc| config.bucket_size[loc] = b.to_i }
+          bucket = b.clamp(Int32::MIN.to_i64, Int32::MAX.to_i64).to_i # avoid Int64->Int32 overflow
+          config.locations.each { |loc| config.bucket_size[loc] = bucket }
         end
         names = Miner::Wordlist.load(config.user_wordlist)
         engine = Miner::Engine.new(bytes, use_h2, names, sender, config)

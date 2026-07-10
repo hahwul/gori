@@ -201,6 +201,9 @@ module Gori::Convert
               i += 12
               next
             elsif hi
+              # A lone/unpaired surrogate (0xD800..0xDFFF) is not a scalar value; Int#chr
+              # would raise a raw ArgumentError, so surface a clean ConvertError instead.
+              raise ConvertError.new("invalid unicode escape: unpaired surrogate \\u#{hi.to_s(16)}") if 0xD800 <= hi <= 0xDFFF
               io << hi.chr
               i += 6
               next

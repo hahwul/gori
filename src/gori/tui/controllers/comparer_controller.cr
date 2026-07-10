@@ -130,7 +130,10 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      inner = rect.inset(1, 1)
+      # Carve the sub-tab strip too (like Convert/Notes), not just the border — the view
+      # renders the REQ/RES chips inside the strip-carved content rect, so a plain
+      # inset(1,1) would hit-test STRIP_H rows too high and never match the chips.
+      inner = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
       if pane = view.pane_chip_at(inner, mx, my)
         view.set_pane(pane)
       end

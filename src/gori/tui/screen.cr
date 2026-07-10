@@ -161,7 +161,7 @@ module Gori::Tui
     # pre-check walked the whole string first).
     def fit(str : String, w : Int32) : String
       return "" if w <= 0
-      return (str[0]? || "").to_s if w == 1
+      return (str.each_grapheme.first?.try(&.to_s) || "") if w == 1 # first GRAPHEME (not codepoint): keep flags/ZWJ/combining intact, matching Highlight.draw
       cur = 0   # width accumulated into `head` (the ellipsis prefix, within w-1)
       total = 0 # running total width, to detect overflow past `w`
       overflow = false

@@ -382,7 +382,10 @@ module Gori::Fuzz
       out = body.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*")((?:[^"\\]|\\.)*)(")/) do |m|
         $2.empty? ? m : "#{$1}#{MARKER}#{$2}#{MARKER}#{$3}"
       end
-      out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(-?\d+(?:\.\d+)?)/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
+      out = out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(-?\d+(?:\.\d+)?)/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
+      # Also mark boolean/null scalar values so `--auto` exercises flag-style fields
+      # (e.g. "admin":true) as documented. (Array-element values are still unmarked.)
+      out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(true|false|null)\b/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
     end
 
     private def self.word_char?(c : Char) : Bool

@@ -40,13 +40,22 @@ module Gori
       # cut mid-stream) with a Content-Length over those bytes so the origin reads a complete
       # body. Case-insensitive header-name match; preserves each line's CRLF/LF terminator.
       private def self.resync_truncated_head(head : Bytes, length : Int32) : Bytes
+        cl_written = false
         String.build do |io|
           String.new(head).each_line(chomp: false) do |line|
             lname = line.lstrip
             eol = line.ends_with?("\r\n") ? "\r\n" : (line.ends_with?('\n') ? "\n" : "")
             if lname[0, 15]?.try(&.downcase) == "content-length:" ||
                lname[0, 18]?.try(&.downcase) == "transfer-encoding:"
-              io << "Content-Length: " << length << eol # RFC 7230 forbids TE+CL, so only one fires
+              # A truncated body is re-framed with ONE Content-Length. If the capture had
+              # BOTH CL and TE (a CL.TE/TE.CL smuggling probe), collapse them into a single
+              # Content-Length instead of emitting a duplicate — RFC 7230 forbids TE+CL.
+              if cl_written
+                next # drop the second framing header
+              else
+                io << "Content-Length: " << length << eol
+                cl_written = true
+              end
             else
               io << line
             end

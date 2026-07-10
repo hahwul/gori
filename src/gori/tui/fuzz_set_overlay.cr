@@ -66,9 +66,16 @@ module Gori::Tui
       when :numbers
         @ptype = :numbers
         range, _, step = spec.value.partition(':')
-        from, _, to = range.partition('-')
-        @fields[:from].set(from)
-        @fields[:to].set(to)
+        # Parse two (possibly negative) integers so reopening a set with a negative From
+        # shows the real values, not a corrupted split on the leading '-'.
+        if m = range.match(/\A(-?\d+)-(-?\d+)\z/)
+          @fields[:from].set(m[1])
+          @fields[:to].set(m[2])
+        else
+          from, _, to = range.partition('-')
+          @fields[:from].set(from)
+          @fields[:to].set(to)
+        end
         @fields[:step].set(step.empty? ? "1" : step)
       when :file
         @ptype = :wordlist
