@@ -90,7 +90,7 @@ module Gori::Proxy
       return false if head.nil? # client closed / keep-alive idle end
 
       req = Codec::Http1.parse_request_head(head)
-      return handle_connect(req) if req.method.upcase == "CONNECT"
+      return handle_connect(req) if req.method.compare("CONNECT", case_insensitive: true) == 0
 
       started = Time.instant
       created_at = now_us
@@ -143,12 +143,11 @@ module Gori::Proxy
 
       # Intercept (request): hold only when enabled AND in scope. Holding buffers
       # the full body (vs streaming) so the human can see/edit it; the non-hold
-      # path keeps zero-buffer streaming (P6). The scope URL is built exactly as the
-      # Scope SQL filter does — scheme || '://' || host || <stored target> — over the
-      # SAME target that gets captured (sent_req.target, used at the insert below), so a
-      # held request is precisely an in-scope History row with no live/SQL divergence.
-      scope_url = "#{scheme}://#{host}#{sent_req.target}"
-      if (ic = @interceptor) && ic.intercepts_request?(scope_url,
+      # path keeps zero-buffer streaming (P6). The gate builds the scope URL lazily
+      # (scheme || '://' || host || <stored target>, matching the Scope SQL filter over
+      # the SAME captured target) only when intercept + Scope are both on, so the common
+      # capture-only path spends nothing here.
+      if (ic = @interceptor) && ic.intercepts_request?(
            method: sent_req.method, host: host, target: sent_req.target, scheme: scheme)
         return handle_held_request(ic, req, sent_req, sent_head, host, port, scheme,
           created_at, started, req_framing, req_len)
@@ -158,7 +157,7 @@ module Gori::Proxy
       # Replay-safety keys on the ACTUALLY-SENT method (sent_req): an M&R rule that rewrites
       # the request line GET→POST must not leave a non-idempotent request marked retryable.
       retryable = retryable_request?(sent_req, req_framing.none?)
-      req_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
+      req_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX, capture_hint(req_framing, req_len))
       req_complete = true
       upstream, reused, sent = acquire_and_send(host, port, retryable) do |up|
         up.write(sent_head)
@@ -182,7 +181,7 @@ module Gori::Proxy
         return false
       end
       handle_response(upstream, req, flow_id, started, host, port, scheme,
-        reused: reused, sent_head: sent_head, can_retry: retryable, scope_url: scope_url, sent_req: sent_req)
+        reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req)
     end
 
     # The intercept-hold request path: buffer the body, let the human edit/drop
@@ -230,8 +229,7 @@ module Gori::Proxy
         scheme: scheme, host: host, port: port, created_at: created_at,
         body: stored, body_truncated: trunc, body_size: size))
       handle_response(upstream, req, flow_id, started, host, port, scheme,
-        reused: reused, sent_head: sent_head, can_retry: retryable,
-        scope_url: "#{scheme}://#{host}#{sent_req.target}", sent_req: sent_req)
+        reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req)
     end
 
     # Acquires the (reused-or-fresh) upstream and runs `send` on it. If a REUSED
@@ -276,7 +274,7 @@ module Gori::Proxy
     # keep the connection alive.
     private def handle_response(upstream : IO, req : Codec::RawRequest, flow_id : Int64,
                                 started : Time::Instant, host : String, port : Int32, scheme : String,
-                                *, reused : Bool, sent_head : Bytes, can_retry : Bool, scope_url : String,
+                                *, reused : Bool, sent_head : Bytes, can_retry : Bool,
                                 sent_req : Codec::RawRequest) : Bool
       resp_head, upstream = read_response_head(upstream, host, port, reused, sent_head, can_retry)
       if resp_head.nil?
@@ -303,13 +301,13 @@ module Gori::Proxy
 
       # Intercept (response): hold only in-scope, non-streaming responses. SSE /
       # close-delimited / WebSocket bodies would buffer forever, so they bypass.
-      # Use the SAME precise URL gate as the request hold (scope_url built above), so a
-      # string/regex-excluded flow whose request wasn't held doesn't get its response held.
-      # The response gate also honours the catch direction + can test `status:`. Match the
-      # CONDITION against `sent_req` (the rewritten/edited request that was captured + scope-
-      # gated), not the original `req`, so a `method:`/`path:` rule that holds the request
-      # also holds its response when a Match&Replace rule changed the request line.
-      if (ic = @interceptor) && ic.intercepts_response?(scope_url,
+      # The gate rebuilds the SAME precise scope URL the request hold uses (lazily, only
+      # when intercept + Scope are on), so a string/regex-excluded flow whose request wasn't
+      # held doesn't get its response held. The response gate also honours the catch direction
+      # + can test `status:`. Match the CONDITION against `sent_req` (the rewritten/edited
+      # request that was captured + scope-gated), not the original `req`, so a `method:`/`path:`
+      # rule that holds the request also holds its response when M&R changed the request line.
+      if (ic = @interceptor) && ic.intercepts_response?(
            method: sent_req.method, host: host, target: sent_req.target, scheme: scheme, status: resp.status) &&
          !resp_framing.close_delimited? && !sse?(resp) && resp.status != 101
         return handle_held_response(ic, upstream, req, sent_req, flow_id, host, port, scheme,
@@ -319,7 +317,7 @@ module Gori::Proxy
       # Non-hold path: stream the response body byte-for-byte (P6) and record the
       # flow. `completed` is true only when the whole body was delivered cleanly; a
       # client abort or upstream truncation is recorded Aborted (see the helper).
-      resp_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
+      resp_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX, capture_hint(resp_framing, resp_len))
       completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
         resp_framing, resp_len, resp_capture, flow_id, ttfb, started)
 
@@ -786,6 +784,13 @@ module Gori::Proxy
       when "GET", "HEAD", "OPTIONS", "TRACE" then true
       else                                        false
       end
+    end
+
+    # Presize hint for a body capture: a Content-Length body's length is known, so the
+    # store is sized once. Chunked/close-delimited length is 0 (unknown → grow on demand);
+    # a bodyless framing keeps the capture unallocated.
+    private def capture_hint(framing : Codec::BodyFraming, length : Int64) : Int64
+      framing.length? ? length : 0_i64
     end
 
     # True when a Connection header field lists `token` (case-insensitive) as one of its

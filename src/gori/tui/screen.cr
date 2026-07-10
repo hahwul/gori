@@ -32,6 +32,13 @@ module Gori::Tui
     getter width : Int32
     getter height : Int32
 
+    # Interned single-cell Strings for the 128 ASCII codepoints, so drawing a Char never
+    # allocates a fresh 1-char String — `cell` is the universal draw primitive (a full-screen
+    # fill alone is width×height calls, thousands more from text()), so `Char#to_s` per cell
+    # was tens of thousands of throwaway Strings per frame. C0/C1-style control chars that
+    # termisu rejects are pre-substituted with a space here, folding the old runtime check in.
+    ASCII_CELL = Array(String).new(128) { |i| (i < 0x20 || i == 0x7f) ? " " : i.unsafe_chr.to_s }
+
     def initialize(@backend : Backend)
       @width, @height = @backend.size
     end
@@ -92,10 +99,13 @@ module Gori::Tui
     def cell(x : Int32, y : Int32, grapheme : Char | String, fg : Color, bg : Color = Theme.bg,
              attr : Attribute = Attribute::None) : Nil
       return unless x >= 0 && y >= 0 && x < @width && y < @height
-      g = grapheme.is_a?(Char) ? grapheme.to_s : grapheme
-      # termisu rejects C0/C1 control chars; substitute a space to stay aligned.
-      if grapheme.is_a?(Char) && grapheme.control?
-        g = " "
+      if grapheme.is_a?(Char)
+        o = grapheme.ord
+        # ASCII → interned cell (control chars already mapped to a space in the table);
+        # non-ASCII control (C1) still substitutes a space; other non-ASCII stringifies.
+        g = o < 128 ? ASCII_CELL[o] : (grapheme.control? ? " " : grapheme.to_s)
+      else
+        g = grapheme
       end
       @backend.put(x, y, g, fg, bg, attr)
     end

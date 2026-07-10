@@ -338,12 +338,16 @@ module Gori::Tui
         # Prism list live refresh: Store#prism_generation increments after every
         # committed prism_issues write (upsert/delete/status). Poll every tick —
         # do NOT rely on the droppable analyzer event channel or PRAGMA data_version.
+        # Reload the (full-table SELECT + filter) list ONLY when Prism is the active tab:
+        # nothing in the always-visible chrome reads it (toasts arrive via drain_events),
+        # and on_enter reloads on tab switch, so an off-tab bump is caught up on return.
+        # `last_prism_gen` still advances so returning to Prism doesn't reload redundantly.
         # When Prism is visible, force a full terminal sync (not just cell-diff) so a
         # new/removed row cannot stick as a stale paint.
         if (pgen = @session.store.prism_generation) != last_prism_gen
           last_prism_gen = pgen
-          prism_controller.refresh_from_store
           if @active_tab == :prism
+            prism_controller.refresh_from_store
             dirty = true
             @resized = true
           end

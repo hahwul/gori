@@ -36,7 +36,12 @@ module Gori::Proxy::Codec::Http1
     return nil if buf.bytesize == 0
     # Hit the cap without a terminator → oversized/hostile head; don't misframe.
     return nil if buf.bytesize >= max_bytes && !ends_with_crlf_crlf?(buf)
-    buf.to_slice.dup
+    # `buf` is a local, discarded here, so the returned view (length = bytesize) is the head's
+    # sole owner — no defensive copy. It becomes an immutable `raw_head` (P7: forwarding emits
+    # it verbatim, the rewriter builds fresh buffers), so nothing writes through it. Trades a
+    # per-head copy (2×/flow on the 100% path) for briefly retaining the buffer's slack capacity
+    # until capture.
+    buf.to_slice
   end
 
   private def self.ends_with_crlf_crlf?(buf : IO::Memory) : Bool

@@ -24,22 +24,37 @@ module Gori::Proxy::Codec
     getter total : Int64 = 0_i64
     getter? truncated : Bool = false
 
-    def initialize(@limit : Int32)
-      @mem = IO::Memory.new
+    # The backing store is created LAZILY on the first byte, so a bodyless message
+    # (the common GET / 204 / 304 — which streams with `None` framing and never tees)
+    # allocates nothing at all. `hint` is the body's KNOWN length (a Content-Length):
+    # the store is then sized once to fit, instead of climbing IO::Memory's doubling-
+    # realloc chain — each step copies everything captured so far and, past the large-
+    # object threshold, can trip a GC cycle on the single proxy thread.
+    def initialize(@limit : Int32, @hint : Int64 = 0_i64)
+      @mem = nil.as(IO::Memory?)
+      @sealed = false
     end
 
     def write(slice : Bytes) : Nil
       @total += slice.size
-      stored = @mem.bytesize
+      return if slice.empty?
+      # A prior `to_slice` handed out a view over @mem; a further write (only reachable via a
+      # protocol-violating h2 DATA-after-END_STREAM frame, since the codec reads capture once
+      # after streaming) must not mutate those already-published bytes. Snapshot into a fresh
+      # store first so the handed-out slice stays a stable copy — copy-on-write, paid only in
+      # that adversarial case, never on the normal read-once path.
+      reseat_after_seal if @sealed
+      mem = (@mem ||= IO::Memory.new(initial_capacity))
+      stored = mem.bytesize
       if stored < @limit
         room = @limit - stored
         if slice.size <= room
-          @mem.write(slice)
+          mem.write(slice)
         else
-          @mem.write(slice[0, room])
+          mem.write(slice[0, room])
           @truncated = true
         end
-      elsif !slice.empty?
+      else
         @truncated = true
       end
     end
@@ -49,9 +64,40 @@ module Gori::Proxy::Codec
       raise NotImplementedError.new("CaptureBuffer is write-only")
     end
 
-    # The captured (possibly truncated) bytes — a fresh copy safe to persist.
+    # The captured (possibly truncated) bytes, safe to persist. Returns a view (length =
+    # bytesize) over @mem's backing buffer — no defensive copy: this CaptureBuffer is read
+    # once after streaming and then discarded, so the slice is the store's sole owner. A later
+    # write (see `write`) does copy-on-write, so the returned slice never changes underfoot.
     def to_slice : Bytes
-      @mem.to_slice.dup
+      mem = @mem
+      return Bytes.empty unless mem
+      @sealed = true
+      mem.to_slice
+    end
+
+    private def reseat_after_seal : Nil
+      old = @mem
+      @sealed = false
+      return unless old
+      fresh = IO::Memory.new(old.bytesize > 0 ? old.bytesize : 64)
+      fresh.write(old.to_slice)
+      @mem = fresh
+    end
+
+    # Bound on the up-front presize. A known Content-Length sizes the store to fit in one
+    # allocation — but the length is an unverified client/origin claim, so a request that
+    # declares a huge body and sends almost none would otherwise let a tiny message force a
+    # multi-MB allocation (a cheap amplification). Cap the eager reservation here; a genuinely
+    # larger body still grows on demand from this size (a couple of reallocs, not a chain from
+    # 64 bytes), while a lying header wastes at most this much.
+    PRESIZE_CAP = 256 * 1024
+
+    # A known length sizes the store to fit (bounded by PRESIZE_CAP and the capture limit);
+    # an unknown length (chunked / close-delimited) falls back to IO::Memory's default growth.
+    private def initial_capacity : Int32
+      return 64 if @hint <= 0
+      cap = @hint > @limit ? @limit : @hint.to_i
+      cap > PRESIZE_CAP ? PRESIZE_CAP : cap
     end
   end
 
@@ -69,6 +115,11 @@ module Gori::Proxy::Codec
 
   module Body
     BUFSIZE = 64 * 1024
+
+    # Shared read-only empty list returned by the framing lookups when Transfer-Encoding is
+    # absent — avoids allocating a throwaway Array on the (common) no-TE path. Never mutated:
+    # chunked?/te_present? only read it.
+    EMPTY_TE = [] of String
 
     # Bounds on chunked framing lines so a hostile peer can't make us buffer/forward
     # unboundedly after the terminating 0-chunk: a single size/trailer line is capped
@@ -95,7 +146,9 @@ module Gori::Proxy::Codec
       # backend still honours it — a CL/TE request-smuggling primitive. Reject up front,
       # like CL+TE, rather than framing on a header we can't see (RFC 7230 §3.2.4).
       raise Gori::Error.new("obfuscated request header (whitespace before colon or obs-fold)") if Http1.obfuscated_header?(req.raw_head)
-      te = req.headers.get_all("Transfer-Encoding")
+      # Skip the get_all Array allocation when Transfer-Encoding is absent (the common case);
+      # an empty list means neither chunked? nor te_present? — fall straight to Content-Length.
+      te = req.headers.has?("Transfer-Encoding") ? req.headers.get_all("Transfer-Encoding") : EMPTY_TE
       if chunked?(te)
         reject_te_with_cl(req.headers)
         {BodyFraming::Chunked, 0_i64}
@@ -117,12 +170,15 @@ module Gori::Proxy::Codec
 
     # RFC 7230 §3.3.3 framing for a response body, given the request method.
     def self.response_framing(resp : RawResponse, request_method : String) : {BodyFraming, Int64}
-      m = request_method.upcase
-      return {BodyFraming::None, 0_i64} if m == "HEAD" || m == "CONNECT"
+      # Allocation-free case-insensitive match (per response); `.upcase` allocated a String.
+      if request_method.compare("HEAD", case_insensitive: true) == 0 ||
+         request_method.compare("CONNECT", case_insensitive: true) == 0
+        return {BodyFraming::None, 0_i64}
+      end
       s = resp.status
       return {BodyFraming::None, 0_i64} if (s >= 100 && s < 200) || s == 204 || s == 304
 
-      te = resp.headers.get_all("Transfer-Encoding")
+      te = resp.headers.has?("Transfer-Encoding") ? resp.headers.get_all("Transfer-Encoding") : EMPTY_TE
       if chunked?(te)
         reject_te_with_cl(resp.headers)
         {BodyFraming::Chunked, 0_i64}
@@ -200,11 +256,12 @@ module Gori::Proxy::Codec
     # a framing ambiguity (the classic CL.TE / TE.CL smuggling primitive). gori
     # never strips a header (P7), so reject and close instead of choosing one.
     private def self.reject_te_with_cl(headers : HeaderList) : Nil
-      return if headers.get_all("Content-Length").empty?
+      return unless headers.has?("Content-Length")
       raise Gori::Error.new("Transfer-Encoding and Content-Length both present")
     end
 
     private def self.content_length(headers : HeaderList) : Int64?
+      return nil unless headers.has?("Content-Length")
       values = headers.get_all("Content-Length")
       return nil if values.empty?
       # A header line may itself be a comma list ("5, 5"); split + parse each token.

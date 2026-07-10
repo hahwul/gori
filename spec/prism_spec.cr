@@ -638,6 +638,15 @@ describe "Gori::Prism::Passive (FP reduction)" do
       codes_of(gql).should contain("tech_graphql")
     end
   end
+
+  it "does not fingerprint an ordinary JSON POST with no query field as GraphQL" do
+    with_store do |store|
+      plain = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api/orders",
+        method: "POST", req_headers: "Content-Type: application/json\r\n",
+        req_body: %({"items":[{"id":1,"qty":2}],"note":"ship fast"}), content_type: nil)
+      codes_of(plain).should_not contain("tech_graphql")
+    end
+  end
 end
 
 describe "Gori::Prism::Passive (secret in URL)" do

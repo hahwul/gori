@@ -91,6 +91,11 @@ module Gori
           # first: a body leaking both a Java exception and a Go panic (or an AWS key
           # AND a GitHub token) previously surfaced only the earliest array entry, so
           # every other distinct disclosure in the same body was silently missed.
+          # NOTE: each pattern is scanned individually on purpose — every one carries a
+          # distinctive literal anchor (AKIA / -----BEGIN / Traceback / ORA- / goroutine …)
+          # that PCRE's first-byte optimization uses to skip a clean body in ~memchr time.
+          # A single `Regex.union` alternation is ~5× SLOWER (measured, bench/prism_bench):
+          # it defeats that per-pattern prefilter, so the loop stays.
           ERROR_SIGNATURES.each do |(pat, label)|
             acc << leak(ctx, "error_stack_leak", "Error/stack trace disclosed", Store::Severity::Medium, label) if pat.matches?(text)
           end

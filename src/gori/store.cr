@@ -95,6 +95,12 @@ module Gori
 
     BATCH_MAX = 128
 
+    # Cap on @pending_req_fts (see initialize). Far above the in-flight (request sent,
+    # response pending) flow count under any real load, since each entry lives only until
+    # its response lands; overflow (a flood of never-answered requests) clears the memo so
+    # update_one transparently falls back to the readback.
+    PENDING_FTS_MAX = 8192
+
     # Keep at most this many newest flows; older ones (and their ws/h2 rows) are
     # pruned so the DB plateaus instead of growing forever (freed pages are
     # reused by later inserts). 0 disables retention. Tunable per Store.open.
@@ -176,6 +182,13 @@ module Gori
       @write_failures = Atomic(Int32).new(0)
       @h2_frames_dropped = Atomic(Int32).new(0)
       @inserts_since_prune = 0
+      # Writer-fiber-only memo of the request-side FTS text keyed by a just-inserted flow id,
+      # so update_one (the response side) reuses it instead of reading the request head +
+      # body back out of the row it just wrote. Populated ONLY post-commit (a rolled-back insert
+      # never enters, so its id can't feed a stale response); bounded so abandoned Pending flows
+      # (a request whose response never arrives) can't grow it without limit — an evicted id
+      # simply falls back to the readback. Single writer fiber ⇒ no lock.
+      @pending_req_fts = {} of Int64 => String
       # Bumped after every committed prism_issues mutation (upsert/delete/status).
       # The TUI polls this every main-loop tick — more reliable than PRAGMA data_version
       # (same-process writer visibility is flaky) or the droppable Prism event channel.
@@ -1455,13 +1468,16 @@ module Gori
                 case op
                 when InsertFlow
                   ins_reply = op.reply
-                  id = insert_one(c, op.req)
-                  deferred << -> { ins_reply.send(id); publish(FlowEvent.new(id, :inserted)) }
+                  id, req_fts = insert_one(c, op.req)
+                  # Remember the request-side FTS text so this flow's later response update
+                  # skips the row readback. Merged only in the post-commit deferred block, so
+                  # a rolled-back insert leaves no entry behind.
+                  deferred << -> { remember_req_fts(id, req_fts); ins_reply.send(id); publish(FlowEvent.new(id, :inserted)) }
                 when InsertImportBatch
                   batch_reply = op.reply
                   inserted = [] of {Int64, Bool}
                   op.pairs.each do |req, resp|
-                    id = insert_one(c, req)
+                    id, _req_fts = insert_one(c, req)
                     has_resp = !resp.nil?
                     if resp
                       update_one(c, Store::CapturedResponse.new(
@@ -1619,11 +1635,14 @@ module Gori
       nil
     end
 
-    private def insert_one(conn : DB::Connection, req : CapturedRequest) : Int64
+    # Inserts the request row + its FTS entry, returning {id, req_fts} so the caller can
+    # hand the already-computed request-side FTS text to update_one (post-commit) instead of
+    # reading the head+body back out of the row.
+    private def insert_one(conn : DB::Connection, req : CapturedRequest) : {Int64, String}
       # request_size is the TRUE wire size (body_size when the BLOB was truncated),
       # so the History size column stays honest even for a capped body.
       body_size = req.body_size || req.body.try(&.size.to_i64) || 0_i64
-      conn.exec(
+      res = conn.exec(
         <<-SQL,
         INSERT INTO flows
           (created_at, scheme, host, port, method, target, http_version,
@@ -1637,11 +1656,13 @@ module Gori
         req.head.size.to_i64 + body_size,
         FlowState::Pending.value, req.h2_conn_id, req.h2_stream_id,
         req.body_truncated? ? 1 : 0)
-      id = conn.scalar("SELECT last_insert_rowid()").as(Int64)
+      # The INSERT's own result carries the rowid — no separate `SELECT last_insert_rowid()`.
+      id = res.last_insert_id
       # Index the request body text now; the response side is filled in by
       # update_one. Same transaction, so FTS and the row commit together.
-      conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, '')", id, request_fts(req))
-      id
+      req_fts = request_fts(req)
+      conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, '')", id, req_fts)
+      {id, req_fts}
     end
 
     private def update_one(conn : DB::Connection, resp : CapturedResponse) : Nil
@@ -1664,14 +1685,24 @@ module Gori
         resp.body_truncated? ? 1 : 0, resp.flow_id)
       # flows_fts is contentless (V24): FTS5 forbids UPDATE there, so re-write the whole
       # row. insert_one indexed the request side (searchable while Pending); DELETE that
-      # row and re-INSERT with BOTH sides. The request text is re-derived from the stored
-      # row (update_one only carries the response), capped in SQL so a multi-MB upload
-      # isn't pulled back whole. DELETE is a cheap tombstone (contentless_delete=1) and
-      # also makes a double update_response idempotent (last write wins).
+      # row and re-INSERT with BOTH sides. The request text was computed at insert time and
+      # memoized (@pending_req_fts) — reuse it rather than reading the head + (capped) body
+      # back from the row on every response; a miss (evicted, an import, or a cross-process
+      # write) falls back to that readback. DELETE is a cheap tombstone (contentless_delete=1)
+      # and also makes a double update_response idempotent (last write wins).
       resp_fts = (binary_content?(resp.content_type) || encoded?(head_markers(resp.head)[1])) ? "" : fts_text(resp.body)
-      req_fts = request_fts_from_row(conn, resp.flow_id)
+      req_fts = @pending_req_fts.delete(resp.flow_id) || request_fts_from_row(conn, resp.flow_id)
       conn.exec("DELETE FROM flows_fts WHERE rowid = ?", resp.flow_id)
       conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, ?)", resp.flow_id, req_fts, resp_fts)
+    end
+
+    # Record a flow's request-side FTS text for its pending response update (writer fiber
+    # only). Clears the memo on overflow rather than growing unbounded — a burst of requests
+    # whose responses never land would otherwise pin memory; after a clear, those responses
+    # take the readback path.
+    private def remember_req_fts(id : Int64, req_fts : String) : Nil
+      @pending_req_fts.clear if @pending_req_fts.size >= PENDING_FTS_MAX
+      @pending_req_fts[id] = req_fts
     end
 
     # The request-side FTS text for an already-stored flow, recomputed the same way

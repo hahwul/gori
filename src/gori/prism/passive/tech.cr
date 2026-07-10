@@ -101,6 +101,11 @@ module Gori
           # 8 KB truncated mid-JSON on real GraphQL requests (a sizeable `variables` object),
           # which then fails JSON.parse and mis-classified them as non-GraphQL; allow up to 256 KB.
           text = String.new(body[0, {body.size, 256 * 1024}.min]).scrub
+          # A GraphQL request body always carries a top-level `"query"` key; a cheap substring
+          # check lets the overwhelming majority of non-GraphQL JSON POSTs skip the full
+          # JSON.parse (a tree build over ≤256 KB) on the shared passive-scan fiber. Conservative:
+          # a `"query"` appearing only inside a value still parses, then the as_h?/as_s? guards reject.
+          return false unless text.includes?(%("query"))
           q = begin
             JSON.parse(text).as_h?.try(&.["query"]?).try(&.as_s?)
           rescue JSON::ParseException

@@ -141,8 +141,8 @@ describe "Gori::Interceptor direction + condition gates" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
       ic.toggle # enable (default Both)
-      req_ok = -> { ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http") }
-      res_ok = -> { ic.intercepts_response?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200) }
+      req_ok = -> { ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http") }
+      res_ok = -> { ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200) }
 
       req_ok.call.should be_true
       res_ok.call.should be_true
@@ -160,8 +160,8 @@ describe "Gori::Interceptor direction + condition gates" do
   it "disabled → both gates closed regardless of direction" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
-      ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
-      ic.intercepts_response?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200).should be_false
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
+      ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200).should be_false
     end
   end
 
@@ -170,8 +170,8 @@ describe "Gori::Interceptor direction + condition gates" do
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
       ic.toggle
       ic.set_filter("method:POST")
-      ic.intercepts_request?("http://acme.test/x", method: "POST", host: "acme.test", target: "/x", scheme: "http").should be_true
-      ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
+      ic.intercepts_request?(method: "POST", host: "acme.test", target: "/x", scheme: "http").should be_true
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
     end
   end
 
@@ -180,9 +180,9 @@ describe "Gori::Interceptor direction + condition gates" do
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
       ic.toggle
       ic.set_filter("status:>=500")
-      ic.intercepts_response?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 503).should be_true
-      ic.intercepts_response?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200).should be_false
-      ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
+      ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 503).should be_true
+      ic.intercepts_response?(method: "GET", host: "acme.test", target: "/x", scheme: "http", status: 200).should be_false
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_false
     end
   end
 
@@ -206,8 +206,8 @@ describe "Gori::Interceptor direction + condition gates" do
       scope.add("include", "host", "acme.test")
       scope.enable
       ic.set_filter("method:GET")
-      ic.intercepts_request?("http://acme.test/x", method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_true
-      ic.intercepts_request?("http://evil.test/x", method: "GET", host: "evil.test", target: "/x", scheme: "http").should be_false # out of scope
+      ic.intercepts_request?(method: "GET", host: "acme.test", target: "/x", scheme: "http").should be_true
+      ic.intercepts_request?(method: "GET", host: "evil.test", target: "/x", scheme: "http").should be_false # out of scope
     end
   end
 end

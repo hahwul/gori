@@ -152,26 +152,28 @@ module Gori
     end
 
     # Precise per-REQUEST gate, used by ClientConn (which has the full request): hold
-    # this exact request? `url` is `scheme://host/target` — the same value the Scope
-    # SQL filter builds, so a held request is exactly an in-scope History row. Folds
-    # in the catch direction (skip when responses-only) and the conditional filter.
-    def intercepts_request?(url : String, *, method : String, host : String,
+    # this exact request? The scope URL (`scheme://host/target` — the same value the
+    # Scope SQL filter builds, so a held request is exactly an in-scope History row) is
+    # built LAZILY here, only after the enabled/direction gates pass AND only when Scope
+    # is active, so the common capture-only (intercept-off) path never allocates it.
+    # Folds in the catch direction (skip when responses-only) and the conditional filter.
+    def intercepts_request?(*, method : String, host : String,
                             target : String, scheme : String) : Bool
       enabled, dir, filter = gate_snapshot
       return false unless enabled
       return false if dir.response_only?
-      return false unless scope_allows?(url, host)
+      return false unless scope_allows?(scheme, host, target)
       filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme))
     end
 
     # Precise per-RESPONSE gate (same shape as the request gate). Skips when
     # requests-only; the condition can also test `status:` here (a response has one).
-    def intercepts_response?(url : String, *, method : String, host : String,
+    def intercepts_response?(*, method : String, host : String,
                              target : String, scheme : String, status : Int32) : Bool
       enabled, dir, filter = gate_snapshot
       return false unless enabled
       return false if dir.request_only?
-      return false unless scope_allows?(url, host)
+      return false unless scope_allows?(scheme, host, target)
       filter.matches?(Subject.new(method: method, host: host, target: target, scheme: scheme, status: status))
     end
 
@@ -181,8 +183,12 @@ module Gori
       @mutex.synchronize { {@enabled && !@shutting_down, @direction, @filter} }
     end
 
-    private def scope_allows?(url : String, host : String) : Bool
-      @scope.active? ? @scope.in_scope_url?(url, host) : true
+    # Build the scope URL only when Scope is active (an inactive scope allows everything
+    # without inspecting the URL), so a passing gate on an intercept-enabled/scope-off
+    # setup still skips the interpolation.
+    private def scope_allows?(scheme : String, host : String, target : String) : Bool
+      return true unless @scope.active?
+      @scope.in_scope_url?("#{scheme}://#{host}#{target}", host)
     end
 
     # --- proxy fiber side (BLOCKS until a decision) --------------------------
