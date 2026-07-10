@@ -67,9 +67,16 @@ module Gori
           text = ctx.body_text
           return if text.nil? || text.empty?
           # Private-IP scan skips script/style payloads, where dotted version strings dominate
-          # and produce the bulk of the false positives.
-          if !scripty?(ctx.content_type) && (m = PRIVATE_IP.match(text))
-            acc << leak(ctx, "private_ip_leak", "Private IP address disclosed", Store::Severity::Low, m[0])
+          # and produce the bulk of the false positives. A 4-part software/assembly version
+          # (e.g. "File version 10.0.1.2", {"version":"10.0.0.0"}) also collides with 10.0.0.0/8,
+          # so skip a candidate immediately preceded by a version-context word and report the
+          # first genuine (non-version) private IP instead.
+          if !scripty?(ctx.content_type)
+            text.scan(PRIVATE_IP) do |m|
+              next if version_context?(m.pre_match)
+              acc << leak(ctx, "private_ip_leak", "Private IP address disclosed", Store::Severity::Low, m[0])
+              break
+            end
           end
           # Report EVERY distinct error-signature / secret TYPE present, not just the
           # first: a body leaking both a Java exception and a Go panic (or an AWS key
@@ -108,6 +115,16 @@ module Gori
           return false if ctype.nil?
           low = ctype.downcase
           low.includes?("javascript") || low.includes?("ecmascript") || low.includes?("css")
+        end
+
+        # True when a private-IP candidate is really a software/assembly VERSION: a version word
+        # sits immediately before it (within a short window of the text preceding the match), e.g.
+        # `File version 10.0.1.2` or `{"version":"10.0.0.0"}`. Keeps a genuine leak (`backend at
+        # 10.0.0.5`) flagged while dropping the ubiquitous 4-part-version false positive.
+        private def version_context?(pre : String) : Bool
+          tail = (pre.size > 24 ? pre[(pre.size - 24)..] : pre).downcase
+          tail.includes?("version") || tail.includes?("build") || tail.includes?("assembly") ||
+            tail.includes?("revision") || tail.includes?("firmware")
         end
       end
     end

@@ -865,6 +865,90 @@ describe "Gori::Prism::Passive (insecure Basic auth)" do
   end
 end
 
+describe "Gori::Prism::Passive (Round-1 hardening)" do
+  it "resolves duplicate CSP directives first-wins (matches browser enforcement)" do
+    with_store do |store|
+      # First script-src is safe; the duplicate must be IGNORED, so this is not weak.
+      safe = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n" \
+        "Content-Security-Policy: script-src 'self'; script-src 'unsafe-inline'\r\n\r\n")
+      codes_of(safe).should_not contain("weak_csp")
+      # First script-src is unsafe-inline; a later 'self' duplicate must not mask it.
+      weak = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n" \
+        "Content-Security-Policy: script-src 'unsafe-inline'; script-src 'self'\r\n\r\n")
+      codes_of(weak).should contain("weak_csp")
+    end
+  end
+
+  it "suppresses hygiene for sentinel-value and negative-Max-Age deletion cookies" do
+    with_store do |store|
+      # PHP clears cookies with the literal value "deleted" (not empty) + Max-Age=0.
+      php = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n" \
+        "Set-Cookie: PHPSESSID=deleted; Max-Age=0; expires=Thu, 01-Jan-1970 00:00:00 GMT; path=/\r\n\r\n")
+      codes_of(php).should_not contain("cookie_no_secure")
+      codes_of(php).should_not contain("cookie_no_httponly")
+      neg = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=; Max-Age=-1\r\n\r\n")
+      codes_of(neg).should_not contain("cookie_no_samesite")
+      # …but a live cookie with a positive Max-Age is still scored.
+      live = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc; Max-Age=3600\r\n\r\n")
+      codes_of(live).should contain("cookie_no_secure")
+    end
+  end
+
+  it "flags a Basic challenge listed after another scheme in one WWW-Authenticate header" do
+    with_store do |store|
+      dets = analyze(store, scheme: "http", content_type: nil, status: 401,
+        resp_head: "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Negotiate, Basic realm=\"x\"\r\n\r\n")
+      dets.find(&.code.==("insecure_basic_auth")).not_nil!.severity.should eq(Gori::Store::Severity::Medium)
+      none = analyze(store, scheme: "http", content_type: nil, status: 401,
+        resp_head: "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Negotiate, Digest realm=\"x\"\r\n\r\n")
+      codes_of(none).should_not contain("insecure_basic_auth")
+    end
+  end
+
+  it "flags PGP and PKCS#8-encrypted private key blocks (not just RSA/EC)" do
+    with_store do |store|
+      pgp = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n\r\n",
+        body: "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF...\n-----END PGP PRIVATE KEY BLOCK-----")
+      pgp.find(&.code.==("secret_in_body")).not_nil!.evidence.should eq("private key block")
+      enc = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n\r\n",
+        body: "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIF...\n-----END ENCRYPTED PRIVATE KEY-----")
+      codes_of(enc).should contain("secret_in_body")
+    end
+  end
+
+  it "does not flag a 4-part software version as a private IP but still catches a real leak" do
+    with_store do |store|
+      json = analyze(store, content_type: "application/json",
+        resp_head: "HTTP/1.1 200 OK\r\n\r\n", body: %({"version":"10.0.0.0"}))
+      codes_of(json).should_not contain("private_ip_leak")
+      htmlv = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\n\r\n", body: "<span>File version 10.0.1.2</span>")
+      codes_of(htmlv).should_not contain("private_ip_leak")
+      # a genuine private IP after a version-shaped token is still surfaced (scan, not first-match).
+      mixed = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n\r\n",
+        body: "<p>build version 10.0.1.2</p><p>backend at 192.168.1.5</p>")
+      mixed.find(&.code.==("private_ip_leak")).not_nil!.evidence.should eq("192.168.1.5")
+    end
+  end
+
+  it "anchors GraphQL introspection on the result envelope, not raw substrings" do
+    with_store do |store|
+      # An echoed introspection QUERY string carries both tokens but is not a result -> no FP.
+      echoed = analyze(store, content_type: "application/json",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        body: %({"data":{"savedQuery":"query IntrospectionQuery { __schema { queryType { name } } }"}}))
+      codes_of(echoed).should_not contain("graphql_introspection")
+      # A real introspection envelope is flagged even when queryType is absent from the prefix.
+      env = analyze(store, content_type: "application/json",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        body: %({"data":{"__schema":{"types":[{"name":"User"}]}}}))
+      codes_of(env).should contain("graphql_introspection")
+    end
+  end
+end
+
 describe "Gori::Prism::Active::CorsReflection" do
   probe = Gori::Prism::Active::CorsReflection.new
 
@@ -1037,6 +1121,7 @@ describe Gori::Prism do
           g.hit_count.to_i64.should eq(s.hit_count)
           g.affected.sort.should eq(s.affected.sort)
           g.evidence.should eq(s.evidence) # first non-nil wins (COALESCE)
+          g.title.should eq(s.title)       # title tracks the same (highest-severity) observation
         end
 
         csp = grouped["missing_csp@a.test"]
@@ -1079,6 +1164,24 @@ describe Gori::Prism do
         Gori::Prism::Detection.new("private_ip_leak", "infoleak", "b.test", "https://b.test/", "t", Gori::Store::Severity::Low, "192.168.0.1"),
       ]
       Gori::Prism.group(ip).find!(&.code.==("private_ip_leak")).evidence.should eq("10.0.0.1")
+    end
+
+    it "adopts the higher-severity title on escalation, staying consistent with the store" do
+      with_store do |store|
+        low = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/api",
+          "Reflected parameter (non-HTML context)", Gori::Store::Severity::Low, "q")
+        high = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/page",
+          "Reflected parameter", Gori::Store::Severity::Medium, "name")
+        dets = [low, high] # non-HTML first, then HTML escalates
+        g = Gori::Prism.group(dets).find!(&.code.== "reflected_param")
+        g.severity.should eq(Gori::Store::Severity::Medium)
+        g.title.should eq("Reflected parameter") # not frozen at "(non-HTML context)"
+        # and the headless group matches what the store persists for the same detections
+        dets.each { |d| store.upsert_prism_issue(d) }
+        stored = store.prism_issues.find!(&.code.== "reflected_param")
+        g.title.should eq(stored.title)
+        g.severity.should eq(stored.severity)
+      end
     end
 
     it "tags the same code on different hosts as separate groups" do

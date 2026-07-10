@@ -50,13 +50,16 @@ module Gori
           end
         end
 
-        # Parse a CSP into {directive => [sources]}, all lowercased.
+        # Parse a CSP into {directive => [sources]}, all lowercased. A directive repeated within
+        # one policy is FIRST-wins (CSP3 "parse a serialized CSP": a duplicate directive name is
+        # ignored) — mirror what the browser enforces, so `script-src 'self'; script-src
+        # 'unsafe-inline'` is judged on the first, safe `script-src` (not the last).
         private def parse_csp(csp : String) : Hash(String, Array(String))
           dirs = {} of String => Array(String)
           csp.split(';').each do |segment|
             toks = segment.strip.downcase.split(/\s+/).reject(&.empty?)
             next if toks.empty?
-            dirs[toks[0]] = toks[1..]
+            dirs[toks[0]] ||= toks[1..]
           end
           dirs
         end

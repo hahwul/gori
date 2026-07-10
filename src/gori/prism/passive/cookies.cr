@@ -18,8 +18,6 @@ module Gori
         HOST_PREFIX   = "__Host-"
         SECURE_PREFIX = "__Secure-"
 
-        MAX_AGE_ZERO = /\Amax-age\s*=\s*0+\z/
-
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
           resp.headers.get_all("Set-Cookie").each do |raw|
@@ -54,11 +52,23 @@ module Gori
           end
         end
 
-        # True for a cookie being cleared: empty value AND a deletion marker (Max-Age=0 or an
-        # Expires attribute — a live cookie sets neither with an empty value).
+        # True for a cookie being cleared (no secret to protect, so its missing flags are noise):
+        #   * Max-Age <= 0 is an UNCONDITIONAL delete regardless of value — a live cookie never
+        #     sets it, and frameworks clear with a sentinel value (PHP emits `sid=deleted;
+        #     Max-Age=0`), so requiring an empty value would miss the common logout pattern.
+        #   * Otherwise, an EMPTY value paired with an Expires attribute is the classic clear.
         private def deletion?(value : String, flags : Array(String)) : Bool
-          return false unless value.empty?
-          flags.any? { |f| MAX_AGE_ZERO.matches?(f) || f.starts_with?("expires=") }
+          return true if flags.any? { |f| max_age_delete?(f) }
+          value.empty? && flags.any?(&.starts_with?("expires="))
+        end
+
+        # Max-Age with a non-positive value (0 or negative) — an immediate deletion (RFC 6265).
+        # `flag` is already stripped + lowercased.
+        private def max_age_delete?(flag : String) : Bool
+          return false unless flag.starts_with?("max-age")
+          eq = flag.index('=') || return false
+          n = flag[(eq + 1)..].strip.to_i64?
+          !n.nil? && n <= 0
         end
 
         # Validate a __Host-/__Secure- prefixed cookie against its browser-enforced rules;

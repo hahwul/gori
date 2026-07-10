@@ -23,10 +23,18 @@ module Gori
           end
 
           return unless resp = ctx.response
-          if resp.headers.get_all("WWW-Authenticate").any? { |v| basic?(v) }
+          if resp.headers.get_all("WWW-Authenticate").any? { |v| offers_basic?(v) }
             acc << det(ctx, "HTTP Basic authentication challenged over cleartext HTTP",
               Store::Severity::Medium, "WWW-Authenticate: Basic")
           end
+        end
+
+        # A WWW-Authenticate header may list several comma-separated challenges
+        # ("Negotiate, Basic realm=…"); Basic counts if it is the scheme of ANY of them, not only
+        # the first. (Auth-param values can also carry commas, but a real Basic challenge's scheme
+        # token still opens one of the comma segments.)
+        private def offers_basic?(value : String) : Bool
+          value.split(',').any? { |seg| basic?(seg) }
         end
 
         # An auth header/challenge whose scheme token is `Basic` (case-insensitive, leading
