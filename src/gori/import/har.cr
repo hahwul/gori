@@ -55,7 +55,7 @@ module Gori
         reason = resp["statusText"]?.to_s.presence || status_reason(status)
         resp_headers = headers_list(resp["headers"]?)
         resp_body, content_type = response_body(resp)
-        content_type ||= resp_headers.find { |(k, _)| k.downcase == "content-type" }.try(&.[1])
+        content_type ||= resp_headers.find { |(k, _)| k.compare("content-type", case_insensitive: true) == 0 }.try(&.[1])
 
         Builder.complete_flow(
           created_at, url, method, req_headers, req_body, http_version,

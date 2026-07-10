@@ -139,7 +139,27 @@ module Gori
     private def scan_body(label : String, body : Bytes?, & : String, String ->)
       return unless body
       return if body.size > MAX_SCAN
+      # SCAN_RE anchors on `eyJ`; a body without those 3 ASCII bytes can't match, so a cheap
+      # raw-byte scan skips the whole-body `String.new(...).scrub` + regex for the vast majority
+      # of flows (which carry no JWT). Equivalent: `eyJ` is ASCII, and scrub never alters ASCII
+      # bytes nor synthesizes them, so its presence in the raw bytes == presence in the string.
+      return unless contains_eyj?(body)
       String.new(body).scrub.scan(SCAN_RE) { |m| yield label, m[0] }
+    end
+
+    # Raw-byte search for the ASCII sequence `eyJ` (0x65 0x79 0x4a) — the JWT header anchor.
+    private def contains_eyj?(body : Bytes) : Bool
+      n = body.size
+      return false if n < 3
+      last = n - 3
+      i = 0
+      while i <= last
+        if body.unsafe_fetch(i) == 0x65_u8 && body.unsafe_fetch(i + 1) == 0x79_u8 && body.unsafe_fetch(i + 2) == 0x4a_u8
+          return true
+        end
+        i += 1
+      end
+      false
     end
   end
 end

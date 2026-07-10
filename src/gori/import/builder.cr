@@ -23,13 +23,14 @@ module Gori
       # `://` later on (e.g. inside a query, `?next=http://x`) is NOT a scheme, so
       # match the leading scheme only — else a scheme-less endpoint carrying a URL in
       # its query was wrongly rejected as "missing scheme" and dropped from the import.
-      LEADING_SCHEME = /\A[a-z][a-z0-9+.-]*:\/\//
+      # Case-insensitive (schemes are, RFC 3986 §3.1) so no per-URL `.downcase` allocation.
+      LEADING_SCHEME = /\A[a-z][a-z0-9+.-]*:\/\//i
+      HTTP_SCHEME    = /\Ahttps?:\/\//i
 
       def self.normalize_url(url : String) : String
         u = url.strip
-        down = u.downcase # schemes are case-insensitive (RFC 3986 §3.1)
-        return u if down.starts_with?("http://") || down.starts_with?("https://")
-        raise Gori::Error.new("invalid URL (missing scheme): #{url}") if down.matches?(LEADING_SCHEME)
+        return u if u.starts_with?(HTTP_SCHEME)
+        raise Gori::Error.new("invalid URL (missing scheme): #{url}") if u.matches?(LEADING_SCHEME)
         "https://#{u}"
       end
 
@@ -54,15 +55,16 @@ module Gori
         String.build do |b|
           b << method.upcase << ' ' << target << ' ' << http_version << "\r\n"
           b << "Host: " << host << "\r\n"
+          # One pass, allocation-free case-insensitive compares: skip the Host line and note
+          # whether a Content-Length is already present (was a `.downcase` per header + a
+          # second `headers.any?` scan — hundreds of throwaway Strings on a large HAR).
+          has_cl = false
           headers.each do |k, v|
-            next if k.downcase == "host"
+            has_cl = true if !has_cl && k.compare("content-length", case_insensitive: true) == 0
+            next if k.compare("host", case_insensitive: true) == 0
             b << k << ": " << v << "\r\n"
           end
-          if body
-            unless headers.any? { |(k, _)| k.downcase == "content-length" }
-              b << "Content-Length: " << body.size << "\r\n"
-            end
-          end
+          b << "Content-Length: " << body.size << "\r\n" if body && !has_cl
           b << "\r\n"
         end.to_slice
       end
@@ -71,10 +73,12 @@ module Gori
                              headers : Headers, body : Bytes?) : Bytes
         String.build do |b|
           b << http_version << ' ' << status << ' ' << reason << "\r\n"
-          headers.each { |k, v| b << k << ": " << v << "\r\n" }
-          unless headers.any? { |(k, _)| k.downcase == "content-length" }
-            b << "Content-Length: " << (body.try(&.size) || 0) << "\r\n"
+          has_cl = false
+          headers.each do |k, v|
+            has_cl = true if !has_cl && k.compare("content-length", case_insensitive: true) == 0
+            b << k << ": " << v << "\r\n"
           end
+          b << "Content-Length: " << (body.try(&.size) || 0) << "\r\n" unless has_cl
           b << "\r\n"
         end.to_slice
       end
