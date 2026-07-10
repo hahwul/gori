@@ -1815,9 +1815,17 @@ module Gori
       args = [op.conn_id, op.created_at, op.direction, op.stream_id,
               op.type_octet, op.flags, op.payload.size] of DB::Any
       args << op.payload unless data
-      conn.exec("INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
-                "VALUES (?,?,?,?,?,?,?,#{data ? "X''" : "?"})", args: args)
+      # Precomputed SQL (one of two fixed texts) — this runs once per h2 frame on the writer
+      # fiber, so string-interpolating the statement every call was pure churn on the shared core.
+      conn.exec(data ? SQL_INSERT_H2_FRAME_DATA : SQL_INSERT_H2_FRAME_PAYLOAD, args: args)
     end
+
+    private SQL_INSERT_H2_FRAME_DATA =
+      "INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
+      "VALUES (?,?,?,?,?,?,?,X'')"
+    private SQL_INSERT_H2_FRAME_PAYLOAD =
+      "INSERT INTO h2_frames (conn_id, created_at, direction, stream_id, type, flags, length, payload) " \
+      "VALUES (?,?,?,?,?,?,?,?)"
 
     # Runs a write closure on the writer connection; returns last_insert_rowid.
     private def exec_task(run : DB::Connection -> Nil) : Int64

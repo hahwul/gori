@@ -351,7 +351,7 @@ module Gori::Proxy::H2
     private def synth_request_head(method : String, path : String, headers : Array({String, String}), authority : String) : Bytes
       String.build do |io|
         io << method << ' ' << path << " HTTP/2\r\n"
-        has_host = headers.any? { |(n, _)| n.downcase == "host" }
+        has_host = headers.any? { |(n, _)| n.compare("host", case_insensitive: true) == 0 }
         io << "Host: " << authority << "\r\n" if !authority.empty? && !has_host
         headers.each { |(n, v)| io << n << ": " << v << "\r\n" unless n.starts_with?(':') }
         io << "\r\n"

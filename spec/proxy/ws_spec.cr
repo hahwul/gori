@@ -83,6 +83,29 @@ describe Gori::Proxy::WS do
     end
   end
 
+  describe ".unmask" do
+    it "is byte-identical to the scalar RFC 6455 mask across every length + offset (word-XOR)" do
+      key = Bytes[0xAA, 0xBB, 0xCC, 0xDD]
+      # Cover 0..40 so every tail remainder (n % 4 ∈ 0,1,2,3) and multi-word bodies run.
+      (0..40).each do |n|
+        src = Bytes.new(n) { |i| ((i * 37 + 11) & 0xff).to_u8 }
+        want = Bytes.new(n) { |i| src[i] ^ key[i & 3] } # scalar reference
+        got = Bytes.new(n)
+        Gori::Proxy::WS.unmask(src, key, got)
+        got.should eq(want)
+      end
+    end
+
+    it "round-trips: unmask(mask(x)) == x for a non-word-aligned length" do
+      key = Bytes[0x01, 0x7f, 0x80, 0xFE]
+      x = "the quick brown fox — 27 bytes!".to_slice # 31 bytes (tail = 3)
+      masked = Bytes.new(x.size) { |i| x[i] ^ key[i & 3] }
+      back = Bytes.new(x.size)
+      Gori::Proxy::WS.unmask(masked, key, back)
+      back.should eq(x)
+    end
+  end
+
   describe ".read_header" do
     it "parses a masked header exposing len and mask key without the payload" do
       h = Gori::Proxy::WS.read_header(IO::Memory.new(MASKED_HI)).not_nil!

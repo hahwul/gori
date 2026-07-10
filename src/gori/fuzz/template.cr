@@ -280,9 +280,11 @@ module Gori::Fuzz
     # `§`, and `sep` is the value|chain boundary `¦` (== `close` when there's no chain).
     # Lets the views tint the value and the (dimmer) chain separately; 1:1 with
     # `positions` / `marked_spans`.
-    def self.marker_regions(text : String) : Array({Int32, Int32, Int32})
+    # `spans` defaults to a fresh `marked_spans(text)`; pass a cached one (views memoize it on
+    # the editor revision) so a cache-miss here does ONE `text.chars` instead of two.
+    def self.marker_regions(text : String, spans : Array({Int32, Int32}) = marked_spans(text)) : Array({Int32, Int32, Int32})
       chars = text.chars
-      marked_spans(text).map do |(a, b)|
+      spans.map do |(a, b)|
         close = b - 1
         value, chain = split_raw_interior(chars[(a + 1)...close])
         sep = chain.nil? ? close : (a + 1 + value.size)

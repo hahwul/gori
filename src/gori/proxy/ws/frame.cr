@@ -118,15 +118,39 @@ module Gori::Proxy::WS
 
     payload =
       if h.masked?
-        key = h.mask_key
-        out = Bytes.new(n) # unmask into a separate buffer; keep `raw` masked for byte-exact relay
-        n.times { |i| out[i] = buf[hlen + i] ^ key[i & 3] }
-        out
+        unmasked = Bytes.new(n) # separate buffer; keep `raw` masked for byte-exact relay
+        unmask(buf[hlen, n], h.mask_key, unmasked) if n > 0
+        unmasked
       else
         buf[hlen, n] # zero-copy view into the wire buffer (already unmasked)
       end
 
     Frame.new(h.fin?, h.opcode, payload, buf)
+  end
+
+  # Unmask `src` into `dst` (RFC 6455 §5.3: `dst[i] = src[i] ^ key[i % 4]`). Every
+  # client→server frame is masked, so this runs over the whole payload of every WS upload —
+  # the byte-at-a-time loop was the dominant WS-capture CPU cost. The mask period is 4 and
+  # aligned to payload offset 0, so a 32-bit word XOR is byte-identical to the scalar form:
+  # load 4 src bytes and the 4 key bytes as words in the SAME native order, XOR, store — the
+  # result's byte layout is `[s0^k0, s1^k1, s2^k2, s3^k3]` on either endianness. A ≤3-byte
+  # tail finishes scalar. `dst` must be exactly `src.size`. Only the CAPTURE copy is unmasked;
+  # `raw`/forward bytes stay masked (byte-exact, P7).
+  def self.unmask(src : Bytes, key : Bytes, dst : Bytes) : Nil
+    n = src.size
+    sp = src.to_unsafe
+    dp = dst.to_unsafe
+    key32 = key.to_unsafe.as(UInt32*).value # the 4 key bytes as one native-order word
+    i = 0
+    while i + 4 <= n
+      (dp + i).as(UInt32*).value = (sp + i).as(UInt32*).value ^ key32
+      i += 4
+    end
+    kp = key.to_unsafe
+    while i < n
+      dp[i] = sp[i] ^ kp[i & 3]
+      i += 1
+    end
   end
 
   # Copies exactly `len` payload bytes from `src` to `dst` in bounded chunks,

@@ -107,6 +107,8 @@ module Gori::Tui
       # Backs BOTH the template tint colours and the Sets→marker chips, so they can't disagree.
       @marker_text_rev = -1
       @marker_spans = [] of {Int32, Int32}
+      @marker_regions_rev = -1
+      @marker_regions_cache = [] of {Int32, Int32, Int32}
       # The CHAIN sub-pane: a visible editor for the Convert chain of the §…§ marker under
       # the TEMPLATE cursor (transform applied to each payload on send). @chain_focused =
       # editing it; @chain_marker_cursor remembers which marker to commit back to.
@@ -517,6 +519,17 @@ module Gori::Tui
         @marker_spans = Fuzz::Template.marked_spans(@editor.text)
       end
       @marker_spans
+    end
+
+    # {open, sep, close} regions cached on the editor revision — the template tint runs it
+    # every render; without the cache marker_regions did 2× whole-buffer `text.chars` per
+    # frame (its own + marked_spans'). Reuses the already-cached `marker_spans`.
+    private def marker_regions : Array({Int32, Int32, Int32})
+      if @editor.edits != @marker_regions_rev
+        @marker_regions_rev = @editor.edits
+        @marker_regions_cache = Fuzz::Template.marker_regions(@editor.text, marker_spans)
+      end
+      @marker_regions_cache
     end
 
     # --- run lifecycle -------------------------------------------------------
@@ -1392,7 +1405,7 @@ module Gori::Tui
       # it reads as metadata, not payload. Colours resolved fresh each frame (offsets are
       # colour-free); marker_regions is 1:1 with `spans`, so the config chips stay in sync.
       bg = [] of {Int32, Int32, Color}
-      Fuzz::Template.marker_regions(@editor.text).each_with_index do |region, i|
+      marker_regions.each_with_index do |region, i|
         a, sep, close = region
         bg << {a, close + 1, Theme.marker_bg(i)}
         bg << {sep, close + 1, Theme.elevated} if sep < close # dim the ¦chain segment

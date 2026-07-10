@@ -126,6 +126,8 @@ module Gori::Tui
       # base64-encode → it's encoded on the wire). Off = byte-identical to a plain send,
       # so a captured `§` is never reinterpreted unless the user turns this on.
       @mark_transform = false
+      @marker_regions_rev = -1
+      @marker_regions_cache = [] of {Int32, Int32, Int32}
       # The CHAIN sub-pane (MARK mode): a visible editor for the chain of the §…§ marker
       # under the request cursor. @chain_focused = editing it (split enlarges + keys route
       # there); @chain_marker_cursor remembers which marker to write back to on commit.
@@ -2192,12 +2194,23 @@ module Gori::Tui
         return
       end
       bg = [] of {Int32, Int32, Color}
-      Fuzz::Template.marker_regions(@editor.text).each_with_index do |region, i|
+      marker_regions.each_with_index do |region, i|
         a, sep, close = region
         bg << {a, close + 1, Theme.marker_bg(i)}
         bg << {sep, close + 1, Theme.elevated} if sep < close # dim the ¦chain segment
       end
       @editor.bg_regions = bg
+    end
+
+    # {open, sep, close} marker regions cached on the editor revision — update_request_mark_tint
+    # runs every render; the cache skips marker_regions' 2× whole-buffer `text.chars` on an
+    # unchanged request buffer.
+    private def marker_regions : Array({Int32, Int32, Int32})
+      if @editor.edits != @marker_regions_rev
+        @marker_regions_rev = @editor.edits
+        @marker_regions_cache = Fuzz::Template.marker_regions(@editor.text)
+      end
+      @marker_regions_cache
     end
 
     private def render_ws_handshake(screen : Screen, rect : Rect, focused : Bool) : Nil
