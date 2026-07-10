@@ -213,13 +213,16 @@ module Gori::Tui
 
     def prism_delete : Nil
       return unless i = @prism.target_issue
-      @host.confirm("DELETE ISSUE", "Delete \"#{i.title}\" on #{i.host}?", confirm_label: "delete", danger: true) do
-        code, host = i.code, i.host
+      # Capture the id/code/host NOW: the confirm resolves on a later tick, and a background
+      # prism_generation reload can shift the selection in between — so both the suppress and
+      # the delete must target THIS issue by id, not whatever happens to be selected at confirm.
+      id, code, host, title = i.id, i.code, i.host, i.title
+      @host.confirm("DELETE ISSUE", "Delete \"#{title}\" on #{host}?", confirm_label: "delete", danger: true) do
         # Suppress FIRST: delete's exec_task yields to the store writer, and an
         # in-flight Active/passive fiber can re-upsert the same (code, host) in
         # that window if suppress runs after delete.
         @host.session.prism.suppress(code, host)
-        @prism.delete(@host.session.store)
+        @prism.delete_by_id(@host.session.store, id)
       end
     end
 

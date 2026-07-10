@@ -505,21 +505,27 @@ module Gori
           return nil
         end
         existing = c.query_one?(
-          "SELECT id, affected, severity, evidence FROM prism_issues WHERE code = ? AND host = ?",
-          d.code, d.host, as: {Int64, String, Int32, String?})
+          "SELECT id, affected, severity, evidence, title FROM prism_issues WHERE code = ? AND host = ?",
+          d.code, d.host, as: {Int64, String, Int32, String?, String})
         if existing
-          id, aff_json, sev, prev_evidence = existing
+          id, aff_json, sev, prev_evidence, prev_title = existing
           urls = parse_affected(aff_json)
           urls << d.url if !urls.includes?(d.url) && urls.size < PRISM_AFFECTED_CAP
           new_sev = sev > d.severity.value ? sev : d.severity.value
+          # Keep the title in sync with the highest-severity observation: a code whose title
+          # is severity-dependent (reflected_param: HTML ⇒ Medium "Reflected parameter" vs
+          # non-HTML ⇒ Low "…(non-HTML context)") must not show an escalated badge next to the
+          # lower-severity title. Adopt the incoming title only when it RAISES severity; for
+          # fixed-title codes (the vast majority) this is a no-op.
+          new_title = d.severity.value > sev ? d.title : prev_title
           # For the type-labeled infoleak codes, accumulate every distinct type seen
           # for this (code, host) group so a later flow's different secret/error type
           # isn't masked by the first-wins COALESCE. Other codes keep their first
           # representative sample.
           new_evidence = accumulate_evidence?(d.code) ? merge_evidence(prev_evidence, d.evidence) : (prev_evidence || d.evidence)
           c.exec("UPDATE prism_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
-                 "evidence = ?, last_seen = ? WHERE id = ?",
-            urls.to_json, new_sev, new_evidence, ts, id)
+                 "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
+            urls.to_json, new_sev, new_title, new_evidence, ts, id)
         else
           c.exec("INSERT INTO prism_issues (code, category, host, title, severity, status, hit_count, " \
                  "affected, sample_flow_id, evidence, first_seen, last_seen, sample_replay_id) " \
@@ -1150,6 +1156,23 @@ module Gori
       msgs
     end
 
+    # Frames on a flow with id AFTER `after_id`, OLDEST-first, up to `limit`. Lets the Prism WS
+    # rescan page forward from its per-flow high-water-mark and cover every frame exactly once,
+    # even when more than a full window accumulated unscanned (a dropped-event burst) or the flow
+    # was evicted from the analyzed-set and re-scanned.
+    def ws_messages_after(flow_id : Int64, after_id : Int64, limit : Int32) : Array(WsMessage)
+      msgs = [] of WsMessage
+      cols = "id, flow_id, replay_id, created_at, direction, opcode, payload"
+      @db.query("SELECT #{cols} FROM ws_messages WHERE flow_id = ? AND id > ? ORDER BY id LIMIT ?",
+        args: [flow_id, after_id, limit.to_i64] of DB::Any) do |rs|
+        rs.each do
+          msgs << WsMessage.new(rs.read(Int64), rs.read(Int64), rs.read(Int64?), rs.read(Int64),
+            rs.read(String), rs.read(Int32), rs.read(Bytes))
+        end
+      end
+      msgs
+    end
+
     def ws_messages_for_replay(replay_id : Int64, limit : Int32? = nil) : Array(WsMessage)
       msgs = [] of WsMessage
       cols = "id, flow_id, replay_id, created_at, direction, opcode, payload"
@@ -1513,6 +1536,12 @@ module Gori
       return if cutoff <= 0
       conn.transaction do |tx|
         c = tx.connection
+        # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
+        # newer flows push its id below the cutoff is reaped here mid-stream, which also stops
+        # Prism WS scanning on it. A liveness guard like the h2 one below is the fix, but it must
+        # compare ws_message.created_at against a WS-relative recency floor (flows.created_at and
+        # ws_messages.created_at are set from different sources), so it is left for a focused
+        # retention change rather than bundled here.
         # Only CAPTURED ws messages (replay_id IS NULL, real flow_id) cascade with their
         # pruned flow. WebSocket-Replay output rows (update_replay_ws_messages) are stored
         # with the sentinel flow_id = 0 and keyed by replay_id, so a bare `flow_id <= cutoff`

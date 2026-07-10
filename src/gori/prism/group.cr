@@ -41,11 +41,16 @@ module Gori
           # size check first so a full list short-circuits the O(n) includes? scan.
           urls << d.url if urls.size < cap && !urls.includes?(d.url)
           sev = g.severity.value >= d.severity.value ? g.severity : d.severity
+          # Title tracks the highest-severity observation (mirrors Store#upsert_prism_issue):
+          # adopt the incoming title only when it RAISES severity, so an escalated group never
+          # shows a lower-severity title (reflected_param: non-HTML Low vs HTML Medium). A
+          # fixed-title code is unaffected.
+          title = d.severity.value > g.severity.value ? d.title : g.title
           # Type-labeled infoleak codes accumulate every distinct type seen (so a body
           # or host leaking several secret/error types surfaces them all); others keep
           # the first representative sample. Mirrors Store#upsert_prism_issue.
           evidence = accumulate_evidence?(d.code) ? merge_evidence(g.evidence, d.evidence) : (g.evidence || d.evidence)
-          acc[key] = Group.new(g.code, g.category, g.host, g.title, sev, g.hit_count + 1,
+          acc[key] = Group.new(g.code, g.category, g.host, title, sev, g.hit_count + 1,
             urls, evidence, g.sample_flow_id, g.sample_replay_id)
         else
           acc[key] = Group.new(d.code, d.category, d.host, d.title, d.severity, 1,

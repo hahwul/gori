@@ -205,6 +205,32 @@ describe Gori::Prism::Active do
       line.should_not contain("http://target.com")
     end
   end
+
+  it "normalizes an absolute-form target to origin-form, preserving a query on a PATHLESS URI" do
+    # The authority ends at the first '/', '?' or '#': a pathless absolute-URI carrying a query
+    # must keep it (was collapsed to "/", silently dropping the reflectable surface), and a '/'
+    # that appears only inside the query must not be mistaken for the path.
+    Gori::Prism::Active.origin_form("http://h/p?q=1").should eq("/p?q=1")
+    Gori::Prism::Active.origin_form("http://h?q=1").should eq("/?q=1")
+    Gori::Prism::Active.origin_form("https://h?a=1&b=2").should eq("/?a=1&b=2")
+    Gori::Prism::Active.origin_form("http://h?next=/x").should eq("/?next=/x")
+    Gori::Prism::Active.origin_form("http://h").should eq("/")
+    Gori::Prism::Active.origin_form("/already?x=1").should eq("/already?x=1") # already origin-form
+  end
+
+  it "builds a reflected-param probe for a PATHLESS absolute-form target that carries a query" do
+    with_store do |store|
+      # Captured plaintext forward-proxy flow, absolute-form, empty path + query. Previously
+      # origin_form dropped the query to "/", so plan() found no params and returned nil.
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", scheme: "http", host: "target.com",
+        target: "http://target.com?name=hello", content_type: nil)
+      plan = Gori::Prism::Active.plan(detail).not_nil!
+      plan.params.map(&.name).should eq(["name"])
+      line = String.new(plan.request).each_line.first
+      line.should start_with("GET /?name=")
+      line.should_not contain("http://target.com")
+    end
+  end
 end
 
 describe Gori::Prism::Analyzer do
@@ -232,6 +258,81 @@ describe Gori::Prism::Analyzer do
       b.set_mode(Gori::Prism::Mode::Active)
       sleep 50.milliseconds
       b.stop
+    end
+  end
+
+  it "does not re-count a buffered WebSocket secret on every later frame (incremental rescan)" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+        target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      fid = detail.row.id
+      store.insert_ws_message(fid, "in", 1, "token=AKIAIOSFODNN7EXAMPLE".to_slice) # secret frame
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Prism::Analyzer.new(store, scope, feed, Gori::Prism::Mode::Passive, true)
+      a.start
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # initial full scan → detect once
+      sleep 120.milliseconds
+      store.prism_issues.find(&.code.== "secret_in_ws").not_nil!.hit_count.should eq(1_i64)
+      # A later, secret-free frame must NOT re-scan the still-buffered secret frame.
+      store.insert_ws_message(fid, "in", 1, "ping".to_slice)
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # rescan → only the new frame
+      sleep 120.milliseconds
+      store.prism_issues.find(&.code.== "secret_in_ws").not_nil!.hit_count.should eq(1_i64)
+      a.stop
+    end
+  end
+
+  it "pages a >WS_MSG_CAP WebSocket backlog without skipping a band (no missed secret)" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+        target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      fid = detail.row.id
+      store.insert_ws_message(fid, "in", 1, "hello".to_slice) # frame 1 (no secret) → sets hwm
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Prism::Analyzer.new(store, scope, feed, Gori::Prism::Mode::Passive, true)
+      a.start
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # initial scan; hwm = frame 1
+      sleep 120.milliseconds
+      # A burst of >WS_MSG_CAP(200) frames arrives with the secret in frame ~30 — the band a
+      # last-200-window rescan would drop (window would be frames ~52..251).
+      250.times do |k|
+        payload = k == 28 ? "token=AKIAIOSFODNN7EXAMPLE" : "frame#{k}"
+        store.insert_ws_message(fid, "in", 1, payload.to_slice)
+      end
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # one rescan must page the whole backlog
+      sleep 250.milliseconds
+      store.prism_issues.count(&.code.== "secret_in_ws").should eq(1) # the banded secret was caught
+      a.stop
+    end
+  end
+
+  it "scans a WebSocket flow FIRST seen with a large backlog from its oldest frame" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+        target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      fid = detail.row.id
+      # A >WS_MSG_CAP backlog already exists before the FIRST scan (the live :updated was dropped
+      # and catch_up picks it up late); the secret is in an OLD frame the last-window would skip.
+      260.times do |k|
+        payload = k == 20 ? "token=AKIAIOSFODNN7EXAMPLE" : "frame#{k}"
+        store.insert_ws_message(fid, "in", 1, payload.to_slice)
+      end
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Prism::Analyzer.new(store, scope, feed, Gori::Prism::Mode::Passive, true)
+      a.start
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # first scan pages the whole backlog from frame 1
+      sleep 250.milliseconds
+      store.prism_issues.count(&.code.== "secret_in_ws").should eq(1)
+      a.stop
     end
   end
 
@@ -839,6 +940,90 @@ describe "Gori::Prism::Passive (insecure Basic auth)" do
   end
 end
 
+describe "Gori::Prism::Passive (Round-1 hardening)" do
+  it "resolves duplicate CSP directives first-wins (matches browser enforcement)" do
+    with_store do |store|
+      # First script-src is safe; the duplicate must be IGNORED, so this is not weak.
+      safe = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n" \
+        "Content-Security-Policy: script-src 'self'; script-src 'unsafe-inline'\r\n\r\n")
+      codes_of(safe).should_not contain("weak_csp")
+      # First script-src is unsafe-inline; a later 'self' duplicate must not mask it.
+      weak = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n" \
+        "Content-Security-Policy: script-src 'unsafe-inline'; script-src 'self'\r\n\r\n")
+      codes_of(weak).should contain("weak_csp")
+    end
+  end
+
+  it "suppresses hygiene for sentinel-value and negative-Max-Age deletion cookies" do
+    with_store do |store|
+      # PHP clears cookies with the literal value "deleted" (not empty) + Max-Age=0.
+      php = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n" \
+        "Set-Cookie: PHPSESSID=deleted; Max-Age=0; expires=Thu, 01-Jan-1970 00:00:00 GMT; path=/\r\n\r\n")
+      codes_of(php).should_not contain("cookie_no_secure")
+      codes_of(php).should_not contain("cookie_no_httponly")
+      neg = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=; Max-Age=-1\r\n\r\n")
+      codes_of(neg).should_not contain("cookie_no_samesite")
+      # …but a live cookie with a positive Max-Age is still scored.
+      live = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=abc; Max-Age=3600\r\n\r\n")
+      codes_of(live).should contain("cookie_no_secure")
+    end
+  end
+
+  it "flags a Basic challenge listed after another scheme in one WWW-Authenticate header" do
+    with_store do |store|
+      dets = analyze(store, scheme: "http", content_type: nil, status: 401,
+        resp_head: "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Negotiate, Basic realm=\"x\"\r\n\r\n")
+      dets.find(&.code.==("insecure_basic_auth")).not_nil!.severity.should eq(Gori::Store::Severity::Medium)
+      none = analyze(store, scheme: "http", content_type: nil, status: 401,
+        resp_head: "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Negotiate, Digest realm=\"x\"\r\n\r\n")
+      codes_of(none).should_not contain("insecure_basic_auth")
+    end
+  end
+
+  it "flags PGP and PKCS#8-encrypted private key blocks (not just RSA/EC)" do
+    with_store do |store|
+      pgp = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n\r\n",
+        body: "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF...\n-----END PGP PRIVATE KEY BLOCK-----")
+      pgp.find(&.code.==("secret_in_body")).not_nil!.evidence.should eq("private key block")
+      enc = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n\r\n",
+        body: "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIF...\n-----END ENCRYPTED PRIVATE KEY-----")
+      codes_of(enc).should contain("secret_in_body")
+    end
+  end
+
+  it "does not flag a 4-part software version as a private IP but still catches a real leak" do
+    with_store do |store|
+      json = analyze(store, content_type: "application/json",
+        resp_head: "HTTP/1.1 200 OK\r\n\r\n", body: %({"version":"10.0.0.0"}))
+      codes_of(json).should_not contain("private_ip_leak")
+      htmlv = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\n\r\n", body: "<span>File version 10.0.1.2</span>")
+      codes_of(htmlv).should_not contain("private_ip_leak")
+      # a genuine private IP after a version-shaped token is still surfaced (scan, not first-match).
+      mixed = analyze(store, content_type: "text/html", resp_head: "HTTP/1.1 200 OK\r\n\r\n",
+        body: "<p>build version 10.0.1.2</p><p>backend at 192.168.1.5</p>")
+      mixed.find(&.code.==("private_ip_leak")).not_nil!.evidence.should eq("192.168.1.5")
+    end
+  end
+
+  it "anchors GraphQL introspection on the result envelope, not raw substrings" do
+    with_store do |store|
+      # An echoed introspection QUERY string carries both tokens but is not a result -> no FP.
+      echoed = analyze(store, content_type: "application/json",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        body: %({"data":{"savedQuery":"query IntrospectionQuery { __schema { queryType { name } } }"}}))
+      codes_of(echoed).should_not contain("graphql_introspection")
+      # A real introspection envelope is flagged even when queryType is absent from the prefix.
+      env = analyze(store, content_type: "application/json",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n",
+        body: %({"data":{"__schema":{"types":[{"name":"User"}]}}}))
+      codes_of(env).should contain("graphql_introspection")
+    end
+  end
+end
+
 describe "Gori::Prism::Active::CorsReflection" do
   probe = Gori::Prism::Active::CorsReflection.new
 
@@ -867,6 +1052,19 @@ describe "Gori::Prism::Active::CorsReflection" do
       text.scan(/Origin:/i).size.should eq(1) # exactly one Origin header
       text.should contain("Origin: #{Gori::Prism::Active::CorsReflection::PROBE_ORIGIN}")
       text.should_not contain("https://real.test") # the browser's Origin was dropped
+    end
+  end
+
+  it "sends an ORIGIN-FORM request line even for an absolute-form (forward-proxy) CORS flow" do
+    with_store do |store|
+      # Plaintext forward-proxy CORS flow is captured absolute-form; the probe goes DIRECT to the
+      # origin, so its request line must be origin-form or some origins reject it (false negative).
+      cors = capture_flow(store, "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://real.test\r\n\r\n",
+        scheme: "http", host: "target.com", target: "http://target.com/api?x=1", content_type: nil)
+      plan = probe.plan(cors).not_nil!
+      line = String.new(plan.request).each_line.first
+      line.should start_with("GET /api?x=1 ")
+      line.should_not contain("http://target.com")
     end
   end
 
@@ -998,6 +1196,7 @@ describe Gori::Prism do
           g.hit_count.to_i64.should eq(s.hit_count)
           g.affected.sort.should eq(s.affected.sort)
           g.evidence.should eq(s.evidence) # first non-nil wins (COALESCE)
+          g.title.should eq(s.title)       # title tracks the same (highest-severity) observation
         end
 
         csp = grouped["missing_csp@a.test"]
@@ -1040,6 +1239,24 @@ describe Gori::Prism do
         Gori::Prism::Detection.new("private_ip_leak", "infoleak", "b.test", "https://b.test/", "t", Gori::Store::Severity::Low, "192.168.0.1"),
       ]
       Gori::Prism.group(ip).find!(&.code.==("private_ip_leak")).evidence.should eq("10.0.0.1")
+    end
+
+    it "adopts the higher-severity title on escalation, staying consistent with the store" do
+      with_store do |store|
+        low = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/api",
+          "Reflected parameter (non-HTML context)", Gori::Store::Severity::Low, "q")
+        high = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/page",
+          "Reflected parameter", Gori::Store::Severity::Medium, "name")
+        dets = [low, high] # non-HTML first, then HTML escalates
+        g = Gori::Prism.group(dets).find!(&.code.== "reflected_param")
+        g.severity.should eq(Gori::Store::Severity::Medium)
+        g.title.should eq("Reflected parameter") # not frozen at "(non-HTML context)"
+        # and the headless group matches what the store persists for the same detections
+        dets.each { |d| store.upsert_prism_issue(d) }
+        stored = store.prism_issues.find!(&.code.== "reflected_param")
+        g.title.should eq(stored.title)
+        g.severity.should eq(stored.severity)
+      end
     end
 
     it "tags the same code on different hosts as separate groups" do
@@ -1114,6 +1331,26 @@ describe Gori::Prism, "WebSocket + Replay sources" do
     end
   end
 
+  it "parses request headers from an LF-joined Replay request (normalizes the head to CRLF)" do
+    with_store do |store|
+      # The Replay editor serializes request text with BARE-LF line endings; without CRLF
+      # normalization Http1.parse_headers returns an empty list and every request-side rule
+      # (CORS Origin, Basic auth, request tech) silently misses.
+      req = "POST /login HTTP/1.1\nHost: acme.test\nAuthorization: Basic dXNlcjpwYXNz\n" \
+            "Origin: https://evil.example\n"
+      resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://evil.example\r\n" \
+             "Access-Control-Allow-Credentials: true\r\n\r\n"
+      id = store.insert_replay("http://acme.test", req, false, false, nil, 0)
+      store.update_replay_response(id, resp.to_slice, "{}".to_slice, nil, 5_i64)
+      rec = store.replays.find!(&.id.== id)
+      detail = Gori::Prism.detail_from_replay(rec).not_nil!
+      detail.row.method.should eq("POST")
+      codes = Gori::Prism::Passive.analyze(detail).map(&.code)
+      codes.should contain("insecure_basic_auth")  # Authorization header now visible over http
+      codes.should contain("cors_reflected_origin") # Origin header now visible
+    end
+  end
+
   it "skips Replay tabs with no response head" do
     with_store do |store|
       id = store.insert_replay("https://empty.test", "GET / HTTP/1.1\r\nHost: empty.test\r\n\r\n",
@@ -1148,6 +1385,52 @@ describe "Store bulk Prism dismiss" do
       after = store.prism_issues.to_h { |i| {"#{i.code}@#{i.host}", i.status} }
       after["missing_csp@a.test"].should eq(Gori::Store::Status::FalsePositive) # open on host → muted
       after["missing_hsts@a.test"].should eq(Gori::Store::Status::Confirmed)    # still untouched
+    end
+  end
+end
+
+describe "Store#upsert_prism_issue (title stays consistent with severity)" do
+  # A code whose title is severity-dependent (reflected_param: HTML ⇒ Medium "Reflected
+  # parameter" vs non-HTML ⇒ Low "…(non-HTML context)") merges into one (code, host) group.
+  # The title must track the HIGHEST-severity observation, not stay frozen at first-insert —
+  # otherwise the escalated badge (MED) sits next to a non-HTML (non-exploitable) title.
+  it "adopts the higher-severity title when a group's severity escalates" do
+    with_store do |store|
+      low = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/api",
+        "Reflected parameter (non-HTML context)", Gori::Store::Severity::Low, "q")
+      high = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/page",
+        "Reflected parameter", Gori::Store::Severity::Medium, "name")
+      store.upsert_prism_issue(low)  # non-HTML seen first
+      store.upsert_prism_issue(high) # HTML on same host escalates the group
+      row = store.prism_issues.find!(&.code.== "reflected_param")
+      row.severity.should eq(Gori::Store::Severity::Medium)
+      row.title.should eq("Reflected parameter") # was frozen at "(non-HTML context)"
+    end
+  end
+
+  it "does not downgrade the title when a later, lower-severity observation merges in" do
+    with_store do |store|
+      high = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/page",
+        "Reflected parameter", Gori::Store::Severity::Medium, "name")
+      low = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/api",
+        "Reflected parameter (non-HTML context)", Gori::Store::Severity::Low, "q")
+      store.upsert_prism_issue(high)
+      store.upsert_prism_issue(low) # lower severity must not clobber the escalated title
+      row = store.prism_issues.find!(&.code.== "reflected_param")
+      row.severity.should eq(Gori::Store::Severity::Medium)
+      row.title.should eq("Reflected parameter")
+    end
+  end
+
+  it "keeps a fixed-title code's title stable across regroups" do
+    with_store do |store|
+      d1 = Gori::Prism::Detection.new("missing_csp", "headers", "a.test", "https://a.test/1",
+        "Missing Content-Security-Policy", Gori::Store::Severity::Low, nil)
+      d2 = Gori::Prism::Detection.new("missing_csp", "headers", "a.test", "https://a.test/2",
+        "Missing Content-Security-Policy", Gori::Store::Severity::Low, nil)
+      store.upsert_prism_issue(d1)
+      store.upsert_prism_issue(d2)
+      store.prism_issues.find!(&.code.== "missing_csp").title.should eq("Missing Content-Security-Policy")
     end
   end
 end

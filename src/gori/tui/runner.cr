@@ -3573,7 +3573,19 @@ module Gori::Tui
     # Findings report). Reuses Store#insert_finding; the issue's severity/host/sample flow carry over.
     def prism_promote : Nil
       return unless i = prism_controller.view.target_issue
-      @session.store.insert_finding(i.title, i.severity, i.host, i.sample_flow_id)
+      # Promotion marks the source issue Confirmed; a second press would otherwise mint a
+      # duplicate Finding for the same issue. Already-Confirmed ⇒ already promoted.
+      if i.status.confirmed?
+        @toast = "already promoted to a finding"
+        return
+      end
+      fid = @session.store.insert_finding(i.title, i.severity, i.host, i.sample_flow_id)
+      # Preserve Replay-only evidence: with no source flow, link the Finding to the Replay tab
+      # that produced the issue so the evidence pointer survives promotion (insert_finding only
+      # carries a flow id).
+      if i.sample_flow_id.nil? && (rid = i.sample_replay_id)
+        @session.store.add_link(Store::LinkOwnerKind::Finding, fid, Store::LinkRefKind::Replay, rid)
+      end
       # Mark the source confirmed (= "promoted to a Finding") so it leaves the default
       # open-only lens instead of lingering as unreviewed noise; still reachable via `a`.
       @session.store.update_prism_issue_status(i.id, Store::Status::Confirmed)
