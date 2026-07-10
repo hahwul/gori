@@ -25,7 +25,7 @@ module Gori
           # probe is sent DIRECT to the origin (Fuzz::Sender → Replay::Engine, no rewrite),
           # so normalize to origin-form here the way the regular replay path (FlowRequest)
           # does — some origins reject an absolute-form target on a non-proxied request.
-          path, query = split_target(origin_form(req.target))
+          path, query = split_target(Active.origin_form(req.target))
 
           params = [] of Param
           new_query, qp = canary_pairs(query, "query")
@@ -94,15 +94,6 @@ module Gori
           (Proxy::Codec::Http1.parse_response_head(result.head).headers.get?("Content-Type") || "").downcase
         rescue
           ""
-        end
-
-        # Strip a scheme://authority prefix so an absolute-form (forward-proxy) target becomes
-        # origin-form; an already-origin-form target passes through unchanged.
-        private def origin_form(target : String) : String
-          return target unless target.starts_with?("http://") || target.starts_with?("https://")
-          scheme_end = target.index("://") || return target
-          slash = target.index('/', scheme_end + 3)
-          slash ? target[slash..] : "/"
         end
 
         # {path, query-without-'?'} — query is "" when the target has none.

@@ -205,6 +205,32 @@ describe Gori::Prism::Active do
       line.should_not contain("http://target.com")
     end
   end
+
+  it "normalizes an absolute-form target to origin-form, preserving a query on a PATHLESS URI" do
+    # The authority ends at the first '/', '?' or '#': a pathless absolute-URI carrying a query
+    # must keep it (was collapsed to "/", silently dropping the reflectable surface), and a '/'
+    # that appears only inside the query must not be mistaken for the path.
+    Gori::Prism::Active.origin_form("http://h/p?q=1").should eq("/p?q=1")
+    Gori::Prism::Active.origin_form("http://h?q=1").should eq("/?q=1")
+    Gori::Prism::Active.origin_form("https://h?a=1&b=2").should eq("/?a=1&b=2")
+    Gori::Prism::Active.origin_form("http://h?next=/x").should eq("/?next=/x")
+    Gori::Prism::Active.origin_form("http://h").should eq("/")
+    Gori::Prism::Active.origin_form("/already?x=1").should eq("/already?x=1") # already origin-form
+  end
+
+  it "builds a reflected-param probe for a PATHLESS absolute-form target that carries a query" do
+    with_store do |store|
+      # Captured plaintext forward-proxy flow, absolute-form, empty path + query. Previously
+      # origin_form dropped the query to "/", so plan() found no params and returned nil.
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", scheme: "http", host: "target.com",
+        target: "http://target.com?name=hello", content_type: nil)
+      plan = Gori::Prism::Active.plan(detail).not_nil!
+      plan.params.map(&.name).should eq(["name"])
+      line = String.new(plan.request).each_line.first
+      line.should start_with("GET /?name=")
+      line.should_not contain("http://target.com")
+    end
+  end
 end
 
 describe Gori::Prism::Analyzer do
@@ -870,6 +896,19 @@ describe "Gori::Prism::Active::CorsReflection" do
     end
   end
 
+  it "sends an ORIGIN-FORM request line even for an absolute-form (forward-proxy) CORS flow" do
+    with_store do |store|
+      # Plaintext forward-proxy CORS flow is captured absolute-form; the probe goes DIRECT to the
+      # origin, so its request line must be origin-form or some origins reject it (false negative).
+      cors = capture_flow(store, "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://real.test\r\n\r\n",
+        scheme: "http", host: "target.com", target: "http://target.com/api?x=1", content_type: nil)
+      plan = probe.plan(cors).not_nil!
+      line = String.new(plan.request).each_line.first
+      line.should start_with("GET /api?x=1 ")
+      line.should_not contain("http://target.com")
+    end
+  end
+
   it "flags High only when the probe origin is reflected WITH credentials" do
     with_store do |store|
       cors = capture_flow(store, "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://real.test\r\n\r\n",
@@ -1148,6 +1187,52 @@ describe "Store bulk Prism dismiss" do
       after = store.prism_issues.to_h { |i| {"#{i.code}@#{i.host}", i.status} }
       after["missing_csp@a.test"].should eq(Gori::Store::Status::FalsePositive) # open on host → muted
       after["missing_hsts@a.test"].should eq(Gori::Store::Status::Confirmed)    # still untouched
+    end
+  end
+end
+
+describe "Store#upsert_prism_issue (title stays consistent with severity)" do
+  # A code whose title is severity-dependent (reflected_param: HTML ⇒ Medium "Reflected
+  # parameter" vs non-HTML ⇒ Low "…(non-HTML context)") merges into one (code, host) group.
+  # The title must track the HIGHEST-severity observation, not stay frozen at first-insert —
+  # otherwise the escalated badge (MED) sits next to a non-HTML (non-exploitable) title.
+  it "adopts the higher-severity title when a group's severity escalates" do
+    with_store do |store|
+      low = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/api",
+        "Reflected parameter (non-HTML context)", Gori::Store::Severity::Low, "q")
+      high = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/page",
+        "Reflected parameter", Gori::Store::Severity::Medium, "name")
+      store.upsert_prism_issue(low)  # non-HTML seen first
+      store.upsert_prism_issue(high) # HTML on same host escalates the group
+      row = store.prism_issues.find!(&.code.== "reflected_param")
+      row.severity.should eq(Gori::Store::Severity::Medium)
+      row.title.should eq("Reflected parameter") # was frozen at "(non-HTML context)"
+    end
+  end
+
+  it "does not downgrade the title when a later, lower-severity observation merges in" do
+    with_store do |store|
+      high = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/page",
+        "Reflected parameter", Gori::Store::Severity::Medium, "name")
+      low = Gori::Prism::Detection.new("reflected_param", "active", "ex.test", "https://ex.test/api",
+        "Reflected parameter (non-HTML context)", Gori::Store::Severity::Low, "q")
+      store.upsert_prism_issue(high)
+      store.upsert_prism_issue(low) # lower severity must not clobber the escalated title
+      row = store.prism_issues.find!(&.code.== "reflected_param")
+      row.severity.should eq(Gori::Store::Severity::Medium)
+      row.title.should eq("Reflected parameter")
+    end
+  end
+
+  it "keeps a fixed-title code's title stable across regroups" do
+    with_store do |store|
+      d1 = Gori::Prism::Detection.new("missing_csp", "headers", "a.test", "https://a.test/1",
+        "Missing Content-Security-Policy", Gori::Store::Severity::Low, nil)
+      d2 = Gori::Prism::Detection.new("missing_csp", "headers", "a.test", "https://a.test/2",
+        "Missing Content-Security-Policy", Gori::Store::Severity::Low, nil)
+      store.upsert_prism_issue(d1)
+      store.upsert_prism_issue(d2)
+      store.prism_issues.find!(&.code.== "missing_csp").title.should eq("Missing Content-Security-Policy")
     end
   end
 end

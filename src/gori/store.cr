@@ -505,21 +505,27 @@ module Gori
           return nil
         end
         existing = c.query_one?(
-          "SELECT id, affected, severity, evidence FROM prism_issues WHERE code = ? AND host = ?",
-          d.code, d.host, as: {Int64, String, Int32, String?})
+          "SELECT id, affected, severity, evidence, title FROM prism_issues WHERE code = ? AND host = ?",
+          d.code, d.host, as: {Int64, String, Int32, String?, String})
         if existing
-          id, aff_json, sev, prev_evidence = existing
+          id, aff_json, sev, prev_evidence, prev_title = existing
           urls = parse_affected(aff_json)
           urls << d.url if !urls.includes?(d.url) && urls.size < PRISM_AFFECTED_CAP
           new_sev = sev > d.severity.value ? sev : d.severity.value
+          # Keep the title in sync with the highest-severity observation: a code whose title
+          # is severity-dependent (reflected_param: HTML ⇒ Medium "Reflected parameter" vs
+          # non-HTML ⇒ Low "…(non-HTML context)") must not show an escalated badge next to the
+          # lower-severity title. Adopt the incoming title only when it RAISES severity; for
+          # fixed-title codes (the vast majority) this is a no-op.
+          new_title = d.severity.value > sev ? d.title : prev_title
           # For the type-labeled infoleak codes, accumulate every distinct type seen
           # for this (code, host) group so a later flow's different secret/error type
           # isn't masked by the first-wins COALESCE. Other codes keep their first
           # representative sample.
           new_evidence = accumulate_evidence?(d.code) ? merge_evidence(prev_evidence, d.evidence) : (prev_evidence || d.evidence)
           c.exec("UPDATE prism_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
-                 "evidence = ?, last_seen = ? WHERE id = ?",
-            urls.to_json, new_sev, new_evidence, ts, id)
+                 "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
+            urls.to_json, new_sev, new_title, new_evidence, ts, id)
         else
           c.exec("INSERT INTO prism_issues (code, category, host, title, severity, status, hit_count, " \
                  "affected, sample_flow_id, evidence, first_seen, last_seen, sample_replay_id) " \

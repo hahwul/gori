@@ -67,8 +67,16 @@ module Gori
           lines = String.new(hbytes).split(eol)
           kept = [] of String
           lines.each_with_index do |l, i|
-            next if i > 0 && origin_header?(l) # keep the request line (i == 0) verbatim
+            next if i > 0 && origin_header?(l) # the request line (i == 0) is normalized below
             kept << l
+          end
+          # Normalize an absolute-form (forward-proxy) request line to origin-form: like the
+          # ReflectedParam probe, this is sent DIRECT to the origin (no proxy rewrite), and some
+          # origins reject an absolute-form target on a non-proxied request — which would make the
+          # CORS probe silently miss a real arbitrary-origin reflection. Origin-form passes through.
+          unless kept.empty?
+            rl = kept[0].split(' ')
+            kept[0] = "#{rl[0]} #{Active.origin_form(rl[1])} #{rl[2]}" if rl.size == 3
           end
           kept.insert(1, "Origin: #{origin}") unless kept.empty?
           io = IO::Memory.new
@@ -84,16 +92,9 @@ module Gori
         # Dedup path: origin-form target with the query stripped (a CORS policy is per-endpoint,
         # not per-query-value), so one probe per (host, method, path).
         private def path_key(target : String) : String
-          t = origin_form(target)
+          t = Active.origin_form(target)
           qi = t.index('?')
           qi ? t[0...qi] : t
-        end
-
-        private def origin_form(target : String) : String
-          return target unless target.starts_with?("http://") || target.starts_with?("https://")
-          se = target.index("://") || return target
-          slash = target.index('/', se + 3)
-          slash ? target[slash..] : "/"
         end
       end
     end

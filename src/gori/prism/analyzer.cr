@@ -245,7 +245,13 @@ module Gori
       end
 
       private def run_active(task : ActiveTask) : Nil
-        return if @stopped # don't fire outbound probes while winding down
+        # Don't fire outbound probes while winding down (@stopped) OR after the operator left
+        # Active mode. set_mode(Passive/Off) flips @mode but can't unqueue tasks already sitting
+        # in @active_jobs (up to ACTIVE_QUEUE deep); the enqueue side (maybe_enqueue_active /
+        # active_backfill) only gates NEW work, so the consumer MUST re-check the live mode too —
+        # otherwise buffered canary/CORS probes keep hitting the target for the minutes it takes
+        # the single worker to drain the backlog, violating the "Off ⇒ no probing" mode contract.
+        return if @stopped || !@mode.active?
         row = task.detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
         http2 = task.detail.http_version.starts_with?("HTTP/2")
