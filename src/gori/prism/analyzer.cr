@@ -33,6 +33,7 @@ module Gori
       def initialize(@store : Store, @scope : Scope, @input : Channel(Store::FlowEvent),
                      @mode : Mode, @verify_upstream : Bool)
         @analyzed = Set(Int64).new
+        @ws_hwm = {} of Int64 => Int64 # per-101-flow high-water-mark: max ws_message id already scanned
         @active_seen = Set(String).new
         @active_error_hosts = Set(String).new # rate-limit probe-failure notifications per host
         @suppressed = Set(String).new         # "code|host" hard-deleted this session
@@ -136,6 +137,7 @@ module Gori
             trim(@analyzed, ANALYZED_CAP)
             ws = load_ws(detail)
             scan_detail(detail, ws_messages: ws, enqueue_active: true)
+            note_ws_scanned(detail.row.id, ws) # mark these frames scanned so rescans stay incremental
           rescue DB::Error | SQLite3::Exception
             # A transient store error (e.g. SQLITE_BUSY) must NOT kill the scanner for the rest
             # of the session — skip this flow and keep draining. On real shutdown the input
@@ -147,16 +149,34 @@ module Gori
         # input closed during shutdown — exit quietly
       end
 
+      # Re-scan ONLY the WS frames that arrived since the last scan. InsertWs republishes
+      # :updated on every frame, so scanning the whole (last-WS_MSG_CAP) buffer each time would
+      # re-detect a secret still buffered from an earlier frame — inflating its hit_count by 1
+      # per frame and re-running the regex over ×200 messages on every frame (O(n²) per socket).
+      # The per-flow high-water-mark keeps each frame scanned exactly once.
       private def rescan_ws(flow_id : Int64) : Nil
         detail = @store.get_flow(flow_id)
         return unless detail
         return unless detail.row.status == 101
         msgs = @store.ws_messages(flow_id, WS_MSG_CAP)
         return if msgs.empty?
-        detections = Passive.analyze_ws(detail, msgs)
+        hwm = @ws_hwm[flow_id]?
+        fresh = hwm ? msgs.select { |m| m.id > hwm } : msgs
+        note_ws_scanned(flow_id, msgs) # advance past ALL loaded ids (ordered asc → last is max)
+        return if fresh.empty?
+        detections = Passive.analyze_ws(detail, fresh)
         persist(detections, flow_id: flow_id, replay_id: nil)
       rescue DB::Error | SQLite3::Exception
       rescue
+      end
+
+      # Record the newest ws_message id scanned for a flow so future rescans skip it. Bounded
+      # like @analyzed (only 101 flows ever get an entry, but cap it for long-lived projects).
+      private def note_ws_scanned(flow_id : Int64, msgs : Array(Store::WsMessage)) : Nil
+        return if msgs.empty?
+        @ws_hwm[flow_id] = msgs.max_of(&.id)
+        return if @ws_hwm.size <= ANALYZED_CAP
+        @ws_hwm.keys.first(@ws_hwm.size - ANALYZED_CAP).each { |k| @ws_hwm.delete(k) }
       end
 
       private def load_ws(detail : Store::FlowDetail) : Array(Store::WsMessage)

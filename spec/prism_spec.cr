@@ -261,6 +261,30 @@ describe Gori::Prism::Analyzer do
     end
   end
 
+  it "does not re-count a buffered WebSocket secret on every later frame (incremental rescan)" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+        target: "/ws", status: 101, content_type: nil,
+        req_headers: "Upgrade: websocket\r\nConnection: Upgrade\r\n")
+      fid = detail.row.id
+      store.insert_ws_message(fid, "in", 1, "token=AKIAIOSFODNN7EXAMPLE".to_slice) # secret frame
+      scope = Gori::Scope.load(store)
+      feed = Channel(Gori::Store::FlowEvent).new(8)
+      a = Gori::Prism::Analyzer.new(store, scope, feed, Gori::Prism::Mode::Passive, true)
+      a.start
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # initial full scan → detect once
+      sleep 120.milliseconds
+      store.prism_issues.find(&.code.== "secret_in_ws").not_nil!.hit_count.should eq(1_i64)
+      # A later, secret-free frame must NOT re-scan the still-buffered secret frame.
+      store.insert_ws_message(fid, "in", 1, "ping".to_slice)
+      feed.send(Gori::Store::FlowEvent.new(fid, :updated)) # rescan → only the new frame
+      sleep 120.milliseconds
+      store.prism_issues.find(&.code.== "secret_in_ws").not_nil!.hit_count.should eq(1_i64)
+      a.stop
+    end
+  end
+
   it "bumps store.prism_generation on persist and honors session suppress after hard delete" do
     with_store do |store|
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: x\r\n\r\n",
@@ -1253,6 +1277,26 @@ describe Gori::Prism, "WebSocket + Replay sources" do
       issue = store.prism_issues.find!(&.code.==("tech_server"))
       issue.sample_replay_id.should eq(id)
       issue.sample_flow_id.should be_nil
+    end
+  end
+
+  it "parses request headers from an LF-joined Replay request (normalizes the head to CRLF)" do
+    with_store do |store|
+      # The Replay editor serializes request text with BARE-LF line endings; without CRLF
+      # normalization Http1.parse_headers returns an empty list and every request-side rule
+      # (CORS Origin, Basic auth, request tech) silently misses.
+      req = "POST /login HTTP/1.1\nHost: acme.test\nAuthorization: Basic dXNlcjpwYXNz\n" \
+            "Origin: https://evil.example\n"
+      resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://evil.example\r\n" \
+             "Access-Control-Allow-Credentials: true\r\n\r\n"
+      id = store.insert_replay("http://acme.test", req, false, false, nil, 0)
+      store.update_replay_response(id, resp.to_slice, "{}".to_slice, nil, 5_i64)
+      rec = store.replays.find!(&.id.== id)
+      detail = Gori::Prism.detail_from_replay(rec).not_nil!
+      detail.row.method.should eq("POST")
+      codes = Gori::Prism::Passive.analyze(detail).map(&.code)
+      codes.should contain("insecure_basic_auth")  # Authorization header now visible over http
+      codes.should contain("cors_reflected_origin") # Origin header now visible
     end
   end
 

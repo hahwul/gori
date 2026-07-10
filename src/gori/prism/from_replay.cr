@@ -21,9 +21,14 @@ module Gori
                      n = req_text[sep, 4]? == "\r\n\r\n" ? 4 : 2
                      req_text[(sep + n)..]?
                    end
-      # Ensure the head ends with a blank line so Http1.parse_request_head is happy.
-      req_head_bytes = (req_head_s.ends_with?("\r\n\r\n") || req_head_s.ends_with?("\n\n") ?
-        req_head_s : "#{req_head_s.rstrip}\r\n\r\n").to_slice
+      # The Replay editor serializes request text with BARE-LF line endings, but
+      # Http1.parse_headers recognizes only CRLF: without normalizing the internal separators,
+      # the first CRLF found is the appended terminator, so parse_headers starts at the blank
+      # line and returns an EMPTY header list — every request-side rule (CORS Origin, Basic
+      # auth, request tech fingerprints) then silently misses on Replay/CLI/MCP-sourced scans.
+      # Normalize LF→CRLF, then ensure the head ends with a blank line for parse_request_head.
+      head_crlf = req_head_s.gsub(/\r?\n/, "\r\n")
+      req_head_bytes = (head_crlf.ends_with?("\r\n\r\n") ? head_crlf : "#{head_crlf.rstrip}\r\n\r\n").to_slice
       req_body = req_body_s.try { |b| b.empty? ? nil : b.to_slice }
 
       req = Proxy::Codec::Http1.parse_request_head(req_head_bytes)
