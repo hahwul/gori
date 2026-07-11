@@ -127,6 +127,7 @@ module Gori
                   retention_flows : Int32 = RETENTION_DEFAULT) : Store
       url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000"
       db = DB.open(url)
+      harden_permissions(path)
       # Make REGEXP byte-safe on every connection before any query runs (so a binary
       # body can't crash a `body~`/`header~` scan or a regex scope rule). See SafeRegexp.
       SafeRegexp.install(db)
@@ -138,6 +139,18 @@ module Gori
       # already at/after it won't re-run.
       reclaim_to_disk(db) if pre_version >= 1 && pre_version < Schema::RECLAIM_VERSION
       new(db, events, prism_events, retention_flows)
+    end
+
+    # The db (and its WAL/SHM sidecars) hold captured request/response bytes — cookies,
+    # Authorization headers, credentials in POST bodies. Lock them to 0600 so the secret
+    # store isn't world-readable even if the enclosing dir's perms are ever loosened or the
+    # file is copied out. Best-effort (the owner-only 0700 project dir is the primary guard,
+    # and it covers a sidecar SQLite may (re)create later that we can't chmod here); mirrors
+    # cert_authority.cr locking the CA key. `:memory:`/absent paths just no-op via the rescue.
+    private def self.harden_permissions(path : String) : Nil
+      File.chmod(path, 0o600) rescue nil
+      File.chmod("#{path}-wal", 0o600) rescue nil
+      File.chmod("#{path}-shm", 0o600) rescue nil
     end
 
     # Ceiling on the db we auto-VACUUM on the boot path. VACUUM rewrites the WHOLE file

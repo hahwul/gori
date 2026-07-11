@@ -70,7 +70,7 @@ module Gori
       raise Gori::Error.new("invalid project name") if slug.empty?
       slug = unique_slug(slug, display) # don't merge into a DIFFERENT project that slugifies alike
       dir = File.join(@root, slug)
-      FileUtils.mkdir_p(dir)
+      Paths.ensure_dir(dir) # 0700 — the project dir holds a DB of captured secrets
       # Persist the verbatim display name so a later `list` shows "My Project", not
       # the lossy slug "my-project".
       File.write(File.join(dir, NAME_FILE), display) rescue nil
@@ -110,7 +110,7 @@ module Gori
     # A throwaway workspace, deleted when its session closes.
     def temp(token : String) : Project
       dir = File.join(@root, "#{TEMP_PREFIX}#{token}")
-      FileUtils.mkdir_p(dir)
+      Paths.ensure_dir(dir) # 0700 — even a throwaway workspace holds captured secrets
       Project.new("temp", File.join(dir, Project::DB_FILE), ephemeral: true)
     end
 
