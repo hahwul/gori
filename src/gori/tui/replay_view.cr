@@ -954,6 +954,16 @@ module Gori::Tui
       @target_mode = InputMode::Read
     end
 
+    # {head, body} strings of the last HTTP response (nil until a send lands, or in
+    # WS/gRPC mode where the "response" is a transcript, not raw head+body bytes).
+    # Feeds the RESPONSE pane's "copy as X" options (status+headers / body / raw).
+    def response_parts : {String, String}?
+      return nil if @ws_mode || @grpc_mode
+      res = @result
+      return nil unless res
+      {String.new(res.head), (b = res.body) ? String.new(b) : ""}
+    end
+
     def request_bytes : Bytes
       return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit # byte-exact; NO auto-CL in hex mode
       return grpc_request_bytes if @grpc_mode                 # edited head + verbatim framed body

@@ -69,6 +69,15 @@ module Gori
         Verb::Scope::Replay, [Verb::Chord.new("y")],
         available: in_replay_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
+      # "Copy as X": a picker of focus-aware copy formats (REQUEST → url/headers/body/
+      # cookies/curl/raw · RESPONSE → status+headers/body/raw). Sits beside Copy in
+      # COMMON so it's reachable from any Replay pane; the picker's contents adapt to
+      # the pane focused when it opens. Menu key 'Y' pairs with Copy's 'y' and is free
+      # across COMMON ∪ every Replay section (all-lowercase keys there).
+      r.register Verb::Definition.new(
+        "replay.copy-as", "Copy as…", "Pick a copy format for the focused pane (url/headers/body/cookies/curl/raw)",
+        Verb::Scope::Replay, available: in_replay_read, mnemonic: 'Y') { |ctx| ctx.copy_as_open; nil }
+
       r.register Verb::Definition.new(
         "replay.new", "New replay request", "Open a blank request in Replay to author and send",
         Verb::Scope::Replay, [Verb::Chord.new("n", ctrl: true)],
@@ -262,6 +271,13 @@ module Gori
         "detail.copy", "Copy selection", "Copy the selected text (or current line) to the clipboard",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("y")],
         mnemonic: 'y') { |ctx| ctx.detail_copy_selection; nil }
+
+      # "Copy as X" for the drill-in: same focus-aware format picker as Replay, over the
+      # REQUEST/RESPONSE pane bytes. Menu key 'Y' pairs with copy's 'y' (free in the
+      # HistoryDetail menu, whose keys are y/O/r/a/c/z/h/x/b/p).
+      r.register Verb::Definition.new(
+        "detail.copy-as", "Copy as…", "Pick a copy format for this pane (url/headers/body/cookies/curl/raw)",
+        Verb::Scope::HistoryDetail, mnemonic: 'Y') { |ctx| ctx.copy_as_open; nil }
 
       r.register Verb::Definition.new(
         "detail.copy-flow", "Copy flow", "Copy this flow's raw request to the clipboard",

@@ -33,6 +33,7 @@ require "./rules_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
 require "./choice_picker"
+require "./copy_picker"
 require "./flow_picker"
 require "./subtab_picker"
 require "./links_overlay"
@@ -135,6 +136,11 @@ module Gori::Tui
       @browser_picker = nil.as(BrowserPicker?)
       # The severity/status value picker (Findings detail → space); @overlay is :choice.
       @choice_picker = nil.as(ChoicePicker?)
+      # The "copy as X" format picker (Replay/History detail → space Y). ORTHOGONAL to
+      # @overlay (like @space_menu_open) so it floats over whatever's underneath — the
+      # Replay body (@overlay :none) OR the History detail drill-in (@overlay :detail) —
+      # without disturbing that state. Non-nil ⇔ shown (see copy_as_shown?).
+      @copy_picker = nil.as(CopyPicker?)
       # The Comparer flow picker (a/b → choose flow A/B); @overlay is :comparer_pick.
       @flow_picker = nil.as(FlowPicker?)
       # The Replay sub-tab search picker (space → s); @overlay is :replay_subtab.
@@ -555,6 +561,7 @@ module Gori::Tui
 
     private def apply_preedit(text : String) : Nil
       return if @space_menu_open # the space menu has no text field — swallow IME while modal
+      return if copy_as_shown?   # copy-as picker is mnemonic-only — swallow IME while modal
       return if @goto_open       # ^G is digits-only; swallow IME (don't leak to the editor)
       if @search_open            # ^F find — IME composing text
         @search_preedit = text
@@ -624,6 +631,7 @@ module Gori::Tui
       # ^G/^F/^B guards (and everything else) so those chords can be recorded.
       return handle_hotkeys_key(ev) if @overlay == :hotkeys && @hotkeys_overlay.capturing?
       return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
+      return handle_copy_as_key(ev) if copy_as_shown?      # the copy-as picker is modal while up
       return handle_goto_key(ev) if @goto_open             # the ^G line prompt is modal while up
       return handle_search_key(ev) if @search_open         # the ^F find prompt is modal while up
       return handle_rename_key(ev) if @rename_open         # the sub-tab rename prompt is modal while up
@@ -832,7 +840,7 @@ module Gori::Tui
         close_import if @import_open
         return
       end
-      return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !@rename_open && subtabs_shown?
+      return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !copy_as_shown? && !@rename_open && subtabs_shown?
       sub_rect = BodyChrome.strip_rect(layout.body, strip: true)
       return unless sub_rect && sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start).find { |(_, r)| r.contains?(mx, my) }
@@ -845,6 +853,7 @@ module Gori::Tui
     # like the keyboard). Centered modals capture every click (outside → dismiss).
     private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
       return if @space_menu_open && click_space_menu(layout, mx, my)
+      return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
       if @goto_open || @search_open || @rename_open || @import_open
         close_goto if @goto_open # a click anywhere dismisses the bottom prompt (like esc)
         close_search if @search_open
@@ -1143,6 +1152,7 @@ module Gori::Tui
     private def handle_wheel(layout : Layout, mx : Int32, my : Int32, dir : Int32) : Nil
       step = dir * 3
       return @space_menu.move(step) if @space_menu_open
+      return @copy_picker.try(&.move(step)) if copy_as_shown?
       return wheel_overlay(step) if modal_overlay?
       return unless layout.body.contains?(mx, my)
       # Pass the pointer + body rect so a multi-pane tab (Project) scrolls the pane
@@ -1433,6 +1443,98 @@ module Gori::Tui
     private def close_choice_picker : Nil
       @overlay = :none
       @choice_picker = nil
+    end
+
+    # Non-nil ⇔ the copy-as picker is up (orthogonal to @overlay, mirrors @space_menu_open).
+    private def copy_as_shown? : Bool
+      !@copy_picker.nil?
+    end
+
+    # "Copy as X" (space → Y): open a centered picker of the focused HTTP message's
+    # copy formats (url/headers/body/cookies/curl/raw), built from the active tab's
+    # current focus. Falls back to the plain smart-copy when the context has no format
+    # variants (a decoded/hex pane), so the verb never dead-ends.
+    def copy_as_open : Nil
+      title, options = copy_as_menu
+      if options.empty?
+        # No format variants here — degrade to the existing "Copy" behaviour.
+        return read_copy
+      end
+      @copy_picker = CopyPicker.new(title, options)
+    end
+
+    # The focus-aware option set for the active context (empty ⇒ no copy-as variants).
+    private def copy_as_menu : {String, Array(CopyMenu::Option)}
+      case @active_tab
+      when :replay
+        replay_controller.copy_as_menu
+      when :history
+        @overlay == :detail ? history_controller.detail_copy_as_menu : {"COPY AS", [] of CopyMenu::Option}
+      else
+        {"COPY AS", [] of CopyMenu::Option}
+      end
+    end
+
+    # Copy-as picker input: ↑/↓ move, ↵ or a row mnemonic copies, esc cancels (mirrors
+    # the choice picker so the two feel identical).
+    private def handle_copy_as_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      p = @copy_picker
+      return close_copy_picker unless p
+      case
+      when key.escape? then close_copy_picker
+      when key.up?     then p.move(-1)
+      when key.down?   then p.move(1)
+      when key.enter?  then apply_copy_as
+      else
+        if (c = ev.char) && !ev.ctrl? && !ev.alt?
+          if idx = p.index_for(c)
+            p.set_selected(idx)
+            apply_copy_as
+          elsif c == 'j'
+            p.move(1)
+          elsif c == 'k'
+            p.move(-1)
+          end
+        end
+      end
+    end
+
+    # Always consumes the click (returns true) so it never leaks to the pane below —
+    # a click on a row copies, a click outside dismisses.
+    private def click_copy_as(area : Rect, mx : Int32, my : Int32) : Bool
+      p = @copy_picker
+      box = p.try(&.overlay_box(area))
+      if p.nil? || box.nil? || dismiss_zone?(box, mx, my)
+        close_copy_picker
+        return true
+      end
+      if idx = p.row_at(box, mx, my)
+        p.set_selected(idx)
+        apply_copy_as
+      end
+      true
+    end
+
+    # Place the picked format on the clipboard, then close. Reports the label + bytes,
+    # and flags a clip when the 64KB cap truncated the payload.
+    private def apply_copy_as : Nil
+      p = @copy_picker
+      return close_copy_picker unless p
+      if opt = p.selected_option
+        written = Clipboard.copy(opt.text)
+        msg = "copied #{opt.label.downcase} (#{written}b)"
+        msg += " — clipped from #{opt.text.bytesize}b (64KB cap)" if written < opt.text.bytesize
+        @toast = msg
+      end
+      close_copy_picker
+    end
+
+    # Orthogonal to @overlay — closing just drops the picker; whatever was underneath
+    # (Replay body or the History detail drill-in) is untouched, so the user returns
+    # exactly where they invoked it.
+    private def close_copy_picker : Nil
+      @copy_picker = nil
     end
 
     # Comparer flow picker (a/b → choose flow A/B): type to filter, ↑/↓ select,
@@ -2691,9 +2793,11 @@ module Gori::Tui
       flush_screen
     end
 
-    # The space menu (bottom-right popup) + the bottom-anchored input prompts, all
-    # drawn last and orthogonal to @overlay so they float over whatever's underneath.
+    # The space menu (bottom-right popup) + the copy-as picker (centered) + the
+    # bottom-anchored input prompts, all drawn last and orthogonal to @overlay so
+    # they float over whatever's underneath (a tab body or the History detail).
     private def render_prompts(screen : Screen, layout : Layout) : Nil
+      @copy_picker.try(&.render(screen, layout.body)) if copy_as_shown?
       @space_menu.render(screen, layout.body) if @space_menu_open
       render_goto_prompt(screen, layout.status) if @goto_open
       render_search_prompt(screen, layout.status) if @search_open
@@ -2742,7 +2846,8 @@ module Gori::Tui
     # always knows which region the keys drive: an open overlay wins, else the
     # tab bar (TABS) vs the content pane (BODY).
     private def focus_label : String
-      return "SPACE" if @space_menu_open # orthogonal to @overlay — floats over it
+      return "SPACE" if @space_menu_open                             # orthogonal to @overlay — floats over it
+      return @copy_picker.try(&.title) || "COPY AS" if copy_as_shown? # ditto
       case @overlay
       when :palette       then "PALETTE"
       when :rules         then "RULES"
@@ -2789,6 +2894,7 @@ module Gori::Tui
     # under their fingers do right now).
     private def key_hints : String
       return "press a key · ↑/↓ select · ↵ run · esc close" if @space_menu_open
+      return "↑/↓ select · ↵ copy · key picks · esc cancel" if copy_as_shown?
       case @overlay
       when :palette       then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
       when :rules         then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"

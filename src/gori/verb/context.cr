@@ -283,6 +283,10 @@ module Gori
       # whole focused pane. Routes to the active tab's existing copy delegators
       # (not new copy logic) — mirrors read_selection_active?'s per-tab dispatch.
       abstract def read_copy : Nil
+      # "Copy as X": open a centered picker of the focused HTTP message's copy formats
+      # (url/headers/body/cookies/curl/raw). Focus-aware — the offered set follows the
+      # active pane; degrades to read_copy when the context has no format variants.
+      abstract def copy_as_open : Nil
       abstract def detail_navigable? : Bool # History detail text pane (not hex)
       # Override a verb's space-menu title (nil → use the registered default).
       abstract def space_menu_title(verb_id : String) : String?

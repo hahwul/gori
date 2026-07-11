@@ -12,7 +12,9 @@ require "./url"
 require "./fmt"
 require "./flow_status"
 require "./read_cursor"
+require "./copy_menu"
 require "../store"
+require "../replay/flow_request"
 require "../ql"
 require "../scope"
 require "../proxy/h2/frame"
@@ -619,6 +621,34 @@ module Gori::Tui
       size, line_at = detail_line_source
       return "" if size <= 0
       @detail_read.selection_text(size, line_at) || @detail_read.current_line(size, line_at)
+    end
+
+    # The "copy as X" menu for the open detail pane: {picker title, options}. REQUEST
+    # offers url/headers/body/cookies/curl/raw (parsed from the captured bytes + the
+    # flow's target URL); RESPONSE offers status+headers/body/raw. Decoded panes
+    # (SAML/JWT/…) and the hex dump have no format variants — an empty list there lets
+    # the runner fall back to the plain selection copy.
+    def detail_copy_as_menu : {String, Array(CopyMenu::Option)}
+      detail = @detail
+      return {"COPY AS", [] of CopyMenu::Option} unless detail
+      case @detail_pane
+      when :request
+        wire = String.new(combine_bytes(detail.request_head, detail.request_body) || Bytes.empty)
+        row = detail.row
+        target = Replay::FlowRequest.build_target(row.scheme, row.host, row.port)
+        {"COPY REQUEST AS", CopyMenu.request_options(wire, target)}
+      when :response
+        head = detail.response_head
+        opts = if head
+                 body = detail.response_body
+                 CopyMenu.response_options(String.new(head), body ? String.new(body) : "")
+               else
+                 [] of CopyMenu::Option
+               end
+        {"COPY RESPONSE AS", opts}
+      else
+        {"COPY AS", [] of CopyMenu::Option}
+      end
     end
 
     def detail_selection? : Bool
