@@ -1,5 +1,5 @@
 title = "gori"
-description = "A fast, keyboard-driven HTTP intercepting proxy and web-security toolkit for the terminal."
+description = "Sit in the loop — a fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal."
 base_url = "http://localhost:3000"
 [plugins]
 processors = ["markdown"]
