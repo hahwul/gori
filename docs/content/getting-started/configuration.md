@@ -35,7 +35,7 @@ gori settings          # print the settings.json path
 gori settings --edit   # open it in your editor
 ```
 
-Persisted sections include `network`, `theme` (default `goridark`), `mouse`, `editor`, `tabs`, `layout`, `hostname_overrides`, `env`, `hotkeys`, `convert`, and `mine`. See the [Configuration Reference](/reference/config/) for the full list of keys.
+Persisted sections include `network`, `theme` (default `goridark`), `mouse`, `editor`, `tabs`, `layout`, `statusline`, `hostname_overrides`, `env`, `hotkeys`, `convert`, and `mine`. See the [Configuration Reference](/reference/config/) for the full list of keys.
 
 ### Network
 
@@ -66,6 +66,10 @@ gori ships thirteen built-in colour themes (`goridark` is the default) and suppo
 ### Hotkeys
 
 Every keyboard shortcut is rebindable from the command palette (`Ctrl-P` → `settings:hotkeys`) and persisted under the `hotkeys` key — see the [Hotkeys guide](/guide/hotkeys/).
+
+### Statusline
+
+An opt-in extra row at the bottom of the TUI (command palette → **Settings: Statusline**, or the `statusline` key). When enabled, gori runs a shell command on an interval and shows its (ANSI-coloured) stdout — a customizable status bar inspired by Claude Code's status line. The command receives a JSON snapshot of the live session (project, capture state, flow count, proxy address) on stdin. Disabled by default; see the [Configuration Reference](/reference/config/#statusline) for the keys and the stdin contract.
 
 ## Per-Project Network Overrides
 

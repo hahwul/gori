@@ -60,11 +60,22 @@ module Gori::Tui
         "how deep the tree opens after reload — ←/→ cycles (all = fully expanded)",
         choices: LAYOUT_DEPTH_CHOICES),
     ]
+    # Statusline: an opt-in bottom row that runs a command and shows its output.
+    STATUSLINE_FIELDS = [
+      Field.new("Statusline",
+        "run a command and show its output at the very bottom — ←/→/space toggles",
+        bool: true),
+      Field.new("Command",
+        "shell command (/bin/sh -c) — receives a JSON context (project, capture, flows, proxy) on stdin"),
+      Field.new("Interval (s)",
+        "how often to re-run the command — seconds (min 1)"),
+    ]
     SECTIONS = {
-      :network => NETWORK_FIELDS,
-      :editor  => EDITOR_FIELDS,
-      :theme   => THEME_FIELDS,
-      :layout  => LAYOUT_FIELDS,
+      :network    => NETWORK_FIELDS,
+      :editor     => EDITOR_FIELDS,
+      :theme      => THEME_FIELDS,
+      :layout     => LAYOUT_FIELDS,
+      :statusline => STATUSLINE_FIELDS,
     }
 
     # Max theme rows shown at once before the list scrolls (the box also shrinks to the
@@ -94,10 +105,11 @@ module Gori::Tui
       @section = section
       Theme.load_custom if section == :theme # pick up theme files dropped since startup
       @values = case section
-                when :editor then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
-                when :theme  then [Theme.canonical(Settings.theme)]
-                when :layout then layout_values
-                else              [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, hostnames_summary]
+                when :editor     then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
+                when :theme      then [Theme.canonical(Settings.theme)]
+                when :layout     then layout_values
+                when :statusline then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
+                else                  [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -121,6 +133,11 @@ module Gori::Tui
                   Settings::DEFAULT_FINDINGS_PREVIEW ? "on" : "off",
                   order_label(Settings::DEFAULT_HISTORY_LIST_ORDER),
                   depth_label(Settings::DEFAULT_SITEMAP_EXPAND_DEPTH),
+                ]
+                when :statusline then [
+                  Settings::DEFAULT_STATUSLINE_ENABLED ? "on" : "off",
+                  Settings::DEFAULT_STATUSLINE_COMMAND,
+                  Settings::DEFAULT_STATUSLINE_INTERVAL.to_s,
                 ]
                 else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, hostnames_summary]
                 end
@@ -291,6 +308,18 @@ module Gori::Tui
         Settings.history_list_order = Settings.normalize_history_list_order(order_from_label(@values[3]))
         Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(depth_from_label(@values[4]))
         @values = layout_values
+        return persist
+      end
+      if @section == :statusline
+        iv = @values[2].strip.to_i?
+        unless iv && iv >= 1
+          @status = "invalid interval"
+          return "settings: invalid statusline interval #{@values[2].inspect} (seconds, min 1)"
+        end
+        Settings.statusline_enabled = @values[0] == "on"
+        Settings.statusline_command = @values[1] # blank is valid (no-op while enabled)
+        Settings.statusline_interval = iv
+        @values = [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, iv.to_s]
         return persist
       end
       port = @values[1].strip.to_i?
