@@ -62,15 +62,29 @@ module Gori
 
     def self.ensure_dirs : Nil
       ensure_dir(home_dir)
+      ensure_dir(projects_dir) # lock the projects ROOT too (registry only mkdir's leaves)
       ensure_dir(wordlists_dir)
     end
 
-    # Race-tolerant `mkdir -p`: two gori instances can start simultaneously and
-    # both create a fresh dir — one wins the mkdir, the other must not crash.
+    # gori's tree holds captured traffic (per-project DBs), the CA private key, and
+    # settings.json — secrets other local users on a shared host must not read. So
+    # every gori dir is owner-only 0700, NOT left at the umask default (a fresh
+    # `~/.gori` was 0755 = world-traversable, exposing world-readable project DBs
+    # underneath). 0700 has no group/other bits for any umask to strip, so
+    # `mkdir_p(mode)` yields it exactly; the explicit chmod additionally tightens a
+    # pre-existing 0755 dir from an older install. Mirrors cert_authority.cr locking
+    # the CA key to 0600 rather than trusting umask.
+    DIR_MODE = 0o700
+
+    # Race-tolerant `mkdir -p` at 0700 (see DIR_MODE): two gori instances can start
+    # simultaneously and both create a fresh dir — one wins the mkdir, the other must
+    # not crash.
     def self.ensure_dir(path : String) : Nil
-      Dir.mkdir_p(path)
+      Dir.mkdir_p(path, DIR_MODE)
+      File.chmod(path, DIR_MODE) rescue nil # tighten a pre-0700 dir from an older install
     rescue File::AlreadyExistsError
       # created concurrently by another instance — it exists now, fine
+      File.chmod(path, DIR_MODE) rescue nil
     end
   end
 end
