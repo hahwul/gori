@@ -179,6 +179,15 @@ module Gori::Tui
       false
     end
 
+    # Page/jump keyboard nav (PageUp/PageDown → ±one screenful; Home/End → top/bottom).
+    # `delta` is a signed row count; Home/End pass a large magnitude and rely on the
+    # view's own clamping (so the exact value only needs to exceed the list length).
+    # Return true if this tab has a navigable body that consumed it. Default: not
+    # navigable — editors leave this false so the physical keys fall through untouched.
+    def body_scroll(delta : Int32) : Bool
+      false
+    end
+
     # Same notch, but with the pointer position + body rect — lets a multi-pane tab
     # (Project) scroll the pane UNDER the cursor instead of the focused one. Defaults
     # to the coordinate-free handle_wheel, so single-target tabs need no change.
@@ -214,6 +223,21 @@ module Gori::Tui
     end
 
     def jump_subtab(idx : Int32) : Nil
+    end
+
+    # Rows for the "find sub-tab" search picker (space → search). Default: one row per
+    # strip label — good enough for Fuzzer/Notes/Convert. Replay overrides to add a
+    # summary/URL detail line. Only meaningful when there are ≥2 sub-tabs (the verb gates
+    # on subtab_count), so jumping to a sub-tab never needs the Ctrl+digit chord.
+    def subtab_search_rows : Array(SubtabPicker::Row)
+      (subtab_labels || [] of String).map_with_index do |label, i|
+        SubtabPicker::Row.new(i, label, "")
+      end
+    end
+
+    # Open sub-tab count — gates the search entry. Derived from the strip labels.
+    def subtab_count : Int32
+      subtab_labels.try(&.size) || 0
     end
 
     # A FIXED strip (Help): the chip set is constant — no ^N/^W create/close and the

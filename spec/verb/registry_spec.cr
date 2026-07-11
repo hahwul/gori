@@ -140,6 +140,14 @@ private class FakeContext < ExecContext
     0
   end
 
+  def subtab_search_open : Nil
+    @calls << :subtab_search_open
+  end
+
+  def subtab_search_count : Int32
+    0
+  end
+
   def replay_rename_subtab : Nil
     @calls << :replay_rename_subtab
   end

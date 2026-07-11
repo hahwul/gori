@@ -178,6 +178,7 @@ module Gori::Tui
       @outcome = :running              # :running | :quit | :back
       @quit_armed = false              # first ^D/^C arms quit; second confirms (avoids accidental exit)
       @resized = false                 # set on a Resize event → next frame full-repaints
+      @body_h = 24                     # last body rect height (captured at render); drives PageUp/Down step size
 
       # Per-tab controllers (strangler-fig: tabs migrate into this registry one at a
       # time; an unmigrated tab is absent and still runs through the case ladders
@@ -300,9 +301,9 @@ module Gori::Tui
       last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
       last_dv_poll = Time.instant
       last_prism_gen = @session.store.prism_generation # committed prism_issues mutations
-      last_spin = Time.instant        # advances the background-job spinner frame
-      last_clock = clock_label        # top-bar wall clock; re-render only when the minute rolls over
-      last_ui_ident = nil.as(String?) # last-written ui-state identity (see UI_STATE_THROTTLE)
+      last_spin = Time.instant                         # advances the background-job spinner frame
+      last_clock = clock_label                         # top-bar wall clock; re-render only when the minute rolls over
+      last_ui_ident = nil.as(String?)                  # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
       loop do
         ev = @term.poll_event(50)
@@ -679,6 +680,12 @@ module Gori::Tui
       # History detail drill-in: shift+arrows select, space opens the action menu.
       if @active_tab == :history && @overlay == :detail && @focus == :body
         return if history_controller.handle_detail_key(ev)
+        # PageUp/PageDown/Home/End page the open response/request body (the :detail
+        # overlay is outside the @overlay == :none body-nav path below, so route here).
+        if delta = page_nav_delta(ev.key)
+          history_controller.scroll_detail(delta)
+          return
+        end
       end
       # The Convert chain autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
       # before the focus ring claims Tab. Non-popup keys fall through (return false).
@@ -747,6 +754,13 @@ module Gori::Tui
       # tab is absent from @tabs and falls through to the verb keymap / space menu below.
       if @overlay == :none && @focus == :body && (c = @tabs[@active_tab]?)
         return if c.handle_body_key(ev)
+        # PageUp/PageDown/Home/End: page/jump the focused list or read-only pane. These
+        # keys never reach the verb keymap (Keybind.from_event doesn't encode them), so
+        # route them straight to the controller's body_scroll. A tab with no navigable
+        # body returns false and the keys fall through harmlessly.
+        if (delta = page_nav_delta(ev.key)) && c.body_scroll(delta)
+          return
+        end
       end
 
       chord = Keybind.from_event(ev)
@@ -840,7 +854,7 @@ module Gori::Tui
     private def modal_overlay? : Bool
       case @overlay
       when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule then true
-      else                                                                                                                                                                                                                                      false
+      else                                                                                                                                                                                                                                       false
       end
     end
 
@@ -1323,10 +1337,10 @@ module Gori::Tui
     private def handle_browser_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       case
-      when key.escape? then close_browser_picker
-      when key.up?     then @browser_picker.try(&.move(-1))
-      when key.down?   then @browser_picker.try(&.move(1))
-      when key.enter?  then launch_selected_browser
+      when key.escape?             then close_browser_picker
+      when key.up?, key.lower_k?   then @browser_picker.try(&.move(-1))
+      when key.down?, key.lower_j? then @browser_picker.try(&.move(1))
+      when key.enter?              then launch_selected_browser
       end
     end
 
@@ -1347,9 +1361,18 @@ module Gori::Tui
       when key.down?   then p.move(1)
       when key.enter?  then apply_choice
       else
-        if (c = ev.char) && !ev.ctrl? && !ev.alt? && (idx = p.index_for(c))
-          p.set_selected(idx)
-          apply_choice
+        if (c = ev.char) && !ev.ctrl? && !ev.alt?
+          # A row mnemonic sets it directly (wins); j/k fall back to vim-style nav
+          # only when they aren't themselves a mnemonic, so the reflex keystroke moves
+          # the highlight instead of being ignored.
+          if idx = p.index_for(c)
+            p.set_selected(idx)
+            apply_choice
+          elsif c == 'j'
+            p.move(1)
+          elsif c == 'k'
+            p.move(-1)
+          end
         end
         # any other key is ignored (the picker stays up — a value pick is deliberate)
       end
@@ -1505,8 +1528,8 @@ module Gori::Tui
         return
       end
       if idx = sp.selected_index
-        replay_controller.jump_subtab(idx)
-        @focus = :body # land on the chosen session's content (we came from the response pane)
+        @tabs[@active_tab]?.try(&.jump_subtab(idx)) # active tab owns the strip (Replay/Fuzzer/Notes/Convert)
+        @focus = :body                              # land on the chosen session's content
       end
       close_subtab_picker
     end
@@ -1554,13 +1577,13 @@ module Gori::Tui
         return
       end
       case
-      when key.escape? then close_links_overlay
-      when key.up?     then lo.move(-1)
-      when key.down?   then lo.move(1)
-      when key.enter?  then open_selected_link(lo)
-      when c == 'o'    then open_selected_link(lo)
-      when c == 'd'    then remove_selected_link(lo)
-      when c == 'a'    then lo.start_add
+      when key.escape?             then close_links_overlay
+      when key.up?, key.lower_k?   then lo.move(-1)
+      when key.down?, key.lower_j? then lo.move(1)
+      when key.enter?              then open_selected_link(lo)
+      when c == 'o'                then open_selected_link(lo)
+      when c == 'd'                then remove_selected_link(lo)
+      when c == 'a'                then lo.start_add
       end
     end
 
@@ -1966,9 +1989,9 @@ module Gori::Tui
         open_palette
       elsif key.escape?
         @overlay = :none
-      elsif key.up?
+      elsif key.up? || key.lower_k?
         @hosts_overlay.select_move(-1)
-      elsif key.down?
+      elsif key.down? || key.lower_j?
         @hosts_overlay.select_move(1)
       elsif key.enter? || c == 'e'
         @hosts_overlay.edit_start
@@ -2033,9 +2056,9 @@ module Gori::Tui
         open_palette
       elsif key.escape?
         @overlay = :none
-      elsif key.up?
+      elsif key.up? || key.lower_k?
         @env_overlay.select_move(-1)
-      elsif key.down?
+      elsif key.down? || key.lower_j?
         @env_overlay.select_move(1)
       elsif key.enter? || c == 'e'
         @env_overlay.edit_start
@@ -2230,11 +2253,11 @@ module Gori::Tui
     # body_hint never advertises it). Rename/close still work.
     private def subtab_new : Nil
       case @active_tab
-      when :replay    then replay_controller.replay_new
-      when :fuzzer    then fuzzer_controller.fuzz_new
-      when :convert   then convert_controller.convert_new
-      when :notes     then notes_controller.notes_new
-      when :comparer  then comparer_controller.comparer_new
+      when :replay   then replay_controller.replay_new
+      when :fuzzer   then fuzzer_controller.fuzz_new
+      when :convert  then convert_controller.convert_new
+      when :notes    then notes_controller.notes_new
+      when :comparer then comparer_controller.comparer_new
       end
     end
 
@@ -2243,18 +2266,18 @@ module Gori::Tui
     private def subtab_new_supported? : Bool
       case @active_tab
       when :replay, :fuzzer, :convert, :notes, :comparer then true
-      else                                                   false
+      else                                                    false
       end
     end
 
     private def subtab_close : Nil
       case @active_tab
-      when :replay    then replay_controller.request_close
-      when :fuzzer    then fuzzer_controller.request_close
-      when :miner     then miner_controller.request_close
-      when :convert   then convert_controller.convert_close
-      when :notes     then notes_controller.notes_close
-      when :comparer  then comparer_controller.comparer_close
+      when :replay   then replay_controller.request_close
+      when :fuzzer   then fuzzer_controller.request_close
+      when :miner    then miner_controller.request_close
+      when :convert  then convert_controller.convert_close
+      when :notes    then notes_controller.notes_close
+      when :comparer then comparer_controller.comparer_close
       end
     end
 
@@ -2359,10 +2382,21 @@ module Gori::Tui
       elsif key.enter?
         run_space_verb(@space_menu.selected_verb)
       elsif (c = ev.char) && !ev.ctrl? && !ev.alt?
-        verb = @space_menu.verb_for(c)
-        verb ? run_space_verb(verb) : close_space_menu
+        # A bound mnemonic always wins (helix leader). Only when j/k are NOT a live
+        # mnemonic in this menu do they fall back to vim-style nav — so the reflex
+        # keystroke moves the selection instead of dismissing the menu, while scopes
+        # that bind 'k' (e.g. link-to-finding) keep their mnemonic.
+        if verb = @space_menu.verb_for(c)
+          run_space_verb(verb)
+        elsif c == 'j'
+          @space_menu.move(1)
+        elsif c == 'k'
+          @space_menu.move(-1)
+        else
+          close_space_menu # an unmapped leader key dismisses (helix feel)
+        end
       else
-        close_space_menu # an unmapped leader key dismisses (helix feel)
+        close_space_menu
       end
     end
 
@@ -2786,9 +2820,27 @@ module Gori::Tui
     end
 
     private def render_body(screen : Screen, rect : Rect) : Nil
+      @body_h = rect.h # remembered for PageUp/PageDown's screenful step (see page_nav_delta)
       # Every catalog tab has a controller that owns its body render; the `?` guard is
       # defensive (a blank body beats a crash if the active tab ever lacks one).
       @tabs[@active_tab]?.try(&.render_body(screen, rect, @focus))
+    end
+
+    # A row delta for a page/jump key, or nil if `key` isn't one. PageUp/PageDown step
+    # by ~one screenful (the last body height, minus a couple rows of overlap); Home/End
+    # pass a large magnitude that the target view clamps to its top/bottom. Shared by the
+    # in-body list dispatch (TabController#body_scroll) and the History detail overlay.
+    JUMP_ROWS = 100_000
+
+    private def page_nav_delta(key : Termisu::Input::Key) : Int32?
+      page = {@body_h - 3, 3}.max
+      case
+      when key.page_down? then page
+      when key.page_up?   then -page
+      when key.home?      then -JUMP_ROWS
+      when key.end?       then JUMP_ROWS
+      else                     nil
+      end
     end
 
     # --- ExecContext (verbs drive the UI through these) ----------------------
@@ -3015,11 +3067,11 @@ module Gori::Tui
     # redirect it.
     private def open_rename(idx : Int32) : Nil
       view = case @active_tab
-             when :replay    then replay_controller.view_at(idx)
-             when :fuzzer    then fuzzer_controller.view_at(idx)
-             when :convert   then convert_controller.view_at(idx)
-             when :miner     then miner_controller.view_at(idx)
-             when :comparer  then comparer_controller.view_at(idx)
+             when :replay   then replay_controller.view_at(idx)
+             when :fuzzer   then fuzzer_controller.view_at(idx)
+             when :convert  then convert_controller.view_at(idx)
+             when :miner    then miner_controller.view_at(idx)
+             when :comparer then comparer_controller.view_at(idx)
              end
       return unless view
       @rename_view = view
@@ -3040,11 +3092,11 @@ module Gori::Tui
     # (the chip reverts to the request/template-derived summary).
     private def apply_rename(name : String) : Nil
       case v = @rename_view
-      when ReplayView    then replay_controller.apply_rename(v, name)
-      when FuzzerView    then fuzzer_controller.apply_rename(v, name)
-      when ConvertView   then convert_controller.apply_rename(v, name)
-      when MinerView     then miner_controller.apply_rename(v, name)
-      when ComparerView  then comparer_controller.apply_rename(v, name)
+      when ReplayView   then replay_controller.apply_rename(v, name)
+      when FuzzerView   then fuzzer_controller.apply_rename(v, name)
+      when ConvertView  then convert_controller.apply_rename(v, name)
+      when MinerView    then miner_controller.apply_rename(v, name)
+      when ComparerView then comparer_controller.apply_rename(v, name)
       end
     end
 
@@ -3816,10 +3868,22 @@ module Gori::Tui
     # Open the Replay sub-tab search picker (space → s). Snapshots the open
     # sessions; the picker filters them in memory and jumps on ↵.
     def replay_find_subtab : Nil
-      rows = replay_controller.subtab_search_rows
-      return @toast = "no other replay open to search" if rows.size < 2
+      subtab_search_open
+    end
+
+    # Generic sub-tab search — opens the fuzzy picker over the ACTIVE tab's sub-tabs
+    # (Replay/Fuzzer/Notes/Convert). commit_subtab_picker jumps on the active controller,
+    # so one path serves every strip. Gives Fuzzer/Notes/Convert a search-and-jump that
+    # doesn't rely on Ctrl+digit (undeliverable on many terminals).
+    def subtab_search_open : Nil
+      rows = @tabs[@active_tab]?.try(&.subtab_search_rows) || [] of SubtabPicker::Row
+      return @toast = "no other sub-tab to search" if rows.size < 2
       @subtab_picker = SubtabPicker.new("FIND SUB-TAB", rows)
       @overlay = :replay_subtab
+    end
+
+    def subtab_search_count : Int32
+      @tabs[@active_tab]?.try(&.subtab_count) || 0
     end
 
     def replay_subtab_count : Int32

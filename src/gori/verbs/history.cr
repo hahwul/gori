@@ -312,6 +312,16 @@ module Gori
         [Verb::Chord.new("n", ctrl: true)],
         available: in_fuzzer, mnemonic: 'n') { |ctx| ctx.fuzz_new; nil }
 
+      # Search-and-jump across open fuzz sessions — the Replay find-subtab picker,
+      # generalised (section :tab so it shows in the tab-bar space menu, like replay).
+      # Gives Fuzzer a sub-tab jump that doesn't depend on Ctrl+digit. 'f' (find) since
+      # 's' is taken by fuzz.stop in Fuzzer COMMON.
+      r.register Verb::Definition.new(
+        "fuzz.find-subtab", "Search sub-tabs", "Filter the open fuzz sessions and jump to one",
+        Verb::Scope::Fuzzer,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 2 },
+        mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+
       # Sub-tab rename/close — mirrors replay.rename-subtab/replay.close-subtab above:
       # the strip's raw `r` rename / ^W close, promoted to verbs so :subtab isn't
       # empty. 'e'/'w' are free in COMMON ∪ :subtab (Fuzzer COMMON keys: r/s/y/k/u/S/v).

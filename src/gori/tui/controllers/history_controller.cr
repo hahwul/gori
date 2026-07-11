@@ -130,6 +130,14 @@ module Gori::Tui
 
     # History detail drill-in: shift+arrows select, space opens the action menu.
     # Plain ↑/↓/j/k stay verb-driven (detail.up/down → detail_move).
+    # PageUp/PageDown/Home/End over the history list (detail paging is handled at the
+    # :detail overlay in the Runner). Uses the view's clamping move directly, so it
+    # never triggers move_selection's ↑-at-top focus pop mid-page.
+    def body_scroll(delta : Int32) : Bool
+      @history.move(delta)
+      true
+    end
+
     def handle_detail_key(ev : Termisu::Event::Key) : Bool
       return false unless @host.overlay == :detail
       if ev.key.space? && !ev.ctrl? && !ev.alt?

@@ -29,6 +29,15 @@ module Gori::Tui
       @findings.detail_open? ? Verb::Scope::FindingsDetail : Verb::Scope::Findings
     end
 
+    # PageUp/PageDown/Home/End over the findings list (view clamps the selection). The
+    # detail view is a short title/notes/links form with no vertical body to page, so
+    # leave those keys untouched when it's open.
+    def body_scroll(delta : Int32) : Bool
+      return false if @findings.detail_open?
+      @findings.move(delta)
+      true
+    end
+
     def body_badge : Symbol
       @findings.notes_insert_mode? ? :editor : :body
     end
@@ -137,14 +146,14 @@ module Gori::Tui
         @findings.focus_links!
       when key.enter?, c == 'i'
         @findings.enter_notes_insert!
-      when key.up?   then @findings.notes_read_move(-1, 0, selecting: selecting)
-      when key.down? then @findings.notes_read_move(1, 0, selecting: selecting)
-      when key.left? && selecting  then @findings.notes_read_move(0, -1, selecting: true)
-      when key.right? && selecting then @findings.notes_read_move(0, 1, selecting: true)
+      when key.up?                  then @findings.notes_read_move(-1, 0, selecting: selecting)
+      when key.down?                then @findings.notes_read_move(1, 0, selecting: selecting)
+      when key.left? && selecting   then @findings.notes_read_move(0, -1, selecting: true)
+      when key.right? && selecting  then @findings.notes_read_move(0, 1, selecting: true)
       when key.left? && !selecting  then @findings.notes_read_move(0, -1)
       when key.right? && !selecting then @findings.notes_read_move(0, 1)
-      when c == 'x'                then @findings.notes_select_line
-      when c == 'y'                then findings_copy
+      when c == 'x'                 then @findings.notes_select_line
+      when c == 'y'                 then findings_copy
       else
         return false
       end
