@@ -2,7 +2,9 @@ require "../tab_controller"
 require "../traffic_empty_state"
 require "../replay_view"
 require "../clipboard"
+require "../copy_menu"
 require "../subtab_picker"
+require "../../env"
 require "../../store"
 require "../../prism"
 require "../../replay/engine"
@@ -533,6 +535,36 @@ module Gori::Tui
       when :target   then !v.pane_insert?(:target)
       when :response then true
       else               false
+      end
+    end
+
+    # The "copy as X" menu for the focused pane: {picker title, options}. The RESPONSE
+    # pane offers status+headers/body/raw (or the whole transcript in WS/gRPC mode);
+    # the REQUEST and TARGET panes offer url/headers/body/cookies/curl/raw parsed from
+    # the request as it'd be sent (env-expanded wire bytes + the resolved target URL).
+    def copy_as_menu : {String, Array(CopyMenu::Option)}
+      v = current_view
+      return {"COPY AS", [] of CopyMenu::Option} unless v
+      if v.focus == :response
+        {"COPY RESPONSE AS", replay_response_options(v)}
+      else
+        {"COPY REQUEST AS", replay_request_options(v)}
+      end
+    end
+
+    private def replay_request_options(v : ReplayView) : Array(CopyMenu::Option)
+      wire = String.new(v.request_bytes)
+      target = Env.expand(v.target)
+      CopyMenu.request_options(wire, target)
+    end
+
+    private def replay_response_options(v : ReplayView) : Array(CopyMenu::Option)
+      if parts = v.response_parts
+        CopyMenu.response_options(parts[0], parts[1])
+      else
+        # WS/gRPC transcript (or no HTTP head+body to split) — offer the rendered pane.
+        text = v.resp_copy_all_text
+        text.empty? ? [] of CopyMenu::Option : [CopyMenu::Option.new("Raw response", 'r', text)]
       end
     end
 

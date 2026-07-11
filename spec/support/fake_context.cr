@@ -407,6 +407,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def read_copy : Nil; end
 
+  def copy_as_open : Nil; end
+
   def detail_navigable? : Bool
     false
   end
