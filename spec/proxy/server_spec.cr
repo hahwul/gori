@@ -36,6 +36,35 @@ private class StubRewriter < Gori::Proxy::HeadRewriter
   end
 end
 
+# A Match&Replace rewriter that rewrites request AND response BODIES (the entity
+# form), for exercising the buffer + re-frame path. Both replacements CHANGE the
+# body length so the test can prove Content-Length is re-synced. Heads pass through.
+private class BodyRewriter < Gori::Proxy::HeadRewriter
+  def rewrite_request(head : Bytes) : Bytes
+    head
+  end
+
+  def rewrite_response(head : Bytes) : Bytes
+    head
+  end
+
+  def rewrites_request_body? : Bool
+    true
+  end
+
+  def rewrites_response_body? : Bool
+    true
+  end
+
+  def rewrite_request_body(entity : Bytes) : Bytes
+    String.new(entity).gsub("ping", "PONG!").to_slice
+  end
+
+  def rewrite_response_body(entity : Bytes) : Bytes
+    String.new(entity).gsub("SECRET", "[HIDDEN]").to_slice
+  end
+end
+
 # Reads from a socket until `marker` appears (or the read times out / EOFs),
 # returning everything read so far. Used to frame one response off a keep-alive
 # connection without consuming the next one.
@@ -64,6 +93,36 @@ private def start_origin(body : String, seen : Channel(String)) : Int32
       request_line = head ? String.new(head).lines.first : ""
       seen.send(request_line)
       conn << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n" << body
+      conn.flush
+      conn.close
+    end
+  end
+  port
+end
+
+# An origin that reads the request BODY (per its framing) and reports it on `seen_body`,
+# then replies with `resp_body`. `chunked` frames the reply as Transfer-Encoding: chunked
+# (one chunk) so the response-body M&R path exercises de-chunk → re-frame.
+private def start_body_origin(resp_body : String, seen_body : Channel(String), chunked : Bool = false) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    while conn = origin.accept?
+      head = Gori::Proxy::Codec::Http1.read_head(conn)
+      if head
+        req = Gori::Proxy::Codec::Http1.parse_request_head(head)
+        framing, len = Gori::Proxy::Codec::Body.request_framing(req)
+        body = Gori::Proxy::Codec::Body.read(conn, framing, len)
+        seen_body.send(body ? String.new(body) : "")
+      else
+        seen_body.send("")
+      end
+      if chunked
+        conn << "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+        conn << resp_body.bytesize.to_s(16) << "\r\n" << resp_body << "\r\n0\r\n\r\n"
+      else
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: #{resp_body.bytesize}\r\nConnection: close\r\n\r\n" << resp_body
+      end
       conn.flush
       conn.close
     end
@@ -608,6 +667,73 @@ describe Gori::Proxy::Server do
 
     sink.requests.first.target.should eq("/hi")                    # capture = sent (modified) bytes
     String.new(sink.responses.first.head).should contain("200 YO") # capture = sent (modified) bytes
+  end
+
+  it "rewrites request/response BODIES and re-frames Content-Length" do
+    seen_body = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_body_origin("the SECRET value", seen_body)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: BodyRewriter.new)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    body = "ping-data" # 9 bytes; "ping" → "PONG!" makes it 10
+    client << "POST /submit HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nContent-Length: #{body.bytesize}\r\n\r\n" << body
+    client.flush
+    response = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    # The origin read EXACTLY the rewritten body — proof the forwarded Content-Length
+    # was re-synced to the new length (10), else it would frame 9 bytes and stall/misread.
+    seen_body.receive.should eq("PONG!-data")
+
+    # The client got the rewritten response body with a re-synced Content-Length (18).
+    response.should contain("the [HIDDEN] value")
+    response.should contain("Content-Length: 18")
+    response.should_not contain("SECRET")
+
+    # Capture reflects the sent (rewritten) bytes on both sides.
+    req = sink.requests.first
+    String.new(req.body.not_nil!).should eq("PONG!-data")
+    String.new(req.head).should contain("Content-Length: 10")
+    resp = sink.responses.first
+    resp.status.should eq(200)
+    resp.state.should eq(Gori::Store::FlowState::Complete)
+    String.new(resp.body.not_nil!).should eq("the [HIDDEN] value")
+    String.new(resp.head).should contain("Content-Length: 18")
+  end
+
+  it "de-chunks, rewrites, and re-frames a chunked response body to Content-Length" do
+    seen_body = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_body_origin("a SECRET here", seen_body, chunked: true)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: BodyRewriter.new)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /page HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    response = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    seen_body.receive # drain
+
+    # The chunked body was de-chunked, rewritten, and re-framed as Content-Length (15) —
+    # the client sees no chunk framing and no Transfer-Encoding.
+    response.should contain("a [HIDDEN] here")
+    response.should contain("Content-Length: 15")
+    response.should_not contain("Transfer-Encoding")
+    response.should_not contain("SECRET")
+    String.new(sink.responses.first.body.not_nil!).should eq("a [HIDDEN] here")
   end
 
   it "holds a request via the interceptor and forwards an edited version" do

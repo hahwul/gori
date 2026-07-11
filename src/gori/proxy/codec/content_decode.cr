@@ -109,7 +109,8 @@ module Gori::Proxy::Codec
     # Recover the entity body from a stored h1 chunked wire form
     # ("<hex>[;ext]\r\n<data>\r\n...0\r\n"). Tolerant: stops at the terminating
     # 0-chunk, EOF, or a malformed size line, returning bytes recovered so far.
-    private def self.dechunk(body : Bytes) : Bytes
+    # Public so the Match&Replace body path can rewrite the entity, not the wire form.
+    def self.dechunk(body : Bytes) : Bytes
       out = IO::Memory.new
       pos = 0
       while pos < body.size

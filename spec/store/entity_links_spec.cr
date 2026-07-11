@@ -65,13 +65,14 @@ describe "entity_links (V21)" do
         "INSERT INTO findings (id, created_at, updated_at, title, severity, host, flow_id, notes, status) " \
         "VALUES (1, 5, 5, 'legacy', 2, 'a.test', ?, '', 0)", fid)
       store.@db.exec("DROP TABLE entity_links")
-      store.@db.exec("ALTER TABLE replays DROP COLUMN mark_transform") # V22 (added a column to a pre-V17 table)
-      store.@db.exec("DROP INDEX idx_flows_sizes")                     # V23
-      store.@db.exec("DROP INDEX idx_ws_messages_replay")              # V26
-      store.@db.exec("ALTER TABLE ws_messages DROP COLUMN replay_id")  # V26
-      store.@db.exec("DROP INDEX idx_h2_frames_created")               # V27
+      store.@db.exec("ALTER TABLE replays DROP COLUMN mark_transform")        # V22 (added a column to a pre-V17 table)
+      store.@db.exec("DROP INDEX idx_flows_sizes")                            # V23
+      store.@db.exec("DROP INDEX idx_ws_messages_replay")                     # V26
+      store.@db.exec("ALTER TABLE ws_messages DROP COLUMN replay_id")         # V26
+      store.@db.exec("DROP INDEX idx_h2_frames_created")                      # V27
       store.@db.exec("ALTER TABLE prism_issues DROP COLUMN sample_replay_id") # V28
-      store.@db.exec("DROP TABLE prism_suppressions")                  # V29
+      store.@db.exec("DROP TABLE prism_suppressions")                         # V29
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN part")              # V30
       store.@db.exec("PRAGMA user_version = 20")
       store.close
 

@@ -61,21 +61,25 @@ gori run history -q 'status:5xx host:api.example.com'
 
 ## Match & Replace
 
-Press `m` (or `Ctrl-P` → **Match & Replace**) to open the rewrite editor. Rules rewrite request or response **heads** in flight — the request line and headers — while bodies stream through unchanged.
+Press `m` (or `Ctrl-P` → **Match & Replace**) to open the rewrite editor. Rules rewrite the **head** (request line + headers) or the **body** of a request/response in flight — a literal substring swap applied to live traffic.
 
 Syntax is one line per rule:
 
 ```text
 req: User-Agent: x => User-Agent: gori
 resp: Set-Cookie => X-Stripped
+reqbody: password => hunter2
+respbody: "debug":false => "debug":true
 ```
 
 | Prefix | Target |
 |--------|--------|
 | `req:` (default) | Request head |
 | `resp:` | Response head |
+| `reqbody:` | Request body |
+| `respbody:` | Response body |
 
-An empty replacement deletes the matched text. Rules are per-project, can be toggled on/off individually, and apply as soon as you add them — no restart. Use them to strip cookies, inject headers, or normalize noisy values before traffic hits History or the scanners.
+An empty replacement deletes the matched text. A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. Body rewriting works on the decoded transfer form — a compressed (`Content-Encoding: gzip`/`br`/…) body isn't decompressed, so a literal pattern simply won't match it — and streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. Rules are per-project, can be toggled on/off individually, and apply as soon as you add them — no restart. Use them to strip cookies, inject headers, or rewrite body values before traffic hits History or the scanners.
 
 ## Import
 

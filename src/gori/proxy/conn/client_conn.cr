@@ -1,6 +1,7 @@
 require "uri"
 require "../codec/http1"
 require "../codec/body"
+require "../codec/content_decode"
 require "../sink"
 require "../head_rewriter"
 require "../../interceptor"
@@ -153,6 +154,15 @@ module Gori::Proxy
           created_at, started, req_framing, req_len)
       end
 
+      # Match&Replace (request body): a body rule can't stream — it must buffer the
+      # whole body to rewrite it and re-frame the head (Content-Length). Only pay this
+      # when a request-body rule is live AND there's a body to rewrite; the common path
+      # (no body rule) falls straight through to zero-buffer streaming below (P6).
+      if (rw = @rewriter) && rw.rewrites_request_body? && !req_framing.none?
+        return forward_request_rewriting_body(rw, req, sent_req, sent_head, host, port,
+          scheme, created_at, started, req_framing, req_len)
+      end
+
       # Non-hold path: stream the request body byte-for-byte (P6), unchanged.
       # Replay-safety keys on the ACTUALLY-SENT method (sent_req): an M&R rule that rewrites
       # the request line GET→POST must not leave a non-idempotent request marked retryable.
@@ -199,6 +209,13 @@ module Gori::Proxy
         record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
         return false
       end
+      # Match&Replace (request body) BEFORE the human sees it — mirroring the head, which is
+      # already M&R'd into `sent_head`. A body rule re-frames to Content-Length, so re-parse
+      # the (possibly rewritten) head for the hold metadata + capture.
+      if (rw = @rewriter) && rw.rewrites_request_body?
+        sent_head, buffered = apply_body_rewrite(sent_head, buffered, req_framing) { |e| rw.rewrite_request_body(e) }
+        sent_req = Codec::Http1.parse_request_head(sent_head)
+      end
       decision = ic.hold_request(build_message(sent_head, buffered),
         method: sent_req.method, target: sent_req.target,
         host: host, port: port, scheme: scheme)
@@ -230,6 +247,39 @@ module Gori::Proxy
         body: stored, body_truncated: trunc, body_size: size))
       handle_response(upstream, req, flow_id, started, host, port, scheme,
         reused: reused, sent_head: sent_head, can_retry: retryable, sent_req: sent_req)
+    end
+
+    # The Match&Replace request-body path (no intercept): buffer the whole body,
+    # rewrite the entity, re-frame the head (Content-Length), and forward. A body was
+    # sent, so the request is never auto-retryable. Structurally this is the hold path
+    # minus the human — same buffer + capped-capture + reused-upstream forwarding.
+    private def forward_request_rewriting_body(rw : HeadRewriter, req : Codec::RawRequest,
+                                               sent_req : Codec::RawRequest, sent_head : Bytes,
+                                               host : String, port : Int32, scheme : String,
+                                               created_at : Int64, started : Time::Instant,
+                                               req_framing : Codec::BodyFraming, req_len : Int64) : Bool
+      buffered, body_complete = Codec::Body.read_complete(@io, req_framing, req_len)
+      unless body_complete
+        # Client cut the body short — forwarding it under the original length would desync
+        # the upstream (mirrors the streaming path's req_complete guard). Record + close.
+        record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
+        return false
+      end
+      sent_head, fwd_body = apply_body_rewrite(sent_head, buffered, req_framing) { |e| rw.rewrite_request_body(e) }
+      sent_req = Codec::Http1.parse_request_head(sent_head) # head may have been re-framed
+      upstream, reused, sent = acquire_and_send(host, port, false) { |up| write_request(up, sent_head, fwd_body) }
+      unless upstream && sent
+        release_upstream
+        record_error(sent_req, scheme, host, port, created_at, "upstream connect/write failed: #{host}:#{port}")
+        write_gateway_error
+        return false
+      end
+      stored, trunc, size = capped(fwd_body)
+      flow_id = @sink.on_request(FlowMapper.request(sent_req,
+        scheme: scheme, host: host, port: port, created_at: created_at,
+        body: stored, body_truncated: trunc, body_size: size))
+      handle_response(upstream, req, flow_id, started, host, port, scheme,
+        reused: reused, sent_head: sent_head, can_retry: false, sent_req: sent_req)
     end
 
     # Acquires the (reused-or-fresh) upstream and runs `send` on it. If a REUSED
@@ -312,6 +362,16 @@ module Gori::Proxy
          !resp_framing.close_delimited? && !sse?(resp) && resp.status != 101
         return handle_held_response(ic, upstream, req, sent_req, flow_id, host, port, scheme,
           resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
+      end
+
+      # Match&Replace (response body): buffer + rewrite a bounded (Length/chunked),
+      # non-streaming response when a response-body rule is live. SSE / close-delimited
+      # / 101-upgrade bodies would buffer forever, so they fall through to streaming and
+      # the body rule no-ops on them (matching the intercept-hold exclusions above).
+      if (rw = @rewriter) && rw.rewrites_response_body? &&
+         (resp_framing.length? || resp_framing.chunked?) && !sse?(resp) && resp.status != 101
+        return forward_response_rewriting_body(rw, upstream, req, sent_req, flow_id, host, port,
+          scheme, resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
 
       # Non-hold path: stream the response body byte-for-byte (P6) and record the
@@ -455,6 +515,47 @@ module Gori::Proxy
         state: state, error: error))
     end
 
+    # The Match&Replace response-body path (no intercept): buffer the whole body,
+    # rewrite the entity, re-frame the head (Content-Length), forward, and capture.
+    # Returns the CLIENT keep-alive decision; the upstream is reused iff we read the
+    # whole body cleanly AND the origin kept its side. Mirrors stream_nonhold_response
+    # + the reuse tail of handle_response, minus the 101/close-delimited cases (excluded
+    # at the call site so the buffer is always bounded).
+    private def forward_response_rewriting_body(rw : HeadRewriter, upstream : IO, req : Codec::RawRequest,
+                                                sent_req : Codec::RawRequest, flow_id : Int64,
+                                                host : String, port : Int32, scheme : String,
+                                                resp : Codec::RawResponse, sent_resp_head : Bytes,
+                                                resp_framing : Codec::BodyFraming, resp_len : Int64,
+                                                ttfb : Int64, started : Time::Instant) : Bool
+      buf = IO::Memory.new
+      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
+      sent_resp_head, fwd_body = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing) { |e| rw.rewrite_response_body(e) }
+      sent_resp = Codec::Http1.parse_response_head(sent_resp_head) # head may have been re-framed
+      stored, trunc, size = capped(fwd_body)
+      state = resp_complete ? Store::FlowState::Complete : Store::FlowState::Aborted
+      error = resp_complete ? nil : "upstream closed before response body complete"
+      begin
+        @io.write(sent_resp_head)
+        @io.write(fwd_body) if fwd_body
+        @io.flush
+      rescue
+        # Client aborted its read mid-response — record what we have, then close.
+        state = Store::FlowState::Aborted
+        error = "connection closed mid-response"
+        resp_complete = false
+      end
+      duration = (Time.instant - started).total_microseconds.to_i64
+      @sink.on_response(FlowMapper.response(sent_resp,
+        flow_id: flow_id, body: stored, ttfb_us: ttfb, duration_us: duration,
+        body_truncated: trunc, body_size: size, state: state, error: error))
+      # Reuse iff the origin kept its side AND we read the whole body; a truncated body
+      # was forwarded short, so close the client connection (return false) rather than
+      # block its next keep-alive request on the missing bytes.
+      update_upstream_reuse(resp_complete && origin_keep_alive?(sent_req, resp, resp_framing))
+      return false unless resp_complete
+      keep_alive?(req, resp, resp_framing)
+    end
+
     # Reads the response head, transparently redialing + resending ONCE if a
     # REUSED idle keep-alive turned out stale (immediate EOF) and the request is
     # replayable (body-less). Returns {head, upstream} — `upstream` may be a fresh
@@ -500,6 +601,12 @@ module Gori::Proxy
       # `buf`; a throwaway IO::Memory would hold the whole response a second time.
       resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
       body = resp_framing.none? ? nil : buf.to_slice.dup
+      # Match&Replace (response body) BEFORE the human sees it, like the head. A body rule
+      # re-frames the head to Content-Length; `resp` (status/version/Connection) is
+      # untouched by that, so keep it as the origin's framing/keep-alive truth.
+      if (rw = @rewriter) && rw.rewrites_response_body?
+        sent_resp_head, body = apply_body_rewrite(sent_resp_head, body, resp_framing) { |e| rw.rewrite_response_body(e) }
+      end
       decision = ic.hold_response(build_message(sent_resp_head, body),
         flow_id: flow_id, method: req.method, target: "#{resp.status} #{resp.reason}",
         host: host, port: port, scheme: scheme)
@@ -730,6 +837,51 @@ module Gori::Proxy
         i += 1
       end
       nil
+    end
+
+    # Apply a body Match&Replace to a buffered wire body and return {head, forward_body}.
+    # `wire_body` is the on-the-wire form (chunk framing preserved for chunked bodies);
+    # it is de-chunked to the entity before matching. `yield entity` runs the rule engine
+    # (rewrite_request_body / rewrite_response_body), which returns the SAME bytes when
+    # nothing matched. On no change we return the ORIGINAL head + wire body byte-exact
+    # (P7) — so an unmatched flow, including a compressed body a literal pattern can't
+    # touch, is never re-framed. On a change we re-frame the head to Content-Length (the
+    # new entity length, Transfer-Encoding dropped) and forward the rewritten entity.
+    private def apply_body_rewrite(head : Bytes, wire_body : Bytes?, framing : Codec::BodyFraming,
+                                   & : Bytes -> Bytes) : {Bytes, Bytes?}
+      return {head, wire_body} if wire_body.nil? || wire_body.empty?
+      entity = framing.chunked? ? Codec::ContentDecode.dechunk(wire_body) : wire_body
+      rewritten = yield entity
+      return {head, wire_body} if rewritten == entity # nothing matched → byte-exact (P7)
+      {reframe_to_length(head, rewritten.size), rewritten}
+    end
+
+    # Rebuild a message head framed as `Content-Length: len`: drop any Transfer-Encoding
+    # and Content-Length header (a rewritten body invalidates both), append the fresh
+    # Content-Length, and keep every other header verbatim in order. Preserves the head's
+    # own line ending (CRLF or bare LF) so the re-parsed head stays well-formed.
+    private def reframe_to_length(head : Bytes, len : Int32) : Bytes
+      text = String.new(head)
+      eol = text.index("\r\n") ? "\r\n" : "\n"
+      section = text.split(eol + eol, 2).first # headers up to the blank line
+      lines = section.split(eol)
+      io = IO::Memory.new(head.size + 32)
+      io << lines.first << eol # request / status line, untouched
+      lines[1..].each do |line|
+        next if header_line_named?(line, "transfer-encoding") || header_line_named?(line, "content-length")
+        io << line << eol
+      end
+      io << "Content-Length: " << len << eol << eol
+      io.to_slice
+    end
+
+    # True when a header line's field-name (case-insensitive, ignoring leading space) is
+    # `name`. The request/status line has no ':' before its first space-token, so it never
+    # matches a header name here.
+    private def header_line_named?(line : String, name : String) : Bool
+      colon = line.index(':')
+      return false unless colon && colon > 0
+      line[0...colon].strip.downcase == name
     end
 
     private def sse?(resp : Codec::RawResponse) : Bool

@@ -97,25 +97,25 @@ module Gori
     end
 
     # Full detail incl. truth bytes — loaded lazily when a row is selected.
-     struct FlowDetail
-       getter row : FlowRow
-       getter http_version : String
-       getter request_head : Bytes
-       getter request_body : Bytes?
-       getter response_head : Bytes?
-       getter response_body : Bytes?
-       getter? request_body_truncated : Bool
-       getter? response_body_truncated : Bool
-       getter h2_conn_id : Int64?
-       getter h2_stream_id : Int64?
-       getter error : String? # upstream/parse/tls failure message for Error/Aborted flows (response side is empty)
-       getter sni : String?
+    struct FlowDetail
+      getter row : FlowRow
+      getter http_version : String
+      getter request_head : Bytes
+      getter request_body : Bytes?
+      getter response_head : Bytes?
+      getter response_body : Bytes?
+      getter? request_body_truncated : Bool
+      getter? response_body_truncated : Bool
+      getter h2_conn_id : Int64?
+      getter h2_stream_id : Int64?
+      getter error : String? # upstream/parse/tls failure message for Error/Aborted flows (response side is empty)
+      getter sni : String?
 
-       def initialize(@row, @http_version, @request_head, @request_body,
-                      @response_head, @response_body, @h2_conn_id = nil, @h2_stream_id = nil,
-                      @request_body_truncated = false, @response_body_truncated = false, @error = nil, @sni = nil)
-       end
-     end
+      def initialize(@row, @http_version, @request_head, @request_body,
+                     @response_head, @response_body, @h2_conn_id = nil, @h2_stream_id = nil,
+                     @request_body_truncated = false, @response_body_truncated = false, @error = nil, @sni = nil)
+      end
+    end
 
     # A captured WebSocket message belonging to a (101) flow. `direction` is
     # "out" (client→server) or "in" (server→client); opcode 1=text, 2=binary.
@@ -289,17 +289,37 @@ module Gori
       end
     end
 
-    # A Match&Replace rule: a literal substring rewrite of a request/response
-    # HEAD (request line + headers; bodies are never touched, P6). Human-authored
-    # (P4), persisted per project. `replacement` may be empty (delete `pattern`).
+    # Which PART of a message a Match&Replace rule rewrites: the HEAD (request/
+    # status line + headers) or the BODY (the entity — de-chunked, but not
+    # decompressed). Stored as the lowercase member name ("head"/"body"); pre-body
+    # rules migrate to `head` (V30 default), so old rows keep their exact meaning.
+    enum RulePart
+      Head
+      Body
+
+      def label : String
+        to_s.downcase
+      end
+
+      def self.from_label(s : String) : RulePart
+        parse(s)
+      end
+    end
+
+    # A Match&Replace rule: a literal substring rewrite of a request/response HEAD
+    # (request line + headers) or BODY (the entity body). Human-authored (P4),
+    # persisted per project. `replacement` may be empty (delete `pattern`). A body
+    # rule buffers + re-frames the message in flight (Content-Length synced); a head
+    # rule streams the body untouched (P6). See `Rules` / `ClientConn`.
     struct MatchRule
       getter id : Int64
       getter? enabled : Bool
       getter target : RuleTarget
+      getter part : RulePart
       getter pattern : String
       getter replacement : String
 
-      def initialize(@id, @enabled, @target, @pattern, @replacement)
+      def initialize(@id, @enabled, @target, @part, @pattern, @replacement)
       end
     end
 

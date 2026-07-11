@@ -1260,7 +1260,7 @@ module Gori::Tui
       @fuzz_advanced_overlay = nil
     end
 
-    # Match&Replace overlay: type a `[req:|resp:] pattern => replacement` rule;
+    # Match&Replace overlay: type a `[req:|resp:|reqbody:|respbody:] pattern => replacement` rule;
     # ↵ add, ⌫ edit/remove, ↑/↓ select, tab on/off, esc close. No view reload —
     # rules act on the live proxy, not on already-captured flows.
     private def handle_rules_key(ev : Termisu::Event::Key) : Nil
