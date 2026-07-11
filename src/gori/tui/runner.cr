@@ -20,6 +20,7 @@ require "./controllers/fuzzer_controller"
 require "./controllers/miner_controller"
 require "./controllers/comparer_controller"
 require "./controllers/convert_controller"
+require "./controllers/statusline_controller"
 require "./history_view"
 require "./replay_view"
 require "./sitemap_view"
@@ -161,6 +162,9 @@ module Gori::Tui
       @jobs = Jobs.new
       @notifications = Notifications.new
       @notifications_overlay = NotificationsOverlay.new(@notifications)
+      # Optional bottom statusline: runs a user script on an interval and shows its
+      # ANSI-coloured stdout. Disabled by default (no fiber, no reserved row until on).
+      @statusline = StatuslineController.new(@session)
       @spinner_frame = 0
       # The Miner config popup (History/Replay → space → "Mine parameters"); @overlay is
       # :mine_config while it's up. Built fresh each time it opens (holds the seed request).
@@ -305,6 +309,7 @@ module Gori::Tui
       last_clock = clock_label                         # top-bar wall clock; re-render only when the minute rolls over
       last_ui_ident = nil.as(String?)                  # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
+      begin
       loop do
         ev = @term.poll_event(50)
         dirty = false
@@ -373,6 +378,9 @@ module Gori::Tui
           @spinner_frame &+= 1
           dirty = true
         end
+        # Statusline: drain a finished script result and (re-)launch on its interval.
+        # Self-gated on Settings.statusline_enabled? — a no-op (zero cost) while disabled.
+        dirty = true if @statusline.tick(now)
         # Debounced QL filter: fire the deferred search once typing has paused.
         dirty = true if history_controller.flush_query_reload_if_due(now)
         dirty = true if sitemap_controller.flush_query_reload_if_due(now)
@@ -393,6 +401,10 @@ module Gori::Tui
         end
         render if dirty
         break unless @outcome == :running
+      end
+      ensure
+        # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
+        @statusline.stop
       end
       @outcome
     end
@@ -794,7 +806,7 @@ module Gori::Tui
       return unless ev.press? || ev.wheel? # ignore motion + button-release (nav-only scope)
       w, h = @backend.size
       return unless Layout.usable?(w, h)
-      layout = Layout.compute(w, h)
+      layout = Layout.compute(w, h, statusline_active?)
       mx, my = ev.x - 1, ev.y - 1
       @quit_armed = false
       @toast = nil
@@ -2607,6 +2619,13 @@ module Gori::Tui
 
     # --- rendering -----------------------------------------------------------
 
+    # Whether the extra bottom statusline row is reserved. MUST gate every Layout.compute
+    # call (render + mouse hit-test + space-menu guard) identically, or the click geometry
+    # drifts a row from what was drawn.
+    private def statusline_active? : Bool
+      Settings.statusline_enabled?
+    end
+
     private def render : Nil
       screen = Screen.new(@backend)
       w, h = screen.width, screen.height
@@ -2618,7 +2637,7 @@ module Gori::Tui
         return
       end
 
-      layout = Layout.compute(w, h)
+      layout = Layout.compute(w, h, statusline_active?)
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
         listen: "#{@session.proxy.host}:#{@session.proxy.port}", time: clock_label,
         scope: scope_label, rules: rules_label, intercept: intercept_label)
@@ -2630,6 +2649,7 @@ module Gori::Tui
         capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,
         write_failures: @session.store.write_failures,
         activity: activity_chip, unread: @notifications.unread)
+      Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay == :palette
       @rules_overlay.render(screen, layout.body) if @overlay == :rules
       @finding_form.render(screen, layout.body) if @overlay == :finding_new
@@ -2997,7 +3017,7 @@ module Gori::Tui
       # renders nothing yet would still capture input. Bail with a hint rather than
       # trap the user behind an invisible modal (only hit at the minimum 40×8 size).
       w, h = @backend.size
-      if Layout.compute(w, h).body.h < 3
+      if Layout.compute(w, h, statusline_active?).body.h < 3
         @toast = "terminal too short for the menu"
         return
       end
@@ -4554,7 +4574,7 @@ module Gori::Tui
 
     def open_settings(section : Symbol) : Nil
       case section
-      when :network, :editor, :theme, :layout
+      when :network, :editor, :theme, :layout, :statusline
         @settings_view.reload(section)       # :theme reloads custom themes — may reconcile the live palette
         @resized = true if section == :theme # so force a full repaint (an edited/removed active theme just changed)
         @overlay = :settings

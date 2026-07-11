@@ -65,6 +65,50 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 | `history_list_order` | string | `"newest"` | List sort: `"newest"` (newest at top) or `"oldest"` (oldest at top) |
 | `sitemap_expand_depth` | integer | `-1` | How deep the Sitemap tree opens after reload: `-1` = all expanded; `0`–`3` = expand only nodes shallower than this depth |
 
+### statusline
+
+An opt-in extra row at the very bottom of the TUI (command palette → **Settings: Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row — think of it as a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from `settings.json` until you change it.
+
+```json
+{
+  "statusline": {
+    "enabled": true,
+    "command": "printf 'proj:%s flows:%s' \"$(jq -r .project)\" \"$(jq -r .flows)\"",
+    "interval": 3
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `enabled` | bool | `false` | Whether the statusline row is shown |
+| `command` | string | `""` | Shell command, run via `/bin/sh -c`. Its **first line** of stdout becomes the row |
+| `interval` | integer | `3` | Seconds between runs (minimum `1`) |
+
+The command's **stdout is parsed for ANSI/SGR colour escapes** (16-colour, 256-colour, and truecolor, plus bold/underline/etc.), so you can produce coloured segments. Only the first line is used; output is truncated to the terminal width. A run that exceeds `interval` seconds is terminated, and a failing command simply leaves the row blank — it never blocks the UI.
+
+Each run receives a **JSON context on stdin** describing the live session, so scripts can display proxy state without querying gori:
+
+```json
+{
+  "version": 1,
+  "project": "acme",
+  "capturing": true,
+  "flows": 1234,
+  "proxy": { "host": "127.0.0.1", "port": 8070, "addr": "127.0.0.1:8070" },
+  "upstream": ""
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `version` | integer | Context schema version (currently `1`) |
+| `project` | string | Active project name |
+| `capturing` | bool | Whether the proxy is currently capturing |
+| `flows` | integer | Number of captured flows |
+| `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | The address the proxy is actually listening on |
+| `upstream` | string | Upstream proxy `host:port`, or empty when connecting directly |
+
 ### hostname_overrides
 
 Global dial map (project-level overrides win on collision). Same idea as `/etc/hosts`:
@@ -115,6 +159,7 @@ See [Environment Variables](/guide/replay-and-fuzzer/#environment-variables).
 | `hotkeys` | Keybinding overrides (`os` layer + `bindings`) — see the [Hotkeys guide](/guide/hotkeys/) |
 | `convert` / `mine` | Saved defaults for the Convert tool and Param Miner |
 | `layout` | History / Prism / Findings previews + Sitemap expand depth — see [layout](#layout) above |
+| `statusline` | Bottom status row that runs a command on an interval — see [statusline](#statusline) above |
 
 ## Per-Project Overrides
 

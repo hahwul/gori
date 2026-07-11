@@ -32,6 +32,11 @@ module Gori
     DEFAULT_FINDINGS_PREVIEW     = false
     DEFAULT_HISTORY_LIST_ORDER   = "newest" # "newest" | "oldest" — list sort direction
     DEFAULT_SITEMAP_EXPAND_DEPTH = -1       # -1 = all
+    # Statusline (settings:statusline): opt-in bottom row that runs a command on an
+    # interval and shows its (ANSI-coloured) stdout. Off by default; no cost until enabled.
+    DEFAULT_STATUSLINE_ENABLED  = false
+    DEFAULT_STATUSLINE_COMMAND  = ""
+    DEFAULT_STATUSLINE_INTERVAL = 3 # seconds between runs (min 1)
 
     class_property bind_host : String = DEFAULT_BIND_HOST
     class_property bind_port : Int32 = DEFAULT_BIND_PORT
@@ -85,6 +90,11 @@ module Gori
     class_property findings_preview : Bool = DEFAULT_FINDINGS_PREVIEW
     class_property history_list_order : String = DEFAULT_HISTORY_LIST_ORDER
     class_property sitemap_expand_depth : Int32 = DEFAULT_SITEMAP_EXPAND_DEPTH
+    # Statusline (settings:statusline). command is run via `/bin/sh -c` on statusline_interval
+    # seconds; its stdout (first line) is rendered at the very bottom of the TUI.
+    class_property? statusline_enabled : Bool = DEFAULT_STATUSLINE_ENABLED
+    class_property statusline_command : String = DEFAULT_STATUSLINE_COMMAND
+    class_property statusline_interval : Int32 = DEFAULT_STATUSLINE_INTERVAL
 
     def self.history_newest_first? : Bool
       history_list_order != "oldest"
@@ -164,6 +174,7 @@ module Gori
       end
       parse_mine_prefs(root["mine"]?)
       parse_layout(root["layout"]?)
+      parse_statusline(root["statusline"]?)
       Env.bump_highlight_rev
     rescue
       # no file yet / unreadable / bad JSON — keep current values
@@ -180,6 +191,18 @@ module Gori
       end
       if d = o["sitemap_expand_depth"]?.try(&.as_i?)
         self.sitemap_expand_depth = normalize_sitemap_depth(d)
+      end
+    end
+
+    # Tolerant statusline section: absent/non-object keeps current; interval floored at 1.
+    private def self.parse_statusline(node : JSON::Any?) : Nil
+      return unless o = node.try(&.as_h?)
+      self.statusline_enabled = load_bool_h(o, "enabled", statusline_enabled?)
+      if cmd = o["command"]?.try(&.as_s?)
+        self.statusline_command = cmd
+      end
+      if iv = o["interval"]?.try(&.as_i?)
+        self.statusline_interval = {iv, 1}.max
       end
     end
 
@@ -428,6 +451,18 @@ module Gori
                 j.field "findings_preview", findings_preview
                 j.field "history_list_order", history_list_order
                 j.field "sitemap_expand_depth", sitemap_expand_depth
+              end
+            end
+          end
+          # Omit statusline when every field is factory default (quiet install; merge-safe).
+          unless statusline_enabled? == DEFAULT_STATUSLINE_ENABLED &&
+                 statusline_command == DEFAULT_STATUSLINE_COMMAND &&
+                 statusline_interval == DEFAULT_STATUSLINE_INTERVAL
+            j.field "statusline" do
+              j.object do
+                j.field "enabled", statusline_enabled?
+                j.field "command", statusline_command
+                j.field "interval", statusline_interval
               end
             end
           end

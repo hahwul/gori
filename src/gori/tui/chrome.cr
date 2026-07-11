@@ -308,6 +308,24 @@ module Gori::Tui
       render_chips(screen, rect, chips, min_x: hint_x)
     end
 
+    # The optional dedicated statusline row (below the status bar) — draws a user
+    # script's stdout, already split into ANSI-coloured segments. A nil fg/bg (the
+    # script used the terminal default, or reset) resolves to the theme's own colours.
+    # The whole row is filled with the canvas bg first so an unclosed colour or a short
+    # line can't leave stale cells; over-long output is truncated by display width via
+    # Screen#text's width clamp (CJK/emoji-safe).
+    def self.render_statusline(screen : Screen, rect : Rect, segments : Array(Ansi::Segment)) : Nil
+      return if rect.empty?
+      screen.fill(rect, Theme.bg)
+      x = rect.x + 1
+      segments.each do |seg|
+        break if x >= rect.right
+        fg = seg.fg || Theme.text
+        bg = seg.bg || Theme.bg
+        x = screen.text(x, rect.y, seg.text, fg, bg, seg.attr, width: {rect.right - x, 0}.max)
+      end
+    end
+
     # The right-aligned status chips, TAGGED so render and the click hit-test share one
     # ordered source (the geometry can't drift). A background-activity chip (spinner +
     # label) and a notification unread badge precede the capture/upstream chips.
