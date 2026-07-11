@@ -73,7 +73,7 @@ Capture and intercept still have global toggles:
 | `c` | Toggle **capture** (off = traffic passes through without being stored) |
 | `i` | Toggle **intercept** (hold matching requests for forward / drop / edit) |
 | `s` | Toggle the **scope lens** (filter views to in-scope traffic) |
-| `m` | Open **Match & Replace** (rewrite request/response heads in flight) |
+| `m` | Open **Match & Replace** (rewrite request/response heads or bodies in flight) |
 
 ## 4. Move around the TUI
 

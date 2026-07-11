@@ -4,13 +4,15 @@ require "./frame"
 require "../rules"
 
 module Gori::Tui
-  # Overlay editor for the Match&Replace lens. One input line with a compact
-  # syntax — `[req:|resp:] pattern => replacement` — mirroring the Scope editor's
-  # interaction (type, ↵ add, ⌫ del, ↑/↓ select, tab on/off). Mutations persist
-  # through the shared Rules instance, which the proxy reads live.
+  # Overlay editor for the Match&Replace lens. One input line with a compact syntax
+  # — `[req:|resp:|reqbody:|respbody:] pattern => replacement` — mirroring the Scope
+  # editor's interaction (type, ↵ add, ⌫ del, ↑/↓ select, tab on/off). Mutations
+  # persist through the shared Rules instance, which the proxy reads live.
   #
-  #   req: User-Agent: x => User-Agent: gori    # rewrite a request header
+  #   req: User-Agent: x => User-Agent: gori    # rewrite a request HEADER
   #   resp: Set-Cookie => X-Stripped            # blank replacement deletes text
+  #   reqbody: password => hunter2              # rewrite the request BODY
+  #   respbody: "debug":false => "debug":true   # rewrite the response BODY
   class RulesOverlay
     def initialize(@rules : Rules)
       @selected = 0
@@ -57,9 +59,9 @@ module Gori::Tui
     end
 
     def submit : Bool
-      target, pattern, replacement = parse(@input)
+      target, part, pattern, replacement = parse(@input)
       return false if pattern.empty?
-      @rules.add(target, pattern, replacement)
+      @rules.add(target, part, pattern, replacement)
       @input = ""
       @icx = 0
       @preedit = ""
@@ -79,21 +81,27 @@ module Gori::Tui
       @rules.toggle(rule.id) if rule
     end
 
-    # `[req:|resp:] pattern => replacement` → {target, pattern, replacement}.
-    # No prefix defaults to request; no `=>` means delete `pattern` (empty repl).
-    def parse(line : String) : {Store::RuleTarget, String, String}
+    # `[req:|resp:|reqbody:|respbody:] pattern => replacement`
+    #   → {target, part, pattern, replacement}.
+    # No prefix defaults to a request HEAD rule; no `=>` means delete `pattern` (empty
+    # repl). Longer `*body:` prefixes are tested first so `reqbody:` isn't mis-split.
+    def parse(line : String) : {Store::RuleTarget, Store::RulePart, String, String}
       body = line.strip
       target = Store::RuleTarget::Request
-      if body.starts_with?("resp:")
-        target = Store::RuleTarget::Response
-        body = body[5..].lstrip
+      part = Store::RulePart::Head
+      if body.starts_with?("respbody:")
+        target, part, body = Store::RuleTarget::Response, Store::RulePart::Body, body[9..].lstrip
+      elsif body.starts_with?("reqbody:")
+        part, body = Store::RulePart::Body, body[8..].lstrip
+      elsif body.starts_with?("resp:")
+        target, body = Store::RuleTarget::Response, body[5..].lstrip
       elsif body.starts_with?("req:")
         body = body[4..].lstrip
       end
       if (sep = body.index("=>"))
-        {target, body[0...sep].strip, body[(sep + 2)..].strip}
+        {target, part, body[0...sep].strip, body[(sep + 2)..].strip}
       else
-        {target, body.strip, ""}
+        {target, part, body.strip, ""}
       end
     end
 
@@ -131,7 +139,7 @@ module Gori::Tui
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top
       if rules.empty?
-        screen.text(box.x + 3, list_top, "(none — e.g.  resp: Old => New )", Theme.muted, Theme.panel)
+        screen.text(box.x + 3, list_top, "(none — e.g.  respbody: Old => New )", Theme.muted, Theme.panel)
       else
         ensure_visible(list_h)
         (0...list_h).each do |i|
@@ -153,7 +161,8 @@ module Gori::Tui
       @scroll = @scroll.clamp(0, {@rules.rules.size - list_h, 0}.max)
     end
 
-    # One row in the rule list: selection bar, enabled `✓`/`·`, REQ/RES tag, rule.
+    # One row in the rule list: selection bar, enabled `✓`/`·`, side+part tag, rule.
+    # The tag reads `REQ H` / `REQ B` / `RES H` / `RES B` (H = head, B = body).
     private def render_rule_row(screen : Screen, box : Rect, rule : Store::MatchRule,
                                 py : Int32, w : Int32, selected : Bool) : Nil
       bg = selected ? Theme.accent_bg : Theme.panel
@@ -161,10 +170,10 @@ module Gori::Tui
       screen.cell(box.x + 1, py, selected ? '▎' : ' ', Theme.accent, bg)
       mark = rule.enabled? ? '✓' : '·'
       screen.cell(box.x + 3, py, mark, rule.enabled? ? Theme.accent : Theme.muted, bg)
-      tag = rule.target.request? ? "REQ" : "RES"
+      tag = "#{rule.target.request? ? "REQ" : "RES"} #{rule.part.body? ? 'B' : 'H'}"
       screen.text(box.x + 5, py, tag, rule.enabled? ? Theme.text : Theme.muted, bg)
       desc = "#{rule.pattern} → #{rule.replacement}"
-      screen.text(box.x + 9, py, desc, selected ? Theme.text_bright : Theme.text, bg, width: w - 11)
+      screen.text(box.x + 11, py, desc, selected ? Theme.text_bright : Theme.text, bg, width: w - 13)
     end
 
     # Rule-row index under (mx,my) — inverts the list loop: input line sits at

@@ -764,20 +764,21 @@ module Gori
 
     def match_rules : Array(MatchRule)
       list = [] of MatchRule
-      @db.query("SELECT id, enabled, target, pattern, replacement FROM match_rules ORDER BY position, id") do |rs|
+      @db.query("SELECT id, enabled, target, part, pattern, replacement FROM match_rules ORDER BY position, id") do |rs|
         rs.each do
           list << MatchRule.new(
             rs.read(Int64), rs.read(Int32) != 0,
-            RuleTarget.from_label(rs.read(String)), rs.read(String), rs.read(String))
+            RuleTarget.from_label(rs.read(String)), RulePart.from_label(rs.read(String)),
+            rs.read(String), rs.read(String))
         end
       end
       list
     end
 
-    def insert_rule(target : RuleTarget, pattern : String, replacement : String) : Int64
+    def insert_rule(target : RuleTarget, part : RulePart, pattern : String, replacement : String) : Int64
       exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO match_rules (enabled, target, pattern, replacement) VALUES (1, ?, ?, ?)",
-          target.label, pattern, replacement)
+        c.exec("INSERT INTO match_rules (enabled, target, part, pattern, replacement) VALUES (1, ?, ?, ?, ?)",
+          target.label, part.label, pattern, replacement)
         nil
       }
     end

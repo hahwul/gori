@@ -17,29 +17,38 @@ private def tmp_store(&)
 end
 
 describe Gori::Tui::RulesOverlay do
-  it "parses the `[req:|resp:] pattern => replacement` syntax" do
+  it "parses the `[req:|resp:|reqbody:|respbody:] pattern => replacement` syntax" do
     tmp_store do |store|
       ov = RulesOverlay.new(Gori::Rules.load(store))
-      ov.parse("resp: Old => New").should eq({Gori::Store::RuleTarget::Response, "Old", "New"})
-      ov.parse("req: A => B").should eq({Gori::Store::RuleTarget::Request, "A", "B"})
-      ov.parse("bare host").should eq({Gori::Store::RuleTarget::Request, "bare host", ""})
-      ov.parse("X-Token: a =>").should eq({Gori::Store::RuleTarget::Request, "X-Token: a", ""})
+      head = Gori::Store::RulePart::Head
+      body = Gori::Store::RulePart::Body
+      req = Gori::Store::RuleTarget::Request
+      resp = Gori::Store::RuleTarget::Response
+      ov.parse("resp: Old => New").should eq({resp, head, "Old", "New"})
+      ov.parse("req: A => B").should eq({req, head, "A", "B"})
+      ov.parse("bare host").should eq({req, head, "bare host", ""})
+      ov.parse("X-Token: a =>").should eq({req, head, "X-Token: a", ""})
+      # body prefixes (tested before the shorter req:/resp: so they aren't mis-split)
+      ov.parse("reqbody: pw => hunter2").should eq({req, body, "pw", "hunter2"})
+      ov.parse("respbody: SECRET =>").should eq({resp, body, "SECRET", ""})
     end
   end
 
-  it "adds a rule via typed input and renders it" do
+  it "adds a body rule via typed input and renders its tag" do
     tmp_store do |store|
       rules = Gori::Rules.load(store)
       ov = RulesOverlay.new(rules)
-      "resp: nginx => gori".each_char { |c| ov.insert(c) }
+      "respbody: nginx => gori".each_char { |c| ov.insert(c) }
       ov.submit.should be_true
       rules.rules.size.should eq(1)
       rules.rules.first.target.should eq(Gori::Store::RuleTarget::Response)
+      rules.rules.first.part.should eq(Gori::Store::RulePart::Body)
+      rules.rewrites_response_body?.should be_true
 
       backend = MemoryBackend.new(80, 14)
       ov.render(Screen.new(backend), Rect.new(0, 0, 80, 14))
       backend.contains?("MATCH & REPLACE").should be_true
-      backend.contains?("RES").should be_true
+      backend.contains?("RES B").should be_true # side + body part tag
       backend.contains?("nginx → gori").should be_true
     end
   end

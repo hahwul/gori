@@ -113,7 +113,7 @@ describe Gori::Proxy::Tls::Tunnel do
       ca = CertAuthority.load_or_create(dir)
       store = Gori::Store.open(dbpath)
       rules = Gori::Rules.load(store.not_nil!)
-      rules.add(Gori::Store::RuleTarget::Request, "/secret", "/rewritten") # one enabled rule → active
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "/secret", "/rewritten") # one enabled rule → active
       rules.active?.should be_true
 
       sink = RecordingSink.new(done)

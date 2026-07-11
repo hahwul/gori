@@ -35,4 +35,4 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links |
 
-Global lenses that are not tabs: **Match & Replace** (`m`) rewrites request/response heads in flight; **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.
+Global lenses that are not tabs: **Match & Replace** (`m`) rewrites request/response heads and bodies in flight; **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.

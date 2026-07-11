@@ -108,16 +108,19 @@ describe "Gori::Store match rules (v4)" do
   it "creates, lists, toggles, and deletes rules" do
     with_store do |store|
       store.match_rules.should be_empty
-      id = store.insert_rule(Gori::Store::RuleTarget::Response, "Server: nginx", "Server: gori")
-      store.insert_rule(Gori::Store::RuleTarget::Request, "secret", "")
+      id = store.insert_rule(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head, "Server: nginx", "Server: gori")
+      body_id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Body, "secret", "")
 
       rules = store.match_rules
       rules.size.should eq(2)
       first = store.match_rules.find!(&.id.==(id))
       first.target.should eq(Gori::Store::RuleTarget::Response)
+      first.part.should eq(Gori::Store::RulePart::Head)
       first.pattern.should eq("Server: nginx")
       first.replacement.should eq("Server: gori")
       first.enabled?.should be_true
+      # the body rule round-trips its part (V30 column)
+      store.match_rules.find!(&.id.==(body_id)).part.should eq(Gori::Store::RulePart::Body)
 
       store.set_rule_enabled(id, false)
       store.match_rules.find!(&.id.==(id)).enabled?.should be_false
