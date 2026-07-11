@@ -28,6 +28,12 @@ module Gori::Tui
       Verb::Scope::Sitemap
     end
 
+    # PageUp/PageDown/Home/End over the sitemap tree (view clamps the selection).
+    def body_scroll(delta : Int32) : Bool
+      @sitemap.move(delta)
+      true
+    end
+
     def body_badge : Symbol # the QL filter bar / tag editor capture text; else the navigable tree
       @sitemap.querying? || @sitemap.tagging? ? :editor : :body
     end

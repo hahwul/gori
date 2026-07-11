@@ -65,6 +65,15 @@ module Gori
       r.register Verb::Definition.new(
         "convert.load", "Load a saved chain", "Load a previously saved chain spec by name",
         Verb::Scope::Convert, available: in_convert, mnemonic: 'o', section: :tab) { |ctx| ctx.convert_load; nil }
+
+      # Search-and-jump across conversion sub-tabs (section :tab — like replay.find-subtab)
+      # so jumping never needs Ctrl+digit. 'f' (find) since 's'/'o' are taken here by
+      # Save/Load in the same :tab group.
+      r.register Verb::Definition.new(
+        "convert.find-subtab", "Search sub-tabs", "Filter the open conversions and jump to one",
+        Verb::Scope::Convert,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :convert && ctx.subtab_search_count >= 2 },
+        mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
     end
   end
 end

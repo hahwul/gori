@@ -27,6 +27,14 @@ module Gori::Tui
       Verb::Scope::Body
     end
 
+    # PageUp/PageDown/Home/End over the (long) Help cheat-sheet. move() clamps the top;
+    # the bottom is clamped at render (clamp_scroll), so the large Home/End magnitude is
+    # safe and lands on the last page.
+    def body_scroll(delta : Int32) : Bool
+      @help.move(delta)
+      true
+    end
+
     # --- fixed sub-tab strip (no new/close/rename) ---
     def subtab_labels : Array(String)
       PAGE_LABELS

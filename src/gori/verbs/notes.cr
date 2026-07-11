@@ -23,6 +23,15 @@ module Gori
         "notes.duplicate-subtab", "Duplicate subtab", "Open a new note sub-tab with the same text",
         Verb::Scope::Notes, available: in_notes, mnemonic: 'd', section: :subtab) { |ctx| ctx.notes_duplicate_subtab; nil }
 
+      # Search-and-jump across note sub-tabs (section :tab, tab-bar space menu — like
+      # replay.find-subtab). A jump path that doesn't need Ctrl+digit. 's' is free in
+      # Notes COMMON ∪ :tab.
+      r.register Verb::Definition.new(
+        "notes.find-subtab", "Search sub-tabs", "Filter the open notes and jump to one",
+        Verb::Scope::Notes,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 },
+        mnemonic: 's', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+
       # The single smart Copy (see replay.copy in verbs/history.cr) — copy-all is gone.
       in_notes_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.notes_read_mode? }
       r.register Verb::Definition.new(

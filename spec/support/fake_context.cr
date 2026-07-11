@@ -75,6 +75,14 @@ class FakeExecContext < Gori::Verb::ExecContext
     @replay_tab_count
   end
 
+  def subtab_search_open : Nil; end
+
+  property subtab_search_tab_count : Int32 = 0
+
+  def subtab_search_count : Int32
+    @subtab_search_tab_count
+  end
+
   def replay_rename_subtab : Nil; end
 
   def replay_close_subtab : Nil; end

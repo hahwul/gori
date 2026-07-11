@@ -97,8 +97,8 @@ module Gori::Tui
       key = ev.key
       selecting = ev.shift?
       case
-      when key.enter?              then @notes.enter_insert!
-      when c == 'i'                then @notes.enter_insert!
+      when key.enter? then @notes.enter_insert!
+      when c == 'i'   then @notes.enter_insert!
       when key.up?
         if @notes.at_top?
           save_notes
@@ -106,13 +106,13 @@ module Gori::Tui
         else
           @notes.read_move(-1, 0, selecting: selecting)
         end
-      when key.down?               then @notes.read_move(1, 0, selecting: selecting)
-      when key.left?               then @notes.read_move(0, -1, selecting: selecting)
-      when key.right?              then @notes.read_move(0, 1, selecting: selecting)
-      when key.home?               then @notes.home
-      when key.end?                then @notes.end_of_line
-      when c == 'x'                then @notes.select_line
-      when c == 'y'                then notes_copy
+      when key.down?  then @notes.read_move(1, 0, selecting: selecting)
+      when key.left?  then @notes.read_move(0, -1, selecting: selecting)
+      when key.right? then @notes.read_move(0, 1, selecting: selecting)
+      when key.home?  then @notes.home
+      when key.end?   then @notes.end_of_line
+      when c == 'x'   then @notes.select_line
+      when c == 'y'   then notes_copy
       end
     end
 
@@ -129,12 +129,12 @@ module Gori::Tui
         else
           @notes.move(-1, 0)
         end
-      when key.down?      then @notes.move(1, 0)
-      when key.left?      then @notes.move(0, -1)
-      when key.right?     then @notes.move(0, 1)
-      when key.home?      then @notes.home
-      when key.end?       then @notes.end_of_line
-      when key.delete?    then @notes.delete
+      when key.down?   then @notes.move(1, 0)
+      when key.left?   then @notes.move(0, -1)
+      when key.right?  then @notes.move(0, 1)
+      when key.home?   then @notes.home
+      when key.end?    then @notes.end_of_line
+      when key.delete? then @notes.delete
       else
         if c && !ev.ctrl? && !ev.alt?
           @notes.insert(c)
@@ -303,10 +303,17 @@ module Gori::Tui
       @host.status(msg)
     end
 
-    # Wipe the current note's text (the sub-tab stays open).
+    # Wipe the current note's text (the sub-tab stays open). Confirm-gated like every
+    # other destructive action — clear_current resets the TextArea, which drops the
+    # undo stack, so a stray `c` would otherwise wipe authored text with no recovery.
+    # Skip the prompt when the note is already blank (nothing to lose).
     def notes_clear : Nil
-      @notes.clear_current
-      @host.status("note cleared")
+      return if @notes.current_blank?
+      @host.confirm("CLEAR NOTE", "Clear this note's text?\nThis can't be undone.",
+        confirm_label: "clear", danger: true) do
+        @notes.clear_current
+        @host.status("note cleared")
+      end
     end
   end
 end

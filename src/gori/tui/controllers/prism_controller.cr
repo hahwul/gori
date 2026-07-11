@@ -29,6 +29,14 @@ module Gori::Tui
       @prism.detail_open? ? Verb::Scope::PrismDetail : Verb::Scope::Prism
     end
 
+    # PageUp/PageDown/Home/End: page the open issue's detail body, else the issue list.
+    # Both the view's move and scroll_detail clamp (scroll_detail's ceiling lands at
+    # render), so the large Home/End magnitude is safe.
+    def body_scroll(delta : Int32) : Bool
+      @prism.detail_open? ? @prism.scroll_detail(delta) : @prism.move(delta)
+      true
+    end
+
     def body_badge : Symbol
       :body # read-only/navigable list + detail (no inline text editor)
     end
