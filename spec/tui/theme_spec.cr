@@ -126,6 +126,27 @@ describe Gori::Tui::Theme do
       fail "#{name}/muted contrast #{muted_ratio.round(2)}:1 < 3.5:1 on bg" if muted_ratio < 3.5
     end
   end
+
+  # Regression guard for focus-area visibility (the light-theme complaint: the focused
+  # pane's gold outline/pill and the focused selection band were too faint on light
+  # canvases). The focus indicators aren't text, so they don't need text-AA — but they
+  # must be clearly perceptible in EVERY theme, not merely technically present:
+  #   • focus_gold (the focused pane's outline + the focused tab/sub-tab pill) ≥ 4.0:1
+  #     on the canvas — the pre-fix light golds sat at 3.4–3.7 and read as a stray
+  #     hairline on paper; 4.0 keeps a visible indicator without demanding text-AA.
+  #   • accent_bg (the focused selection band) ≥ 1.30:1 on the canvas — the pre-fix
+  #     light bands sat at 1.21–1.27 and were nearly invisible; 1.30 is the faintest
+  #     band that still registers (goridark, the reference, clears it).
+  Theme.available.each do |name|
+    it "keeps the focus indicators perceptible on the canvas (#{name} theme)" do
+      Theme.apply(name)
+      bg = Theme.bg
+      gold = wcag_contrast(Theme.focus_gold, bg)
+      fail "#{name}/focus_gold contrast #{gold.round(2)}:1 < 4.0:1 on bg" if gold < 4.0
+      band = wcag_contrast(Theme.accent_bg, bg)
+      fail "#{name}/accent_bg contrast #{band.round(2)}:1 < 1.30:1 on bg" if band < 1.30
+    end
+  end
 end
 
 describe Gori::Tui::SettingsView do
