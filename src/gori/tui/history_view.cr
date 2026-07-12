@@ -60,6 +60,7 @@ module Gori::Tui
       @qcx = 0
       @preedit = ""
       @querying = false
+      @query_note = nil.as(String?) # why an active filter is empty when it's INVALID (not just no-match)
       @scope = nil.as(Scope?)
       @detail = nil.as(Store::FlowDetail?)
       @detail_ws = nil.as(Array(Store::WsMessage)?)
@@ -203,7 +204,21 @@ module Gori::Tui
     # newest-first (ORDER BY id DESC); reverse when the layout pref is oldest-first.
     def reload(store : Store) : Nil
       prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
-      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(@query))
+      query_filter = QL.parse(@query)
+      @query_note = query_note_for(query_filter)
+      # A non-blank query that compiles to EMPTY (every term invalid — a typo'd field,
+      # a bad numeric like dur:>2sec, an unterminated value) must NOT fall through to a
+      # match-all search: that would show EVERY flow while the bar claims a filter is
+      # active — the opposite of the ask, and dangerous on a security proxy. Reject it
+      # (empty list + a note), mirroring the MCP/CLI surfaces which both reject_empty?.
+      if QL.reject_empty?(@query, query_filter)
+        @rows = [] of Store::FlowRow
+        @filter_dirty = false
+        @selected = 0
+        @scroll = 0
+        return
+      end
+      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, query_filter)
       @rows = store.search(combined, PAGE)
       @rows.reverse! unless newest_first?
       @filter_dirty = false
@@ -215,6 +230,16 @@ module Gori::Tui
         else
           @selected.clamp(0, {@rows.size - 1, 0}.max)
         end
+    end
+
+    # A short note explaining a filter that matches nothing because it is INVALID (vs a
+    # valid filter that genuinely has no matches) — surfaced in the empty-state hint so a
+    # typo'd status:/dur:/size: or a broken body~[regex isn't misread as "no traffic".
+    private def query_note_for(filter : QL::Filter) : String?
+      return nil if @query.blank?
+      return "invalid filter — no valid terms" if QL.reject_empty?(@query, filter)
+      bad = QL.invalid_regex_terms(@query)
+      bad.empty? ? nil : "invalid regex in #{bad.first}"
     end
 
     # settings:layout History list order — newest first (default) or oldest first.
@@ -525,12 +550,22 @@ module Gori::Tui
     end
 
     # The synthetic log panes (FRAMES / EVENTS) and the decoded-protocol panes render
-    # as text and have no raw-byte hex view, unlike REQUEST/RESPONSE.
+    # as text and have no raw-byte hex view, unlike REQUEST/RESPONSE. The WebSocket
+    # MESSAGES pane reuses the :response slot but is also a synthetic transcript (its
+    # bytes live in the ws_messages table, NOT response_body), so it belongs here too —
+    # otherwise x/w would fall back to hex/reveal of the bare 101 handshake head.
     private def log_pane? : Bool
+      return true if ws_messages_pane?
       case @detail_pane
       when :frames, :events, :saml, :jwt, :graphql, :params then true
       else                                                       false
       end
+    end
+
+    # The :response pane renders the WebSocket message transcript (not the handshake
+    # bytes) for a 101 flow — a synthetic log with no raw-byte hex/reveal view.
+    private def ws_messages_pane? : Bool
+      @detail_pane == :response && !@detail_ws.nil?
     end
 
     # 'x' toggles a raw hex dump of the current pane (request/response bytes).
@@ -815,9 +850,9 @@ module Gori::Tui
       detail = @detail
       return nil unless detail
       head, body = case @detail_pane
-                   when :response then {detail.response_head, detail.response_body}
+                   when :response then ws_messages_pane? ? {nil, nil} : {detail.response_head, detail.response_body}
                    when :request  then {detail.request_head, detail.request_body}
-                   else                {nil, nil} # frames: no raw-bytes hex
+                   else                {nil, nil} # frames/messages: no raw-bytes hex
                    end
       @detail_hex_bytes = combine_bytes(head, body)
     end
@@ -969,7 +1004,9 @@ module Gori::Tui
         # would mislead (⇧S clears the lens). Mirrors sitemap_view's ordering.
         msg, hint =
           if !@query.blank?
-            {"no flows match", @querying ? "esc clears the filter" : "/ to edit the filter"}
+            # An INVALID query (all terms bad, or a broken regex) reads as "no flows match"
+            # unless we say why — @query_note distinguishes it from a genuine empty result.
+            {@query_note || "no flows match", @querying ? "esc clears the filter" : "/ to edit the filter"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             {"no flows in scope", "⇧S clears the scope lens"}
           else
@@ -1403,6 +1440,10 @@ module Gori::Tui
       return if list_h <= 0
       @scroll = @selected if @selected < @scroll
       @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
+      # Never scroll past what fits: on_event's `@scroll += 1` (not-following) and the
+      # trim clamp can leave @scroll above (rows.size - list_h), stranding the newest
+      # rows off the top with blank space below. Pull it back when the list underfills.
+      @scroll = {@scroll, {@rows.size - list_h, 0}.max}.min
       @scroll = 0 if @scroll < 0
     end
 
@@ -1511,12 +1552,15 @@ module Gori::Tui
         trailer << [Highlight::Span.new("— body truncated at capture limit (#{Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)} MiB); full size in the list —", Theme.yellow)]
       end
 
-      # gRPC: bounded framed hex view — style eagerly into `head`.
+      # gRPC: bounded framed hex view — style eagerly into `head`. Flagged binary so the
+      # reveal-whitespace path is gated off (like any other binary body): a gRPC body is
+      # opaque protobuf whose bytes would desync the terminal if rendered as text (the
+      # very 잔상 the binary placeholder avoids). Hex (x) stays available on this pane.
       if (body && !body.empty?) && grpc_body?(head)
         ls = Highlight.message(head, nil, request)
         ls << Highlight::Line.new
         ls.concat(wrap(grpc_lines(body)))
-        return DetailView.new(ls, EMPTY_BODY, :text, trailer)
+        return DetailView.new(ls, EMPTY_BODY, :text, trailer, binary: true)
       end
 
       # Plain body → WINDOWED. Decode compressed/chunked bodies for display
