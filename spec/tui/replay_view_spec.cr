@@ -628,6 +628,21 @@ describe Gori::Tui::ReplayView do
     view.resp_copy_text.should eq(lines[0][0, 4])
   end
 
+  it "^G go-to-line in the response pane also moves the caret (not just the scroll)" do
+    view = ReplayView.new
+    view.load_blank
+    ok = Gori::Replay::Result.new(
+      "HTTP/1.1 200 OK\r\n\r\n".to_slice, "LINE1\nLINE2\nLINE3\nLINE4".to_slice, nil, 1000_i64)
+    view.apply(ok)
+    view.focus_pane(:response)
+    line3 = view.response_search_lines("LINE3").first # 0-based row of the body's 3rd line
+
+    view.goto_response_line(line3 + 1) # 1-based
+    view.resp_copy_text.should eq("LINE3")
+    view.resp_move(-1, 0) # ↑ should step to LINE2, not jump from a stale pre-goto caret
+    view.resp_copy_text.should eq("LINE2")
+  end
+
   it "apply_peer_request keeps live response + focus (reconcile must not wipe a send)" do
     # Regression: reconcile used full restore() for request-side sync. restore() always
     # sets focus=:target and clears @result when no response BLOBs are passed — so a

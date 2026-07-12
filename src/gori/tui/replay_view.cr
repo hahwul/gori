@@ -1911,9 +1911,20 @@ module Gori::Tui
     end
 
     # ^G go-to-line in the response pane: scroll so 1-based line `n` is at the top
-    # (interpreted in the currently-shown mode — response/diff/hex row).
+    # (interpreted in the currently-shown mode — response/diff/hex row). Hex mode has
+    # no caret to move; in navigable (cursor-tracked) modes, sync @resp_cursor too —
+    # otherwise the first ↑/↓ after the jump moves from the caret's stale pre-jump
+    # position instead of the line just jumped to.
     def goto_response_line(n : Int32) : Nil
-      @scroll = (n - 1).clamp(0, {resp_line_count - 1, 0}.max)
+      if resp_navigable?
+        size, _ = resp_line_source
+        return if size <= 0
+        cy = (n - 1).clamp(0, size - 1)
+        @resp_cursor.sync(cy, 0)
+        @scroll = cy
+      else
+        @scroll = (n - 1).clamp(0, {resp_line_count - 1, 0}.max)
+      end
     end
 
     # ^F search in the response pane: 0-based line indices containing `query` in the

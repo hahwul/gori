@@ -250,6 +250,30 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "^G go-to-line in the detail view also moves the caret (not just the scroll)" do
+    tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/api", http_version: "HTTP/1.1",
+        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+        body: "LINE1\nLINE2\nLINE3\nLINE4".to_slice, content_type: "text/plain"))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response
+      line3 = view.detail_search_lines("LINE3").first # 0-based row of the body's 3rd line
+
+      view.goto_detail_line(line3 + 1) # 1-based
+      view.detail_copy_text.should eq("LINE3")
+      view.detail_move(-1, 0) # ↑ should step to LINE2, not jump from a stale pre-goto caret
+      view.detail_copy_text.should eq("LINE2")
+    end
+  end
+
   it "pretty-prints a JSON response body when enabled, and restores raw when off" do
     tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
