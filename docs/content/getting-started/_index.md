@@ -22,6 +22,6 @@ It understands **HTTP/1.1, HTTP/2, WebSocket, gRPC, and Server-Sent Events**, an
 
 ## Next Steps
 
-- [Installation](/getting-started/installation/) — build gori from source
+- [Installation](/getting-started/installation/) — Homebrew, the AUR, Docker, a binary, or from source
 - [Quick Start](/getting-started/quick-start/) — capture, keys, and your first Replay
 - [Configuration](/getting-started/configuration/) — settings, storage, and the CA
