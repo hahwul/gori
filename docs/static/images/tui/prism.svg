@@ -11,7 +11,7 @@
 <rect x="45.00" y="214.00" width="882.00" height="18.00" fill="#19191c"/>
 <rect x="36.00" y="484.00" width="54.00" height="18.00" fill="#1b1b1f"/>
 <rect x="90.00" y="484.00" width="846.00" height="18.00" fill="#141417"/>
-<text x="45.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">𝓰𝓸𝓻𝓲</text>
+<text x="45.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" font-weight="700" xml:space="preserve">𝓰𝓸𝓻𝓲</text>
 <text x="90.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
 <text x="108.00" y="83.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">default</text>
 <text x="576.00" y="83.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">scope:off</text>
@@ -19,7 +19,7 @@
 <text x="684.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">●</text>
 <text x="702.00" y="83.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">127.0.0.1:8070</text>
 <text x="837.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
-<text x="855.00" y="83.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">01:54</text>
+<text x="855.00" y="83.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">07:04</text>
 <text x="909.00" y="83.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">pm</text>
 <text x="36.00" y="101.68" textLength="900.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────────────</text>
 <text x="54.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Project</text>
@@ -40,8 +40,8 @@
 <text x="324.00" y="155.68" textLength="90.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">cloudflare</text>
 <text x="423.00" y="155.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">gunicorn</text>
 <text x="738.00" y="155.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">a:CLOSED</text>
-<text x="819.00" y="155.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" xml:space="preserve">M:9</text>
-<text x="855.00" y="155.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">L:6</text>
+<text x="819.00" y="155.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" xml:space="preserve">M:8</text>
+<text x="855.00" y="155.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">L:4</text>
 <text x="891.00" y="155.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">I:8</text>
 <text x="927.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="173.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
@@ -64,137 +64,131 @@
 <text x="36.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="45.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">▎</text>
 <text x="54.00" y="227.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" font-weight="700" xml:space="preserve">MED</text>
-<text x="108.00" y="227.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">cors</text>
-<text x="171.00" y="227.68" textLength="90.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">Permissive</text>
-<text x="270.00" y="227.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">CORS</text>
-<text x="315.00" y="227.68" textLength="261.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">(Access-Control-Allow-Origin:</text>
-<text x="585.00" y="227.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">*)</text>
-<text x="765.00" y="227.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×2</text>
-<text x="792.00" y="227.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">api.github.com</text>
+<text x="108.00" y="227.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
+<text x="171.00" y="227.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">Missing</text>
+<text x="243.00" y="227.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" xml:space="preserve">Content-Security-Policy</text>
+<text x="819.00" y="227.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">example.com</text>
 <text x="927.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="245.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="245.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" font-weight="700" xml:space="preserve">MED</text>
 <text x="108.00" y="245.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
-<text x="171.00" y="245.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">JSON</text>
-<text x="216.00" y="245.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">response</text>
-<text x="297.00" y="245.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">may</text>
-<text x="333.00" y="245.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">be</text>
-<text x="360.00" y="245.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">cached</text>
-<text x="423.00" y="245.68" textLength="135.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">(Cache-Control:</text>
-<text x="567.00" y="245.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">public)</text>
-<text x="792.00" y="245.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">api.github.com</text>
+<text x="171.00" y="245.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
+<text x="243.00" y="245.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">or</text>
+<text x="270.00" y="245.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">disabled</text>
+<text x="351.00" y="245.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">HSTS</text>
+<text x="396.00" y="245.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">header</text>
+<text x="819.00" y="245.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">example.com</text>
 <text x="927.00" y="245.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="263.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" font-weight="700" xml:space="preserve">MED</text>
-<text x="108.00" y="263.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">cors</text>
-<text x="171.00" y="263.68" textLength="90.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Permissive</text>
-<text x="270.00" y="263.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">CORS</text>
-<text x="315.00" y="263.68" textLength="261.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">(Access-Control-Allow-Origin:</text>
-<text x="585.00" y="263.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">*)</text>
-<text x="792.00" y="263.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×6</text>
+<text x="108.00" y="263.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
+<text x="171.00" y="263.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
+<text x="243.00" y="263.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Content-Security-Policy</text>
+<text x="792.00" y="263.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×7</text>
 <text x="819.00" y="263.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
 <text x="927.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="281.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" font-weight="700" xml:space="preserve">MED</text>
-<text x="108.00" y="281.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">cookie</text>
-<text x="171.00" y="281.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Cookie</text>
-<text x="234.00" y="281.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">without</text>
-<text x="306.00" y="281.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Secure</text>
-<text x="369.00" y="281.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">flag</text>
+<text x="108.00" y="281.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
+<text x="171.00" y="281.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
+<text x="243.00" y="281.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">or</text>
+<text x="270.00" y="281.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">disabled</text>
+<text x="351.00" y="281.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">HSTS</text>
+<text x="396.00" y="281.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">header</text>
+<text x="792.00" y="281.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×8</text>
 <text x="819.00" y="281.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
 <text x="927.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="299.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" font-weight="700" xml:space="preserve">MED</text>
-<text x="108.00" y="299.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
-<text x="171.00" y="299.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
-<text x="243.00" y="299.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Content-Security-Policy</text>
-<text x="792.00" y="299.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×2</text>
-<text x="819.00" y="299.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
+<text x="108.00" y="299.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">cors</text>
+<text x="171.00" y="299.68" textLength="90.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Permissive</text>
+<text x="270.00" y="299.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">CORS</text>
+<text x="315.00" y="299.68" textLength="261.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">(Access-Control-Allow-Origin:</text>
+<text x="585.00" y="299.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">*)</text>
+<text x="765.00" y="299.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×2</text>
+<text x="792.00" y="299.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">api.github.com</text>
 <text x="927.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="317.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" font-weight="700" xml:space="preserve">MED</text>
 <text x="108.00" y="317.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
-<text x="171.00" y="317.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
-<text x="243.00" y="317.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">or</text>
-<text x="270.00" y="317.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">disabled</text>
-<text x="351.00" y="317.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">HSTS</text>
-<text x="396.00" y="317.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">header</text>
-<text x="792.00" y="317.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×6</text>
-<text x="819.00" y="317.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
+<text x="171.00" y="317.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">JSON</text>
+<text x="216.00" y="317.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">response</text>
+<text x="297.00" y="317.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">may</text>
+<text x="333.00" y="317.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">be</text>
+<text x="360.00" y="317.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">cached</text>
+<text x="423.00" y="317.68" textLength="135.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">(Cache-Control:</text>
+<text x="567.00" y="317.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">public)</text>
+<text x="792.00" y="317.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">api.github.com</text>
 <text x="927.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="335.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="335.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" font-weight="700" xml:space="preserve">MED</text>
-<text x="108.00" y="335.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
-<text x="171.00" y="335.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">JSON</text>
-<text x="216.00" y="335.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">response</text>
-<text x="297.00" y="335.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">may</text>
-<text x="333.00" y="335.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">be</text>
-<text x="360.00" y="335.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">cached</text>
-<text x="423.00" y="335.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">(missing</text>
-<text x="504.00" y="335.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Cache-Control)</text>
-<text x="792.00" y="335.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×4</text>
+<text x="108.00" y="335.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">cors</text>
+<text x="171.00" y="335.68" textLength="90.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Permissive</text>
+<text x="270.00" y="335.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">CORS</text>
+<text x="315.00" y="335.68" textLength="261.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">(Access-Control-Allow-Origin:</text>
+<text x="585.00" y="335.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">*)</text>
 <text x="819.00" y="335.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
 <text x="927.00" y="335.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="353.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" font-weight="700" xml:space="preserve">MED</text>
 <text x="108.00" y="353.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
-<text x="171.00" y="353.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
-<text x="243.00" y="353.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Content-Security-Policy</text>
-<text x="819.00" y="353.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">example.com</text>
+<text x="171.00" y="353.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">JSON</text>
+<text x="216.00" y="353.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">response</text>
+<text x="297.00" y="353.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">may</text>
+<text x="333.00" y="353.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">be</text>
+<text x="360.00" y="353.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">cached</text>
+<text x="423.00" y="353.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">(missing</text>
+<text x="504.00" y="353.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Cache-Control)</text>
+<text x="819.00" y="353.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
 <text x="927.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
-<text x="54.00" y="371.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#d6a13a" font-weight="700" xml:space="preserve">MED</text>
+<text x="54.00" y="371.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">LOW</text>
 <text x="108.00" y="371.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
 <text x="171.00" y="371.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
-<text x="243.00" y="371.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">or</text>
-<text x="270.00" y="371.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">disabled</text>
-<text x="351.00" y="371.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">HSTS</text>
-<text x="396.00" y="371.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">header</text>
+<text x="243.00" y="371.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">X-Content-Type-Options:</text>
+<text x="459.00" y="371.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">nosniff</text>
 <text x="819.00" y="371.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">example.com</text>
 <text x="927.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="389.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">LOW</text>
-<text x="108.00" y="389.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">cookie</text>
-<text x="171.00" y="389.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Cookie</text>
-<text x="234.00" y="389.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">without</text>
-<text x="306.00" y="389.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">SameSite</text>
-<text x="387.00" y="389.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">attribute</text>
-<text x="819.00" y="389.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
+<text x="108.00" y="389.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
+<text x="171.00" y="389.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
+<text x="243.00" y="389.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">or</text>
+<text x="270.00" y="389.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">ineffective</text>
+<text x="378.00" y="389.68" textLength="135.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">X-Frame-Options</text>
+<text x="819.00" y="389.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">example.com</text>
 <text x="927.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="407.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">LOW</text>
-<text x="108.00" y="407.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">cookie</text>
-<text x="171.00" y="407.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Cookie</text>
-<text x="234.00" y="407.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">without</text>
-<text x="306.00" y="407.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">HttpOnly</text>
-<text x="387.00" y="407.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">flag</text>
+<text x="108.00" y="407.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
+<text x="171.00" y="407.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
+<text x="243.00" y="407.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">X-Content-Type-Options:</text>
+<text x="459.00" y="407.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">nosniff</text>
+<text x="792.00" y="407.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×7</text>
 <text x="819.00" y="407.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
 <text x="927.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="54.00" y="425.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">LOW</text>
 <text x="108.00" y="425.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
 <text x="171.00" y="425.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
-<text x="243.00" y="425.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">X-Content-Type-Options:</text>
-<text x="459.00" y="425.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">nosniff</text>
-<text x="792.00" y="425.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×2</text>
+<text x="243.00" y="425.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">or</text>
+<text x="270.00" y="425.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">ineffective</text>
+<text x="378.00" y="425.68" textLength="135.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">X-Frame-Options</text>
+<text x="792.00" y="425.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×7</text>
 <text x="819.00" y="425.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
 <text x="927.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="443.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
-<text x="54.00" y="443.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">LOW</text>
+<text x="54.00" y="443.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" font-weight="700" xml:space="preserve">INFO</text>
 <text x="108.00" y="443.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
 <text x="171.00" y="443.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
-<text x="243.00" y="443.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">or</text>
-<text x="270.00" y="443.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">ineffective</text>
-<text x="378.00" y="443.68" textLength="135.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">X-Frame-Options</text>
-<text x="792.00" y="443.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">×2</text>
-<text x="819.00" y="443.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">httpbin.org</text>
+<text x="243.00" y="443.68" textLength="135.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Referrer-Policy</text>
+<text x="819.00" y="443.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">example.com</text>
 <text x="927.00" y="443.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="461.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
-<text x="54.00" y="461.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">LOW</text>
-<text x="108.00" y="461.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
-<text x="171.00" y="461.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Missing</text>
-<text x="243.00" y="461.68" textLength="207.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">X-Content-Type-Options:</text>
-<text x="459.00" y="461.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">nosniff</text>
+<text x="54.00" y="461.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" font-weight="700" xml:space="preserve">INFO</text>
+<text x="108.00" y="461.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">tech</text>
+<text x="171.00" y="461.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">Server:</text>
+<text x="243.00" y="461.68" textLength="90.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">cloudflare</text>
 <text x="819.00" y="461.68" textLength="99.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">example.com</text>
 <text x="927.00" y="461.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
 <text x="36.00" y="479.68" textLength="900.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">╰──────────────────────────────────────────────────────────────────────────────────────────────────╯</text>

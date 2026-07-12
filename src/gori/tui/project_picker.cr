@@ -425,14 +425,14 @@ module Gori::Tui
     # Entrance effect — three phases on one frame clock (~50 ms/frame, the idle poll):
     #   1. Wave reveal: a diagonal front (top-left → bottom-right) materialises the
     #      art; each cell ramps ░▒▓ while its colour fades from near-canvas up to
-    #      the accent, then locks to a solid block.
-    #   2. Glint: a narrow focus_gold band sweeps the same diagonal once — light
-    #      catching the finished mark.
+    #      the gold, then locks to a solid block.
+    #   2. Glint: a narrow bright band sweeps the same diagonal once — light
+    #      catching the finished gold mark.
     #   3. The wordmark, then the tagline, fade in beneath it (see render_list).
     # Every timeline constant derives from BRAND_ART, so swapping the art re-times
     # the entrance. ART_ANIM_DONE is the frame at which everything has resolved —
     # the run loop freezes @art_frame there, and past it the same code paints the
-    # identical static logo (band swept out, full accent, text at full strength).
+    # identical static logo (band swept out, full gold, text at full strength).
     ART_SHADES    = {'░', '▒', '▓'}
     ART_ROW_SLOPE = 2 # diagonal metric d = col + row * SLOPE — the front's tilt
     ART_STAGGER   = 4 # d-units the wave front advances per frame
@@ -681,8 +681,8 @@ module Gori::Tui
     #
     # `frame` drives the entrance (see the timeline constants above): the diagonal
     # wave front reveals cells by their d-coordinate, each ramping ░▒▓ and fading
-    # up to the accent before locking solid; the glint band then sweeps the same
-    # diagonal once. Past ART_ANIM_DONE every cell is solid accent, so the same
+    # up to the gold before locking solid; the glint band then sweeps the same
+    # diagonal once. Past ART_ANIM_DONE every cell is solid gold, so the same
     # call renders the final static logo.
     private def draw_brand_art(screen : Screen, y : Int32, w : Int32, frame : Int32) : Nil
       x = {(w - ART_INK_W) // 2 - ART_LEFT, 0}.max
@@ -700,11 +700,11 @@ module Gori::Tui
     end
 
     # Shade + colour for a cell `prog` frames after the wave front reached it:
-    # ░▒▓ ramping from a dim accent up toward full strength, then a solid block.
+    # ░▒▓ ramping from a dim gold up toward full strength, then a solid block.
     private def art_cell(prog : Int32) : {Char, Color}
-      return {'█', Theme.accent} if prog > ART_SHADES.size
+      return {'█', Theme.focus_gold} if prog > ART_SHADES.size
       t = 0.35 + 0.65 * prog / (ART_SHADES.size + 1)
-      {ART_SHADES[prog - 1], Theme.blend(Theme.accent, Theme.bg, t)}
+      {ART_SHADES[prog - 1], Theme.blend(Theme.focus_gold, Theme.bg, t)}
     end
 
     # 0..1 progress of a text fade that starts at frame `start` and spans TEXT_FADE.
@@ -725,22 +725,22 @@ module Gori::Tui
       end
       if (t = fade_t(WORDMARK_START)) > 0
         Chrome.render_wordmark(screen, 0, top, center_w: w, bg: Theme.bg,
-          fg: Theme.blend(Theme.text_bright, Theme.bg, t))
+          fg: Theme.blend(Theme.focus_gold, Theme.bg, t))
       end
       if (t = fade_t(TAGLINE_START)) > 0
         centered(screen, top + 1, TAGLINE, Theme.blend(Theme.muted, Theme.bg, t), w)
       end
     end
 
-    # The glint: a GLINT_BAND-wide focus_gold band sweeping down the diagonal after
-    # the reveal — brightest at its leading edge, trailing back off to the accent.
-    # A no-op before the sweep starts and after the band has left the art, so the
-    # frozen frame is pure accent.
+    # The glint: a GLINT_BAND-wide highlight band sweeping down the diagonal after
+    # the reveal — the bright accent catching the gilded mark at its leading edge,
+    # trailing back off to the base gold (`fg`). A no-op before the sweep starts and
+    # after the band has left the art, so the frozen frame is pure gold.
     private def glint_tint(d : Int32, frame : Int32, fg : Color) : Color
       return fg if frame <= REVEAL_DONE
       dist = (frame - REVEAL_DONE) * GLINT_SPEED - d
       return fg if dist < 0 || dist >= GLINT_BAND
-      Theme.blend(Theme.focus_gold, Theme.accent, 1.0 - dist / GLINT_BAND.to_f)
+      Theme.blend(Theme.accent, fg, 1.0 - dist / GLINT_BAND.to_f)
     end
 
     private def ensure_results_visible(list_h : Int32) : Nil

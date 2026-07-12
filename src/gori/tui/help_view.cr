@@ -199,7 +199,7 @@ module Gori::Tui
         top += Brand::ART_H + ART_GAP
       end
 
-      centered(screen, rect, top, "gori", Theme.accent, attr: Attribute::Bold)
+      centered(screen, rect, top, "gori", Theme.focus_gold, attr: Attribute::Bold)
       centered(screen, rect, top + 1, "v#{Gori::VERSION}", Theme.text_bright)
       centered(screen, rect, top + 3, Brand::BYLINE, Theme.muted) if top + 3 < rect.bottom
       centered(screen, rect, top + 4, Gori::REPOSITORY_URL, Theme.muted) if top + 4 < rect.bottom

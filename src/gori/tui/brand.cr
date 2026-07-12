@@ -27,10 +27,12 @@ module Gori::Tui
     BYLINE  = "made by #{AUTHOR}"
     TAGLINE = "Hack from the terminal."
 
-    # Static full-accent art (no entrance animation). `origin_x` is the absolute
-    # column for glyph col 0 of each ART line (includes the art's leading spaces).
+    # Static gilded art (no entrance animation). Defaults to the theme's gold
+    # (focus_gold: warm gold on dark, deepened AA gold on light), so the mark
+    # reads gold in every palette. `origin_x` is the absolute column for glyph
+    # col 0 of each ART line (includes the art's leading spaces).
     def self.draw_art(screen : Screen, origin_x : Int32, y : Int32,
-                      *, fg : Color = Theme.accent) : Nil
+                      *, fg : Color = Theme.focus_gold) : Nil
       ART.each_with_index do |line, i|
         line.each_char_with_index do |ch, col|
           next if ch == ' '
