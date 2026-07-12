@@ -140,11 +140,9 @@ module Gori::Tui
     # Hit-test the REQ / RES chips on the divider row (render_pane_selector geometry).
     def pane_chip_at(rect : Rect, mx : Int32, my : Int32) : Symbol?
       return nil if rect.h <= 2 || my != rect.y + 1
-      hint = "←/→ "
-      total = Screen.display_width(hint) + 10 # " REQ " + " RES "
-      sx = rect.right - total - 1
-      return nil if sx <= rect.x + 1
-      start = sx + Screen.display_width(hint)
+      geom = pane_selector_geom(rect)
+      return nil unless geom
+      _, start = geom
       Frame.left_chip_hit(mx, my, rect.y + 1, start, [
         {:request, " REQ "},
         {:response, " RES "},
@@ -245,13 +243,25 @@ module Gori::Tui
     # half of the two flows is diffed; the active side is lit, the other muted — so the
     # mode + its keys ride the chrome instead of only the footer prose.
     private def render_pane_selector(screen : Screen, rect : Rect) : Nil
-      hint = "←/→ "
-      total = Screen.display_width(hint) + 10 # " REQ " + " RES "
-      sx = rect.right - total - 1
-      return if sx <= rect.x + 1
-      x = screen.text(sx, rect.y + 1, hint, Theme.muted, Theme.bg)
-      x = Frame.chip(screen, x, rect.y + 1, " REQ ", @pane == :request)
+      geom = pane_selector_geom(rect)
+      return unless geom
+      sx, _ = geom
+      x = screen.text(sx, rect.y + 1, "←/→ ", Theme.muted, Theme.bg)
+      # `+ 1` after each chip matches Frame.left_chip_hit's 1-col gap contract (as
+      # Replay/History/Intercept do) so pane_chip_at lands on the drawn cells.
+      x = Frame.chip(screen, x, rect.y + 1, " REQ ", @pane == :request) + 1
       Frame.chip(screen, x, rect.y + 1, " RES ", @pane == :response)
+    end
+
+    # Divider-row geometry of the REQ/RES selector, shared by render + hit-test so the
+    # two can't drift (they did — the RES chip's click zone was one column off). Returns
+    # {hint x, first chip x}, or nil when the frame is too narrow for the selector.
+    private def pane_selector_geom(rect : Rect) : {Int32, Int32}?
+      hint_w = Screen.display_width("←/→ ")
+      total = hint_w + 11 # " REQ " + 1-col gap + " RES "
+      sx = rect.right - total - 1
+      return nil if sx <= rect.x + 1
+      {sx, sx + hint_w}
     end
 
     private def header_label(tag : String, d : Store::FlowDetail?) : String
