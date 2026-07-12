@@ -1,3 +1,4 @@
+require "socket"
 require "./message"
 
 # Pure, byte-exact HTTP/1.1 head codec (sans-IO).
@@ -23,7 +24,19 @@ module Gori::Proxy::Codec::Http1
   # in the socket and get consumed as the body, desyncing keep-alive — so we treat
   # an oversized head as an unusable connection (caller drops it). A head cut short
   # by EOF still returns its bytes (the connection is closing; P7 keeps the octets).
-  def self.read_head(io : IO, max_bytes : Int32 = 1024 * 256) : Bytes?
+  # `deadline` + `timeout_sock` (both required to arm it) bound the total time to assemble a
+  # head AFTER its first byte — the drip-feed slowloris defense a per-read timeout can't provide
+  # (a byte-at-a-time trickle keeps resetting a per-read timer). The socket's read_timeout is
+  # shrunk toward the deadline before each read and RESTORED on exit, so the body read that
+  # follows sees the caller's baseline, not the leftover head budget. With `deadline`/`timeout_sock`
+  # nil (every caller but the client request-head read) the loop is byte-for-byte the original.
+  def self.read_head(io : IO, max_bytes : Int32 = 1024 * 256, *,
+                     deadline : Time::Span? = nil, timeout_sock : ::Socket? = nil) : Bytes?
+    # Deadline path only when BOTH are provided (the client request-head read); every other
+    # caller takes the byte-for-byte original fast path.
+    if (sock = timeout_sock) && (dl = deadline)
+      return read_head_deadlined(io, sock, dl, max_bytes)
+    end
     buf = IO::Memory.new(512) # presized: covers a typical head without regrowing
     while buf.bytesize < max_bytes
       byte = io.read_byte
@@ -33,14 +46,43 @@ module Gori::Proxy::Codec::Http1
       # — skip the 4-byte tail compare on every other byte.
       break if byte == 0x0a_u8 && buf.bytesize >= 4 && ends_with_crlf_crlf?(buf)
     end
+    finalize_head(buf, max_bytes)
+  end
+
+  # As read_head, but bounds the total time to assemble a head AFTER its first byte — the
+  # drip-feed slowloris defense a per-read timeout can't provide (a byte-at-a-time trickle keeps
+  # resetting a per-read timer). `sock`'s read_timeout is shrunk toward `deadline` before each
+  # read and RESTORED on exit, so the body read that follows sees the caller's baseline.
+  private def self.read_head_deadlined(io : IO, sock : ::Socket, deadline : Time::Span, max_bytes : Int32) : Bytes?
+    buf = IO::Memory.new(512)
+    saved_timeout = sock.read_timeout
+    head_started = nil.as(Time::Instant?)
+    begin
+      while buf.bytesize < max_bytes
+        if hs = head_started
+          remaining = deadline - (Time.instant - hs)
+          raise IO::TimeoutError.new("request head incomplete before deadline") if remaining <= Time::Span.zero
+          sock.read_timeout = remaining
+        end
+        byte = io.read_byte
+        break if byte.nil?            # EOF
+        head_started ||= Time.instant # start the head clock at the first received byte
+        buf.write_byte(byte)
+        break if byte == 0x0a_u8 && buf.bytesize >= 4 && ends_with_crlf_crlf?(buf)
+      end
+    ensure
+      sock.read_timeout = saved_timeout # restore the baseline for the following body read
+    end
+    finalize_head(buf, max_bytes)
+  end
+
+  # Turn a read head buffer into the returned bytes (or nil). A `buf` that hit the cap without a
+  # terminator is an oversized/hostile head — returning it would misframe the body (the real
+  # CRLFCRLF is still on the wire), so drop it. Otherwise the view (length = bytesize) is the
+  # head's sole owner: it becomes an immutable `raw_head` (P7), so no defensive copy is made.
+  private def self.finalize_head(buf : IO::Memory, max_bytes : Int32) : Bytes?
     return nil if buf.bytesize == 0
-    # Hit the cap without a terminator → oversized/hostile head; don't misframe.
     return nil if buf.bytesize >= max_bytes && !ends_with_crlf_crlf?(buf)
-    # `buf` is a local, discarded here, so the returned view (length = bytesize) is the head's
-    # sole owner — no defensive copy. It becomes an immutable `raw_head` (P7: forwarding emits
-    # it verbatim, the rewriter builds fresh buffers), so nothing writes through it. Trades a
-    # per-head copy (2×/flow on the 100% path) for briefly retaining the buffer's slack capacity
-    # until capture.
     buf.to_slice
   end
 

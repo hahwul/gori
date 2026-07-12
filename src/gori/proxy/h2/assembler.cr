@@ -282,6 +282,7 @@ module Gori::Proxy::H2
       cap = stream.resp.body
       body = cap.total == 0 ? nil : cap.to_slice
       content_type = header_value(headers, "content-type")
+      content_encoding = header_value(headers, "content-encoding")
       head = synth_response_head(status, headers)
       now = Time.instant
       duration_us = (now - stream.started_at).total_microseconds.to_i64
@@ -289,7 +290,7 @@ module Gori::Proxy::H2
       @sink.on_response(Store::CapturedResponse.new(
         flow_id: flow_id, status: status, head: head, body: body,
         body_truncated: cap.truncated?, body_size: cap.total,
-        content_type: content_type, state: state, error: error,
+        content_type: content_type, content_encoding: content_encoding, state: state, error: error,
         ttfb_us: ttfb_us, duration_us: duration_us))
     end
 

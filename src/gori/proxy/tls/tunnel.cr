@@ -4,6 +4,7 @@ require "../head_rewriter"
 require "../../interceptor"
 require "../conn/client_conn"
 require "../upstream"
+require "../socket_tuning"
 require "../h2/relay"
 require "../../host_overrides"
 require "./cert_authority"
@@ -70,6 +71,10 @@ module Gori::Proxy::Tls
       upstream = Proxy::Upstream.dial_tls(host, port, verify: @verify_upstream, alpn: "h2", overrides: @host_overrides)
       if upstream && upstream.alpn_protocol == "h2"
         upstream.sync = true
+        # Long-lived end-to-end h2 relay: relax both legs so an idle h2 connection isn't reaped
+        # (keepalive on both underlying sockets reaps a dead peer). Resolves through the TLS wrap.
+        Proxy::SocketTuning.relax(client_tls)
+        Proxy::SocketTuning.relax(upstream)
         Proxy::H2::Relay.run(client_tls, upstream, host, port, sink)
       end
     ensure

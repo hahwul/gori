@@ -2,13 +2,14 @@ require "socket"
 require "openssl"
 require "../settings"
 require "../host_overrides"
+require "./socket_tuning"
 
 module Gori::Proxy
-  # Dials origin servers and parses authorities. We open one upstream per flow and
-  # close it after the response (no pooling — correctness first; pooling is a
-  # deferred optimization). When an upstream proxy is configured (Settings), every
-  # dial is tunnelled through it via CONNECT (so both TLS-wrapping and plaintext
-  # forwarding run unchanged over the tunnel).
+  # Dials origin servers and parses authorities. A dialed upstream is reused across a
+  # single client connection's keep-alive requests (see ClientConn#acquire_upstream) and
+  # closed when that connection ends; there is no cross-connection pool. When an upstream
+  # proxy is configured (Settings), every dial is tunnelled through it via CONNECT (so both
+  # TLS-wrapping and plaintext forwarding run unchanged over the tunnel).
   module Upstream
     CONNECT_TIMEOUT = 30.seconds
     IO_TIMEOUT      = 30.seconds
@@ -73,6 +74,9 @@ module Gori::Proxy
         sock.tcp_nodelay = true
         sock.read_timeout = io_timeout
         sock.write_timeout = io_timeout
+        # Keepalive reaps a dead origin on a later relaxed tunnel (WS/SSE/CONNECT/h2 relay),
+        # where the io_timeout above is cleared so a legitimately-idle tunnel survives.
+        SocketTuning.enable_keepalive(sock)
       rescue
         # A peer RST between connect and option-setup would otherwise leak the open fd
         # (the outer rescue returns nil without closing it) — close it first.

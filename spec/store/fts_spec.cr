@@ -106,7 +106,7 @@ describe "contentless FTS (V24)" do
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-encoding: gzip\r\n\r\n".to_slice,
-        body: "compressedbodytoken".to_slice, content_type: "text/html"))
+        body: "compressedbodytoken".to_slice, content_type: "text/html", content_encoding: "gzip"))
       store.flush
       body_hits(store, "compressedbodytoken").should be_empty
     end
@@ -130,7 +130,7 @@ describe "contentless FTS (V24)" do
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200,
         head: "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-encoding: identity\r\n\r\n".to_slice,
-        body: "identitybodytoken".to_slice, content_type: "text/html"))
+        body: "identitybodytoken".to_slice, content_type: "text/html", content_encoding: "identity"))
       store.flush
       body_hits(store, "identitybodytoken").should eq([id]) # identity ⇒ NOT skipped
     end
