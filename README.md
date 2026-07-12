@@ -12,56 +12,78 @@
 <img src="https://img.shields.io/badge/Crystal-000000?style=for-the-badge&logo=crystal&logoColor=white"></a>
 </p>
 
-**gori** (고리 — Korean for *ring, link, loop*) is a keyboard-driven HTTP/HTTPS intercepting
-proxy and web-hacking workbench that runs entirely in your terminal. Point a browser or client
-at it and gori sits in the loop between you and your target, recording every request and
-response as a *flow*. From there it is your pentest workbench: intercept and edit traffic in
-flight, replay and fuzz requests, mine hidden parameters, and scan for vulnerabilities —
-across HTTP/1.1, HTTP/2, WebSocket, gRPC, and Server-Sent Events, with JWT / SAML / GraphQL
-decoded inline.
+<p align="center">
+  <a href="#installation">Installation</a> •
+  <a href="#usage">Usage</a> •
+  <a href="docs/">Documentation</a> •
+  <a href="#contributing">Contributing</a>
+</p>
 
-Everything the TUI does is also a `gori run` subcommand and a Model Context Protocol (MCP)
+---
+
+**gori** (고리 — Korean for *ring, link, loop*) sits in the loop between your client and its target,
+capturing every request and response as a *flow* you can intercept, replay, fuzz, and scan across
+HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE. Every action is also a `gori run` subcommand and an MCP
 tool, so scripts and AI agents can drive the same engagement.
 
 > ⚠️ **Test only what you are authorized to.** gori is for penetration testing and security
 > research against systems you own or have explicit permission to assess.
 
-## Features
+<details>
+<summary><strong>Features</strong></summary>
 
-- **Intercepting proxy & History** — capture HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE; hold, edit, forward, or drop traffic in flight.
-- **Replay & Fuzzer** — a request workbench (incl. WebSocket & gRPC) and an Intruder-style fuzzer with four attack modes.
-- **Prism scanner & Param Miner** — passive and active vulnerability scanning plus hidden-parameter discovery, triaged into Findings.
-- **Convert & Comparer** — a chained encode / decode / hash pipeline and side-by-side flow diffing.
-- **Keyboard-first** — a command palette (`Ctrl-P`) and a context space menu (`Space`) reach every action; rebindable hotkeys and colour themes.
-- **Headless & scriptable** — drive the same project from `gori run` or an MCP-connected agent.
+### Capture & Intercept
+- Intercepting proxy for HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE
+- Hold, edit, forward, or drop traffic in flight
+- Searchable History of every flow, with a query language for filtering
+- Scope rules, hostname overrides, and match & replace
+
+### Replay, Fuzz & Convert
+- Replay workbench for crafting and re-sending requests (incl. WebSocket & gRPC)
+- Intruder-style Fuzzer with four attack modes
+- Convert pipeline for chained encode / decode / hash
+- Side-by-side Comparer for diffing two flows
+- Inline JWT / SAML / GraphQL decoding, hex view, and pretty-printing
+
+### Discover & Scan
+- Prism passive & active vulnerability scanner
+- Param Miner for hidden-parameter discovery
+- Findings triage with Markdown / JSON export
+
+### Keyboard-first Workflow
+- Command palette (`Ctrl-P`) and context space menu (`Space`) reach every action
+- Rebindable hotkeys and switchable colour themes
+- Mouse support, multi-line editing, and go-to-line navigation
+
+### Headless & Scriptable
+- `gori run` mirrors every TUI action for non-interactive use
+- MCP server (`gori mcp`) exposes the same engagement to AI agents
+
+</details>
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew tap hahwul/gori
+brew install gori
+```
+
+### From source
+
 Requires [Crystal](https://crystal-lang.org/) `>= 1.20.2` and `pkg-config`.
 
-### System libraries (Brotli / Zstd)
-
-By default, gori links against native decoders for HTTP `Content-Encoding: br` and
-`zstd` in the detail view. Install them before building:
-
-| Platform | Command |
-|----------|---------|
-| macOS (Homebrew) | `brew install brotli zstd` |
-| Debian / Ubuntu | `sudo apt install libbrotli-dev libzstd-dev` |
-
-Then build:
-
 ```bash
-shards build
+git clone https://github.com/hahwul/gori.git
+cd gori
+shards build --release
 ```
 
-If these libraries are unavailable, you can still build without them. Gzip and
-deflate decoding (Crystal stdlib) continue to work; Brotli and Zstd bodies show a
-"decoder not built in" note instead of decoded text:
+The binary is written to `bin/gori`.
 
-```bash
-shards build -Dwithout_native_codecs
-```
+> For system libraries (Brotli / Zstd), offline builds, and other options, see the
+> [Installation guide](docs/content/getting-started/installation.md).
 
 ## Usage
 
@@ -72,22 +94,14 @@ gori
 ```
 
 The proxy listens on `127.0.0.1:8070` by default, and a short first-run wizard picks the bind
-address and theme. To intercept HTTPS, trust gori's root CA — the quickest path is the
-palette's **Open browser** (`Ctrl-P`), which launches a browser already trusted and proxied.
-Captured traffic lands in **History**; press `Ctrl-P` for the command palette or `Space` for
-context actions.
-
-Choose a different bind address or port:
+address and theme. To intercept HTTPS, trust gori's root CA — the quickest path is the palette's
+**Open browser** (`Ctrl-P`), which launches a browser already trusted and proxied. Captured traffic
+lands in **History**; press `Ctrl-P` for the command palette or `Space` for context actions.
 
 ```bash
-gori --listen 0.0.0.0 --port 8080
-```
-
-Run non-interactively, or expose gori to an agent:
-
-```bash
-gori run --help    # non-interactive subcommands over the same project
-gori mcp           # Model Context Protocol server (stdio)
+gori --listen 0.0.0.0 --port 8080   # choose a different bind address / port
+gori run --help                     # non-interactive subcommands over the same project
+gori mcp                            # Model Context Protocol server (stdio)
 ```
 
 See the [documentation](docs/) for the full guide, or open the **Help** tab in the app.
@@ -99,9 +113,10 @@ shards build          # release binary at bin/gori
 shards run gori       # run without installing
 ```
 
-If linking fails with undefined `BrotliDecoder*` symbols, `libbrotlidec` is missing
-from your system or `pkg-config` cannot find it — install `brotli` (see above) or
-use `-Dwithout_native_codecs`.
+If linking fails with undefined `BrotliDecoder*` symbols, `libbrotlidec` is missing or
+`pkg-config` cannot find it — see the
+[Installation guide](docs/content/getting-started/installation.md) for the system libraries and the
+`-Dwithout_native_codecs` offline build.
 
 ## Contributing
 
@@ -109,8 +124,14 @@ use `-Dwithout_native_codecs`.
 2. Create your feature branch (`git checkout -b my-new-feature`)
 3. Commit your changes (`git commit -am 'Add some feature'`)
 4. Push to the branch (`git push origin my-new-feature`)
-5. Create a new Pull Request
+5. Open a Pull Request
 
 ## Contributors
 
-- [hahwul](https://github.com/hahwul) - creator and maintainer
+- [hahwul](https://github.com/hahwul) — creator and maintainer
+
+## Why "gori"?
+
+gori (고리) is the Korean word for a **ring, link, or loop** — exactly where the tool sits: in the
+loop between your client and its target, capturing and reshaping each request as it passes through.
+*Sit in the loop.*
