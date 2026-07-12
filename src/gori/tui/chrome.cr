@@ -202,11 +202,14 @@ module Gori::Tui
     # top tab menu: no row fill — inactive labels are muted on the canvas, the active
     # chip is FOCUS_GOLD when the strip holds focus else a dim SELECTION_DIM band.
     # `‹` / `›` flag overflow.
+    # `hidden` (Replay's tag filter) drops those absolute chip indices from the strip —
+    # they keep their absolute number, so the visible chips read with gaps (2, 5, 7).
     def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
-                              active : Int32, focused : Bool, prev_start : Int32 = 0) : Int32
+                              active : Int32, focused : Bool, prev_start : Int32 = 0,
+                              hidden : Set(Int32)? = nil) : Int32
       return prev_start if rect.empty? || labels.empty?
       active = active.clamp(0, labels.size - 1)
-      segs, start, last = strip_layout(rect, labels, active, prev_start)
+      segs, start, last, vis_last = strip_layout(rect, labels, active, prev_start, hidden)
       segs.each do |(i, label, seg)|
         if i == active
           abg = focused ? Theme.focus_gold : Theme.selection_dim
@@ -218,40 +221,47 @@ module Gori::Tui
         end
       end
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0
-      screen.cell(rect.right - 1, rect.y, '›', Theme.muted, Theme.bg) if last < labels.size - 1
+      screen.cell(rect.right - 1, rect.y, '›', Theme.muted, Theme.bg) if last < vis_last
       start
     end
 
     # Pure: the visible sub-tab chips — {index, cell rect} — computed IDENTICALLY to
     # render_tab_strip (shares strip_layout) so a click hit-test can't drift. Used by
-    # the Replay/Notes sub-tab strips.
-    def self.strip_segments(rect : Rect, labels : Array(String), active : Int32, prev_start : Int32 = 0) : Array({Int32, Rect})
+    # the Replay/Notes sub-tab strips. Each `index` is the ABSOLUTE chip index, even
+    # when `hidden` filters intervening chips out.
+    def self.strip_segments(rect : Rect, labels : Array(String), active : Int32,
+                            prev_start : Int32 = 0, hidden : Set(Int32)? = nil) : Array({Int32, Rect})
       return [] of {Int32, Rect} if rect.empty? || labels.empty?
-      strip_layout(rect, labels, active.clamp(0, labels.size - 1), prev_start)[0].map { |(i, _, seg)| {i, seg} }
+      strip_layout(rect, labels, active.clamp(0, labels.size - 1), prev_start, hidden)[0].map { |(i, _, seg)| {i, seg} }
     end
 
     # The single source of sub-tab-chip geometry: each visible chip's {index, label,
-    # rect} plus the window `start` and `last` drawn index (so render can flag the
-    # ‹ / › overflow markers). Mirrors the old inline render_tab_strip loop exactly —
-    # reserves a column each edge (the `> rect.right - 1` break) for the markers.
-    private def self.strip_layout(rect : Rect, labels : Array(String),
-                                  active : Int32, prev_start : Int32 = 0) : {Array({Int32, String, Rect}), Int32, Int32}
+    # rect} plus the window `start` / `last` position and the last visible position
+    # (so render can flag the ‹ / › overflow markers). `hidden` chips are excluded
+    # from layout entirely but retain their absolute index in the segment tuple.
+    # Reserves a column each edge (the `> rect.right - 1` break) for the markers.
+    private def self.strip_layout(rect : Rect, labels : Array(String), active : Int32,
+                                  prev_start : Int32 = 0, hidden : Set(Int32)? = nil) : {Array({Int32, String, Rect}), Int32, Int32, Int32}
       segs = [] of {Int32, String, Rect}
+      # The absolute indices actually shown, in order (filtered chips skipped).
+      vis = (0...labels.size).select { |i| hidden.nil? || !hidden.includes?(i) }
+      return {segs, 0, -1, -1} if vis.empty?
       widths = labels.map(&.size.+(2)) # one space of padding each side of the segment
-      # Reserve a column on each edge for the ‹ / › overflow markers, then advance
-      # the start until the segments [start..active] fit in what remains.
-      start = scroll_start(widths, active, {rect.w - 2, 0}.max, prev_start)
+      # Window over the VISIBLE positions so the active chip stays on-screen; reserve a
+      # column on each edge for the ‹ / › overflow markers.
+      apos = vis.index(active) || 0
+      start = scroll_start(vis.map { |i| widths[i] }, apos, {rect.w - 2, 0}.max, prev_start)
       x = rect.x + 1
       last = start - 1
-      labels.each_with_index do |label, i|
-        next if i < start
+      vis.each_with_index do |i, pos|
+        next if pos < start
         seg_w = widths[i]
         break if x + seg_w > rect.right - 1 # leave the last column for the › marker
-        segs << {i, label, Rect.new(x, rect.y, seg_w, 1)}
+        segs << {i, labels[i], Rect.new(x, rect.y, seg_w, 1)}
         x += seg_w + 1
-        last = i
+        last = pos
       end
-      {segs, start, last}
+      {segs, start, last, vis.size - 1}
     end
 
     # The header hairline (row 1) under the logo row, above the tab menu.

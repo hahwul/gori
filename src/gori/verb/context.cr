@@ -76,6 +76,8 @@ module Gori
       abstract def subtab_search_open : Nil                # open the sub-tab search picker for the active tab
       abstract def subtab_search_count : Int32             # active tab's open sub-tab count (gates the search entry)
       abstract def replay_rename_subtab : Nil              # open the rename prompt for the active sub-tab
+      abstract def replay_tag_subtab : Nil                 # open the tag editor for the active sub-tab (issue #121)
+      abstract def replay_filter_subtabs : Nil             # open the `/` tag-filter bar over the sub-tab strip
       abstract def replay_close_subtab : Nil               # close the active sub-tab (confirm-gated)
       abstract def replay_duplicate_subtab : Nil           # clone the active sub-tab's content into a new sibling
       abstract def replay_toggle_hex : Nil                 # toggle byte-exact hex editing of the request pane

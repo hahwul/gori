@@ -111,6 +111,12 @@ module Gori::Tui
       # reconcile can reorder/remove replay tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
       @rename_view = nil.as(ReplayView | FuzzerView | ConvertView | MinerView | ComparerView | Nil)
+      # The Replay sub-tab TAG editor (issue #121) — a bottom prompt mirroring rename,
+      # space-separated tags. Held by VIEW identity for the same reconcile-race reason.
+      @tag_edit_open = false
+      @tag_buffer = ""
+      @tag_preedit = ""
+      @tag_view = nil.as(ReplayView?)
       # The import path prompt (palette → import:har/urls/oas) — bottom-anchored like
       # ^G/^F, with filesystem tab-completion via PathComplete.
       @import_open = false
@@ -571,8 +577,16 @@ module Gori::Tui
         @rename_preedit = text
         return
       end
+      if @tag_edit_open # sub-tab tag editor — IME composing text (e.g. Hangul tags)
+        @tag_preedit = text
+        return
+      end
       if @import_open
         @import_preedit = text
+        return
+      end
+      if @active_tab == :replay && replay_controller.subtab_filter_editing?
+        replay_controller.set_subtab_filter_preedit(text)
         return
       end
       # Route preedit to whichever input is active so composing text (e.g. Hangul
@@ -635,6 +649,7 @@ module Gori::Tui
       return handle_goto_key(ev) if @goto_open             # the ^G line prompt is modal while up
       return handle_search_key(ev) if @search_open         # the ^F find prompt is modal while up
       return handle_rename_key(ev) if @rename_open         # the sub-tab rename prompt is modal while up
+      return handle_tag_edit_key(ev) if @tag_edit_open     # the Replay tag editor is modal while up
       return handle_import_key(ev) if @import_open         # the import path prompt is modal while up
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
       # multi-line view (editors move the cursor, read-only panes scroll). Modifier
@@ -693,6 +708,12 @@ module Gori::Tui
       end
       if @active_tab == :prism && @overlay == :none && @focus == :body && prism_controller.view.querying?
         return if prism_controller.handle_query_key(ev)
+      end
+      # Replay sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc.
+      # Opened from the strip (not the body), so it's not gated on @focus.
+      if @active_tab == :replay && @overlay == :none && replay_controller.subtab_filter_editing?
+        replay_controller.handle_subtab_filter_key(ev)
+        return
       end
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.detail_open?
         return if findings_controller.handle_detail_key(ev)
@@ -831,19 +852,20 @@ module Gori::Tui
     # Right-click: rename a Replay/Fuzzer/Convert/Miner sub-tab chip (the one context menu we have).
     # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
-      if @goto_open || @search_open || @rename_open || @import_open
+      if @goto_open || @search_open || @rename_open || @tag_edit_open || @import_open
         # A right-click dismisses an open bottom prompt (like left-click/esc), so it can't
         # stack a second orthogonal prompt on top of the first.
         close_goto if @goto_open
         close_search if @search_open
         close_rename if @rename_open
+        close_tag_edit if @tag_edit_open
         close_import if @import_open
         return
       end
-      return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !copy_as_shown? && !@rename_open && subtabs_shown?
+      return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !copy_as_shown? && !@rename_open && !@tag_edit_open && subtabs_shown?
       sub_rect = BodyChrome.strip_rect(layout.body, strip: true)
       return unless sub_rect && sub_rect.contains?(mx, my)
-      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start).find { |(_, r)| r.contains?(mx, my) }
+      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start, current_subtab_hidden).find { |(_, r)| r.contains?(mx, my) }
         open_rename(seg[0])
       end
     end
@@ -854,10 +876,11 @@ module Gori::Tui
     private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
       return if @space_menu_open && click_space_menu(layout, mx, my)
       return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
-      if @goto_open || @search_open || @rename_open || @import_open
+      if @goto_open || @search_open || @rename_open || @tag_edit_open || @import_open
         close_goto if @goto_open # a click anywhere dismisses the bottom prompt (like esc)
         close_search if @search_open
         close_rename if @rename_open
+        close_tag_edit if @tag_edit_open
         close_import if @import_open
         return
       end
@@ -896,7 +919,7 @@ module Gori::Tui
     private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
       sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?)
       return false unless sub_rect && sub_rect.contains?(mx, my)
-      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start).find { |(_, r)| r.contains?(mx, my) }
+      if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start, current_subtab_hidden).find { |(_, r)| r.contains?(mx, my) }
         jump_subtab(seg[0])
         focus_pane(:subtabs)
       end
@@ -914,6 +937,13 @@ module Gori::Tui
 
     private def current_subtab_start : Int32
       @tabs[@active_tab]?.try(&.subtab_start) || 0
+    end
+
+    # Absolute chip indices hidden by the active tab's sub-tab filter (Replay only);
+    # nil = show all. Threaded into every strip_segments/render call so click hit-tests
+    # skip filtered chips exactly like rendering does.
+    private def current_subtab_hidden : Set(Int32)?
+      @tabs[@active_tab]?.try(&.subtab_hidden)
     end
 
     # Per-tab body click. Every tab has a controller; the fallback just takes focus
@@ -2343,6 +2373,10 @@ module Gori::Tui
         jump_subtab(c.to_i - 1) # switch + stay on the strip
       when rename_chord?(ev)
         open_rename(current_subtab_index) # rename the active sub-tab (Replay/Fuzzer/Convert/Miner)
+      when @active_tab == :replay && !ev.ctrl? && !ev.alt? && key.lower_t?
+        open_tag_edit(current_subtab_index) # tag the active Replay sub-tab (issue #121)
+      when @active_tab == :replay && !ev.ctrl? && !ev.alt? && c == '/'
+        replay_controller.start_subtab_filter # open the `/` tag-filter bar
       when key.left?, key.lower_h?
         move_subtab(-1)
       when key.right?, key.lower_l?
@@ -2802,6 +2836,7 @@ module Gori::Tui
       render_goto_prompt(screen, layout.status) if @goto_open
       render_search_prompt(screen, layout.status) if @search_open
       render_rename_prompt(screen, layout.status) if @rename_open
+      render_tag_prompt(screen, layout.status) if @tag_edit_open
       render_import_prompt(screen, layout.status) if @import_open
     end
 
@@ -3235,6 +3270,60 @@ module Gori::Tui
       x = rect.x + prefix.size
       iw = {rect.right - x - hint.size - 2, 4}.max
       screen.input_line(x, rect.y, @rename_buffer, @rename_buffer.size, @rename_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
+    end
+
+    # --- Replay sub-tab TAG editor (issue #121) ---------------------------------
+    # A bottom prompt mirroring rename: space-separated flat tags for the active Replay
+    # sub-tab. The target is held by VIEW identity (the reconcile may reorder/remove
+    # tabs while the prompt is open) — apply_tags re-finds it, never a shifted neighbour.
+
+    private def open_tag_edit(idx : Int32) : Nil
+      return unless @active_tab == :replay
+      return unless view = replay_controller.view_at(idx)
+      @tag_view = view
+      @tag_buffer = view.tags.join(" ")
+      @tag_preedit = ""
+      @tag_edit_open = true
+    end
+
+    private def close_tag_edit : Nil
+      @tag_edit_open = false
+      @tag_preedit = ""
+      @tag_view = nil
+    end
+
+    private def handle_tag_edit_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        close_tag_edit
+      elsif key.enter?
+        apply_tag_edit(@tag_buffer)
+        close_tag_edit
+      elsif key.backspace?
+        @tag_buffer = @tag_buffer[0, {@tag_buffer.size - 1, 0}.max]
+      elsif c && !ev.ctrl? && !ev.alt?
+        @tag_buffer += c
+        @tag_preedit = "" # commit any IME preedit
+      end
+    end
+
+    private def apply_tag_edit(raw : String) : Nil
+      if v = @tag_view
+        replay_controller.apply_tags(v, raw)
+      end
+    end
+
+    private def render_tag_prompt(screen : Screen, rect : Rect) : Nil
+      return if rect.w < 6
+      screen.fill(rect, Theme.panel)
+      prefix = "tags: "
+      screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
+      hint = "↵ save · esc cancel · #tags space-separated"
+      x = rect.x + prefix.size
+      iw = {rect.right - x - hint.size - 2, 4}.max
+      screen.input_line(x, rect.y, @tag_buffer, @tag_buffer.size, @tag_preedit, Theme.text_bright, Theme.panel, width: iw)
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
@@ -4020,6 +4109,16 @@ module Gori::Tui
     # reuse the SAME shell-owned rename prompt / confirm-gated close, not a new path.
     def replay_rename_subtab : Nil
       open_rename(current_subtab_index)
+    end
+
+    # Space-menu counterparts of the strip's `t` tag chord / `/` filter chord (issue
+    # #121) — reuse the SAME shell-owned tag prompt / controller-owned filter bar.
+    def replay_tag_subtab : Nil
+      open_tag_edit(current_subtab_index)
+    end
+
+    def replay_filter_subtabs : Nil
+      replay_controller.start_subtab_filter
     end
 
     def replay_close_subtab : Nil
