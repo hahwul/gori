@@ -2387,6 +2387,8 @@ module Gori::Tui
         jump_subtab(c.to_i - 1) # switch + stay on the strip
       when rename_chord?(ev)
         open_rename(current_subtab_index) # rename the active sub-tab (Replay/Fuzzer/Convert/Miner)
+      when @active_tab == :replay && ev.ctrl? && key.lower_r?
+        replay_controller.replay_send # send from the strip too — not just :body focus
       when @active_tab == :replay && !ev.ctrl? && !ev.alt? && key.lower_t?
         open_tag_edit(current_subtab_index) # tag the active Replay sub-tab (issue #121)
       when @active_tab == :replay && !ev.ctrl? && !ev.alt? && c == '/'
