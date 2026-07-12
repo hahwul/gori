@@ -16,7 +16,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="{{ page.description | default(site.description, true) | e }}">
   <title>{% if page.title is present %}{{ page.title | e }} - {% endif %}{{ site.title | e }}</title>
-  <link rel="icon" type="image/svg+xml" href="{{ base_url }}/favicon.svg">
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Gori" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
   {{ og_all_tags }}
   {{ canonical_tag }}
   {{ jsonld }}
