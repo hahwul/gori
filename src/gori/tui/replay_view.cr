@@ -1029,8 +1029,13 @@ module Gori::Tui
       expanded_text_to_bytes(@editor.text)
     end
 
+    # Env-expand the LF editor text and normalize to CRLF wire form. Uses
+    # `Env.expand_wire` (gsub `/\r?\n/`) — NOT `split('\n').join("\r\n")` — so a `$KEY`
+    # whose value itself carries a CRLF isn't doubled into `\r\r\n`, which would corrupt
+    # the header line (or the head/body separator). Shared logic with the CLI/MCP replay
+    # send paths so the TUI can't disagree with them on the bytes it puts on the wire.
     private def expanded_text_to_bytes(text : String) : Bytes
-      Env.expand(text).split('\n').join("\r\n").to_slice
+      Env.expand_wire(text)
     end
 
     # MARK-transform mode: parse the CRLF wire form as a Fuzz template and render each

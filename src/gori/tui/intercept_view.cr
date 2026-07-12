@@ -182,7 +182,9 @@ module Gori::Tui
     def pending_edit : {Int64, Bytes}?
       id = @loaded_id
       return nil unless id && @editor_dirty
-      raw = Env.expand(@editor.text).split('\n').join("\r\n").to_slice
+      # `Env.expand_wire` (gsub `/\r?\n/`) not `split('\n').join("\r\n")`: a `$KEY` value
+      # carrying a CRLF would otherwise double into `\r\r\n` and corrupt the forwarded bytes.
+      raw = Env.expand_wire(@editor.text)
       {id, Fuzz::ContentLength.sync(raw, add_when_missing: true)}
     end
 
