@@ -147,6 +147,17 @@ describe Gori::Convert do
       expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\ud800") }
       expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\udc00") }
     end
+
+    it "unicode-unescape treats a \\u run with a sign/space (not 4 hex digits) as literal" do
+      # `to_i?(16)` also accepts a leading sign/whitespace, so without an explicit
+      # hex-digit guard `\u+ABC`/`\u 1FF` silently mis-decode and `\u-1FF` reaches
+      # `Int#chr` with a NEGATIVE value → a raw ArgumentError. All four must stay literal.
+      conv("unicode-unescape", "\\u+ABC").should eq "\\u+ABC"
+      conv("unicode-unescape", "\\u 1FF").should eq "\\u 1FF"
+      conv("unicode-unescape", "\\u-1FF").should eq "\\u-1FF" # was: raw "0x-1ff out of char range"
+      conv("unicode-unescape", "\\u_ABC").should eq "\\u_ABC"
+      conv("unicode-unescape", "\\uABCD").should eq "ꯍ" # a genuine 4-hex-digit escape still decodes
+    end
   end
 
   describe "text transforms" do
