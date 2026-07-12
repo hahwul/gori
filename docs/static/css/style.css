@@ -1908,6 +1908,14 @@ nav.pagination a:hover,
   font-size: 0.9rem;
 }
 
+/* Doc pages keep the sidebar fixed for the full viewport height, so the
+   footer (a flow sibling after .docs-container closes) needs its own
+   left offset to clear it — otherwise the two overlap once the page is
+   scrolled to the bottom. */
+.is-doc .docs-footer {
+  padding-left: calc(var(--sidebar-w) + 3rem);
+}
+
 .docs-footer p {
   margin: 0;
 }
@@ -2307,6 +2315,10 @@ nav.pagination a:hover,
   .docs-container {
     display: block;
     padding-left: 0;
+  }
+
+  .is-doc .docs-footer {
+    padding-left: 1.25rem;
   }
 
   .docs-main {
