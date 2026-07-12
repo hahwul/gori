@@ -1,31 +1,36 @@
 :root {
   color-scheme: dark;
-  /* Overlay/tint bases as R G B triplets so they flip with the theme. */
+  /* Overlay/tint bases as R G B triplets so they flip with the theme. The
+     palette is drawn from the official art: indigo-ink night, gold leaf, and
+     the cool blue-grey of brushed cloud line-work. */
   --ink-rgb: 250 250 250;      /* near-white surface overlays (GORIDARK) */
-  --accent-rgb: 194 160 90;    /* gori focus gold */
-  --scrim-rgb: 8 8 9;          /* fixed dark scrim over dark art */
-  --bg: #0a0a0b;
-  --bg-soft: #101012;
-  --bg-panel: #141417;
-  --bg-panel-strong: #1b1b1f;
-  --text: #c8c8cc;
-  --heading: #fafafa;
-  --muted: #8f8f97;
-  --quiet: #6e6e76;
+  --accent-rgb: 200 168 96;    /* gori focus gold, warmed toward leaf */
+  --cloud-rgb: 108 126 178;    /* cool indigo ink for cloud/wave layers */
+  --scrim-rgb: 6 8 14;         /* fixed dark scrim over dark art */
+  --bg: #080a11;               /* indigo-black night */
+  --bg-soft: #0c0f18;
+  --bg-panel: #12141e;
+  --bg-panel-strong: #191c28;
+  --text: #c6c8d4;
+  --heading: #f6f5f1;          /* warm near-white */
+  --muted: #8d90a2;
+  --quiet: #6a6d7e;
   --line: rgb(var(--ink-rgb) / 0.12);
   --line-strong: rgb(var(--ink-rgb) / 0.24);
   --line-soft: rgb(var(--ink-rgb) / 0.07);
-  --accent: #c2a05a;
-  --accent-strong: #dcc084;
-  --accent-ink: #14100a;
+  --accent: #c8a860;
+  --accent-strong: #e6cf92;
+  --accent-ink: #120f06;
+  /* Brushed gold-leaf gradient for accent surfaces (mark, primary CTA, rules). */
+  --grad-gold-leaf: linear-gradient(135deg, #a67f36 0%, #e6cf92 24%, #c8a860 48%, #8c6a2c 72%, #ddc084 100%);
   --selection: rgb(var(--accent-rgb) / 0.26);
-  --shadow: 0 22px 80px rgb(0 0 0 / 0.55);
-  --shadow-soft: 0 12px 40px rgb(0 0 0 / 0.42);
-  --header-bg: rgb(10 10 11 / 0.82);
-  --sidebar-bg: rgb(10 10 11 / 0.88);
-  --modal-bg: #141417;
-  --overlay-bg: rgb(4 4 5 / 0.74);
-  --pre-bg: #0f0f11;
+  --shadow: 0 24px 80px rgb(2 3 9 / 0.62);
+  --shadow-soft: 0 14px 44px rgb(2 3 9 / 0.5);
+  --header-bg: rgb(9 11 18 / 0.82);
+  --sidebar-bg: rgb(9 11 18 / 0.9);
+  --modal-bg: #12141e;
+  --overlay-bg: rgb(4 5 10 / 0.76);
+  --pre-bg: #0c0e17;
   /* syntax (GORIDARK) */
   --syn-comment: #6e6e76;
   --syn-keyword: #b08ec2;
@@ -49,6 +54,7 @@
   color-scheme: light;
   --ink-rgb: 26 22 14;         /* warm-dark surface overlays (GORILIGHT) */
   --accent-rgb: 168 121 31;    /* gori focus gold (light) */
+  --cloud-rgb: 150 132 96;     /* warm taupe ink for cloud/wave layers */
   --scrim-rgb: 8 8 9;
   --bg: #faf9f7;
   --bg-soft: #f4f2ee;
@@ -64,6 +70,7 @@
   --accent: #a8791f;
   --accent-strong: #8a5d0a;
   --accent-ink: #fbf7ee;
+  --grad-gold-leaf: linear-gradient(135deg, #8a5d0a 0%, #c39a3c 26%, #a8791f 52%, #6f4e12 76%, #cba43e 100%);
   --selection: rgb(var(--accent-rgb) / 0.2);
   --shadow: 0 22px 70px rgb(60 50 30 / 0.16);
   --shadow-soft: 0 12px 34px rgb(60 50 30 / 0.12);
@@ -104,24 +111,70 @@ body {
   font-size: 16px;
   line-height: 1.65;
   color: var(--text);
+  /* Indigo cloud masses top-right and bottom-left, a warm gold glow where the
+     art's leaf concentrates, over an indigo-black night. */
   background:
-    radial-gradient(circle at 12% 6%, rgb(var(--accent-rgb) / 0.05), transparent 32rem),
-    linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 40rem);
+    radial-gradient(58rem 42rem at 90% -8%, rgb(var(--cloud-rgb) / 0.16), transparent 70%),
+    radial-gradient(52rem 40rem at 6% 108%, rgb(var(--cloud-rgb) / 0.11), transparent 72%),
+    radial-gradient(38rem 30rem at 94% 6%, rgb(var(--accent-rgb) / 0.07), transparent 66%),
+    linear-gradient(180deg, var(--bg-soft) 0%, var(--bg) 46rem);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Ambient ink-wave line-work: the contour SVG is used as a mask so the indigo
+   gradient shows only where the brushed strokes are. It flows in from the
+   top-right, behind the hero art, and dissolves at its own edges. */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
+  z-index: 0;
   pointer-events: none;
+  opacity: 0.46;
+  /* The wave colour is baked into the SVG, so this is a plain background-image
+     (cheap) rather than an image mask. A single linear-gradient mask keeps the
+     line-work in the right half, clear of the headline. */
+  background: url("../images/contour-waves.svg") 118% -8% / 128% auto no-repeat;
+  -webkit-mask: linear-gradient(90deg, transparent 0%, transparent 42%, #000 64%);
+  mask: linear-gradient(90deg, transparent 0%, transparent 42%, #000 64%);
+}
+
+/* Scattered gold-leaf flecks, clustered toward the top-right of the night field. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.75;
+  background: url("../images/gold-flecks.svg") top right / 62% auto no-repeat;
+}
+
+:root[data-theme="light"] body::before {
   opacity: 0.34;
-  background-image:
-    linear-gradient(rgb(var(--ink-rgb) / 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--ink-rgb) / 0.035) 1px, transparent 1px);
-  background-size: 72px 72px;
-  mask-image: radial-gradient(circle at 52% 18%, black, transparent 62%);
+  /* Warm the baked cool-indigo strokes toward taupe so the wave line-work sits
+     in the warm-paper palette instead of reading as cold blue ink. */
+  filter: hue-rotate(172deg) saturate(0.65);
+}
+
+:root[data-theme="light"] body::after {
+  opacity: 0.5;
+}
+
+/* Documentation pages keep the reading column calm: the wave line-work drops to
+   a whisper and the flecks thin out, so the atmosphere stays present without
+   sitting under body text. The landing keeps the full treatment. */
+body.is-doc::before {
+  opacity: 0.09;
+}
+
+body.is-doc::after {
+  opacity: 0.4;
+}
+
+:root[data-theme="light"] body.is-doc::before {
+  opacity: 0.16;
 }
 
 ::selection {
@@ -196,21 +249,15 @@ img {
   white-space: nowrap;
 }
 
-.logo-img {
+/* The loop mark is the white PNG used as a mask over the gold-leaf gradient, so
+   it reads as brushed gold in both themes from one source (the gradient itself
+   flips per theme). --logo-src is set inline in the template to carry base_url. */
+.logo-mark {
+  width: 2rem;
   height: 1.8rem;
-  width: auto;
-}
-
-.logo-light {
-  display: none;
-}
-
-:root[data-theme="light"] .logo-dark {
-  display: none;
-}
-
-:root[data-theme="light"] .logo-light {
-  display: block;
+  background: var(--grad-gold-leaf);
+  -webkit-mask: var(--logo-src) center / contain no-repeat;
+  mask: var(--logo-src) center / contain no-repeat;
 }
 
 .logo-word {
@@ -219,6 +266,11 @@ img {
   line-height: 1;
   letter-spacing: 0;
   transform: translateY(-0.04em);
+  /* Gold-leaf wordmark: the gradient is clipped to the glyphs. */
+  background: var(--grad-gold-leaf);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .top-nav {
@@ -410,7 +462,7 @@ kbd {
   width: 0.42rem;
   height: 0.42rem;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--grad-gold-leaf);
   box-shadow: 0 0 0 3px rgb(var(--accent-rgb) / 0.2);
 }
 
@@ -454,15 +506,16 @@ kbd {
 }
 
 .button-primary {
-  border: 1px solid var(--accent);
-  background: var(--accent);
+  border: 1px solid var(--accent-strong);
+  background: var(--grad-gold-leaf);
   color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), var(--shadow-soft);
 }
 
 .button-primary:hover {
-  background: var(--accent-strong);
   border-color: var(--accent-strong);
   color: var(--accent-ink);
+  filter: brightness(1.06);
 }
 
 .button-secondary {
@@ -521,11 +574,14 @@ kbd {
   background: linear-gradient(115deg, rgb(var(--scrim-rgb) / 0.2), transparent 40%, rgb(var(--accent-rgb) / 0.1));
 }
 
+/* Warm the monochrome wave capture into gold leaf on indigo, so the disc reads
+   like the official art rather than a cold render. */
 .hero-disc img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  filter: sepia(1) saturate(2.3) hue-rotate(3deg) brightness(1.04) contrast(1.03);
 }
 
 /* --- Showcase: a real terminal capture floating under the hero --------- */
@@ -742,6 +798,8 @@ kbd {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Same gold-leaf wash as the hero disc, so the two orbs read as a pair. */
+  filter: sepia(1) saturate(2.1) hue-rotate(4deg) brightness(1.02) contrast(1.02);
 }
 
 .structure-copy {
@@ -1154,9 +1212,10 @@ kbd {
   position: absolute;
   left: 0;
   bottom: 0;
-  width: 6rem;
+  width: 7rem;
   height: 2px;
-  background: linear-gradient(90deg, var(--accent), transparent);
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent) 46%, transparent);
 }
 
 .docs-main h2 {
