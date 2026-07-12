@@ -4,6 +4,7 @@ require "./connect"
 require "./head_rewriter"
 require "../interceptor"
 require "../host_overrides"
+require "./socket_tuning"
 require "./conn/client_conn"
 
 module Gori::Proxy
@@ -112,6 +113,11 @@ module Gori::Proxy
       spawn do
         client.sync = true # immediate writes (P6)
         client.tcp_nodelay = true
+        # Baseline read/write timeout (defeats silent slowloris + RUDY on the client leg) and
+        # keepalive (reaps a dead peer on a later relaxed tunnel). ClientConn re-arms per request
+        # and relaxes both on entering a WS/SSE/CONNECT/h2 tunnel.
+        SocketTuning.enable_keepalive(client)
+        SocketTuning.arm(client, SocketTuning::CLIENT_IO_TIMEOUT)
         ClientConn.new(client, "http", @sink, @tls, rewriter: @rewriter, interceptor: @interceptor,
           host_overrides: @host_overrides, self_addr: {@host, @port}).run
       rescue

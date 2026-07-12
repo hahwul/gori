@@ -4,6 +4,10 @@ module Gori::Proxy
   # ClientHello from an HTTP/2 cleartext preface after a CONNECT, so the chosen
   # handler (TLS MITM or h2c relay) still sees the complete byte stream (P7).
   class PrefixIO < IO
+    # The wrapped transport IO — exposed so SocketTuning can reach the underlying socket
+    # (a PrefixIO over the raw client socket is what the TLS-MITM server socket wraps).
+    getter inner : IO
+
     def initialize(@prefix : Bytes, @inner : IO)
       @pos = 0
     end

@@ -112,8 +112,10 @@ module Gori
           head: req_head, body: req_stored, body_truncated: req_trunc, body_size: req_size)
         resp_head = response_head(http_version, status, reason, resp_headers, resp_body)
         resp_stored, resp_trunc, resp_size = capped(resp_body)
+        content_encoding = resp_headers.find { |(k, _)| k.compare("content-encoding", case_insensitive: true) == 0 }.try(&.[1])
         resp = Store::CapturedResponse.new(
           flow_id: 0, status: status, reason: reason.presence, content_type: content_type,
+          content_encoding: content_encoding,
           head: resp_head, body: resp_stored, body_truncated: resp_trunc, body_size: resp_size,
           duration_us: duration_us, state: Store::FlowState::Complete)
         FlowPair.new(req, resp)

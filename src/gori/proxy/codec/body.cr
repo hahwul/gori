@@ -200,13 +200,21 @@ module Gori::Proxy::Codec
     # the body completed: false means a Content-Length/chunked body was cut short,
     # so the caller must close the connection (a half-delivered body can't be
     # followed by a keep-alive request without desyncing the peer).
-    def self.stream(src : IO, dst : IO, framing : BodyFraming, length : Int64, tee : IO) : Bool
+    #
+    # `buf` is the scratch copy buffer. When nil (Replay/Fuzz/Miner callers) a body
+    # allocates a fresh 64 KiB slice, as before. A caller that forwards many bodies on
+    # one connection (ClientConn) passes ONE reused buffer so a keep-alive stream stops
+    # churning a large-object 64 KiB allocation per body — safe because a body is pumped
+    # one direction on one fiber, so the request and response bodies copy sequentially,
+    # never overlapping (the same argument copy_chunked already uses across its chunks).
+    # A body-less frame (None) never touches the buffer, so a bodyless request never allocates.
+    def self.stream(src : IO, dst : IO, framing : BodyFraming, length : Int64, tee : IO, buf : Bytes? = nil) : Bool
       complete =
         case framing
         in BodyFraming::None           then true
-        in BodyFraming::Length         then copy_n(src, dst, tee, length)
-        in BodyFraming::CloseDelimited then (copy_until_eof(src, dst, tee); true) # EOF is the framing
-        in BodyFraming::Chunked        then copy_chunked(src, dst, tee)
+        in BodyFraming::Length         then copy_n(src, dst, tee, length, buf)
+        in BodyFraming::CloseDelimited then (copy_until_eof(src, dst, tee, buf); true) # EOF is the framing
+        in BodyFraming::Chunked        then copy_chunked(src, dst, tee, buf)
         end
       dst.flush
       complete
@@ -290,18 +298,19 @@ module Gori::Proxy::Codec
 
     # Copies exactly `n` bytes; returns false if the source EOF'd early (a
     # truncated Content-Length body), true once all `n` were transferred.
-    # `buf` is the scratch copy buffer. The Length-framing caller lets it default to a
-    # fresh 64 KiB slice (one alloc per body); copy_chunked passes ONE buffer reused
-    # across every chunk (a chunked body used to allocate a fresh 64 KiB per chunk — a
-    # 100 MB response in 16 KB chunks churned ~400 MB of throwaway buffers). Safe to
-    # share: a body is pumped one direction on one fiber, so chunks copy sequentially.
-    private def self.copy_n(src : IO, dst : IO, tee : IO, n : Int64, buf : Bytes = Bytes.new(BUFSIZE)) : Bool
+    # `buf` is the scratch copy buffer. When nil a fresh 64 KiB slice is allocated (one
+    # alloc per body); a caller that reuses one buffer across a whole connection or across
+    # copy_chunked's chunks passes it in (a chunked body used to allocate a fresh 64 KiB
+    # per chunk — a 100 MB response in 16 KB chunks churned ~400 MB of throwaway buffers).
+    # Safe to share: a body is pumped one direction on one fiber, so chunks copy sequentially.
+    private def self.copy_n(src : IO, dst : IO, tee : IO, n : Int64, buf : Bytes? = nil) : Bool
+      cbuf = buf || Bytes.new(BUFSIZE)
       remaining = n
       while remaining > 0
         want = remaining < BUFSIZE ? remaining.to_i : BUFSIZE
-        read = src.read(buf[0, want])
+        read = src.read(cbuf[0, want])
         break if read == 0 # premature EOF
-        slice = buf[0, read]
+        slice = cbuf[0, read]
         dst.write(slice)
         tee.write(slice)
         remaining -= read
@@ -309,10 +318,10 @@ module Gori::Proxy::Codec
       remaining == 0
     end
 
-    private def self.copy_until_eof(src : IO, dst : IO, tee : IO) : Nil
-      buf = Bytes.new(BUFSIZE)
-      while (read = src.read(buf)) > 0
-        slice = buf[0, read]
+    private def self.copy_until_eof(src : IO, dst : IO, tee : IO, buf : Bytes? = nil) : Nil
+      cbuf = buf || Bytes.new(BUFSIZE)
+      while (read = src.read(cbuf)) > 0
+        slice = cbuf[0, read]
         dst.write(slice)
         tee.write(slice)
       end
@@ -320,10 +329,15 @@ module Gori::Proxy::Codec
 
     # Returns true once the terminating 0-length chunk is seen; false if the
     # source EOF'd mid-stream (a truncated chunked body).
-    private def self.copy_chunked(src : IO, dst : IO, tee : IO) : Bool
-      buf = Bytes.new(BUFSIZE) # reused across every chunk's copy_n (see copy_n)
+    private def self.copy_chunked(src : IO, dst : IO, tee : IO, buf : Bytes? = nil) : Bool
+      cbuf = buf || Bytes.new(BUFSIZE) # reused across every chunk's copy_n (see copy_n)
+      # ONE reused scratch for every chunk-size + trailer line of this body: read_crlf_line
+      # fills+returns a view into it instead of a fresh IO::Memory + dup per line (a long
+      # chunked/SSE stream has one size line per chunk). Safe: each line is emitted (and the
+      # size line parsed) before the next read_crlf_line clears+refills the scratch.
+      line_buf = IO::Memory.new
       loop do
-        size_line = read_crlf_line(src)
+        size_line = read_crlf_line(src, line_buf)
         # EOF before any byte → truncated mid-stream. A line that hit MAX_LINE_BYTES WITHOUT an
         # LF is also unterminated: parse_chunk_size could still read a valid-looking size from the
         # partial (all-'0' → 0 terminating chunk; '5;<oversized ext>' → 5), leaving the rest of the
@@ -343,7 +357,7 @@ module Gori::Proxy::Codec
           # trailer lines) can't pin/forward unboundedly — abort (→ close) on overrun.
           trailer_total = 0_i64
           loop do
-            trailer = read_crlf_line(src)
+            trailer = read_crlf_line(src, line_buf)
             # Clean EOF after the 0-chunk → tolerate (as before). But an unterminated (LF-less,
             # cap-truncated) trailer line is a framing error: forwarding it and keeping the
             # connection alive would leak the line remainder onto the wire to misframe the next
@@ -357,8 +371,8 @@ module Gori::Proxy::Codec
           end
           return true # terminating chunk reached
         end
-        return false unless copy_n(src, dst, tee, size, buf) # truncated mid-chunk
-        if crlf = read_exact(src, 2)                         # the CRLF terminating the chunk data
+        return false unless copy_n(src, dst, tee, size, cbuf) # truncated mid-chunk
+        if crlf = read_exact(src, 2)                          # the CRLF terminating the chunk data
           emit(dst, tee, crlf)
         end
       end
@@ -373,14 +387,22 @@ module Gori::Proxy::Codec
     # Stops buffering at `max_size` even without an LF, so a pathological line with
     # no terminator can't grow memory unbounded; the partial (LF-less) line then
     # fails the caller's framing check (bad chunk-size / never-blank trailer → close).
-    private def self.read_crlf_line(io : IO, max_size : Int32 = MAX_LINE_BYTES) : Bytes?
-      buf = IO::Memory.new
+    #
+    # With a `scratch` IO::Memory the line is read into (and returned as a VIEW over)
+    # that reused buffer — no per-line IO::Memory + dup. The caller MUST consume the
+    # returned slice before the next read_crlf_line call clears+refills the scratch
+    # (copy_chunked emits/parses each line immediately, so this holds). Without a scratch
+    # the line is returned as an owned copy that outlives the call.
+    private def self.read_crlf_line(io : IO, scratch : IO::Memory? = nil, max_size : Int32 = MAX_LINE_BYTES) : Bytes?
+      buf = scratch || IO::Memory.new
+      buf.clear if scratch
       while byte = io.read_byte
         buf.write_byte(byte)
         break if byte == 0x0a_u8 # LF
         break if buf.bytesize >= max_size
       end
-      buf.bytesize == 0 ? nil : buf.to_slice.dup
+      return nil if buf.bytesize == 0
+      scratch ? buf.to_slice : buf.to_slice.dup
     end
 
     private def self.read_exact(io : IO, n : Int32) : Bytes?

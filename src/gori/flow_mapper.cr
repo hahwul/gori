@@ -44,6 +44,7 @@ module Gori
         body: body,
         reason: resp.reason.presence,
         content_type: resp.headers.get?("Content-Type"),
+        content_encoding: resp.headers.get?("Content-Encoding"),
         ttfb_us: ttfb_us,
         duration_us: duration_us,
         state: state,

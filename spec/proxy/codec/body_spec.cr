@@ -322,6 +322,35 @@ describe Gori::Proxy::Codec::Body do
   end
 end
 
+describe "Body.stream reused buffers (perf: per-connection copy buffer + chunked size-line scratch)" do
+  it "streams two sequential bodies through ONE shared copy buffer byte-exactly" do
+    # The connection-lifetime buffer ClientConn threads in is reused across the request body
+    # then the response body; they run sequentially, so reuse must not corrupt either.
+    buf = Bytes.new(Body::BUFSIZE)
+    a = "A" * 200_000 # larger than BUFSIZE → multiple copy iterations
+    src_a, dst_a, tee_a = IO::Memory.new(a), IO::Memory.new, IO::Memory.new
+    Body.stream(src_a, dst_a, BodyFraming::Length, a.bytesize.to_i64, tee_a, buf).should be_true
+    b = "B" * 130_000
+    src_b, dst_b, tee_b = IO::Memory.new(b), IO::Memory.new, IO::Memory.new
+    Body.stream(src_b, dst_b, BodyFraming::Length, b.bytesize.to_i64, tee_b, buf).should be_true
+    dst_a.to_s.should eq(a); tee_a.to_s.should eq(a)
+    dst_b.to_s.should eq(b); tee_b.to_s.should eq(b)
+  end
+
+  it "forwards a MANY-chunk body byte-exactly with the reused size-line scratch + copy buffer" do
+    wire = String.build do |s|
+      500.times { s << "5\r\nhello\r\n" } # 500 size-line reads share one scratch IO::Memory
+      s << "0\r\nX-Sum: z\r\n\r\nNEXT"
+    end
+    src, dst, tee = IO::Memory.new(wire), IO::Memory.new, IO::Memory.new
+    Body.stream(src, dst, BodyFraming::Chunked, 0_i64, tee, Bytes.new(Body::BUFSIZE)).should be_true
+    expected = wire[0, wire.size - "NEXT".size]
+    dst.to_s.should eq(expected) # wire form forwarded byte-exact (framing + trailer intact)
+    tee.to_s.should eq(expected)
+    src.gets_to_end.should eq("NEXT") # next keep-alive message not consumed
+  end
+end
+
 describe Gori::Proxy::Codec::ContentDecode do
   head = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".to_slice
 

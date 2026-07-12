@@ -1503,14 +1503,15 @@ module Gori
                   op.pairs.each do |req, resp|
                     id, _req_fts = insert_one(c, req)
                     has_resp = !resp.nil?
-                    if resp
+                    if r = resp
                       update_one(c, Store::CapturedResponse.new(
-                        flow_id: id, status: resp.not_nil!.status, head: resp.not_nil!.head,
-                        body: resp.not_nil!.body, reason: resp.not_nil!.reason,
-                        content_type: resp.not_nil!.content_type, ttfb_us: resp.not_nil!.ttfb_us,
-                        duration_us: resp.not_nil!.duration_us, state: resp.not_nil!.state,
-                        error: resp.not_nil!.error, body_truncated: resp.not_nil!.body_truncated?,
-                        body_size: resp.not_nil!.body_size))
+                        flow_id: id, status: r.status, head: r.head,
+                        body: r.body, reason: r.reason,
+                        content_type: r.content_type,
+                        content_encoding: r.content_encoding, ttfb_us: r.ttfb_us,
+                        duration_us: r.duration_us, state: r.state,
+                        error: r.error, body_truncated: r.body_truncated?,
+                        body_size: r.body_size))
                     end
                     inserted << {id, has_resp}
                   end
@@ -1714,7 +1715,13 @@ module Gori
       # back from the row on every response; a miss (evicted, an import, or a cross-process
       # write) falls back to that readback. DELETE is a cheap tombstone (contentless_delete=1)
       # and also makes a double update_response idempotent (last write wins).
-      resp_fts = (binary_content?(resp.content_type) || encoded?(head_markers(resp.head)[1])) ? "" : fts_text(resp.body)
+      # Skip the FTS body text for a binary content type or a compressed (non-identity
+      # Content-Encoding) body. Both markers now ride on CapturedResponse (extracted once
+      # by the proxy where the headers are already parsed), so this no longer copies the
+      # raw head into a String + scans it per flow. A body-less response (204/304/redirect)
+      # has no text to index and short-circuits before the marker checks.
+      resp_body = resp.body
+      resp_fts = (resp_body.nil? || resp_body.empty? || binary_content?(resp.content_type) || encoded?(resp.content_encoding)) ? "" : fts_text(resp_body)
       req_fts = @pending_req_fts.delete(resp.flow_id) || request_fts_from_row(conn, resp.flow_id)
       conn.exec("DELETE FROM flows_fts WHERE rowid = ?", resp.flow_id)
       conn.exec("INSERT INTO flows_fts(rowid, req, resp) VALUES (?, ?, ?)", resp.flow_id, req_fts, resp_fts)

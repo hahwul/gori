@@ -7,6 +7,7 @@ require "../head_rewriter"
 require "../../interceptor"
 require "../../host_overrides"
 require "../prefix_io"
+require "../socket_tuning"
 require "../h2/relay"
 require "../connect"
 require "../upstream"
@@ -40,10 +41,25 @@ module Gori::Proxy
       @upstream = nil.as(IO?)
       @up_host = nil.as(String?)
       @up_port = 0
+      # One 64 KiB copy buffer reused across every request AND response body forwarded on
+      # this connection (see `copy_buf`), so a keep-alive stream stops churning a large-object
+      # allocation per body. Lazily allocated on the first body copy.
+      @copy_buf = nil.as(Bytes?)
+    end
+
+    # The connection-lifetime scratch buffer for body forwarding, allocated on first use.
+    # Safe to share across the request and response streams because they run sequentially on
+    # this one fiber (the request body is fully forwarded before the response head is read).
+    private def copy_buf : Bytes
+      @copy_buf ||= Bytes.new(Codec::Body::BUFSIZE)
     end
 
     def run : Nil
       loop do
+        # Re-arm the client read/write timeout at the START of every keep-alive request, so a
+        # prior request that RELAXED the socket for a streamed (SSE/chunked) response then kept
+        # the connection alive can't carry that relaxed (untimed) state into the next request.
+        SocketTuning.arm(@io, SocketTuning::CLIENT_IO_TIMEOUT)
         break unless handle_request
       end
     rescue
@@ -87,7 +103,11 @@ module Gori::Proxy
 
     # Returns true to keep the connection alive for another request.
     private def handle_request : Bool
-      head = Codec::Http1.read_head(@io)
+      # The client request head is the slowloris surface: bound total head-assembly time after
+      # its first byte (a drip-feed that a per-read timeout can't catch). The first-byte (idle
+      # keep-alive) wait stays bounded by the baseline timeout armed in `run`.
+      head = Codec::Http1.read_head(@io,
+        deadline: SocketTuning::HEAD_DEADLINE, timeout_sock: SocketTuning.underlying_socket(@io))
       return false if head.nil? # client closed / keep-alive idle end
 
       req = Codec::Http1.parse_request_head(head)
@@ -171,7 +191,7 @@ module Gori::Proxy
       req_complete = true
       upstream, reused, sent = acquire_and_send(host, port, retryable) do |up|
         up.write(sent_head)
-        req_complete = Codec::Body.stream(@io, up, req_framing, req_len, req_capture)
+        req_complete = Codec::Body.stream(@io, up, req_framing, req_len, req_capture, copy_buf)
         up.flush
         true
       end
@@ -292,10 +312,15 @@ module Gori::Proxy
     private def acquire_and_send(host : String, port : Int32, retryable : Bool, & : IO -> Bool) : {IO?, Bool, Bool}
       upstream, reused = acquire_upstream(host, port)
       return {nil, false, false} unless upstream
+      # Re-arm the per-request upstream timeout: a REUSED socket may carry a relaxed (untimed)
+      # state from a prior streamed (SSE/chunked) response. A freshly dialed one already has it
+      # (direct_dial), so this is an idempotent set there.
+      SocketTuning.arm(upstream, Upstream::IO_TIMEOUT)
       ok = send_guard { yield upstream }
       if !ok && reused && retryable
         release_upstream
         upstream, reused = acquire_upstream(host, port)
+        SocketTuning.arm(upstream, Upstream::IO_TIMEOUT) if upstream
         ok = upstream ? send_guard { yield upstream } : false
       end
       {upstream, reused, ok}
@@ -374,6 +399,8 @@ module Gori::Proxy
           scheme, resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
 
+      relax_for_streaming_response(resp, resp_framing, upstream)
+
       # Non-hold path: stream the response body byte-for-byte (P6) and record the
       # flow. `completed` is true only when the whole body was delivered cleanly; a
       # client abort or upstream truncation is recorded Aborted (see the helper).
@@ -393,6 +420,11 @@ module Gori::Proxy
         @upstream = nil
         @up_host = nil
         @up_port = 0
+        # Entering a long-lived bidirectional tunnel: relax both legs' timeouts so an idle
+        # WebSocket/tunnel isn't reaped by a wall-clock cutoff (the 30 s upstream io_timeout would
+        # otherwise tear a quiet tunnel down). Keepalive (both legs) reaps a truly dead peer.
+        SocketTuning.relax(@io)
+        SocketTuning.relax(upstream)
         if websocket_upgrade?(resp)
           WS::Relay.run(@io, upstream, flow_id, @sink) # frames until close (P6/P7)
         else
@@ -491,7 +523,7 @@ module Gori::Proxy
       begin
         @io.write(sent_resp_head)
         @io.flush
-        resp_complete = Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture)
+        resp_complete = Codec::Body.stream(upstream, @io, resp_framing, resp_len, resp_capture, copy_buf)
       rescue
         record_streamed_response(sent_resp, resp_framing, resp_capture, flow_id, ttfb, started,
           state: Store::FlowState::Aborted, error: "connection closed mid-response")
@@ -528,7 +560,7 @@ module Gori::Proxy
                                                 resp_framing : Codec::BodyFraming, resp_len : Int64,
                                                 ttfb : Int64, started : Time::Instant) : Bool
       buf = IO::Memory.new
-      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
+      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
       sent_resp_head, fwd_body = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing) { |e| rw.rewrite_response_body(e) }
       sent_resp = Codec::Http1.parse_response_head(sent_resp_head) # head may have been re-framed
       stored, trunc, size = capped(fwd_body)
@@ -599,7 +631,7 @@ module Gori::Proxy
       buf = IO::Memory.new
       # tee into a discard sink, not a second IO::Memory — the body is already buffered in
       # `buf`; a throwaway IO::Memory would hold the whole response a second time.
-      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new)
+      resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
       body = resp_framing.none? ? nil : buf.to_slice.dup
       # Match&Replace (response body) BEFORE the human sees it, like the head. A body rule
       # re-frames the head to Content-Length; `resp` (status/version/Connection) is
@@ -658,12 +690,26 @@ module Gori::Proxy
       release_upstream unless origin_keep_alive
     end
 
+    # A close-delimited or SSE (event-stream) response streams for an unbounded, idle-prone time;
+    # relax BOTH legs' read/write timeouts so a legitimately-idle stream isn't torn down mid-flight
+    # (keepalive reaps a genuinely dead peer). A normal Length/chunked response keeps the baseline
+    # timeout, and the `run`/`acquire_and_send` re-arm restores it for any later keep-alive request.
+    private def relax_for_streaming_response(resp : Codec::RawResponse, resp_framing : Codec::BodyFraming, upstream : IO) : Nil
+      return unless resp_framing.close_delimited? || sse?(resp)
+      SocketTuning.relax(@io)
+      SocketTuning.relax(upstream)
+    end
+
     # Cleartext HTTP/2 (h2c) tunnelled inside a CONNECT: the target is the
     # CONNECT authority, so we dial it plaintext and run the same h2 relay (no
     # :authority routing / HPACK coupling needed). The origin must speak h2c.
     private def intercept_h2c(host : String, port : Int32, client : IO) : Nil
       upstream = Upstream.dial(host, port, overrides: @host_overrides)
       return unless upstream
+      # Long-lived h2c relay: relax both legs so an idle h2 connection isn't reaped by the
+      # baseline/io timeouts; keepalive (both legs) handles a dead peer.
+      SocketTuning.relax(client)
+      SocketTuning.relax(upstream)
       begin
         H2::Relay.run(client, upstream, host, port, @sink)
       ensure
@@ -724,6 +770,10 @@ module Gori::Proxy
         begin
           @io.write("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)
           @io.flush
+          # Blind CONNECT tunnel: relax both legs so an idle tunnel (IMAP IDLE, long-poll, a quiet
+          # TLS session) isn't reaped by the 30 s io_timeout; keepalive reaps a genuinely dead peer.
+          SocketTuning.relax(@io)
+          SocketTuning.relax(upstream)
           Pump.blind_tunnel(@io, upstream)
         ensure
           upstream.close rescue nil

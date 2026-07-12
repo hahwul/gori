@@ -44,6 +44,10 @@ module Gori
       getter status : Int32
       getter reason : String?
       getter content_type : String?
+      # Content-Encoding header value (nil = none/identity). Extracted once by the proxy
+      # where the response headers are already parsed, so the store writer can decide FTS
+      # skipping without re-parsing the raw head per flow.
+      getter content_encoding : String?
       getter head : Bytes
       getter body : Bytes? # captured body, possibly truncated to the capture cap
       getter? body_truncated : Bool
@@ -56,7 +60,7 @@ module Gori
       def initialize(@flow_id, @status, @head, @body = nil, @reason = nil,
                      @content_type = nil, @ttfb_us = nil, @duration_us = nil,
                      @state = FlowState::Complete, @error = nil,
-                     @body_truncated = false, @body_size = nil)
+                     @body_truncated = false, @body_size = nil, @content_encoding = nil)
       end
     end
 
