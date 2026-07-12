@@ -783,26 +783,48 @@ kbd {
   padding: 2rem 0 6rem;
 }
 
-/* A real capture, not abstract art: the Space menu open over History. Framed as
-   a terminal card with the same gold offset-ring as the hero disc so it still
-   reads as a pair, but rectangular so the whole menu stays visible. */
+/* A gold-ringed disc matching the hero orb: the same ink-and-gold wallpaper art
+   fills it as a backdrop, with the real Space-menu capture floating on top like
+   a window resting on the art. A soft radial scrim sinks the wallpaper behind
+   the screenshot so the terminal stays the focal point. */
 .structure-art {
   position: relative;
   justify-self: center;
-  width: min(100%, 34rem);
-  margin: 0;
-  border-radius: 12px;
+  width: min(92%, 30rem);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 46%, transparent 30%, rgb(4 5 10 / 0.55) 78%),
+    #0a0a0b url("../images/wallpaper.jpg") center / cover;
   box-shadow: var(--shadow-soft);
   outline: 1px solid rgb(var(--accent-rgb) / 0.2);
-  outline-offset: 0.75rem;
+  outline-offset: 1.5rem;
 }
 
+.structure-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 1px solid rgb(var(--accent-rgb) / 0.28);
+  border-radius: 50%;
+}
+
+/* The screenshot floats centred as a window; the wallpaper shows around it
+   (mostly above/below, since the capture is wide). The light twin swaps in via
+   the theme-swap JS and pops even harder against the dark art. */
 .structure-art img {
-  display: block;
-  width: 100%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 86%;
   height: auto;
-  border-radius: 11px;
-  filter: drop-shadow(0 18px 44px rgb(0 0 0 / 0.42));
+  transform: translate(-50%, -50%);
+  border-radius: 9px;
+  box-shadow: 0 22px 55px rgb(0 0 0 / 0.55);
+  outline: 1px solid rgb(255 255 255 / 0.08);
+  outline-offset: -1px;
 }
 
 .structure-copy {
@@ -2207,8 +2229,8 @@ nav.pagination a:hover,
   }
 
   .structure-art {
-    width: min(100%, 30rem);
-    outline-offset: 0.55rem;
+    width: min(88%, 26rem);
+    outline-offset: 1.1rem;
   }
 
   .home-paths {
