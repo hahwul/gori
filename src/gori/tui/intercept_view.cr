@@ -45,13 +45,16 @@ module Gori::Tui
       @preedit = ""
       @loaded_id = nil.as(Int64?) # which item the editor currently holds
       @editor_dirty = false       # whether the held bytes were actually edited (vs just viewed)
-      # Cached highlight of the selected held item's raw bytes (read-only detail
-      # pane). Held bytes are immutable and item ids are monotonic, so the id is a
-      # perfect cache key — recomputed only when the selection changes, not on
-      # every render (a held body was re-tokenised on each repaint).
+      # Cached highlight of the selected held item's bytes (read-only detail pane).
+      # Held bytes are immutable, so the item id + theme is the base cache key —
+      # recomputed only when the selection/theme changes, not every render. The loaded
+      # item's IN-PROGRESS edit is the exception: its preview must show the edited bytes
+      # (not the original), so @detail_win_edit_rev folds the editor's change counter into
+      # the key and the preview refreshes as those bytes change (same item id).
       @detail_win = nil.as(Highlight::Windowed?)
       @detail_win_id = nil.as(Int64?)
       @detail_win_rev = Theme.revision # the theme the cached (colour-baked) head was built under
+      @detail_win_edit_rev = -1        # @editor.edits the preview was built at (-1 = built from the pristine held bytes)
       @detail_xscroll = 0              # horizontal scroll offset for the read-only held-item preview
       @detail_scroll = 0               # vertical scroll offset (lines) for the read-only preview
     end
@@ -529,15 +532,23 @@ module Gori::Tui
     # and styled per visible line — a multi-MiB held body no longer freezes the UI
     # fiber on selection (mirrors the History/Replay windowing).
     private def detail_window_for(it : Interceptor::Item) : Highlight::Windowed
+      # When this is the item loaded in the editor AND it was modified, preview the EDITED
+      # bytes (mirrors forward_bytes / effective_method_target) rather than the pristine
+      # held bytes — so leaving the editor for the QUEUE doesn't snap the body back to the
+      # original. edit_rev keys the cache on the editor's change counter for that case.
+      edited = @loaded_id == it.id && @editor_dirty
+      edit_rev = edited ? @editor.edits : -1
       cached = @detail_win
-      return cached if cached && @detail_win_id == it.id && @detail_win_rev == Theme.revision
+      return cached if cached && @detail_win_id == it.id && @detail_win_rev == Theme.revision && @detail_win_edit_rev == edit_rev
       if @detail_win_id != it.id # a newly-previewed item resets both scroll axes
         @detail_xscroll = 0
         @detail_scroll = 0
       end
       @detail_win_id = it.id
       @detail_win_rev = Theme.revision
-      @detail_win = Highlight.from_lines_windowed(String.new(it.raw).split('\n').map(&.rstrip('\r')), it.kind.request?)
+      @detail_win_edit_rev = edit_rev
+      lines = edited ? @editor.lines_snapshot : String.new(it.raw).split('\n').map(&.rstrip('\r'))
+      @detail_win = Highlight.from_lines_windowed(lines, it.kind.request?)
     end
 
     private def ensure_visible(h : Int32) : Nil

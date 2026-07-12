@@ -171,6 +171,19 @@ module Gori::Tui
       @project_view.desc_clear_selection
     end
 
+    # Editor-style Tab: while typing the DESCRIPTION, forward Tab types a tab rather than
+    # advancing the focus ring (esc / arrows at the edges still cross to the other panes).
+    def editor_captures_tab? : Bool
+      @project_view.pane == :desc && @project_view.desc_insert_mode?
+    end
+
+    def handle_editor_tab(ev : Termisu::Event::Key) : Bool
+      return false unless editor_captures_tab?
+      @project_view.insert('\t')
+      @project_view.set_preedit("")
+      true
+    end
+
     # --- focus ring (SCOPE ◂▸ HOST OVERRIDES ◂▸ DESCRIPTION ◂▸ PROJECT SETTINGS) ---
     def pane_advance(dir : Int32) : Bool
       # Tab-ing off the settings pane applies its pending network edit before the pane changes.

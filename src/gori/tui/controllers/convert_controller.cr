@@ -318,6 +318,22 @@ module Gori::Tui
       true
     end
 
+    # Editor-style Tab: while typing in the INPUT editor, forward Tab types a tab rather
+    # than advancing the focus ring (↓ / Shift-Tab still cross to the CHAIN + OUTPUT panes).
+    def editor_captures_tab? : Bool
+      s = cur
+      s.pane == :input && s.input_mode == InputMode::Insert
+    end
+
+    def handle_editor_tab(ev : Termisu::Event::Key) : Bool
+      return false unless editor_captures_tab?
+      s = cur
+      s.input.insert('\t')
+      s.input.set_preedit("")
+      touch
+      true
+    end
+
     # --- focus ring (Tab/Shift-Tab): menu ▸ input ▸ chain ▸ output ▸ menu ---
     # OUTPUT is read-only but joins the ring so it can be focused + scrolled.
     PANE_ORDER = [:input, :chain, :output]
@@ -354,7 +370,7 @@ module Gori::Tui
         "↑/↓ move · ⇧arrows select · y copy · ⇧←/→ h-scroll · ↑-top chain · space cmds · ^X mode · ^Y copy all · esc tabs"
       when :input
         if s.input_mode == InputMode::Insert
-          "type to edit · esc read · ↓/↹ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
+          "type to edit · esc read · ↓ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
         else
           "i/↵ edit · ⇧arrows select · y copy · space cmds · ↓/↹ chain · ^X mode · ^N new · esc tabs"
         end
