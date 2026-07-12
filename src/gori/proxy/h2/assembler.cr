@@ -39,6 +39,11 @@ module Gori::Proxy::H2
       # can't grow per-connection memory without bound. Raw frames stay the truth.
       getter body = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
       property headers : Array({String, String})? = nil
+      # Cumulative decoded-header bytesize across all merged blocks on this side, so a
+      # flood of repeated non-status HEADERS blocks (fake trailers, never END_STREAM)
+      # can't grow `headers` without bound. Per-block caps (MAX_HEADER_BLOCK, HPACK
+      # MAX_HEADER_LIST) only bound ONE block; this bounds the accumulation.
+      property header_bytes = 0
       property ended = false
     end
 
@@ -152,8 +157,16 @@ module Gori::Proxy::H2
     # initial headers rather than clobbering them.
     private def finish_header_block(side : Side, decoder : HPACK::Decoder) : Nil
       decoded = decoder.decode(side.header_buf.to_slice)
+      added = decoded.sum { |(n, v)| n.bytesize + v.bytesize + HPACK::Decoder::ENTRY_OVERHEAD }
       if (existing = side.headers) && !decoded.any? { |(n, _)| n == ":status" }
         # Trailers (no :status) append to the existing header list — grpc-status et al.
+        # Bound the CUMULATIVE list: the per-decode MAX_HEADER_LIST caps ONE block, but a
+        # flood of repeated non-status HEADERS blocks (fake trailers on a stream held open
+        # past END_STREAM) would otherwise grow `headers` without limit (memory DoS). The
+        # raise unwinds into feed's rescue, which drops the projection and keeps the raw
+        # frame log authoritative; the ensure below still clears header_buf.
+        raise Gori::Error.new("h2 cumulative header list too large") if side.header_bytes + added > HPACK::Decoder::MAX_HEADER_LIST
+        side.header_bytes += added
         existing.concat(decoded)
       else
         # First block, OR a status-bearing response block. An interim 1xx (100/103)
@@ -162,6 +175,7 @@ module Gori::Proxy::H2
         # :status first and mis-report the flow's status). This also bounds a stream's
         # header list against a flood of repeated interim HEADERS blocks.
         side.headers = decoded
+        side.header_bytes = added
       end
     ensure
       # Always reset, even if decode raised (feed rescues HPACK/framing errors and

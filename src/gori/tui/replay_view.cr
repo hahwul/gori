@@ -1487,7 +1487,11 @@ module Gori::Tui
         else
           @editor.at_top?
         end
-      when :response then @scroll == 0
+        # Cursor-aware for navigable modes (mirrors fuzzer_view's detail_cursor_at_top?) so
+        # ↑/⇧↑ move/extend the read cursor upward until it reaches line 0 with scroll at top,
+        # instead of ejecting the pane whenever the response fits on screen (@scroll stays 0).
+        # The non-navigable hex dump has no caret, so keep scroll-based ejection there.
+      when :response then resp_navigable? ? (@resp_cursor.cy == 0 && @scroll == 0) : @scroll == 0
       else                false
       end
     end

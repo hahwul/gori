@@ -212,6 +212,16 @@ describe Gori::Proxy::Codec::Body do
       Http1.obfuscated_header?("GET / HTTP/1.1\r\nX : y\r\n\r\n".to_slice).should be_true
     end
 
+    it "rejects a bare LF used to hide a header from the CRLF-only framing scan" do
+      # `Foo: bar\nTransfer-Encoding: chunked` folds into one header for the CRLF-only
+      # parser, but an LF-lenient backend still reads the hidden TE — a smuggling vector.
+      Http1.obfuscated_header?(
+        "GET / HTTP/1.1\r\nHost: h\r\nFoo: bar\nTransfer-Encoding: chunked\r\n\r\n".to_slice).should be_true
+      req = Http1.parse_request_head(
+        "POST / HTTP/1.1\r\nHost: h\r\nFoo: bar\nTransfer-Encoding: chunked\r\n\r\n".to_slice)
+      expect_raises(Gori::Error) { Body.request_framing(req) }
+    end
+
     it "leaves a response with a non-chunked Transfer-Encoding as close-delimited (not rejected)" do
       # Responses may legitimately be close-delimited under a non-chunked TE — only the
       # request path (which must know the body boundary to keep-alive) rejects.

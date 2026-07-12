@@ -122,6 +122,14 @@ module Gori
       private def self.validate_header(name : String, value : String) : Nil
         raise Gori::Error.new("header name must not be empty") if name.empty?
         reject_token_breakers(name, "header name #{name.inspect}")
+        # A header name is an RFC 7230 token (tchar only). reject_token_breakers stops
+        # whitespace/controls, but a printable non-token char — especially ':' — evades
+        # the case-insensitive Host/Content-Length dedup and puts a second, conflicting
+        # line on the wire (name "Content-Length:0" writes `Content-Length:0: x` next to
+        # the auto `Content-Length: <bodylen>`).
+        if name =~ /[^!#$%&'*+\-.^_`|~0-9A-Za-z]/
+          raise Gori::Error.new("illegal character in header name #{name.inspect} (must be an RFC 7230 token)")
+        end
         raise Gori::Error.new("illegal CR/LF/NUL in value of header #{name.inspect}") if injection_char?(value)
       end
 

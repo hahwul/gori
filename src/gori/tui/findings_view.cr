@@ -433,9 +433,10 @@ module Gori::Tui
       return unless finding = @detail
       store.update_finding(finding.id, notes: String.new(@notes.to_bytes))
       exit_notes_insert!
+      # refresh_detail already re-syncs @notes from the re-fetched @detail (now that
+      # notes-insert mode is off), and it nil-guards a peer-deleted finding — so no
+      # separate (unsafe) set_text here.
       refresh_detail(store)
-      @notes.set_text(@detail.not_nil!.notes)
-      @notes_read.sync_from(@notes)
     end
 
     # Leave the notes editor WITHOUT persisting (^W) — discards the in-buffer
@@ -730,8 +731,11 @@ module Gori::Tui
         @detail = store.get_finding(finding.id)
         @detail_flow = @detail.try { |f| f.flow_id.try { |fid| store.flow_row(fid) } }
         reload_detail_links(store)
-        unless notes_insert_mode?
-          @notes.set_text(@detail.not_nil!.notes)
+        # get_finding returns nil when the row was deleted by a peer session (supported
+        # cross-session scenario) — guard the deref, mirroring PrismView#refresh_detail.
+        # When @detail is nil the render path already falls back to the list view.
+        if !notes_insert_mode? && (d = @detail)
+          @notes.set_text(d.notes)
           @notes_read.sync_from(@notes)
         end
       end

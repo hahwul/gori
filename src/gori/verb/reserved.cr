@@ -37,6 +37,11 @@ module Gori
         when "escape"    then "Escape is reserved (back / close)"
         when "tab"       then "Tab is reserved (focus ring)"
         when "backspace" then "Backspace is reserved (delete)"
+          # Space is the action-menu leader (open_space_menu), dispatched AFTER the scoped
+          # keymap lookup in runner.cr — binding a verb to it shadows the leader (app-wide
+          # if the verb is Global). Keyed on chord.key, so this also covers shift+space,
+          # which the leader dispatch treats identically (it only excludes ctrl/alt).
+        when "space"     then "Space is reserved (action menu)"
           # ':' opens the command line in dispatch regardless of the shift modifier (the
           # `ev.char == ':'` guard ignores shift), so reserve it unconditionally.
         when ":" then "':' is reserved (command line)"

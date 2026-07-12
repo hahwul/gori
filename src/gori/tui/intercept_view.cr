@@ -205,10 +205,16 @@ module Gori::Tui
       end
     end
 
+    # backspace/delete/undo are no-ops at buffer start / end-of-buffer / empty undo
+    # stack (TextArea returns early without bumping @edits). A no-op here must NOT set
+    # @editor_dirty: once dirty, forward_bytes recomputes Content-Length and normalizes
+    # line endings, so a held message the user only *looked* at would forward as
+    # different bytes — breaking the byte-exact hold contract (P7). Gate on a real edit.
     def edit_undo : Nil
       return unless @editing
+      before = @editor.edits
       @editor.undo
-      @editor_dirty = true
+      @editor_dirty = true if @editor.edits != before
     end
 
     def edit_insert(ch : Char) : Nil
@@ -225,8 +231,9 @@ module Gori::Tui
 
     def edit_backspace : Nil
       return unless @editing
+      before = @editor.edits
       @editor.backspace
-      @editor_dirty = true
+      @editor_dirty = true if @editor.edits != before
     end
 
     def edit_move(dr : Int32, dc : Int32) : Nil
@@ -242,11 +249,12 @@ module Gori::Tui
       @editor.end_of_line if @editing
     end
 
-    # Forward-delete the char under the caret — a content edit.
+    # Forward-delete the char under the caret — a content edit (no-op at end-of-buffer).
     def edit_delete : Nil
       return unless @editing
+      before = @editor.edits
       @editor.delete
-      @editor_dirty = true
+      @editor_dirty = true if @editor.edits != before
     end
 
     # ^G go-to-line / ^F search in the held-message editor (only while editing).

@@ -325,7 +325,7 @@ module Gori
           io << " type=" << e.type if e.type
           io << " id=" << e.id if e.id
           io << " retry=" << e.retry if e.retry
-          e.data.each_line { |l| io << "\n  " << l.scrub }
+          e.data.each_line { |l| io << "\n  " << CLI::Output.term_safe_multiline(l.scrub) }
         end
       end
 
@@ -341,7 +341,7 @@ module Gori
         if doc = Saml.from_flow(tgt, rh, rb, sh, sb)
           puts ""
           puts "=== SAML (#{Saml.summary(doc)}) ==="
-          puts Saml.pretty_xml(doc.xml).scrub
+          puts CLI::Output.term_safe_multiline(Saml.pretty_xml(doc.xml).scrub)
         end
         jwts = Jwt.from_flow(tgt, rh, rb, sh, sb)
         unless jwts.empty?
@@ -349,18 +349,18 @@ module Gori
           puts "=== JWT (#{jwts.size}) ==="
           jwts.each do |f|
             puts "▸ #{f.location}#{(b = f.brief) ? " · #{b}" : ""}"
-            puts f.decoded.scrub
+            puts CLI::Output.term_safe_multiline(f.decoded.scrub)
           end
         end
         if op = Graphql.from_flow(tgt, rh, rb)
           puts ""
           puts "=== GRAPHQL ==="
-          puts Graphql.display(op).scrub
+          puts CLI::Output.term_safe_multiline(Graphql.display(op).scrub)
         end
         if fields = FormData.from_flow(tgt, rh, rb)
           puts ""
           puts "=== PARAMS (#{fields.size}) ==="
-          fields.each { |f| puts "#{f.source == :query ? "?" : " "} #{f.name} = #{(n = f.note) ? "(#{n})" : f.value}".scrub }
+          fields.each { |f| puts CLI::Output.term_safe_multiline("#{f.source == :query ? "?" : " "} #{f.name} = #{(n = f.note) ? "(#{n})" : f.value}".scrub) }
         end
       end
 
@@ -379,7 +379,7 @@ module Gori
       private def self.ws_message_text(m : Store::WsMessage) : String
         arrow = m.direction == "out" ? "→" : "←"
         if m.text?
-          "#{arrow} #{String.new(m.payload).scrub}"
+          "#{arrow} #{CLI::Output.term_safe_multiline(String.new(m.payload).scrub)}"
         else
           preview = m.payload[0, {m.payload.size, 16}.min].hexstring
           "#{arrow} [binary #{m.payload.size}B] #{preview}#{m.payload.size > 16 ? "…" : ""}"
@@ -2256,13 +2256,16 @@ module Gori
       end
 
       private def self.print_message_text(head : Bytes?, body : Bytes?) : Nil
-        STDOUT.puts(String.new(head || Bytes.empty).scrub.rstrip)
+        # Neutralize ANSI/OSC/CSI escapes in captured (attacker-controlled) head/body
+        # before writing to the live terminal; `binary_body?` only sniffs for NUL, so an
+        # escape-only payload would otherwise pass through. `--format raw` stays exact.
+        STDOUT.puts(CLI::Output.term_safe_multiline(String.new(head || Bytes.empty).scrub).rstrip)
         if body && !body.empty?
           STDOUT.puts ""
           if binary_body?(body)
             STDOUT.puts "[binary body, #{body.size} bytes — use --format raw for exact bytes, or view hex]"
           else
-            STDOUT.puts(String.new(body).scrub)
+            STDOUT.puts(CLI::Output.term_safe_multiline(String.new(body).scrub))
           end
         end
       end

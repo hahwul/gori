@@ -48,6 +48,15 @@ module Gori
         String.build { |io| s.each_char { |c| io << (c.control? ? '·' : c) } }
       end
 
+      # Like `term_safe` but preserves '\n'/'\t', so a captured multi-line head/body keeps
+      # its layout while ANSI/OSC/CSI escapes and other control bytes are neutralized. Use
+      # for captured text written to a live terminal (the `show`/`replay` text views).
+      # `--format raw` stays the exact-bytes path for scripts/redirection.
+      def self.term_safe_multiline(s : String) : String
+        return s unless s.each_char.any? { |c| c.control? && c != '\n' && c != '\t' }
+        String.build { |io| s.each_char { |c| io << ((c.control? && c != '\n' && c != '\t') ? '·' : c) } }
+      end
+
       # "#42  GET   https  example.com:443/users  200  1.2kB  3ms  [Complete]"
       # Columns are padded for scannability; status/state make capture progress legible.
       def self.flow_row_text(row : Store::FlowRow) : String

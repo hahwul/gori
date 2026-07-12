@@ -43,7 +43,9 @@ module Gori
         private def cross_origin?(origin : String, ctx : Context) : Bool
           # Host is a bracketed IPv6 literal ([::1]) OR a normal reg-name/IPv4; either with an
           # optional port. Strip the IPv6 brackets to compare against the bare stored host.
-          m = origin.strip.downcase.match(%r{\A(https?)://(\[[^\]]+\]|[^/:]+)(?::(\d+))?\z}) || return true
+          # scrub: a non-UTF-8 Origin byte would make PCRE raise and drop the whole flow's
+          # detections (see secret_in_url); a real origin is ASCII so scrubbing is lossless here.
+          m = origin.strip.scrub.downcase.match(%r{\A(https?)://(\[[^\]]+\]|[^/:]+)(?::(\d+))?\z}) || return true
           scheme = m[1]
           host = m[2].lchop('[').rchop(']')
           port = m[3]?.try(&.to_i?) || (scheme == "https" ? 443 : 80)

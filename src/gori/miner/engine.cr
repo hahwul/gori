@@ -6,33 +6,8 @@ require "./baseline"
 require "../fuzz/engine"
 
 module Gori::Miner
-  # Enforces a HARD ceiling on the total number of real network sends across a whole
-  # mining run — baseline calibration + bucket probes + confirmation rounds all count.
-  # Past the cap, send() returns a benign error Result without touching the network, so
-  # `--max-requests` is a true hard cap. Previously it was a soft/racy check in the
-  # dispatcher only: it overshot by ~2x concurrency (the check `@sent >= cap` lagged the
-  # workers' post-round-trip increment across a buffered channel) AND skipped baseline
-  # traffic entirely (Baseline called the backend directly, uncounted).
-  class CappedBackend < Fuzz::Backend
-    getter sent : Int64 = 0_i64
-
-    def initialize(@inner : Fuzz::Backend, @cap : Int64?)
-    end
-
-    def origin : Fuzz::Origin
-      @inner.origin
-    end
-
-    def cap_reached? : Bool
-      (c = @cap) && c > 0 ? @sent >= c : false
-    end
-
-    def send(bytes : Bytes) : Replay::Result
-      return Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, "max-requests cap reached") if cap_reached?
-      @sent += 1
-      @inner.send(bytes)
-    end
-  end
+  # The hard-cap wrapper (baseline calibration + bucket probes + confirmation rounds all
+  # count against `--max-requests`) lives with the send seam it wraps: Fuzz::CappedBackend.
 
   # Drives a parameter-mining run: calibrate a baseline, then for each location stuff
   # candidate names into buckets, diff vs baseline, and BINARY-SEARCH each interesting
@@ -59,7 +34,7 @@ module Gori::Miner
     @concurrency : Int32
     @state : State
     @wake : Channel(Nil)
-    @backend : CappedBackend
+    @backend : Fuzz::CappedBackend
     @report : Baseline::Report?
     @seen : Set({Location, String})
     @found : Int32
@@ -72,7 +47,7 @@ module Gori::Miner
                    backend : Fuzz::Backend, @config : Config)
       # Wrap the backend so max_requests is enforced at every real send (baseline,
       # bucket, and confirm), not just as a racy pre-dispatch check.
-      @backend = CappedBackend.new(backend, @config.max_requests)
+      @backend = Fuzz::CappedBackend.new(backend, @config.max_requests)
       @concurrency = @config.concurrency.clamp(1, MAX_CONCURRENCY)
       @state = State::Running
       @wake = Channel(Nil).new(1)

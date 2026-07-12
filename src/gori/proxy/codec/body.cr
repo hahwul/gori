@@ -145,7 +145,7 @@ module Gori::Proxy::Codec
       # obs-folded is invisible to the exact-match framing lookups below, yet a lenient
       # backend still honours it — a CL/TE request-smuggling primitive. Reject up front,
       # like CL+TE, rather than framing on a header we can't see (RFC 7230 §3.2.4).
-      raise Gori::Error.new("obfuscated request header (whitespace before colon or obs-fold)") if Http1.obfuscated_header?(req.raw_head)
+      raise Gori::Error.new("obfuscated request header (whitespace before colon, obs-fold, or bare LF)") if Http1.obfuscated_header?(req.raw_head)
       # Skip the get_all Array allocation when Transfer-Encoding is absent (the common case);
       # an empty list means neither chunked? nor te_present? — fall straight to Content-Length.
       te = req.headers.has?("Transfer-Encoding") ? req.headers.get_all("Transfer-Encoding") : EMPTY_TE

@@ -1,6 +1,7 @@
 require "json"
 require "base64"
 require "time"
+require "uri"
 require "./builder"
 
 module Gori
@@ -77,9 +78,24 @@ module Gori
         list
       end
 
+      # A HAR request body is recorded as EITHER postData.text OR an array of
+      # postData.params {name,value} — Firefox/Safari record x-www-form-urlencoded
+      # POSTs as params with no text. Fall back to reconstructing the urlencoded body
+      # from params so the body (and its Content-Length) aren't silently dropped.
       private def self.post_body(node : JSON::Any?) : Bytes?
         return nil unless node
-        encoded_body(node["text"]?.to_s, node["encoding"]?.to_s)
+        if body = encoded_body(node["text"]?.to_s, node["encoding"]?.to_s)
+          return body
+        end
+        if params = node["params"]?.try(&.as_a?)
+          pairs = params.compact_map do |p|
+            name = p["name"]?.to_s
+            next if name.empty?
+            "#{URI.encode_www_form(name)}=#{URI.encode_www_form(p["value"]?.to_s)}"
+          end
+          return pairs.join('&').to_slice unless pairs.empty?
+        end
+        nil
       end
 
       private def self.response_body(resp : JSON::Any) : {Bytes?, String?}

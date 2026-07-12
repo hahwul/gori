@@ -2132,9 +2132,11 @@ module Gori::Tui
       # decision — effective_tabs force-includes the active tab, which would mask the hide.
       vis = Chrome.visible_tabs(Settings.tab_prefs)
       unless vis.any? { |(s, _)| s == @active_tab }
-        project_controller.commit if @active_tab == :project
-        replay_controller.save_current_replay if @active_tab == :replay
-        convert_controller.commit if @active_tab == :convert # now a hideable default tab — flush before snapping off
+        # Persist the outgoing tab's dirty buffer before snapping off — @active_tab still
+        # names the tab being hidden here. flush_active_tab_edits covers all hideable tabs
+        # (Notes/Fuzzer/Findings/Miner included), unlike the old project/replay/convert-only
+        # flush which silently dropped the others at hide-time.
+        flush_active_tab_edits
         @active_tab = vis.first[0]
         on_enter_tab
         @focus = :menu

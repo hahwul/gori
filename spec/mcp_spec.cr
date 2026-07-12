@@ -830,6 +830,16 @@ describe Gori::MCP::RequestBuilder do
       expect_raises(Gori::Error, /empty/) { Gori::MCP::RequestBuilder.build(args) }
     end
 
+    it "rejects a non-token char (':') in a header name (would emit a 2nd Content-Length)" do
+      # "Content-Length:0" evades the case-insensitive dedup and is written as
+      # `Content-Length:0: x` next to the auto Content-Length — two conflicting lines.
+      args = {"url"     => JSON::Any.new("http://h.test/"),
+              "method"  => JSON::Any.new("POST"),
+              "body"    => JSON::Any.new("hi"),
+              "headers" => JSON::Any.new({"Content-Length:0" => JSON::Any.new("x")})}
+      expect_raises(Gori::Error, /header name/) { Gori::MCP::RequestBuilder.build(args) }
+    end
+
     it "rejects whitespace/CRLF in the method (request-line forgery)" do
       args = {"url"    => JSON::Any.new("http://h.test/"),
               "method" => JSON::Any.new("GET /admin HTTP/1.1\r\nHost: a")}
