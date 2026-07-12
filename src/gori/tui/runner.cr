@@ -2197,6 +2197,9 @@ module Gori::Tui
         @hosts_overlay.move_cursor(1)
       elsif key.backspace?
         @hosts_overlay.cancel_add unless @hosts_overlay.backspace
+      elsif key.tab?
+        @hosts_overlay.input(' ') # Tab types the IP/host separator, not a focus jump
+        @hosts_overlay.set_preedit("")
       elsif c && !ev.ctrl? && !ev.alt?
         @hosts_overlay.input(c)
         @hosts_overlay.set_preedit("")
@@ -2289,6 +2292,9 @@ module Gori::Tui
         @env_overlay.move_cursor(1)
       elsif key.backspace?
         @env_overlay.cancel_add unless @env_overlay.backspace
+      elsif key.tab?
+        @env_overlay.input(' ') # Tab types the KEY/VALUE separator, not a focus jump
+        @env_overlay.set_preedit("")
       elsif c && !ev.ctrl? && !ev.alt?
         @env_overlay.input(c)
         @env_overlay.set_preedit("")

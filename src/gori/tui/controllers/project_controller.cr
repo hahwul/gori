@@ -483,6 +483,9 @@ module Gori::Tui
         @project_view.ov_move_cursor(1)
       elsif key.backspace?
         @project_view.cancel_ov_add unless @project_view.ov_backspace
+      elsif key.tab?
+        @project_view.ov_input(' ') # Tab types the IP/host separator, not a pane jump
+        @project_view.set_preedit("")
       elsif c && !ev.ctrl? && !ev.alt?
         @project_view.ov_input(c)
         @project_view.set_preedit("") # commit any preedit
@@ -584,6 +587,9 @@ module Gori::Tui
         @project_view.env_move_cursor(1)
       elsif key.backspace?
         @project_view.cancel_env_add unless @project_view.env_backspace
+      elsif key.tab?
+        @project_view.env_input(' ') # Tab types the KEY/VALUE separator, not a pane jump
+        @project_view.set_preedit("")
       elsif c && !ev.ctrl? && !ev.alt?
         @project_view.env_input(c)
         @project_view.set_preedit("")
