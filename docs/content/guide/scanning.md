@@ -9,6 +9,11 @@ gori includes automated analysis that runs alongside your manual testing. **Pris
 
 **Prism** groups security issues by type and severity. Its passive checks run as you browse — with zero extra requests — inspecting **History** flows and **Replay** send results. Active checks send a small, controlled number of probes only when you ask for them.
 
+<figure class="tui-shot">
+  <img src="/images/tui/prism.svg" alt="gori Prism scanner listing passive findings grouped by severity and category: permissive CORS, missing CSP and HSTS, cookie flag issues, and cacheable responses, each with an affected host">
+  <figcaption><strong>Prism</strong> surfaces passive findings as you browse (CORS, cookie hygiene, missing security headers, info leaks), grouped by severity and category.</figcaption>
+</figure>
+
 | Category | What it covers |
 |----------|----------------|
 | `headers` | Security headers (HSTS, CSP, …), cleartext Basic auth, mixed content, cacheable API responses |

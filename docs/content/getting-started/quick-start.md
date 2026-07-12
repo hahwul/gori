@@ -66,6 +66,11 @@ Almost everything is reachable from two places. Learn these before memorizing ta
 
 The palette is the map of the whole tool. The space menu is the map of *this* pane. Both show key hints; if you forget a chord, open one of them.
 
+<figure class="tui-shot">
+  <img src="/images/tui/command-palette.svg" alt="gori command palette open over the History tab, listing settings, navigation and export actions with a filter box">
+  <figcaption>The command palette (<kbd>Ctrl-P</kbd>): fuzzy-filter every app-wide action, from settings to <em>Open browser</em> to tab jumps.</figcaption>
+</figure>
+
 Capture and intercept still have global toggles:
 
 | Key | Action |
@@ -94,6 +99,11 @@ The **Help** tab is a full key cheatsheet inside the app — use it when this pa
 ## 5. Watch flows in History
 
 Switch to **History** (`3`, or `[` / `]` until History is active). Every request/response is a *flow*: start line, headers, body (up to 8 MiB), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.
+
+<figure class="tui-shot">
+  <img src="/images/tui/history.svg" alt="gori History tab listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration columns">
+  <figcaption>The <strong>History</strong> tab: every captured flow with method, status, size and timing, filterable with the query language.</figcaption>
+</figure>
 
 | Key | Action |
 |-----|--------|
@@ -130,6 +140,11 @@ Select a flow in History (list or detail), then:
 2. `Enter` or `i` on the request to edit (INS mode); `Esc` back to READ.
 3. `Ctrl-R` again to **send**; inspect the response (timing and diff against the previous reply).
 4. `Tab` cycles target → request → response.
+
+<figure class="tui-shot">
+  <img src="/images/tui/replay.svg" alt="gori Replay tab showing an editable request pane beside the response pane, with a status line reading replayed 200 in 1152ms">
+  <figcaption><strong>Replay</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
+</figure>
 
 ### Minimal Fuzzer loop
 
@@ -172,6 +187,11 @@ A mock-UI walkthrough of tab/pane navigation, the palette, the space menu, and R
 ```bash
 gori tutorial
 ```
+
+<figure class="tui-shot">
+  <img src="/images/tui/tutorial.svg" alt="gori guided tour welcome card explaining the four core moves: tabs and panes, the command palette, the action menu, and edit mode">
+  <figcaption>The guided tour walks through tabs and panes, the palette, the space menu, and READ / INS edit mode in a harmless sandbox.</figcaption>
+</figure>
 
 It is also offered at the end of the first-run wizard.
 

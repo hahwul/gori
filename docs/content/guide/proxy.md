@@ -11,9 +11,19 @@ Start gori and point your client at `127.0.0.1:8070` (see the [Quick Start](/get
 
 Each flow records the full request and response: start line, headers, and body (captured up to 8 MiB). Bodies compressed with gzip, deflate, Brotli, or Zstd are decoded for display.
 
+<figure class="tui-shot">
+  <img src="/images/tui/response-detail.svg" alt="gori flow detail view on the RESPONSE sub-tab, showing an HTTP/2 200 status line and syntax-highlighted response headers">
+  <figcaption>Open any flow with <kbd>Enter</kbd> to read the full request and response, with sub-tabs for headers, HTTP/2 frames, and raw bytes.</figcaption>
+</figure>
+
 ## Intercept
 
 Press `i` to enable **Intercept**. When on, matching requests (and optionally responses) are held so you can forward, drop, or edit them before they continue. A filter bar at the top of the Intercept tab lets you choose the direction to catch and narrow what gets held with a query-language expression, so you only pause on the traffic you care about.
+
+<figure class="tui-shot">
+  <img src="/images/tui/intercept.svg" alt="gori Intercept tab with a filter bar for catch direction and a query condition, and a card explaining forward and drop while catch is off">
+  <figcaption>The <strong>Intercept</strong> tab: toggle catch with <kbd>i</kbd>, pick a direction, and hold only matching traffic to forward, drop, or edit in flight.</figcaption>
+</figure>
 
 ## Scope
 
@@ -22,6 +32,11 @@ Scope keeps a large session focused on your target. In the **Project** tab you d
 ## Sitemap
 
 The **Sitemap** tab collapses History into a deduplicated tree of `host → path` endpoints, with method chips and scope markers. It's the fastest way to see the shape of a target's attack surface. Numeric path segments can be folded together so `/user/1` and `/user/2` share one node.
+
+<figure class="tui-shot">
+  <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts">
+  <figcaption>The <strong>Sitemap</strong> folds History into a <code>host → path</code> tree with method chips, so a target's surface is one glance.</figcaption>
+</figure>
 
 ## Protocol Support
 
@@ -107,6 +122,11 @@ Useful for staging hosts, IP-based virtual hosts, or pointing a production hostn
 ## Project Tab
 
 The **Project** home tab is more than a summary. Focusable panes (cycle with `Tab`):
+
+<figure class="tui-shot">
+  <img src="/images/tui/project.svg" alt="gori Project tab with overview, at-a-glance status bars, scope, host overrides, environment variables, description, and network panes">
+  <figcaption>The <strong>Project</strong> home: overview and status at a glance, plus panes for scope, host overrides, env vars, and per-project network settings.</figcaption>
+</figure>
 
 | Pane | Purpose |
 |------|---------|

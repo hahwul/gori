@@ -365,6 +365,7 @@ kbd {
 }
 
 .home-hero,
+.home-showcase,
 .home-paths,
 .home-structure,
 .home-flow,
@@ -525,6 +526,40 @@ kbd {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* --- Showcase: a real terminal capture floating under the hero --------- */
+
+.home-showcase {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 0 3.5rem;
+}
+
+.showcase-frame {
+  width: min(100%, 1040px);
+  margin: 0;
+}
+
+.showcase-frame img {
+  width: 100%;
+  height: auto;
+  border-radius: 14px;
+  filter: drop-shadow(0 26px 60px rgb(0 0 0 / 0.5));
+}
+
+.showcase-note {
+  max-width: 46ch;
+  margin: 1.5rem auto 0;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.98rem;
+  line-height: 1.55;
+}
+
+.showcase-note strong {
+  color: var(--heading);
 }
 
 /* --- Paths: three links woven into a chain ----------------------------- */
@@ -763,22 +798,44 @@ kbd {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
-  max-width: 980px;
+  max-width: 1080px;
   margin-top: 1.6rem;
   border-top: 1px solid var(--line);
 }
 
-.flow-list div {
+/* Each step alternates copy / screenshot so the workflow reads as a walkthrough,
+   not three identical cards. */
+.flow-list > div {
   display: grid;
-  grid-template-columns: 11rem minmax(0, 1fr);
-  gap: 1rem;
-  align-items: baseline;
-  padding: 1.2rem 0;
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  gap: 2.6rem;
+  align-items: center;
+  padding: 2.4rem 0;
   border-bottom: 1px solid var(--line);
+}
+
+.flow-list > div:nth-child(even) .flow-shot {
+  order: -1;
+}
+
+.flow-copy span {
+  display: block;
+  margin-bottom: 0.55rem;
 }
 
 .flow-list p {
   color: var(--muted);
+  max-width: 34ch;
+}
+
+.flow-shot {
+  margin: 0;
+}
+
+.flow-shot img {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 18px 44px rgb(0 0 0 / 0.42));
 }
 
 /* --- The name (dictionary entry) -------------------------------------- */
@@ -1162,6 +1219,69 @@ kbd {
 
 .docs-main strong {
   color: var(--heading);
+}
+
+/* --- TUI screenshots: real terminal captures rendered to self-contained SVG.
+   The SVG carries its own near-black (or theme) canvas + rounded window frame,
+   so on the dark docs it floats on the same field; on light it reads as a card.
+   drop-shadow (not box-shadow) hugs the rounded shape's alpha. --- */
+.tui-shot {
+  margin: 2rem 0 2.4rem;
+}
+.tui-shot img {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 14px 36px rgb(0 0 0 / 0.34));
+}
+.tui-shot figcaption {
+  margin-top: 0.75rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  text-align: center;
+}
+.docs-main kbd {
+  padding: 0.06rem 0.36rem;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--heading);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  white-space: nowrap;
+}
+/* theme gallery: a tidy grid of the same view across palettes */
+.tui-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+  margin: 2rem 0 2.4rem;
+}
+.tui-gallery figure {
+  margin: 0;
+}
+.tui-gallery img {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 8px 22px rgb(0 0 0 / 0.3));
+}
+.tui-gallery figcaption {
+  margin-top: 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+/* Gentle breakout on wide screens so the terminal text stays legible. */
+@media (min-width: 1180px) {
+  .tui-shot {
+    margin-inline: -2.5rem;
+  }
+}
+@media (max-width: 620px) {
+  .tui-gallery {
+    grid-template-columns: 1fr;
+  }
 }
 
 hr {
@@ -1634,7 +1754,7 @@ nav.pagination a:hover,
   .path-chain,
   .structure-art,
   .structure-copy,
-  .flow-list div {
+  .flow-list > div {
     animation: rise-in 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
@@ -1649,11 +1769,11 @@ nav.pagination a:hover,
     animation-delay: 120ms;
   }
 
-  .flow-list div:nth-child(2) {
+  .flow-list > div:nth-child(2) {
     animation-delay: 160ms;
   }
 
-  .flow-list div:nth-child(3) {
+  .flow-list > div:nth-child(3) {
     animation-delay: 230ms;
   }
 
@@ -1796,9 +1916,13 @@ nav.pagination a:hover,
     grid-template-columns: 1fr;
   }
 
-  .flow-list div {
+  .flow-list > div {
     grid-template-columns: 1fr;
-    gap: 0.35rem;
+    gap: 1.1rem;
+  }
+
+  .flow-list > div:nth-child(even) .flow-shot {
+    order: 0;
   }
 
   .home-meaning {
