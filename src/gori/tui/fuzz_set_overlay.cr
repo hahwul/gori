@@ -141,17 +141,27 @@ module Gori::Tui
         move_row(-1); return :stay
       end
 
-      return handle_type_row(key) if f == :type
+      return handle_type_row(ev) if f == :type
       return handle_values(ev) if f == :values
       handle_field(ev, f)
     end
 
-    private def handle_type_row(key : Termisu::Input::Key) : Symbol
+    private def handle_type_row(ev : Termisu::Event::Key) : Symbol
+      key = ev.key
       case
       when key.left?             then cycle_ptype(-1)
       when key.right?            then cycle_ptype(1)
       when key.up?               then move_row(-1)
       when key.down?, key.enter? then move_row(1)
+      else
+        # A printable typed (or pasted) on the Type row while it's a List drops straight
+        # into the values editor and is captured there. Without this the Type selector
+        # silently swallowed it — losing the whole first line of a pasted wordlist (the
+        # ^L quick-List path opens focused on this row). →/← still cycle the type.
+        if @ptype == :list && (ch = ev.char) && !ev.ctrl? && !ev.alt?
+          @sel = rows.index(:values) || @sel
+          @values.insert(ch)
+        end
       end
       :stay
     end
@@ -242,7 +252,7 @@ module Gori::Tui
         vals = list_values
         vals.empty? ? nil : SetSpec.new(:list, vals.join(","))
       when :numbers
-        SetSpec.new(:numbers, "#{num(:from)}-#{num(:to)}:#{num(:step, 1)}")
+        SetSpec.new(:numbers, "#{num64(:from)}-#{num64(:to)}:#{num64(:step, 1_i64)}")
       when :wordlist
         p = @fields[:path].value.strip
         p.empty? ? nil : SetSpec.new(:file, p)
@@ -260,6 +270,13 @@ module Gori::Tui
 
     private def num(f : Symbol, default : Int32 = 0) : Int32
       @fields[f].value.to_i? || default
+    end
+
+    # From/To/Step round-trip through the Int64 engine (Fuzz::NumberRange), so parse
+    # them wide: `num` (Int32) truncated any bound above 2³¹−1 to the default, silently
+    # collapsing e.g. a post-2038 timestamp or large-ID range to `0` on the first apply.
+    private def num64(f : Symbol, default : Int64 = 0_i64) : Int64
+      @fields[f].value.to_i64? || default
     end
 
     private def ptype_label(t : Symbol) : String

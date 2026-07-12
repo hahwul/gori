@@ -74,7 +74,7 @@ module Gori::Tui
       @editor.gutter = true
       @editor.follow_x = true     # long lines (headers, URLs, §-marked params) scroll horizontally to keep the cursor visible
       @editor.env_complete = true # `$KEY` autocomplete against the registered env vars (expanded on send)
-      @last_synced_config = "" # last store config blob applied (reconcile equality)
+      @last_synced_config = ""    # last store config blob applied (reconcile equality)
       @config = Fuzz::Config.new(keep_bodies: :matched)
       @sets = [] of SetSpec
       @matcher = Fuzz::Matcher.new(keep_bodies: :matched)
@@ -372,7 +372,7 @@ module Gori::Tui
       case pane
       when :template then template_insert? || chain_pane_active?
       when :target   then target_insert?
-      else               false
+      else                false
       end
     end
 
@@ -948,9 +948,11 @@ module Gori::Tui
       @detail_scroll = (@detail_scroll + step).clamp(0, max)
       lo = @detail_scroll
       hi = {@detail_scroll + @detail_last_h - 1, lines.size - 1}.min
-      @detail_cursor.sync(
-        @detail_cursor.cy.clamp(lo, hi),
-        @detail_cursor.cx.clamp(0, lines[@detail_cursor.cy].size))
+      # Clamp cy into range BEFORE indexing `lines`: while a run streams, a live re-sort
+      # (non-index sort) can swap the fixed @sel onto a shorter result, leaving cy stale
+      # and larger than the new `lines` — a bare `lines[cy]` would then raise IndexError.
+      cy = @detail_cursor.cy.clamp(lo, hi)
+      @detail_cursor.sync(cy, @detail_cursor.cx.clamp(0, lines[cy].size))
     end
 
     def detail_plain_lines : Array(String)
@@ -1183,7 +1185,7 @@ module Gori::Tui
       when :template then !pane_insert?(:template) && @template_read.selection?
       when :target   then !pane_insert?(:target) && @target_read.selection?
       when :detail   then detail_navigable? && @detail_cursor.selection?
-      else               false
+      else                false
       end
     end
 
@@ -1232,6 +1234,8 @@ module Gori::Tui
           j.field "filter_status", @matcher.filter_status
           j.field "match_size", @matcher.match_size
           j.field "filter_size", @matcher.filter_size
+          j.field "match_words", @matcher.match_words
+          j.field "filter_words", @matcher.filter_words
           j.field "match_regex", @matcher.match_regex.try(&.source)
           j.field "filter_regex", @matcher.filter_regex.try(&.source)
           j.field "extract", @matcher.extract.try(&.source)
@@ -1257,6 +1261,8 @@ module Gori::Tui
       @matcher.filter_status = obj["filter_status"]?.try(&.as_s?)
       @matcher.match_size = obj["match_size"]?.try(&.as_s?)
       @matcher.filter_size = obj["filter_size"]?.try(&.as_s?)
+      @matcher.match_words = obj["match_words"]?.try(&.as_s?)
+      @matcher.filter_words = obj["filter_words"]?.try(&.as_s?)
       @matcher.match_regex = obj["match_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.filter_regex = obj["filter_regex"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
       @matcher.extract = obj["extract"]?.try(&.as_s?).try { |s| Regex.new(s) rescue nil }
@@ -1842,7 +1848,7 @@ module Gori::Tui
     end
 
     private def paint_detail_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
-                                           focused : Bool, lines : Array(String)) : Nil
+                                         focused : Bool, lines : Array(String)) : Nil
       return unless focused && detail_navigable?
       @detail_cursor.highlight_spans(lines).each do |(l, x0, x1)|
         paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
