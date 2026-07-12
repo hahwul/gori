@@ -249,24 +249,32 @@ img {
   white-space: nowrap;
 }
 
-/* The loop mark is the PNG used as a mask, filled with the heading colour, so
-   it reads white on dark and near-black on light from one source. --logo-src is
-   set inline in the template to carry base_url. */
+/* The loop mark is the PNG used as a mask, filled with the brushed gold-leaf
+   gradient so it reads as a gilded silhouette. The gradient is redefined per
+   theme (warmer leaf on dark, deepened gold on light), so the mark stays legible
+   in both. --logo-src is set inline in the template to carry base_url. */
 .logo-mark {
   width: 2rem;
   height: 1.8rem;
-  background: var(--heading);
+  background: var(--grad-gold-leaf);
   -webkit-mask: var(--logo-src) center / contain no-repeat;
   mask: var(--logo-src) center / contain no-repeat;
 }
 
+/* Gilded wordmark: the gold-leaf gradient clipped to the glyphs, matching the
+   mark and the primary CTA. --accent is the flat fallback where background-clip
+   text is unsupported. Both tokens flip with the theme. */
 .logo-word {
   font-family: "STIX Two Math", "Cambria Math", "Latin Modern Math", "Apple Symbols", Georgia, serif;
   font-size: 1.5rem;
   line-height: 1;
   letter-spacing: 0;
   transform: translateY(-0.04em);
-  color: var(--heading);
+  color: var(--accent);
+  background: var(--grad-gold-leaf);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .top-nav {
