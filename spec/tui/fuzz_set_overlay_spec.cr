@@ -23,6 +23,24 @@ describe Gori::Tui::FuzzSetOverlay do
     spec.value.should eq("admin,root")
   end
 
+  it "List: typing on the Type row (before any nav) drops into the values editor" do
+    # ^L opens focused on the Type selector; the first keystroke/paste must not be lost.
+    ov = FuzzSetOverlay.for_list
+    otype(ov, "admin")
+    ov.handle_key(okey(Termisu::Input::Key::Enter))
+    otype(ov, "root")
+    ov.build_spec.not_nil!.value.should eq("admin,root")
+  end
+
+  it "Numbers: bounds above Int32::MAX survive build_spec (Int64 range)" do
+    ov = FuzzSetOverlay.for_list
+    ov.handle_key(okey(Termisu::Input::Key::Right))                 # List → Numbers
+    ov.handle_key(okey(Termisu::Input::Key::Down))                  # Type row → From
+    5.times { ov.handle_key(okey(Termisu::Input::Key::Backspace)) } # clear "1"
+    otype(ov, "3000000000")
+    ov.build_spec.not_nil!.value.should eq("3000000000-100:1")
+  end
+
   it "seeds an existing List set (comma → lines) and round-trips back to commas" do
     ov = FuzzSetOverlay.editing(Gori::Tui::SetSpec.new(:list, "a,b,c"), 0)
     ov.edit_index.should eq(0)

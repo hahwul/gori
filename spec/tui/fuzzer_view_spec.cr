@@ -128,6 +128,21 @@ describe Gori::Tui::FuzzerView do
       back.follow.should be_true
       back.m_status.should eq("200,500")
     end
+
+    it "persists match/filter words across a config_json round-trip" do
+      src = loaded_fuzzer
+      snap = src.advanced_snapshot
+      src.apply_advanced(Gori::Tui::AdvancedSnapshot.new(
+        conc: snap.conc, rate: snap.rate, timeout: snap.timeout, retries: snap.retries,
+        follow: snap.follow, calibrate: snap.calibrate,
+        m_status: snap.m_status, m_size: snap.m_size, m_words: "42", m_regex: snap.m_regex,
+        f_status: snap.f_status, f_size: snap.f_size, f_words: "7", f_regex: snap.f_regex))
+      dst = FuzzerView.new
+      dst.duplicate_from(src) # duplicate_from restores via apply_config_json(config_json)
+      back = dst.advanced_snapshot
+      back.m_words.should eq("42")
+      back.f_words.should eq("7")
+    end
   end
 
   it "verifies vertical navigation boundaries (template/config/results at_top)" do
