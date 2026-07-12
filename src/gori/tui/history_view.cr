@@ -717,9 +717,20 @@ module Gori::Tui
     end
 
     # ^G go-to-line in the detail view: scroll so 1-based line `n` is at the top
-    # (interpreted in the active pane/mode — request/response/frames/hex row).
+    # (interpreted in the active pane/mode — request/response/frames/hex row). Hex
+    # has no caret; in navigable (cursor-tracked) modes, sync @detail_read too —
+    # otherwise the first ↑/↓ after the jump moves from the caret's stale pre-jump
+    # position instead of the line just jumped to.
     def goto_detail_line(n : Int32) : Nil
-      @detail_scroll = (n - 1).clamp(0, detail_scroll_max)
+      if detail_navigable?
+        size, _ = detail_line_source
+        return if size <= 0
+        cy = (n - 1).clamp(0, size - 1)
+        @detail_read.sync(cy, 0)
+        @detail_scroll = cy
+      else
+        @detail_scroll = (n - 1).clamp(0, detail_scroll_max)
+      end
     end
 
     # ^F search: 0-based indices of the detail text lines containing `query` (case-
