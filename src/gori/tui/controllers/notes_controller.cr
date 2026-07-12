@@ -162,6 +162,19 @@ module Gori::Tui
       true
     end
 
+    # Editor-style Tab: while typing a note, forward Tab types a tab, not a focus jump to
+    # the sub-tab strip / tab bar (esc or ↑-at-top still leave; Shift-Tab steps focus back).
+    def editor_captures_tab? : Bool
+      @notes.insert_mode?
+    end
+
+    def handle_editor_tab(ev : Termisu::Event::Key) : Bool
+      return false unless @notes.insert_mode?
+      @notes.insert('\t')
+      @notes.set_preedit("")
+      true
+    end
+
     def notes_read_mode? : Bool
       !@notes.insert_mode?
     end

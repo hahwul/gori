@@ -229,6 +229,18 @@ module Gori::Tui
       @intercept.reload(@host.session.interceptor)
     end
 
+    # Editor-style Tab: in the held-message editor, forward Tab types a tab rather than
+    # advancing the focus ring (Shift-Tab / esc still leave for the queue).
+    def editor_captures_tab? : Bool
+      @intercept.editing?
+    end
+
+    def handle_editor_tab(ev : Termisu::Event::Key) : Bool
+      return false unless @intercept.editing?
+      @intercept.edit_insert('\t')
+      true
+    end
+
     # --- focus ring (list ◂▸ detail editor) ---
     def pane_advance(dir : Int32) : Bool
       @intercept.pane_advance(dir)
