@@ -733,6 +733,18 @@ module Gori::Tui
       if @active_tab == :convert && @overlay == :none && @focus == :body && convert_controller.completing?
         return if convert_controller.handle_complete_key(ev)
       end
+      # The $ENV autocomplete popup in an editor (Replay request, Fuzzer template) owns
+      # Tab/↵/↑/↓/Esc while open — before the focus ring claims Tab, so Tab accepts the
+      # suggestion. Non-popup keys fall through (return false) so editing + refilter flow on.
+      if @overlay == :none && @focus == :body && (ac = @tabs[@active_tab]?) && ac.editor_completing?
+        return if ac.handle_editor_complete_key(ev)
+      end
+      # Editor-style Tab: while actively typing in a text editor, forward Tab inserts a tab
+      # (or accepts a suggestion) instead of advancing the focus ring. Shift-Tab (back_tab)
+      # is left to the focus ring below, so there's always a keyboard way out of the pane.
+      if @overlay == :none && @focus == :body && ev.key.tab? && (at = @tabs[@active_tab]?) && at.editor_captures_tab?
+        return if at.handle_editor_tab(ev)
+      end
       # Focusable sub-tab strip (Replay/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
       # the editor, ↑/esc pop to the tab bar. Claimed BEFORE the Tab ring + ^N so the
       # strip owns Tab and its own ^N. @focus is only ever :subtabs for Replay/Notes.

@@ -72,7 +72,8 @@ module Gori::Tui
       @http2 = false
       @editor = TextArea.new
       @editor.gutter = true
-      @editor.follow_x = true # long lines (headers, URLs, §-marked params) scroll horizontally to keep the cursor visible
+      @editor.follow_x = true     # long lines (headers, URLs, §-marked params) scroll horizontally to keep the cursor visible
+      @editor.env_complete = true # `$KEY` autocomplete against the registered env vars (expanded on send)
       @last_synced_config = "" # last store config blob applied (reconcile equality)
       @config = Fuzz::Config.new(keep_bodies: :matched)
       @sets = [] of SetSpec
@@ -389,6 +390,35 @@ module Gori::Tui
 
     def exit_template_insert! : Nil
       @template_mode = InputMode::Read
+      @editor.env_complete_close # no dangling $ENV dropdown once we leave insert mode
+    end
+
+    # --- $ENV autocomplete in the template editor ---
+    # True while the template is a live text editor (insert mode, not the CHAIN sub-pane) —
+    # the state in which the $ENV dropdown and editor-style Tab apply (controller reads it too).
+    def template_text_editing? : Bool
+      @focus == :template && template_insert? && !chain_pane_active?
+    end
+
+    def template_env_completing? : Bool
+      template_text_editing? && @editor.env_completing?
+    end
+
+    # The popup owns tab/↵/↑/↓/esc while open; accepting edits the buffer → mark dirty.
+    def handle_template_env_complete_key(ev : Termisu::Event::Key) : Bool
+      return false unless template_text_editing?
+      before = @editor.edits
+      handled = @editor.handle_env_complete_key(ev)
+      @dirty = true if handled && @editor.edits != before
+      handled
+    end
+
+    # Editor-style Tab: insert a literal tab into the template (no focus move).
+    def template_tab_insert : Nil
+      return unless template_text_editing?
+      @editor.insert('\t')
+      @editor.set_preedit("")
+      @dirty = true
     end
 
     def detail_navigable? : Bool

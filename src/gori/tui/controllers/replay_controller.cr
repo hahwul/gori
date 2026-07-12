@@ -713,6 +713,25 @@ module Gori::Tui
       save_current_replay
     end
 
+    # --- editor $ENV autocomplete + tab-as-text (request pane in insert mode) ---
+    def editor_completing? : Bool
+      current_view.try(&.request_env_completing?) || false
+    end
+
+    def handle_editor_complete_key(ev : Termisu::Event::Key) : Bool
+      current_view.try(&.handle_request_env_complete_key(ev)) || false
+    end
+
+    def editor_captures_tab? : Bool
+      current_view.try(&.request_text_editing?) || false
+    end
+
+    def handle_editor_tab(ev : Termisu::Event::Key) : Bool
+      return false unless editor_captures_tab?
+      current_view.try(&.request_tab_insert)
+      true
+    end
+
     # --- focus ring (target ◂▸ request ◂▸ response, within the active sub-tab) ---
     def pane_advance(dir : Int32) : Bool
       current_view.try(&.pane_advance(dir)) || false

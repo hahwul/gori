@@ -61,8 +61,9 @@ module Gori::Tui
       @scx = 0             # SNI cursor
       @target_field = :url # which field the TARGET pane edits: :url | :sni
       @editor = TextArea.new
-      @editor.gutter = true   # line numbers in the request body (pairs with ^G)
-      @editor.follow_x = true # long lines (headers, URLs, base64 params) scroll horizontally to keep the cursor visible
+      @editor.gutter = true       # line numbers in the request body (pairs with ^G)
+      @editor.follow_x = true     # long lines (headers, URLs, base64 params) scroll horizontally to keep the cursor visible
+      @editor.env_complete = true # `$KEY` autocomplete against the registered env vars (expanded on send)
       @search_hl = ""         # active ^F query → highlight in the response pane (request is via @editor)
       @reveal = false         # 'w' shows whitespace/CR/LF as glyphs (response from raw bytes, request via @editor)
       @reveal_lines = nil.as(Array(String)?)
@@ -114,9 +115,10 @@ module Gori::Tui
       # Content-Length resynced; otherwise the envelope is sent as captured. Sent as a
       # NORMAL request (ordinary response pane). Session-only (db_id nil) like WS/gRPC.
       @decode_kind = nil.as(Symbol?) # nil | :saml | :graphql
-      @decoded = TextArea.new        # the payload editor (lower split)
+      @decoded = TextArea.new         # the payload editor (lower split)
       @decoded.gutter = true
-      @decoded.follow_x = true # long decoded payload lines (SAML XML, GraphQL query) scroll horizontally
+      @decoded.follow_x = true        # long decoded payload lines (SAML XML, GraphQL query) scroll horizontally
+      @decoded.env_complete = true    # env tokens re-encode into the request on send here too (WS messages, decoded payload)
       @req_pane = :envelope    # :envelope | :decoded — which split sub-pane is active
       @decoded_dirty = false   # the decoded payload was edited → re-encode on send
       @saml_param = "SAMLResponse"
@@ -239,6 +241,37 @@ module Gori::Tui
 
     def exit_request_insert! : Nil
       @request_mode = InputMode::Read
+      req_editor.env_complete_close # no dangling $ENV dropdown once we leave insert mode
+    end
+
+    # --- $ENV autocomplete in the request editor (delegates to the active req editor) ---
+    # True while the request pane is a live text editor (insert mode, not hex) — the state
+    # in which the $ENV dropdown and editor-style Tab apply (read by the controller too).
+    def request_text_editing? : Bool
+      @focus == :request && request_insert? && !request_hex?
+    end
+
+    def request_env_completing? : Bool
+      request_text_editing? && req_editor.env_completing?
+    end
+
+    # The popup owns tab/↵/↑/↓/esc while open; accepting a key edits the buffer, so mirror
+    # the dirty-marking edit_* helpers do. Returns true when the key was consumed.
+    def handle_request_env_complete_key(ev : Termisu::Event::Key) : Bool
+      return false unless request_text_editing?
+      ed = req_editor
+      before = ed.edits
+      handled = ed.handle_env_complete_key(ev)
+      mark_req_edit if handled && ed.edits != before
+      handled
+    end
+
+    # Editor-style Tab: insert a literal tab into the request editor (no focus move).
+    def request_tab_insert : Nil
+      return unless request_text_editing?
+      req_editor.insert('\t')
+      req_editor.set_preedit("") # commit any preedit (termisu dup-guard)
+      mark_req_edit
     end
 
     def enter_target_insert! : Nil
