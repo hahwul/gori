@@ -272,6 +272,30 @@ module Gori::Tui
       nil
     end
 
+    # --- editor autocomplete + tab-as-text (opt-in; default off) -------------
+    # An `$ENV` completion popup is open in the focused editor → it owns Tab/↵/↑/↓/Esc,
+    # claimed BEFORE the global focus ring so Tab accepts the suggestion instead of moving
+    # focus. Return true from handle_editor_complete_key when the key was consumed; false
+    # falls through so normal editing continues and the popup refilters.
+    def editor_completing? : Bool
+      false
+    end
+
+    def handle_editor_complete_key(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
+    # The focused pane is an actively-editing text editor → forward Tab types a tab (real
+    # editor feel) rather than advancing the focus ring. Shift-Tab still steps focus back,
+    # so there is always a keyboard way out of the pane.
+    def editor_captures_tab? : Bool
+      false
+    end
+
+    def handle_editor_tab(ev : Termisu::Event::Key) : Bool
+      false
+    end
+
     # --- focus ring (Tab/Shift-Tab across panes); false = no further pane ---
     def pane_advance(dir : Int32) : Bool
       false

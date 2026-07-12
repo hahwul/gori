@@ -560,6 +560,25 @@ module Gori::Tui
         (@host.active_tab == :fuzzer && @host.focus == :body)
     end
 
+    # --- editor $ENV autocomplete + tab-as-text (template pane in insert mode) ---
+    def editor_completing? : Bool
+      current_view.try(&.template_env_completing?) || false
+    end
+
+    def handle_editor_complete_key(ev : Termisu::Event::Key) : Bool
+      current_view.try(&.handle_template_env_complete_key(ev)) || false
+    end
+
+    def editor_captures_tab? : Bool
+      current_view.try(&.template_text_editing?) || false
+    end
+
+    def handle_editor_tab(ev : Termisu::Event::Key) : Bool
+      return false unless editor_captures_tab?
+      current_view.try(&.template_tab_insert)
+      true
+    end
+
     # --- focus ring ---
     def pane_advance(dir : Int32) : Bool
       current_view.try(&.pane_advance(dir)) || false

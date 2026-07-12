@@ -2,9 +2,11 @@ require "./screen"
 require "./theme"
 require "./highlight"
 require "../env"
+require "../settings"
 require "./gutter"
 require "./search_hi"
 require "./reveal"
+require "./env_complete"
 
 module Gori::Tui
   # A minimal multi-line text editor for inline editing (e.g. the Replay
@@ -46,6 +48,10 @@ module Gori::Tui
       # widget knows nothing about §-markers; the owner supplies offsets + resolved colours.
       @bg_regions = [] of {Int32, Int32, Color}
       @undo_stack = [] of UndoState
+      # Opt-in `$ENV` autocomplete popup (nil = disabled). Enabled only on the outbound
+      # request editors (Replay request, Fuzzer template) where env tokens are expanded on
+      # send; every other editor keeps it nil so its edit path is byte-for-byte unchanged.
+      @env_complete = nil.as(EnvComplete?)
       set_text(text)
     end
 
@@ -73,6 +79,7 @@ module Gori::Tui
       @styled = nil
       @edits += 1
       @undo_stack.clear
+      env_complete_close
     end
 
     # Preedit/composing text from IME (e.g. current Hangul syllable while typing jamo).
@@ -114,8 +121,9 @@ module Gori::Tui
       @cx = cx + 1
       @styled = nil
       @edits += 1
+      refresh_env_complete
     end
- 
+
     def insert_newline : Nil
       push_undo
       line = @lines[@cy]
@@ -126,8 +134,9 @@ module Gori::Tui
       @cx = 0
       @styled = nil
       @edits += 1
+      refresh_env_complete
     end
- 
+
     def backspace : Nil
       return if @cx == 0 && @cy == 0 # buffer start — nothing to delete, don't dirty (mirrors delete)
       if @cx > 0
@@ -146,16 +155,19 @@ module Gori::Tui
       end
       @styled = nil
       @edits += 1
+      refresh_env_complete
     end
 
     # Home / End: jump the cursor to the start / end of the current line. Pure navigation
     # (no buffer change), so @styled/@edits are untouched — mirrors `move`.
     def home : Nil
       @cx = 0
+      env_complete_close
     end
 
     def end_of_line : Nil
       @cx = @lines[@cy].size
+      env_complete_close
     end
 
     # Forward delete: remove the char under the cursor, or join the next line when at EOL.
@@ -176,6 +188,7 @@ module Gori::Tui
       @cx = cx
       @styled = nil
       @edits += 1
+      refresh_env_complete
     end
 
     def move(dr : Int32, dc : Int32) : Nil
@@ -200,6 +213,7 @@ module Gori::Tui
           @cx = @lines[@cy].size
         end
       end
+      refresh_env_complete
     end
 
     # Cursor is on the first line — the Runner pops focus to the tab bar when ↑
@@ -235,6 +249,7 @@ module Gori::Tui
       # + @xscroll: the click lands at display column (mx - content_x) WITHIN the
       # visible window, which is @xscroll columns into the full line.
       @cx = Screen.column_for(@lines[@cy], mx - (rect.x + gw) + @xscroll)
+      env_complete_close
     end
 
     # Viewport scroll by `step` lines (the mouse wheel), INDEPENDENT of the cursor:
@@ -248,6 +263,7 @@ module Gori::Tui
       @scroll = (@scroll + step).clamp(0, max)
       @cy = @cy.clamp(@scroll, {@scroll + @last_h - 1, @lines.size - 1}.min)
       @cx = @cx.clamp(0, @lines[@cy].size)
+      env_complete_close
     end
 
     # Horizontal viewport nudge (shift+←/→ in READ panes). No-op unless @follow_x.
@@ -261,12 +277,14 @@ module Gori::Tui
     def goto_line(n : Int32) : Nil
       @cy = (n - 1).clamp(0, @lines.size - 1)
       @cx = 0
+      env_complete_close
     end
 
     # Place the caret without pushing undo (read-mode navigation / click-to-cursor).
     def place_cursor(cy : Int32, cx : Int32) : Nil
       @cy = cy.clamp(0, @lines.size - 1)
       @cx = cx.clamp(0, @lines[@cy].size)
+      env_complete_close
     end
 
     def line_count : Int32
@@ -333,6 +351,7 @@ module Gori::Tui
       # Replay/Notes (no regions) skip it so their hot path is unchanged.
       line_off = 0
       (0...@scroll).each { |k| line_off += @lines[k].size + 1 } unless @bg_regions.empty? # +1 for '\n'
+      caret_cell = nil.as({Int32, Int32}?) # the drawn caret's screen cell — anchors the env-complete popup
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= @lines.size
@@ -383,6 +402,7 @@ module Gori::Tui
         preedit_w = Screen.display_width(@preedit)
         cxs = cx0 + prefix_w + preedit_w - @xscroll
         if cxs >= cx0 && cxs < cx0 + cw
+          caret_cell = {cxs, rect.y + i}
           screen.cursor(cxs, rect.y + i)
           cgw = [Screen.display_width((@preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]).to_s), 1].max
           ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
@@ -392,6 +412,11 @@ module Gori::Tui
             screen.cell(cxs + off, rect.y + i, cch, Theme.bg, Theme.accent)
           end
         end
+      end
+      # The env-complete dropdown paints LAST (over the text, anchored at the caret) so it
+      # never renders when the caret is off-screen or the editor is unfocused (cursor=false).
+      if cursor && (cc = caret_cell) && (ec = @env_complete)
+        ec.render(screen, cc[0], cc[1], rect)
       end
     end
 
@@ -507,6 +532,105 @@ module Gori::Tui
       @cx = state.cx.clamp(0, @lines[@cy].size)
       @styled = nil
       @edits += 1
+      refresh_env_complete
+    end
+
+    # --- `$ENV` autocomplete (opt-in) ----------------------------------------
+    # Enable/disable the completion popup. Enabled editors get a live dropdown of
+    # matching env vars while a `$partial` token is under the caret; disabled editors
+    # keep @env_complete nil and every edit-path guard below short-circuits.
+    def env_complete=(on : Bool) : Nil
+      @env_complete = on ? (@env_complete || EnvComplete.new) : nil
+    end
+
+    def env_completing? : Bool
+      (ec = @env_complete) ? ec.open? : false
+    end
+
+    def env_complete_close : Nil
+      @env_complete.try(&.close)
+    end
+
+    # While the popup owns the keyboard: Tab/↵ accept, ↑/↓ (+ Shift-Tab) move the
+    # selection, Esc closes. Returns true when consumed (the caller stops routing the key).
+    def handle_env_complete_key(ev : Termisu::Event::Key) : Bool
+      ec = @env_complete
+      return false unless ec && ec.open?
+      key = ev.key
+      case
+      when key.tab?, key.enter?   then env_accept(ec)
+      when key.up?, key.back_tab? then ec.move(-1)
+      when key.down?              then ec.move(1)
+      when key.escape?            then ec.close
+      else                             return false
+      end
+      true
+    end
+
+    private def env_accept(ec : EnvComplete) : Nil
+      push_undo
+      line = @lines[@cy]
+      newline, ncx = ec.accept(line, @cx.clamp(0, line.size))
+      @lines[@cy] = newline
+      @cx = ncx.clamp(0, newline.size)
+      ec.close
+      @styled = nil
+      @edits += 1
+    end
+
+    # Recompute the match set for the `$partial` token the caret sits in — the run of
+    # env-key chars immediately left of the caret, which must be preceded by the prefix
+    # sigil. Closes when there's no token, no registered vars, or the sole match is already
+    # fully typed. Called after every insert-mode edit; a cheap no-op when disabled.
+    private def refresh_env_complete : Nil
+      ec = @env_complete
+      return unless ec
+      prefix = Settings.env_prefix
+      return ec.close if prefix.empty?
+      vars = Env.effective_vars
+      return ec.close if vars.empty?
+      line = @lines[@cy]
+      cx = @cx.clamp(0, line.size)
+      plen = prefix.size
+      ks = cx
+      while ks > 0 && env_key_tail?(line[ks - 1])
+        ks -= 1
+      end
+      # A prefix sigil must sit immediately before the key run (else it isn't an env token).
+      return ec.close unless ks - plen >= 0 && line[(ks - plen)...ks] == prefix
+      partial = line[ks...cx]
+      # A non-empty partial must start with a valid key head — `$1` etc. never expand.
+      return ec.close if !partial.empty? && !env_key_head?(partial[0])
+      # Extend right over the rest of the key run so accepting replaces the whole identifier.
+      ke = cx
+      while ke < line.size && env_key_tail?(line[ke])
+        ke += 1
+      end
+      pl = partial.downcase
+      matches = vars.keys
+        .select { |k| pl.empty? || k.downcase.starts_with?(pl) }
+        .sort!
+        .first(40)
+        .map { |k| {k, env_value_preview(vars[k])} }
+      if matches.empty? || (matches.size == 1 && matches[0][0] == partial)
+        ec.close # nothing to offer, or already fully typed
+      else
+        ec.set(matches, ks - plen, ke, prefix)
+      end
+    end
+
+    private def env_key_head?(c : Char) : Bool
+      c.ascii_letter? || c == '_'
+    end
+
+    private def env_key_tail?(c : Char) : Bool
+      c.ascii_alphanumeric? || c == '_'
+    end
+
+    # A one-line, whitespace-collapsed, length-capped value hint for the dropdown row.
+    private def env_value_preview(v : String) : String
+      s = v.gsub(/\s+/, " ").strip
+      s.size > 20 ? "#{s[0, 19]}…" : s
     end
   end
 end
