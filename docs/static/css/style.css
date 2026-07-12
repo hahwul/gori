@@ -261,20 +261,29 @@ img {
   mask: var(--logo-src) center / contain no-repeat;
 }
 
-/* Gilded wordmark: the gold-leaf gradient clipped to the glyphs, matching the
-   mark and the primary CTA. --accent is the flat fallback where background-clip
-   text is unsupported. Both tokens flip with the theme. */
+/* Gilded wordmark: a softer gold-leaf gradient clipped to the glyphs. It runs
+   its own gradient (gentler than --grad-gold-leaf, which was too high-contrast
+   here) rather than the shared token. --accent is the flat fallback where
+   background-clip text is unsupported. */
 .logo-word {
   font-family: "STIX Two Math", "Cambria Math", "Latin Modern Math", "Apple Symbols", Georgia, serif;
-  font-size: 1.5rem;
+  font-size: 1rem;
   line-height: 1;
   letter-spacing: 0;
   transform: translateY(-0.04em);
   color: var(--accent);
-  background: var(--grad-gold-leaf);
+  background: linear-gradient(135deg, #a67f36 0%, #e6cf92 24%, #c8a860 98%, #8c6a2c 72%, #ddc084 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+
+/* On the light canvas the light-gold set keeps the wordmark legible, softened
+   the same way (mid stop stretched long, deep golds compressed into the tail). */
+:root[data-theme="light"] .logo-word {
+  background: linear-gradient(135deg, #8a5d0a 0%, #c39a3c 26%, #a8791f 98%, #6f4e12 76%, #cba43e 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
 }
 
 .top-nav {
@@ -774,35 +783,26 @@ kbd {
   padding: 2rem 0 6rem;
 }
 
+/* A real capture, not abstract art: the Space menu open over History. Framed as
+   a terminal card with the same gold offset-ring as the hero disc so it still
+   reads as a pair, but rectangular so the whole menu stays visible. */
 .structure-art {
   position: relative;
   justify-self: center;
-  width: min(92%, 30rem);
-  aspect-ratio: 1;
-  overflow: hidden;
-  border-radius: 50%;
-  background: #0a0a0b;
+  width: min(100%, 34rem);
+  margin: 0;
+  border-radius: 12px;
   box-shadow: var(--shadow-soft);
   outline: 1px solid rgb(var(--accent-rgb) / 0.2);
-  outline-offset: 1.5rem;
-}
-
-.structure-art::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border: 1px solid rgb(var(--accent-rgb) / 0.28);
-  border-radius: 50%;
+  outline-offset: 0.75rem;
 }
 
 .structure-art img {
   display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
-  /* Same gold-leaf wash as the hero disc, so the two orbs read as a pair. */
-  filter: sepia(1) saturate(2.1) hue-rotate(4deg) brightness(1.02) contrast(1.02);
+  height: auto;
+  border-radius: 11px;
+  filter: drop-shadow(0 18px 44px rgb(0 0 0 / 0.42));
 }
 
 .structure-copy {
@@ -897,6 +897,287 @@ kbd {
   width: 100%;
   height: auto;
   filter: drop-shadow(0 18px 44px rgb(0 0 0 / 0.42));
+}
+
+/* --- Hand it to an agent (the MCP seam) ------------------------------- */
+
+.home-agent {
+  padding: 1.5rem 0 5.5rem;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+
+.home-agent h2 {
+  max-width: 16em;
+  margin: 0 auto;
+  color: var(--heading);
+  font-size: 3.05rem;
+  line-height: 1.08;
+  font-weight: 780;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.agent-intro {
+  max-width: 44rem;
+  margin: 1rem auto 0;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+/* agent  ⇄ MCP ⇄  gori project — two panels joined by a bidirectional wire. */
+.agent-seam {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  margin: 2.8rem auto 0;
+  max-width: 62rem;
+}
+
+.seam-node {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 1.3rem 1.45rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  text-align: left;
+}
+
+.seam-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+
+.seam-node > strong {
+  color: var(--heading);
+  font-size: 1.02rem;
+  font-weight: 680;
+  line-height: 1.3;
+}
+
+.seam-toollist {
+  margin-top: 0.1rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  color: var(--muted);
+  word-spacing: 0.08em;
+}
+
+/* The connector: protocol label above a gold wire, the entry command below. */
+.seam-link {
+  flex: 0 0 auto;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1.1rem;
+  min-width: 12.5rem;
+}
+
+.seam-link-label {
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.seam-wire {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  background: var(--grad-gold-leaf);
+  border-radius: 2px;
+}
+
+/* Arrowheads at both ends: the agent calls, gori answers. */
+.seam-wire::before,
+.seam-wire::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border-block: 5px solid transparent;
+}
+.seam-wire::before {
+  left: -1px;
+  border-right: 7px solid var(--accent);
+}
+.seam-wire::after {
+  right: -1px;
+  border-left: 7px solid var(--accent);
+}
+
+.seam-mcp {
+  font-family: var(--font-mono);
+  font-size: 0.73rem;
+  color: var(--accent-ink);
+  background: var(--accent);
+  padding: 0.14rem 0.55rem;
+  border-radius: var(--radius-pill);
+}
+
+.agent-link {
+  display: inline-block;
+  margin-top: 2.2rem;
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+/* Narrow: stack the seam vertically and turn the wire on its end. */
+@media (max-width: 720px) {
+  .agent-seam {
+    flex-direction: column;
+    max-width: 26rem;
+  }
+
+  .seam-node {
+    text-align: center;
+    align-items: center;
+  }
+
+  .seam-link {
+    width: 100%;
+    min-width: 0;
+    padding: 0.85rem 0;
+  }
+
+  .seam-wire {
+    width: 2px;
+    height: 2.4rem;
+  }
+
+  .seam-wire::before,
+  .seam-wire::after {
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    border-block: 0;
+    border-inline: 5px solid transparent;
+  }
+
+  .seam-wire::before {
+    top: -1px;
+    border-right: 0;
+    border-bottom: 7px solid var(--accent);
+  }
+
+  .seam-wire::after {
+    top: auto;
+    bottom: -1px;
+    border-left: 0;
+    border-top: 7px solid var(--accent);
+  }
+}
+
+/* --- Agent session card (shared: MCP guide transcript) --------------- */
+
+.agent-session {
+  margin: 1.6rem 0 2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel-strong);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+  font-family: var(--font-mono);
+}
+
+.agent-session-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+
+.agent-session-bar .dots {
+  display: flex;
+  gap: 0.34rem;
+}
+
+.agent-session-bar .dots i {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: rgb(var(--ink-rgb) / 0.16);
+}
+
+.agent-session-title {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.agent-session-body {
+  padding: 1rem 1.15rem;
+  font-size: 0.82rem;
+  line-height: 1.75;
+}
+
+.agent-session-body p {
+  margin: 0.1rem 0;
+  color: var(--text);
+}
+
+.agent-session-body .as-user {
+  margin-bottom: 0.55rem;
+  color: var(--heading);
+}
+
+.as-who {
+  display: inline-block;
+  margin-right: 0.5rem;
+  padding: 0.02rem 0.42rem;
+  border-radius: var(--radius-sm);
+  background: rgb(var(--accent-rgb) / 0.16);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.as-arrow {
+  color: var(--accent);
+}
+
+.agent-session-body .as-ret .as-arrow {
+  color: var(--quiet);
+}
+
+.agent-session-body code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-strong);
+  font-weight: 600;
+  font-size: inherit;
+}
+
+.as-args {
+  color: var(--muted);
+}
+
+.as-warn {
+  color: #d98b5f;
+  font-weight: 600;
+}
+
+.agent-session-body .as-done {
+  margin-top: 0.55rem;
+  color: var(--heading);
+}
+
+.as-check {
+  color: var(--syn-string);
+  font-weight: 700;
 }
 
 /* --- The name (dictionary entry) -------------------------------------- */
@@ -1926,8 +2207,8 @@ nav.pagination a:hover,
   }
 
   .structure-art {
-    width: min(88%, 26rem);
-    outline-offset: 1.1rem;
+    width: min(100%, 30rem);
+    outline-offset: 0.55rem;
   }
 
   .home-paths {

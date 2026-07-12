@@ -5,6 +5,22 @@ description = "Drive gori from an AI agent or script over the Model Context Prot
 
 gori ships a built-in **MCP (Model Context Protocol) server**. Instead of embedding a chat window in the TUI, gori exposes its project over a clean tool interface so any MCP-capable agent — Claude, Codex, Grok, and others — can read your traffic and drive the tools.
 
+<figure class="agent-session" aria-label="Example agent session: an agent finds an IDOR over MCP and logs a finding">
+  <div class="agent-session-bar">
+    <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="agent-session-title">agent · gori over MCP</span>
+  </div>
+  <div class="agent-session-body">
+    <p class="as-user"><span class="as-who">you</span>Find an IDOR on the users API and log it.</p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>list_history</code> <span class="as-args">path~/v1/users status:200</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-args">14 flows — customer and admin tokens</span></p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>send_request</code> <span class="as-args">GET /v1/users/2 · customer token</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-warn">200</span> <span class="as-args">{"id":2,"email":"other-tenant@example.com"} — not the caller's row</span></p>
+    <p class="as-call"><span class="as-arrow">→</span> <code>create_finding</code> <span class="as-args">"IDOR on /v1/users/{id}" severity:high</span></p>
+    <p class="as-done"><span class="as-check">✓</span> Finding logged; the request is saved as a Replay session for repro.</p>
+  </div>
+</figure>
+
 ```bash
 gori mcp
 ```
