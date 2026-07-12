@@ -29,8 +29,8 @@ module Gori
       # The notification center (background-job results, alerts). `n` is a Global
       # fallback chord — scope-local `n` (e.g. findings.new on Findings) still wins
       # where bound, exactly like Global `c` (capture) yields to Intercept's `c`. The
-      # clickable bottom-bar `notify:N` badge is the mouse path; both are rebindable
-      # via settings:hotkeys.
+      # clickable top-bar `notify:N` badge (left of scope) is the mouse path; both
+      # are rebindable via settings:hotkeys.
       r.register Verb::Definition.new(
         "app.notifications", "Notifications", "Open the notification center (background-job results)",
         Verb::Scope::Global, [Verb::Chord.new("n")], category: Verb::Category::System) { |ctx| ctx.open_notifications; nil }

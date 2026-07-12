@@ -865,7 +865,7 @@ module Gori::Tui
         handle_overlay_click(layout, mx, my)
         return
       end
-      return if click_status(layout.status, mx, my)
+      return if click_top_bar(layout.topbar, mx, my)
       return click_menu(layout.menu, mx, my) if layout.menu.contains?(mx, my)
       return if subtabs_shown? && click_subtab_strip(layout.body, mx, my)
       click_body(layout.body, mx, my) if layout.body.contains?(mx, my)
@@ -972,20 +972,30 @@ module Gori::Tui
       end
     end
 
-    # Click the bottom-bar notification badge (`notify:N`) → open the center. Returns
-    # true when consumed. The chip rect is rebuilt from the same source render uses.
-    private def click_status(rect : Rect, mx : Int32, my : Int32) : Bool
+    # Click a top-bar chip: the notification badge (`notify:N`, left of scope) opens
+    # the center; the scope chip (`scope:N` / `scope:off`) flips the lens — the same
+    # action as the global `s` chord. Returns true when consumed. Each rect is
+    # rebuilt from the same tagged source render uses, so a click can't drift.
+    private def click_top_bar(rect : Rect, mx : Int32, my : Int32) : Bool
       return false unless rect.contains?(mx, my)
-      # Mirror render_status's chip floor (the hint start, right of the focus badge) so the
-      # clickable rect lands exactly on the drawn badge even on a narrow row.
-      hint_x = rect.x + " #{focus_label} ".size + 1
-      nrect = Chrome.status_chip_rect(rect, :notify,
-        capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,
-        write_failures: @session.store.write_failures, activity: activity_chip,
-        unread: @notifications.unread, min_x: hint_x)
-      return false unless nrect && nrect.contains?(mx, my)
-      open_notifications
-      true
+      unread = @notifications.unread
+      listen = "#{@session.proxy.host}:#{@session.proxy.port}"
+
+      nrect = Chrome.top_bar_chip_rect(rect, :notify, scope: scope_label, rules: rules_label,
+        intercept: intercept_label, listen: listen, time: clock_label, unread: unread)
+      if nrect && nrect.contains?(mx, my)
+        open_notifications
+        return true
+      end
+
+      srect = Chrome.top_bar_chip_rect(rect, :scope, scope: scope_label, rules: rules_label,
+        intercept: intercept_label, listen: listen, time: clock_label, unread: unread)
+      if srect && srect.contains?(mx, my)
+        scope_toggle_lens
+        return true
+      end
+
+      false
     end
 
     private def click_notifications(area : Rect, mx : Int32, my : Int32) : Nil
@@ -2742,7 +2752,8 @@ module Gori::Tui
       layout = Layout.compute(w, h, statusline_active?)
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
         listen: "#{@session.proxy.host}:#{@session.proxy.port}", time: clock_label,
-        scope: scope_label, rules: rules_label, intercept: intercept_label)
+        scope: scope_label, rules: rules_label, intercept: intercept_label,
+        unread: @notifications.unread)
       Chrome.render_rule(screen, layout.rule)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
         tabs: effective_tabs, intercept_count: @session.interceptor.pending_count)
@@ -2750,7 +2761,7 @@ module Gori::Tui
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
         capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,
         write_failures: @session.store.write_failures,
-        activity: activity_chip, unread: @notifications.unread)
+        activity: activity_chip)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay == :palette
       @rules_overlay.render(screen, layout.body) if @overlay == :rules
@@ -3082,7 +3093,7 @@ module Gori::Tui
       @notifications
     end
 
-    # Open the notification center (the app.notifications verb + the clickable bottom-bar
+    # Open the notification center (the app.notifications verb + the clickable top-bar
     # badge). Marks everything read, clearing the unread badge.
     def open_notifications : Nil
       @overlay = :notifications

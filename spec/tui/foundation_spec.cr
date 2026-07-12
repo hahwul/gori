@@ -196,7 +196,27 @@ describe Gori::Tui::Chrome do
     backend.row(0).should contain("acme")
     backend.row(0).should contain("scope:2")
     backend.row(0).should contain("01:37 PM")
-    backend.row(0).should_not contain("rec") # capture state moved to the bottom status bar
+    backend.row(0).should_not contain("rec")    # capture state moved to the bottom status bar
+    backend.row(0).should_not contain("notify") # no unread → badge omitted
+  end
+
+  it "shows the unread notify badge on the top bar, left of scope" do
+    backend = MemoryBackend.new(80, 1)
+    screen = Screen.new(backend)
+    Chrome.render_top_bar(screen, Rect.new(0, 0, 80, 1),
+      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2", unread: 3)
+    backend.row(0).should contain("notify:3")
+    row = backend.row(0)
+    row.index("notify:3").not_nil!.should be < row.index("scope:2").not_nil!
+    fx = row.index("notify:3").not_nil!
+    backend.fg_at(fx, 0).should eq(Theme.accent)
+  end
+
+  it "omits the notify badge from the bottom status bar (it moved to the top bar)" do
+    backend = MemoryBackend.new(90, 1)
+    Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
+      focus: "BODY", hints: "↹ pane · esc tabs", capturing: true, insecure_upstream: false)
+    backend.contains?("notify").should be_false
   end
 end
 

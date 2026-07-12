@@ -99,21 +99,21 @@ module Gori::Tui
 
     def self.render_top_bar(screen : Screen, rect : Rect, *, project : String,
                             listen : String, time : String,
-                            scope : String, rules : String = "", intercept : String = "") : Nil
+                            scope : String, rules : String = "", intercept : String = "",
+                            unread : Int32 = 0) : Nil
       # Logo row sits flush on the canvas — no lifted panel band (tabs/status keep panel).
       screen.fill(rect, Theme.bg)
       x = render_wordmark(screen, rect.x + 1, rect.y, bg: Theme.bg)
       name_x = x + 1
 
-      # right-aligned status chips: scope:N · rules:N · intercept:on(N) · listen · h:MM AM/PM
-      # value-emphasized, dim · separators; the hot intercept state in RED. The clock
-      # is the rightmost anchor. (Capture state lives on the bottom status bar.)
-      chips = [] of {String, Color}
-      chips << {scope, scope.ends_with?(":off") ? Theme.muted : Theme.text} unless scope.empty?
-      chips << {rules, Theme.text} unless rules.empty?
-      chips << {intercept, Theme.red} unless intercept.empty?
-      chips << {listen, Theme.muted}
-      chips << {time, Theme.muted}
+      # right-aligned status chips: notify:N · scope:N · rules:N · intercept:on(N) ·
+      # listen · h:MM AM/PM — value-emphasized, dim · separators; the hot intercept
+      # state in RED. The clock is the rightmost anchor. (Capture state lives on the
+      # bottom status bar.) `unread` rides just left of scope so a background-job ping
+      # surfaces beside the state it's most likely to affect.
+      tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept,
+        listen: listen, time: time, unread: unread)
+      chips = tagged.map { |(_, l, c)| {l, c} }
 
       # Bound the project name and floor the chips past it, so neither overwrites the
       # other at narrow widths (previously the name was unbounded and render_chips got
@@ -122,6 +122,43 @@ module Gori::Tui
       name_end = screen.text(name_x, rect.y, "· #{project}", Theme.muted, Theme.bg,
         width: {chips_left - name_x - 1, 0}.max)
       render_chips(screen, rect, chips, bg: Theme.bg, min_x: name_end + 1)
+    end
+
+    # The right-aligned top-bar chips, TAGGED so render and the click hit-test share
+    # one ordered source (the geometry can't drift). Mirrors `status_chips` below.
+    private def self.top_bar_chips(*, scope : String, rules : String, intercept : String,
+                                   listen : String, time : String, unread : Int32) : Array({Symbol, String, Color})
+      chips = [] of {Symbol, String, Color}
+      chips << {:notify, "notify:#{unread}", Theme.accent} if unread > 0
+      chips << {:scope, scope, scope.ends_with?(":off") ? Theme.muted : Theme.text} unless scope.empty?
+      chips << {:rules, rules, Theme.text} unless rules.empty?
+      chips << {:intercept, intercept, Theme.red} unless intercept.empty?
+      chips << {:listen, listen, Theme.muted}
+      chips << {:time, time, Theme.muted}
+      chips
+    end
+
+    # The drawn rect of a tagged top-bar chip (or nil if absent) — rebuilds the SAME
+    # chip list + layout render_top_bar uses, so a click on `notify:N` can't drift
+    # from the glyph. Used by the Runner to make the badge clickable.
+    #
+    # `min_x` reproduces render_top_bar's project-name floor WITHOUT a live Screen:
+    # that floor only ever resolves to one of two values — `rect.right -
+    # chips_width - 1` (chips have room; the name gets whatever's left) or `name_x +
+    # 1` (chips are wider than available space, so the name is squeezed to zero
+    # width) — never something in between, since the name's own drawn width is
+    # itself bounded by the same floor. `chip_layout`'s `{A, min_x}.max` picks the
+    # right one either way, so passing `name_x + 1` here matches the real render
+    # exactly regardless of the actual project string or its truncation.
+    def self.top_bar_chip_rect(rect : Rect, tag : Symbol, *, scope : String, rules : String = "",
+                               intercept : String = "", listen : String, time : String,
+                               unread : Int32 = 0) : Rect?
+      tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept,
+        listen: listen, time: time, unread: unread)
+      idx = tagged.index { |(t, _, _)| t == tag }
+      return nil unless idx
+      name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
+      chip_layout(rect, tagged.map { |(_, l, c)| {l, c} }, name_x + 1)[idx]?
     end
 
     # A horizontal tab menu (row 2) styled as a segmented control. The active tab
@@ -292,16 +329,17 @@ module Gori::Tui
     # Bottom row: a focus-area badge (far left) + contextual key hints + capture/
     # upstream state chips (right). The badge — TABS / BODY / an overlay name —
     # is a lifted chip so the user always knows which region the keys drive.
+    # (The notification unread badge lives on the top bar, next to scope.)
     def self.render_status(screen : Screen, rect : Rect, *, focus : String, hints : String,
                            capturing : Bool, insecure_upstream : Bool, write_failures : Int32 = 0,
-                           activity : {String, Color}? = nil, unread : Int32 = 0) : Nil
+                           activity : {String, Color}? = nil) : Nil
       screen.fill(rect, Theme.panel)
       badge = " #{focus} "
       screen.text(rect.x, rect.y, badge, Theme.text_bright, Theme.elevated, Attribute::Bold)
       hint_x = rect.x + badge.size + 1
 
       chips = status_chips(capturing: capturing, insecure_upstream: insecure_upstream,
-        write_failures: write_failures, activity: activity, unread: unread).map { |(_, l, c)| {l, c} }
+        write_failures: write_failures, activity: activity).map { |(_, l, c)| {l, c} }
       hint_w = {rect.right - hint_x - chips_width(chips) - 2, 1}.max
       screen.text(hint_x, rect.y, hints, Theme.muted, Theme.panel, width: hint_w)
       # Floor the chips at the hint start so they can never overwrite the badge.
@@ -326,14 +364,13 @@ module Gori::Tui
       end
     end
 
-    # The right-aligned status chips, TAGGED so render and the click hit-test share one
-    # ordered source (the geometry can't drift). A background-activity chip (spinner +
-    # label) and a notification unread badge precede the capture/upstream chips.
+    # The right-aligned status chips, TAGGED so render and (were there a clickable
+    # chip here) a hit-test would share one ordered source. A background-activity
+    # chip (spinner + label) precedes the capture/upstream chips.
     private def self.status_chips(*, capturing : Bool, insecure_upstream : Bool, write_failures : Int32,
-                                  activity : {String, Color}?, unread : Int32) : Array({Symbol, String, Color})
+                                  activity : {String, Color}?) : Array({Symbol, String, Color})
       chips = [] of {Symbol, String, Color}
       chips << {:activity, activity[0], activity[1]} if activity
-      chips << {:notify, "notify:#{unread}", Theme.accent} if unread > 0
       # A persistent capture-write failure (e.g. disk full) is louder than the
       # normal on/off chip — the operator must know rows are being dropped.
       chips << if write_failures > 0
@@ -344,22 +381,6 @@ module Gori::Tui
       # an insecure upstream is a security warning — the one allowed non-status colour.
       chips << (insecure_upstream ? {:upstream, "upstream:insecure", Theme.yellow} : {:upstream, "upstream:verify", Theme.muted})
       chips
-    end
-
-    # The drawn rect of a tagged status chip (or nil if absent) — rebuilds the SAME chip
-    # list + layout render_status uses, so a click can't drift from the glyph. Used by
-    # the Runner to make the `notify:N` badge clickable.
-    # `min_x` MUST be the same floor render_status passes to render_chips (the hint start),
-    # or the hit-test rect drifts left of the drawn chip on a narrow row where the chips are
-    # floored. The Runner computes it identically from the focus badge.
-    def self.status_chip_rect(rect : Rect, tag : Symbol, *, capturing : Bool, insecure_upstream : Bool,
-                              write_failures : Int32, activity : {String, Color}?, unread : Int32,
-                              min_x : Int32) : Rect?
-      tagged = status_chips(capturing: capturing, insecure_upstream: insecure_upstream,
-        write_failures: write_failures, activity: activity, unread: unread)
-      idx = tagged.index { |(t, _, _)| t == tag }
-      return nil unless idx
-      chip_layout(rect, tagged.map { |(_, l, c)| {l, c} }, min_x)[idx]?
     end
 
     # The drawn rect of each chip, computed IDENTICALLY to render_chips' x-advance, so a
