@@ -70,6 +70,8 @@ gori mcp --install-claude-code
 | `list_findings` / `get_finding` | Read triaged findings |
 | `list_scope` | Current scope include/exclude rules |
 | `list_notes` / `get_note` | Read project notes |
+| `list_rules` | List the project's Match & Replace rules in apply order |
+| `convert` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
 | `project_info` | Flow / finding counts and which database is served |
 | `get_current_context` | What the user is viewing in the TUI right now |
 | `get_replay_context` | Replay workbench state and saved sessions |
@@ -83,10 +85,11 @@ gori mcp --install-claude-code
 | `create_replay` / `update_replay` / `delete_replay` | Manage Replay sessions |
 | `create_finding` / `update_finding` | Record and update findings |
 | `create_note` / `update_note` / `delete_note` | Manage project notes |
+| `create_rule` / `set_rule_enabled` / `delete_rule` | Create, toggle, and delete Match & Replace rules (literal rewrites on in-flight request/response head or body) |
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
 
-> Action tools are capped for safety: fuzz and mine jobs are limited in total requests, concurrency, and stored results.
+> Action tools are capped for safety: fuzz and mine jobs are limited in total requests, concurrency, and stored results. A rule created via `create_rule` is picked up by `gori run` and newly opened TUIs; an already-running TUI applies it only after its rules reload.
 
 ## Why a Seam, Not a Chatbox
 

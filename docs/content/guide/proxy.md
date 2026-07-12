@@ -9,7 +9,7 @@ The proxy is the heart of gori. It sits between your client and the upstream ser
 
 Start gori and point your client at `127.0.0.1:8070` (see the [Quick Start](/getting-started/quick-start/)). Toggle capture at any time with `c` — turning it off lets traffic pass through without being recorded, which is handy while you set up.
 
-Each flow records the full request and response: start line, headers, and body (captured up to 8 MiB). Bodies compressed with gzip, deflate, Brotli, or Zstd are decoded for display.
+Each flow records the full request and response: start line, headers, and body (the stored body is capped at 2 MiB; larger bodies still forward byte-exact and report their true size). Bodies compressed with gzip, deflate, Brotli, or Zstd are decoded for display.
 
 <figure class="tui-shot">
   <img src="/images/tui/response-detail.svg" alt="gori flow detail view on the RESPONSE sub-tab, showing an HTTP/2 200 status line and syntax-highlighted response headers">
@@ -55,6 +55,7 @@ On top of the wire protocols, gori decodes common payloads inline so you don't h
 - **JWT** — header and payload decoded from `Authorization`, cookies, URLs, and bodies (signatures are shown but never verified).
 - **SAML** — base64 (and DEFLATE for the redirect binding) decoded for `SAMLRequest` / `SAMLResponse`.
 - **GraphQL** — `query`, `operationName`, and `variables` parsed from POST bodies and `?query=` parameters.
+- **Form params** — `application/x-www-form-urlencoded` and `multipart/form-data` request bodies, plus the URL query string, decoded into a flat key=value list in the PARAMS pane (multipart file parts are summarised).
 
 ## Filtering History
 
@@ -65,7 +66,7 @@ status:5xx                  flows that errored
 host:api.example.com        a single host
 method:POST body:password   POST requests mentioning "password"
 dur:>500                    responses slower than 500 ms
-path:~/admin/               path matching a regex
+path~/admin/                path matching a regex
 ```
 
 Type a query in the History filter bar, or run it headless:

@@ -19,7 +19,7 @@ Replay handles more than HTTP/1:
 - **HTTP/2** requests are re-sent over a real h2 connection.
 - **WebSocket** replay opens a handshake, then lets you send messages and watch the drained responses.
 - **gRPC** replay reuses the HTTP/2 engine for framed messages.
-- A **decode** mode re-encodes edited JWT / SAML / GraphQL payloads on send.
+- A **decode** mode re-encodes edited SAML / GraphQL payloads on send. (To decode or edit a JWT, use the [Convert](/guide/convert/) tab's `jwt-decode`.)
 
 Replay from the command line, optionally against a new target:
 
@@ -68,7 +68,7 @@ The Fuzzer is an Intruder-style engine: mark positions in a request, attach payl
 
 ### Positions and Payloads
 
-Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a wordlist, an explicit list, a numeric range, null bytes, or brute-force character sets. Processors let you transform each payload on the way out — prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
+Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a wordlist, an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. Processors let you transform each payload on the way out — prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
 
 ### Matching
 

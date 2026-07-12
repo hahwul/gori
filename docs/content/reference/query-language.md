@@ -50,12 +50,12 @@ dur:<2s             faster than 2 s (s / ms suffixes allowed)
 
 ## Regular Expressions
 
-Use `~` for a regex match on `host`, `path`, `url`, `header`, or `body`:
+Use `~` for a regex match on `host`, `path`, `url`, `header`, or `body`. The `~` is its own field/value separator — do **not** put a colon before it. Matching is case-sensitive; prefix `(?i)` for case-insensitive.
 
 ```text
-path:~/admin/
-host:~^api\.
-header:~set-cookie
+path~/admin/
+host~^api\.
+header~set-cookie
 ```
 
 ## Combining Terms
@@ -82,7 +82,7 @@ gori run history -q 'host:api.example.com status:5xx'
 gori run history -q 'method:POST dur:>1s body:token'
 
 # Admin paths, excluding static assets
-gori run history -q 'path:~/admin/ -path:~\.(css|js|png)$'
+gori run history -q 'path~/admin/ -path~\.(css|js|png)$'
 
 # Scope a passive scan
 gori run prism -q 'host:example.com'

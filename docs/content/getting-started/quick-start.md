@@ -98,7 +98,7 @@ The **Help** tab is a full key cheatsheet inside the app — use it when this pa
 
 ## 5. Watch flows in History
 
-Switch to **History** (`3`, or `[` / `]` until History is active). Every request/response is a *flow*: start line, headers, body (up to 8 MiB), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.
+Switch to **History** (`3`, or `[` / `]` until History is active). Every request/response is a *flow*: start line, headers, body (stored up to 2 MiB), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.
 
 <figure class="tui-shot">
   <img src="/images/tui/history.svg" alt="gori History tab listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration columns">
@@ -170,6 +170,7 @@ Keep this table nearby until the chords stick:
 | `Ctrl-R` | History | → Replay |
 | `Shift-I` | History | → Fuzzer |
 | `Ctrl-R` | Replay / Fuzzer | Send request / run fuzz |
+| `n` | Anywhere | Notification center (background-job results / alerts) |
 | `Esc` | Most places | Back out one level |
 
 ## First-run wizard
