@@ -82,3 +82,13 @@ seed-demo:
 [group('documents')]
 docs-serve:
     hwaro serve -i docs --base-url="http://localhost:3000"
+
+# Re-capture every TUI screenshot for the docs (dark → tui/, light → tui/light/).
+[group('documents')]
+docs-shots: build
+    docs/tools/tui-capture/capture.sh
+
+# Re-capture only the light-theme TUI screenshots (→ tui/light/).
+[group('documents')]
+docs-shots-light: build
+    SHOTS="goriday:light" docs/tools/tui-capture/capture.sh
