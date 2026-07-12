@@ -199,10 +199,15 @@ module Gori::Convert
 
     # Parse EXACTLY 4 hex digits at `at`, or nil. A short slice near end-of-string
     # (e.g. `\uAB`) must NOT decode — it stays literal, matching the mid-string case
-    # where `\uABX` is left alone because `to_i?` rejects the non-hex char.
+    # where `\uABX` is left alone because `X` is not a hex digit. The explicit
+    # `hex?` guard is load-bearing: `to_i?(16)` also accepts a leading sign or
+    # whitespace, so `\u+ABC`/`\u 1FF` would silently mis-decode and `\u-1FF` would
+    # even reach `Int#chr` with a negative value (a raw ArgumentError). Requiring all
+    # four chars to be hex digits keeps those literal, as intended.
     private def hex4(s : String, at : Int32) : Int32?
       h = s[at, 4]?
-      (h && h.size == 4) ? h.to_i?(16) : nil
+      return nil unless h && h.size == 4 && h.each_char.all?(&.hex?)
+      h.to_i?(16)
     end
 
     def unicode_unescape(s : String) : String
