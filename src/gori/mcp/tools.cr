@@ -1057,6 +1057,10 @@ module Gori
       private def convert(h) : Result
         spec = str(h, "spec")
         return Result.new("missing required 'spec'", is_error: true) if spec.nil? || spec.strip.empty?
+        # A spec that is only separators (">", ",", "|") parses to zero tokens, which
+        # Chain.run treats as identity — reject it rather than reporting a phantom
+        # "success" that echoes the input back unchanged.
+        return Result.new("'spec' has no converter tokens (e.g. 'base64-decode > gunzip')", is_error: true) if Convert.parse_spec(spec).empty?
         raw = str(h, "input")
         return Result.new("missing required 'input'", is_error: true) if raw.nil?
 
@@ -1137,12 +1141,12 @@ module Gori
         pattern = str(h, "pattern")
         return Result.new("missing required 'pattern'", is_error: true) if pattern.nil? || pattern.empty?
 
-        tgt_s = str(h, "target")
-        target = tgt_s && !tgt_s.strip.empty? ? Store::RuleTarget.parse?(tgt_s.strip) : Store::RuleTarget::Request
+        tgt_s = str(h, "target").try(&.strip)
+        target = tgt_s.nil? || tgt_s.empty? ? Store::RuleTarget::Request : Store::RuleTarget.parse?(tgt_s)
         return Result.new("invalid 'target' (expected request|response)", is_error: true) unless target
 
-        part_s = str(h, "part")
-        part = part_s && !part_s.strip.empty? ? Store::RulePart.parse?(part_s.strip) : Store::RulePart::Head
+        part_s = str(h, "part").try(&.strip)
+        part = part_s.nil? || part_s.empty? ? Store::RulePart::Head : Store::RulePart.parse?(part_s)
         return Result.new("invalid 'part' (expected head|body)", is_error: true) unless part
 
         replacement = str(h, "replacement") || ""
@@ -1162,7 +1166,7 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) unless id
         enabled = bool(h, "enabled")
         return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
-        return Result.new("no rule with id #{id}", is_error: true) unless @store.match_rules.any? { |r| r.id == id }
+        return Result.new("no rule with id #{id}", is_error: true) unless rule_exists?(id)
         @store.set_rule_enabled(id, enabled)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
       end
@@ -1170,9 +1174,16 @@ module Gori
       private def delete_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        return Result.new("no rule with id #{id}", is_error: true) unless @store.match_rules.any? { |r| r.id == id }
+        return Result.new("no rule with id #{id}", is_error: true) unless rule_exists?(id)
         @store.delete_rule(id)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
+      end
+
+      # Whether a Match&Replace rule id exists. A full read (the store has no
+      # single-row rule fetch), but the rule set is tiny and enable/disable/delete
+      # are low-frequency actions.
+      private def rule_exists?(id : Int64) : Bool
+        @store.match_rules.any? { |r| r.id == id }
       end
 
       private def create_replay(h) : Result

@@ -422,6 +422,15 @@ describe Gori::MCP::Server do
         tool_payload(resp)["output"].as_s.size.should eq(64)
       end
     end
+
+    it "rejects a separator-only spec instead of echoing the input as a phantom success" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"convert","arguments":{"input":"hello","spec":">"}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("no converter tokens")
+      end
+    end
   end
 
   describe "match&replace rules" do
