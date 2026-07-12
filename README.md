@@ -1,7 +1,7 @@
 <div align="center">
   <br>
   <img src="docs/static/images/gori-wallpaper.jpg">
-  <p>𝓰𝓸𝓻𝓲</p>
+  <p>A fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal.</p>
 </div>
 <p align="center">
 <a href="https://github.com/hahwul/gori/blob/main/CONTRIBUTING.md">
@@ -11,9 +11,6 @@
 <a href="https://crystal-lang.org">
 <img src="https://img.shields.io/badge/Crystal-000000?style=for-the-badge&logo=crystal&logoColor=white"></a>
 </p>
-
-
-> A fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal.
 
 **gori** (고리 — Korean for *ring, link, loop*) is a keyboard-driven HTTP/HTTPS intercepting
 proxy and web-hacking workbench that runs entirely in your terminal. Point a browser or client
