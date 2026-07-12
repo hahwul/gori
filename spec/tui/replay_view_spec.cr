@@ -223,6 +223,23 @@ describe Gori::Tui::ReplayView do
     String.new(view.request_bytes).should eq("POST /x HTTP/1.1\r\nHost: a.test\r\n\r\nq=§hi§")
   end
 
+  it "does not double CRLF when a $KEY value carries its own CRLF" do
+    # A var value with an embedded CRLF must land in the wire request as a single CRLF,
+    # not `\r\r\n` — parity with Env.expand_wire (the CLI/MCP send path). The old
+    # split('\n').join("\r\n") over already-expanded text doubled it, corrupting the line.
+    prev = Gori::Settings.env_vars
+    begin
+      Gori::Settings.env_vars = [{"MULTI", "a\r\nb"}]
+      view = ReplayView.new
+      view.restore("https://h.test", "POST /x HTTP/1.1\nHost: h.test\n\n$MULTI", false, false)
+      sent = String.new(view.request_bytes)
+      sent.should eq("POST /x HTTP/1.1\r\nHost: h.test\r\n\r\na\r\nb")
+      sent.includes?("\r\r\n").should be_false
+    ensure
+      Gori::Settings.env_vars = prev
+    end
+  end
+
   it "MARK transform on applies a marker's inline chain on send + resyncs Content-Length" do
     view = ReplayView.new
     view.restore("https://a.test",
