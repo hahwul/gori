@@ -308,6 +308,56 @@ describe "InterceptView#bar_zone_at" do
   end
 end
 
+describe "Chrome.top_bar_chip_rect" do
+  it "returns nil for :notify when there's no unread, and a rect matching the drawn badge otherwise" do
+    rect = Rect.new(0, 0, 80, 1)
+    Chrome.top_bar_chip_rect(rect, :notify, scope: "scope:2", listen: "127.0.0.1:8080",
+      time: "01:37 PM", unread: 0).should be_nil
+
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), rect,
+      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2", unread: 3)
+    nrect = Chrome.top_bar_chip_rect(rect, :notify, scope: "scope:2", listen: "127.0.0.1:8080",
+      time: "01:37 PM", unread: 3).not_nil!
+    backend.row(0)[nrect.x, nrect.w].should eq("notify:3")
+  end
+
+  it "returns a rect matching the drawn scope chip whether it's on or off" do
+    rect = Rect.new(0, 0, 80, 1)
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), rect,
+      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2")
+    srect = Chrome.top_bar_chip_rect(rect, :scope, scope: "scope:2", listen: "127.0.0.1:8080",
+      time: "01:37 PM").not_nil!
+    backend.row(0)[srect.x, srect.w].should eq("scope:2")
+
+    backend2 = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend2), rect,
+      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:off")
+    srect2 = Chrome.top_bar_chip_rect(rect, :scope, scope: "scope:off", listen: "127.0.0.1:8080",
+      time: "01:37 PM").not_nil!
+    backend2.row(0)[srect2.x, srect2.w].should eq("scope:off")
+  end
+
+  it "keeps notify/scope hit-test rects in sync with the drawn row even when the project name is squeezed" do
+    # Narrow rect: chips (notify:3 · scope:99 · 127.0.0.1:8080 · 01:37 PM) leave the
+    # project name almost no room — exercises the "name squeezed to zero width" branch.
+    rect = Rect.new(0, 0, 45, 1)
+    backend = MemoryBackend.new(45, 1)
+    Chrome.render_top_bar(Screen.new(backend), rect,
+      project: "a very long project name", listen: "127.0.0.1:8080", time: "01:37 PM",
+      scope: "scope:99", unread: 3)
+
+    nrect = Chrome.top_bar_chip_rect(rect, :notify, scope: "scope:99", listen: "127.0.0.1:8080",
+      time: "01:37 PM", unread: 3).not_nil!
+    backend.row(0)[nrect.x, nrect.w].should eq("notify:3")
+
+    srect = Chrome.top_bar_chip_rect(rect, :scope, scope: "scope:99", listen: "127.0.0.1:8080",
+      time: "01:37 PM", unread: 3).not_nil!
+    backend.row(0)[srect.x, srect.w].should eq("scope:99")
+  end
+end
+
 describe "ComparerView#pane_chip_at" do
   it "hits REQ / RES chips on the divider row" do
     view = ComparerView.new

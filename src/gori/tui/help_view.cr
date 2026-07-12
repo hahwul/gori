@@ -20,7 +20,7 @@ module Gori::Tui
         {"^P", "command palette"},
         {"space", "focus-area action menu"},
         {"c", "toggle capture"},
-        {"s · m", "toggle scope lens · Match & Replace rules"},
+        {"s · m", "toggle scope lens (or click scope:N) · Match & Replace rules"},
         {"n", "notification center (or click the notify:N badge)"},
         {"^B", "reveal whitespace (·→␍␊)"},
         {"^D / ^C ×2", "quit gori"},
