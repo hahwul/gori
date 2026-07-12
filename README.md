@@ -1,6 +1,18 @@
-# 𝓰𝓸𝓻𝓲
+<div align="center">
+  <br>
+  <img src="docs/static/images/gori.png" alt="dalfox" width="170px;">
+  <p>𝓰𝓸𝓻𝓲</p>
+</div>
+<p align="center">
+<a href="https://github.com/hahwul/gori/blob/main/CONTRIBUTING.md">
+<img src="https://img.shields.io/badge/CONTRIBUTIONS-WELCOME-000000?style=for-the-badge&labelColor=black"></a>
+<a href="https://github.com/hahwul/gori/releases">
+<img src="https://img.shields.io/github/v/release/hahwul/gori?style=for-the-badge&color=black&labelColor=black&logo=web"></a>
+<a href="https://crystal-lang.org">
+<img src="https://img.shields.io/badge/Crystal-000000?style=for-the-badge&logo=crystal&logoColor=white"></a>
+</p>
 
-> **Sit in the loop.**
+
 > A fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal.
 
 **gori** (고리 — Korean for *ring, link, loop*) is a keyboard-driven HTTP/HTTPS intercepting
