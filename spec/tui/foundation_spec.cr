@@ -123,11 +123,11 @@ describe Gori::Tui::Chrome do
   it "renders the focus-area badge at the far left of the status bar" do
     backend = MemoryBackend.new(90, 1)
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
-      focus: "BODY", hints: "↹ pane · esc tabs", capturing: true, insecure_upstream: false)
+      focus: "BODY", hints: "↹ pane · esc tabs", insecure_upstream: false)
     backend.contains?("BODY").should be_true
-    backend.fg_at(1, 0).should eq(Theme.text_bright) # badge text is bright (col 0 is the leading pad)
-    backend.contains?("↹ pane").should be_true       # hints still render to the right of the badge
-    backend.contains?("capture:on").should be_true   # chips still on the right
+    backend.fg_at(1, 0).should eq(Theme.text_bright)    # badge text is bright (col 0 is the leading pad)
+    backend.contains?("↹ pane").should be_true          # hints still render to the right of the badge
+    backend.contains?("upstream:verify").should be_true # chips still on the right
   end
 
   it "keeps the focus badge intact when chips would otherwise overflow a narrow bar" do
@@ -135,20 +135,10 @@ describe Gori::Tui::Chrome do
     # widest chip pair must not clobber the persistent focus badge.
     backend = MemoryBackend.new(36, 1)
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 36, 1),
-      focus: "FINDING", hints: "type title · esc cancel", capturing: false, insecure_upstream: true)
+      focus: "FINDING", hints: "type title · esc cancel", insecure_upstream: true)
     backend.row(0)[0, 9].should eq(" FINDING ") # badge survives, no chip bled into it
     backend.fg_at(1, 0).should eq(Theme.text_bright)
-    backend.contains?("capture:off").should be_true # chips still present (truncated at the right edge)
-  end
-
-  it "shows a loud red capture-failing chip when writes are dropping" do
-    backend = MemoryBackend.new(90, 1)
-    Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
-      focus: "BODY", hints: "x", capturing: true, insecure_upstream: false, write_failures: 4)
-    backend.contains?("capture:FAILING(4)").should be_true
-    fx = backend.row(0).index("capture:FAILING").not_nil!
-    backend.fg_at(fx, 0).should eq(Theme.red)
-    backend.contains?("capture:on").should be_false # replaced, not appended
+    backend.contains?("upstream:insecure").should be_true # chips still present (truncated at the right edge)
   end
 
   it "gilds the shell only for single-pane body focus" do
@@ -196,8 +186,8 @@ describe Gori::Tui::Chrome do
     backend.row(0).should contain("acme")
     backend.row(0).should contain("scope:2")
     backend.row(0).should contain("01:37 PM")
-    backend.row(0).should_not contain("rec")    # capture state moved to the bottom status bar
-    backend.row(0).should_not contain("notify") # no unread → badge omitted
+    backend.row(0).should contain("127.0.0.1:8080") # listen address always shown, capture state rides its colour
+    backend.row(0).should_not contain("notify")     # no unread → badge omitted
   end
 
   it "shows the unread notify badge on the top bar, left of scope" do
@@ -215,8 +205,36 @@ describe Gori::Tui::Chrome do
   it "omits the notify badge from the bottom status bar (it moved to the top bar)" do
     backend = MemoryBackend.new(90, 1)
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
-      focus: "BODY", hints: "↹ pane · esc tabs", capturing: true, insecure_upstream: false)
+      focus: "BODY", hints: "↹ pane · esc tabs", insecure_upstream: false)
     backend.contains?("notify").should be_false
+  end
+
+  it "colours the top-bar listen chip green while capturing (address text unchanged)" do
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), Rect.new(0, 0, 80, 1),
+      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2", capturing: true)
+    backend.row(0).should contain("127.0.0.1:8080")
+    fx = backend.row(0).index("127.0.0.1:8080").not_nil!
+    backend.fg_at(fx, 0).should eq(Theme.green)
+    backend.contains?("capture:on").should be_false # merged into the listen chip, not a separate label
+  end
+
+  it "dims the top-bar listen chip when capture is paused" do
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), Rect.new(0, 0, 80, 1),
+      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2", capturing: false)
+    fx = backend.row(0).index("127.0.0.1:8080").not_nil!
+    backend.fg_at(fx, 0).should eq(Theme.muted)
+  end
+
+  it "turns the top-bar listen chip red with the drop count when writes are failing" do
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), Rect.new(0, 0, 80, 1),
+      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2",
+      capturing: true, write_failures: 4)
+    backend.row(0).should contain("127.0.0.1:8080 (4)")
+    fx = backend.row(0).index("127.0.0.1:8080").not_nil!
+    backend.fg_at(fx, 0).should eq(Theme.red)
   end
 end
 

@@ -1010,16 +1010,20 @@ module Gori::Tui
       return false unless rect.contains?(mx, my)
       unread = @notifications.unread
       listen = "#{@session.proxy.host}:#{@session.proxy.port}"
+      capturing = @session.capturing?
+      write_failures = @session.store.write_failures
 
       nrect = Chrome.top_bar_chip_rect(rect, :notify, scope: scope_label, rules: rules_label,
-        intercept: intercept_label, listen: listen, time: clock_label, unread: unread)
+        intercept: intercept_label, listen: listen, time: clock_label, unread: unread,
+        capturing: capturing, write_failures: write_failures)
       if nrect && nrect.contains?(mx, my)
         open_notifications
         return true
       end
 
       srect = Chrome.top_bar_chip_rect(rect, :scope, scope: scope_label, rules: rules_label,
-        intercept: intercept_label, listen: listen, time: clock_label, unread: unread)
+        intercept: intercept_label, listen: listen, time: clock_label, unread: unread,
+        capturing: capturing, write_failures: write_failures)
       if srect && srect.contains?(mx, my)
         scope_toggle_lens
         return true
@@ -2787,14 +2791,14 @@ module Gori::Tui
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
         listen: "#{@session.proxy.host}:#{@session.proxy.port}", time: clock_label,
         scope: scope_label, rules: rules_label, intercept: intercept_label,
-        unread: @notifications.unread)
+        unread: @notifications.unread, capturing: @session.capturing?,
+        write_failures: @session.store.write_failures)
       Chrome.render_rule(screen, layout.rule)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
         tabs: effective_tabs, intercept_count: @session.interceptor.pending_count)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
-        capturing: @session.capturing?, insecure_upstream: @session.config.insecure_upstream?,
-        write_failures: @session.store.write_failures,
+        insecure_upstream: @session.config.insecure_upstream?,
         activity: activity_chip)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay == :palette
