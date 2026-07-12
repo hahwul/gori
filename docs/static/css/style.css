@@ -249,13 +249,13 @@ img {
   white-space: nowrap;
 }
 
-/* The loop mark is the white PNG used as a mask over the gold-leaf gradient, so
-   it reads as brushed gold in both themes from one source (the gradient itself
-   flips per theme). --logo-src is set inline in the template to carry base_url. */
+/* The loop mark is the PNG used as a mask, filled with the heading colour, so
+   it reads white on dark and near-black on light from one source. --logo-src is
+   set inline in the template to carry base_url. */
 .logo-mark {
   width: 2rem;
   height: 1.8rem;
-  background: var(--grad-gold-leaf);
+  background: var(--heading);
   -webkit-mask: var(--logo-src) center / contain no-repeat;
   mask: var(--logo-src) center / contain no-repeat;
 }
@@ -266,11 +266,7 @@ img {
   line-height: 1;
   letter-spacing: 0;
   transform: translateY(-0.04em);
-  /* Gold-leaf wordmark: the gradient is clipped to the glyphs. */
-  background: var(--grad-gold-leaf);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--heading);
 }
 
 .top-nav {

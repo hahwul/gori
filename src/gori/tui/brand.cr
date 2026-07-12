@@ -25,7 +25,7 @@ module Gori::Tui
 
     AUTHOR  = "hahwul (Hwan Lee)"
     BYLINE  = "made by #{AUTHOR}"
-    TAGLINE = "free · open-source · human in the driver's seat"
+    TAGLINE = "Hack from the terminal."
 
     # Static full-accent art (no entrance animation). `origin_x` is the absolute
     # column for glyph col 0 of each ART line (includes the art's leading spaces).
