@@ -148,28 +148,28 @@ module Gori::Tui
         x0, x1 = {ax, @cx}.min, {ax, @cx}.max
         line = line_at.call(y0)
         return "" if x0 >= x1 && x0 >= line.size
-        return line[x0...x1]
+        return line[x0.clamp(0, line.size)...x1.clamp(0, line.size)]
       end
-      # Multi-line: if anchor and caret share a line column pattern for pure line
-      # selection (ax==0 and cx at line end), copy full lines; else copy char rects.
-      cy_line = line_at.call(@cy)
-      full_lines = ax == 0 && @cx >= cy_line.size && (ay != @cy || ax == 0)
-      if full_lines && @cx == cy_line.size && ax == 0
-        parts = Array(String).new(y1 - y0 + 1)
-        (y0..y1).each { |yi| parts << line_at.call(yi) }
-        parts.join("\n")
-      else
-        parts = [] of String
-        (y0..y1).each do |yi|
-          line = line_at.call(yi)
-          parts << case yi
-                   when y0 then line[ax..]
-                   when y1 then line[0...@cx]
-                   else         line
-                   end
+      # Multi-line char rectangle. Assign the boundary columns to the lines they
+      # actually belong to in DOCUMENT order: an upward selection (caret above the
+      # anchor) has the CARET column on the top line and the ANCHOR column on the
+      # bottom — the reverse of a downward one. The old code assumed y0==anchor /
+      # y1==caret unconditionally, so an upward selection copied the wrong text AND
+      # sliced a short top line past its end (`line[ax..]` with ax > size → IndexError,
+      # crashing the copy). Each column is clamped to its line's length because a
+      # vertical select parks the caret at EOL, which can exceed a shorter neighbour.
+      # A clean full-line selection (top col 0, bottom col ≥ EOL) falls out as whole lines.
+      top_x, bot_x = @cy < ay ? {@cx, ax} : {ax, @cx}
+      parts = Array(String).new(y1 - y0 + 1)
+      (y0..y1).each do |yi|
+        line = line_at.call(yi)
+        parts << case yi
+        when y0 then line[top_x.clamp(0, line.size)..]
+        when y1 then line[0...bot_x.clamp(0, line.size)]
+        else         line
         end
-        parts.join("\n")
       end
+      parts.join("\n")
     end
 
     def current_line(lines : Array(String)) : String
@@ -195,6 +195,10 @@ module Gori::Tui
       y0, y1 = {ay, @cy}.min, {ay, @cy}.max
       y0 = y0.clamp(0, size - 1)
       y1 = y1.clamp(0, size - 1)
+      # Boundary columns belong to their DOCUMENT-order lines (see selection_text):
+      # an upward selection puts the caret column on the top line, the anchor on the
+      # bottom — so the highlight matches the text a copy would produce.
+      top_x, bot_x = @cy < ay ? {@cx, ax} : {ax, @cx}
       spans = [] of {Int32, Int32, Int32}
       (y0..y1).each do |yi|
         line = line_at.call(yi)
@@ -203,9 +207,9 @@ module Gori::Tui
                    xb = {ax, @cx}.max
                    {xa, xb}
                  elsif yi == y0
-                   {ax, line.size}
+                   {top_x.clamp(0, line.size), line.size}
                  elsif yi == y1
-                   {0, @cx}
+                   {0, bot_x.clamp(0, line.size)}
                  else
                    {0, line.size}
                  end

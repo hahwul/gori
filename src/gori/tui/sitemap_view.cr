@@ -52,8 +52,9 @@ module Gori::Tui
       @scope = nil.as(Scope?)
       @query = ""
       @querying = false
-      @qcx = 0      # caret position within @query
-      @preedit = "" # IME composition, drawn at the caret
+      @qcx = 0                      # caret position within @query
+      @preedit = ""                 # IME composition, drawn at the caret
+      @query_note = nil.as(String?) # why an active filter is empty when its QL residual is INVALID
       # Numeric-sequence folding (Feature: path-param explosion). On by default; `g`
       # toggles it for the rare case of wanting every literal id.
       @grouping = true
@@ -86,7 +87,22 @@ module Gori::Tui
       # `tag:`/`-tag:` are Sitemap-local (the shared QL has no tag column): split them
       # out, hand the residual to QL.parse, and apply the tag filter to the built tree.
       positives, negatives, residual = split_tag_terms(@query)
-      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, QL.parse(residual))
+      residual_filter = QL.parse(residual)
+      @query_note = query_note_for(residual, residual_filter)
+      # A non-blank QL residual that compiles to EMPTY means every QL term was invalid
+      # (typo'd field, bad numeric, unterminated value). Mirror HistoryView / MCP / CLI:
+      # reject it (empty tree + a note) rather than fall through to a match-all search
+      # that shows the WHOLE sitemap behind an "active" filter. A tag-only query has a
+      # blank residual, so reject_empty? is false and the tag filter still applies below.
+      if QL.reject_empty?(residual, residual_filter)
+        @hosts = [] of Node
+        @visible_cache = nil
+        @selected = 0
+        @scroll = 0
+        @loaded = true
+        return
+      end
+      combined = QL.and(@scope.try(&.filter) || QL::EMPTY, residual_filter)
       @hosts = Sitemap.build(store.sitemap_entries(combined))
       Sitemap.stamp_tags!(@hosts, store.sitemap_tags)
       filter_by_tags(positives, negatives)
@@ -165,6 +181,17 @@ module Gori::Tui
     end
 
     # --- tags: filter (stamping lives in Gori::Sitemap.stamp_tags!) ----------
+
+    # A short note explaining a filter that matches nothing because its QL residual is
+    # INVALID (vs a valid filter that genuinely has no matches) — surfaced in the
+    # empty-state so a typo'd status:/dur:/size: or a broken body~[regex isn't misread
+    # as "no endpoints". Operates on the residual (tag: terms are handled separately).
+    private def query_note_for(residual : String, filter : QL::Filter) : String?
+      return nil if residual.blank?
+      return "invalid filter — no valid terms" if QL.reject_empty?(residual, filter)
+      bad = QL.invalid_regex_terms(residual)
+      bad.empty? ? nil : "invalid regex in #{bad.first}"
+    end
 
     # Split `tag:`/`-tag:` tokens out of the query (whitespace-tokenised, matching
     # QL.parse). Returns positive + negative keywords (lowercased) and the residual
@@ -465,7 +492,9 @@ module Gori::Tui
         # real `/` query — a Scope-lens-only empty set isn't cleared with esc//.
         msg, hint =
           if !@query.blank?
-            {"no endpoints match", querying? ? "esc clears the filter" : "/ to edit the filter"}
+            # An INVALID QL residual (all terms bad, or a broken regex) reads as "no
+            # endpoints match" unless we say why — @query_note distinguishes it.
+            {@query_note || "no endpoints match", querying? ? "esc clears the filter" : "/ to edit the filter"}
           elsif filtering? # in-scope subset is empty (Scope lens, no QL query)
             {"no endpoints in scope", nil}
           else

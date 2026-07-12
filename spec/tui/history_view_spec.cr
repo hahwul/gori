@@ -264,7 +264,7 @@ describe Gori::Tui::HistoryView do
       view = HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
-      view.toggle_pane # request -> response
+      view.toggle_pane                                # request -> response
       line3 = view.detail_search_lines("LINE3").first # 0-based row of the body's 3rd line
 
       view.goto_detail_line(line3 + 1) # 1-based
@@ -630,6 +630,116 @@ describe Gori::Tui::HistoryView do
       backend.contains?("127.0.0.1:8070").should be_true
       backend.contains?("Open browser").should be_true
       backend.contains?("FLOW LOG").should be_true
+    end
+  end
+
+  it "does not fall back to the 101 handshake bytes for hex/reveal on the WS MESSAGES pane" do
+    tmp_store do |store|
+      id = add_flow(store, "GET", "/ws", 101) # response head = the 101 handshake
+      store.insert_ws_message(id, "out", 1, "hello".to_slice)
+      store.insert_ws_message(id, "in", 1, "world".to_slice)
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response (= MESSAGES for a WS flow)
+
+      # x (hex) must be a no-op on a synthetic transcript — never a hex dump of the
+      # bare "HTTP/1.1 101" handshake (whose bytes hold neither "hello" nor "world").
+      view.toggle_detail_hex
+      hexb = MemoryBackend.new(80, 12)
+      view.render_detail(Screen.new(hexb), Rect.new(0, 0, 80, 12))
+      hexb.contains?("hello").should be_true
+      hexb.contains?("world").should be_true
+
+      # w (reveal) likewise stays on the message log, not the handshake.
+      view.toggle_detail_hex # back to text
+      view.reveal = true
+      wsb = MemoryBackend.new(80, 12)
+      view.render_detail(Screen.new(wsb), Rect.new(0, 0, 80, 12))
+      wsb.contains?("hello").should be_true
+      wsb.contains?("world").should be_true
+    end
+  end
+
+  it "gates reveal-whitespace on a gRPC body (keeps the framed view, avoids raw-protobuf desync)" do
+    tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "grpc.test", port: 443,
+        method: "POST", target: "/svc/Method", http_version: "HTTP/2",
+        head: "POST /svc/Method HTTP/2\r\ncontent-type: application/grpc\r\n\r\n".to_slice, body: nil))
+      gbody = IO::Memory.new
+      gbody.write(Bytes[0x00, 0x00, 0x00, 0x00, 0x02]) # flag 0 + len 2
+      gbody << "hi"
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/2 200\r\ncontent-type: application/grpc\r\n\r\n".to_slice, body: gbody.to_slice))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response (gRPC body)
+
+      view.reveal = true # 'w' — must NOT swap the framed view for reveal-glyphed protobuf
+      backend = MemoryBackend.new(100, 14)
+      view.render_detail(Screen.new(backend), Rect.new(0, 0, 100, 14))
+      backend.contains?("message #1").should be_true # still the framed view
+    end
+  end
+
+  it "keeps the newest capture visible after a live insert while not following" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/A", 200)
+      add_flow(store, "GET", "/B", 200)
+      view = HistoryView.new
+      view.reload(store) # newest-first [B, A], following (top)
+      view.select_row(1) # click the older row A → follow off, scroll 0
+      view.follow?.should be_false
+
+      cid = add_flow(store, "GET", "/C", 200)
+      view.on_event(Gori::Store::FlowEvent.new(cid, :inserted), store) # [C,B,A]; @scroll bumped to 1
+
+      backend = MemoryBackend.new(80, 30) # ample room for all 3 rows
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 80, 30))
+      body = (0...30).map { |y| backend.row(y) }.join("\n")
+      body.should contain("/C") # newest row must not be stranded above the top
+      body.should contain("/A")
+    end
+  end
+
+  it "rejects an all-invalid QL query instead of matching every flow" do
+    tmp_store do |store|
+      3.times { |i| add_flow(store, "GET", "/#{i}", 200) }
+      view = HistoryView.new
+      view.reload(store)
+      view.rows.size.should eq(3)
+
+      view.start_query
+      "dur:>2sec".each_char { |c| view.query_insert(c) } # every term invalid → compiles to match-all EMPTY
+      view.reload(store)
+      view.rows.empty?.should be_true # must NOT show all flows behind an "active" filter
+
+      backend = MemoryBackend.new(80, 12)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 80, 12))
+      rows = (0...12).map { |y| backend.row(y) }.join("\n")
+      rows.should contain("invalid filter")
+    end
+  end
+
+  it "flags an invalid regex filter term in the empty-state (not a bare no-match)" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/a", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.start_query
+      "body~[bad".each_char { |c| view.query_insert(c) } # unterminated class → never-match "0"
+      view.reload(store)
+      view.rows.empty?.should be_true
+
+      backend = MemoryBackend.new(80, 12)
+      view.render_list(Screen.new(backend), Rect.new(0, 0, 80, 12))
+      rows = (0...12).map { |y| backend.row(y) }.join("\n")
+      rows.should contain("invalid regex")
     end
   end
 

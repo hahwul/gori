@@ -106,6 +106,63 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  it "rejects an all-invalid QL query instead of showing the whole tree" do
+    tmp_store do |store|
+      capture(store, "api.acme.test", "GET", "/v1/users")
+      capture(store, "cdn.acme.test", "GET", "/assets/app.js")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.start_query
+      "dur:>2sec".each_char { |c| view.query_insert(c) } # every term invalid → match-all EMPTY
+      view.reload(store)
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("api.acme.test").should be_false # must NOT show the whole tree behind an "active" filter
+      b.contains?("cdn.acme.test").should be_false
+      rows = (0...20).map { |y| b.row(y) }.join("\n")
+      rows.should contain("invalid filter")
+    end
+  end
+
+  it "does NOT reject a tag:-only query (its QL residual is blank)" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      capture(store, "acme.test", "GET", "/static/app.js")
+      store.set_sitemap_tag("acme.test", "/api", "payment")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.start_query
+      "tag:pay".each_char { |c| view.query_insert(c) } # residual "" → EMPTY, but valid (tag filter)
+      view.reload(store)
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("acme.test").should be_true # the tag filter applies; NOT rejected as invalid
+      b.contains?("users").should be_true
+      rows = (0...20).map { |y| b.row(y) }.join("\n")
+      rows.should_not contain("invalid filter")
+    end
+  end
+
+  it "flags an invalid regex filter term in the empty-state" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/")
+      view = SitemapView.new
+      view.reload(store)
+      view.start_query
+      "path~[bad".each_char { |c| view.query_insert(c) } # unterminated class → never-match "0"
+      view.reload(store)
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      rows = (0...20).map { |y| b.row(y) }.join("\n")
+      rows.should contain("invalid regex")
+    end
+  end
+
   it "renders the filter bar: scope chip + hint, then the filter prompt" do
     tmp_store do |store|
       capture(store, "acme.test", "GET", "/")
