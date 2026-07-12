@@ -119,15 +119,17 @@ module Gori
       # disabled by read-only mode, rather than discovering it only on a rejected call.
       private def instructions_text : String
         base = "gori MCP exposes the active project's captured HTTP traffic " \
-               "(history, flows, sitemap, scope, findings). Call ql_reference before " \
+               "(history, flows, sitemap, scope, findings, notes, match&replace rules), plus a " \
+               "pure `convert` encode/decode/hash tool. Call ql_reference before " \
                "writing list_history/list_sitemap queries. Timestamps include unix " \
                "microseconds plus *_iso RFC3339 fields where available."
         if @allow_actions
           "#{base} Action tools are enabled: send_request (supports flow_id replay), " \
-          "fuzz_*, mine_*, and create/update_finding make real outbound requests or mutate findings."
+          "fuzz_*, mine_*, create/update_finding, and create/delete_rule + set_rule_enabled " \
+          "make real outbound requests or mutate findings/rules."
         else
           "#{base} Read-only mode: action tools (send_request, fuzz_*, mine_*, " \
-          "create/update_finding) are disabled — restart without --read-only to enable them."
+          "create/update_finding, create/delete_rule) are disabled — restart without --read-only to enable them."
         end
       end
 
