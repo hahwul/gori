@@ -45,6 +45,11 @@ module Gori
 
       MCP_REPLAY_REQUEST_MAX = 16 * 1024
 
+      # Ceiling on the `convert` tool's returned output string. A Convert step can
+      # produce up to 32 MiB (Convert::MAX_OUT); returning that inline would swamp
+      # the JSON-RPC channel, so truncate the display string and flag it.
+      CONVERT_MAX_OUTPUT = 256 * 1024
+
       def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool,
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil)
@@ -183,7 +188,43 @@ module Gori
             s.field "id", intprop("database note ID"), required: true
           end
 
+          tool j, "convert",
+            "Run a gori Convert chain (encode/decode/hash/compress) over `input` and return the " \
+            "result — the same engine as the TUI Convert tab. Pure transform: no network, no state. " \
+            "`spec` is converter tokens separated by '>', '|' or ',' applied left-to-right, e.g. " \
+            "'base64-decode > gunzip', 'url-encode', 'sha256'. Common converters: base64, " \
+            "base64-decode, url-encode, url-decode, hex, hex-decode, gzip, gunzip, deflate, inflate, " \
+            "jwt-decode, html-encode, md5, sha1, sha256. An unknown token returns the full list." do |s|
+            s.field "input", strprop("the value to transform (UTF-8 text unless input_base64 is set)"), required: true
+            s.field "spec", strprop("converter chain, e.g. 'base64-decode > gunzip'"), required: true
+            s.field "input_base64", boolprop("treat `input` as base64 and decode it to raw bytes first (for binary input)")
+          end
+
+          tool j, "list_rules",
+            "List the project's Match & Replace rules (literal substring rewrites applied to " \
+            "in-flight request/response HEAD or BODY), in apply order." { }
+
           if @allow_actions
+            tool j, "create_rule",
+              "Add a Match & Replace rule (a literal substring rewrite applied to in-flight traffic). " \
+              "Persisted to the project. Note: a gori TUI already running applies it only after its " \
+              "rules reload (reopen the rules editor or restart); `gori run` and newly opened TUIs " \
+              "pick it up immediately." do |s|
+              s.field "pattern", strprop("literal substring to match"), required: true
+              s.field "replacement", strprop("literal replacement (empty = delete the pattern; default empty)")
+              s.field "target", strprop("request|response (default request)")
+              s.field "part", strprop("head|body — head = request/status line + headers, body = entity body (default head)")
+            end
+
+            tool j, "set_rule_enabled", "Enable or disable a Match & Replace rule by id." do |s|
+              s.field "id", intprop("rule id from list_rules"), required: true
+              s.field "enabled", boolprop("true to enable, false to disable"), required: true
+            end
+
+            tool j, "delete_rule", "Delete a Match & Replace rule by id." do |s|
+              s.field "id", intprop("rule id from list_rules"), required: true
+            end
+
             tool j, "create_note", "Create a new note with optional text content." do |s|
               s.field "text", strprop("initial text content for the new note")
             end
@@ -371,6 +412,8 @@ module Gori
         when "ql_reference"        then ql_reference
         when "list_notes"          then list_notes
         when "get_note"            then get_note(h)
+        when "convert"             then convert(h)
+        when "list_rules"          then list_rules
         end
       end
 
@@ -395,6 +438,9 @@ module Gori
         when "create_note"    then gated { create_note(h) }
         when "update_note"    then gated { update_note(h) }
         when "delete_note"    then gated { delete_note(h) }
+        when "create_rule"       then gated { create_rule(h) }
+        when "set_rule_enabled"  then gated { set_rule_enabled(h) }
+        when "delete_rule"       then gated { delete_rule(h) }
         end
       end
 
@@ -1003,6 +1049,130 @@ module Gori
             j.field "message", "Note deleted successfully"
           end
         end)
+      end
+
+      # Run a Convert chain over caller-supplied bytes. Pure: no store, no network,
+      # so it's a read tool (always exposed). A failed/unknown step is a tool-level
+      # error; an unknown token also enumerates the registry so the model can retry.
+      private def convert(h) : Result
+        spec = str(h, "spec")
+        return Result.new("missing required 'spec'", is_error: true) if spec.nil? || spec.strip.empty?
+        raw = str(h, "input")
+        return Result.new("missing required 'input'", is_error: true) if raw.nil?
+
+        input =
+          if bool(h, "input_base64")
+            begin
+              Base64.decode(raw)
+            rescue
+              return Result.new("invalid 'input': input_base64 is set but the value is not valid base64", is_error: true)
+            end
+          else
+            raw.to_slice
+          end
+
+        reg = Convert.shared_registry
+        result = Convert.run(reg, input, spec)
+
+        if (idx = result.failed_at)
+          step = result.steps[idx]
+          msg = "convert failed at step #{idx + 1} '#{step.token}': #{step.error || "failed"}"
+          msg += " — available converters: #{reg.names.join(", ")}" if step.state.unknown?
+          return Result.new(msg, is_error: true)
+        end
+
+        out_bytes = result.output || Bytes.empty
+        text, mode = Convert.display(out_bytes)
+        # Bound the channel: Chain.run caps a step at 32 MiB, far too large to return
+        # inline. Truncate on a byte budget and scrub so a split multibyte char can't
+        # emit invalid UTF-8 into the JSON string; `output_bytes` keeps the true size.
+        truncated = text.bytesize > CONVERT_MAX_OUTPUT
+        text = text.byte_slice(0, CONVERT_MAX_OUTPUT).scrub if truncated
+
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "spec", spec
+            j.field "output", text
+            j.field "output_encoding", mode.to_s.downcase
+            j.field "output_bytes", out_bytes.size
+            j.field("output_truncated", true) if truncated
+            j.field "steps" do
+              j.array do
+                result.steps.each do |s|
+                  j.object do
+                    j.field "converter", s.name
+                    j.field "state", s.state.to_s.downcase
+                  end
+                end
+              end
+            end
+          end
+        end)
+      end
+
+      private def list_rules : Result
+        rules = @store.match_rules
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "count", rules.size
+            j.field "rules" do
+              j.array do
+                rules.each do |r|
+                  j.object do
+                    j.field "id", r.id
+                    j.field "enabled", r.enabled?
+                    j.field "target", r.target.label
+                    j.field "part", r.part.label
+                    j.field "pattern", r.pattern
+                    j.field "replacement", r.replacement
+                  end
+                end
+              end
+            end
+          end
+        end)
+      end
+
+      private def create_rule(h) : Result
+        pattern = str(h, "pattern")
+        return Result.new("missing required 'pattern'", is_error: true) if pattern.nil? || pattern.empty?
+
+        tgt_s = str(h, "target")
+        target = tgt_s && !tgt_s.strip.empty? ? Store::RuleTarget.parse?(tgt_s.strip) : Store::RuleTarget::Request
+        return Result.new("invalid 'target' (expected request|response)", is_error: true) unless target
+
+        part_s = str(h, "part")
+        part = part_s && !part_s.strip.empty? ? Store::RulePart.parse?(part_s.strip) : Store::RulePart::Head
+        return Result.new("invalid 'part' (expected head|body)", is_error: true) unless part
+
+        replacement = str(h, "replacement") || ""
+        id = @store.insert_rule(target, part, pattern, replacement)
+        return Result.new("failed to persist rule (store busy or unwritable)", is_error: true) if id == 0
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", id
+            j.field "target", target.label
+            j.field "part", part.label
+          end
+        end)
+      end
+
+      private def set_rule_enabled(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        enabled = bool(h, "enabled")
+        return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
+        return Result.new("no rule with id #{id}", is_error: true) unless @store.match_rules.any? { |r| r.id == id }
+        @store.set_rule_enabled(id, enabled)
+        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
+      end
+
+      private def delete_rule(h) : Result
+        id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) unless id
+        return Result.new("no rule with id #{id}", is_error: true) unless @store.match_rules.any? { |r| r.id == id }
+        @store.delete_rule(id)
+        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
       end
 
       private def create_replay(h) : Result

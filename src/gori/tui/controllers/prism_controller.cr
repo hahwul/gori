@@ -178,7 +178,8 @@ module Gori::Tui
             @host.status("Prism: #{summary}")
           end
         when Prism::ErrorEvent
-          @host.notifications.push(:warn, ev.message)
+          # Bottom bar only — a scan error is operational noise, not a result to push
+          # into the notification center (#127).
           @host.status(ev.message)
         end
       end

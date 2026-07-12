@@ -643,10 +643,11 @@ module Gori::Tui
         finish_job(v, ev)
       when Fuzz::ErrorEvent
         v.finish_run
-        # Persist the failure in the bottom bar + notification center so it survives the
-        # next keystroke (a transient toast alone is cleared on the very next key).
+        # The failure persists in the jobs center (survives the next keystroke) and shows
+        # in the bottom bar. It is deliberately NOT pushed to the notification center: a
+        # job error is an operational failure, not a result the human wants surfaced there
+        # (and it already had two other surfaces) — see #127.
         @host.jobs.finish(v.job_id, :error, ev.message)
-        @host.notifications.push(:error, "Fuzzer: #{ev.message} on #{v.summary}", goto_for(v))
         @host.status("fuzz error: #{ev.message}")
       end
     end

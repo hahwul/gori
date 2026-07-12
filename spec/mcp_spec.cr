@@ -392,6 +392,91 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "convert" do
+    it "runs a converter chain and returns the decoded output" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"convert","arguments":{"input":"aGVsbG8=","spec":"base64-decode"}}})
+        payload = tool_payload(drive(store, call)[0])
+        payload["output"].as_s.should eq("hello")
+        payload["output_encoding"].as_s.should eq("text")
+        payload["steps"].as_a.size.should eq(1)
+      end
+    end
+
+    it "reports an unknown converter as an error and enumerates the registry" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"convert","arguments":{"input":"x","spec":"nope-bogus"}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        text = resp["result"]["content"][0]["text"].as_s
+        text.should contain("unknown converter")
+        text.should contain("base64-decode")
+      end
+    end
+
+    it "is available in read-only mode (pure transform, no gating)" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"convert","arguments":{"input":"hi","spec":"sha256"}}})
+        resp = drive(store, call, allow_actions: false)[0]
+        resp["result"]["isError"]?.should_not eq(true)
+        tool_payload(resp)["output"].as_s.size.should eq(64)
+      end
+    end
+  end
+
+  describe "match&replace rules" do
+    it "creates, lists, toggles, and deletes a rule" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"secret","replacement":"REDACTED","target":"response","part":"body"}}})
+        id = tool_payload(drive(store, create)[0])["id"].as_i64
+        id.should_not eq(0)
+
+        listed = tool_payload(drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_rules"}}))[0])
+        listed["count"].as_i64.should eq(1)
+        rule = listed["rules"][0]
+        rule["pattern"].as_s.should eq("secret")
+        rule["target"].as_s.should eq("response")
+        rule["part"].as_s.should eq("body")
+        rule["enabled"].as_bool.should be_true
+
+        toggle = %({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"set_rule_enabled","arguments":{"id":#{id},"enabled":false}}})
+        tool_payload(drive(store, toggle)[0])["enabled"].as_bool.should be_false
+        store.match_rules[0].enabled?.should be_false
+
+        del = %({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"delete_rule","arguments":{"id":#{id}}}})
+        tool_payload(drive(store, del)[0])["deleted"].as_bool.should be_true
+        store.match_rules.should be_empty
+      end
+    end
+
+    it "rejects an invalid target on create (persists nothing)" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"x","target":"sideways"}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        store.match_rules.should be_empty
+      end
+    end
+
+    it "reports an error for delete/toggle of an unknown rule id" do
+      with_store do |store|
+        del = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"delete_rule","arguments":{"id":999}}})
+        drive(store, del)[0]["result"]["isError"].as_bool.should be_true
+      end
+    end
+
+    it "gates rule write tools in read-only mode but keeps list_rules" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"x"}}})
+        drive(store, create, allow_actions: false)[0]["result"]["isError"].as_bool.should be_true
+        store.match_rules.should be_empty
+
+        listed = tool_payload(drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_rules"}}), allow_actions: false)[0])
+        listed["count"].as_i64.should eq(0)
+      end
+    end
+  end
+
   describe "create_replay and update_replay" do
     it "creates a new replay from raw payload and returns context fields" do
       with_store do |store|
