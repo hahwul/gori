@@ -100,19 +100,23 @@ module Gori::Tui
     def self.render_top_bar(screen : Screen, rect : Rect, *, project : String,
                             listen : String, time : String,
                             scope : String, rules : String = "", intercept : String = "",
-                            unread : Int32 = 0) : Nil
+                            unread : Int32 = 0, capturing : Bool = true,
+                            write_failures : Int32 = 0) : Nil
       # Logo row sits flush on the canvas — no lifted panel band (tabs/status keep panel).
       screen.fill(rect, Theme.bg)
       x = render_wordmark(screen, rect.x + 1, rect.y, bg: Theme.bg)
       name_x = x + 1
 
       # right-aligned status chips: notify:N · scope:N · rules:N · intercept:on(N) ·
-      # listen · h:MM AM/PM — value-emphasized, dim · separators; the hot intercept
-      # state in RED. The clock is the rightmost anchor. (Capture state lives on the
-      # bottom status bar.) `unread` rides just left of scope so a background-job ping
-      # surfaces beside the state it's most likely to affect.
+      # ●listen · h:MM AM/PM — value-emphasized, dim · separators; the hot intercept
+      # state in RED. The clock is the rightmost anchor. `unread` rides just left of
+      # scope so a background-job ping surfaces beside the state it's most likely to
+      # affect. The listen chip's address text never changes — capture on/off/failing
+      # rides as the leading dot + label colour (green/muted/red), so the one address
+      # a user glances at doubles as the capture indicator instead of a separate chip.
       tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept,
-        listen: listen, time: time, unread: unread)
+        listen: listen, time: time, unread: unread, capturing: capturing,
+        write_failures: write_failures)
       chips = tagged.map { |(_, l, c)| {l, c} }
 
       # Bound the project name and floor the chips past it, so neither overwrites the
@@ -127,15 +131,27 @@ module Gori::Tui
     # The right-aligned top-bar chips, TAGGED so render and the click hit-test share
     # one ordered source (the geometry can't drift). Mirrors `status_chips` below.
     private def self.top_bar_chips(*, scope : String, rules : String, intercept : String,
-                                   listen : String, time : String, unread : Int32) : Array({Symbol, String, Color})
+                                   listen : String, time : String, unread : Int32,
+                                   capturing : Bool, write_failures : Int32) : Array({Symbol, String, Color})
       chips = [] of {Symbol, String, Color}
       chips << {:notify, "notify:#{unread}", Theme.accent} if unread > 0
       chips << {:scope, scope, scope.ends_with?(":off") ? Theme.muted : Theme.text} unless scope.empty?
       chips << {:rules, rules, Theme.text} unless rules.empty?
       chips << {:intercept, intercept, Theme.red} unless intercept.empty?
-      chips << {:listen, listen, Theme.muted}
+      label, color = listen_chip(listen, capturing, write_failures)
+      chips << {:listen, label, color}
       chips << {:time, time, Theme.muted}
       chips
+    end
+
+    # Label + colour for the merged listen/capture chip. The address (`listen`)
+    # itself is always shown verbatim — capture state rides on the leading dot and
+    # the chip's colour: green while capturing, muted while paused, and red (with
+    # the drop count appended) when writes are silently failing — that last case is
+    # the one an operator can't afford to miss, so it outranks plain on/off.
+    private def self.listen_chip(listen : String, capturing : Bool, write_failures : Int32) : {String, Color}
+      return {"● #{listen} (#{write_failures})", Theme.red} if write_failures > 0
+      {"● #{listen}", capturing ? Theme.green : Theme.muted}
     end
 
     # The drawn rect of a tagged top-bar chip (or nil if absent) — rebuilds the SAME
@@ -152,9 +168,11 @@ module Gori::Tui
     # exactly regardless of the actual project string or its truncation.
     def self.top_bar_chip_rect(rect : Rect, tag : Symbol, *, scope : String, rules : String = "",
                                intercept : String = "", listen : String, time : String,
-                               unread : Int32 = 0) : Rect?
+                               unread : Int32 = 0, capturing : Bool = true,
+                               write_failures : Int32 = 0) : Rect?
       tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept,
-        listen: listen, time: time, unread: unread)
+        listen: listen, time: time, unread: unread, capturing: capturing,
+        write_failures: write_failures)
       idx = tagged.index { |(t, _, _)| t == tag }
       return nil unless idx
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
@@ -336,20 +354,19 @@ module Gori::Tui
       ""
     end
 
-    # Bottom row: a focus-area badge (far left) + contextual key hints + capture/
-    # upstream state chips (right). The badge — TABS / BODY / an overlay name —
-    # is a lifted chip so the user always knows which region the keys drive.
-    # (The notification unread badge lives on the top bar, next to scope.)
+    # Bottom row: a focus-area badge (far left) + contextual key hints + an upstream
+    # state chip (right). The badge — TABS / BODY / an overlay name — is a lifted
+    # chip so the user always knows which region the keys drive. (The notification
+    # unread badge lives on the top bar, next to scope; capture on/off/failing now
+    # rides the top bar's listen chip instead of a dedicated chip here.)
     def self.render_status(screen : Screen, rect : Rect, *, focus : String, hints : String,
-                           capturing : Bool, insecure_upstream : Bool, write_failures : Int32 = 0,
-                           activity : {String, Color}? = nil) : Nil
+                           insecure_upstream : Bool, activity : {String, Color}? = nil) : Nil
       screen.fill(rect, Theme.panel)
       badge = " #{focus} "
       screen.text(rect.x, rect.y, badge, Theme.text_bright, Theme.elevated, Attribute::Bold)
       hint_x = rect.x + badge.size + 1
 
-      chips = status_chips(capturing: capturing, insecure_upstream: insecure_upstream,
-        write_failures: write_failures, activity: activity).map { |(_, l, c)| {l, c} }
+      chips = status_chips(insecure_upstream: insecure_upstream, activity: activity).map { |(_, l, c)| {l, c} }
       hint_w = {rect.right - hint_x - chips_width(chips) - 2, 1}.max
       screen.text(hint_x, rect.y, hints, Theme.muted, Theme.panel, width: hint_w)
       # Floor the chips at the hint start so they can never overwrite the badge.
@@ -376,18 +393,11 @@ module Gori::Tui
 
     # The right-aligned status chips, TAGGED so render and (were there a clickable
     # chip here) a hit-test would share one ordered source. A background-activity
-    # chip (spinner + label) precedes the capture/upstream chips.
-    private def self.status_chips(*, capturing : Bool, insecure_upstream : Bool, write_failures : Int32,
+    # chip (spinner + label) precedes the upstream chip.
+    private def self.status_chips(*, insecure_upstream : Bool,
                                   activity : {String, Color}?) : Array({Symbol, String, Color})
       chips = [] of {Symbol, String, Color}
       chips << {:activity, activity[0], activity[1]} if activity
-      # A persistent capture-write failure (e.g. disk full) is louder than the
-      # normal on/off chip — the operator must know rows are being dropped.
-      chips << if write_failures > 0
-        {:capture, "capture:FAILING(#{write_failures})", Theme.red}
-      else
-        {:capture, capturing ? "capture:on" : "capture:off", capturing ? Theme.text : Theme.muted}
-      end
       # an insecure upstream is a security warning — the one allowed non-status colour.
       chips << (insecure_upstream ? {:upstream, "upstream:insecure", Theme.yellow} : {:upstream, "upstream:verify", Theme.muted})
       chips
