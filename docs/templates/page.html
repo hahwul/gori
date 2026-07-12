@@ -20,6 +20,13 @@
     </figure>
   </section>
 
+  <section class="home-showcase reveal" aria-label="gori running in the terminal">
+    <figure class="showcase-frame">
+      <img src="{{ base_url }}/images/tui/history.svg" alt="gori History tab in the terminal, listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration">
+    </figure>
+    <p class="showcase-note">Every request your client makes lands in <strong>History</strong> as a flow, one keystroke from Replay, the Fuzzer, or a finding.</p>
+  </section>
+
   <section class="home-paths" aria-label="Documentation paths">
     <div class="path-chain">
       <a class="path-ring path-ring-lead" href="{{ base_url }}{{ lang_prefix }}/getting-started/">
@@ -68,16 +75,31 @@
     <h2 id="flow-title">From capture to finding.</h2>
     <div class="flow-list">
       <div>
-        <span>Capture</span>
-        <p>Run the proxy, trust the CA once, and every request flows into History with full HTTP/2, WebSocket, and gRPC detail.</p>
+        <div class="flow-copy">
+          <span>Capture</span>
+          <p>Run the proxy, trust the CA once, and every request flows into History with full HTTP/2, WebSocket, and gRPC detail.</p>
+        </div>
+        <figure class="flow-shot">
+          <img src="{{ base_url }}/images/tui/response-detail.svg" alt="gori flow detail on the response tab, showing an HTTP/2 200 status and syntax-highlighted response headers">
+        </figure>
       </div>
       <div>
-        <span>Test</span>
-        <p>Send interesting flows to Replay or the Fuzzer, mine hidden parameters, and let Prism flag issues as you browse.</p>
+        <div class="flow-copy">
+          <span>Test</span>
+          <p>Send interesting flows to Replay or the Fuzzer, mine hidden parameters, and let Prism flag issues as you browse.</p>
+        </div>
+        <figure class="flow-shot">
+          <img src="{{ base_url }}/images/tui/fuzzer.svg" alt="gori Fuzzer tab with marked payload positions in the request, a results table, and a status distribution sidebar">
+        </figure>
       </div>
       <div>
-        <span>Report</span>
-        <p>Triage results into Findings, take notes, and export, or hand the whole project to an agent over MCP.</p>
+        <div class="flow-copy">
+          <span>Report</span>
+          <p>Triage results into Findings, take notes, and export, or hand the whole project to an agent over MCP.</p>
+        </div>
+        <figure class="flow-shot">
+          <img src="{{ base_url }}/images/tui/prism.svg" alt="gori Prism scanner listing passive security findings grouped by severity and category">
+        </figure>
       </div>
     </div>
   </section>

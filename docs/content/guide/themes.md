@@ -9,6 +9,27 @@ gori ships thirteen built-in colour themes — `goridark` (the default), `gorida
 
 Open **`settings:theme`** from the command palette (`Ctrl-P`). The picker is a vertical, scrollable list; each row shows a small swatch of the theme's own palette, and selecting a row previews it live — `Enter` applies and persists the choice, `Esc` reverts.
 
+The same History view across four of the built-ins:
+
+<div class="tui-gallery">
+  <figure>
+    <img src="/images/tui/theme-goridark.svg" alt="gori History tab in the goridark theme: near-black canvas with a subtle gold focus outline">
+    <figcaption>goridark (default)</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/tui/theme-goriday.svg" alt="gori History tab in the goriday light theme: warm off-white canvas with dark text">
+    <figcaption>goriday (light)</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/tui/theme-tokyonight.svg" alt="gori History tab in the tokyonight theme: deep blue canvas with cool accent colours">
+    <figcaption>tokyonight</figcaption>
+  </figure>
+  <figure>
+    <img src="/images/tui/theme-gruvbox.svg" alt="gori History tab in the gruvbox theme: warm dark canvas with retro amber and green accents">
+    <figcaption>gruvbox</figcaption>
+  </figure>
+</div>
+
 ## Custom Themes
 
 You can add your own themes as JSON files, dropped into:

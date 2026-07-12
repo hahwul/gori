@@ -9,6 +9,11 @@ Once you've captured an interesting flow, **Replay** and the **Fuzzer** are wher
 
 Replay is a request workbench, like a repeater. Send a flow to it, edit any part of the request, and re-send — the response, timing, and a diff against the previous response are shown side by side. Sessions persist with the project, so you can come back to them later.
 
+<figure class="tui-shot">
+  <img src="/images/tui/replay.svg" alt="gori Replay tab with an editable HTTP/2 request pane, a response pane showing headers and a JSON body, and a replayed 200 in 1152ms status line">
+  <figcaption><strong>Replay</strong>: an editable request on the left, the live response and timing on the right, with a diff against the previous send.</figcaption>
+</figure>
+
 Replay handles more than HTTP/1:
 
 - **HTTP/2** requests are re-sent over a real h2 connection.
@@ -46,6 +51,11 @@ Values that appear in captured traffic can be masked back to `$KEY` when copying
 ## Fuzzer
 
 The Fuzzer is an Intruder-style engine: mark positions in a request, attach payload sets, and send the matrix of requests while matching on the responses.
+
+<figure class="tui-shot">
+  <img src="/images/tui/fuzzer.svg" alt="gori Fuzzer tab with a request template showing highlighted marker positions, a payload-set config pane, a results table of sent requests, and a distribution sidebar">
+  <figcaption>The <strong>Fuzzer</strong>: <code>§…§</code> markers in the template, payload sets and mode in CONFIG, a live results table, and a status / size distribution sidebar.</figcaption>
+</figure>
 
 ### Attack Modes
 
