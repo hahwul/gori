@@ -138,4 +138,20 @@ describe "Gori::Store replay tabs (v9)" do
       store.replays.find!(&.id.==(id)).mark_transform?.should be_true
     end
   end
+
+  it "round-trips the V31 tags column (default nil, set + clear)" do
+    with_store do |store|
+      id = store.insert_replay("https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 0)
+      store.replays.find!(&.id.==(id)).tags.should be_nil # untagged by default
+
+      store.set_replay_tags(id, "idor auth")
+      store.replays.find!(&.id.==(id)).tags.should eq("idor auth")
+
+      # tagging does not rewrite the request (its own narrow UPDATE, like the name)
+      store.replays.find!(&.id.==(id)).request.should eq("GET / HTTP/1.1\r\n\r\n")
+
+      store.set_replay_tags(id, nil) # blank clears the column back to NULL
+      store.replays.find!(&.id.==(id)).tags.should be_nil
+    end
+  end
 end

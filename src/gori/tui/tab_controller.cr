@@ -78,12 +78,12 @@ module Gori::Tui
     # `labels` is given, then yield the remaining content rect.
     def framed_body(screen : Screen, rect : Rect, shell_focused : Bool,
                     subtabs_focused : Bool, labels : Array(String)?, active : Int32,
-                    prev_start : Int32 = 0, & : Rect ->) : Int32
+                    prev_start : Int32 = 0, hidden : Set(Int32)? = nil, & : Rect ->) : Int32
       new_start = prev_start
       framed(screen, rect, shell_focused) do |inner|
         if labels
           sub_rect, content = carve_subtab_row(inner)
-          new_start = render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused, prev_start)
+          new_start = render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused, prev_start, hidden)
           yield content
         else
           yield inner
@@ -127,9 +127,10 @@ module Gori::Tui
     # the strip itself holds focus (←/→ switch) → active chip lights FOCUS_GOLD and the
     # divider hairline matches.
     def render_subtab_strip(screen : Screen, rect : Rect, labels : Array(String),
-                            active : Int32, focused : Bool, prev_start : Int32 = 0) : Int32
+                            active : Int32, focused : Bool, prev_start : Int32 = 0,
+                            hidden : Set(Int32)? = nil) : Int32
       return prev_start if rect.empty?
-      new_start = Chrome.render_tab_strip(screen, tab_row(rect), labels, active, focused, prev_start)
+      new_start = Chrome.render_tab_strip(screen, tab_row(rect), labels, active, focused, prev_start, hidden)
       return prev_start if rect.h < 2
       border = focused ? Theme.focus_gold : Theme.border
       screen.hline(rect.x, rect.y + 1, rect.w, fg: border, bg: Theme.bg)
@@ -238,6 +239,13 @@ module Gori::Tui
     # Open sub-tab count — gates the search entry. Derived from the strip labels.
     def subtab_count : Int32
       subtab_labels.try(&.size) || 0
+    end
+
+    # Absolute chip indices to hide from the strip (Replay's tag filter); nil = show
+    # all. Rendering + click hit-tests skip these, but the indices stay absolute so
+    # jump/rename/^N keep working unchanged.
+    def subtab_hidden : Set(Int32)?
+      nil
     end
 
     # A FIXED strip (Help): the chip set is constant — no ^N/^W create/close and the

@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 30
+      VERSION = 31
 
       # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
       # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
@@ -526,7 +526,16 @@ module Gori
         "ALTER TABLE match_rules ADD COLUMN part TEXT NOT NULL DEFAULT 'head'",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30]
+      # Replay tabs gain flat multi-label TAGS: a space-joined set of free-text tokens
+      # ("idor", "auth-bypass") for organizing and filtering the sub-tab strip. Stored
+      # as one delimited column (tags are few per session; the multi-label set lives
+      # in-memory as an Array). NULL = untagged; additive, so existing rows keep their
+      # exact meaning. Persist + restore-on-open only (like `name`) — not reconciled.
+      V31 = [
+        "ALTER TABLE replays ADD COLUMN tags TEXT",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

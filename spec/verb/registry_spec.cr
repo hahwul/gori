@@ -152,6 +152,14 @@ private class FakeContext < ExecContext
     @calls << :replay_rename_subtab
   end
 
+  def replay_tag_subtab : Nil
+    @calls << :replay_tag_subtab
+  end
+
+  def replay_filter_subtabs : Nil
+    @calls << :replay_filter_subtabs
+  end
+
   def replay_close_subtab : Nil
     @calls << :replay_close_subtab
   end

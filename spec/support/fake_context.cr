@@ -85,6 +85,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_rename_subtab : Nil; end
 
+  def replay_tag_subtab : Nil; end
+
+  def replay_filter_subtabs : Nil; end
+
   def replay_close_subtab : Nil; end
 
   def replay_duplicate_subtab : Nil; end

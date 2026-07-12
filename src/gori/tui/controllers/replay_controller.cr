@@ -45,11 +45,18 @@ module Gori::Tui
         view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us,
           sni: r.sni || "", mark_transform: r.mark_transform?, ws_messages: ws_msgs)
-        view.name = r.name # custom sub-tab label survives reopen
+        view.name = r.name                    # custom sub-tab label survives reopen
+        view.tags = Replay::Tags.parse(r.tags) # flat tags survive reopen (V31)
         seed_replay_original(view, r.flow_id)
         @replays << ReplayTab.new(view, r.flow_id, r.id)
       end
       @current_replay_idx = @replays.empty? ? -1 : 0
+      # Sub-tab filter (issue #121): a live in-memory query (tag:/name:/host:/method: +
+      # free text) that narrows which chips the strip shows. "" = no filter (all shown).
+      @subtab_filter = ""
+      @subtab_filter_editing = false # the `/` bar is capturing keystrokes
+      @filter_cx = 0                 # caret within @subtab_filter
+      @filter_preedit = ""           # live IME composition in the bar
       # Replay round-trips run off the UI fiber and deliver their Result here; the run
       # loop applies it to the originating view on a later tick (buffered so a finished
       # replay never blocks its background fiber).
@@ -95,17 +102,110 @@ module Gori::Tui
     end
 
     def subtab_labels : Array(String)
-      @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.view.label(18)}" }
+      @replays.map_with_index { |tab, i| "#{i + 1}:#{tab.view.label(18)}#{tab.view.tags_label(12)}" }
     end
 
     # Rows for the sub-tab search picker (space → s): the chip label plus a dim,
-    # searchable request line (method/path + target URL) so a session is findable
-    # by host/path even when a custom name hides its summary.
+    # searchable request line (method/path + target URL + tags) so a session is
+    # findable by host/path/tag even when a custom name hides its summary.
     def subtab_search_rows : Array(SubtabPicker::Row)
       @replays.map_with_index do |tab, i|
         v = tab.view
-        SubtabPicker::Row.new(i, v.label(40), "#{v.summary(60)} #{v.target}".strip)
+        tags = v.tags.empty? ? "" : " #{v.tags.map { |t| "##{t}" }.join(' ')}"
+        SubtabPicker::Row.new(i, v.label(40), "#{v.summary(60)} #{v.target}#{tags}".strip)
       end
+    end
+
+    # --- sub-tab tag filter (issue #121) ---
+    # The searchable projection of a session for the in-memory matcher (TUI-free).
+    private def filter_subject(v : ReplayView) : Replay::SubtabFilter::Subject
+      Replay::SubtabFilter::Subject.new(v.name, v.summary(200), v.target, v.request_method, v.tags)
+    end
+
+    # Absolute chip indices hidden by the active filter; nil when no filter is set.
+    def subtab_hidden : Set(Int32)?
+      return nil if @subtab_filter.blank?
+      f = Replay::SubtabFilter.parse(@subtab_filter)
+      hidden = Set(Int32).new
+      @replays.each_with_index { |t, i| hidden << i unless f.matches?(filter_subject(t.view)) }
+      hidden
+    end
+
+    # Absolute indices of the sessions the filter keeps visible (all when unfiltered).
+    def visible_indices : Array(Int32)
+      h = subtab_hidden
+      return (0...@replays.size).to_a unless h
+      (0...@replays.size).reject { |i| h.includes?(i) }
+    end
+
+    # The `/` bar is currently capturing keystrokes (the shell routes keys here).
+    def subtab_filter_editing? : Bool
+      @subtab_filter_editing
+    end
+
+    # The filter bar occupies a body row (editing, or a set filter that narrows chips).
+    def subtab_filter_shown? : Bool
+      @subtab_filter_editing || !@subtab_filter.blank?
+    end
+
+    # Open the `/` filter bar (from the strip or the space menu), seeding the caret.
+    def start_subtab_filter : Nil
+      @subtab_filter_editing = true
+      @filter_cx = @subtab_filter.size
+      @filter_preedit = ""
+    end
+
+    # Enter: keep the (possibly blank) filter and close the bar; re-anchor the current
+    # session onto a still-visible chip so the body matches the narrowed strip.
+    def commit_subtab_filter : Nil
+      @subtab_filter_editing = false
+      @filter_preedit = ""
+      reanchor_current
+    end
+
+    # Esc: drop the filter entirely and close the bar (every chip returns).
+    def clear_subtab_filter : Nil
+      @subtab_filter = ""
+      @subtab_filter_editing = false
+      @filter_cx = 0
+      @filter_preedit = ""
+    end
+
+    def set_subtab_filter_preedit(text : String) : Nil
+      @filter_preedit = text
+    end
+
+    def handle_subtab_filter_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        clear_subtab_filter
+      elsif key.enter?
+        commit_subtab_filter
+      elsif key.backspace?
+        if @filter_cx > 0
+          @subtab_filter = @subtab_filter[0, @filter_cx - 1] + @subtab_filter[@filter_cx..]
+          @filter_cx -= 1
+        end
+        @filter_preedit = ""
+      elsif key.left?
+        @filter_cx = {@filter_cx - 1, 0}.max
+      elsif key.right?
+        @filter_cx = {@filter_cx + 1, @subtab_filter.size}.min
+      elsif c && !ev.ctrl? && !ev.alt? && !c.control?
+        @subtab_filter = @subtab_filter[0, @filter_cx] + c + @subtab_filter[@filter_cx..]
+        @filter_cx += 1
+        @filter_preedit = ""
+      end
+    end
+
+    # Keep the current session on a visible chip: if the filter hid it, jump to the
+    # first still-visible session (never while empty — clearing the filter restores it).
+    private def reanchor_current : Nil
+      vis = visible_indices
+      return if vis.empty? || vis.includes?(@current_replay_idx)
+      save_current_replay
+      @current_replay_idx = vis.first
     end
 
     def subtab_index : Int32
@@ -215,13 +315,44 @@ module Gori::Tui
       current_replay_tab.try { |t| t.view.reveal = @host.reveal?; t.view.pretty = @host.pretty? }
       labels = subtab_strip_shown? ? subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: !current_view.nil?)
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @current_replay_idx, @subtab_start) do |content|
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @current_replay_idx, @subtab_start, subtab_hidden) do |content|
+        bar, body = carve_filter_bar(content)
+        render_subtab_filter_bar(screen, bar) if bar
         if v = current_view
-          v.render(screen, content, focused: body_focused)
+          v.render(screen, body, focused: body_focused)
         else
-          TrafficEmptyState.render(screen, content, variant: :replay)
+          TrafficEmptyState.render(screen, body, variant: :replay)
         end
       end
+    end
+
+    # The filter-bar row carved off the body top when the `/` filter is shown — used
+    # by BOTH render_body and handle_click so the body geometry never drifts. Returns
+    # {bar_rect | nil, body_rect}.
+    private def carve_filter_bar(content : Rect) : {Rect?, Rect}
+      return {nil, content} unless subtab_filter_shown? && content.h > 1
+      bar = Rect.new(content.x, content.y, content.w, 1)
+      body = Rect.new(content.x, content.y + 1, content.w, content.h - 1)
+      {bar, body}
+    end
+
+    private def render_subtab_filter_bar(screen : Screen, rect : Rect) : Nil
+      return if rect.w < 8
+      screen.fill(rect, Theme.panel)
+      px = screen.text(rect.x, rect.y, "filter › ", Theme.accent, Theme.panel)
+      vis = visible_indices.size
+      count = "#{vis}/#{@replays.size}"
+      count_x = rect.right - count.size
+      field_w = {count_x - 1 - px, 1}.max
+      if @subtab_filter_editing
+        screen.input_line(px, rect.y, @subtab_filter, @filter_cx, @filter_preedit,
+          Theme.text_bright, Theme.panel, width: field_w)
+      elsif @subtab_filter.blank?
+        screen.text(px, rect.y, "tag:  name:  host:  method:  (esc clears)", Theme.muted, Theme.panel, width: field_w)
+      else
+        screen.text(px, rect.y, @subtab_filter, Theme.text, Theme.panel, width: field_w)
+      end
+      screen.text(count_x, rect.y, count, vis == 0 ? Theme.red : Theme.muted, Theme.panel)
     end
 
     # --- input ---
@@ -231,12 +362,9 @@ module Gori::Tui
         save_current_replay # persist the tab before the palette takes over
         @host.open_palette
       elsif ev.ctrl? && (c = ev.char || key.to_char) && '1' <= c <= '9'
-        # Switch replay sub-tab (works even while editing fields because of the ctrl check).
-        idx = c.to_i - 1
-        if idx < @replays.size
-          save_current_replay # persist the tab we're leaving before switching
-          @current_replay_idx = idx
-        end
+        # Switch replay sub-tab by its (absolute) chip number — works even while editing
+        # fields because of the ctrl check. jump_subtab reveals a filtered-out target.
+        jump_subtab(c.to_i - 1)
       elsif ev.ctrl? && key.lower_w?
         request_close
       elsif ev.ctrl_z? && (view = current_view) && view.focus == :request
@@ -432,6 +560,7 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
+      _, body = carve_filter_bar(body) # keep body clicks aligned when the filter bar is up
       return true unless v = current_view
       # Border chips/badges consume the click (no caret move) — same toggles as keys.
       if chip = v.chrome_hit(body, mx, my)
@@ -598,18 +727,29 @@ module Gori::Tui
     end
 
     # --- sub-tab nav (the shell's shared strip machinery drives these for Replay) ---
-    # Move the active sub-tab by ±1 (clamped, no wrap), saving the outgoing tab first.
+    # Move the active sub-tab by ±1 (strip ←/→) among the VISIBLE (filtered) chips, so
+    # h/l walks exactly the chips shown; clamped, no wrap, saving the outgoing tab first.
     def move_subtab(dir : Int32) : Nil
-      return unless @replays.size >= 2
-      nidx = (@current_replay_idx + dir).clamp(0, @replays.size - 1)
-      return if nidx == @current_replay_idx
+      vis = visible_indices
+      return if vis.size < 2
+      cur = vis.index(@current_replay_idx)
+      target = if cur
+                 vis[(cur + dir).clamp(0, vis.size - 1)]
+               else
+                 dir < 0 ? vis.first : vis.last # current filtered out → step onto an edge
+               end
+      return if target == @current_replay_idx
       save_current_replay
-      @current_replay_idx = nidx
+      @current_replay_idx = target
     end
 
-    # Jump to an absolute sub-tab index (^1-9 on the strip) and STAY on the strip.
+    # Jump to an absolute sub-tab index (^1-9 on the strip, a strip click, or a picked
+    # search result) and STAY on the strip. A jump to a filtered-out tab drops the
+    # filter so the target is actually visible (chip numbers are absolute, so ^N by the
+    # number shown always lands right).
     def jump_subtab(idx : Int32) : Nil
       return unless 0 <= idx < @replays.size
+      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
       return if idx == @current_replay_idx
       save_current_replay
       @current_replay_idx = idx
@@ -624,6 +764,17 @@ module Gori::Tui
       view.name = clean.empty? ? nil : clean
       if id = tab.db_id
         @host.session.store.set_replay_name(id, view.name)
+      end
+    end
+
+    # Apply the typed tags to the captured tab + persist. Re-find by VIEW identity (a
+    # reconcile may have reordered/removed it) — gone → no-op. Mirrors apply_rename;
+    # blank clears every tag. The raw string is normalized (ws/comma split, dedupe).
+    def apply_tags(view : ReplayView, raw : String) : Nil
+      return unless tab = @replays.find { |t| t.view.same?(view) }
+      view.tags = Replay::Tags.parse(raw)
+      if id = tab.db_id
+        @host.session.store.set_replay_tags(id, Replay::Tags.serialize(view.tags))
       end
     end
 

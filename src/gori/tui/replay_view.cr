@@ -19,6 +19,7 @@ require "../replay/h2_engine"
 require "../replay/ws_engine"
 require "../replay/diff"
 require "../replay/flow_request"
+require "../replay/subtab_filter"
 require "../fuzz"
 require "../convert"
 require "./chain_pane"
@@ -46,9 +47,13 @@ module Gori::Tui
     end
 
     property name : String? # custom sub-tab chip label (nil = derive from the request); set separately from restore()
+    # Flat multi-label tags (V31) for organizing/filtering the sub-tab strip. Set
+    # separately from restore() — like @name, the reconcile clobber never touches it.
+    property tags : Array(String) = [] of String
 
     def initialize
       @name = nil
+      @tags = [] of String
       @flow = nil.as(Store::FlowDetail?)
       @target = ""
       @tcx = 0             # target (URL) cursor
@@ -286,6 +291,20 @@ module Gori::Tui
       else
         summary(max)
       end
+    end
+
+    # A compact ` #tag #tag` suffix for the sub-tab chip, fit within `budget` columns
+    # (leading space included, trailing `…` when it overflows). Empty when untagged.
+    def tags_label(budget : Int32 = 12) : String
+      return "" if @tags.empty? || budget <= 2
+      s = @tags.map { |t| "##{t}" }.join(' ')
+      s = "#{s[0, budget - 2]}…" if s.size > budget - 1
+      " #{s}"
+    end
+
+    # The leading METHOD token of the request line (for the sub-tab filter's `method:`).
+    def request_method : String
+      (@editor.first_nonblank_line || "").strip.split(' ').first? || ""
     end
 
     # Replace the request body (e.g. from the external editor); marks dirty so the

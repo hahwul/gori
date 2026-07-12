@@ -104,6 +104,17 @@ module Gori
       r.register Verb::Definition.new(
         "replay.rename-subtab", "Rename subtab", "Rename the active replay sub-tab's chip",
         Verb::Scope::Replay, available: in_replay, mnemonic: 'e', section: :subtab) { |ctx| ctx.replay_rename_subtab; nil }
+      # Tag / filter the sub-tab strip (issue #121). `t` tags the active session, `/`
+      # opens the tag-filter bar. 't' is free in COMMON ∪ :subtab (COMMON: r/y/n/f/m/k/u;
+      # :subtab: e/w/d); the filter uses '/' (the shared filter idiom, unique here).
+      r.register Verb::Definition.new(
+        "replay.tag-subtab", "Tag subtab", "Add/edit flat tags on the active replay sub-tab",
+        Verb::Scope::Replay, available: in_replay, mnemonic: 't', section: :subtab) { |ctx| ctx.replay_tag_subtab; nil }
+      r.register Verb::Definition.new(
+        "replay.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host",
+        Verb::Scope::Replay,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_subtab_count >= 2 },
+        mnemonic: '/', section: :tab) { |ctx| ctx.replay_filter_subtabs; nil }
       r.register Verb::Definition.new(
         "replay.close-subtab", "Close subtab", "Close the active replay sub-tab",
         Verb::Scope::Replay, available: in_replay, mnemonic: 'w', section: :subtab) { |ctx| ctx.replay_close_subtab; nil }

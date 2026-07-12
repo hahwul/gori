@@ -73,6 +73,7 @@ describe "entity_links (V21)" do
       store.@db.exec("ALTER TABLE prism_issues DROP COLUMN sample_replay_id") # V28
       store.@db.exec("DROP TABLE prism_suppressions")                         # V29
       store.@db.exec("ALTER TABLE match_rules DROP COLUMN part")              # V30
+      store.@db.exec("ALTER TABLE replays DROP COLUMN tags")                  # V31
       store.@db.exec("PRAGMA user_version = 20")
       store.close
 

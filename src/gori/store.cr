@@ -804,13 +804,13 @@ module Gori
     # (potentially multi-MB) response on each cross-session commit.
     def replays : Array(ReplayRecord)
       list = [] of ReplayRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, mark_transform FROM replays ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, mark_transform, tags FROM replays ORDER BY position, id") do |rs|
         rs.each do
           list << ReplayRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
-            mark_transform: rs.read(Int32) != 0)
+            mark_transform: rs.read(Int32) != 0, tags: rs.read(String?))
         end
       end
       list
@@ -889,6 +889,16 @@ module Gori
     def set_replay_name(id : Int64, name : String?) : Nil
       exec_task ->(c : DB::Connection) {
         c.exec("UPDATE replays SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
+        nil
+      }
+    end
+
+    # Set (or clear, with nil) a replay tab's flat tags (V31) — its own narrow UPDATE,
+    # like set_replay_name, so tagging never rewrites the request. `tags` is the
+    # space-joined token set; nil/blank clears it.
+    def set_replay_tags(id : Int64, tags : String?) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE replays SET tags = ?, updated_at = ? WHERE id = ?", tags, now_us, id)
         nil
       }
     end
