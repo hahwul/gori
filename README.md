@@ -1,6 +1,6 @@
 <div align="center">
   <br>
-  <img src="docs/static/images/gori.png" alt="dalfox" width="170px;">
+  <img src="docs/static/images/gori-wallpaper.jpg">
   <p>𝓰𝓸𝓻𝓲</p>
 </div>
 <p align="center">
