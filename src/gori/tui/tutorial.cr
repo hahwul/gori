@@ -966,9 +966,11 @@ module Gori::Tui
 
       shell = Rect.new(box.x + 2, y, box.w - 4, {box.bottom - 1 - y, 3}.max)
       render_shell(screen, shell, @p_tab, false, 0, "", flow: 0)
+      # Demo auto-overlay only until the user has tried — after they close it,
+      # leave a clean shell so it doesn't look like the palette is still open.
       if @overlay == :palette
         draw_palette_overlay(screen, shell, live: true)
-      else
+      elsif !@tried_palette
         draw_palette_overlay(screen, shell, live: false)
       end
     end
@@ -989,7 +991,7 @@ module Gori::Tui
       render_shell(screen, shell, 0, true, 0, "", flow: 0)
       if @overlay == :space
         draw_space_overlay(screen, shell, live: true)
-      else
+      elsif !@tried_space
         draw_space_overlay(screen, shell, live: false)
       end
     end
@@ -1061,7 +1063,7 @@ module Gori::Tui
             elsif @edit_insert
               "INS mode — type, then esc back to READ."
             else
-              "←/→ tabs · ↓ body · ↑/↓ list · ⇥ panes · esc · ^P · space · i"
+              "←/→ tabs · ↓ body · ↑ tabs · ↓ list · ⇥ panes · esc · ^P · space · i"
             end
       screen.text(ix, box.bottom - 2, msg, practice_done? ? Theme.green : Theme.muted, Theme.panel, width: iw)
     end
@@ -1198,11 +1200,15 @@ module Gori::Tui
         screen.text(ix, yy, ln, Theme.text, Theme.panel, width: iw)
         yy += 1
       end
-      if insert && yy < rect.bottom - 1
-        px = screen.text(ix, yy, "username=#{typed}", Theme.text_bright, Theme.panel, width: iw)
-        screen.cell({px, rect.right - 2}.min, yy, ' ', Theme.bg, Theme.accent)
-      elsif focused && !insert && yy < rect.bottom - 1
-        screen.text(ix, yy, "username=alice", Theme.muted, Theme.panel, width: iw)
+      if yy < rect.bottom - 1
+        # Keep what the user typed after leaving INS (don't snap back to the demo "alice").
+        user = typed.empty? ? "alice" : typed
+        if insert
+          px = screen.text(ix, yy, "username=#{user}", Theme.text_bright, Theme.panel, width: iw)
+          screen.cell({px, rect.right - 2}.min, yy, ' ', Theme.bg, Theme.accent)
+        elsif focused || !typed.empty?
+          screen.text(ix, yy, "username=#{user}", typed.empty? ? Theme.muted : Theme.text, Theme.panel, width: iw)
+        end
       end
     end
 
