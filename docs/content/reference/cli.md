@@ -281,9 +281,13 @@ Detects how this `gori` binary was installed and updates accordingly:
 
 | Install channel | Behavior |
 |-----------------|----------|
-| Standalone binary (curl install, manual download, workspace build) | Downloads the latest GitHub release asset for this OS/arch and replaces the binary (macOS also refreshes sibling `lib/` in a dedicated dir) |
+| Standalone binary (curl install, manual download, workspace build, or a **manual** copy into `/usr/bin` that no package manager owns) | Downloads the latest GitHub release asset for this OS/arch and replaces the binary (macOS also refreshes sibling `lib/` in a dedicated dir) |
 | Homebrew | Prints `brew upgrade gori` (use `--exec` to run it; never overwrites the brew-managed path) |
 | Snap | Prints `snap refresh gori` (use `--exec` to run it) |
-| AUR / pacman (`/usr/bin/gori`) | Prints AUR helper guidance (`yay` / `paru` / `pacman`) |
+| pacman / AUR | Prints `yay` / `paru` / `pacman` guidance |
+| deb (dpkg) | Prints `apt` upgrade guidance |
+| rpm | Prints `dnf` / `yum` / `zypper` guidance |
+
+Paths under `/usr/bin` or `/bin` are classified by **package ownership** (`pacman -Qo`, `dpkg-query -S`, `rpm -qf`). If a manager owns the file, gori never overwrites it. If probes find no owner, the binary channel self-updates. When no package tools are available, `/etc/os-release` (`ID` / `ID_LIKE`) picks Arch-like / Debian-like / RHEL-like guidance as a fallback.
 
 Release asset names match the [installation guide](/getting-started/installation/) (`gori-v*-linux-*` plain binaries, `gori-v*-osx-*.tar.gz` archives). macOS archive updates require a dedicated layout (e.g. `PREFIX/opt/gori` from the curl installer) so bundled `lib/` is never written under shared roots like `/usr/local/lib`. If no release assets exist yet, the command exits with a clear error pointing at the releases page — it does not silently no-op.

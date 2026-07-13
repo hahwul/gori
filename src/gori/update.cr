@@ -30,20 +30,68 @@ module Gori
     enum Channel
       Homebrew
       Snap
-      Aur
+      Pacman
+      Deb
+      Rpm
       Binary
     end
 
+    # Result of asking the distro package manager who owns an executable path.
+    enum OwnerResult
+      Pacman  # pacman -Qo succeeded
+      Dpkg    # dpkg-query -S succeeded
+      Rpm     # rpm -qf succeeded
+      None    # at least one PM tool was queried and none claimed the path
+      Unknown # no PM query tools available (or probe skipped)
+    end
+
+    # Coarse family from /etc/os-release (for fallback guidance only).
+    enum OsFamily
+      ArchLike
+      DebianLike
+      RhelLike
+      Unknown
+    end
+
     # ---------------------------------------------------------------------------
-    # Channel detection (pure)
+    # Channel detection (pure + injectable probes)
     # ---------------------------------------------------------------------------
 
-    # Classify an install from the running executable path (prefer `File.realpath`).
-    def self.detect_channel(exe_path : String) : Channel
+    # Classify an install from the executable path plus optional ownership/OS hints.
+    #
+    # For FHS system bins (`/usr/bin`, `/bin`):
+    # - owned by pacman/dpkg/rpm → that package channel (never overwrite)
+    # - probed and **not** owned → Binary (manual copy; self-update allowed)
+    # - unprobed → fall back to os-release family for package guidance, else Binary
+    def self.detect_channel(exe_path : String, *,
+                            owner : OwnerResult = OwnerResult::Unknown,
+                            os_family : OsFamily = OsFamily::Unknown) : Channel
       return Channel::Snap if snap_path?(exe_path)
       return Channel::Homebrew if homebrew_path?(exe_path)
-      return Channel::Aur if aur_path?(exe_path)
+
+      if system_package_path?(exe_path)
+        return channel_for_system_bin(owner, os_family)
+      end
+
       Channel::Binary
+    end
+
+    def self.channel_for_system_bin(owner : OwnerResult, os_family : OsFamily) : Channel
+      case owner
+      when .pacman? then Channel::Pacman
+      when .dpkg?   then Channel::Deb
+      when .rpm?    then Channel::Rpm
+      when .none?   then Channel::Binary
+      else
+        # OwnerResult::Unknown — no successful probe. Prefer distro guidance over
+        # blindly replacing a system path when os-release looks like a packaging distro.
+        case os_family
+        when .arch_like?   then Channel::Pacman
+        when .debian_like? then Channel::Deb
+        when .rhel_like?   then Channel::Rpm
+        else                    Channel::Binary
+        end
+      end
     end
 
     def self.homebrew_path?(path : String) : Bool
@@ -66,11 +114,98 @@ module Gori
       path.starts_with?("/snap/") || path.includes?("/snap/gori/")
     end
 
-    # Pacman/AUR packages install under `/usr/bin` (not `/usr/local/bin`).
-    # Manual copies into /usr/bin are also classified here (safer than overwriting).
-    def self.aur_path?(path : String) : Bool
-      return true if path == "/usr/bin/gori"
-      path.starts_with?("/usr/bin/") && File.basename(path) == "gori"
+    # Paths where distro packages typically install the CLI (not /usr/local).
+    def self.system_package_path?(path : String) : Bool
+      return true if path == "/usr/bin/gori" || path == "/bin/gori"
+      base = File.basename(path)
+      return false unless base == "gori"
+      path.starts_with?("/usr/bin/") || path.starts_with?("/bin/")
+    end
+
+    # Parse /etc/os-release body into a coarse family (pure; for tests + probe).
+    def self.parse_os_release(content : String) : OsFamily
+      id = ""
+      id_like = ""
+      content.each_line do |line|
+        line = line.strip
+        next if line.empty? || line.starts_with?('#')
+        if line.starts_with?("ID=")
+          id = unquote_os_value(line.lchop("ID=")).downcase
+        elsif line.starts_with?("ID_LIKE=")
+          id_like = unquote_os_value(line.lchop("ID_LIKE=")).downcase
+        end
+      end
+      blob = "#{id} #{id_like}"
+      # Order matters: some images set ID=linux with ID_LIKE=arch.
+      return OsFamily::ArchLike if blob.split.any? { |t|
+        {"arch", "archlinux", "manjaro", "endeavouros", "garuda", "artix", "archarm"}.includes?(t)
+      }
+      return OsFamily::DebianLike if blob.split.any? { |t|
+        {"debian", "ubuntu", "linuxmint", "pop", "raspbian", "kali", "elementary", "zorin", "neon"}.includes?(t)
+      }
+      return OsFamily::RhelLike if blob.split.any? { |t|
+        {"rhel", "fedora", "centos", "rocky", "almalinux", "ol", "amzn", "sles", "opensuse", "suse", "mageia"}.includes?(t)
+      }
+      OsFamily::Unknown
+    end
+
+    private def self.unquote_os_value(raw : String) : String
+      v = raw.strip
+      if v.size >= 2 && ((v.starts_with?('"') && v.ends_with?('"')) || (v.starts_with?('\'') && v.ends_with?('\'')))
+        v[1..-2]
+      else
+        v
+      end
+    end
+
+    def self.load_os_family(os_release_path : String = "/etc/os-release") : OsFamily
+      return OsFamily::Unknown unless File.file?(os_release_path)
+      parse_os_release(File.read(os_release_path))
+    rescue
+      OsFamily::Unknown
+    end
+
+    # Ask pacman / dpkg / rpm whether they own `path`. Pure enough for tests via
+    # the optional `runners` inject (defaults run real Process commands).
+    def self.probe_package_owner(path : String) : OwnerResult
+      probed = false
+
+      if Process.find_executable("pacman")
+        probed = true
+        if run_quiet("pacman", ["-Qo", path])
+          return OwnerResult::Pacman
+        end
+      end
+
+      if Process.find_executable("dpkg-query")
+        probed = true
+        if run_quiet("dpkg-query", ["-S", path])
+          return OwnerResult::Dpkg
+        end
+      elsif Process.find_executable("dpkg")
+        probed = true
+        if run_quiet("dpkg", ["-S", path])
+          return OwnerResult::Dpkg
+        end
+      end
+
+      if Process.find_executable("rpm")
+        probed = true
+        if run_quiet("rpm", ["-qf", path])
+          return OwnerResult::Rpm
+        end
+      end
+
+      probed ? OwnerResult::None : OwnerResult::Unknown
+    end
+
+    private def self.run_quiet(cmd : String, args : Array(String)) : Bool
+      status = Process.run(cmd, args,
+        output: Process::Redirect::Close,
+        error: Process::Redirect::Close)
+      status.success?
+    rescue
+      false
     end
 
     # ---------------------------------------------------------------------------
@@ -90,9 +225,19 @@ module Gori
           message: "Snap install detected. Refresh with the package manager:",
           command: "snap refresh gori",
         }
-      when .aur?
+      when .pacman?
         {
-          message: "AUR/pacman install detected (path under /usr/bin). Upgrade with your AUR helper, or reinstall if this was a manual copy:\n  yay -Syu gori\n  paru -Syu gori\n  # or: sudo pacman -Syu gori",
+          message: "pacman/AUR install detected. Upgrade with your AUR helper (or pacman if packaged in a repo):\n  yay -Syu gori\n  paru -Syu gori\n  # or: sudo pacman -Syu gori",
+          command: nil,
+        }
+      when .deb?
+        {
+          message: "Debian/Ubuntu package install detected (dpkg owns this binary). Upgrade with apt (do not overwrite /usr/bin):\n  sudo apt update && sudo apt install --only-upgrade gori",
+          command: nil,
+        }
+      when .rpm?
+        {
+          message: "RPM package install detected. Upgrade with your package manager (do not overwrite /usr/bin):\n  sudo dnf upgrade gori\n  # or: sudo yum upgrade gori\n  # or: sudo zypper update gori",
           command: nil,
         }
       else
@@ -101,6 +246,10 @@ module Gori
           command: nil,
         }
       end
+    end
+
+    def self.package_managed?(channel : Channel) : Bool
+      channel.homebrew? || channel.snap? || channel.pacman? || channel.deb? || channel.rpm?
     end
 
     # ---------------------------------------------------------------------------
@@ -564,20 +713,25 @@ module Gori
     # Entry used by `gori update`. Raises `Gori::Error` on failure (CLI aborts).
     # Package-manager commands are print-only unless `exec_package_commands` is true
     # (CLI: `gori update --exec`).
+    #
+    # Tests inject `owner` / `os_family` to avoid live package-manager probes.
     def self.run(io : IO = STDOUT, err : IO = STDERR, *,
                  exe_path : String? = nil,
                  release_json : String? = nil,
-                 exec_package_commands : Bool = false) : Nil
+                 exec_package_commands : Bool = false,
+                 owner : OwnerResult? = nil,
+                 os_family : OsFamily? = nil) : Nil
       path = exe_path || resolve_executable_path
-      channel = detect_channel(path)
+      resolved_owner = owner || (system_package_path?(path) ? probe_package_owner(path) : OwnerResult::None)
+      resolved_family = os_family || load_os_family
+      channel = detect_channel(path, owner: resolved_owner, os_family: resolved_family)
 
       io.puts "gori #{VERSION}"
       io.puts "install channel: #{channel.to_s.downcase} (#{path})"
       io.puts ""
 
       action = package_action(channel)
-      case channel
-      when .homebrew?, .snap?, .aur?
+      if package_managed?(channel)
         io.puts action[:message]
         if cmd = action[:command]
           io.puts "  #{cmd}"
@@ -594,10 +748,10 @@ module Gori
               io.puts "(#{tool} not found on PATH — run the command above yourself)"
             end
           else
-            io.puts "Re-run with --exec to run the command above automatically."
+            io.puts "Re-run with --exec to run the command above automatically." if cmd
           end
         end
-      when .binary?
+      else
         io.puts action[:message]
         io.puts ""
         update_binary(path, io, err, release_json: release_json)

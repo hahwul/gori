@@ -476,7 +476,12 @@ module Gori
           puts "  • standalone binary  — download the latest GitHub release asset"
           puts "  • Homebrew           — print (or --exec) brew upgrade gori"
           puts "  • Snap               — print (or --exec) snap refresh gori"
-          puts "  • AUR/pacman         — print yay/paru/pacman guidance"
+          puts "  • pacman/AUR         — print yay/paru/pacman guidance"
+          puts "  • deb (dpkg)         — print apt upgrade guidance"
+          puts "  • rpm                — print dnf/yum/zypper guidance"
+          puts ""
+          puts "System paths under /usr/bin are classified by package ownership"
+          puts "(pacman -Qo / dpkg-query -S / rpm -qf) and /etc/os-release."
           exit 0
         end
         p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }

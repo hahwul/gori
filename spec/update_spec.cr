@@ -20,8 +20,31 @@ describe Gori::Update do
       Gori::Update.detect_channel("/snap/bin/gori").should eq(Gori::Update::Channel::Snap)
     end
 
-    it "detects AUR/pacman paths under /usr/bin" do
-      Gori::Update.detect_channel("/usr/bin/gori").should eq(Gori::Update::Channel::Aur)
+    it "classifies /usr/bin by package ownership, not path alone" do
+      Gori::Update.detect_channel("/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::Pacman).should eq(Gori::Update::Channel::Pacman)
+      Gori::Update.detect_channel("/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::Dpkg).should eq(Gori::Update::Channel::Deb)
+      Gori::Update.detect_channel("/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::Rpm).should eq(Gori::Update::Channel::Rpm)
+      # Manual copy into /usr/bin — package manager says "not owned" → self-update
+      Gori::Update.detect_channel("/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::None).should eq(Gori::Update::Channel::Binary)
+    end
+
+    it "falls back to os-release family when ownership cannot be probed" do
+      Gori::Update.detect_channel("/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::Unknown,
+        os_family: Gori::Update::OsFamily::ArchLike).should eq(Gori::Update::Channel::Pacman)
+      Gori::Update.detect_channel("/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::Unknown,
+        os_family: Gori::Update::OsFamily::DebianLike).should eq(Gori::Update::Channel::Deb)
+      Gori::Update.detect_channel("/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::Unknown,
+        os_family: Gori::Update::OsFamily::RhelLike).should eq(Gori::Update::Channel::Rpm)
+      Gori::Update.detect_channel("/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::Unknown,
+        os_family: Gori::Update::OsFamily::Unknown).should eq(Gori::Update::Channel::Binary)
     end
 
     it "classifies standalone binary installs (including curl opt layout and workspace builds)" do
@@ -30,6 +53,32 @@ describe Gori::Update do
       Gori::Update.detect_channel("/usr/local/opt/gori/gori").should eq(Gori::Update::Channel::Binary)
       Gori::Update.detect_channel("/Users/dev/Projects/gori/bin/gori").should eq(Gori::Update::Channel::Binary)
       Gori::Update.detect_channel("/home/user/.local/bin/gori").should eq(Gori::Update::Channel::Binary)
+    end
+  end
+
+  describe ".parse_os_release" do
+    it "detects Arch-like IDs" do
+      Gori::Update.parse_os_release("ID=arch\n").should eq(Gori::Update::OsFamily::ArchLike)
+      Gori::Update.parse_os_release("ID=manjaro\nID_LIKE=arch\n").should eq(Gori::Update::OsFamily::ArchLike)
+    end
+
+    it "detects Debian-like IDs" do
+      Gori::Update.parse_os_release("ID=ubuntu\nID_LIKE=debian\n").should eq(Gori::Update::OsFamily::DebianLike)
+      Gori::Update.parse_os_release("ID=\"debian\"\n").should eq(Gori::Update::OsFamily::DebianLike)
+    end
+
+    it "detects RHEL-like IDs" do
+      Gori::Update.parse_os_release("ID=fedora\n").should eq(Gori::Update::OsFamily::RhelLike)
+      Gori::Update.parse_os_release("ID=rocky\nID_LIKE=\"rhel centos fedora\"\n").should eq(Gori::Update::OsFamily::RhelLike)
+    end
+  end
+
+  describe ".system_package_path?" do
+    it "matches FHS system bins only" do
+      Gori::Update.system_package_path?("/usr/bin/gori").should be_true
+      Gori::Update.system_package_path?("/bin/gori").should be_true
+      Gori::Update.system_package_path?("/usr/local/bin/gori").should be_false
+      Gori::Update.system_package_path?("/home/u/.local/bin/gori").should be_false
     end
   end
 
@@ -193,11 +242,21 @@ describe Gori::Update do
       action[:message].should match(/Snap/i)
     end
 
-    it "returns AUR helper guidance without a single auto-run command" do
-      action = Gori::Update.package_action(Gori::Update::Channel::Aur)
+    it "returns pacman/AUR helper guidance without a single auto-run command" do
+      action = Gori::Update.package_action(Gori::Update::Channel::Pacman)
       action[:command].should be_nil
       action[:message].should contain("yay -Syu gori")
       action[:message].should contain("paru -Syu gori")
+    end
+
+    it "returns apt guidance for deb and dnf/yum for rpm" do
+      deb = Gori::Update.package_action(Gori::Update::Channel::Deb)
+      deb[:command].should be_nil
+      deb[:message].should match(/apt/i)
+
+      rpm = Gori::Update.package_action(Gori::Update::Channel::Rpm)
+      rpm[:command].should be_nil
+      rpm[:message].should match(/dnf|yum|zypper/i)
     end
 
     it "describes standalone binary self-update" do
@@ -230,14 +289,39 @@ describe Gori::Update do
       out.should contain("snap refresh gori")
     end
 
-    it "prints AUR guidance" do
+    it "prints pacman guidance when ownership is pacman" do
       io = IO::Memory.new
       Gori::Update.run(io, io,
         exe_path: "/usr/bin/gori",
-        exec_package_commands: false)
+        owner: Gori::Update::OwnerResult::Pacman,
+        os_family: Gori::Update::OsFamily::ArchLike)
       out = io.to_s
-      out.should contain("install channel: aur")
+      out.should contain("install channel: pacman")
       out.should contain("yay -Syu gori")
+    end
+
+    it "prints apt guidance for dpkg-owned /usr/bin" do
+      io = IO::Memory.new
+      Gori::Update.run(io, io,
+        exe_path: "/usr/bin/gori",
+        owner: Gori::Update::OwnerResult::Dpkg,
+        os_family: Gori::Update::OsFamily::DebianLike)
+      out = io.to_s
+      out.should contain("install channel: deb")
+      out.should match(/apt/i)
+    end
+
+    it "self-updates when /usr/bin is not package-owned (manual install)" do
+      io = IO::Memory.new
+      empty = %({"tag_name":"v9.9.9","assets":[]})
+      expect_raises(Gori::Error, /no downloadable assets|no matching asset|no GitHub releases/) do
+        Gori::Update.run(io, io,
+          exe_path: "/usr/bin/gori",
+          owner: Gori::Update::OwnerResult::None,
+          os_family: Gori::Update::OsFamily::DebianLike,
+          release_json: empty)
+      end
+      io.to_s.should contain("install channel: binary")
     end
 
     it "on binary channel uses fixture JSON and reports missing assets clearly" do
