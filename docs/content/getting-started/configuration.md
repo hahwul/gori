@@ -87,11 +87,13 @@ When a field matches the current global value, gori drops that override so the p
 To intercept HTTPS, clients must trust gori's root certificate, kept in `~/.gori/ca` as `root.crt.pem` and `root.key.pem`.
 
 ```bash
-gori export ca-cert                  # print the certificate path
-gori export ca-cert --ca-dir /path   # use a custom CA directory
+gori ca                       # print the certificate path
+gori ca --pem                 # print the PEM to stdout
+gori ca --ca-dir /path        # use a custom CA directory
+gori ca regenerate --yes      # replace the root CA (scripts/CI; voids prior trust)
 ```
 
-You can rotate the CA from the TUI command palette (**Regenerate CA certificate**) — this is confirm-gated because it invalidates all previously issued trust.
+You can also rotate the CA from the TUI command palette (**Regenerate CA certificate**), or interactively with `gori ca regenerate` (type `regenerate` to confirm). Both paths are confirm-gated because rotation invalidates all previously issued trust; any already-running gori keeps the old CA until restarted.
 
 The palette's **Open browser** action launches an installed browser with an isolated profile that already trusts the CA and routes through the proxy — the fastest path on a fresh machine (see the [Quick Start](/getting-started/quick-start/)).
 

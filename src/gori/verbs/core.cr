@@ -51,7 +51,7 @@ module Gori
         Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.refresh_screen; nil }
 
       r.register Verb::Definition.new(
-        "ca.export", "Export CA certificate", "Print the path to gori's root CA for trust setup",
+        "ca.export", "Copy CA certificate path", "Copy the path to gori's root CA (same as `gori ca`) for trust setup",
         Verb::Scope::Global) { |ctx| ctx.export_ca; nil }
 
       # Palette-only (destructive — gated behind a confirm in the Runner): mint a

@@ -42,7 +42,7 @@ Empty History also hints at this path (`^P → Open browser`).
 Print the CA path and import that file into your system or browser trust store as a **trusted root CA**:
 
 ```bash
-gori export ca-cert
+gori ca
 ```
 
 Then set the client to use `127.0.0.1:8070` as its HTTP **and** HTTPS proxy. For a quick smoke test:

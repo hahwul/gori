@@ -70,7 +70,7 @@ module Gori::Proxy::Tls
       end
     end
 
-    # PEM bytes of the root certificate, for the `ca export` verb / trust setup.
+    # PEM bytes of the root certificate, for `gori ca --pem` / TUI CA copy / trust setup.
     def ca_cert_pem : String
       File.read(@ca_cert_path)
     end

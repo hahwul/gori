@@ -14,7 +14,7 @@ gori [command] [options]
 | `tui` | Start the proxy and terminal UI (default) |
 | `run` | Non-interactive suite over a project |
 | `mcp` | Model Context Protocol stdio server |
-| `export` | Export the root CA certificate |
+| `ca` | Print the root CA path / PEM, or regenerate the CA |
 | `settings` | Show or edit `settings.json` |
 | `wizard` | Interactive first-run setup |
 | `tutorial` | Guided TUI tour (navigation, palette, space menu, edit mode) |
@@ -39,9 +39,8 @@ gori tui --listen 0.0.0.0 --port 8080
 | `--ca-dir=PATH` | Directory for the root CA |
 | `--headless` | Run without the TUI (capture to STDOUT) |
 | `--insecure-upstream` | Do not verify upstream TLS certificates |
-| `--export-ca` | Print the root CA certificate path and exit |
 
-> `GORI_HOME` is an environment variable, not a flag. Project selection in the TUI is done through the project picker. Bind flags only set the **global** layer for this run — see [Configuration](/getting-started/configuration/#network).
+> `GORI_HOME` is an environment variable, not a flag. Project selection in the TUI is done through the project picker. Bind flags only set the **global** layer for this run — see [Configuration](/getting-started/configuration/#network). For the root CA path, use [`gori ca`](#gori-ca).
 
 ## gori run
 
@@ -239,13 +238,33 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--read-only` | Disable action tools (`send_request`, create/update findings, fuzz/mine) |
 | `--install-claude` / `--install-claude-code` / `--install-codex` / `--install-agy` / `--install-grok` | Write the MCP config for that client |
 
-## gori export
+## gori ca
 
 ```bash
-gori export ca-cert [--ca-dir=DIR]
+gori ca
+gori ca --pem
+gori ca --ca-dir=DIR
+gori ca regenerate
+gori ca regenerate --yes
 ```
 
-Prints the root CA certificate path. `gori --export-ca` is a compatibility alias.
+Prints the path to gori's root CA certificate (creates it on first use). Use this when trusting the CA in a browser or system store, or when pointing a client at `--cacert`.
+
+| Option | Description |
+|--------|-------------|
+| `--ca-dir=DIR` | CA directory (default `~/.gori/ca`, or `$GORI_HOME/ca`) |
+| `--pem` | Print the certificate PEM to stdout instead of the path |
+
+### gori ca regenerate
+
+Replaces the on-disk root CA with a freshly minted one. **Destructive** — every client that trusted the old CA must re-trust the new certificate. Any already-running gori process keeps the old CA in memory until restarted.
+
+| Option | Description |
+|--------|-------------|
+| `--yes`, `-y` | Skip the interactive confirm (required when stdin is not a tty) |
+| `--ca-dir=DIR` | CA directory to regenerate |
+
+Without `--yes`, the command prompts on a tty and expects you to type `regenerate` (same word as the TUI confirm). Scripts and CI should pass `--yes`. On success the new cert path is printed to stdout.
 
 ## gori settings
 

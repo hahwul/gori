@@ -13,17 +13,14 @@ require "./proxy/tls/cert_authority"
 module Gori
   # Subcommand-based CLI entrypoint.
   #
-  # - `gori` or `gori tui [flags]`  → interactive TUI (or --headless for compat)
+  # - `gori` or `gori tui [flags]`  → interactive TUI (or --headless for capture-only)
   # - `gori settings [--edit]`      → print (and lazily init) / edit settings.json
-  # - `gori export ca-cert`         → print CA cert path (refactors old --export-ca)
+  # - `gori ca`                     → print root CA path (or PEM); `ca regenerate` rotates it
   # - `gori run <sub>`              → non-interactive CLI (see Gori::CLI::Run)
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
   # - `gori wizard`                 → interactive first-run setup wizard (bind/theme)
   # - `gori tutorial`               → guided TUI tour (navigation, palette, menu, edit)
   # - `gori update`                 → channel-aware self-update (binary / brew / snap / AUR)
-  #
-  # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
-  # via the tui path for backward compatibility.
   module CLI
     def self.run(argv : Array(String) = ARGV) : Nil
       # Global version (works before/after any subcommand or alone)
@@ -48,8 +45,8 @@ module Gori
         run_tui(subargs)
       when "settings"
         run_settings(subargs)
-      when "export"
-        run_export(subargs)
+      when "ca"
+        run_ca(subargs)
       when "run"
         run_run(subargs)
       when "wizard"
@@ -75,7 +72,7 @@ module Gori
       puts "Commands:"
       puts "  tui       Start the interactive TUI (default when no command)"
       puts "  settings  Show the settings.json path (or --edit to open it)"
-      puts "  export    Export things (currently only ca-cert)"
+      puts "  ca        Print the root CA path, or regenerate it (see gori ca --help)"
       puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
       puts "  wizard    Interactive setup wizard (bind, theme) — also runs on first launch"
       puts "  tutorial  Guided TUI tour with try-it steps (nav, palette, menu, edit)"
@@ -86,8 +83,7 @@ module Gori
       puts "Flags like --version and --help work at the top level too."
     end
 
-    # Runs the TUI (or headless for compat with old --headless flag).
-    # All legacy flat flags continue to be accepted here.
+    # Runs the TUI (or headless capture-only mode).
     private def self.run_tui(args : Array(String)) : Nil
       Settings.load # persisted bind/upstream are the defaults; CLI flags override below
       listen = Settings.bind_host
@@ -96,7 +92,6 @@ module Gori
       ca_dir = Paths.default_ca_dir
       headless = false
       insecure = false
-      export_ca = false
 
       parser = OptionParser.new do |p|
         p.banner = "Usage: gori tui [options]"
@@ -110,19 +105,12 @@ module Gori
         p.on("--ca-dir=PATH", "Directory for the root CA") { |v| ca_dir = v }
         p.on("--headless", "Run without the TUI (capture to STDOUT)") { headless = true }
         p.on("--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
-        p.on("--export-ca", "Print the root CA certificate path and exit (compat)") { export_ca = true }
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.on("-v", "--version", "Show version") { puts "gori #{VERSION}"; exit 0 }
         p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
         p.missing_option { |flag| abort "missing value for #{flag}" }
       end
       parser.parse(args)
-
-      if export_ca
-        Paths.ensure_dirs
-        puts Proxy::Tls::CertAuthority.load_or_create(ca_dir).ca_cert_path
-        return
-      end
 
       Paths.ensure_dirs
       # Reflect the active bind (after any CLI override) in the settings UI; the
@@ -179,44 +167,112 @@ module Gori
       abort "gori settings: editor (#{cmd.join(' ')}) exited #{status.exit_code}" unless status.success?
     end
 
-    private def self.run_export(args : Array(String)) : Nil
-      # Generic usage only for a bare invocation or a top-level help flag. An unknown
-      # dash-prefixed first arg (e.g. `--bogus`) must still fall through to the else
-      # below (error + exit 1), and `gori export ca-cert --help` must reach the
-      # ca-cert parser (which documents --ca-dir and its own -h/--help).
-      if args.empty? || args[0] == "-h" || args[0] == "--help"
-        print_export_usage(STDOUT)
+    # `gori ca` is the CA utility surface:
+    # - bare / flags  → print path (default) or PEM (`--pem`); creates CA on first use
+    # - `regenerate`  → replace the root CA (destructive; needs --yes or an interactive confirm)
+    private def self.run_ca(args : Array(String)) : Nil
+      if (first = args[0]?) && !first.starts_with?("-")
+        case first
+        when "regenerate"
+          run_ca_regenerate(args[1..])
+        else
+          STDERR.puts "unknown ca subcommand: #{first}"
+          print_ca_usage(STDERR)
+          exit 1
+        end
         return
       end
+      run_ca_show(args)
+    end
 
-      case args[0]
-      when "ca-cert"
-        ca_dir = Paths.default_ca_dir
-        parser = OptionParser.new do |p|
-          p.banner = "Usage: gori export ca-cert [options]"
-          p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
-          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
-          p.missing_option { |flag| abort "missing value for #{flag}" }
+    private def self.print_ca_usage(io : IO) : Nil
+      io.puts "Usage: gori ca [options]"
+      io.puts "       gori ca regenerate [--yes] [--ca-dir=DIR]"
+      io.puts ""
+      io.puts "Print the root CA certificate path (default), create it on first use, or"
+      io.puts "regenerate it (invalidates existing client trust)."
+      io.puts ""
+      io.puts "Options:"
+      io.puts "  --ca-dir=DIR   CA directory (default ~/.gori/ca or $GORI_HOME/ca)"
+      io.puts "  --pem          Print the certificate PEM to stdout instead of the path"
+      io.puts "  -h, --help     Show this help"
+      io.puts ""
+      io.puts "Regenerate options:"
+      io.puts "  --yes, -y      Skip the interactive confirm (required when stdin is not a tty)"
+      io.puts "  --ca-dir=DIR   CA directory to regenerate"
+    end
+
+    # Path / PEM print path (the default `gori ca` action).
+    private def self.run_ca_show(args : Array(String)) : Nil
+      ca_dir = Paths.default_ca_dir
+      pem = false
+      parser = OptionParser.new do |p|
+        p.banner = "Usage: gori ca [options]\n       gori ca regenerate [--yes] [--ca-dir=DIR]"
+        p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
+        p.on("--pem", "Print the certificate PEM to stdout instead of the path") { pem = true }
+        p.on("-h", "--help", "Show this help") { print_ca_usage(STDOUT); exit 0 }
+        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        p.missing_option { |flag| abort "missing value for #{flag}" }
+      end
+      parser.parse(args)
+
+      begin
+        Paths.ensure_dirs
+        ca = Proxy::Tls::CertAuthority.load_or_create(ca_dir)
+        if pem
+          print ca.ca_cert_pem
+          # PEM files usually already end with a newline; don't double them.
+          STDOUT.flush
+        else
+          puts ca.ca_cert_path
         end
-        parser.parse(args[1..])
-        begin
-          Paths.ensure_dirs
-          puts Proxy::Tls::CertAuthority.load_or_create(ca_dir).ca_cert_path
-        rescue ex
-          abort "gori export ca-cert: could not create/read the CA in #{ca_dir}: #{ex.message}"
-        end
-      else
-        STDERR.puts "unknown export subcommand: #{args[0]}"
-        print_export_usage(STDERR)
-        exit 1
+      rescue ex
+        abort "gori ca: could not create/read the CA in #{ca_dir}: #{ex.message}"
       end
     end
 
-    private def self.print_export_usage(io : IO) : Nil
-      io.puts "Usage: gori export <subcommand>"
-      io.puts "Subcommands:"
-      io.puts "  ca-cert   Print path to the root CA certificate (for client trust)"
+    # Replace the on-disk root CA. Destructive: voids every prior client trust entry.
+    # A *running* gori process keeps the old CA in memory until restart — warn on stderr.
+    # Confirmation mirrors the TUI (type "regenerate", or pass --yes for scripts/CI).
+    private def self.run_ca_regenerate(args : Array(String)) : Nil
+      ca_dir = Paths.default_ca_dir
+      yes = false
+      parser = OptionParser.new do |p|
+        p.banner = "Usage: gori ca regenerate [--yes] [--ca-dir=DIR]"
+        p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
+        p.on("-y", "--yes", "Skip the interactive confirm") { yes = true }
+        p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        p.missing_option { |flag| abort "missing value for #{flag}" }
+      end
+      parser.parse(args)
+
+      confirm_ca_regenerate!(ca_dir) unless yes
+
+      begin
+        Paths.ensure_dirs
+        ca = Proxy::Tls::CertAuthority.load_or_create(ca_dir)
+        ca.regenerate!
+        puts ca.ca_cert_path
+        STDERR.puts "gori ca: regenerated — re-trust clients; restart any running gori"
+      rescue ex
+        abort "gori ca regenerate: could not replace the CA in #{ca_dir}: #{ex.message}"
+      end
+    end
+
+    # Interactive gate for regenerate (skipped when --yes). Non-tty stdin without --yes
+    # is rejected so a pipe/CI job can't hang waiting for a typed confirm.
+    private def self.confirm_ca_regenerate!(ca_dir : String) : Nil
+      unless STDIN.tty?
+        abort "gori ca regenerate: stdin is not a terminal; re-run with --yes to confirm"
+      end
+      STDERR.puts "Replace the root CA in #{ca_dir}?"
+      STDERR.puts "This invalidates existing client trust."
+      STDERR.puts "Running gori instances keep the old CA until restarted."
+      STDERR.print "Type 'regenerate' to confirm: "
+      STDERR.flush
+      line = (STDIN.gets || "").strip
+      abort "gori ca regenerate: cancelled" unless line == "regenerate"
     end
 
     # Handler for `gori run` (the non-interactive CLI mode). Named run_run to match

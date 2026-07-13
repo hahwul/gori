@@ -4482,14 +4482,14 @@ module Gori::Tui
       path = @session.ca.ca_cert_path
       confirm("REGENERATE CA",
         "Replace the current root CA with a new one?\n\n" \
-        "The old CA becomes untrusted — re-export and\n" \
-        "re-trust the new certificate in your clients.\n" \
+        "The old CA becomes untrusted — re-trust the new\n" \
+        "certificate in your clients (gori ca / path copied).\n" \
         "New connections use it immediately.",
         confirm_label: "regenerate", danger: true) do
         begin
           @session.ca.regenerate!
           Clipboard.copy(path)
-          @toast = "root CA regenerated — re-export & re-trust it (path copied): #{path}"
+          @toast = "root CA regenerated — re-trust it (path copied): #{path}"
         rescue ex
           @toast = "CA regeneration failed: #{ex.message}"
         end
