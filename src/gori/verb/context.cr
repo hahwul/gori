@@ -31,6 +31,11 @@ module Gori
       # follows the user's settings:tabs order/visibility. Out-of-range n is a no-op.
       abstract def focus_visible_tab(n : Int32) : Nil
       abstract def cycle_tab(delta : Int32) : Nil
+      # Horizontal tab-bar navigation (←/→ on the menu). Like cycle_tab(±1), but → past
+      # the last visible tab lands on the far-right "more" dropdown affordance (holding
+      # the settings-hidden tabs) instead of wrapping; ← steps back off it.
+      abstract def menu_left : Nil
+      abstract def menu_right : Nil
       # Descend from the tab menu into the active tab's content. Tabs with a
       # navigable sub-tab strip (Replay/Notes) land on the STRIP first; others go
       # straight to the body. (The strip then descends into the editor itself.)

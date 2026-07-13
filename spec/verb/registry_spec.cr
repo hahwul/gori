@@ -60,6 +60,14 @@ private class FakeContext < ExecContext
     @calls << :cycle_tab
   end
 
+  def menu_left : Nil
+    @calls << :menu_left
+  end
+
+  def menu_right : Nil
+    @calls << :menu_right
+  end
+
   def move_selection(delta : Int32) : Nil
     @calls << :move
   end

@@ -29,6 +29,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def cycle_tab(delta : Int32) : Nil; end
 
+  def menu_left : Nil; end
+
+  def menu_right : Nil; end
+
   def move_selection(delta : Int32) : Nil; end
 
   def open_detail : Nil; end

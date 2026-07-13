@@ -83,6 +83,55 @@ describe "Chrome.visible_tabs" do
   end
 end
 
+describe "Chrome.hidden_tabs" do
+  it "returns the tabs hidden from the bar (Miner by default) on empty prefs" do
+    hid = Chrome.hidden_tabs([] of {String, Bool}).map(&.first)
+    hid.should eq([:miner]) # only the default-hidden tab
+  end
+
+  it "excludes the active tab even when its stored visibility is false (it's force-shown)" do
+    # Miner is hidden by default but active → force-shown on the bar, so it must NOT
+    # also appear in the dropdown list.
+    Chrome.hidden_tabs([] of {String, Bool}, force: :miner).map(&.first).should_not contain(:miner)
+  end
+
+  it "lists a user-hidden tab and preserves catalog order" do
+    prefs = [{"replay", false}, {"convert", false}]
+    hid = Chrome.hidden_tabs(prefs).map(&.first)
+    hid.includes?(:replay).should be_true
+    hid.includes?(:convert).should be_true
+    hid.includes?(:miner).should be_true                                 # still default-hidden
+    hid.index(:replay).not_nil!.should be < hid.index(:convert).not_nil! # catalog order
+  end
+end
+
+describe "Chrome.more_button_rect" do
+  it "is nil when nothing is hidden" do
+    Chrome.more_button_rect(Rect.new(0, 0, 80, 1), hidden_count: 0).should be_nil
+  end
+
+  it "reserves a right-anchored pill sized to the ⋯ label when tabs are hidden" do
+    rect = Rect.new(0, 0, 80, 1)
+    mb = Chrome.more_button_rect(rect, hidden_count: 2).not_nil!
+    mb.right.should eq(rect.right)                # flush to the right edge
+    mb.w.should eq(Chrome.more_label(2).size + 2) # padded pill
+  end
+
+  it "is nil on a row too narrow to host the button" do
+    Chrome.more_button_rect(Rect.new(0, 0, 4, 1), hidden_count: 3).should be_nil
+  end
+end
+
+describe "Chrome.menu_segments" do
+  it "keeps tab segments clear of the reserved ⋯ button region" do
+    rect = Rect.new(0, 0, 80, 1)
+    tabs = Chrome.visible_tabs([] of {String, Bool})
+    mb = Chrome.more_button_rect(rect, hidden_count: 1).not_nil!
+    segs = Chrome.menu_segments(rect, :project, tabs: tabs, hidden_count: 1)
+    segs.each { |(_, seg)| seg.right.should be <= mb.x } # no segment overlaps the button
+  end
+end
+
 describe "Chrome.scroll_start" do
   it "scrolls active_idx to the end when no prev_start is provided and it doesn't fit" do
     widths = [10, 10, 10, 10, 10]
@@ -104,4 +153,3 @@ describe "Chrome.scroll_start" do
     Chrome.scroll_start(widths, active_idx: 4, avail: 25, prev_start: 1).should eq(3)
   end
 end
-
