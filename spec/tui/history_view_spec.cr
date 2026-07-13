@@ -76,6 +76,41 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "re-fetches the preview of a still-pending flow after its response lands" do
+    # The refresh_preview cache guard skips the per-frame get_flow ONLY for a Complete,
+    # non-streaming flow (whose bytes are immutable). A pending flow must keep refreshing
+    # so the preview picks up the response once it arrives — a guard keyed on the wrong
+    # state would freeze the pane on "(empty)".
+    prev = Gori::Settings.history_preview
+    begin
+      Gori::Settings.history_preview = true
+      tmp_store do |store|
+        id = add_flow(store, "GET", "/pending") # no response yet → Pending
+        view = HistoryView.new
+        view.reload(store)
+        view.refresh_preview(store) # caches the pending detail (no RESPONSE body)
+
+        backend = MemoryBackend.new(100, 30)
+        view.render_list(Screen.new(backend), Rect.new(0, 0, 100, 30))
+        before = (0...30).map { |y| backend.row(y) }.join("\n")
+        before.should contain("(empty)") # RESPONSE side empty while pending
+        before.should_not contain("200")
+
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\nhi".to_slice,
+          body: "hi".to_slice, content_type: "text/plain"))
+        view.refresh_preview(store) # NOT skipped: cached detail was pending → re-fetch
+
+        backend2 = MemoryBackend.new(100, 30)
+        view.render_list(Screen.new(backend2), Rect.new(0, 0, 100, 30))
+        after = (0...30).map { |y| backend2.row(y) }.join("\n")
+        after.should contain("200") # RESPONSE now shows the landed response
+      end
+    ensure
+      Gori::Settings.history_preview = prev
+    end
+  end
+
   it "loads flows newest-first with the newest selected (follow)" do
     tmp_store do |store|
       add_flow(store, "GET", "/a", 200)

@@ -524,7 +524,7 @@ module Gori::Tui
       # accumulated @filter_dirty makes it catch up on the first drain after History
       # becomes active, and on_enter reloads on entry — so the list is never shown stale.
       # (Mirrors apply_external_change, which already only reloads the active tab.)
-      history_controller.view.flush_filter(@session.store) if @active_tab == :history
+      drained = true if @active_tab == :history && history_controller.view.flush_filter(@session.store)
       drained
     end
 

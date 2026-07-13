@@ -55,7 +55,8 @@ module Gori::Tui
       @selected = 0
       @scroll = 0
       @follow = true
-      @filter_dirty = false # a filtered view needs a coalesced reload after draining
+      @filter_dirty = false                       # a filtered view needs a coalesced reload after draining
+      @last_filter_flush = nil.as(Time::Instant?) # debounce clock for flush_filter (nil ⇒ first flush is immediate)
       @query = ""
       @qcx = 0
       @preedit = ""
@@ -96,6 +97,11 @@ module Gori::Tui
       # settings:layout History Req/Res preview (list page bottom pane) — separate from full detail.
       @preview_detail = nil.as(Store::FlowDetail?)
       @preview_id = nil.as(Int64?)
+      # Split preview lines, computed once per (re)fetched @preview_detail — NOT per frame.
+      # A ≤64 KiB body scrub+split+array is wasteful to redo every render tick while the
+      # selected flow is unchanged (which is every captured flow under live capture).
+      @preview_req_lines = nil.as(Array(String)?)
+      @preview_res_lines = nil.as(Array(String)?)
       @preview_scroll_req = 0
       @preview_scroll_res = 0
       @preview_focus = :list # :list | :req | :res
@@ -118,14 +124,31 @@ module Gori::Tui
       if @preview_id != id
         @preview_scroll_req = 0
         @preview_scroll_res = 0
+      elsif (d = @preview_detail) && d.row.state.complete? && d.row.status != 101 && d.h2_conn_id.nil?
+        # Same flow, already cached, and its captured bytes are immutable (Complete,
+        # non-streaming) — a data_version poke from OTHER flows committing has nothing
+        # to pick up here. Skip the SQLite round-trip + body re-split every render tick
+        # (mirrors refresh_detail's guard). A pending / 101 / h2 flow still re-fetches.
+        return
       end
-      @preview_detail = store.get_flow(id, body_max: PREVIEW_BODY_CAP + 1)
+      detail = store.get_flow(id, body_max: PREVIEW_BODY_CAP + 1)
+      @preview_detail = detail
       @preview_id = id
+      # Split the (bounded) preview text once, here — render reads the cached arrays.
+      if detail
+        @preview_req_lines = preview_text_lines(detail.request_head, detail.request_body)
+        @preview_res_lines = preview_text_lines(detail.response_head, detail.response_body)
+      else
+        @preview_req_lines = nil
+        @preview_res_lines = nil
+      end
     end
 
     def clear_preview : Nil
       @preview_detail = nil
       @preview_id = nil
+      @preview_req_lines = nil
+      @preview_res_lines = nil
       @preview_scroll_req = 0
       @preview_scroll_res = 0
     end
@@ -253,10 +276,28 @@ module Gori::Tui
       newest_first? ? 0 : @rows.size - 1
     end
 
+    # Minimum spacing between live-capture filter reloads. A filtered / Scope-lens list
+    # can't update incrementally, so every captured flow flags @filter_dirty and would
+    # otherwise re-run the FULL-table search + reverse (up to PAGE rows) on each drain
+    # tick — ~20×/sec under sustained capture, and a Scope lens alone puts every session
+    # in this state. Coalescing to this cadence drops the frequency ~10-40× with no
+    # correctness loss (@filter_dirty just accumulates until the window elapses). The
+    # FIRST dirtying still reloads immediately (last-flush is nil), so the view stays live.
+    FILTER_FLUSH_INTERVAL = 250.milliseconds
+
     # Apply any filtered-view staleness accumulated during a drain cycle in ONE
-    # reload (vs reloading per flow event — a search+reverse of up to PAGE rows).
-    def flush_filter(store : Store) : Nil
-      reload(store) if @filter_dirty
+    # reload (vs reloading per flow event — a search+reverse of up to PAGE rows),
+    # debounced to FILTER_FLUSH_INTERVAL so a busy capture can't thrash the search.
+    # Returns true if it actually reloaded (so the caller can mark the frame dirty).
+    def flush_filter(store : Store) : Bool
+      return false unless @filter_dirty
+      now = Time.instant
+      if (last = @last_filter_flush) && now - last < FILTER_FLUSH_INTERVAL
+        return false
+      end
+      @last_filter_flush = now
+      reload(store)
+      true
     end
 
     def on_event(event : Store::FlowEvent, store : Store) : Nil
@@ -1075,9 +1116,9 @@ module Gori::Tui
         # Vertical hairline between Req and Res; top cell sits on the horizontal seam as ┬.
         screen.cell(body.x + half, rect.y, '┬', border)
         (0...body.h).each { |i| screen.cell(body.x + half, body.y + i, '│', border) }
-        render_preview_side(screen, left, "REQUEST", detail.request_head, detail.request_body,
+        render_preview_side(screen, left, "REQUEST", @preview_req_lines,
           @preview_scroll_req, active: focused && @preview_focus == :req)
-        render_preview_side(screen, right, "RESPONSE", detail.response_head, detail.response_body,
+        render_preview_side(screen, right, "RESPONSE", @preview_res_lines,
           @preview_scroll_res, active: focused && @preview_focus == :res)
       else
         # Stack Req above Res; reserve one row for a tee-joined mid seam when height allows.
@@ -1087,25 +1128,25 @@ module Gori::Tui
           top = Rect.new(body.x, body.y, body.w, half_h)
           bot = Rect.new(body.x, mid_y + 1, body.w, body.h - half_h - 1)
           Frame.inner_divider(screen, rect, mid_y, border: border)
-          render_preview_side(screen, top, "REQUEST", detail.request_head, detail.request_body,
+          render_preview_side(screen, top, "REQUEST", @preview_req_lines,
             @preview_scroll_req, active: focused && @preview_focus == :req)
-          render_preview_side(screen, bot, "RESPONSE", detail.response_head, detail.response_body,
+          render_preview_side(screen, bot, "RESPONSE", @preview_res_lines,
             @preview_scroll_res, active: focused && @preview_focus == :res) if bot.h > 0
         else
-          render_preview_side(screen, body, "REQUEST", detail.request_head, detail.request_body,
+          render_preview_side(screen, body, "REQUEST", @preview_req_lines,
             @preview_scroll_req, active: focused && @preview_focus == :req)
         end
       end
     end
 
     private def render_preview_side(screen : Screen, rect : Rect, title : String,
-                                    head : Bytes?, body : Bytes?, scroll : Int32, *, active : Bool) : Nil
+                                    lines : Array(String)?, scroll : Int32, *, active : Bool) : Nil
       return if rect.empty?
       bg = active ? Theme.selection_dim : Theme.bg
       screen.fill(rect, bg) if active
       label = active ? " #{title} ▎" : " #{title} "
       screen.text(rect.x + 1, rect.y, label, active ? Theme.accent : Theme.muted, bg, attr: Attribute::Bold)
-      lines = preview_text_lines(head, body)
+      lines ||= ["(empty)"]
       content_y = rect.y + 1
       content_h = {rect.bottom - content_y, 0}.max
       return if content_h <= 0

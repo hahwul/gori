@@ -59,6 +59,47 @@ describe Gori::Import do
     end
   end
 
+  it "indexes the imported request body for FTS body: search (response-bearing entry)" do
+    har = File.tempname("gori", ".har")
+    begin
+      # A response is present, so the import writer takes the update_one path (which reuses
+      # the request FTS text computed at insert time instead of reading the row back). The
+      # distinctive token lives ONLY in the REQUEST body, so a body: hit proves the request
+      # FTS column was populated correctly through that path.
+      File.write(har, <<-JSON)
+        {
+          "log": {
+            "entries": [{
+              "startedDateTime": "2026-06-01T12:00:00+00:00",
+              "request": {
+                "method": "POST",
+                "url": "https://api.test/submit",
+                "httpVersion": "HTTP/1.1",
+                "postData": {"mimeType": "text/plain", "text": "hello zephyrquux world"}
+              },
+              "response": {
+                "status": 200, "statusText": "OK", "httpVersion": "HTTP/1.1",
+                "headers": [{"name": "Content-Type", "value": "text/html"}],
+                "content": {"mimeType": "text/html", "text": "<p>ok</p>"}
+              }
+            }]
+          }
+        }
+        JSON
+
+      with_store do |store|
+        Gori::Import.import_file(store, :har, har).count.should eq(1)
+        hits = store.search(Gori::QL.parse("body:zephyrquux"), 10)
+        hits.size.should eq(1)
+        hits.first.target.should eq("/submit")
+        # A token that appears in neither body must not match (guards a bogus index).
+        store.search(Gori::QL.parse("body:nonesuchtoken"), 10).size.should eq(0)
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "preserves duplicate response headers (multiple Set-Cookie) on HAR import" do
     har = File.tempname("gori", ".har")
     begin

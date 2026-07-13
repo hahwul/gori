@@ -736,6 +736,65 @@ describe Gori::Proxy::Server do
     String.new(sink.responses.first.body.not_nil!).should eq("a [HIDDEN] here")
   end
 
+  it "leaves a response body over MAX_REWRITE_BODY byte-exact (rule no-ops, no unbounded buffer)" do
+    seen_body = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    # A Content-Length body one byte past the rewrite cap. "SECRET" sits at the FRONT so the
+    # rule WOULD match — proving the rule was SKIPPED (not that it just found nothing to change).
+    cap = Gori::Proxy::ClientConn::MAX_REWRITE_BODY
+    big = "SECRET" + ("x" * (cap + 1 - 6))
+    origin_port = start_body_origin(big, seen_body)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: BodyRewriter.new)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /big HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    response = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    seen_body.receive # drain (GET carries no body)
+
+    # Over the cap the response-body rule is skipped: the body reaches the client byte-exact,
+    # with the ORIGINAL Content-Length (no re-frame) and "SECRET" NOT rewritten to "[HIDDEN]".
+    response.should contain("Content-Length: #{big.bytesize}")
+    response.should_not contain("[HIDDEN]")
+    response.bytesize.should be >= big.bytesize # whole body forwarded, not truncated
+  end
+
+  it "leaves a request body over MAX_REWRITE_BODY byte-exact (rule no-ops, no unbounded buffer)" do
+    seen_body = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_body_origin("ok", seen_body)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, rewriter: BodyRewriter.new)
+    proxy.start
+
+    cap = Gori::Proxy::ClientConn::MAX_REWRITE_BODY
+    body = "ping" + ("x" * (cap + 1 - 4)) # one byte past the cap; "ping" → "PONG!" would match
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "POST /submit HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\nContent-Length: #{body.bytesize}\r\n\r\n"
+    client << body
+    client.flush
+    client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+
+    # The origin received the body byte-exact (full length, "ping" NOT rewritten to "PONG!") —
+    # the rule was skipped rather than buffering the whole oversized upload to rewrite it.
+    got = seen_body.receive
+    got.bytesize.should eq(body.bytesize)
+    got.starts_with?("ping").should be_true
+    got.should_not contain("PONG!")
+  end
+
   it "holds a request via the interceptor and forwards an edited version" do
     seen = Channel(String).new(1)
     done = Channel(Nil).new(1)
