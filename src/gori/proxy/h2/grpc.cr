@@ -29,6 +29,21 @@ module Gori::Proxy::H2
       STATUS_NAMES[code]? || "CODE#{code}"
     end
 
+    # The inverse of `messages` for ONE message: the 5-byte length prefix (1-byte
+    # compressed flag + 4-byte big-endian length) followed by the payload. Used when the
+    # Replay editor mutates a gRPC message body — reframing keeps the length prefix in sync
+    # with the edited payload so the origin doesn't reject a length mismatch (a hex edit
+    # that changes the byte count would otherwise leave a stale prefix). The length is a
+    # UInt32; a payload larger than that can't be gRPC-framed, so it's rejected by the
+    # caller before reaching here (an edited message that large is not a realistic input).
+    def self.frame(compressed : Bool, data : Bytes) : Bytes
+      framed = Bytes.new(5 + data.size)
+      framed[0] = compressed ? 1_u8 : 0_u8
+      IO::ByteFormat::BigEndian.encode(data.size.to_u32, framed[1, 4])
+      data.copy_to(framed[5, data.size]) unless data.empty?
+      framed
+    end
+
     # Frames a DATA body into messages. A trailing partial frame (incomplete on a
     # still-streaming capture) is left out rather than guessed at.
     def self.messages(body : Bytes) : Array(Message)

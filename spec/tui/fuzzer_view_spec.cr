@@ -31,6 +31,19 @@ describe Gori::Tui::FuzzerView do
     view.template_text.should contain("§x¦rot13§")
   end
 
+  it "toggle_http2 flips the transport and retargets the template request-line version" do
+    view = loaded_fuzzer
+    view.http2?.should be_false
+    view.template_text.lines.first.should end_with("HTTP/1.1")
+
+    view.toggle_http2.should be_true
+    view.http2?.should be_true
+    view.template_text.lines.first.should end_with("HTTP/2")
+
+    view.toggle_http2.should be_false
+    view.template_text.lines.first.should end_with("HTTP/1.1")
+  end
+
   it "duplicate_from copies template + config and clears run results" do
     src = loaded_fuzzer
     src.name = "probe"

@@ -132,6 +132,10 @@ private class FakeContext < ExecContext
     @calls << :replay_send
   end
 
+  def replay_send_group : Nil
+    @calls << :replay_send_group
+  end
+
   def replay_find_subtab : Nil
     @calls << :replay_find_subtab
   end
@@ -182,6 +186,10 @@ private class FakeContext < ExecContext
 
   def replay_toggle_auto_content_length : Nil
     @calls << :replay_toggle_auto_content_length
+  end
+
+  def replay_toggle_http2 : Nil
+    @calls << :replay_toggle_http2
   end
 
   def replay_toggle_resp_diff : Nil
@@ -266,6 +274,10 @@ private class FakeContext < ExecContext
 
   def fuzz_pretty_template : Nil
     @calls << :fuzz_pretty_template
+  end
+
+  def fuzz_toggle_http2 : Nil
+    @calls << :fuzz_toggle_http2
   end
 
   def fuzz_clear_marks : Nil

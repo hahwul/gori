@@ -180,6 +180,14 @@ module Gori
         "replay.toggle-auto-content-length", "Toggle auto Content-Length", "Recompute Content-Length from the body on send",
         Verb::Scope::Replay, [Verb::Chord.new("l", ctrl: true)],
         available: in_replay) { |ctx| ctx.replay_toggle_auto_content_length; nil }
+      r.register Verb::Definition.new(
+        "replay.toggle-http2", "Toggle HTTP/2 (h2)", "Send this request over HTTP/2 or HTTP/1.1, overriding the captured protocol",
+        Verb::Scope::Replay, [Verb::Chord.new("v", ctrl: true)],
+        available: in_replay, mnemonic: 'h', section: :request) { |ctx| ctx.replay_toggle_http2; nil }
+      r.register Verb::Definition.new(
+        "replay.send-group", "Send group (one connection)",
+        "Pipeline every request (split on a lone %%% line) over ONE keep-alive connection — active request-smuggling / keep-alive reuse — and show each response",
+        Verb::Scope::Replay, available: in_replay, mnemonic: 'g', section: :request) { |ctx| ctx.replay_send_group; nil }
 
       # --- RESPONSE pane (Round 5 order: diff, hex, pretty) — today's plain `d`/`x`/`p`
       # keys, handled inline by ReplayController#handle_replay_response; promoted to
@@ -378,6 +386,10 @@ module Gori
         "fuzz.pretty-template", "Pretty-print template", "Format the request template body in-place (JSON/XML/form-urlencoded)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("u", ctrl: true)],
         available: in_fuzzer, mnemonic: 'p', section: :template) { |ctx| ctx.fuzz_pretty_template; nil }
+      r.register Verb::Definition.new(
+        "fuzz.toggle-http2", "Toggle HTTP/2 (h2)", "Run the fuzz over HTTP/2 or HTTP/1.1, overriding the seed flow's protocol",
+        Verb::Scope::Fuzzer, [Verb::Chord.new("v", ctrl: true)],
+        available: in_fuzzer, mnemonic: 'h', section: :template) { |ctx| ctx.fuzz_toggle_http2; nil }
       r.register Verb::Definition.new(
         "fuzz.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain) from the template",
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'x', section: :template) { |ctx| ctx.fuzz_clear_marks; nil }

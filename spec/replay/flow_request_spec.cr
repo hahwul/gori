@@ -53,4 +53,28 @@ describe Gori::Replay::FlowRequest do
       Gori::Replay::FlowRequest.resync_content_length(wire).should eq(wire)
     end
   end
+
+  describe ".retarget_version_line" do
+    it "downgrades an h2-captured request line to HTTP/1.1 for the verbatim h1 send" do
+      Gori::Replay::FlowRequest.retarget_version_line("GET /a HTTP/2", false).should eq("GET /a HTTP/1.1")
+    end
+
+    it "upgrades an h1 request line to HTTP/2" do
+      Gori::Replay::FlowRequest.retarget_version_line("POST /a HTTP/1.1", true).should eq("POST /a HTTP/2")
+    end
+
+    it "no-ops (nil) when the version already matches the transport" do
+      Gori::Replay::FlowRequest.retarget_version_line("GET /a HTTP/1.1", false).should be_nil
+      Gori::Replay::FlowRequest.retarget_version_line("GET /a HTTP/2", true).should be_nil
+    end
+
+    it "bounds the version by the LAST space, tolerating a raw space in the target" do
+      Gori::Replay::FlowRequest.retarget_version_line("GET /a b HTTP/2", false).should eq("GET /a b HTTP/1.1")
+    end
+
+    it "leaves a line that isn't a recognizable request line alone (nil)" do
+      Gori::Replay::FlowRequest.retarget_version_line("not a request line", false).should be_nil
+      Gori::Replay::FlowRequest.retarget_version_line("GET /a", false).should be_nil
+    end
+  end
 end

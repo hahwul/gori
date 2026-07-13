@@ -480,6 +480,21 @@ module Gori::Tui
       "auto-marked #{n} position#{n == 1 ? "" : "s"}"
     end
 
+    # Flip the run transport between HTTP/1.1 and HTTP/2 (`^V`), picking which engine the
+    # Sender dials and overriding the seed flow's protocol. Rewrites the request-line
+    # version token to match (so a template seeded from an h2 flow doesn't ship a stray
+    # "HTTP/2" once run over h1, and the `TEMPLATE (h2)` label agrees with the wire).
+    def toggle_http2 : Bool
+      @http2 = !@http2
+      if first = @editor.text.split('\n', 2).first?
+        if updated = Replay::FlowRequest.retarget_version_line(first, @http2)
+          @editor.replace_line(0, updated)
+        end
+      end
+      @dirty = true
+      @http2
+    end
+
     def pretty_print_template : String?
       text = @editor.text
       env_sep = text.index("\n\n")

@@ -64,6 +64,9 @@ module Gori::Tui
       # WebSocket replay transcripts arrive on their own channel (a distinct result
       # type from HTTP) and are applied by the same drain on a later tick.
       @ws_results = Channel({ReplayView, Replay::WsEngine::Result}).new(8)
+      # "Send group" pipelines several requests on one connection and delivers the
+      # labelled per-request results here (distinct type again — an ordered array).
+      @group_results = Channel({ReplayView, Array({String, Replay::Result})}).new(8)
     end
 
     def tab : Symbol
@@ -292,10 +295,13 @@ module Gori::Tui
     end
 
     private def grpc_hint(v : ReplayView) : String
-      if v.request_insert?
+      if v.request_hex?
+        "gRPC payload hex — overtype 0-9a-f · Ins/Del length · ^X/esc exit · ^R send"
+      elsif v.request_insert?
         "type head/metadata · esc read · ↹ pane"
       else
-        "i/↵ edit · ⇧arrows select · y copy · space cmds · ↹ pane"
+        msg = v.grpc_reframable? ? "^X hex-edit payload · " : ""
+        "i/↵ edit head · #{msg}⇧arrows select · y copy · space cmds · ↹ pane"
       end
     end
 
@@ -481,16 +487,22 @@ module Gori::Tui
     end
 
     def replay_toggle_hex : Nil
-      if (view = current_view) && (view.ws_mode? || view.grpc_mode? || view.decode_mode?)
-        msg = if view.ws_mode?
-                "edit WS messages as text"
-              elsif view.grpc_mode?
-                "the gRPC body is sent verbatim; edit the head as text"
-              else
-                "edit the envelope as text + the decoded payload below; it is re-encoded on send"
-              end
+      return unless view = current_view
+      if view.grpc_mode?
+        # A unary gRPC call hex-edits its message PAYLOAD (the length prefix is recomputed
+        # on send); a 0- or multi-message body has no unambiguous single payload to edit.
+        if !view.grpc_reframable?
+          @host.status("gRPC hex edit needs a single-message body (this call has #{view.grpc_msg_count}) — sent verbatim")
+        elsif view.focus == :request
+          on = view.toggle_request_hex
+          @host.status(on ? "gRPC payload hex: on — length prefix recomputed on send (^X/esc exit)" : "gRPC payload hex: off")
+        else
+          @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
+        end
+      elsif view.ws_mode? || view.decode_mode?
+        msg = view.ws_mode? ? "edit WS messages as text" : "edit the envelope as text + the decoded payload below; it is re-encoded on send"
         @host.status("hex edit not available here — #{msg}")
-      elsif (view = current_view) && view.focus == :request
+      elsif view.focus == :request
         on = view.toggle_request_hex
         @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
       else
@@ -514,6 +526,19 @@ module Gori::Tui
       else
         on = view.toggle_auto_content_length
         @host.status(on ? "auto Content-Length: on" : "auto Content-Length: off")
+      end
+    end
+
+    # Flip the request between HTTP/1.1 and HTTP/2 (overriding the captured protocol) so
+    # the next ^R dials the other engine. Refused for WebSocket (h1 by definition) and
+    # gRPC (rides h2) where the transport is intrinsic.
+    def replay_toggle_http2 : Nil
+      return unless view = current_view
+      if view.ws_mode? || view.grpc_mode?
+        @host.status("transport is fixed for #{view.ws_mode? ? "WebSocket" : "gRPC"} flows")
+      else
+        h2 = view.toggle_http2
+        @host.status(h2 ? "transport: HTTP/2 (h2)" : "transport: HTTP/1.1")
       end
     end
 
@@ -835,6 +860,14 @@ module Gori::Tui
         end
         applied = true
       end
+      while pair = nonblocking_group_result
+        view, labeled = pair
+        next unless @replays.find { |t| t.view.same?(view) } # sub-tab closed mid-flight
+        view.apply_group(labeled)
+        ok = labeled.count { |(_, r)| r.error.nil? }
+        @host.status("send group: #{ok}/#{labeled.size} ok on one connection")
+        applied = true
+      end
       applied
     end
 
@@ -853,7 +886,7 @@ module Gori::Tui
 
     # Passive-scan a successful WebSocket Replay transcript (handshake + text frames).
     private def prism_scan_ws_replay(replay_id : Int64, result : Replay::WsEngine::Result,
-                                    flow_id : Int64?, view : ReplayView) : Nil
+                                     flow_id : Int64?, view : ReplayView) : Nil
       head = result.handshake_head
       return if head.empty?
       upgrade = view.ws_upgrade_bytes
@@ -891,6 +924,15 @@ module Gori::Tui
       end
     end
 
+    private def nonblocking_group_result : {ReplayView, Array({String, Replay::Result})}?
+      select
+      when p = @group_results.receive
+        p
+      else
+        nil
+      end
+    end
+
     # Converge local replay tabs with the project's `replays` rows after a peer
     # committed (or any writer-connection commit that bumps PRAGMA data_version —
     # including our own update_replay_response after a successful send; the writer
@@ -915,7 +957,7 @@ module Gori::Tui
         # Only re-apply when the PERSISTED request side actually changed (data_version
         # also bumps on capture/response writes, so most polls touch an identical row).
         next if v.request_side_matches?(row.target, row.request, row.http2?,
-          row.auto_content_length?, row.mark_transform?, row.sni)
+                  row.auto_content_length?, row.mark_transform?, row.sni)
         # Soft sync: request/target/flags only. Full restore() would reset focus to
         # :target and clear @result (no response BLOBs on this path) — that is the
         # "send then response vanishes / focus jumps to Target" bug.
@@ -984,11 +1026,13 @@ module Gori::Tui
         @replays << ReplayTab.new(view, id, nil)
         @host.status("ws replay: #{view.summary} — edit messages (one per line) · ^R send · esc back")
       elsif grpc_flow?(detail)
-        # gRPC: head editable, framed message body sent verbatim. Session-only (db_id
-        # nil) — the binary body can't round-trip the text-keyed replays store.
+        # gRPC: head editable as text; a unary call's message payload is hex-editable (^X)
+        # and reframed on send. Session-only (db_id nil) — the binary body can't round-trip
+        # the text-keyed replays store.
         view.load_grpc(detail)
         @replays << ReplayTab.new(view, id, nil)
-        @host.status("grpc replay: #{view.summary} — edit head/metadata · ^R send · esc back")
+        tip = view.grpc_reframable? ? "edit head · ^X payload" : "edit head/metadata"
+        @host.status("grpc replay: #{view.summary} — #{tip} · ^R send · esc back")
       elsif saml_doc = saml_request_doc(detail)
         # SAML: split — full request envelope + the decoded XML payload (re-encoded into
         # the param on send). Session-only (db_id nil): the binding/param reconstruction
@@ -1095,7 +1139,7 @@ module Gori::Tui
     def replay_send : Nil
       return unless (tab = current_replay_tab) && (view = tab.view).loaded?
       view.commit_chain_pane # flush an in-progress CHAIN-pane edit so ^R can't send stale bytes (matches the SEND-chip click)
-      if view.inflight? # one outstanding round-trip per view — don't pile up fibers on ^R mashing
+      if view.inflight?      # one outstanding round-trip per view — don't pile up fibers on ^R mashing
         @host.status("replay already in flight…")
         return
       end
@@ -1153,6 +1197,51 @@ module Gori::Tui
         result = Replay::WsEngine.send(upgrade, messages, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni)
         select
         when results.send({view, result})
+        else
+        end
+      ensure
+        view.inflight = false
+      end
+    end
+
+    # Pipeline every request in the editor (split on lone `%%%` lines) over ONE keep-alive
+    # connection and show a transcript of each response — the active request-smuggling /
+    # keep-alive-reuse loop. HTTP/1.1 + plain text only (send_pipeline is an h1 primitive);
+    # h2 / hex / gRPC / WS / decode keep their own send path.
+    def replay_send_group : Nil
+      return unless (tab = current_replay_tab) && (view = tab.view).loaded?
+      view.commit_chain_pane
+      if view.inflight?
+        @host.status("replay already in flight…")
+        return
+      end
+      unless view.group_sendable?
+        @host.status(view.http2? ? "send group is HTTP/1.1 only — ^V to switch off h2" : "send group needs plain text mode (not hex/gRPC/WS/decode)")
+        return
+      end
+      scheme, host, port = view.parse_target
+      if host.empty?
+        @host.status("replay: invalid target — use scheme://host[:port]/path")
+        return
+      end
+      reqs = view.pipeline_requests
+      if reqs.empty?
+        @host.status("nothing to send — the request is empty")
+        return
+      end
+      save_current_replay
+      verify = !@host.session.config.insecure_upstream?
+      sni = view.sni_override
+      labels = reqs.map(&.[0])
+      bytes = reqs.map(&.[1])
+      results = @group_results
+      view.inflight = true
+      @host.status("send group → #{host}:#{port} · #{bytes.size} request#{bytes.size == 1 ? "" : "s"} on one connection…")
+      spawn(name: "gori-replay-group") do
+        rs = Replay::Engine.send_pipeline(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni)
+        labeled = labels.zip(rs)
+        select
+        when results.send({view, labeled})
         else
         end
       ensure
@@ -1230,7 +1319,7 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
-      when ev.ctrl_z? then view.edit_undo
+      when ev.ctrl_z?     then view.edit_undo
       when key.enter?     then view.edit_newline
       when key.backspace? then view.edit_backspace
       when key.up?        then view.at_top? ? view.focus_first : view.edit_move(-1, 0) # ↑-at-top → target field above
@@ -1285,16 +1374,16 @@ module Gori::Tui
       c = ev.char || key.to_char
       selecting = ev.shift?
       case
-      when key.enter?              then view.enter_request_insert!
-      when c == 'i'                then view.enter_request_insert!
-      when key.up?                  then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
-      when key.down?                then view.request_read_move(1, 0, selecting: selecting)
-      when key.left?                then view.request_read_move(0, -1, selecting: selecting)
-      when key.right?               then view.request_read_move(0, 1, selecting: selecting)
-      when key.home?                then view.edit_home
-      when key.end?                 then view.edit_end
-      when c == 'x'                 then view.pane_select_line
-      when c == 'y'                 then replay_copy
+      when key.enter? then view.enter_request_insert!
+      when c == 'i'   then view.enter_request_insert!
+      when key.up?    then view.at_top? ? view.focus_first : view.request_read_move(-1, 0, selecting: selecting)
+      when key.down?  then view.request_read_move(1, 0, selecting: selecting)
+      when key.left?  then view.request_read_move(0, -1, selecting: selecting)
+      when key.right? then view.request_read_move(0, 1, selecting: selecting)
+      when key.home?  then view.edit_home
+      when key.end?   then view.edit_end
+      when c == 'x'   then view.pane_select_line
+      when c == 'y'   then replay_copy
       end
     end
 
@@ -1355,21 +1444,21 @@ module Gori::Tui
       return if handle_replay_response_hscroll(ev, view)
       key = ev.key
       selecting = ev.shift?
-      transcript = view.ws_mode? || view.grpc_mode?
+      transcript = view.ws_mode? || view.grpc_mode? || view.group_mode?
       nav = view.resp_navigable?
       case
-      when key.enter?              then replay_send
-      when key.up?, key.lower_k?   then view.at_top? ? view.focus_first : resp_nav_step(view, -1, 0, selecting, nav)
-      when key.down?, key.lower_j? then resp_nav_step(view, 1, 0, selecting, nav)
-      when key.left? && !selecting then resp_nav_step(view, 0, -1, false, nav) unless transcript
+      when key.enter?               then replay_send
+      when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : resp_nav_step(view, -1, 0, selecting, nav)
+      when key.down?, key.lower_j?  then resp_nav_step(view, 1, 0, selecting, nav)
+      when key.left? && !selecting  then resp_nav_step(view, 0, -1, false, nav) unless transcript
       when key.right? && !selecting then resp_nav_step(view, 0, 1, false, nav) unless transcript
-      when key.left? && selecting  then resp_nav_step(view, 0, -1, true, nav) unless transcript
-      when key.right? && selecting then resp_nav_step(view, 0, 1, true, nav) unless transcript
-      when transcript              then nil
-      when key.lower_d?            then view.toggle_resp_mode
-      when key.lower_x?            then view.toggle_resp_hex
-      when key.lower_b?            then @host.toggle_reveal
-      when key.lower_p?            then @host.toggle_pretty
+      when key.left? && selecting   then resp_nav_step(view, 0, -1, true, nav) unless transcript
+      when key.right? && selecting  then resp_nav_step(view, 0, 1, true, nav) unless transcript
+      when transcript               then nil
+      when key.lower_d?             then view.toggle_resp_mode
+      when key.lower_x?             then view.toggle_resp_hex
+      when key.lower_b?             then @host.toggle_reveal
+      when key.lower_p?             then @host.toggle_pretty
       end
     end
 

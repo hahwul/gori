@@ -68,6 +68,7 @@ module Gori
       abstract def replay_selected : Nil       # load History's selection into Replay
       abstract def replay_new : Nil            # open a blank, hand-authored replay request
       abstract def replay_send : Nil           # resend the (edited) request to the target
+      abstract def replay_send_group : Nil     # pipeline %%%-split requests on one connection
       abstract def replay_find_subtab : Nil    # open the sub-tab search picker (filter + jump)
       abstract def replay_subtab_count : Int32 # open replay session count (gates the search menu entry)
       # Generic sub-tab search — the Replay picker generalised to Fuzzer/Notes/Convert so
@@ -84,12 +85,14 @@ module Gori
       abstract def replay_toggle_decoded : Nil             # toggle the envelope/decoded split sub-pane (SAML/GraphQL)
       abstract def replay_toggle_sni : Nil                 # toggle the SNI-override sub-field (target pane)
       abstract def replay_toggle_auto_content_length : Nil # recompute Content-Length on send
+      abstract def replay_toggle_http2 : Nil               # flip the request transport h1↔h2 (override captured protocol)
       abstract def replay_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
       abstract def replay_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
       # mark-transform mode: mark request values (§…§) and attach Convert chains applied on send
       abstract def replay_toggle_mark_transform : Nil # toggle MARK mode on/off
       abstract def replay_pretty_request : Nil
       abstract def fuzz_pretty_template : Nil
+      abstract def fuzz_toggle_http2 : Nil    # flip the fuzz transport h1↔h2 (override seed protocol)
       abstract def replay_auto_mark : Nil     # wrap every request param value in §…§
       abstract def replay_mark_word : Nil     # toggle a marker around the token at the cursor
       abstract def replay_insert_marker : Nil # drop a single § at the cursor (bracket by hand)

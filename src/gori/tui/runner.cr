@@ -4117,6 +4117,10 @@ module Gori::Tui
       replay_controller.replay_send
     end
 
+    def replay_send_group : Nil
+      replay_controller.replay_send_group
+    end
+
     # Open the Replay sub-tab search picker (space → s). Snapshots the open
     # sessions; the picker filters them in memory and jumps on ↵.
     def replay_find_subtab : Nil
@@ -4180,6 +4184,10 @@ module Gori::Tui
 
     def replay_toggle_auto_content_length : Nil
       replay_controller.replay_toggle_auto_content_length
+    end
+
+    def replay_toggle_http2 : Nil
+      replay_controller.replay_toggle_http2
     end
 
     # Space-menu (:response) counterparts of the response pane's raw `d`/`x` keys —
@@ -4281,6 +4289,10 @@ module Gori::Tui
 
     def fuzz_pretty_template : Nil
       fuzzer_controller.fuzz_pretty_template
+    end
+
+    def fuzz_toggle_http2 : Nil
+      fuzzer_controller.fuzz_toggle_http2
     end
 
     def fuzz_clear_marks : Nil
