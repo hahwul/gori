@@ -79,6 +79,13 @@ benchmark:
 seed-demo:
     crystal run scripts/seed_demo.cr
 
+# Local mock GitHub releases server for testing `gori update` download progress.
+# In another terminal:
+#   GORI_UPDATE_API_URL=http://127.0.0.1:8765/repos/hahwul/gori/releases/latest ./bin/gori update
+[group('development')]
+update-mock port="8765" size="4M" throttle="400k":
+    crystal run scripts/mock_update_server.cr -- --port {{port}} --size {{size}} --throttle {{throttle}}
+
 [group('documents')]
 docs-serve:
     hwaro serve -i docs --base-url="http://localhost:3000"

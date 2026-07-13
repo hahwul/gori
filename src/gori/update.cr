@@ -11,12 +11,18 @@ module Gori
   # unit-tested with injected paths/fixtures. I/O (HTTP, filesystem, Process)
   # lives in the methods used by the CLI entrypoint.
   module Update
-    GITHUB_REPO     = "hahwul/gori"
-    API_LATEST      = "https://api.github.com/repos/#{GITHUB_REPO}/releases/latest"
-    RELEASES_URL    = "#{REPOSITORY_URL}/releases"
-    USER_AGENT      = "gori/#{VERSION} (+#{REPOSITORY_URL})"
-    MAX_REDIRECTS   = 10
-    HTTP_TIMEOUT    = 60.seconds
+    GITHUB_REPO   = "hahwul/gori"
+    API_LATEST    = "https://api.github.com/repos/#{GITHUB_REPO}/releases/latest"
+    RELEASES_URL  = "#{REPOSITORY_URL}/releases"
+    USER_AGENT    = "gori/#{VERSION} (+#{REPOSITORY_URL})"
+    MAX_REDIRECTS = 10
+    HTTP_TIMEOUT  = 60.seconds
+    # Download progress meter
+    PROGRESS_BAR_WIDTH    = 24
+    PROGRESS_CHUNK        = 64 * 1024
+    PROGRESS_MIN_INTERVAL = 100.milliseconds
+    # Env override for local mock release servers (scripts/mock_update_server.cr).
+    UPDATE_API_ENV = "GORI_UPDATE_API_URL"
     # Shared library roots we must never rm_rf / replace wholesale.
     FORBIDDEN_LIB_PATHS = {
       "/usr/local/lib", "/usr/lib", "/lib", "/lib64", "/usr/local/lib64",
@@ -138,14 +144,14 @@ module Gori
       blob = "#{id} #{id_like}"
       # Order matters: some images set ID=linux with ID_LIKE=arch.
       return OsFamily::ArchLike if blob.split.any? { |t|
-        {"arch", "archlinux", "manjaro", "endeavouros", "garuda", "artix", "archarm"}.includes?(t)
-      }
+                                     {"arch", "archlinux", "manjaro", "endeavouros", "garuda", "artix", "archarm"}.includes?(t)
+                                   }
       return OsFamily::DebianLike if blob.split.any? { |t|
-        {"debian", "ubuntu", "linuxmint", "pop", "raspbian", "kali", "elementary", "zorin", "neon"}.includes?(t)
-      }
+                                       {"debian", "ubuntu", "linuxmint", "pop", "raspbian", "kali", "elementary", "zorin", "neon"}.includes?(t)
+                                     }
       return OsFamily::RhelLike if blob.split.any? { |t|
-        {"rhel", "fedora", "centos", "rocky", "almalinux", "ol", "amzn", "sles", "opensuse", "suse", "mageia"}.includes?(t)
-      }
+                                     {"rhel", "fedora", "centos", "rocky", "almalinux", "ol", "amzn", "sles", "opensuse", "suse", "mageia"}.includes?(t)
+                                   }
       OsFamily::Unknown
     end
 
@@ -462,6 +468,106 @@ module Gori
     end
 
     # ---------------------------------------------------------------------------
+    # Download progress (pure formatters + streaming copy)
+    # ---------------------------------------------------------------------------
+
+    # Human-readable byte size with a space before the unit (e.g. "12.4 MB").
+    def self.format_size(bytes : Int64) : String
+      n = bytes.to_f
+      return "#{bytes} B" if n < 1024
+      n /= 1024
+      return "#{round1(n)} kB" if n < 1024
+      n /= 1024
+      return "#{round1(n)} MB" if n < 1024
+      n /= 1024
+      return "#{round1(n)} GB" if n < 1024
+      "#{round1(n / 1024)} TB"
+    end
+
+    # Elapsed span for download summaries ("850ms", "5.1s").
+    def self.format_duration(span : Time::Span) : String
+      ms = span.total_milliseconds
+      return "#{ms.round.to_i}ms" if ms < 1000
+      "#{round1(span.total_seconds)}s"
+    end
+
+    # Horizontal block bar of `done/total`, exactly `width` columns.
+    # Unknown total (total <= 0) → empty string (caller uses indeterminate line).
+    def self.format_progress_bar(done : Int64, total : Int64, width : Int32 = PROGRESS_BAR_WIDTH) : String
+      return "" if width <= 0
+      return "░" * width if total <= 0
+      frac = (done.to_f / total.to_f).clamp(0.0, 1.0)
+      filled = (frac * width).round.to_i
+      filled = 1 if filled < 1 && done > 0
+      filled = width if filled > width
+      String.build do |io|
+        filled.times { io << '█' }
+        (width - filled).times { io << '░' }
+      end
+    end
+
+    # One progress line (no trailing newline). When total is unknown, omit the bar/%.
+    def self.format_progress_line(done : Int64, total : Int64, *,
+                                  elapsed : Time::Span = Time::Span::ZERO,
+                                  width : Int32 = PROGRESS_BAR_WIDTH) : String
+      rate = if elapsed.total_seconds > 0
+               format_size((done.to_f / elapsed.total_seconds).round.to_i64) + "/s"
+             else
+               "—/s"
+             end
+      if total > 0
+        pct = ((done.to_f / total.to_f) * 100).clamp(0.0, 100.0).round.to_i
+        bar = format_progress_bar(done, total, width)
+        "#{bar}  #{pct.to_s.rjust(3)}%  #{format_size(done)} / #{format_size(total)}  #{rate}"
+      else
+        "#{format_size(done)}  #{rate}"
+      end
+    end
+
+    private def self.round1(n : Float64) : String
+      ((n * 10).round / 10.0).to_s
+    end
+
+    # Stream body_io → dest with optional live progress on a TTY (or when force_progress).
+    # Returns bytes written. `on_progress` is always invoked when present (for tests).
+    def self.copy_with_progress(body_io : IO, dest : String, total : Int64, *,
+                                progress_io : IO? = nil,
+                                on_progress : Proc(Int64, Int64, Nil)? = nil,
+                                force_progress : Bool = false) : Int64
+      show = force_progress || !!(progress_io && progress_io.tty?)
+      started = Time.instant
+      last_draw = Time.instant - PROGRESS_MIN_INTERVAL # allow first draw immediately
+      downloaded = 0_i64
+      buf = Bytes.new(PROGRESS_CHUNK)
+
+      File.open(dest, "w") do |file|
+        loop do
+          n = body_io.read(buf)
+          break if n == 0
+          file.write(buf[0, n])
+          downloaded += n
+          on_progress.try &.call(downloaded, total)
+
+          if show && progress_io
+            now = Time.instant
+            if now - last_draw >= PROGRESS_MIN_INTERVAL || (total > 0 && downloaded >= total)
+              line = format_progress_line(downloaded, total, elapsed: started.elapsed)
+              progress_io.print "\r\e[K  #{line}"
+              progress_io.flush
+              last_draw = now
+            end
+          end
+        end
+      end
+
+      if show && progress_io
+        progress_io.print "\r\e[K"
+        progress_io.flush
+      end
+      downloaded
+    end
+
+    # ---------------------------------------------------------------------------
     # CLI orchestration + I/O
     # ---------------------------------------------------------------------------
 
@@ -478,13 +584,19 @@ module Gori
       client
     end
 
-    def self.fetch_latest_release_json(api_url : String = API_LATEST) : String
-      uri = URI.parse(api_url)
+    # Resolves the releases API URL: explicit arg → env override → GitHub default.
+    def self.resolve_api_url(api_url : String? = nil) : String
+      api_url || ENV[UPDATE_API_ENV]? || API_LATEST
+    end
+
+    def self.fetch_latest_release_json(api_url : String? = nil) : String
+      url = resolve_api_url(api_url)
+      uri = URI.parse(url)
       headers = HTTP::Headers{
         "Accept"     => "application/vnd.github+json",
         "User-Agent" => USER_AGENT,
       }
-      host = uri.host || raise Error.new("invalid API URL: #{api_url}")
+      host = uri.host || raise Error.new("invalid API URL: #{url}")
       port = uri.port || (uri.scheme == "https" ? 443 : 80)
       tls = uri.scheme == "https"
       client = http_client(host, port, tls)
@@ -506,7 +618,11 @@ module Gori
       end
     end
 
-    def self.download_to(url : String, dest : String, redirects_left : Int32 = MAX_REDIRECTS) : Nil
+    def self.download_to(url : String, dest : String, redirects_left : Int32 = MAX_REDIRECTS, *,
+                         expected_size : Int64 = 0_i64,
+                         progress_io : IO? = nil,
+                         on_progress : Proc(Int64, Int64, Nil)? = nil,
+                         force_progress : Bool = false) : Int64
       raise Error.new("too many redirects downloading #{url}") if redirects_left < 0
 
       uri = URI.parse(url)
@@ -517,6 +633,9 @@ module Gori
 
       client = http_client(host, port, tls)
       begin
+        # Capture result outside the HTTP block (block return is not always the method return).
+        result = 0_i64
+        redirect_url : String? = nil
         client.get(uri.request_target, headers: headers) do |response|
           code = response.status_code
           if {301, 302, 303, 307, 308}.includes?(code)
@@ -524,18 +643,28 @@ module Gori
             raise Error.new("redirect without Location from #{url}") unless location
             response.body_io.gets_to_end
             # Resolve relative redirects against the current URL.
-            next_url = location.starts_with?("http://") || location.starts_with?("https://") ? location : URI.parse(url).resolve(location).to_s
-            client.close
-            return download_to(next_url, dest, redirects_left - 1)
+            redirect_url = location.starts_with?("http://") || location.starts_with?("https://") ? location : URI.parse(url).resolve(location).to_s
+            next
           end
           unless code == 200
             response.body_io.gets_to_end
             raise Error.new("download failed HTTP #{code} for #{url}")
           end
-          File.open(dest, "w") do |file|
-            IO.copy(response.body_io, file)
-          end
+          cl = response.headers["Content-Length"]?.try(&.to_i64?) || 0_i64
+          total = cl > 0 ? cl : expected_size
+          result = copy_with_progress(response.body_io, dest, total,
+            progress_io: progress_io,
+            on_progress: on_progress,
+            force_progress: force_progress)
         end
+        if next_url = redirect_url
+          return download_to(next_url, dest, redirects_left - 1,
+            expected_size: expected_size,
+            progress_io: progress_io,
+            on_progress: on_progress,
+            force_progress: force_progress)
+        end
+        result
       ensure
         client.close
       end
@@ -664,8 +793,10 @@ module Gori
     end
 
     def self.update_binary(target_path : String, io : IO = STDOUT, _err : IO = STDERR, *,
-                           release_json : String? = nil) : Nil
-      json = release_json || fetch_latest_release_json
+                           release_json : String? = nil,
+                           api_url : String? = nil,
+                           force_progress : Bool = false) : Nil
+      json = release_json || fetch_latest_release_json(api_url)
       release = parse_release(json)
       ver = release.version
       local = normalize_version(VERSION)
@@ -691,16 +822,21 @@ module Gori
       end
 
       io.puts "Updating #{VERSION} → #{release.tag_name}"
-      io.puts "Downloading #{asset.name} …"
+      size_note = asset.size > 0 ? " (#{format_size(asset.size)})" : ""
+      io.puts "Downloading #{asset.name}#{size_note}"
 
       with_tempdir("gori-dl-") do |dir|
         dest = File.join(dir, asset.name)
-        download_to(asset.browser_download_url, dest)
-        got = File.size(dest)
+        started = Time.instant
+        got = download_to(asset.browser_download_url, dest,
+          expected_size: asset.size,
+          progress_io: io,
+          force_progress: force_progress)
         raise Error.new("downloaded asset is empty: #{asset.name}") unless got > 0
         if asset.size > 0 && got != asset.size
           raise Error.new("downloaded size mismatch for #{asset.name}: expected #{asset.size} bytes, got #{got}")
         end
+        io.puts "Downloaded #{format_size(got)} in #{format_duration(started.elapsed)}"
         install_from_download(dest, target_path, asset_is_archive?(asset.name))
       end
 
@@ -715,12 +851,15 @@ module Gori
     # (CLI: `gori update --exec`).
     #
     # Tests inject `owner` / `os_family` to avoid live package-manager probes.
+    # `api_url` / `GORI_UPDATE_API_URL` point the releases API at a mock server.
     def self.run(io : IO = STDOUT, err : IO = STDERR, *,
                  exe_path : String? = nil,
                  release_json : String? = nil,
+                 api_url : String? = nil,
                  exec_package_commands : Bool = false,
                  owner : OwnerResult? = nil,
-                 os_family : OsFamily? = nil) : Nil
+                 os_family : OsFamily? = nil,
+                 force_progress : Bool = false) : Nil
       path = exe_path || resolve_executable_path
       resolved_owner = owner || (system_package_path?(path) ? probe_package_owner(path) : OwnerResult::None)
       resolved_family = os_family || load_os_family
@@ -754,7 +893,10 @@ module Gori
       else
         io.puts action[:message]
         io.puts ""
-        update_binary(path, io, err, release_json: release_json)
+        update_binary(path, io, err,
+          release_json: release_json,
+          api_url: api_url,
+          force_progress: force_progress)
       end
     end
   end

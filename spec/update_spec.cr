@@ -1,5 +1,6 @@
 require "./spec_helper"
 require "file_utils"
+require "./support/mock_release_server"
 
 describe Gori::Update do
   describe ".detect_channel" do
@@ -364,6 +365,148 @@ describe Gori::Update do
     it "detects macOS tarballs vs plain Linux binaries" do
       Gori::Update.asset_is_archive?("gori-v0.1.0-osx-arm64.tar.gz").should be_true
       Gori::Update.asset_is_archive?("gori-v0.1.0-linux-x86_64").should be_false
+    end
+  end
+
+  describe "progress formatters" do
+    it "formats human sizes with a unit space" do
+      Gori::Update.format_size(0).should eq("0 B")
+      Gori::Update.format_size(512).should eq("512 B")
+      Gori::Update.format_size(1536).should eq("1.5 kB")
+      Gori::Update.format_size(5_i64 * 1024 * 1024).should eq("5.0 MB")
+    end
+
+    it "builds a fixed-width bar from 0% to 100%" do
+      empty = Gori::Update.format_progress_bar(0, 100, 10)
+      empty.size.should eq(10)
+      empty.should eq("░" * 10)
+
+      full = Gori::Update.format_progress_bar(100, 100, 10)
+      full.should eq("█" * 10)
+
+      mid = Gori::Update.format_progress_bar(50, 100, 10)
+      mid.size.should eq(10)
+      mid.should contain("█")
+      mid.should contain("░")
+    end
+
+    it "includes percent, sizes, and rate in a known-total progress line" do
+      line = Gori::Update.format_progress_line(50_i64 * 1024, 100_i64 * 1024,
+        elapsed: 1.second, width: 10)
+      line.should match(/%/)
+      line.should contain("50.0 kB")
+      line.should contain("100.0 kB")
+      line.should contain("/s")
+    end
+
+    it "omits the bar when total is unknown" do
+      line = Gori::Update.format_progress_line(4096, 0, elapsed: 0.5.seconds)
+      line.should_not contain("█")
+      line.should_not contain("%")
+      line.should contain("4.0 kB")
+    end
+
+    it "formats short durations" do
+      Gori::Update.format_duration(250.milliseconds).should eq("250ms")
+      Gori::Update.format_duration(1.5.seconds).should eq("1.5s")
+    end
+  end
+
+  describe ".download_to with mock release server" do
+    it "streams the asset, reports progress, and writes the full body" do
+      payload = ("x" * 32_768) # 32 KiB — multiple chunks
+      with_mock_release_server(tag: "v99.0.0", body: payload) do |server|
+        name = server.asset_names.find { |n| n.includes?("linux-x86_64") }.not_nil!
+        dest = File.tempname("gori-dl-")
+        begin
+          samples = [] of {Int64, Int64}
+          got = Gori::Update.download_to(server.download_url(name), dest,
+            expected_size: payload.bytesize.to_i64,
+            on_progress: ->(done : Int64, total : Int64) {
+              samples << {done, total}
+            })
+          got.should eq(payload.bytesize)
+          File.read(dest).should eq(payload)
+          samples.size.should be > 0
+          samples.last[0].should eq(payload.bytesize)
+          samples.last[1].should eq(payload.bytesize)
+          # Monotonic downloaded counters
+          samples.each_cons(2) { |(a, b)| b[0].should be >= a[0] }
+        ensure
+          File.delete?(dest)
+        end
+      end
+    end
+
+    it "draws progress when force_progress is set even without a TTY" do
+      payload = "a" * 8192
+      with_mock_release_server(body: payload) do |server|
+        name = server.asset_names.first
+        dest = File.tempname("gori-dl-")
+        io = IO::Memory.new
+        begin
+          Gori::Update.download_to(server.download_url(name), dest,
+            expected_size: payload.bytesize.to_i64,
+            progress_io: io,
+            force_progress: true)
+          out = io.to_s
+          # Force-progress writes use \r redraws; at least one progress tick or clear.
+          (out.includes?("\r") || out.includes?("%") || out.includes?("B")).should be_true
+        ensure
+          File.delete?(dest)
+        end
+      end
+    end
+
+    it "update_binary installs from the mock and prints staged download lines" do
+      payload = "#!/bin/sh\necho mock-new\n"
+      root = File.tempname("gori-upd-")
+      Dir.mkdir_p(root)
+      begin
+        want = Gori::Update.asset_name("99.0.0", Gori::Update.current_os, Gori::Update.current_arch)
+        body_bytes = if Gori::Update.asset_is_archive?(want)
+                       stage = File.join(root, "stage")
+                       Dir.mkdir_p(File.join(stage, "lib"))
+                       File.write(File.join(stage, "gori"), payload)
+                       File.chmod(File.join(stage, "gori"), 0o755)
+                       File.write(File.join(stage, "lib", "libexample.dylib"), "dylib")
+                       archive = File.join(root, "asset.tar.gz")
+                       Process.run("tar", ["czf", archive, "-C", stage, "gori", "lib"],
+                         output: Process::Redirect::Close, error: Process::Redirect::Close)
+                       File.read(archive).to_slice
+                     else
+                       payload.to_slice
+                     end
+
+        with_mock_release_server(tag: "v99.0.0", body: body_bytes, asset_names: [want]) do |srv|
+          target_dir = File.join(root, "opt", "gori")
+          Dir.mkdir_p(target_dir)
+          target = File.join(target_dir, "gori")
+          File.write(target, "#!/bin/sh\necho old\n")
+          File.chmod(target, 0o755)
+
+          io = IO::Memory.new
+          Gori::Update.update_binary(target, io, release_json: srv.release_json)
+
+          out = io.to_s
+          out.should contain("Updating")
+          out.should contain("Downloading #{want}")
+          out.should contain("Downloaded")
+          out.should contain("Installed v99.0.0")
+          File.read(target).should contain("mock-new")
+        end
+      ensure
+        FileUtils.rm_rf(root) if File.exists?(root)
+      end
+    end
+
+    it "fetches release JSON from the mock API URL" do
+      with_mock_release_server(tag: "v99.0.0", body: "hi") do |server|
+        json = Gori::Update.fetch_latest_release_json(server.api_url)
+        rel = Gori::Update.parse_release(json)
+        rel.tag_name.should eq("v99.0.0")
+        rel.assets.size.should be > 0
+      end
     end
   end
 
