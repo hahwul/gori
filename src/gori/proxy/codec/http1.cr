@@ -165,7 +165,19 @@ module Gori::Proxy::Codec::Http1
   # smuggles a request past the proxy. Return true when the header block contains
   # whitespace before a colon or an obs-fold continuation line, so the caller can reject
   # the message (record + close) exactly like the other ambiguous-framing vectors.
+  #
+  # A bare LF (0x0a not immediately preceded by 0x0d) used as an in-head line terminator
+  # is the same class of vector: the CRLF-only index_crlf/parse_headers scan misses the
+  # header after it (folding it into the previous value), yet an LF-lenient backend
+  # (RFC 7230 §3.5) still reads it — a hidden Transfer-Encoding/Content-Length. read_head
+  # only ever returns a head ending in CRLFCRLF, so a well-formed head has every LF
+  # CR-preceded; reject any that doesn't.
   def self.obfuscated_header?(raw : Bytes) : Bool
+    i = 0
+    while i < raw.size
+      return true if raw.unsafe_fetch(i) == 0x0a_u8 && (i == 0 || raw.unsafe_fetch(i - 1) != 0x0d_u8)
+      i += 1
+    end
     start_crlf = index_crlf(raw, 0)
     return false if start_crlf.nil?
     pos = start_crlf + 2 # first byte after the start-line's CRLF

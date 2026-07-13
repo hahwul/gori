@@ -186,6 +186,39 @@ describe Gori::Import do
     end
   end
 
+  it "reconstructs a form body from HAR postData.params when there is no text (Firefox/Safari shape)" do
+    har = File.tempname("gori", ".har")
+    begin
+      File.write(har, <<-JSON)
+        {
+          "log": {
+            "entries": [{
+              "startedDateTime": "2026-06-01T12:00:00+00:00",
+              "request": {
+                "method": "POST",
+                "url": "https://api.test/login",
+                "httpVersion": "HTTP/1.1",
+                "postData": {
+                  "mimeType": "application/x-www-form-urlencoded",
+                  "params": [{"name": "user", "value": "a b"}, {"name": "pw", "value": "s&t"}]
+                }
+              }
+            }]
+          }
+        }
+        JSON
+
+      with_store do |store|
+        result = Gori::Import.import_file(store, :har, har)
+        result.count.should eq(1)
+        detail = store.get_flow(store.search(Gori::QL::EMPTY, 1).first.id).not_nil!
+        String.new(detail.request_body.not_nil!).should eq("user=a+b&pw=s%26t")
+      end
+    ensure
+      File.delete?(har)
+    end
+  end
+
   it "prepends https:// to scheme-less URL list lines" do
     urls = File.tempname("gori", ".txt")
     begin

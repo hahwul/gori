@@ -743,7 +743,10 @@ module Gori
           j.field field, text.byte_slice(0, MCP_REPLAY_REQUEST_MAX).scrub
           j.field "#{field}_truncated", true
         else
-          j.field field, text
+          # Scrub here too: a replay request built from a binary/non-UTF-8 body round-trips
+          # invalid UTF-8 through the store, and JSON::Builder emits it verbatim — which
+          # corrupts the stdio JSON-RPC stream (must be well-formed UTF-8).
+          j.field field, text.scrub
         end
       end
 

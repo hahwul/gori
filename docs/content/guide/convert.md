@@ -17,7 +17,7 @@ Four cards stack top to bottom:
 | Pane | Role |
 |------|------|
 | **INPUT** | Source text (editable) |
-| **CHAIN** | Pipeline spec — converter names separated by `|` or `>` |
+| **CHAIN** | Pipeline spec — converter names separated by `|`, `>`, or `,` (all equivalent) |
 | **PIPELINE** | One row per step with its intermediate output |
 | **OUTPUT** | Final result (text / hex / base64 display modes) |
 

@@ -673,6 +673,12 @@ module Gori::Tui
         target = Replay::FlowRequest.build_target(row.scheme, row.host, row.port)
         {"COPY REQUEST AS", CopyMenu.request_options(wire, target)}
       when :response
+        # The WS MESSAGES pane reuses the :response slot but renders the transcript
+        # (ws_messages), NOT the bare 101 handshake that response_head/body still hold —
+        # offering head/body variants here would copy the handshake (the same leak x/w
+        # had before log_pane? gating). Empty list ⇒ copy_as falls back to the plain
+        # selection copy, which yields the visible transcript via detail_copy_text.
+        return {"COPY RESPONSE AS", [] of CopyMenu::Option} if ws_messages_pane?
         head = detail.response_head
         opts = if head
                  body = detail.response_body

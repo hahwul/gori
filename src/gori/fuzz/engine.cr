@@ -33,6 +33,35 @@ module Gori::Fuzz
     end
   end
 
+  # Enforces a HARD ceiling on the total number of real network sends. Wraps any Backend
+  # and, past the cap, returns a benign error Result WITHOUT touching the network — so
+  # retries, redirect hops, and baseline calibration all count against `max_requests`,
+  # unlike a dispatch-only check (which counts one-per-payload and overshoots). A nil or
+  # non-positive cap is a pass-through no-op. (Shared by the fuzzer and the param-miner.)
+  class CappedBackend < Backend
+    # Stable error string so run_one can skip retries on a permanent budget stop.
+    CAP_ERROR = "max-requests cap reached"
+
+    getter sent : Int64 = 0_i64
+
+    def initialize(@inner : Backend, @cap : Int64?)
+    end
+
+    def origin : Origin
+      @inner.origin
+    end
+
+    def cap_reached? : Bool
+      (c = @cap) && c > 0 ? @sent >= c : false
+    end
+
+    def send(bytes : Bytes) : Replay::Result
+      return Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) if cap_reached?
+      @sent += 1
+      @inner.send(bytes)
+    end
+  end
+
   # Runs a generator's jobs concurrently and streams events. Concurrency model
   # (single-threaded fiber scheduler — no `-Dpreview_mt` — so plain ivars need no
   # locking):
@@ -60,6 +89,7 @@ module Gori::Fuzz
 
     getter events : Channel(Event)
 
+    @backend : Backend
     @concurrency : Int32
     @state : State
     @wake : Channel(Nil)
@@ -73,7 +103,10 @@ module Gori::Fuzz
     @total : Int64?
     @total_computed : Bool
 
-    def initialize(@generator : Generator, @matcher : Matcher, @backend : Backend, @config : Config)
+    def initialize(@generator : Generator, @matcher : Matcher, backend : Backend, @config : Config)
+      # Wrap so max_requests is a TRUE hard cap on real sends — retries, redirect hops and
+      # baseline calibration all count, not just one-per-dispatched-payload (nil cap = no-op).
+      @backend = CappedBackend.new(backend, @config.max_requests)
       # Clamp here (the deepest point) so no frontend can spawn an OOM-sized fiber +
       # channel fleet — the CLI's --concurrency is otherwise unbounded.
       conc = @config.concurrency.clamp(1, MAX_CONCURRENCY)
@@ -159,7 +192,10 @@ module Gori::Fuzz
         raise Halt.new if @state == State::Stopped
         park_if_paused
         raise Halt.new if @state == State::Stopped
+        # Soft job-count check (cheap) plus the hard real-send ceiling: retries/redirects
+        # can exhaust CappedBackend mid-run while @dispatched is still under cap.
         raise Halt.new if (cap = @config.max_requests) && cap > 0 && @dispatched >= cap
+        raise Halt.new if (b = @backend).is_a?(CappedBackend) && b.cap_reached?
         pace(interval)
         @jobs.send(job)
         @dispatched += 1
@@ -203,7 +239,9 @@ module Gori::Fuzz
       attempts = 0
       loop do
         raw = @backend.send(job.bytes)
-        if raw.error && attempts < @config.retries
+        # Don't burn retries/sleep on a permanent max-requests stop — further send()s
+        # are also refused. Real network errors still retry as configured.
+        if raw.error && raw.error != CappedBackend::CAP_ERROR && attempts < @config.retries
           attempts += 1
           sleep @config.retry_pause
           next

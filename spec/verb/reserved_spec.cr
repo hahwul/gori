@@ -16,7 +16,7 @@ describe Gori::Verb::Reserved do
 
   it "rejects bare structural keys" do
     {Chord.new("enter"), Chord.new("escape"), Chord.new("tab"), Chord.new("backspace"),
-     Chord.new(":")}.each do |c|
+     Chord.new("space"), Chord.new(":")}.each do |c|
       Reserved.reserved?(c).should_not be_nil
     end
   end

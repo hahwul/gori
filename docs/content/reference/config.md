@@ -167,4 +167,4 @@ A project can override the network settings without editing the global file. The
 
 ## Projects & Database
 
-Each project is a SQLite database (via `crystal-db` / `crystal-sqlite3`) holding flows, WebSocket messages, scope rules, findings, match rules, HTTP/2 frames, replay and fuzz sessions, host overrides, sitemap tags, miner sessions, and Prism issues, plus a full-text index over flow bodies. Request/response bodies are captured up to 8 MiB. Serve any project's database directly with `--db PATH`, or select a named project with `--project NAME`.
+Each project is a SQLite database (via `crystal-db` / `crystal-sqlite3`) holding flows, WebSocket messages, scope rules, findings, match rules, HTTP/2 frames, replay and fuzz sessions, host overrides, sitemap tags, miner sessions, and Prism issues, plus a full-text index over flow bodies. Stored request/response bodies are capped at 2 MiB; larger bodies are truncated in the database, but their true wire size is still recorded. Serve any project's database directly with `--db PATH`, or select a named project with `--project NAME`.

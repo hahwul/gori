@@ -56,6 +56,12 @@ module Gori
 
         # {name, raw value} for each query pair; bare flags carry an empty value.
         private def query_pairs(target : String) : Array({String, String})
+          # The target comes from parse_request_head unscrubbed, so it can carry invalid
+          # UTF-8 (legacy Shift-JIS/Latin-1 GET forms, binary tokens, mojibake). PCRE
+          # raises on the first illegal byte, which would propagate up and make the whole
+          # flow's passive+active scan silently skip. Scrub once here (a JWT/secret is
+          # ASCII, so dropping non-UTF-8 bytes elsewhere can't hide a real match).
+          target = target.scrub
           qi = target.index('?')
           return [] of {String, String} unless qi
           target[(qi + 1)..].split('&').compact_map do |pair|

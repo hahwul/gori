@@ -56,13 +56,13 @@ gori run <subcommand> [options]
 | `capture` | Run the proxy and stream captured flows to STDOUT |
 | `history` (`ls`) | List / query captured flows |
 | `show <flow-id>` | Print one flow's request and response |
-| `replay <flow-id>` | Re-send a captured flow |
+| `replay <flow-id>` · `list` · `create` | Re-send a captured flow, or list / create Replay workbench sessions |
 | `fuzz [<flow-id>]` | Intruder-style fuzzer |
 | `mine [<flow-id>]` | Hidden-parameter discovery |
 | `prism [QL]` | Passive security scan (no requests) |
 | `sitemap [QL]` | Host → path endpoint tree |
 | `notes [<n>]` | Read project notes |
-| `findings` | List / export findings |
+| `findings` · `create` · `update` | List / export findings, or write findings |
 | `projects` | List known projects |
 | `scope` | List / add / delete / enable / disable scope rules |
 
@@ -106,6 +106,8 @@ gori run show <flow-id> --format raw
 
 ### run replay
 
+Re-send one captured flow, or manage the Replay workbench sessions shared with the TUI.
+
 ```bash
 gori run replay <flow-id> --target https://staging.example.com --http2 --diff
 ```
@@ -114,8 +116,31 @@ gori run replay <flow-id> --target https://staging.example.com --http2 --diff
 |--------|-------------|
 | `--target=URL` | Send to a different URL |
 | `--http2` | Use HTTP/2 |
+| `--sni=HOST` | TLS SNI override |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
+| `-H`, `--header=HEADER` | Overwrite/add a request header (repeatable) |
+| `-b`, `--body=BODY` | Request body override |
 | `--diff` | Diff against the original response |
+| `--format=FMT` | `text` (default) or `json` |
+
+**`replay list`** — list saved Replay sessions (`--format text|json`).
+
+**`replay create`** — create a Replay session:
+
+```bash
+gori run replay create --target https://api.example.com --request-file req.txt --name "login probe"
+gori run replay create --flow 42 --name "clone of 42"
+```
+
+| Option | Description |
+|--------|-------------|
+| `-t`, `--target=URL` | Target URL (required unless cloned from `--flow`) |
+| `-f`, `--request-file=FILE` | Read the raw HTTP request from FILE |
+| `-r`, `--request-raw=RAW` | Verbatim raw HTTP request string |
+| `--flow=ID` | Clone request / target / HTTP/2 from a captured flow |
+| `--name=NAME` | Custom tab name |
+| `--http2`, `--no-auto-cl`, `--sni=HOST` | HTTP/2, skip auto `Content-Length`, SNI override |
+| `--mark-transform` | Enable inline `§value¦chain§` substitution on send |
 
 ### run fuzz
 
@@ -123,6 +148,7 @@ Sources: `--flow=ID`, `--request=FILE`, or stdin. Positions: `§…§` markers, 
 
 | Group | Options |
 |-------|---------|
+| Transport | `--target=URL` (required for `--request`/stdin), `--http2`, `--sni=HOST`, `-k`/`--insecure-upstream` |
 | Mode | `--mode=` `sniper` (default), `batteringram`, `pitchfork`, `clusterbomb` |
 | Payloads | `-w`/`--wordlist`, `--payloads=LIST`, `--numbers=FROM-TO[:STEP]`, `--null=N`, `--brute=CHARSET:MIN-MAX` |
 | Processors | `--prefix`, `--suffix`, `--encode` (`url`\|`urlall`\|`base64`\|`hex`), `--case` (`upper`\|`lower`), `--hash` (`md5`\|`sha1`\|`sha256`), `--regex-replace=/pat/rep/` |
@@ -158,7 +184,7 @@ gori run prism --severity high --category cors
 gori run sitemap --in-scope --format paths
 ```
 
-`--in-scope` limits to in-scope hosts, `--no-group` disables numeric path folding, `--format` is `text` (tree), `json`, or `paths`.
+`-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default `SITEMAP_MAX`), `--in-scope` limits to in-scope hosts, `--no-group` disables numeric path folding, `--format` is `text` (tree), `json`, or `paths`.
 
 ### run findings / notes / projects
 
@@ -167,6 +193,18 @@ gori run findings --format markdown --export report.md
 gori run notes --all
 gori run projects --format json
 ```
+
+Write findings from scripts with `create` / `update`:
+
+```bash
+gori run findings create --title "Reflected XSS on /search" --severity high --host app.example.com --flow 42
+gori run findings update 7 --status confirmed --notes "Verified on staging" --severity critical
+```
+
+| Option | Description |
+|--------|-------------|
+| `create` | `-t`/`--title` (required), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
+| `update <id>` | `-t`/`--title`, `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
 
 ### run scope
 

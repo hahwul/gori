@@ -809,6 +809,11 @@ module Gori::Tui
       return if h <= 0
       @scroll = @selected if @selected < @scroll
       @scroll = @selected - h + 1 if @selected >= @scroll + h
+      # Never scroll past what fits: reload's `prev_scroll.clamp(0, rows.size-1)` can
+      # leave @scroll above (total - h) after the tree shrinks, stranding rows off the
+      # top with blank space below. Pull it back when the list underfills (mirrors
+      # HistoryView#ensure_visible).
+      @scroll = {@scroll, {total - h, 0}.max}.min
       @scroll = 0 if @scroll < 0
     end
   end

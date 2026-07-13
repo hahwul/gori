@@ -70,7 +70,7 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 ## Limitations
 
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
-- The **Help** tab (digit `9`) and the status-bar hints show **default** chords, not your rebindings — if you remap something, those still advertise the original key.
+- The **Help** tab (the last tab — reach it with `[` / `]` or the palette's *Go to Help*; digits `1`–`9` only reach the first nine visible tabs) and the status-bar hints show **default** chords, not your rebindings — if you remap something, those still advertise the original key.
 
 ## Next Steps
 
