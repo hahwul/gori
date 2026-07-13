@@ -1501,9 +1501,14 @@ module Gori
                   batch_reply = op.reply
                   inserted = [] of {Int64, Bool}
                   op.pairs.each do |req, resp|
-                    id, _req_fts = insert_one(c, req)
+                    id, req_fts = insert_one(c, req)
                     has_resp = !resp.nil?
                     if r = resp
+                      # Hand update_one the request FTS text we just computed so its memo
+                      # lookup HITS instead of reading the row back (a per-entry SELECT +
+                      # up-to-64KiB body re-materialization on every imported pair with a
+                      # response). delete-on-read in update_one keeps the memo from growing.
+                      remember_req_fts(id, req_fts)
                       update_one(c, Store::CapturedResponse.new(
                         flow_id: id, status: r.status, head: r.head,
                         body: r.body, reason: r.reason,
