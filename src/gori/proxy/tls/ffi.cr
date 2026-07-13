@@ -30,6 +30,17 @@ lib LibCrypto
   fun x509_store_add_cert = X509_STORE_add_cert(store : X509_STORE, x : X509) : Int
   fun x509_up_ref = X509_up_ref(x : X509) : Int
 
+  # Validating an externally-supplied root CA before we adopt it (gori ca import):
+  # the private key must match the certificate's public key (else every minted leaf
+  # fails verification), and the certificate must actually be a CA (basicConstraints
+  # CA:TRUE, else clients reject any leaf it signs during path validation).
+  fun x509_check_private_key = X509_check_private_key(x : X509, pkey : EVP_PKEY) : Int
+  fun x509_check_ca = X509_check_ca(x : X509) : Int
+  # Compare an ASN1_TIME to now (t == NULL): <0 if the cert time is in the past,
+  # >0 if in the future, 0 on parse error. Used to warn (not block) on an imported
+  # CA that is expired or not-yet-valid.
+  fun x509_cmp_time = X509_cmp_time(s : ASN1_TIME, t : Void*) : Int
+
   # SubjectPublicKeyInfo (for the browser's --ignore-certificate-errors-spki-list
   # pin): grab the SPKI structure, then DER-encode it (pp == NULL returns the
   # length so we can size the buffer first).

@@ -95,6 +95,18 @@ gori ca regenerate --yes      # replace the root CA (scripts/CI; voids prior tru
 
 You can also rotate the CA from the TUI command palette (**Regenerate CA certificate**), or interactively with `gori ca regenerate` (type `regenerate` to confirm). Both paths are confirm-gated because rotation invalidates all previously issued trust; any already-running gori keeps the old CA until restarted.
 
+### Bring your own CA
+
+To reuse one CA across a team or machines, generate a root externally and import it (cert **and** key — gori signs leaf certificates with the key; clients trust only the cert):
+
+```bash
+openssl ecparam -genkey -name prime256v1 -out root.key.pem
+openssl req -x509 -new -key root.key.pem -days 3650 -subj "/CN=my ca" -out root.crt.pem
+gori ca import --cert root.crt.pem --key root.key.pem --yes
+```
+
+The same action is available from the palette (**Import CA certificate**). gori checks the key matches the cert and that it is a CA before adopting it. Distribute only `root.crt.pem` to trust; keep `root.key.pem` secret. See [`gori ca import`](/reference/cli/#gori-ca-import).
+
 The palette's **Open browser** action launches an installed browser with an isolated profile that already trusts the CA and routes through the proxy — the fastest path on a fresh machine (see the [Quick Start](/getting-started/quick-start/)).
 
 ## Full Reference

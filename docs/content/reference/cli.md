@@ -14,7 +14,7 @@ gori [command] [options]
 | `tui` | Start the proxy and terminal UI (default) |
 | `run` | Non-interactive suite over a project |
 | `mcp` | Model Context Protocol stdio server |
-| `ca` | Print the root CA path / PEM, or regenerate the CA |
+| `ca` | Print the root CA path / PEM, or regenerate / import the CA |
 | `settings` | Show or edit `settings.json` |
 | `wizard` | Interactive first-run setup |
 | `tutorial` | Guided TUI tour (navigation, palette, space menu, edit mode) |
@@ -246,6 +246,7 @@ gori ca --pem
 gori ca --ca-dir=DIR
 gori ca regenerate
 gori ca regenerate --yes
+gori ca import --cert root.crt.pem --key root.key.pem --yes
 ```
 
 Prints the path to gori's root CA certificate (creates it on first use). Use this when trusting the CA in a browser or system store, or when pointing a client at `--cacert`.
@@ -265,6 +266,29 @@ Replaces the on-disk root CA with a freshly minted one. **Destructive** — ever
 | `--ca-dir=DIR` | CA directory to regenerate |
 
 Without `--yes`, the command prompts on a tty and expects you to type `regenerate` (same word as the TUI confirm). Scripts and CI should pass `--yes`. On success the new cert path is printed to stdout.
+
+### gori ca import
+
+Adopts an **externally-created** root CA (a certificate + matching private key, both PEM) in place of gori's own — for sharing one CA across a team or machines, or reusing an organization CA. gori needs both files because it signs per-host leaf certificates on the fly; clients trust only the certificate. **Destructive**, like `regenerate` — it replaces the on-disk root and voids prior trust.
+
+| Option | Description |
+|--------|-------------|
+| `--cert FILE` | Root CA certificate PEM to adopt (required) |
+| `--key FILE` | Matching private key PEM (required) |
+| `--yes`, `-y` | Skip the interactive confirm (required when stdin is not a tty) |
+| `--ca-dir=DIR` | CA directory to install into |
+
+The pair is validated before anything is written: the key must match the certificate and the certificate must be a CA (`basicConstraints CA:TRUE`) — a bad pair aborts without touching the current CA. An expired or not-yet-valid certificate imports with a warning. Confirm by typing `import` on a tty, or pass `--yes`. The same action is available from the TUI palette (**Import CA certificate**).
+
+Generate a root with OpenSSL, then import it:
+
+```bash
+openssl ecparam -genkey -name prime256v1 -out root.key.pem
+openssl req -x509 -new -key root.key.pem -days 3650 -subj "/CN=my ca" -out root.crt.pem
+gori ca import --cert root.crt.pem --key root.key.pem --yes
+```
+
+Trust only `root.crt.pem` in your clients — never distribute the private key.
 
 ## gori settings
 

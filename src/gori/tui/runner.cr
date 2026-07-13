@@ -55,6 +55,7 @@ require "./path_complete"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
 require "./scope_rule_overlay"
+require "./ca_import_overlay"
 require "../paths"
 require "../browser"
 require "../external_editor"
@@ -84,7 +85,7 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule | :ca_import
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -188,6 +189,9 @@ module Gori::Tui
       @fuzz_advanced_overlay = nil.as(FuzzAdvancedOverlay?)
       # Project SCOPE add/edit popup (a/e on the rule list). Built fresh each open.
       @scope_rule_overlay = nil.as(ScopeRuleOverlay?)
+      # The "Import CA certificate" popup (palette → ca.import): collects the cert +
+      # key PEM paths, then hands off to the destructive-CA confirm. @overlay is :ca_import.
+      @ca_import_overlay = nil.as(CAImportOverlay?)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
       @toast = nil.as(String?)         # transient action feedback; nil → show key hints
@@ -613,6 +617,7 @@ module Gori::Tui
       when :fuzz_set      then @fuzz_set_overlay.try(&.set_preedit(text))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.set_preedit(text))
       when :scope_rule    then @scope_rule_overlay.try(&.set_preedit(text))
+      when :ca_import     then @ca_import_overlay.try(&.set_preedit(text))
       when :none          then apply_preedit_body(text)
       end
     end
@@ -693,6 +698,7 @@ module Gori::Tui
       return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
       return handle_fuzz_advanced_key(ev) if @overlay == :fuzz_advanced
       return handle_scope_rule_key(ev) if @overlay == :scope_rule
+      return handle_ca_import_key(ev) if @overlay == :ca_import
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
@@ -936,7 +942,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule then true
+      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule, :ca_import then true
       else                                                                                                                                                                                                                                       false
       end
     end
@@ -1037,6 +1043,7 @@ module Gori::Tui
       when :fuzz_set      then click_fuzz_set(area, mx, my)
       when :fuzz_advanced then click_fuzz_advanced(area, mx, my)
       when :scope_rule    then click_scope_rule(area, mx, my)
+      when :ca_import     then click_ca_import(area, mx, my)
         # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
@@ -1102,6 +1109,13 @@ module Gori::Tui
       ov = @fuzz_advanced_overlay || return
       box = ov.overlay_box(area)
       return apply_close_fuzz_advanced(ov) if box.nil? || dismiss_zone?(box, mx, my)
+      ov.handle_click(box, mx, my)
+    end
+
+    private def click_ca_import(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @ca_import_overlay || return
+      box = ov.overlay_box(area)
+      return close_ca_import if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel (destructive: never auto-submit)
       ov.handle_click(box, mx, my)
     end
 
@@ -1265,6 +1279,7 @@ module Gori::Tui
       when :fuzz_set      then @fuzz_set_overlay.try(&.move(step))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.move(step))
       when :scope_rule    then @scope_rule_overlay.try(&.move(step))
+      when :ca_import     then @ca_import_overlay.try(&.move(step))
       end
     end
 
@@ -1328,6 +1343,50 @@ module Gori::Tui
       case ov.handle_key(ev)
       when :cancel then close_scope_rule
       when :commit then commit_scope_rule_overlay(ov)
+      end
+    end
+
+    # CA import popup: collect cert + key paths, then hand off to the destructive
+    # confirm on :submit. esc cancels without touching the CA.
+    private def handle_ca_import_key(ev : Termisu::Event::Key) : Nil
+      ov = @ca_import_overlay || return
+      case ov.handle_key(ev)
+      when :cancel then close_ca_import
+      when :submit then submit_ca_import(ov)
+      end
+    end
+
+    private def close_ca_import : Nil
+      @overlay = :none
+      @ca_import_overlay = nil
+    end
+
+    # Validate the two paths are filled, close the overlay, then run the same danger
+    # confirm as regenerate before adopting the imported CA. import! does the heavy
+    # validation (pair match, CA flag) and leaves the current CA untouched on failure.
+    private def submit_ca_import(ov : CAImportOverlay) : Nil
+      cert = ov.cert_path
+      key = ov.key_path
+      if cert.empty? || key.empty?
+        @toast = "CA import: both certificate and key paths are required"
+        return
+      end
+      path = @session.ca.ca_cert_path
+      close_ca_import
+      confirm("IMPORT CA",
+        "Replace the current root CA with the imported one?\n\n" \
+        "The old CA becomes untrusted — re-trust the imported\n" \
+        "certificate in your clients (gori ca / path copied).\n" \
+        "New connections use it immediately.",
+        confirm_label: "import", danger: true) do
+        begin
+          warning = @session.ca.import!(cert, key)
+          Clipboard.copy(path)
+          note = warning ? " (warning: #{warning})" : ""
+          @toast = "root CA imported#{note} — re-trust it (path copied): #{path}"
+        rescue ex
+          @toast = "CA import failed: #{ex.message}"
+        end
       end
     end
 
@@ -2873,6 +2932,7 @@ module Gori::Tui
       @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
       @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_advanced
       @scope_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :scope_rule
+      @ca_import_overlay.try(&.render(screen, layout.body)) if @overlay == :ca_import
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
 
@@ -2972,6 +3032,7 @@ module Gori::Tui
       when :fuzz_set      then "PAYLOAD SET"
       when :fuzz_advanced then "ADVANCED"
       when :scope_rule    then "SCOPE RULE"
+      when :ca_import     then "IMPORT CA"
       else
         case @focus
         when :menu    then "TABS"
@@ -3018,6 +3079,7 @@ module Gori::Tui
       when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
       when :fuzz_advanced then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
       when :scope_rule    then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
+      when :ca_import     then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
       when :detail        then history_controller.body_hint(:body)
       else
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
@@ -4538,6 +4600,14 @@ module Gori::Tui
           @toast = "CA regeneration failed: #{ex.message}"
         end
       end
+    end
+
+    # Open the "Import CA certificate" popup (palette → ca.import): collect the
+    # cert + key PEM paths. The destructive swap happens later, on submit, behind
+    # the same confirm as regenerate (see submit_ca_import).
+    def import_ca : Nil
+      @ca_import_overlay = CAImportOverlay.new
+      @overlay = :ca_import
     end
 
     # --- browser (open a pre-trusted system browser) ---

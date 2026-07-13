@@ -644,6 +644,10 @@ private class FakeContext < ExecContext
     @calls << :regenerate_ca
   end
 
+  def import_ca : Nil
+    @calls << :import_ca
+  end
+
   def open_browser_picker : Nil
     @calls << :open_browser_picker
   end

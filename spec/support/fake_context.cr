@@ -329,6 +329,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def regenerate_ca : Nil; end
 
+  def import_ca : Nil; end
+
   def open_browser_picker : Nil; end
 
   def comparer_pick(slot : Symbol) : Nil; end

@@ -60,6 +60,12 @@ module Gori
         "ca.regenerate", "Regenerate CA certificate", "Replace gori's root CA with a fresh one (old trust is invalidated)",
         Verb::Scope::Global) { |ctx| ctx.regenerate_ca; nil }
 
+      # Palette-only (destructive — gated behind a confirm in the Runner): adopt an
+      # externally-created root CA (cert + key PEM) instead of gori's own.
+      r.register Verb::Definition.new(
+        "ca.import", "Import CA certificate", "Use an externally-created root CA (cert + key) instead of gori's own",
+        Verb::Scope::Global) { |ctx| ctx.import_ca; nil }
+
       # Palette-only (no chord — used rarely): open a system browser pre-trusting
       # gori's CA and routed through the proxy, like Burp/Caido's embedded browser.
       r.register Verb::Definition.new(

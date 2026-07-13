@@ -82,13 +82,60 @@ module Gori::Proxy::Tls
     # key+identity, so any client that trusted the OLD CA must re-trust it.
     def regenerate!(common_name : String = DEFAULT_CN) : Nil
       cert, key = CertBuilder.build_root(common_name)
+      install!(cert, key)
+    end
+
+    # Adopt an externally-created root CA (`gori ca import`): read the cert + key
+    # PEMs, verify they are a usable CA pair, then swap them in over the current
+    # root exactly like `regenerate!`. Returns a human warning (expired / not-yet-
+    # valid) if the cert is time-invalid but otherwise usable, else nil. Raises
+    # Gori::Error (leaving the current CA untouched) if a PEM won't parse or the
+    # pair is unusable — validation runs BEFORE anything is written.
+    def import!(cert_path : String, key_path : String) : String?
+      cert = Cert.read_pem(cert_path)
+      key = KeyPair.read_pem(key_path)
+      warning = CertAuthority.validate_ca_pair!(cert, key)
+      install!(cert, key)
+      warning
+    end
+
+    # Read + validate an external CA pair WITHOUT installing it. Lets a caller (the
+    # CLI) reject a bad import BEFORE creating or loading any CA, so a failed import
+    # never leaves a spurious auto-generated CA behind. Same checks as import!.
+    def self.validate_pem_pair(cert_path : String, key_path : String) : String?
+      validate_ca_pair!(Cert.read_pem(cert_path), KeyPair.read_pem(key_path))
+    end
+
+    # Reject an imported pair that can't serve as a signing root; return a soft
+    # warning for a time-invalid-but-usable cert. A mismatched key would make every
+    # minted leaf fail verification, and a non-CA cert (basicConstraints CA:FALSE)
+    # makes clients reject any leaf it signs — both are hard errors we catch up front.
+    # A class method: it inspects the two handles via the FFI, no instance state.
+    def self.validate_ca_pair!(cert : Cert, key : KeyPair) : String?
+      if LibCrypto.x509_check_private_key(cert.handle, key.handle) != 1
+        raise Gori::Error.new("private key does not match the certificate")
+      end
+      if LibCrypto.x509_check_ca(cert.handle) == 0
+        raise Gori::Error.new("certificate is not a CA (basicConstraints CA:TRUE required)")
+      end
+      if LibCrypto.x509_cmp_time(LibCrypto.x509_getm_not_after(cert.handle), Pointer(Void).null) < 0
+        return "certificate is expired"
+      end
+      if LibCrypto.x509_cmp_time(LibCrypto.x509_getm_not_before(cert.handle), Pointer(Void).null) > 0
+        return "certificate is not valid yet"
+      end
+      nil
+    end
+
+    # Persist a cert/key pair over the on-disk root and swap it live. Shared by
+    # regenerate! and import!. Overwriting a WORKING CA means a half-written pair
+    # (disk full, a permission error) must not corrupt it: stage both PEMs in full
+    # to temp files, then rename into place (atomic on POSIX; both temps already
+    # exist, so the on-disk cert/key never disagree past the gap between renames).
+    private def install!(cert : Cert, key : KeyPair) : Nil
       dir = File.dirname(@ca_cert_path)
       Gori::Paths.ensure_dir(dir) # parity with load_or_create: the dir may have been removed at runtime
       key_path = File.join(dir, CA_KEY_FILE)
-      # Regenerating overwrites a WORKING CA, so a half-written cert/key pair (disk
-      # full, a permission error) must not corrupt it: stage both PEMs in full to
-      # temp files, then rename into place (atomic on POSIX; both temps already
-      # exist, so the on-disk cert/key never disagree past the gap between renames).
       cert_tmp = "#{@ca_cert_path}.tmp"
       key_tmp = "#{key_path}.tmp"
       begin

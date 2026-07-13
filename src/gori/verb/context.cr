@@ -232,6 +232,7 @@ module Gori
       # certificate authority
       abstract def export_ca : Nil
       abstract def regenerate_ca : Nil # mint a fresh root CA (after a confirm)
+      abstract def import_ca : Nil     # adopt an externally-created root CA (cert + key PEM)
 
       # browser: open a system browser pre-trusting gori's CA + routed via the proxy
       abstract def open_browser_picker : Nil
