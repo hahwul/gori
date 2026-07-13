@@ -78,7 +78,7 @@ module Gori
       puts "  export    Export things (currently only ca-cert)"
       puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
       puts "  wizard    Interactive setup wizard (bind, theme) — also runs on first launch"
-      puts "  tutorial  Guided tour of the TUI (navigation, palette, menu, edit mode)"
+      puts "  tutorial  Guided TUI tour with try-it steps (nav, palette, menu, edit)"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
       puts "  update    Update gori (channel-aware: binary download or package manager)"
       puts ""
@@ -264,9 +264,11 @@ module Gori
     private def self.run_tutorial(args : Array(String)) : Nil
       if args.any? { |a| ["-h", "--help"].includes?(a) }
         puts "Usage: gori tutorial"
-        puts "  Interactive tour of gori's TUI: tab/pane navigation, the command"
-        puts "  palette (^P), the action menu (space), and edit mode (READ/INS)."
-        puts "  Also offered at the end of `gori wizard`; use this to replay it."
+        puts "  Interactive tour of gori's TUI on a mock UI: tab/pane navigation,"
+        puts "  the command palette (^P), the action menu (space), and edit mode"
+        puts "  (READ/INS). Each lesson asks you to try the key; a final practice"
+        puts "  step covers all four moves, then a first-session checklist."
+        puts "  Also offered at the end of `gori wizard`; safe to re-run anytime."
         return
       end
       Paths.ensure_dirs
@@ -274,8 +276,8 @@ module Gori
       Tui::Theme.load_custom           # honour user themes so the mock matches the real UI
       Tui::Theme.apply(Settings.theme) # render the tour in the persisted theme
       term = Tui.open_terminal("run the tutorial directly, not under CI or a detached/background job")
-      term.enable_enhanced_keyboard       # Kitty disambiguation (mirrors the wizard)
-      term.enable_mouse if Settings.mouse # a click advances the tour
+      term.enable_enhanced_keyboard # Kitty disambiguation (mirrors the wizard)
+      term.enable_mouse             # always on for the tour: Prev/Next buttons + mock clicks
       begin
         Tui::Tutorial.new(term).run
       ensure

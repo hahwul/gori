@@ -183,7 +183,7 @@ gori wizard
 
 ## Guided UI tour
 
-A mock-UI walkthrough of tab/pane navigation, the palette, the space menu, and READ/INS edit mode — safe to run without a live proxy session:
+A mock-UI walkthrough of tab/pane navigation, the palette, the space menu, and READ/INS edit mode — safe to run without a live proxy session. Each lesson shows a short demo and asks you to try the real key; the final step is a hands-on sandbox for all four moves, then a first-session checklist.
 
 ```bash
 gori tutorial
@@ -191,7 +191,7 @@ gori tutorial
 
 <figure class="tui-shot">
   <img src="/images/tui/tutorial.svg" alt="gori guided tour welcome card explaining the four core moves: tabs and panes, the command palette, the action menu, and edit mode">
-  <figcaption>The guided tour walks through tabs and panes, the palette, the space menu, and READ / INS edit mode in a harmless sandbox.</figcaption>
+  <figcaption>The guided tour walks through tabs and panes, the palette, the space menu, and READ / INS edit mode — try each key, then practice all four in a harmless sandbox.</figcaption>
 </figure>
 
 It is also offered at the end of the first-run wizard.
