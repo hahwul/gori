@@ -98,6 +98,31 @@ module Gori::Tui
       vis
     end
 
+    # The tabs NOT on the bar — hidden via settings:tabs (Miner by default) — for the
+    # far-right "more" dropdown. Mirrors visible_tabs' force logic in reverse: the
+    # active tab is force-SHOWN on the bar, so it's excluded here even when its stored
+    # visibility is false (it would otherwise appear both on the bar and in the list).
+    def self.hidden_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : Array({Symbol, String})
+      reconcile(prefs).reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
+    end
+
+    # The "more" affordance label — a ⋯ ellipsis plus the hidden-tab count, so the bar
+    # reads "there are N tabs tucked away here" at a glance.
+    def self.more_label(hidden_count : Int32) : String
+      "⋯ #{hidden_count}"
+    end
+
+    # The far-right "more" button's cell rect on the menu row, or nil when nothing is
+    # hidden (no button) or the row is too narrow to host it. Shared by render + the
+    # click hit-test so they can't drift.
+    def self.more_button_rect(rect : Rect, hidden_count : Int32) : Rect?
+      return nil if hidden_count <= 0 || rect.empty?
+      w = more_label(hidden_count).size + 2 # a padded pill, like a tab segment
+      x = rect.right - w
+      return nil if x < rect.x + 1 # no room without colliding with the ‹ overflow cell
+      Rect.new(x, rect.y, w, 1)
+    end
+
     def self.render_top_bar(screen : Screen, rect : Rect, *, project : String,
                             listen : String, time : String,
                             scope : String, rules : String = "", intercept : String = "",
@@ -187,10 +212,15 @@ module Gori::Tui
     # held-intercept count rides inline as a `(N)` badge.
     def self.render_menu(screen : Screen, rect : Rect, *, active_tab : Symbol, focused : Bool,
                          tabs : Array({Symbol, String}) = TABS,
-                         intercept_count : Int32 = 0) : Nil
+                         intercept_count : Int32 = 0, hidden_count : Int32 = 0,
+                         more_focused : Bool = false) : Nil
       return if rect.empty?
 
-      segs, start = menu_layout(rect, active_tab, tabs, intercept_count)
+      # Carve the rightmost cells out for the "more" dropdown button (when tabs are
+      # hidden) so the segment layout never packs a tab over it. A one-col gutter sits
+      # between the last tab and the button.
+      more = more_button_rect(rect, hidden_count)
+      segs, start = menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count)
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0 # earlier tabs hidden
       segs.each do |(sym, label, seg)|
         if sym == active_tab
@@ -202,6 +232,22 @@ module Gori::Tui
           screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.bg)
         end
       end
+
+      render_more_button(screen, more, hidden_count, more_focused) if more
+    end
+
+    # The far-right "more" pill — a gold pill when it holds focus (mirroring the active
+    # tab), else a muted label. `more_focused` is only ever true when the menu bar has
+    # focus AND the affordance (not a tab) is the current stop.
+    private def self.render_more_button(screen : Screen, seg : Rect, hidden_count : Int32, focused : Bool) : Nil
+      label = more_label(hidden_count)
+      if focused
+        bg = Theme.focus_gold
+        screen.fill(seg, bg)
+        screen.text(seg.x + 1, seg.y, label, Theme.ink_on(bg), bg, Attribute::Bold)
+      else
+        screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.bg)
+      end
     end
 
     # Pure: the visible tab segments under the menu strip — {symbol, cell rect} —
@@ -209,10 +255,19 @@ module Gori::Tui
     # can never drift from what was drawn. Coords are 0-based cells.
     def self.menu_segments(rect : Rect, active_tab : Symbol, *,
                            tabs : Array({Symbol, String}) = TABS,
-                           intercept_count : Int32 = 0) : Array({Symbol, Rect})
+                           intercept_count : Int32 = 0, hidden_count : Int32 = 0) : Array({Symbol, Rect})
       return [] of {Symbol, Rect} if rect.empty?
-      menu_layout(rect, active_tab, tabs, intercept_count)[0]
+      menu_layout(tabs_area(rect, hidden_count), active_tab, tabs, intercept_count)[0]
         .map { |(sym, _, seg)| {sym, seg} }
+    end
+
+    # The drawable region for tab segments: the menu row minus the far-right "more"
+    # button (plus a one-col gutter) when tabs are hidden. Shared by render_menu +
+    # menu_segments so the drawn segments and the click hit-test can never drift.
+    private def self.tabs_area(rect : Rect, hidden_count : Int32) : Rect
+      more = more_button_rect(rect, hidden_count)
+      return rect unless more
+      Rect.new(rect.x, rect.y, {more.x - 1 - rect.x, 0}.max, 1)
     end
 
     # The single source of menu-segment geometry: each visible tab's {symbol, label,

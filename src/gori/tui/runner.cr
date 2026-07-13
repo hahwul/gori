@@ -33,6 +33,7 @@ require "./rules_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
 require "./choice_picker"
+require "./more_menu"
 require "./copy_picker"
 require "./flow_picker"
 require "./subtab_picker"
@@ -85,7 +86,7 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule | :ca_import
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule | :ca_import
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -143,6 +144,10 @@ module Gori::Tui
       @browser_picker = nil.as(BrowserPicker?)
       # The severity/status value picker (Findings detail → space); @overlay is :choice.
       @choice_picker = nil.as(ChoicePicker?)
+      # The tab-bar "more" dropdown (the ⋯ affordance → ↵/↓): lists the settings-hidden
+      # tabs (Miner by default). @overlay is :tabs_more while it's open; built fresh each
+      # time from the current hidden set.
+      @more_menu = nil.as(MoreMenu?)
       # The "copy as X" format picker (Replay/History detail → space Y). ORTHOGONAL to
       # @overlay (like @space_menu_open) so it floats over whatever's underneath — the
       # Replay body (@overlay :none) OR the History detail drill-in (@overlay :detail) —
@@ -194,6 +199,7 @@ module Gori::Tui
       @ca_import_overlay = nil.as(CAImportOverlay?)
       @theme_restore = nil.as(String?) # theme to revert to if the theme settings are cancelled (live preview)
       @focus = :menu                   # default focus on the tab bar (TABS) on project entry; :body for content
+      @menu_more = false               # tab-bar focus is on the far-right ⋯ "more" affordance (only meaningful when @focus == :menu)
       @toast = nil.as(String?)         # transient action feedback; nil → show key hints
       @outcome = :running              # :running | :quit | :back
       @quit_armed = false              # first ^D/^C arms quit; second confirms (avoids accidental exit)
@@ -683,6 +689,7 @@ module Gori::Tui
       return handle_confirm_key(ev) if @overlay == :confirm
       return handle_browser_key(ev) if @overlay == :browser
       return handle_choice_key(ev) if @overlay == :choice
+      return handle_more_menu_key(ev) if @overlay == :tabs_more
       return handle_flow_picker_key(ev) if @overlay == :comparer_pick
       return handle_subtab_picker_key(ev) if @overlay == :replay_subtab
       return handle_links_key(ev) if @overlay == :links
@@ -942,16 +949,22 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule, :ca_import then true
-      else                                                                                                                                                                                                                                       false
+      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule, :ca_import then true
+      else                                                                                                                                                                                                                                                               false
       end
     end
 
     # Click the top tab bar: switch to the clicked tab and land focus on the bar
     # (TABS level) — clicking a tab selects the tab, it does not drill into the body.
     private def click_menu(rect : Rect, mx : Int32, my : Int32) : Nil
+      # The far-right ⋯ "more" affordance opens the hidden-tabs dropdown.
+      if (mb = Chrome.more_button_rect(rect, hidden_tab_count)) && mb.contains?(mx, my)
+        focus_pane(:menu) # land on the bar (clears any stale overlay / saves edits)
+        open_more_menu
+        return
+      end
       seg = Chrome.menu_segments(rect, @active_tab, tabs: effective_tabs,
-        intercept_count: @session.interceptor.pending_count).find { |(_, r)| r.contains?(mx, my) }
+        intercept_count: @session.interceptor.pending_count, hidden_count: hidden_tab_count).find { |(_, r)| r.contains?(mx, my) }
       if seg
         seg[0] == @active_tab ? focus_pane(:menu) : focus_tab(seg[0], focus: :menu)
       else
@@ -1027,6 +1040,7 @@ module Gori::Tui
       when :rules         then click_rules(area, mx, my)
       when :browser       then click_browser(area, mx, my)
       when :choice        then click_choice(area, mx, my)
+      when :tabs_more     then click_more_menu(layout, mx, my)
       when :comparer_pick then click_flow_picker(area, mx, my)
       when :replay_subtab then click_subtab_picker(area, mx, my)
       when :links         then click_links(area, mx, my)
@@ -1264,6 +1278,7 @@ module Gori::Tui
       when :rules         then @rules_overlay.select_move(step)
       when :browser       then @browser_picker.try(&.move(step))
       when :choice        then @choice_picker.try(&.move(step))
+      when :tabs_more     then @more_menu.try(&.move(step))
       when :comparer_pick then @flow_picker.try(&.move(step))
       when :replay_subtab then @subtab_picker.try(&.move(step))
       when :links         then @links_overlay.try(&.move(step))
@@ -2904,8 +2919,10 @@ module Gori::Tui
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures)
       Chrome.render_rule(screen, layout.rule)
-      Chrome.render_menu(screen, layout.menu, active_tab: @active_tab, focused: @focus == :menu,
-        tabs: effective_tabs, intercept_count: @session.interceptor.pending_count)
+      Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
+        focused: @focus == :menu && !@menu_more,
+        tabs: effective_tabs, intercept_count: @session.interceptor.pending_count,
+        hidden_count: hidden_tab_count, more_focused: @focus == :menu && @menu_more)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
         insecure_upstream: @session.config.insecure_upstream?,
@@ -2917,6 +2934,7 @@ module Gori::Tui
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
       @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
       @choice_picker.try(&.render(screen, layout.body)) if @overlay == :choice
+      @more_menu.try(&.render(screen, more_anchor_rect(layout), layout.body)) if @overlay == :tabs_more
       @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
       @subtab_picker.try(&.render(screen, layout.body)) if @overlay == :replay_subtab
       @links_overlay.try(&.render(screen, layout.body)) if @overlay == :links
@@ -3007,7 +3025,7 @@ module Gori::Tui
     # always knows which region the keys drive: an open overlay wins, else the
     # tab bar (TABS) vs the content pane (BODY).
     private def focus_label : String
-      return "SPACE" if @space_menu_open                             # orthogonal to @overlay — floats over it
+      return "SPACE" if @space_menu_open                              # orthogonal to @overlay — floats over it
       return @copy_picker.try(&.title) || "COPY AS" if copy_as_shown? # ditto
       case @overlay
       when :palette       then "PALETTE"
@@ -3064,6 +3082,7 @@ module Gori::Tui
       when :confirm       then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
       when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
+      when :tabs_more     then "↑/↓ select · ↵ open tab · ←/esc close"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
       when :replay_subtab then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
       when :links         then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
@@ -3082,6 +3101,8 @@ module Gori::Tui
       when :ca_import     then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
       when :detail        then history_controller.body_hint(:body)
       else
+        # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
+        return "↵/↓ show hidden tabs · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
         # Focus on the tab bar: ←/→ pick the tab, Tab/↵ drop into the body.
         return "←/→ switch tab · ↹/↵ enter · 1-9 jump · ^P cmds · q projects · ^D quit" if @focus == :menu
         if @focus == :subtabs
@@ -3587,16 +3608,19 @@ module Gori::Tui
       convert_controller.commit if @active_tab == :convert && @focus == :body && pane != :body
       notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
       @focus = pane
+      @menu_more = false # any focus change lands on a real tab, not the ⋯ affordance
       @overlay = :none
       view_focus_first if pane == :body
     end
 
-    # Descend from the tab menu (↓/↵/j on the tab bar). Tabs with a navigable
-    # sub-tab strip (Replay/Notes/Convert) land on the STRIP first so ←/→ can
-    # switch sub-tabs; ↓/↵ again drops into the editor. Other tabs go straight to
-    # the body. (`focus_pane`'s guard would otherwise route an absent strip to the
-    # menu, so the active tab is checked here.)
+    # Descend from the tab menu (↓/↵/j on the tab bar). When focus is on the far-right
+    # ⋯ "more" affordance, ↓/↵ EXPANDS the hidden-tabs dropdown instead. Otherwise: tabs
+    # with a navigable sub-tab strip (Replay/Notes/Convert) land on the STRIP first so
+    # ←/→ can switch sub-tabs; ↓/↵ again drops into the editor. Other tabs go straight to
+    # the body. (`focus_pane`'s guard would otherwise route an absent strip to the menu,
+    # so the active tab is checked here.)
     def enter_content : Nil
+      return open_more_menu if @menu_more
       focus_pane(subtabs_shown? ? :subtabs : :body)
     end
 
@@ -3620,6 +3644,7 @@ module Gori::Tui
       flush_active_tab_edits
       @active_tab = tab
       @focus = focus
+      @menu_more = false
       @overlay = :none
       on_enter_tab
       view_focus_first
@@ -3649,6 +3674,7 @@ module Gori::Tui
       tabs = effective_tabs
       idx = tabs.index { |(s, _)| s == @active_tab } || 0
       @active_tab = tabs[(idx + delta) % tabs.size][0]
+      @menu_more = false
       @overlay = :none
       on_enter_tab
       # Switching tabs on the bar (menu focus) just moves the highlight; switching
@@ -3656,11 +3682,106 @@ module Gori::Tui
       view_focus_first if @focus == :body
     end
 
+    # ←/→ on the tab bar. → past the last visible tab lands on the far-right ⋯ "more"
+    # affordance (when tabs are hidden) rather than wrapping; ← steps back off it onto
+    # the last tab. Everywhere else these are plain cycle_tab(±1). (`[`/`]` keep the
+    # from-anywhere wrap via cycle_tab — the ⋯ stop is menu-bar-only.)
+    def menu_right : Nil
+      return if @menu_more
+      if last_visible_tab? && hidden_tab_count > 0
+        @menu_more = true
+      else
+        cycle_tab(1)
+      end
+    end
+
+    def menu_left : Nil
+      @menu_more ? (@menu_more = false) : cycle_tab(-1)
+    end
+
+    # The tabs hidden from the bar right now — the ⋯ dropdown's contents. The active tab
+    # is force-shown on the bar, so it's never listed here.
+    private def hidden_tabs_now : Array({Symbol, String})
+      Chrome.hidden_tabs(Settings.tab_prefs, force: @active_tab)
+    end
+
+    private def hidden_tab_count : Int32
+      hidden_tabs_now.size
+    end
+
+    private def last_visible_tab? : Bool
+      effective_tabs.last?.try(&.first) == @active_tab
+    end
+
+    # The anchor the dropdown drops down from — the ⋯ button's cell rect, or (defensively,
+    # on a terminal too narrow to draw the button) a zero-width rect flush with the menu's
+    # right edge, so the dropdown never becomes an invisible-but-input-capturing modal.
+    private def more_anchor_rect(layout : Layout) : Rect
+      Chrome.more_button_rect(layout.menu, hidden_tab_count) ||
+        Rect.new(layout.menu.right, layout.menu.y, 0, 1)
+    end
+
+    # Open the hidden-tabs dropdown from the ⋯ affordance (↵/↓ on it, or a click).
+    # No-op when nothing is hidden. Keeps @menu_more set so a dismiss returns to the ⋯.
+    def open_more_menu : Nil
+      items = hidden_tabs_now
+      return if items.empty?
+      @focus = :menu
+      @menu_more = true
+      @more_menu = MoreMenu.new(items)
+      @overlay = :tabs_more
+    end
+
+    # Dismiss the dropdown back to the ⋯ affordance (esc / ← / click-outside). Focus
+    # stays on the bar with @menu_more set, so ←/→ keep navigating from there.
+    private def close_more_menu : Nil
+      @overlay = :none
+      @more_menu = nil
+    end
+
+    # ↑/↓ (or j/k) move · ↵ switch to the hidden tab (force-shown on the bar, like a
+    # palette "Go to …") · esc/← dismiss back to the ⋯ affordance.
+    private def handle_more_menu_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      mm = @more_menu
+      return close_more_menu unless mm
+      case
+      when key.escape?, key.left?  then close_more_menu
+      when key.up?, key.lower_k?   then mm.move(-1)
+      when key.down?, key.lower_j? then mm.move(1)
+      when key.enter?, key.space?  then apply_more_menu
+      end
+    end
+
+    # Switch to the selected hidden tab and drill into its content (like "Go to …").
+    private def apply_more_menu : Nil
+      mm = @more_menu
+      return close_more_menu unless mm
+      if sym = mm.selected_sym
+        close_more_menu
+        focus_tab(sym) # :body — the deliberate pick drills in; force-shows the tab on the bar
+      else
+        close_more_menu
+      end
+    end
+
+    private def click_more_menu(layout : Layout, mx : Int32, my : Int32) : Nil
+      mm = @more_menu
+      return close_more_menu unless mm
+      if idx = mm.row_at(more_anchor_rect(layout), layout.body, mx, my)
+        mm.set_selected(idx)
+        apply_more_menu
+      else
+        close_more_menu # click outside the list → dismiss (back to the ⋯ affordance)
+      end
+    end
+
     # --- unified focus ring (tab-bar ◂▸ body panes) --------------------------
 
     # Tab (+1) / Shift-Tab (-1) move focus one step around the ring: from the tab
     # bar into the body's first/last pane, between panes, then back to the bar.
     private def focus_advance(dir : Int32) : Nil
+      @menu_more = false # the ring lands on a tab / body pane, never the ⋯ affordance
       if @focus == :menu
         @focus = :body
         dir > 0 ? view_focus_first : view_focus_last

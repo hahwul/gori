@@ -242,11 +242,11 @@ module Gori
       # --- top menu focus navigation (horizontal) ---
       r.register Verb::Definition.new(
         "sidebar.prev", "Previous tab", "Select the tab to the left", Verb::Scope::Sidebar,
-        [Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.cycle_tab(-1); nil }
+        [Verb::Chord.new("left"), Verb::Chord.new("h")], hidden: true) { |ctx| ctx.menu_left; nil }
 
       r.register Verb::Definition.new(
         "sidebar.next", "Next tab", "Select the tab to the right", Verb::Scope::Sidebar,
-        [Verb::Chord.new("right"), Verb::Chord.new("l")], hidden: true) { |ctx| ctx.cycle_tab(1); nil }
+        [Verb::Chord.new("right"), Verb::Chord.new("l")], hidden: true) { |ctx| ctx.menu_right; nil }
 
       r.register Verb::Definition.new(
         "sidebar.enter", "Enter tab", "Move focus into the content pane", Verb::Scope::Sidebar,
