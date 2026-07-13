@@ -13,9 +13,9 @@ Launch the TUI. With no subcommand, gori starts the proxy and opens the interfac
 gori
 ```
 
-By default the proxy listens on `127.0.0.1:8070`. The first launch runs a short [setup wizard](#first-run-wizard) to pick the bind address and theme, then offers the interactive [UI tour](#guided-ui-tour).
+By default the proxy listens on `127.0.0.1:8070`. The first launch runs a short [setup wizard](#first-run-wizard) to pick the **global default** bind and theme, then offers the interactive [UI tour](#guided-ui-tour). Individual projects can pin a different bind later in the Project tab.
 
-Choose a different address or port with flags:
+Override the global bind for a single run with flags (not written to disk; a project's own bind still wins when set):
 
 ```bash
 gori --listen 0.0.0.0 --port 8080
@@ -175,11 +175,13 @@ Keep this table nearby until the chords stick:
 
 ## First-run wizard
 
-Re-run the guided setup (bind address, then theme) at any time:
+Re-run the guided setup (global proxy bind default, then theme) at any time:
 
 ```bash
 gori wizard
 ```
+
+The bind step sets the shared default in `settings.json` — the same layer as **Settings: Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed.
 
 ## Guided UI tour
 

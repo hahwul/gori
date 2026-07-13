@@ -101,13 +101,14 @@ Start the proxy and open the TUI — no subcommand needed:
 gori
 ```
 
-The proxy listens on `127.0.0.1:8070` by default, and a short first-run wizard picks the bind
-address and theme. To intercept HTTPS, trust gori's root CA — the quickest path is the palette's
-**Open browser** (`Ctrl-P`), which launches a browser already trusted and proxied. Captured traffic
-lands in **History**; press `Ctrl-P` for the command palette or `Space` for context actions.
+The proxy listens on `127.0.0.1:8070` by default, and a short first-run wizard picks the
+**global default** bind and theme (projects can pin their own later). To intercept HTTPS, trust
+gori's root CA — the quickest path is the palette's **Open browser** (`Ctrl-P`), which launches a
+browser already trusted and proxied. Captured traffic lands in **History**; press `Ctrl-P` for the
+command palette or `Space` for context actions.
 
 ```bash
-gori --listen 0.0.0.0 --port 8080   # choose a different bind address / port
+gori --listen 0.0.0.0 --port 8080   # global bind for this run only (not persisted)
 gori run --help                     # non-interactive subcommands over the same project
 gori mcp                            # Model Context Protocol server (stdio)
 ```

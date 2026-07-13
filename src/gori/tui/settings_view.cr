@@ -22,9 +22,9 @@ module Gori::Tui
     record Field, label : String, hint : String, bool : Bool = false, choices : Array(String)? = nil, opener : Symbol? = nil
 
     NETWORK_FIELDS = [
-      Field.new("Bind IP", "proxy listen address"),
-      Field.new("Bind Port", "proxy listen port (0-65535)"),
-      Field.new("Upstream proxy", "host:port — blank = connect directly"),
+      Field.new("Bind IP", "global default listen address — projects may pin their own"),
+      Field.new("Bind Port", "global default port (0-65535) — project overrides win when set"),
+      Field.new("Upstream proxy", "host:port — blank = connect directly; projects may override"),
       Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
     EDITOR_FIELDS = [

@@ -37,9 +37,11 @@ Everything lives under `GORI_HOME` — `$GORI_HOME` if set and non-empty, otherw
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `bind_host` | string | `127.0.0.1` | Proxy listen address |
-| `bind_port` | integer | `8070` | Proxy listen port |
-| `upstream_proxy` | string | `""` | `host:port` HTTP proxy to chain through; empty = direct |
+| `bind_host` | string | `127.0.0.1` | Global default listen address (used when a project has no `net.bind_host`) |
+| `bind_port` | integer | `8070` | Global default listen port (used when a project has no `net.bind_port`) |
+| `upstream_proxy` | string | `""` | Global default upstream (`host:port`); empty = direct. Project `net.upstream_proxy` wins when set |
+
+CLI `--listen` / `--port` override these for the current process only (not written to disk). See [Per-Project Overrides](#per-project-overrides).
 
 ### layout
 
@@ -163,7 +165,18 @@ See [Environment Variables](/guide/replay-and-fuzzer/#environment-variables).
 
 ## Per-Project Overrides
 
-A project can override the network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`) and edited from the **Project** tab's settings pane. When present, they take precedence over `settings.json` for that project.
+A project can pin its own network settings without editing the global file. These are stored in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`) and edited from the **Project** tab's settings pane.
+
+**Effective bind / upstream** for an open project:
+
+| Priority | Source |
+|----------|--------|
+| 1 (highest) | Project DB `net.bind_host` / `net.bind_port` / `net.upstream_proxy` when set |
+| 2 | CLI `--listen` / `--port` (process-only override of the global layer) |
+| 3 | `settings.json` `network.*` |
+| 4 (lowest) | Factory defaults `127.0.0.1:8070` / direct |
+
+Saving a Project-tab field that equals the current global value deletes that KV key, so the project keeps inheriting future global edits instead of freezing a duplicate.
 
 ## Projects & Database
 

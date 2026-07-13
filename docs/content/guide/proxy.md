@@ -135,7 +135,7 @@ The **Project** home tab is more than a summary. Focusable panes (cycle with `Ta
 | **HOST OVERRIDES** | Per-project dial map |
 | **ENV** | Per-project `$KEY` variables for outbound requests — see [Replay & Fuzzer](/guide/replay-and-fuzzer/#environment-variables) |
 | **DESCRIPTION** | Free-form project notes |
-| **SETTINGS** | Per-project network overrides (bind / upstream) |
+| **SETTINGS** | Per-project network pins (bind / upstream) — override the global Settings default when set |
 
 Scope rules are also scriptable: `gori run scope add --kind=include --type=host --pattern=api.example.com` — full flags in the [CLI Reference](/reference/cli/#run-scope).
 

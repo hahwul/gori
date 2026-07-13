@@ -235,8 +235,10 @@ module Gori
     private def self.run_wizard(args : Array(String)) : Nil
       if args.any? { |a| ["-h", "--help"].includes?(a) }
         puts "Usage: gori wizard"
-        puts "  Interactive setup wizard: proxy bind address, TUI theme."
+        puts "  Interactive setup wizard: global proxy bind (default for projects), TUI theme."
         puts "  Runs automatically on first launch; use this to re-run it anytime."
+        puts "  Bind is the shared default — pin a different address per project in the Project tab;"
+        puts "  --listen/--port override settings for one run only (not written to disk)."
         return
       end
       Paths.ensure_dirs

@@ -299,7 +299,7 @@ module Gori::Tui
     # short to hold them, and render_* draw at fixed offsets up to `box.y + 2 + this`.
     private def content_rows : Int32
       case @step
-      when Step::Bind   then 7 # heading, gap, ip, port, gap, info, status
+      when Step::Bind   then 8 # heading, gap, ip, port, gap, 2 info lines, status
       when Step::Review then 8 # title, gap, 2 recap rows, gap, offer prompt, 2 offer rows
       # ≥7 so the preview panel (header + 3 status rows) is never clipped, capped so a
       # long theme list scrolls (the list viewport derives from the card height) instead
@@ -377,7 +377,7 @@ module Gori::Tui
 
     private def card_title : String
       case @step
-      when Step::Bind       then "NETWORK · proxy bind"
+      when Step::Bind       then "NETWORK · global default"
       when Step::Appearance then "THEME · appearance"
       else                       "REVIEW"
       end
@@ -395,13 +395,17 @@ module Gori::Tui
     private def render_bind(screen : Screen, box : Rect) : Nil
       ix = box.x + 3
       iw = {box.w - 6, 1}.max
-      screen.text(ix, box.y + 2, "Where should gori's proxy listen?", Theme.text, Theme.panel, width: iw)
+      screen.text(ix, box.y + 2, "Global default bind (projects inherit this)", Theme.text, Theme.panel, width: iw)
       fy = box.y + 4
       render_field(screen, box, fy, "Bind IP", @ip, @bind_field == :ip)
       render_field(screen, box, fy + 1, "Bind Port", @port, @bind_field == :port)
-      screen.text(ix, fy + 3, "Default 127.0.0.1:8070 — change later in Settings: Network.", Theme.muted, Theme.panel, width: iw)
+      # Two muted lines: this is the *global* layer only. Projects may pin their own
+      # bind; -l/-p override settings for one process and are not written to disk.
+      # Keep each line ≤ ~56 chars so a 64-col card (iw ≈ 58) never clips mid-word.
+      screen.text(ix, fy + 3, "Projects inherit this unless they pin their own bind.", Theme.muted, Theme.panel, width: iw)
+      screen.text(ix, fy + 4, "Settings later · Project tab to pin · -l/-p one run.", Theme.muted, Theme.panel, width: iw)
       if st = @status
-        screen.text(ix, fy + 4, "• #{st}", Theme.yellow, Theme.panel, width: iw)
+        screen.text(ix, fy + 5, "• #{st}", Theme.yellow, Theme.panel, width: iw)
       end
     end
 
@@ -516,7 +520,7 @@ module Gori::Tui
       y = box.y + 2
       screen.text(ix, y, "You're all set!", Theme.text_bright, Theme.panel, width: {box.w - 6, 1}.max)
       y += 2
-      recap(screen, box, ix, y, "Proxy", "#{effective_ip}:#{@port.strip}"); y += 1
+      recap(screen, box, ix, y, "Proxy (global)", "#{effective_ip}:#{@port.strip}"); y += 1
       recap(screen, box, ix, y, "Theme", @theme_name); y += 2
       screen.text(ix, y, "New to gori? Take a quick tour of the TUI:", Theme.muted, Theme.panel, width: {box.w - 6, 1}.max)
       y += 1

@@ -39,7 +39,7 @@ Persisted sections include `network`, `theme` (default `goridark`), `mouse`, `ed
 
 ### Network
 
-The `network` section controls how the proxy binds and whether traffic is forwarded through an upstream proxy:
+The `network` section is the **global default** for how the proxy binds and whether traffic is forwarded through an upstream proxy. Projects without their own network overrides inherit these values:
 
 ```json
 {
@@ -53,11 +53,16 @@ The `network` section controls how the proxy binds and whether traffic is forwar
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `bind_host` | `127.0.0.1` | Address the proxy listens on |
-| `bind_port` | `8070` | Port the proxy listens on |
-| `upstream_proxy` | `""` | `host:port` HTTP proxy to chain through; empty = direct |
+| `bind_host` | `127.0.0.1` | Global default listen address |
+| `bind_port` | `8070` | Global default listen port |
+| `upstream_proxy` | `""` | Global default upstream (`host:port`); empty = direct |
 
-Command-line flags such as `--listen` and `--port` override these per run.
+**Precedence** (highest first):
+
+1. **Per-project overrides** (`net.bind_*` in the project DB) — when set, they win for that project only.
+2. **CLI flags** (`--listen` / `--port`) — override `settings.json` for the current process only; not written to disk.
+3. **`settings.json` `network`** — the shared default (what the first-run wizard and Settings: Network edit).
+4. **Factory defaults** — `127.0.0.1:8070` when nothing else is set.
 
 ### Theme
 
@@ -73,7 +78,9 @@ An opt-in extra row at the bottom of the TUI (command palette → **Settings: St
 
 ## Per-Project Network Overrides
 
-A project can override the network settings without touching the global file. These overrides are stored in the project's own database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`) and edited from the **Project** tab's settings pane — useful when different engagements need different bind addresses or upstream proxies.
+A project can pin its own bind address, port, and upstream without touching the global file. These live in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`) and are edited from the **Project** tab's settings pane — useful when different engagements need different ports or upstream proxies.
+
+When a field matches the current global value, gori drops that override so the project keeps inheriting later global changes. Clearing a pin therefore means “use Settings / CLI again,” not “leave the last value frozen forever.”
 
 ## The Root CA
 

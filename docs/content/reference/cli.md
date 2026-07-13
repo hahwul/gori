@@ -33,15 +33,15 @@ gori tui --listen 0.0.0.0 --port 8080
 
 | Option | Description |
 |--------|-------------|
-| `-l`, `--listen=HOST` | Listen address (default `127.0.0.1`) |
-| `-p`, `--port=PORT` | Listen port, `0`–`65535` (default `8070`) |
+| `-l`, `--listen=HOST` | Global bind address for this process (defaults to `settings.json`, else `127.0.0.1`). Not persisted. A project's own bind still wins when set. |
+| `-p`, `--port=PORT` | Global bind port for this process, `0`–`65535` (defaults to `settings.json`, else `8070`). Not persisted. Project `net.bind_port` still wins when set. |
 | `--db=PATH` | SQLite database path |
 | `--ca-dir=PATH` | Directory for the root CA |
 | `--headless` | Run without the TUI (capture to STDOUT) |
 | `--insecure-upstream` | Do not verify upstream TLS certificates |
 | `--export-ca` | Print the root CA certificate path and exit |
 
-> `GORI_HOME` is an environment variable, not a flag. Project selection in the TUI is done through the project picker.
+> `GORI_HOME` is an environment variable, not a flag. Project selection in the TUI is done through the project picker. Bind flags only set the **global** layer for this run — see [Configuration](/getting-started/configuration/#network).
 
 ## gori run
 
@@ -76,7 +76,7 @@ gori run capture --port 8070 --format json --for 5m
 
 | Option | Description |
 |--------|-------------|
-| `-l`, `--listen`; `-p`, `--port` | Bind address / port |
+| `-l`, `--listen`; `-p`, `--port` | Global bind for this process (settings default; project override still wins) |
 | `--project=NAME` | Project to write to (default `default`) |
 | `--db=PATH` | Database path |
 | `-k`, `--insecure-upstream` | Skip upstream TLS verification |
@@ -260,7 +260,7 @@ gori settings --edit   # open it in $EDITOR
 gori wizard
 ```
 
-Runs the interactive setup (proxy bind address, then theme). Also runs automatically on first launch.
+Runs the interactive setup (global proxy bind default, then theme). Also runs automatically on first launch. The bind step writes the shared `settings.json` defaults — projects can still pin their own address in the Project tab; `--listen` / `--port` override for one run only.
 
 ## gori tutorial
 
