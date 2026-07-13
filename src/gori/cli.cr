@@ -170,11 +170,14 @@ module Gori
     # `gori ca` is the CA utility surface:
     # - bare / flags  → print path (default) or PEM (`--pem`); creates CA on first use
     # - `regenerate`  → replace the root CA (destructive; needs --yes or an interactive confirm)
+    # - `import`      → adopt an externally-created root CA (cert + key PEM); destructive
     private def self.run_ca(args : Array(String)) : Nil
       if (first = args[0]?) && !first.starts_with?("-")
         case first
         when "regenerate"
           run_ca_regenerate(args[1..])
+        when "import"
+          run_ca_import(args[1..])
         else
           STDERR.puts "unknown ca subcommand: #{first}"
           print_ca_usage(STDERR)
@@ -188,9 +191,11 @@ module Gori
     private def self.print_ca_usage(io : IO) : Nil
       io.puts "Usage: gori ca [options]"
       io.puts "       gori ca regenerate [--yes] [--ca-dir=DIR]"
+      io.puts "       gori ca import --cert FILE --key FILE [--yes] [--ca-dir=DIR]"
       io.puts ""
-      io.puts "Print the root CA certificate path (default), create it on first use, or"
-      io.puts "regenerate it (invalidates existing client trust)."
+      io.puts "Print the root CA certificate path (default), create it on first use,"
+      io.puts "regenerate it, or import an externally-created root CA (both invalidate"
+      io.puts "existing client trust)."
       io.puts ""
       io.puts "Options:"
       io.puts "  --ca-dir=DIR   CA directory (default ~/.gori/ca or $GORI_HOME/ca)"
@@ -200,6 +205,12 @@ module Gori
       io.puts "Regenerate options:"
       io.puts "  --yes, -y      Skip the interactive confirm (required when stdin is not a tty)"
       io.puts "  --ca-dir=DIR   CA directory to regenerate"
+      io.puts ""
+      io.puts "Import options:"
+      io.puts "  --cert FILE    Root CA certificate PEM to adopt (required)"
+      io.puts "  --key FILE     Matching private key PEM (required)"
+      io.puts "  --yes, -y      Skip the interactive confirm (required when stdin is not a tty)"
+      io.puts "  --ca-dir=DIR   CA directory to install into"
     end
 
     # Path / PEM print path (the default `gori ca` action).
@@ -273,6 +284,69 @@ module Gori
       STDERR.flush
       line = (STDIN.gets || "").strip
       abort "gori ca regenerate: cancelled" unless line == "regenerate"
+    end
+
+    # Adopt an externally-created root CA (cert + key PEM) in place of gori's own.
+    # Destructive like regenerate — it overwrites the on-disk root and voids prior
+    # client trust — so it shares the confirm gate. Validation (key↔cert match, CA
+    # flag) happens inside import! BEFORE anything is written, so a bad pair aborts
+    # without touching the current CA.
+    private def self.run_ca_import(args : Array(String)) : Nil
+      ca_dir = Paths.default_ca_dir
+      cert_path = nil.as(String?)
+      key_path = nil.as(String?)
+      yes = false
+      parser = OptionParser.new do |p|
+        p.banner = "Usage: gori ca import --cert FILE --key FILE [--yes] [--ca-dir=DIR]"
+        p.on("--cert FILE", "Root CA certificate PEM to adopt") { |v| cert_path = v }
+        p.on("--key FILE", "Matching private key PEM") { |v| key_path = v }
+        p.on("--ca-dir=DIR", "Directory for the root CA") { |v| ca_dir = v }
+        p.on("-y", "--yes", "Skip the interactive confirm") { yes = true }
+        p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
+        p.missing_option { |flag| abort "missing value for #{flag}" }
+      end
+      parser.parse(args)
+
+      cert = cert_path
+      key = key_path
+      abort "gori ca import: --cert and --key are both required\n#{parser}" unless cert && key
+
+      # Validate the pair up front so a bad --cert/--key aborts BEFORE we touch (or,
+      # in a fresh dir, auto-create) any CA — the user asked for THEIR cert, not a
+      # surprise gori-generated one.
+      begin
+        Proxy::Tls::CertAuthority.validate_pem_pair(cert, key)
+      rescue ex
+        abort "gori ca import: #{ex.message}"
+      end
+
+      confirm_ca_import!(ca_dir) unless yes
+
+      begin
+        Paths.ensure_dirs
+        ca = Proxy::Tls::CertAuthority.load_or_create(ca_dir)
+        warning = ca.import!(cert, key)
+        puts ca.ca_cert_path
+        STDERR.puts "gori ca: WARNING — #{warning}" if warning
+        STDERR.puts "gori ca: imported — re-trust the imported cert; restart any running gori"
+      rescue ex
+        abort "gori ca import: could not install the CA in #{ca_dir}: #{ex.message}"
+      end
+    end
+
+    # Interactive gate for import (skipped when --yes). Same non-tty rule as regenerate.
+    private def self.confirm_ca_import!(ca_dir : String) : Nil
+      unless STDIN.tty?
+        abort "gori ca import: stdin is not a terminal; re-run with --yes to confirm"
+      end
+      STDERR.puts "Replace the root CA in #{ca_dir} with the imported cert/key?"
+      STDERR.puts "This invalidates existing client trust."
+      STDERR.puts "Running gori instances keep the old CA until restarted."
+      STDERR.print "Type 'import' to confirm: "
+      STDERR.flush
+      line = (STDIN.gets || "").strip
+      abort "gori ca import: cancelled" unless line == "import"
     end
 
     # Handler for `gori run` (the non-interactive CLI mode). Named run_run to match
