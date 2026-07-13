@@ -3,6 +3,7 @@ require "../notes_view"
 require "../clipboard"
 require "../../store"
 require "../../links"
+require "../../hotkeys"
 require "../theme"
 
 module Gori::Tui
@@ -87,13 +88,14 @@ module Gori::Tui
       elsif @notes.insert_mode?
         edit_insert(ev, c)
       else
-        handle_read(ev, c)
+        return handle_read(ev, c)
       end
       true
     end
 
-    private def handle_read(ev : Termisu::Event::Key, c : Char?) : Nil
-      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+    # READ: structure local; x/y and Global breath defer to the keymap.
+    private def handle_read(ev : Termisu::Event::Key, c : Char?) : Bool
+      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       selecting = ev.shift?
       case
@@ -111,9 +113,10 @@ module Gori::Tui
       when key.right? then @notes.read_move(0, 1, selecting: selecting)
       when key.home?  then @notes.home
       when key.end?   then @notes.end_of_line
-      when c == 'x'   then @notes.select_line
-      when c == 'y'   then notes_copy
+      when c && !ev.ctrl? && !ev.alt? && !c.control?
+        return false
       end
+      true
     end
 
     private def edit_insert(ev : Termisu::Event::Key, c : Char?) : Nil
@@ -215,7 +218,8 @@ module Gori::Tui
       if @notes.insert_mode?
         "type to edit · esc read · ^N new · ^W close · ^G goto · ^F find · ^1-9 · ↑ sub-tabs"
       else
-        "i/↵ edit · ⇧arrows select · y copy · space cmds · ^N new · ^W close · ^G goto · ^F find · esc tabs"
+        y = Hotkeys.binding_label(@host.session.registry, "notes.copy", "y")
+        "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ^N new · ^W close · ^G goto · ^F find · esc tabs"
       end
     end
 

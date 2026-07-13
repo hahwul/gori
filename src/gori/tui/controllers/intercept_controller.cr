@@ -2,6 +2,7 @@ require "../tab_controller"
 require "../intercept_view"
 require "../url"
 require "../../interceptor"
+require "../../hotkeys"
 
 module Gori::Tui
   # The Intercept tab: the hold-and-decide queue (P4). Owns the InterceptView (a
@@ -32,12 +33,19 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
+      reg = @host.session.registry
       if @intercept.editing?
         "type to edit · ^R forward · ⇧↹/esc queue"
       elsif @intercept.querying?
         "type condition · ↵ apply · esc clear"
       else
-        "↑/↓ move · ⇧←/→ h-scroll · ↵/e edit · f fwd · d drop · F all · / filter · c catch · i on/off · space cmds · ↹ detail · esc tabs"
+        f = Hotkeys.binding_label(reg, "intercept.forward", "f")
+        d = Hotkeys.binding_label(reg, "intercept.drop", "d")
+        fa = Hotkeys.binding_label(reg, "intercept.forward-all", "⇧F")
+        filt = Hotkeys.binding_label(reg, "intercept.filter", "/")
+        catch = Hotkeys.binding_label(reg, "intercept.direction", "c")
+        on = Hotkeys.binding_label(reg, "intercept.toggle", "i")
+        "↑/↓ move · ⇧←/→ h-scroll · ↵/e edit · #{f} fwd · #{d} drop · #{fa} all · #{filt} filter · #{catch} catch · #{on} on/off · space cmds · ↹ detail · esc tabs"
       end
     end
 
@@ -108,33 +116,21 @@ module Gori::Tui
     end
 
     # Keys while navigating the held queue (the left list). Returns true when consumed;
-    # false (the catch `c` / filter `/`, and anything unhandled) defers to the keymap —
-    # those are now Intercept-scope verbs so they're rebindable. The queue is a navigable
-    # list (not a text field), so deferring unhandled keys is safe; the held-bytes editor
+    # false defers to the keymap — catch `c`, filter `/`, forward/drop/all, Global
+    # intercept toggle `i`, and breath keys are rebindable verbs. The queue is a
+    # navigable list (not a text field), so deferring is safe; the held-bytes editor
     # and condition bar keep swallowing `c`/`/` as literal text (separate handlers).
-    # ⇧F = "forward all". Most terminals deliver a typed capital as the char 'F' with NO
-    # shift modifier (only Kitty's protocol sets shift), so accept both (cf. Keybind's
-    # `c.ascii_uppercase?` normalisation) — else ⇧F is a dead key on a plain terminal.
-    private def forward_all_key?(ev : Termisu::Event::Key) : Bool
-      (ev.key.lower_f? && ev.shift?) || (ev.char || ev.key.to_char) == 'F'
-    end
-
     private def handle_queue_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
-      # A modified chord (^F, alt+…) must NOT trigger a queue action — bare `key.lower_f?`
-      # matches Ctrl+F too, which would IRREVERSIBLY forward the selected held message.
-      # Defer modified chords to the central keymap (shift is kept for ⇧F forward-all).
+      # Modified chords (^F find, etc.) must not hit list actions — bare `lower_f?`
+      # would also match Ctrl+F and irreversibly forward a held message.
       return false if ev.ctrl? || ev.alt?
       case
       when key.escape?              then @host.request_focus(:menu)
       when key.lower_j?, key.down?  then @intercept.move(1)
       when key.lower_k?, key.up?    then @intercept.at_top? ? @host.request_focus(:menu) : @intercept.move(-1)
       when key.enter?, key.lower_e? then @intercept.toggle_edit
-      when forward_all_key?(ev)     then intercept_forward_all
-      when key.lower_f?             then intercept_forward
-      when key.lower_d?             then intercept_drop
-      when key.lower_i?             then intercept_toggle
-      else                               return false
+      else                               return false # f/d/⇧F/i/c/… → keymap
       end
       true
     end

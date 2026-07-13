@@ -55,9 +55,11 @@ describe Gori::Tui::RulesOverlay do
 end
 
 describe "Match&Replace verb (P1)" do
-  it "binds `m` to rules.edit" do
+  it "is palette-reachable and keyless by default (L4 — rebind for a Global chord)" do
     reg = Gori::Verbs.registry
+    reg["rules.edit"]?.should_not be_nil
+    reg["rules.edit"].chords.should be_empty
     keymap = Gori::Verb::Keymap.build(reg)
-    keymap.lookup(Gori::Verb::Chord.new("m"), Gori::Verb::Scope::Body).should eq("rules.edit")
+    keymap.lookup(Gori::Verb::Chord.new("m"), Gori::Verb::Scope::Global).should be_nil
   end
 end

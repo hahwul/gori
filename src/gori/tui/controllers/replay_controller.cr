@@ -7,6 +7,7 @@ require "../subtab_picker"
 require "../../env"
 require "../../store"
 require "../../prism"
+require "../../hotkeys"
 require "../../replay/engine"
 require "../../replay/h2_engine"
 require "../../replay/ws_engine"
@@ -258,36 +259,44 @@ module Gori::Tui
       (v = current_view) ? (v.pane_insert?(v.focus) ? :editor : :body) : :body
     end
 
-    # Hints depend on the focused pane and READ vs INS mode.
+    # Hints depend on the focused pane and READ vs INS mode. Chord tokens for rebindable
+    # verbs resolve through Hotkeys so a rebind is reflected in the status line.
     def body_hint(focus : Symbol) : String
       v = current_view
       return "↹/esc tabs · ^N new" unless v
+      reg = @host.session.registry
+      y = Hotkeys.binding_label(reg, "replay.copy", "y")
+      send = Hotkeys.binding_label(reg, "replay.send", "^R")
+      hex = Hotkeys.binding_label(reg, "replay.toggle-hex", "^X")
+      sni = Hotkeys.binding_label(reg, "replay.toggle-sni", "^S")
+      diff = Hotkeys.binding_label(reg, "replay.toggle-diff", "d")
+      pretty = Hotkeys.binding_label(reg, "replay.toggle-pretty", "p")
       # ^R send lives on the REQUEST border chip (` ^R:SEND `) — not re-listed in the
       # request-focus footer (discoverability is the border badge; keys still work).
-      return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · ^X/esc exit" if v.request_hex?
-      read_common = "⇧arrows select · y copy · space cmds"
+      return "HEX: 0-9a-f overtype · Ins/Del/⌫ bytes · ←/→/↑/↓ move · #{hex}/esc exit" if v.request_hex?
+      read_common = "⇧arrows select · #{y} copy · space cmds"
       if v.ws_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" : ws_hint(v)
+        return v.focus == :response ? "↑/↓ move · #{read_common} · ⇧←/→ h-scroll · ^F find · #{send} send · ↹ pane · esc tabs" : ws_hint(v)
       end
       if v.grpc_mode?
-        return v.focus == :response ? "↑/↓ move · #{read_common} · ⇧←/→ h-scroll · ^F find · ^R replay · ↹ pane · esc tabs" : grpc_hint(v)
+        return v.focus == :response ? "↑/↓ move · #{read_common} · ⇧←/→ h-scroll · ^F find · #{send} send · ↹ pane · esc tabs" : grpc_hint(v)
       end
       return decode_hint(v) if v.decode_mode? && v.focus == :request
       case v.focus
       when :target
         if v.target_insert?
-          v.editing_sni? ? "type SNI · ^S/↵/esc URL · ^R send" : "type URL · ^S SNI · ↵ request · ^R send · ↹ pane · esc read"
+          v.editing_sni? ? "type SNI · #{sni}/↵/esc URL · #{send} send" : "type URL · #{sni} SNI · ↵ request · #{send} send · ↹ pane · esc read"
         else
-          "i/↵ edit · #{read_common} · ^S SNI · ^R send · ↹ pane · esc tabs"
+          "i/↵ edit · #{read_common} · #{sni} SNI · #{send} send · ↹ pane · esc tabs"
         end
       when :response
         nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        "#{nav} · #{read_common} · d diff · ⇧←/→ h-scroll · x hex · p pretty · ^F find · ↵/^R send · ↹ pane · esc tabs"
+        "#{nav} · #{read_common} · #{diff} diff · ⇧←/→ h-scroll · x hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · esc tabs"
       when :request
         if v.request_insert?
-          "type to edit · ^G goto · ^F find · ^X hex · esc read · ↹ pane"
+          "type to edit · ^G goto · ^F find · #{hex} hex · esc read · ↹ pane"
         else
-          "i/↵ edit · #{read_common} · ^G goto · ^F find · ^X hex · ↹ pane · esc tabs"
+          "i/↵ edit · #{read_common} · ^G goto · ^F find · #{hex} hex · ↹ pane · esc tabs"
         end
       else
         ""
@@ -362,6 +371,9 @@ module Gori::Tui
     end
 
     # --- input ---
+    # Returns false when the key should fall through to the shell keymap (rebindable
+    # verbs + Global breath). READ panes own structure (nav, i/↵ INS, space menu, and
+    # pane-local `x`); command letters like `y`/`d`/`p` and unmatched bare keys defer.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       if ev.ctrl? && key.lower_p?
@@ -392,7 +404,7 @@ module Gori::Tui
       elsif ev.ctrl? || ev.alt?
         # Any OTHER modified chord (^R send, ^X hex, ^S SNI, ^L auto-CL, …) defers to the
         # central keymap so it's rebindable. Editors never insert ctrl/alt chars, so the
-        # defer is safe mid-edit; plain keys below still type literally.
+        # defer is safe mid-edit; plain keys below still type literally in INS.
         return false
       else
         view = current_view
@@ -402,10 +414,11 @@ module Gori::Tui
           end
           return true
         end
-        case view.focus
+        return case view.focus
         when :request  then edit_replay_request(ev, view)
         when :target   then edit_replay_target(ev, view)
         when :response then handle_replay_response(ev, view)
+        else                true
         end
       end
       true
@@ -1312,9 +1325,15 @@ module Gori::Tui
       view.seed_original(detail.response_head, detail.response_body)
     end
 
-    private def edit_replay_request(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return edit_replay_request_hex(ev, view) if view.request_hex?
-      return view.handle_chain_pane_key(ev) if view.chain_pane_active?
+    private def edit_replay_request(ev : Termisu::Event::Key, view : ReplayView) : Bool
+      if view.request_hex?
+        edit_replay_request_hex(ev, view)
+        return true
+      end
+      if view.chain_pane_active?
+        view.handle_chain_pane_key(ev)
+        return true
+      end
       return handle_replay_request_read(ev, view) unless view.request_insert?
       key = ev.key
       c = ev.char || key.to_char
@@ -1335,6 +1354,7 @@ module Gori::Tui
           view.set_preedit("") # commit preedit
         end
       end
+      true
     end
 
     # Hex-edit keys for the REQUEST pane (overtype with 0-9a-f; Ins/Del/⌫ change length).
@@ -1356,8 +1376,11 @@ module Gori::Tui
       end
     end
 
-    private def edit_replay_target(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return edit_replay_sni(ev, view) if view.editing_sni?
+    private def edit_replay_target(ev : Termisu::Event::Key, view : ReplayView) : Bool
+      if view.editing_sni?
+        edit_replay_sni(ev, view)
+        return true
+      end
       return handle_replay_target_read(ev, view) unless view.target_insert?
       key = ev.key
       case
@@ -1366,10 +1389,14 @@ module Gori::Tui
       when key.down?  then view.pane_advance(1)
       else                 edit_target_common(ev, view)
       end
+      true
     end
 
-    private def handle_replay_request_read(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+    # READ request: structure stays local; command letters defer to the keymap so
+    # `y` (copy) and Global breath keys rebind / fire through the same path as History.
+    # `x` stays local — select-line here vs response hex (same letter, pane-local).
+    private def handle_replay_request_read(ev : Termisu::Event::Key, view : ReplayView) : Bool
+      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       c = ev.char || key.to_char
       selecting = ev.shift?
@@ -1383,12 +1410,14 @@ module Gori::Tui
       when key.home?  then view.edit_home
       when key.end?   then view.edit_end
       when c == 'x'   then view.pane_select_line
-      when c == 'y'   then replay_copy
+      when c && !ev.ctrl? && !ev.alt? && !c.control?
+        return false # y copy, Global c/i/s, …
       end
+      true
     end
 
-    private def handle_replay_target_read(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+    private def handle_replay_target_read(ev : Termisu::Event::Key, view : ReplayView) : Bool
+      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       key = ev.key
       c = ev.char || key.to_char
       selecting = ev.shift?
@@ -1402,8 +1431,10 @@ module Gori::Tui
       when key.home?  then view.target_home
       when key.end?   then view.target_end
       when c == 'x'   then view.pane_select_line
-      when c == 'y'   then replay_copy
+      when c && !ev.ctrl? && !ev.alt? && !c.control?
+        return false
       end
+      true
     end
 
     # The SNI override sub-field: same single-line editing (the view's target mutators
@@ -1438,14 +1469,16 @@ module Gori::Tui
       end
     end
 
-    # Response/Diff pane: read-only with cursor + selection. d toggles diff; Enter/^R send.
-    private def handle_replay_response(ev : Termisu::Event::Key, view : ReplayView) : Nil
-      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
-      return if handle_replay_response_hscroll(ev, view)
+    # Response/Diff pane: structure + pane-local `x`/`b` stay here; `d`/`p`/`y` and other
+    # bare letters defer to the keymap (rebindable verbs + Global breath).
+    private def handle_replay_response(ev : Termisu::Event::Key, view : ReplayView) : Bool
+      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
+      return true if handle_replay_response_hscroll(ev, view)
       key = ev.key
       selecting = ev.shift?
       transcript = view.ws_mode? || view.grpc_mode? || view.group_mode?
       nav = view.resp_navigable?
+      c = ev.char || key.to_char
       case
       when key.enter?               then replay_send
       when key.up?, key.lower_k?    then view.at_top? ? view.focus_first : resp_nav_step(view, -1, 0, selecting, nav)
@@ -1454,12 +1487,15 @@ module Gori::Tui
       when key.right? && !selecting then resp_nav_step(view, 0, 1, false, nav) unless transcript
       when key.left? && selecting   then resp_nav_step(view, 0, -1, true, nav) unless transcript
       when key.right? && selecting  then resp_nav_step(view, 0, 1, true, nav) unless transcript
-      when transcript               then nil
-      when key.lower_d?             then view.toggle_resp_mode
-      when key.lower_x?             then view.toggle_resp_hex
-      when key.lower_b?             then @host.toggle_reveal
-      when key.lower_p?             then @host.toggle_pretty
+      when transcript
+        # Transcript: no d/x/p tools; still let Global breath / copy through.
+        return false if c && !ev.ctrl? && !ev.alt? && !c.control?
+      when key.lower_x? then view.toggle_resp_hex # pane-local (select-line owns `x` on req/tgt)
+      when key.lower_b? then @host.toggle_reveal  # bare `b` (Global reveal is ^B)
+      when c && !ev.ctrl? && !ev.alt? && !c.control?
+        return false # d diff, p pretty, y copy, Global c/i/s, …
       end
+      true
     end
 
     private def resp_nav_step(view : ReplayView, dr : Int32, dc : Int32, selecting : Bool, nav : Bool) : Nil

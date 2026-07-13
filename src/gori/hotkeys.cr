@@ -4,11 +4,9 @@ require "./settings"
 module Gori
   # Facade over the hotkey engine (Verb::Keymap / OsProfile / Reserved / Conflicts) and
   # the persisted Settings. The read-path the DISPATCH keymap (`build_keymap`), the
-  # settings:hotkeys editor, and the command PALETTE (via #binding_for) share for a verb's
-  # effective chord — so a rebind is reflected in the palette's chord column. NOTE: the
-  # Help tab and the status-bar hints are still curated DEFAULT-chord prose (a documented
-  # limitation — they don't route through here); a rebind isn't reflected in those, which
-  # is why the Help tab points users to settings:hotkeys.
+  # settings:hotkeys editor, the command PALETTE, Help (verb-id rows), and status body
+  # hints (History/Replay) share for a verb's effective chord — so a rebind is reflected
+  # on those surfaces via #binding_for / #binding_label.
   module Hotkeys
     # Selectable OS default profiles (the Settings.keymap_os domain). "auto" tracks the
     # build's native platform.
@@ -24,14 +22,25 @@ module Gori
 
     # Chords consumed by a hardcoded handler BEFORE the keymap is consulted, so binding ANY
     # verb to one would be silently shadowed — the editor refuses them on top of the
-    # terminal-reserved set. Two sources, both of which this MUST stay in sync with (there is
-    # no shared constant yet — a guard moved without updating this set re-opens the footgun):
-    #   • Runner#handle_key global guards: ^G goto, ^F find, ^B reveal, ^E external editor.
-    #   • Controllers' handle_body_key + Runner's ^N: ^P palette, ^N new, ^W close, ^1-9 sub-tab.
+    # terminal-reserved set.
+    #
+    # **Single source of truth for "claimed" letters.** Runner#handle_key and controllers
+    # must only hardcode Ctrl+letter guards that appear here (or the reserved set). When
+    # adding a new pre-keymap guard, append to CLAIMED_CTRL_LETTERS / CLAIMED_CTRL_DIGITS
+    # first, then wire the handler — the hotkey editor and reserved?() stay in sync.
+    #   • Runner global guards: ^G goto, ^F find, ^B reveal, ^E external editor.
+    #   • Controllers + Runner: ^P palette, ^N new, ^W close, ^1-9 sub-tab.
+    CLAIMED_CTRL_LETTERS = %w(g f b e p n w)
+    CLAIMED_CTRL_DIGITS  = ('1'..'9').map(&.to_s)
+
     CLAIMED_CHORDS = begin
-      cs = %w(g f b e p n w).map { |k| Verb::Chord.new(k, ctrl: true) }
-      (1..9).each { |n| cs << Verb::Chord.new(n.to_s, ctrl: true) }
+      cs = CLAIMED_CTRL_LETTERS.map { |k| Verb::Chord.new(k, ctrl: true) }
+      CLAIMED_CTRL_DIGITS.each { |d| cs << Verb::Chord.new(d, ctrl: true) }
       cs
+    end
+
+    def self.claimed?(chord : Verb::Chord) : Bool
+      CLAIMED_CHORDS.includes?(chord)
     end
 
     # Build the dispatch keymap from the registry under the persisted OS profile + user
@@ -81,7 +90,7 @@ module Gori
     def self.reserved?(chord : Verb::Chord) : String?
       if reason = Verb::Reserved.reserved?(chord)
         reason
-      elsif CLAIMED_CHORDS.includes?(chord)
+      elsif claimed?(chord)
         "#{chord.label} is reserved by a gori shortcut"
       end
     end
@@ -94,6 +103,47 @@ module Gori
       verb = registry[id]?
       return nil unless verb
       Verb::Keymap.effective_chords(verb, Verb::OsProfile.resolve(profile), overrides).first?
+    end
+
+    # Compact status/Help token for a chord (`ctrl-r` → `^R`, `shift-i` → `⇧I`, `f` → `f`).
+    # Matches the curated prose style used in body_hint / Help before binding-truth.
+    def self.display_label(chord : Verb::Chord) : String
+      if chord.ctrl
+        rest = chord.key.size == 1 ? chord.key.upcase : chord.key
+        return "⇧^#{rest}" if chord.shift
+        return "^#{rest}"
+      end
+      String.build do |io|
+        io << "⌥" if chord.alt
+        if chord.shift && chord.key.size == 1
+          io << "⇧" << chord.key.upcase
+        else
+          io << "⇧" if chord.shift
+          io << case chord.key
+          when "enter"     then "↵"
+          when "escape"    then "esc"
+          when "tab"       then "↹"
+          when "backspace" then "⌫"
+          when "space"     then "space"
+          when "up"        then "↑"
+          when "down"      then "↓"
+          when "left"      then "←"
+          when "right"     then "→"
+          else                  chord.key
+          end
+        end
+      end
+    end
+
+    # Effective binding as a status/Help token, or `fallback` when unbound / unknown.
+    def self.binding_label(registry : Verb::Registry, id : String, fallback : String,
+                           overrides : Hash(String, Array(Verb::Chord)) = rebindable_overrides(registry),
+                           profile : String = Settings.keymap_os) : String
+      if chord = binding_for(registry, id, overrides, profile)
+        display_label(chord)
+      else
+        fallback
+      end
     end
 
     # The PRIMARY default chord for `id` under `profile` with NO user overrides — what a

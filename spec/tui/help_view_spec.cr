@@ -23,7 +23,7 @@ describe Gori::Tui::HelpView do
     view.render(Screen.new(MemoryBackend.new(90, 8)), short)
     view.at_top?.should be_true
 
-    view.move(100) # past the end → clamped to the last screenful on render
+    view.move(10_000) # past the end → clamped to the last screenful on render
     after = MemoryBackend.new(90, 8)
     view.render(Screen.new(after), short)
     after.contains?("GLOBAL").should be_false  # scrolled off the top

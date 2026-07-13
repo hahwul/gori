@@ -94,5 +94,21 @@ describe Gori::Verb::Keymap do
         end
       end
     end
+
+    it "keeps Global bare-letter defaults within the L2 breath set (c/i/s)" do
+      # Key-budget policy: only capture / intercept / scope lens may own a Global
+      # bare letter by default. New Global bare chords need an explicit justification.
+      allowed = Set{"c", "i", "s"}
+      Gori::Verbs.registry.each do |v|
+        next unless v.scope.global?
+        v.chords.each do |c|
+          next if c.ctrl || c.alt || c.shift
+          next unless c.key.size == 1 && c.key[0].ascii_letter?
+          unless allowed.includes?(c.key)
+            fail "Global bare '#{c.key}' on #{v.id} — L2 breath is c/i/s only (see docs/guide/hotkeys)"
+          end
+        end
+      end
+    end
   end
 end

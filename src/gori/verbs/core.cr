@@ -1,8 +1,10 @@
 require "../verb"
 
 module Gori
-  # Concrete verb definitions for this milestone. Each is registered once and
-  # thereby becomes both a keybinding and a palette entry (P1).
+  # Concrete verb definitions. Each registration is a keybinding + palette entry (P1).
+  # Key budget (docs/guide/hotkeys): L0 structural · L1 loop · L2 Global breath
+  # (bare c/i/s only) · L3 space mnemonic · L4 palette. New pane actions default L3.
+  # Ctrl is for INS-safe or destructive work — not a general upgrade from bare.
   module Verbs
     def self.register_core(r : Verb::Registry) : Nil
       # Discoverable from anywhere via the palette (Global). The 'q' KEY, though, only
@@ -26,14 +28,12 @@ module Gori
         "app.palette", "Command palette", "Open the command palette", Verb::Scope::Global,
         [Verb::Chord.new("p", ctrl: true)], category: Verb::Category::System) { |ctx| ctx.open_palette; nil }
 
-      # The notification center (background-job results, alerts). `n` is a Global
-      # fallback chord — scope-local `n` (e.g. findings.new on Findings) still wins
-      # where bound, exactly like Global `c` (capture) yields to Intercept's `c`. The
-      # clickable top-bar `notify:N` badge (left of scope) is the mouse path; both
-      # are rebindable via settings:hotkeys.
+      # Notification center (background-job results, alerts). Palette + top-bar
+      # `notify:N` badge only by default — a Global bare letter is reserved for
+      # L2 session breath (c/i/s). Rebind via settings:hotkeys if you want a chord.
       r.register Verb::Definition.new(
         "app.notifications", "Notifications", "Open the notification center (background-job results)",
-        Verb::Scope::Global, [Verb::Chord.new("n")], category: Verb::Category::System) { |ctx| ctx.open_notifications; nil }
+        Verb::Scope::Global, category: Verb::Category::System) { |ctx| ctx.open_notifications; nil }
 
       r.register Verb::Definition.new(
         "capture.toggle", "Toggle capture", "Start/stop capturing traffic", Verb::Scope::Global,
@@ -152,27 +152,32 @@ module Gori
         Verb::Scope::Body,
         available: in_project_desc_read, mnemonic: 'Y') { |ctx| ctx.read_copy; nil }
 
+      # Match & Replace is session setup, not per-flow breath — palette-only by
+      # default (L4). Rebind via settings:hotkeys if you want a Global chord.
       r.register Verb::Definition.new(
         "rules.edit", "Match & Replace", "Edit in-flight request/response head rewrite rules", Verb::Scope::Global,
-        [Verb::Chord.new("m")]) { |ctx| ctx.rules_open; nil }
+        category: Verb::Category::Settings) { |ctx| ctx.rules_open; nil }
 
       # --- intercept (hold-and-decide; P4) ---
       r.register Verb::Definition.new(
         "intercept.toggle", "Toggle intercept", "Hold requests/responses for a human decision", Verb::Scope::Global,
         [Verb::Chord.new("i")]) { |ctx| ctx.intercept_toggle; nil }
 
-      # forward/drop are also handled directly on the Intercept tab; registered
-      # here (no chord) for palette discoverability (P1).
+      # Forward / drop / forward-all are Intercept-scope keymap verbs (rebindable).
+      # The queue defers bare f/d/⇧F to the keymap; space-menu mnemonics stay f/d/a.
       intercept_selected = ->(ctx : Verb::ExecContext) { !ctx.selected_intercept_id.nil? }
       r.register Verb::Definition.new(
         "intercept.forward", "Forward held", "Forward the selected held message (with edits)",
-        Verb::Scope::Intercept, available: intercept_selected, mnemonic: 'f') { |ctx| ctx.intercept_forward; nil }
+        Verb::Scope::Intercept, [Verb::Chord.new("f")],
+        available: intercept_selected, mnemonic: 'f') { |ctx| ctx.intercept_forward; nil }
       r.register Verb::Definition.new(
         "intercept.drop", "Drop held", "Drop the selected held message",
-        Verb::Scope::Intercept, available: intercept_selected, mnemonic: 'd') { |ctx| ctx.intercept_drop; nil }
+        Verb::Scope::Intercept, [Verb::Chord.new("d")],
+        available: intercept_selected, mnemonic: 'd') { |ctx| ctx.intercept_drop; nil }
       r.register Verb::Definition.new(
         "intercept.forward-all", "Forward all held", "Forward every held message",
-        Verb::Scope::Intercept, available: intercept_selected, mnemonic: 'a') { |ctx| ctx.intercept_forward_all; nil }
+        Verb::Scope::Intercept, [Verb::Chord.new("f", shift: true)],
+        available: intercept_selected, mnemonic: 'a') { |ctx| ctx.intercept_forward_all; nil }
 
       # Catch controls — what to hold (direction) + a condition that narrows it. Keymap-
       # driven (Intercept scope) so they're rebindable; the queue defers `c`/`/` to here,
@@ -212,12 +217,16 @@ module Gori
         :project => "Project", :sitemap => "Sitemap", :history => "History", :intercept => "Intercept",
         :replay => "Replay", :fuzzer => "Fuzzer", :miner => "Miner", :convert => "Convert",
         :comparer => "Comparer", :prism => "Prism", :findings => "Findings", :notes => "Notes",
-        :help => "Help",
       }.each do |tab, label|
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global,
           category: Verb::Category::Navigation) { |ctx| ctx.focus_tab(tab); nil }
       end
+      # Help is special: bare `?` (mitmproxy-style) jumps to the cheat-sheet from any
+      # navigable context. Palette still lists it as "Go to Help".
+      r.register Verb::Definition.new(
+        "tab.help", "Go to Help", "Focus the Help tab (keyboard cheat-sheet)", Verb::Scope::Global,
+        [Verb::Chord.new("?")], category: Verb::Category::Navigation) { |ctx| ctx.focus_tab(:help); nil }
 
       # Close the command palette overlay.
       r.register Verb::Definition.new(

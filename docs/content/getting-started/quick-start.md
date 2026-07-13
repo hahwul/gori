@@ -78,7 +78,7 @@ Capture and intercept still have global toggles:
 | `c` | Toggle **capture** (off = traffic passes through without being stored) |
 | `i` | Toggle **intercept** (hold matching requests for forward / drop / edit) |
 | `s` | Toggle the **scope lens** (filter views to in-scope traffic) |
-| `m` | Open **Match & Replace** (rewrite request/response heads or bodies in flight) |
+| `Ctrl-P` → Match & Replace | In-flight request/response rewrite rules (palette; rebindable) |
 
 ## 4. Move around the TUI
 
@@ -161,16 +161,15 @@ Keep this table nearby until the chords stick:
 
 | Key | Where | Action |
 |-----|--------|--------|
-| `Ctrl-P` | Anywhere | Command palette |
+| `Ctrl-P` | Anywhere | Command palette (settings, Match & Replace, notifications, …) |
 | `Space` | Focused pane | Area action menu |
-| `c` / `i` / `s` / `m` | Anywhere | Capture / intercept / scope lens / match & replace |
+| `c` / `i` / `s` | Anywhere | Capture / intercept / scope lens |
 | `[` `]` · `1`–`9` | Anywhere | Switch tabs |
 | `/` | History | Query-language filter |
 | `Enter` | History | Open flow detail |
 | `Ctrl-R` | History | → Replay |
 | `Shift-I` | History | → Fuzzer |
 | `Ctrl-R` | Replay / Fuzzer | Send request / run fuzz |
-| `n` | Anywhere | Notification center (background-job results / alerts) |
 | `Esc` | Most places | Back out one level |
 
 ## First-run wizard

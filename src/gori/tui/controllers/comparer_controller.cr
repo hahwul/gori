@@ -1,6 +1,7 @@
 require "../tab_controller"
 require "../comparer_view"
 require "../subtab_clone"
+require "../../hotkeys"
 
 module Gori::Tui
   # The Comparer tab: multi-session (sub-tabs) workspace for side-by-side flow diffs.
@@ -141,7 +142,11 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
-      "←/→ req|res · ↑/↓ scroll · a/b pick · s swap · ^N new · ^W close · space cmds · ↹/esc tabs"
+      reg = @host.session.registry
+      a = Hotkeys.binding_label(reg, "comparer.pick-a", "a")
+      b = Hotkeys.binding_label(reg, "comparer.pick-b", "b")
+      s = Hotkeys.binding_label(reg, "comparer.swap", "s")
+      "←/→ req|res · ↑/↓ scroll · #{a}/#{b} pick · #{s} swap · ^N new · ^W close · space cmds · ↹/esc tabs"
     end
   end
 end

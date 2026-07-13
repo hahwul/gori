@@ -2,6 +2,7 @@ require "../tab_controller"
 require "../prism_view"
 require "../../store"
 require "../../prism"
+require "../../hotkeys"
 
 module Gori::Tui
   # The Prism tab: the grouped scan-issue list + a per-issue detail (affected URLs,
@@ -42,18 +43,21 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
+      reg = @host.session.registry
+      mode = Hotkeys.binding_label(reg, "prism.mode", "m")
+      filt = Hotkeys.binding_label(reg, "prism.filter", "/")
       if @prism.detail_open?
         "o flow · r replay · p promote · c dismiss · d delete · space cmds · ←/esc back"
       elsif @prism.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @prism.mode.off?
-        "m enable scanning · / filter · space cmds · esc tabs"
+        "#{mode} enable scanning · #{filt} filter · space cmds · esc tabs"
       elsif @prism.preview_enabled? && @prism.preview_focus == :preview
         "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs"
       elsif @prism.preview_enabled?
-        "↑/↓ move · ↵ open · ↹ preview · m mode · / filter · space cmds"
+        "↑/↓ move · ↵ open · ↹ preview · #{mode} mode · #{filt} filter · space cmds"
       else
-        "o flow · r replay · p promote · c dismiss · d delete · m mode · / filter · space cmds"
+        "o flow · r replay · p promote · c dismiss · d delete · #{mode} mode · #{filt} filter · space cmds"
       end
     end
 

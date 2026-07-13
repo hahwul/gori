@@ -1,10 +1,13 @@
 require "./screen"
 require "./theme"
+require "./brand"
+require "../hotkeys"
 
 module Gori::Tui
-  # The Help tab: a static, scrollable keyboard + mouse cheat-sheet. Read-only —
-  # ↑/↓ (or the wheel) scroll; there's nothing to select. The content is curated
-  # from the same shortcuts the status bar hints advertise, grouped by area.
+  # The Help tab: a scrollable keyboard + mouse cheat-sheet. Read-only —
+  # ↑/↓ (or the wheel) scroll; there's nothing to select. When constructed with a
+  # registry, rebindable rows resolve their key column through Hotkeys (same path
+  # as the command palette) so a rebind is reflected here.
   class HelpView
     # One rendered line: a section :head, a key/desc :item, or a blank :gap.
     record Row, kind : Symbol, a : String, b : String
@@ -14,133 +17,155 @@ module Gori::Tui
     KEY_W = 20
     KEY_GAP =  2
 
-    # {section title, [{keys, description}, ...]} — the source of the rendered rows.
+    # `verb_id` non-nil ⇒ resolve the key label from the effective keymap at build time.
+    record Item, key : String, desc : String, verb_id : String? = nil
+
+    # {section title, items} — the source of the rendered rows.
     SECTIONS = [
       {"GLOBAL", [
-        {"^P", "command palette"},
-        {"space", "focus-area action menu"},
-        {"c", "toggle capture"},
-        {"s · m", "toggle scope lens (or click scope:N) · Match & Replace rules"},
-        {"n", "notification center (or click the notify:N badge)"},
-        {"^B", "reveal whitespace (·→␍␊)"},
-        {"^D / ^C ×2", "quit gori"},
-        {"q", "back to projects (on the tab bar)"},
-        {"Settings: Hotkeys", "rebind any shortcut below (^P → Settings: Hotkeys)"},
+        Item.new("^P", "command palette", "app.palette"),
+        Item.new("space", "focus-area action menu"),
+        Item.new("c", "toggle capture", "capture.toggle"),
+        Item.new("i", "toggle intercept", "intercept.toggle"),
+        Item.new("s", "toggle scope lens (or click scope:N)", "scope.toggle-lens"),
+        Item.new("^P", "Match & Replace (palette; rebindable)", "rules.edit"),
+        Item.new("badge / ^P", "notification center (palette; rebindable)", "app.notifications"),
+        Item.new("^B", "reveal whitespace (·→␍␊)", "view.reveal-ws"),
+        Item.new("^D / ^C ×2", "quit gori"),
+        Item.new("q", "back to projects (on the tab bar)"),
+        Item.new("?", "open this Help tab", "tab.help"),
+        Item.new("Settings: Hotkeys", "rebind any shortcut below (^P → Settings: Hotkeys)"),
       ]},
       {"TABS & FOCUS", [
-        {"←/→", "switch tab (on the tab bar)"},
-        {"↹ / ⇧↹", "focus ring: tab bar ↔ panes"},
-        {"↵ / ↓", "enter the tab body"},
-        {"1-9", "jump to the Nth visible tab"},
-        {"Settings: Tabs", "show/hide + reorder tabs"},
-        {"esc", "pop back to the tab bar"},
+        Item.new("←/→", "switch tab (on the tab bar)"),
+        Item.new("↹ / ⇧↹", "focus ring: tab bar ↔ panes"),
+        Item.new("↵ / ↓", "enter the tab body"),
+        Item.new("1-9", "jump to the Nth visible tab"),
+        Item.new("Settings: Tabs", "show/hide + reorder tabs"),
+        Item.new("esc", "pop back to the tab bar"),
       ]},
       {"MOUSE", [
-        {"click tab", "switch to it"},
-        {"click row", "select · click again opens"},
-        {"click pane", "focus · in an editor, place the caret"},
-        {"sub-tab chip", "switch · right-click renames (Replay/Fuzzer/Convert)"},
-        {"wheel", "scroll / move the selection"},
-        {"click outside", "close a popup"},
+        Item.new("click tab", "switch to it"),
+        Item.new("click row", "select · click again opens"),
+        Item.new("click pane", "focus · in an editor, place the caret"),
+        Item.new("sub-tab chip", "switch · right-click renames (Replay/Fuzzer/Convert)"),
+        Item.new("wheel", "scroll / move the selection"),
+        Item.new("click outside", "close a popup"),
       ]},
       {"HISTORY", [
-        {"↑/↓ · ↵", "move · open the flow"},
-        {"^R", "send the flow to Replay"},
-        {"⇧I", "send the flow to the Fuzzer"},
-        {"⇧F", "create a finding"},
-        {"f · /", "follow newest · filter (query language)"},
-        {"i", "toggle intercept hold-mode"},
-        {"detail", "↑/↓ move · ⇧arrows select · y copy · space cmds · ⇧←/→ h-scroll"},
-        {"x · b · p", "in detail: hex · whitespace · pretty bodies"},
+        Item.new("↑/↓ · ↵", "move · open the flow"),
+        Item.new("^R", "send the flow to Replay", "history.replay"),
+        Item.new("⇧I", "send the flow to the Fuzzer", "history.fuzz"),
+        Item.new("⇧F", "create a finding", "finding.create"),
+        Item.new("f", "follow newest", "history.toggle-follow"),
+        Item.new("/", "filter (query language)", "history.query"),
+        Item.new("y", "copy flow", "history.copy"),
+        Item.new("i", "toggle intercept hold-mode", "intercept.toggle"),
+        Item.new("detail", "↑/↓ move · ⇧arrows select · y copy · space cmds · ⇧←/→ h-scroll"),
+        Item.new("x · b · p", "in detail: hex · whitespace · pretty bodies"),
       ]},
       {"REPLAY", [
-        {"^R", "send the request"},
-        {"^N / ^W", "new / close a sub-tab"},
-        {"r", "rename the sub-tab (on the strip)"},
-        {"i / ↵", "enter INS (edit) on request/target · esc back to READ"},
-        {"space", "command menu (READ mode on request/target/response)"},
-        {"y · O", "copy selection/line · copy all pane (READ)"},
-        {"⇧arrows", "select text (line or char)"},
-        {"^X", "hex-edit the request"},
-        {"^S", "SNI override (on the target)"},
-        {"^L", "toggle auto Content-Length"},
-        {"^V", "toggle transport HTTP/1.1 ↔ HTTP/2"},
-        {"space → g", "send group: %%%-split requests on one connection"},
-        {"↹", "cycle target → request → response"},
-        {"x · d · p", "response: hex · diff · pretty"},
-        {"⇧←/→", "response: scroll a long line sideways"},
+        Item.new("^R", "send the request", "replay.send"),
+        Item.new("^N / ^W", "new / close a sub-tab"),
+        Item.new("r", "rename the sub-tab (on the strip)"),
+        Item.new("i / ↵", "enter INS (edit) on request/target · esc back to READ"),
+        Item.new("space", "command menu (READ mode on request/target/response)"),
+        Item.new("y", "copy selection/line (READ)", "replay.copy"),
+        Item.new("⇧arrows", "select text (line or char)"),
+        Item.new("^X", "hex-edit the request", "replay.toggle-hex"),
+        Item.new("^S", "SNI override (on the target)", "replay.toggle-sni"),
+        Item.new("^L", "toggle auto Content-Length", "replay.toggle-auto-content-length"),
+        Item.new("^V", "toggle transport HTTP/1.1 ↔ HTTP/2", "replay.toggle-http2"),
+        Item.new("space → g", "send group: %%%-split requests on one connection"),
+        Item.new("↹", "cycle target → request → response"),
+        Item.new("d", "response: toggle diff", "replay.toggle-diff"),
+        Item.new("p", "response: pretty bodies", "replay.toggle-pretty"),
+        Item.new("x", "response: hex dump (pane-local)"),
+        Item.new("⇧←/→", "response: scroll a long line sideways"),
       ]},
       {"FUZZER", [
-        {"⇧I", "send a flow/replay here (History/Replay)"},
-        {"^N / ^W", "new / close a sub-tab"},
-        {"i / ↵", "enter INS (edit) on target/template · esc back to READ"},
-        {"space", "command menu (READ mode on target/template/results/detail)"},
-        {"y · O", "copy selection/line · copy all pane (READ)"},
-        {"⇧arrows", "select text (line or char)"},
-        {"^A · ^K · ^T · ^U", "auto-mark params · mark word · mark point (manual §) · clear §"},
-        {"^V", "toggle transport HTTP/1.1 ↔ HTTP/2"},
-        {"^O", "focus the config pane (payload sets · Mode · Advanced · Run)"},
-        {"config", "↑/↓ rows · ↵ edit a set / Add / Advanced / Run · ←/→ Mode · Del remove a set"},
-        {"^L", "add a List payload set (one value per line, paste splits)"},
-        {"set editor", "↹/↑↓ fields · List = multi-line · wordlist path auto-completes · esc applies"},
-        {"^R · ^X", "run · stop"},
-        {"↑/↓ · ↵", "results: select · open detail"},
-        {"o · m", "sort · matched-only"},
-        {"r", "rename the sub-tab (on the strip)"},
-        {"⇧←/→", "detail: scroll a long line sideways"},
+        Item.new("⇧I", "send a flow/replay here (History/Replay)"),
+        Item.new("^N / ^W", "new / close a sub-tab"),
+        Item.new("i / ↵", "enter INS (edit) on target/template · esc back to READ"),
+        Item.new("space", "command menu (READ mode on target/template/results/detail)"),
+        Item.new("y · O", "copy selection/line · copy all pane (READ)"),
+        Item.new("⇧arrows", "select text (line or char)"),
+        Item.new("^A · ^K · ^T · ^U", "auto-mark params · mark word · mark point (manual §) · clear §"),
+        Item.new("^V", "toggle transport HTTP/1.1 ↔ HTTP/2"),
+        Item.new("^O", "focus the config pane (payload sets · Mode · Advanced · Run)"),
+        Item.new("config", "↑/↓ rows · ↵ edit a set / Add / Advanced / Run · ←/→ Mode · Del remove a set"),
+        Item.new("^L", "add a List payload set (one value per line, paste splits)"),
+        Item.new("set editor", "↹/↑↓ fields · List = multi-line · wordlist path auto-completes · esc applies"),
+        Item.new("^R · ^X", "run · stop"),
+        Item.new("↑/↓ · ↵", "results: select · open detail"),
+        Item.new("o · m", "sort · matched-only"),
+        Item.new("r", "rename the sub-tab (on the strip)"),
+        Item.new("⇧←/→", "detail: scroll a long line sideways"),
       ]},
       {"COMPARER", [
-        {"a · b", "pick flow A · flow B"},
-        {"←/→", "compare requests ⟷ responses"},
-        {"s", "swap A ⇄ B"},
-        {"^N / ^W · r", "new / close / rename comparison sub-tab"},
-        {"Send to Comparer", "from History (space menu) — fills the active sub-tab"},
+        Item.new("a · b", "pick flow A · flow B"),
+        Item.new("←/→", "compare requests ⟷ responses"),
+        Item.new("s", "swap A ⇄ B"),
+        Item.new("^N / ^W · r", "new / close / rename comparison sub-tab"),
+        Item.new("Send to Comparer", "from History (space menu) — fills the active sub-tab"),
       ]},
       {"EDITORS", [
-        {"^G · ^F", "go to line · find"},
-        {"^E", "open the field in $EDITOR"},
-        {"^B", "reveal whitespace"},
+        Item.new("^G · ^F", "go to line · find"),
+        Item.new("^E", "open the field in $EDITOR"),
+        Item.new("^B", "reveal whitespace"),
       ]},
       {"OTHER TABS", [
-        {"Sitemap", "↑/↓ · / filter · ↵/→ expand · t tag · g group · ⇧S scope"},
-        {"Findings", "detail notes: i/↵ edit · x line · ⇧select · y copy · space cmds · ↑/↓ links"},
-        {"Prism", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · ⇧S scope · space cmds"},
-        {"Notes", "i/↵ edit · x line · ⇧arrows select · y copy · space cmds (Copy selected when highlighted)"},
-        {"Project", "desc: i/↵ edit · x line · ⇧arrows select · y copy · space cmds"},
-        {"Intercept", "↵/e edit · f fwd · d drop · F all · c catch dir · / condition · ⇧←/→ h-scroll preview"},
+        Item.new("Sitemap", "↑/↓ · / filter · ↵/→ expand · t tag · g group · ⇧S scope"),
+        Item.new("Findings", "detail notes: i/↵ edit · x line · ⇧select · y copy · space cmds · ↑/↓ links"),
+        Item.new("Prism", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · ⇧S scope · space cmds"),
+        Item.new("Notes", "i/↵ edit · x line · ⇧arrows select · y copy · space cmds (Copy selected when highlighted)"),
+        Item.new("Project", "desc: i/↵ edit · x line · ⇧arrows select · y copy · space cmds"),
+        Item.new("Intercept", "↵/e edit · f fwd · d drop · ⇧F all · c catch · / condition · i on/off · ⇧←/→ h-scroll"),
       ]},
       {"CONVERT", [
-        {"i / ↵", "enter INS on INPUT · esc back to READ"},
-        {"INPUT READ", "⇧arrows select · y copy · space cmds"},
-        {"chain", "always editable — base64 > url-encode > sha256 ( > | , )"},
-        {"↹ / ↵", "complete the suggested converter (popup)"},
-        {"OUTPUT", "↑/↓ move · ⇧arrows select · y copy · ⇧←/→ h-scroll"},
-        {"^Y · ^X", "copy all output · cycle text/hex/base64"},
-        {"^S · ^O", "save chain by name · load a saved chain"},
-        {"^N · ^W", "new · close conversion sub-tab"},
-        {"^1-9 · r", "switch sub-tab · rename (on the strip)"},
-        {"space", "command menu (on the sub-tab strip)"},
+        Item.new("i / ↵", "enter INS on INPUT · esc back to READ"),
+        Item.new("INPUT READ", "⇧arrows select · y copy · space cmds"),
+        Item.new("chain", "always editable — base64 > url-encode > sha256 ( > | , )"),
+        Item.new("↹ / ↵", "complete the suggested converter (popup)"),
+        Item.new("OUTPUT", "↑/↓ move · ⇧arrows select · y copy · ⇧←/→ h-scroll"),
+        Item.new("^Y · ^X", "copy all output · cycle text/hex/base64"),
+        Item.new("^S · ^O", "save chain by name · load a saved chain"),
+        Item.new("^N · ^W", "new · close conversion sub-tab"),
+        Item.new("^1-9 · r", "switch sub-tab · rename (on the strip)"),
+        Item.new("space", "command menu (on the sub-tab strip)"),
       ]},
       {"OVERLAYS", [
-        {"palette / settings", "↑/↓ · ↵ · esc"},
-        {"confirm", "←/→ choose · y / n · ↵"},
-        {"Settings: Editor", "toggle mouse support (Mouse field)"},
+        Item.new("palette / settings", "↑/↓ · ↵ · esc"),
+        Item.new("confirm", "←/→ choose · y / n · ↵"),
+        Item.new("Settings: Editor", "toggle mouse support (Mouse field)"),
       ]},
     ]
 
     @rows : Array(Row)
     @scroll : Int32 = 0
 
-    def initialize
-      @rows = build_rows
+    def initialize(registry : Verb::Registry? = nil)
+      @rows = build_rows(registry)
     end
 
-    private def build_rows : Array(Row)
+    # Rebuild from the live registry (call after a hotkeys save so Help stays honest).
+    def reload(registry : Verb::Registry) : Nil
+      @rows = build_rows(registry)
+      @scroll = 0
+    end
+
+    private def build_rows(registry : Verb::Registry?) : Array(Row)
       rows = [] of Row
       SECTIONS.each_with_index do |(title, items), si|
         rows << Row.new(:gap, "", "") if si > 0
         rows << Row.new(:head, title, "")
-        items.each { |(k, d)| rows << Row.new(:item, k, d) }
+        items.each do |item|
+          key = item.key
+          if (id = item.verb_id) && registry
+            key = Hotkeys.binding_label(registry, id, item.key)
+          end
+          rows << Row.new(:item, key, item.desc)
+        end
       end
       rows
     end

@@ -6,6 +6,7 @@ require "../text_read_state"
 require "../clipboard"
 require "../../convert"
 require "../../settings"
+require "../../hotkeys"
 require "../subtab_clone"
 
 module Gori::Tui
@@ -206,7 +207,8 @@ module Gori::Tui
     end
 
     # The body dispatcher. Reached only when this tab is active, no overlay is up,
-    # and @focus == :body. Always returns true (keys are literal text by default).
+    # and @focus == :body. READ input/output return false so command letters hit the
+    # keymap (rebindable copy + Global breath); INS/chain still swallow printables.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
       return handle_prompt_key(ev) if @prompt # save/load mini-prompt is modal-in-body
       key = ev.key
@@ -241,10 +243,10 @@ module Gori::Tui
           @host.request_focus(:subtabs)
         end
       else
-        case cur.pane
+        return case cur.pane
         when :input  then edit_input(ev, c)
         when :output then handle_output(ev)
-        else              edit_chain(ev, c)
+        else              edit_chain(ev, c); true
         end
       end
       true
@@ -362,17 +364,18 @@ module Gori::Tui
       return "type a name · ↵ save · esc cancel" if @prompt == :save_as
       return "type a name · ↵ load · esc cancel" if @prompt == :load
       s = cur
+      y = Hotkeys.binding_label(@host.session.registry, "convert.copy", "y")
       case s.pane
       when :chain
         return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if @popup.open?
         "chain (> | ,) · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc tabs"
       when :output
-        "↑/↓ move · ⇧arrows select · y copy · ⇧←/→ h-scroll · ↑-top chain · space cmds · ^X mode · ^Y copy all · esc tabs"
+        "↑/↓ move · ⇧arrows select · #{y} copy · ⇧←/→ h-scroll · ↑-top chain · space cmds · ^X mode · ^Y copy all · esc tabs"
       when :input
         if s.input_mode == InputMode::Insert
           "type to edit · esc read · ↓ chain · ^L clear · ^X mode · ^N new · ^W close · ↑ sub-tabs"
         else
-          "i/↵ edit · ⇧arrows select · y copy · space cmds · ↓/↹ chain · ^X mode · ^N new · esc tabs"
+          "i/↵ edit · ⇧arrows select · #{y} copy · space cmds · ↓/↹ chain · ^X mode · ^N new · esc tabs"
         end
       else
         ""
@@ -488,7 +491,7 @@ module Gori::Tui
     end
 
     # ---- INPUT editor ----
-    private def edit_input(ev : Termisu::Event::Key, c : Char?) : Nil
+    private def edit_input(ev : Termisu::Event::Key, c : Char?) : Bool
       s = cur
       return handle_input_read(ev, c) unless s.input_mode == InputMode::Insert
       key = ev.key
@@ -511,10 +514,11 @@ module Gori::Tui
       else
         edit_input_caret(ev, s, c) # ←/→/Home/End/Delete + literal insert
       end
+      true
     end
 
-    private def handle_input_read(ev : Termisu::Event::Key, c : Char?) : Nil
-      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+    private def handle_input_read(ev : Termisu::Event::Key, c : Char?) : Bool
+      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
       s = cur
       key = ev.key
       selecting = ev.shift?
@@ -533,9 +537,10 @@ module Gori::Tui
       when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
       when key.home?  then s.input.home
       when key.end?   then s.input.end_of_line
-      when c == 'x'   then s.input_read.select_line(s.input)
-      when c == 'y'   then convert_copy_selection
+      when c && !ev.ctrl? && !ev.alt? && !c.control?
+        return false # x/y + Global breath → keymap
       end
+      true
     end
 
     # The within-line caret keys + literal insert for the INPUT editor (split out of
@@ -598,9 +603,10 @@ module Gori::Tui
     # ---- OUTPUT pane (read-only but navigable) ----
     # Mirrors Replay's response pane: space opens the action menu (nothing to type
     # here), ↑/↓ scroll, and ↑ at the top pops focus up to the CHAIN field above.
-    private def handle_output(ev : Termisu::Event::Key) : Nil
-      return @host.open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
-      return if handle_output_hscroll(ev)
+    # Command letters defer to the keymap (rebindable copy + Global breath).
+    private def handle_output(ev : Termisu::Event::Key) : Bool
+      return true.tap { @host.open_space_menu } if ev.key.space? && !ev.ctrl? && !ev.alt?
+      return true if handle_output_hscroll(ev)
       s = cur
       key = ev.key
       selecting = ev.shift?
@@ -610,11 +616,10 @@ module Gori::Tui
       when key.down?, key.lower_j? then out_nav_step(s, 1, 0, selecting)
       when key.left?               then out_nav_step(s, 0, -1, selecting)
       when key.right?              then out_nav_step(s, 0, 1, selecting)
-      when (c = ev.char || key.to_char) == 'x'
-        s.view.output_select_line(s.result)
-      when c == 'y'
-        convert_copy_selection
+      when (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt? && !c.control?
+        return false
       end
+      true
     end
 
     private def handle_output_hscroll(ev : Termisu::Event::Key) : Bool

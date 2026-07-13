@@ -9,6 +9,25 @@ gori's keyboard shortcuts are rebindable from **`settings:hotkeys`** in the comm
 Ctrl-P → settings:hotkeys
 ```
 
+## Key budget (how new shortcuts earn a key)
+
+Bare letter keys are scarce. New actions should pick a **price tier** before taking a chord:
+
+| Tier | Price | When | Examples |
+|------|-------|------|----------|
+| **L0 Structural** | `Esc` `Enter` `Tab` arrows `Space` (leader) | Always | focus, open/close, READ/INS, space menu |
+| **L1 Loop** | bare letter or sticky family (`^R`) | many times / minute | History `j/k` `/` `y`, Replay send |
+| **L2 Session breath** | Global bare — **cap: `c` `i` `s` only** | many times / session | capture, intercept, scope lens |
+| **L3 Contextual** | `Space` then mnemonic | occasional, pane-local | compare, mine, send-group, copy-as |
+| **L4 Rare / config** | palette (`Ctrl-P`) only | rare | settings, Match & Replace, notifications |
+
+Rules of thumb:
+
+- **Default for new pane actions is L3** (space menu only). Promote to a direct key only after the loop proves it.
+- **Ctrl** is for actions that must work while typing (INS) or that are destructive — not a general upgrade from bare.
+- **History → Replay** and **Replay send** stay on **`Ctrl-R`** (same muscle memory). Do not move History→Replay to bare `r`.
+- Match & Replace and Notifications ship **keyless** (palette / badge); rebind them if you want a Global chord.
+
 ## Editing
 
 The editor opens a working copy — nothing is saved until you press `Enter`, and `Esc` discards every change.
@@ -70,7 +89,10 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 ## Limitations
 
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
-- The **Help** tab (the last tab — reach it with `[` / `]` or the palette's *Go to Help*; digits `1`–`9` only reach the first nine visible tabs) and the status-bar hints show **default** chords, not your rebindings — if you remap something, those still advertise the original key.
+- The **command palette** and the **Help** tab (Global / History / Replay rows wired to verb ids) resolve chords through the effective keymap after a rebind. Other Help sections and some status chips may still use curated defaults.
+- Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
+- Pane-local keys that share a letter (Replay response `x` = hex vs request/target `x` = select line) stay controller-owned so both meanings can coexist.
+- Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).
 
 ## Next Steps
 

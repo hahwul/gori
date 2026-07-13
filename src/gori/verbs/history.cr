@@ -189,23 +189,23 @@ module Gori
         "Pipeline every request (split on a lone %%% line) over ONE keep-alive connection — active request-smuggling / keep-alive reuse — and show each response",
         Verb::Scope::Replay, available: in_replay, mnemonic: 'g', section: :request) { |ctx| ctx.replay_send_group; nil }
 
-      # --- RESPONSE pane (Round 5 order: diff, hex, pretty) — today's plain `d`/`x`/`p`
-      # keys, handled inline by ReplayController#handle_replay_response; promoted to
-      # verbs purely so the :response space-menu group has something to show. 'd'/'x'/'p'
-      # are free in COMMON ∪ :response (COMMON has none of these; :request's own
-      # 'd'/'x'/'p' — toggle-decoded/toggle-hex/pretty-request — are a DIFFERENT
-      # section, so no bleed). toggle-pretty has no chord (the direct 'p' key in the
-      # response pane is handled inline by the controller) and reuses the SAME shared
-      # @pretty flag as History detail's `p` toggle.
+      # --- RESPONSE pane (diff / pretty via keymap so rebind works; hex stays
+      # controller-owned on the response pane because plain `x` is also select-line
+      # on request/target READ — same letter, pane-local meaning). 'd'/'p' chords are
+      # free in COMMON ∪ :response (:request's 'd'/'p' are a different section for the
+      # space menu only; keymap last-wins is avoided because request toggles use
+      # ctrl chords). Handlers no-op unless the response pane is focused.
       r.register Verb::Definition.new(
         "replay.toggle-diff", "Toggle diff", "Switch the response pane between the raw response and a diff against the previous one",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'd', section: :response) { |ctx| ctx.replay_toggle_resp_diff; nil }
+        Verb::Scope::Replay, [Verb::Chord.new("d")],
+        available: in_replay, mnemonic: 'd', section: :response) { |ctx| ctx.replay_toggle_resp_diff; nil }
       r.register Verb::Definition.new(
         "replay.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
         Verb::Scope::Replay, available: in_replay, mnemonic: 'x', section: :response) { |ctx| ctx.replay_toggle_resp_hex; nil }
       r.register Verb::Definition.new(
         "replay.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'p', section: :response) { |ctx| ctx.toggle_pretty; nil }
+        Verb::Scope::Replay, [Verb::Chord.new("p")],
+        available: in_replay, mnemonic: 'p', section: :response) { |ctx| ctx.toggle_pretty; nil }
 
       # --- detail view ---
       # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and only

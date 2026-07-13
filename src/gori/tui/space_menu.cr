@@ -2,6 +2,7 @@ require "./screen"
 require "./frame"
 require "./theme"
 require "../verb"
+require "../hotkeys"
 
 module Gori::Tui
   # The "space" action menu — a helix-style leader popup anchored at the
@@ -33,10 +34,11 @@ module Gori::Tui
 
     # Fixed per-row chrome around the title in the narrow single-column layout:
     # left border(1) + selection indicator(1) + mnemonic key(1) + gap(1) + scroll-
-    # marker column(1) + right border(1) = 6. Box width is exactly the widest
-    # entry title plus this — never widened to pack columns (Round 5: classic
-    # narrow single-column look, not the old row-packed layout).
+    # marker column(1) + right border(1) = 6, plus room for an optional dim
+    # direct-chord label (e.g. `^R`) when the verb has a rebindable binding that
+    # differs from the space mnemonic.
     CHROME = 6
+    CHORD_COL = 5 # reserved right gutter for e.g. `^R` / `⇧I`
 
     SECTION_LABELS = {
       :common => "COMMON", :request => "REQUEST", :response => "RESPONSE", :target => "TARGET",
@@ -112,9 +114,25 @@ module Gori::Tui
       # Widest of the entry titles AND the group headers ("─ LABEL ─", 4 chars of
       # chrome around the label) — a grouped view with a long section label (e.g.
       # SECTION_LABELS additions) must still fit inside the box the entries sized.
-      entry_w = @entries.empty? ? 0 : @entries.max_of { |v| menu_title(v, ctx).size }
+      entry_w = @entries.empty? ? 0 : @entries.max_of { |v| menu_title(v, ctx).size + chord_hint_w(v) }
       header_w = @groups.empty? ? 0 : @groups.max_of { |g| g.label.size + 4 }
       @title_w = {entry_w, header_w}.max
+    end
+
+    # Extra width when we paint a dim direct-chord label next to the title.
+    private def chord_hint_w(v : Verb::Definition) : Int32
+      return 0 unless hint = chord_hint(v)
+      hint.size + 1
+    end
+
+    # Effective direct chord (e.g. `^R`), or nil when unbound / identical to the
+    # single-char mnemonic (no need to repeat `y` next to mnemonic `y`).
+    private def chord_hint(v : Verb::Definition) : String?
+      return nil unless chord = Hotkeys.binding_for(@registry, v.id)
+      label = Hotkeys.display_label(chord)
+      mk = v.menu_key
+      return nil if mk && (label == mk.to_s || label == mk.to_s.upcase)
+      label
     end
 
     private def menu_title(v : Verb::Definition, ctx : Verb::ExecContext) : String
@@ -210,10 +228,15 @@ module Gori::Tui
         screen.cell(b.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
         screen.text(b.x + 2, ry, v.menu_key.to_s, Theme.accent, bg, Attribute::Bold)
         title_fg = active ? Theme.text_bright : Theme.text
-        # Reserve the rightmost interior col for the scroll marker (above) so a
-        # widest-title row can't paint over it.
+        # Reserve the rightmost interior col for the scroll marker, and (when set)
+        # a dim direct-chord label so rebinds stay visible without changing mnemonics.
+        hint = chord_hint(v)
+        hint_w = hint ? hint.size + 1 : 0
         title_text = @ctx.try { |c| menu_title(v, c) } || v.title
-        screen.text(b.x + 4, ry, title_text, title_fg, bg, width: {b.w - 6, 0}.max)
+        screen.text(b.x + 4, ry, title_text, title_fg, bg, width: {b.w - 6 - hint_w, 0}.max)
+        if hint
+          screen.text(b.right - 2 - hint.size, ry, hint, Theme.muted, bg)
+        end
       end
     end
 

@@ -16,7 +16,12 @@ module Gori::Tui
 
     def initialize(host : Host)
       super(host)
-      @help = HelpView.new
+      @help = HelpView.new(host.session.registry)
+    end
+
+    # Rebuild the cheat-sheet after settings:hotkeys save so labels match dispatch.
+    def reload_help(registry : Verb::Registry) : Nil
+      @help.reload(registry)
     end
 
     def tab : Symbol

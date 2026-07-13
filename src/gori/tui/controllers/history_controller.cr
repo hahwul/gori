@@ -2,6 +2,7 @@ require "../tab_controller"
 require "../history_view"
 require "../clipboard"
 require "../url"
+require "../../hotkeys"
 
 module Gori::Tui
   # The History tab: the live flow list + the in-frame detail drill-in. The detail
@@ -191,16 +192,24 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
+      reg = @host.session.registry
+      y = Hotkeys.binding_label(reg, "history.copy", "y")
+      replay = Hotkeys.binding_label(reg, "history.replay", "^R")
+      finding = Hotkeys.binding_label(reg, "finding.create", "⇧F")
+      follow = Hotkeys.binding_label(reg, "history.toggle-follow", "f")
+      filter = Hotkeys.binding_label(reg, "history.query", "/")
+      intercept = Hotkeys.binding_label(reg, "intercept.toggle", "i")
       if @host.overlay == :detail
         nav = @history.detail_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        return "←/→ panes · #{nav} · ⇧arrows select · y copy · ⇧←/→ h-scroll · space cmds · esc back"
+        dy = Hotkeys.binding_label(reg, "detail.copy", "y")
+        return "←/→ panes · #{nav} · ⇧arrows select · #{dy} copy · ⇧←/→ h-scroll · space cmds · esc back"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       if @history.preview_enabled?
         return "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs" if @history.preview_focus != :list
-        return "↑/↓ move · ↵ open · ↹ preview · ^R replay · / filter · space cmds · esc tabs"
+        return "↑/↓ move · ↵ open · ↹ preview · #{replay} replay · #{filter} filter · space cmds · esc tabs"
       end
-      "↑/↓ move · ↵ open · ^R replay · ⇧F finding · f follow · / filter · i hold-mode · space cmds · esc tabs"
+      "↑/↓ move · ↵ open · #{replay} replay · #{finding} finding · #{follow} follow · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
     end
 
     # Live IME composition only flows to the QL filter bar (the one text field).

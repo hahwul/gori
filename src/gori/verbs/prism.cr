@@ -27,8 +27,8 @@ module Gori
         "prism.filter", "Filter issues", "Filter the list (severity:/status:/category:/host:/code:/free text)",
         Verb::Scope::Prism, [Verb::Chord.new("/")]) { |ctx| ctx.prism_query; nil }
 
-      # `m` is Global rules.edit, but a Prism-scoped `m` safely shadows it only while the
-      # Prism body has focus (different scopes don't conflict; the scoped keymap wins).
+      # Prism-local `m` (mode cycle). Global Match & Replace is palette-only by default,
+      # so this no longer needs to shadow a Global bare letter.
       r.register Verb::Definition.new(
         "prism.mode", "Set mode", "Choose the scan mode (off / passive / passive+active)",
         Verb::Scope::Prism, [Verb::Chord.new("m")]) { |ctx| ctx.prism_set_mode; nil }

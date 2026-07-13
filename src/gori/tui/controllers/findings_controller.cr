@@ -3,6 +3,7 @@ require "../findings_view"
 require "../clipboard"
 require "../../store"
 require "../../findings_export"
+require "../../hotkeys"
 
 module Gori::Tui
   # The Findings tab: the triage list + a finding's detail (with an inline notes
@@ -43,11 +44,15 @@ module Gori::Tui
     end
 
     def body_hint(focus : Symbol) : String
+      reg = @host.session.registry
+      filt = Hotkeys.binding_label(reg, "findings.filter", "/")
+      nnew = Hotkeys.binding_label(reg, "findings.new", "n")
+      y = Hotkeys.binding_label(reg, "finding.copy", "y")
       if @findings.detail_open?
         if @findings.notes_insert_mode?
           "type to edit · esc save · ^W discard"
         elsif @findings.notes_focused?
-          "↑/↓ move · ⇧arrows select · y copy · i/↵ edit · space cmds · ⇧←/→ h-scroll · esc links"
+          "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · ⇧←/→ h-scroll · esc links"
         else
           "↑/↓ links · ↵ open · i/↵ notes · o flow · r replay · space cmds · ←/esc back"
         end
@@ -56,9 +61,9 @@ module Gori::Tui
       elsif @findings.preview_enabled? && @findings.preview_focus == :preview
         "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs"
       elsif @findings.preview_enabled?
-        "↑/↓ move · ↵ open · ↹ preview · / filter · n new · space cmds · esc tabs"
+        "↑/↓ move · ↵ open · ↹ preview · #{filt} filter · #{nnew} new · space cmds · esc tabs"
       else
-        "↑/↓ move · ↵ open · / filter · n new · space cmds · esc tabs"
+        "↑/↓ move · ↵ open · #{filt} filter · #{nnew} new · space cmds · esc tabs"
       end
     end
 

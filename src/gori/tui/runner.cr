@@ -225,6 +225,10 @@ module Gori::Tui
     # actions, the shell's ExecContext delegates) is downcast here, ONCE per tab, so
     # call sites stay cast-free. The key is always present after initialize, so `.as`
     # never raises in practice (a missing key would be a registry-wiring bug).
+    private def help_controller : HelpController
+      @tabs[:help].as(HelpController)
+    end
+
     private def sitemap_controller : SitemapController
       @tabs[:sitemap].as(SitemapController)
     end
@@ -818,7 +822,10 @@ module Gori::Tui
 
       chord = Keybind.from_event(ev)
       return unless chord
-      if id = @keymap.lookup(chord, current_scope)
+      # Resolve through the keymap, honouring available? so a scoped binding that is
+      # gated off (e.g. Replay copy only in READ) does not swallow the chord — and so
+      # Global breath keys (c/i/s) still fire when a scoped verb is unavailable.
+      if id = resolve_verb_id(chord, current_scope)
         @toast = @session.registry[id].call(self) || @toast
         return
       end
@@ -833,6 +840,26 @@ module Gori::Tui
       # pane + the Intercept queue route space from their own handlers, which return
       # before this point.)
       open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
+    end
+
+    # Keymap id for `chord` in `scope` (then Global) whose verb is currently available.
+    # A scoped hit that fails available? does not block the Global fallback — so e.g.
+    # Replay's READ-only `y` does not shadow a future Global on the same letter when
+    # the user is in INS, and gated response tools never swallow breath keys.
+    private def resolve_verb_id(chord : Verb::Chord, scope : Verb::Scope) : String?
+      if id = @keymap.lookup(chord, scope)
+        verb = @session.registry[id]
+        return id if verb.available?(self)
+        # lookup already fell back to Global when the scope had no binding; when the
+        # scope HAD a binding that is gated off, try Global explicitly.
+        if verb.scope != Verb::Scope::Global && scope != Verb::Scope::Global
+          if gid = @keymap.lookup(chord, Verb::Scope::Global)
+            return gid if @session.registry[gid].available?(self)
+          end
+        end
+        return nil
+      end
+      nil
     end
 
     # --- mouse dispatch ------------------------------------------------------
@@ -2377,6 +2404,8 @@ module Gori::Tui
       Hotkeys.apply(working, profile)
       ok = Settings.save
       @keymap = Hotkeys.build_keymap(@session.registry)
+      # Help is built from the registry at open; reload so rebound labels stay honest.
+      help_controller.reload_help(@session.registry)
       @overlay = :none
       @toast = ok ? "hotkeys saved" : "hotkeys applied — could not save to #{Settings.path}"
     end
@@ -4193,11 +4222,14 @@ module Gori::Tui
     # Space-menu (:response) counterparts of the response pane's raw `d`/`x` keys —
     # same ReplayView toggles, just reachable without memorizing the key.
     def replay_toggle_resp_diff : Nil
-      replay_controller.current_view.try(&.toggle_resp_mode)
+      # Pane-gated: plain `d` is a response-only tool (request has other uses).
+      return unless (v = replay_controller.current_view) && v.focus == :response
+      v.toggle_resp_mode
     end
 
     def replay_toggle_resp_hex : Nil
-      replay_controller.current_view.try(&.toggle_resp_hex)
+      return unless (v = replay_controller.current_view) && v.focus == :response
+      v.toggle_resp_hex
     end
 
     def replay_toggle_mark_transform : Nil
