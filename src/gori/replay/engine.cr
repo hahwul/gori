@@ -44,49 +44,99 @@ module Gori
         return error(connect_error(scheme, host, port, verify_upstream), started) unless upstream
 
         begin
-          upstream.write(request)
-          upstream.flush
-          head = Proxy::Codec::Http1.read_head(upstream)
-          return error("no response from #{host}:#{port}", started) unless head
-
-          resp = Proxy::Codec::Http1.parse_response_head(head)
-          # Skip interim 1xx informational responses (RFC 9110 §15.2): a captured
-          # request carrying `Expect: 100-continue`, or an origin/CDN that emits
-          # 103 Early Hints, would otherwise return the 100/103 as the replay
-          # result. Read on until the final (>=200) status. 101 Switching Protocols
-          # is terminal (a protocol upgrade), so it is NOT skipped.
-          interim_seen = 0
-          while resp.status >= 100 && resp.status < 200 && resp.status != 101
-            # RFC 9112 §6: a 1xx MUST NOT carry content. One that declares a body
-            # (Content-Length / Transfer-Encoding) is malformed and a desync vector
-            # (its body can embed a fake final response) — refuse it.
-            if resp.headers.get?("Content-Length") || resp.headers.get?("Transfer-Encoding")
-              return error("malformed interim 1xx response (declared a body) from #{host}:#{port}", started)
-            end
-            # Cap the run so an origin streaming endless body-less 103s can't hang the
-            # replay/fuzz worker fiber indefinitely (there is no whole-request deadline).
-            interim_seen += 1
-            return error("too many interim 1xx responses from #{host}:#{port}", started) if interim_seen > MAX_INTERIM
-            head = Proxy::Codec::Http1.read_head(upstream)
-            return error("upstream closed after interim 1xx from #{host}:#{port}", started) unless head
-            resp = Proxy::Codec::Http1.parse_response_head(head)
-          end
-          begin
-            framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
-            body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len)
-            Result.new(head, body, resp, elapsed(started), incomplete: !complete)
-          rescue ex
-            # The head was already read + parsed. A framing rejection (CL+TE — precisely the
-            # ambiguous response a smuggling/desync probe is hunting) or a mid-body read error
-            # must NOT throw the head away as a bare error string. Keep the head + parsed
-            # response, flag incomplete, and carry the reason so the workbench shows both.
-            Result.new(head, nil, resp, elapsed(started), error: ex.message || "response read failed", incomplete: true)
-          end
-        rescue ex
-          error(ex.message || "replay error", started)
+          exchange(upstream, request, host, port, started)
         ensure
           upstream.close rescue nil
         end
+      end
+
+      # Sends several requests back-to-back on ONE keep-alive connection, capturing each
+      # response in order — the primitive behind Replay's "send group". Active HTTP request
+      # smuggling (CL.TE / TE.CL desync) and keep-alive-reuse probes NEED this: a desync
+      # induced by request N surfaces only as a corrupted/misaligned response to request N+1
+      # on the SAME socket, which the fresh-connection-per-send path can never reveal.
+      #
+      # Requests are sent AS GIVEN — the caller owns the framing (a deliberately wrong
+      # Content-Length is the whole point), so nothing here rewrites them. Sequential
+      # send→receive (write a request, read its one response, then the next). Once an
+      # exchange errors the socket is treated as unusable: the remaining requests return a
+      # "skipped" Result rather than dialing again (a group is ONE connection by definition).
+      def self.send_pipeline(requests : Array(Bytes), *, scheme : String, host : String, port : Int32,
+                             verify_upstream : Bool, sni : String? = nil,
+                             timeout : Time::Span? = nil) : Array(Result)
+        results = [] of Result
+        return results if requests.empty?
+        ct = timeout || Proxy::Upstream::CONNECT_TIMEOUT
+        it = timeout || Proxy::Upstream::IO_TIMEOUT
+        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it)
+        unless upstream
+          msg = connect_error(scheme, host, port, verify_upstream)
+          now = Time.instant
+          requests.size.times { results << error(msg, now) }
+          return results
+        end
+        begin
+          dead = false
+          requests.each do |request|
+            if dead
+              results << Result.new(Bytes.new(0), nil, nil, 0_i64, "skipped — the connection closed earlier in the group")
+              next
+            end
+            r = exchange(upstream, request, host, port, Time.instant)
+            results << r
+            dead = true if r.error # a failed exchange leaves the socket state unusable for the rest
+          end
+        ensure
+          upstream.close rescue nil
+        end
+        results
+      end
+
+      # Writes one request on an already-open connection and reads its single response
+      # (skipping interim 1xx). Fully self-contained: any IO/parse failure becomes an error
+      # Result rather than propagating, so a group send can decide what to do next. `started`
+      # is when timing began (pre-dial for a one-shot send; per-request for a group).
+      private def self.exchange(upstream : IO, request : Bytes, host : String, port : Int32,
+                                started : Time::Instant) : Result
+        upstream.write(request)
+        upstream.flush
+        head = Proxy::Codec::Http1.read_head(upstream)
+        return error("no response from #{host}:#{port}", started) unless head
+
+        resp = Proxy::Codec::Http1.parse_response_head(head)
+        # Skip interim 1xx informational responses (RFC 9110 §15.2): a captured request
+        # carrying `Expect: 100-continue`, or an origin/CDN that emits 103 Early Hints,
+        # would otherwise return the 100/103 as the replay result. Read on until the final
+        # (>=200) status. 101 Switching Protocols is terminal (a protocol upgrade), NOT skipped.
+        interim_seen = 0
+        while resp.status >= 100 && resp.status < 200 && resp.status != 101
+          # RFC 9112 §6: a 1xx MUST NOT carry content. One that declares a body
+          # (Content-Length / Transfer-Encoding) is malformed and a desync vector
+          # (its body can embed a fake final response) — refuse it.
+          if resp.headers.get?("Content-Length") || resp.headers.get?("Transfer-Encoding")
+            return error("malformed interim 1xx response (declared a body) from #{host}:#{port}", started)
+          end
+          # Cap the run so an origin streaming endless body-less 103s can't hang the
+          # replay/fuzz worker fiber indefinitely (there is no whole-request deadline).
+          interim_seen += 1
+          return error("too many interim 1xx responses from #{host}:#{port}", started) if interim_seen > MAX_INTERIM
+          head = Proxy::Codec::Http1.read_head(upstream)
+          return error("upstream closed after interim 1xx from #{host}:#{port}", started) unless head
+          resp = Proxy::Codec::Http1.parse_response_head(head)
+        end
+        begin
+          framing, len = Proxy::Codec::Body.response_framing(resp, request_method(request))
+          body, complete = Proxy::Codec::Body.read_complete(upstream, framing, len)
+          Result.new(head, body, resp, elapsed(started), incomplete: !complete)
+        rescue ex
+          # The head was already read + parsed. A framing rejection (CL+TE — precisely the
+          # ambiguous response a smuggling/desync probe is hunting) or a mid-body read error
+          # must NOT throw the head away as a bare error string. Keep the head + parsed
+          # response, flag incomplete, and carry the reason so the workbench shows both.
+          Result.new(head, nil, resp, elapsed(started), error: ex.message || "response read failed", incomplete: true)
+        end
+      rescue ex
+        error(ex.message || "replay error", started)
       end
 
       private def self.error(message : String, started : Time::Instant) : Result

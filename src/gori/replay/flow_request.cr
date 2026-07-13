@@ -133,6 +133,24 @@ module Gori
         combine(head, body)
       end
 
+      # Rewrite a request line's HTTP-version token to match the transport when the user
+      # flips the h1↔h2 toggle. The h1 `Engine` sends the request line VERBATIM, so a flow
+      # captured over h2 (stored with a "…​ HTTP/2" line, see H2 Assembler#synth_request_head)
+      # would otherwise reach an h1 origin as a malformed "GET / HTTP/2"; `H2Engine` ignores
+      # the token, but we still normalize it so the editor display agrees with the wire.
+      # The version is the LAST space-delimited token (a raw space inside the target is
+      # tolerated, as elsewhere). Returns the rewritten line, or nil when nothing needs to
+      # change (already correct, or not a recognizable "… HTTP/x" request line).
+      def self.retarget_version_line(line : String, http2 : Bool) : String?
+        sp = line.rindex(' ')
+        return nil unless sp
+        version = line[(sp + 1)..]
+        return nil unless version.starts_with?("HTTP/")
+        want = http2 ? "HTTP/2" : "HTTP/1.1"
+        return nil if version == want
+        "#{line[0, sp]} #{want}"
+      end
+
       # Returns the origin-form request line for an absolute-form one, else nil
       # (origin-form already, or not a well-formed 3-token request line).
       def self.rewrite_request_line(line : String) : String?

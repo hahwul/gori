@@ -79,6 +79,72 @@ describe Gori::Replay::Engine do
     result.ok?.should be_false
     result.error.not_nil!.should contain("too many interim")
   end
+
+  it "send_pipeline sends a group on ONE connection and captures each response" do
+    # A keep-alive origin: reads requests until EOF on each accepted connection and tags
+    # every response with that connection's id, so identical ids prove one shared socket.
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn do
+      cid = 0
+      while conn = origin.accept?
+        cid += 1
+        id = cid
+        begin
+          while head = Gori::Proxy::Codec::Http1.read_head(conn)
+            path = String.new(head).split(' ')[1]? || "?"
+            body = "c#{id}#{path}"
+            conn << "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n" << body
+            conn.flush
+          end
+        rescue
+        ensure
+          conn.close rescue nil
+        end
+      end
+    end
+
+    reqs = ["GET /a HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+            "GET /b HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice]
+    results = Gori::Replay::Engine.send_pipeline(reqs,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    results.size.should eq(2)
+    results.all?(&.ok?).should be_true
+    String.new(results[0].body.not_nil!).should eq("c1/a")
+    String.new(results[1].body.not_nil!).should eq("c1/b") # SAME c1 → one connection
+  end
+
+  it "send_pipeline marks the remaining requests when the origin closes mid-group" do
+    origin = TCPServer.new("127.0.0.1", 0)
+    port = origin.local_address.port
+    spawn do
+      if conn = origin.accept?
+        Gori::Proxy::Codec::Http1.read_head(conn)
+        conn << "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi"
+        conn.flush
+        conn.close
+      end
+    end
+
+    reqs = ["GET /a HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice,
+            "GET /b HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".to_slice]
+    results = Gori::Replay::Engine.send_pipeline(reqs,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    results.size.should eq(2)
+    results[0].ok?.should be_true
+    String.new(results[0].body.not_nil!).should eq("hi")
+    results[1].ok?.should be_false # the connection was gone after the first response
+  end
+
+  it "send_pipeline returns an error Result per request when the origin is unreachable" do
+    reqs = ["GET /a HTTP/1.1\r\n\r\n".to_slice, "GET /b HTTP/1.1\r\n\r\n".to_slice]
+    results = Gori::Replay::Engine.send_pipeline(reqs,
+      scheme: "http", host: "127.0.0.1", port: 1, verify_upstream: false)
+    results.size.should eq(2)
+    results.each(&.ok?.should(be_false))
+  end
 end
 
 describe Gori::Replay::Diff do

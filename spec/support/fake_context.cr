@@ -67,6 +67,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_send : Nil; end
 
+  def replay_send_group : Nil; end
+
   def replay_find_subtab : Nil; end
 
   property replay_tab_count : Int32 = 0
@@ -101,6 +103,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def replay_toggle_auto_content_length : Nil; end
 
+  def replay_toggle_http2 : Nil; end
+
   def replay_toggle_resp_diff : Nil; end
 
   def replay_toggle_resp_hex : Nil; end
@@ -110,6 +114,8 @@ class FakeExecContext < Gori::Verb::ExecContext
   def replay_pretty_request : Nil; end
 
   def fuzz_pretty_template : Nil; end
+
+  def fuzz_toggle_http2 : Nil; end
 
   def replay_auto_mark : Nil; end
 

@@ -308,6 +308,141 @@ describe Gori::Tui::ReplayView do
     end
   end
 
+  it "reframes an edited unary gRPC payload with a corrected length prefix" do
+    replay_tmp_store do |store|
+      body = Bytes[0x00, 0x00, 0x00, 0x00, 0x03, 0xFF, 0x01, 0x02] # one message, payload 0xFF 01 02
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/S/M", http_version: "HTTP/2",
+        head: "POST /S/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
+        body: body))
+      view = ReplayView.new
+      view.load_grpc(store.get_flow(id).not_nil!)
+      view.grpc_reframable?.should be_true
+
+      # unmodified: the reframed body matches the captured framing byte-for-byte
+      s0 = view.request_bytes
+      s0[(s0.size - body.size)..].should eq(body)
+
+      # hex-edit the payload: overtype 0xFF → 0xAB (length unchanged → prefix stays 3)
+      view.toggle_request_hex.should be_true
+      view.hex_set_nibble('a')
+      view.hex_set_nibble('b')
+      view.toggle_request_hex.should be_false # exit writes the edited payload back
+      sent = view.request_bytes
+      sent[(sent.size - 8)..].should eq(Bytes[0x00, 0x00, 0x00, 0x00, 0x03, 0xAB, 0x01, 0x02])
+    end
+  end
+
+  it "pipeline_requests splits the editor on lone %%% lines and labels each request" do
+    view = ReplayView.new
+    req = "GET /a HTTP/1.1\nHost: h\n\n%%%\nGET /b HTTP/1.1\nHost: h\n\n"
+    view.restore("http://127.0.0.1", req, false, false)
+    reqs = view.pipeline_requests
+    reqs.size.should eq(2)
+    reqs[0][0].should eq("GET /a HTTP/1.1") # label = the request line
+    reqs[1][0].should eq("GET /b HTTP/1.1")
+    # a bodyless head gets its CRLFCRLF terminator (the blank line is consumed by the split)
+    String.new(reqs[0][1]).should eq("GET /a HTTP/1.1\r\nHost: h\r\n\r\n")
+    String.new(reqs[1][1]).should eq("GET /b HTTP/1.1\r\nHost: h\r\n\r\n")
+  end
+
+  it "pipeline_requests keeps a bodied request's separator (no double terminator)" do
+    view = ReplayView.new
+    req = "POST /a HTTP/1.1\nHost: h\nContent-Length: 4\n\ndata\n%%%\nGET /b HTTP/1.1\nHost: h\n"
+    view.restore("http://127.0.0.1", req, false, false)
+    reqs = view.pipeline_requests
+    reqs.size.should eq(2)
+    String.new(reqs[0][1]).should eq("POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\ndata")
+    String.new(reqs[1][1]).should eq("GET /b HTTP/1.1\r\nHost: h\r\n\r\n")
+  end
+
+  it "group_sendable? is false in h2 / hex / gRPC modes" do
+    view = ReplayView.new
+    view.load_blank
+    view.group_sendable?.should be_true
+    view.toggle_http2 # h2 → send_pipeline is an h1 primitive
+    view.group_sendable?.should be_false
+  end
+
+  it "apply_group shows a per-response transcript and a single ^R send reclaims the pane" do
+    view = ReplayView.new
+    view.load_blank
+    head = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    r1 = Gori::Replay::Result.new(head, "hi".to_slice, resp, 1_000_i64)
+    r2 = Gori::Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, "connect failed")
+    view.apply_group([{"GET /a HTTP/1.1", r1}, {"GET /b HTTP/1.1", r2}])
+
+    view.group_mode?.should be_true
+    lines = view.resp_plain_lines
+    lines.any?(&.includes?("req 1 · GET /a HTTP/1.1")).should be_true
+    lines.any?(&.includes?("HTTP 200")).should be_true
+    lines.any?(&.includes?("req 2 · GET /b HTTP/1.1")).should be_true
+    lines.any?(&.includes?("connect failed")).should be_true
+
+    # a normal single send takes the response pane back from the group transcript
+    view.apply(Gori::Replay::Result.new(head, "hi".to_slice, resp, 1_000_i64))
+    view.group_mode?.should be_false
+  end
+
+  it "does not reframe a multi-message gRPC body — verbatim, hex refused" do
+    replay_tmp_store do |store|
+      body = Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0xAA,
+        0x00, 0x00, 0x00, 0x00, 0x01, 0xBB] # two framed messages
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/S/M", http_version: "HTTP/2",
+        head: "POST /S/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
+        body: body))
+      view = ReplayView.new
+      view.load_grpc(store.get_flow(id).not_nil!)
+      view.grpc_reframable?.should be_false
+      view.toggle_request_hex.should be_false # nothing single-payload to edit
+      sent = view.request_bytes
+      sent[(sent.size - body.size)..].should eq(body)
+    end
+  end
+
+  it "toggle_http2 flips the transport and retargets the request-line version token" do
+    view = ReplayView.new
+    view.load_blank
+    view.http2?.should be_false
+    view.request_text.should contain("HTTP/1.1")
+
+    view.toggle_http2.should be_true
+    view.http2?.should be_true
+    view.request_text.lines.first.should end_with("HTTP/2")
+    view.request_text.should_not contain("HTTP/1.1")
+
+    view.toggle_http2.should be_false
+    view.http2?.should be_false
+    view.request_text.lines.first.should end_with("HTTP/1.1")
+  end
+
+  it "toggle_http2 is refused for gRPC (h2) and WebSocket (h1) — the transport is intrinsic" do
+    replay_tmp_store do |store|
+      gid = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
+        method: "POST", target: "/demo.Greeter/SayHello", http_version: "HTTP/2",
+        head: "POST /demo.Greeter/SayHello HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
+        body: Bytes[0x00, 0x00, 0x00, 0x00, 0x00]))
+      gview = ReplayView.new
+      gview.load_grpc(store.get_flow(gid).not_nil!)
+      gview.toggle_http2.should be_true # stays h2 — no flip
+      gview.http2?.should be_true
+
+      wid = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 2_i64, scheme: "https", host: "ws.test", port: 443,
+        method: "GET", target: "/ws", http_version: "HTTP/1.1",
+        head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
+      wview = ReplayView.new
+      wview.load_ws(store.get_flow(wid).not_nil!, [] of String)
+      wview.toggle_http2.should be_false # stays h1 — no flip
+      wview.http2?.should be_false
+    end
+  end
+
   it "ws_out_messages yields one clean frame per line and labels the tab by the upgrade request" do
     replay_tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(

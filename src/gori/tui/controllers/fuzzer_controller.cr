@@ -228,6 +228,14 @@ module Gori::Tui
       end
     end
 
+    # Flip the run between HTTP/1.1 and HTTP/2, overriding the seed flow's protocol so the
+    # next run dials the other engine (Engine vs H2Engine).
+    def fuzz_toggle_http2 : Nil
+      return unless view = current_view
+      h2 = view.toggle_http2
+      @host.status(h2 ? "transport: HTTP/2 (h2)" : "transport: HTTP/1.1")
+    end
+
     # Strip every §…§ marker (and its chain) from the template. Space-menu only —
     # `^U` now pretty-prints (matching Replay); clearing lives in the space menu here too.
     def fuzz_clear_marks : Nil
