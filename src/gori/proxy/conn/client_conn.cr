@@ -177,8 +177,10 @@ module Gori::Proxy
       # Match&Replace (request body): a body rule can't stream — it must buffer the
       # whole body to rewrite it and re-frame the head (Content-Length). Only pay this
       # when a request-body rule is live AND there's a body to rewrite; the common path
-      # (no body rule) falls straight through to zero-buffer streaming below (P6).
-      if (rw = @rewriter) && rw.rewrites_request_body? && !req_framing.none?
+      # (no body rule) falls straight through to zero-buffer streaming below (P6). A body
+      # whose declared length exceeds MAX_REWRITE_BODY is left byte-exact (see the constant)
+      # so a huge upload can't grow the proxy heap while a rule is on.
+      if (rw = @rewriter) && rewrite_request_body?(rw, req_framing, req_len)
         return forward_request_rewriting_body(rw, req, sent_req, sent_head, host, port,
           scheme, created_at, started, req_framing, req_len)
       end
@@ -392,9 +394,10 @@ module Gori::Proxy
       # Match&Replace (response body): buffer + rewrite a bounded (Length/chunked),
       # non-streaming response when a response-body rule is live. SSE / close-delimited
       # / 101-upgrade bodies would buffer forever, so they fall through to streaming and
-      # the body rule no-ops on them (matching the intercept-hold exclusions above).
-      if (rw = @rewriter) && rw.rewrites_response_body? &&
-         (resp_framing.length? || resp_framing.chunked?) && !sse?(resp) && resp.status != 101
+      # the body rule no-ops on them (matching the intercept-hold exclusions above). A body
+      # whose declared length exceeds MAX_REWRITE_BODY is likewise left byte-exact (see the
+      # constant) so one huge download can't grow the proxy heap while a rule is on.
+      if (rw = @rewriter) && rewrite_response_body?(rw, resp, resp_framing, resp_len)
         return forward_response_rewriting_body(rw, upstream, req, sent_req, flow_id, host, port,
           scheme, resp, sent_resp_head, resp_framing, resp_len, ttfb, started)
       end
@@ -632,7 +635,10 @@ module Gori::Proxy
       # tee into a discard sink, not a second IO::Memory — the body is already buffered in
       # `buf`; a throwaway IO::Memory would hold the whole response a second time.
       resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
-      body = resp_framing.none? ? nil : buf.to_slice.dup
+      # `buf` is filled once and never written again, and build_message copies head+body into
+      # a fresh buffer, so `buf.to_slice` is a stable view — no defensive dup (which would hold
+      # the whole body a second time). Mirrors the non-hold M&R path above.
+      body = resp_framing.none? ? nil : buf.to_slice
       # Match&Replace (response body) BEFORE the human sees it, like the head. A body rule
       # re-frames the head to Content-Length; `resp` (status/version/Connection) is
       # untouched by that, so keep it as the origin's framing/keep-alive truth.
@@ -887,6 +893,40 @@ module Gori::Proxy
         i += 1
       end
       nil
+    end
+
+    # Ceiling on a body Match&Replace will buffer to rewrite. A body rule can't stream —
+    # it must hold the whole entity to gsub + re-frame (Content-Length), and rewriting
+    # allocates a few more full copies (dechunk, String round-trip, gsub). Left uncapped,
+    # one large download/upload with a body rule live would grow the proxy heap without
+    # bound (a per-connection OOM). Above this size the rule no-ops and the body is
+    # forwarded byte-exact, exactly as it already does for SSE / compressed / 101 bodies —
+    # correctness costs nothing but the rule not applying to a body too big to safely hold.
+    # Only gates KNOWN-length (Content-Length) bodies; a chunked body has no declared size
+    # to check here and still buffers (bounded only by the peer) — capping that streams a
+    # follow-up.
+    MAX_REWRITE_BODY = 16 * 1024 * 1024 # 16 MiB
+
+    # Whether a body of this framing/declared-length is small enough to buffer + rewrite.
+    # Chunked/unknown-length has no size to gate on, so it isn't blocked here.
+    private def rewritable_body_size?(framing : Codec::BodyFraming, len : Int64) : Bool
+      !framing.length? || len <= MAX_REWRITE_BODY
+    end
+
+    # Whether the response-body Match&Replace path applies: a body rule is live, the body is
+    # bounded (Length/chunked, not SSE / close-delimited / 101), and small enough to buffer.
+    # Extracted from handle_response so the dispatch stays flat (it just tests + branches).
+    private def rewrite_response_body?(rw : HeadRewriter, resp : Codec::RawResponse,
+                                       framing : Codec::BodyFraming, len : Int64) : Bool
+      rw.rewrites_response_body? &&
+        (framing.length? || framing.chunked?) && !sse?(resp) && resp.status != 101 &&
+        rewritable_body_size?(framing, len)
+    end
+
+    # Whether the request-body Match&Replace path applies: a body rule is live, there IS a
+    # body, and it's small enough to buffer. Extracted from handle_request (see above).
+    private def rewrite_request_body?(rw : HeadRewriter, framing : Codec::BodyFraming, len : Int64) : Bool
+      rw.rewrites_request_body? && !framing.none? && rewritable_body_size?(framing, len)
     end
 
     # Apply a body Match&Replace to a buffered wire body and return {head, forward_body}.

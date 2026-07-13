@@ -57,13 +57,22 @@ module Gori::Tui
       @detail_win_edit_rev = -1        # @editor.edits the preview was built at (-1 = built from the pristine held bytes)
       @detail_xscroll = 0              # horizontal scroll offset for the read-only held-item preview
       @detail_scroll = 0               # vertical scroll offset (lines) for the read-only preview
+      @reload_rev = -1                 # Interceptor#revision the queue snapshot was last taken at (-1 ⇒ never)
     end
 
-    # Fresh snapshot (cheap; called on enter AND every frame via the 50ms loop).
+    # Fresh snapshot (called on enter AND every frame via the 50ms loop). Gated on the
+    # Interceptor's lock-free revision counter: every mutation that changes what this
+    # method reads — a hold/forward/drop/clear, or an enable/direction/filter change —
+    # bumps it, so an unchanged counter means the queue snapshot + @enabled/@direction
+    # are still current. Skipping then avoids a per-frame mutex lock + Array alloc +
+    # linear re-anchor scan on the common idle frame (spinner tick, clock, unrelated key).
     # Re-anchors selection by item id (not index) so forward/drop of an earlier
     # queue entry does not silently move the highlight onto a different hold.
     # If the edited item vanished (forwarded/dropped/released), drop edit mode.
     def reload(interceptor : Interceptor) : Nil
+      rev = interceptor.revision
+      return if rev == @reload_rev
+      @reload_rev = rev
       prev_id = @items[@selected]?.try(&.id)
       @items = interceptor.pending
       @selected =

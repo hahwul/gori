@@ -110,6 +110,12 @@ module Gori::Tui
       @marker_spans = [] of {Int32, Int32}
       @marker_regions_rev = -1
       @marker_regions_cache = [] of {Int32, Int32, Int32}
+      # The chain under the cursor, cached on {editor revision, cursor} — render_chain_pane
+      # reads it every frame the pane is visible, so a stationary cursor mustn't re-join +
+      # re-scan the whole template buffer each frame (mirrors marker_spans).
+      @chain_rev = -1
+      @chain_cursor = -1
+      @chain_cache = nil.as(String?)
       # The CHAIN sub-pane: a visible editor for the Convert chain of the §…§ marker under
       # the TEMPLATE cursor (transform applied to each payload on send). @chain_focused =
       # editing it; @chain_marker_cursor remembers which marker to commit back to.
@@ -564,6 +570,19 @@ module Gori::Tui
         @marker_spans = Fuzz::Template.marked_spans(@editor.text)
       end
       @marker_spans
+    end
+
+    # The chain (`¦…`) of the marker under the cursor, or nil (not in a marker) / "" (marker,
+    # no chain). Cached on {editor revision, cursor} so a stationary cursor doesn't re-join +
+    # re-scan the whole template buffer every render frame the CHAIN pane is visible.
+    private def chain_under_cursor : String?
+      cur = @editor.cursor_offset
+      if @editor.edits != @chain_rev || cur != @chain_cursor
+        @chain_rev = @editor.edits
+        @chain_cursor = cur
+        @chain_cache = Fuzz::Template.chain_at(@editor.text, cur)
+      end
+      @chain_cache
     end
 
     # {open, sep, close} regions cached on the editor revision — the template tint runs it
@@ -1355,7 +1374,7 @@ module Gori::Tui
         @chain_pane.render(screen, rect, true, "CHAIN · #{marker_label}", CHAIN_PLACEHOLDER)
         return
       end
-      chain = Fuzz::Template.chain_at(@editor.text, @editor.cursor_offset)
+      chain = chain_under_cursor
       Frame.card(screen, rect, chain ? "CHAIN · #{marker_label}" : "CHAIN", bg: Theme.bg, border: Frame.pane_border(false))
       inner = rect.inset(1, 1)
       w = {inner.w, 1}.max

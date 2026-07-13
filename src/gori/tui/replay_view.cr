@@ -147,6 +147,14 @@ module Gori::Tui
       @mark_transform = false
       @marker_regions_rev = -1
       @marker_regions_cache = [] of {Int32, Int32, Int32}
+      # §…§ spans + the chain under the cursor, cached on the editor revision (marked_spans)
+      # and on {revision, cursor} (chain_at) — both re-join the whole buffer, so an unchanged
+      # MARK/CHAIN pane shouldn't recompute them every frame (mirrors marker_regions).
+      @marker_spans_rev = -1
+      @marker_spans_cache = [] of {Int32, Int32}
+      @chain_rev = -1
+      @chain_cursor = -1
+      @chain_cache = nil.as(String?)
       # The CHAIN sub-pane (MARK mode): a visible editor for the chain of the §…§ marker
       # under the request cursor. @chain_focused = editing it (split enlarges + keys route
       # there); @chain_marker_cursor remembers which marker to write back to on commit.
@@ -2238,7 +2246,7 @@ module Gori::Tui
         @chain_pane.render(screen, rect, true, "CHAIN · #{marker_label}", CHAIN_PLACEHOLDER)
         return
       end
-      chain = Fuzz::Template.chain_at(@editor.text, @editor.cursor_offset)
+      chain = chain_under_cursor
       Frame.card(screen, rect, chain ? "CHAIN · #{marker_label}" : "CHAIN", bg: Theme.bg, border: pane_border(false))
       inner = rect.inset(1, 1)
       w = {inner.w, 1}.max
@@ -2253,10 +2261,32 @@ module Gori::Tui
 
     # "§N" label for the marker under the cursor (1-based), or "§" when not in one.
     private def marker_label : String
-      spans = Fuzz::Template.marked_spans(@editor.text)
       cur = @editor.cursor_offset
-      idx = spans.index { |(a, b)| a <= cur && cur <= b }
+      idx = marker_spans.index { |(a, b)| a <= cur && cur <= b }
       idx ? "§#{idx + 1}" : "§"
+    end
+
+    # §…§ char-offset spans for the current request buffer, cached on the editor revision —
+    # marker_label + the CHAIN title both read it, so an unchanged buffer joins/scans once.
+    private def marker_spans : Array({Int32, Int32})
+      if @editor.edits != @marker_spans_rev
+        @marker_spans_rev = @editor.edits
+        @marker_spans_cache = Fuzz::Template.marked_spans(@editor.text)
+      end
+      @marker_spans_cache
+    end
+
+    # The chain (`¦…`) of the marker under the cursor, or nil (not in a marker) / "" (marker,
+    # no chain). Cached on {editor revision, cursor} so a stationary cursor doesn't re-join +
+    # re-scan the whole buffer every render frame the CHAIN pane is visible.
+    private def chain_under_cursor : String?
+      cur = @editor.cursor_offset
+      if @editor.edits != @chain_rev || cur != @chain_cursor
+        @chain_rev = @editor.edits
+        @chain_cursor = cur
+        @chain_cache = Fuzz::Template.chain_at(@editor.text, cur)
+      end
+      @chain_cache
     end
 
     # The DECODED split sub-pane: the editable payload (SAML XML / GraphQL query+vars),
