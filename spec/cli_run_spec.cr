@@ -77,7 +77,7 @@ describe Gori::Replay::FlowRequest do
   end
 
   it "re-syncs Content-Length to the stored body when the capture was truncated" do
-    # Head over-promises CL: 9999 but only 3 bytes survived the 8 MiB cap — replaying the
+    # Head over-promises CL: 9999 but only 3 bytes survived the capture cap — replaying the
     # original CL would hang the origin. build() rewrites CL to the actual length.
     head = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 9999\r\nX-T: 1\r\n\r\n"
     body = Bytes[0x41, 0x42, 0x43] # "ABC"

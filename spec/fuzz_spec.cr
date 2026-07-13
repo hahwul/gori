@@ -395,6 +395,32 @@ describe F::Engine do
     results.size.should eq(3) # all sent — a 0 cap must not break at @dispatched >= 0
   end
 
+  it "enforces max_requests as a hard cap on real sends (retries count)" do
+    # Each payload fails once then succeeds → 2 real sends per job without a hard cap.
+    # With max_requests=3, CappedBackend must refuse the 4th send even though only ~2 jobs
+    # were dispatched (the old dispatch-only check would have allowed 3 full jobs = 6 sends).
+    attempts = 0
+    set = F::PayloadSet.new(F::InlineList.new(["a", "b", "c", "d"]))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 1, retries: 1, max_requests: 3_i64)
+    gen = F::Generator.new(base, [set], cfg)
+    backend = FakeBackend.new(F::Origin.new("http", "h", 80)) do |_b|
+      attempts += 1
+      # Odd attempts fail so each successful job burns 2 real sends.
+      attempts.odd? ? Gori::Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, "boom") : ok_result(200, "ok")
+    end
+    drain(F::Engine.new(gen, F::Matcher.new, backend, cfg))
+    backend.sent.should be <= 3
+  end
+
+  it "does not overshoot max_requests under concurrency" do
+    set = F::PayloadSet.new(F::InlineList.new((1..40).map(&.to_s)))
+    cfg = F::Config.new(mode: F::Mode::Sniper, concurrency: 8, max_requests: 12_i64)
+    gen = F::Generator.new(base, [set], cfg)
+    backend = FakeBackend.new(F::Origin.new("http", "h", 80)) { |_b| ok_result(200, "ok") }
+    drain(F::Engine.new(gen, F::Matcher.new, backend, cfg))
+    backend.sent.should be <= 12
+  end
+
   it "stops after the in-flight batch, not the buffered jobs" do
     gate = Channel(Nil).new        # unbuffered: each send blocks until released
     started = Channel(Nil).new(64) # buffered so a send-entry signal never blocks a worker

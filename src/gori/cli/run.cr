@@ -678,11 +678,12 @@ module Gori
         end
         abort "gori run replay: no flow ##{id}" unless detail
 
-        # The captured request body was capped at 8 MiB; FlowRequest.build re-syncs the
+        # The captured request body was capped at CAPTURE_MAX; FlowRequest.build re-syncs the
         # Content-Length to the stored bytes so the request stays well-formed, but warn that
         # the resent body differs from what the origin originally received.
         if detail.request_body_truncated?
-          STDERR.puts "gori run replay: request body was truncated at the 8 MiB capture cap — resending the stored (shorter) body with a corrected Content-Length"
+          cap_mib = Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)
+          STDERR.puts "gori run replay: request body was truncated at the #{cap_mib} MiB capture cap — resending the stored (shorter) body with a corrected Content-Length"
         end
 
         built = Replay::FlowRequest.build(detail)
