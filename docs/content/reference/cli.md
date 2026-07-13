@@ -18,7 +18,7 @@ gori [command] [options]
 | `settings` | Show or edit `settings.json` |
 | `wizard` | Interactive first-run setup |
 | `tutorial` | Guided TUI tour (navigation, palette, space menu, edit mode) |
-| `update` | Show how to update gori |
+| `update` | Channel-aware self-update (binary / Homebrew / Snap / AUR) |
 
 Global flags: `-v` / `--version`, `-h` / `--help`.
 
@@ -274,6 +274,16 @@ Interactive tour of the TUI on a mock UI: tab/pane navigation, the command palet
 
 ```bash
 gori update
+gori update --exec   # Homebrew/Snap: run the package-manager command
 ```
 
-Prints how to update gori. There is no built-in self-update; rebuild from source with `crystal build src/main.cr -o bin/gori --release`.
+Detects how this `gori` binary was installed and updates accordingly:
+
+| Install channel | Behavior |
+|-----------------|----------|
+| Standalone binary (curl install, manual download, workspace build) | Downloads the latest GitHub release asset for this OS/arch and replaces the binary (macOS also refreshes sibling `lib/` in a dedicated dir) |
+| Homebrew | Prints `brew upgrade gori` (use `--exec` to run it; never overwrites the brew-managed path) |
+| Snap | Prints `snap refresh gori` (use `--exec` to run it) |
+| AUR / pacman (`/usr/bin/gori`) | Prints AUR helper guidance (`yay` / `paru` / `pacman`) |
+
+Release asset names match the [installation guide](/getting-started/installation/) (`gori-v*-linux-*` plain binaries, `gori-v*-osx-*.tar.gz` archives). macOS archive updates require a dedicated layout (e.g. `PREFIX/opt/gori` from the curl installer) so bundled `lib/` is never written under shared roots like `/usr/local/lib`. If no release assets exist yet, the command exits with a clear error pointing at the releases page — it does not silently no-op.

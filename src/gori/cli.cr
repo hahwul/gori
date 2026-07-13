@@ -20,7 +20,7 @@ module Gori
   # - `gori mcp`                    → MCP (Model Context Protocol) server over stdio
   # - `gori wizard`                 → interactive first-run setup wizard (bind/theme)
   # - `gori tutorial`               → guided TUI tour (navigation, palette, menu, edit)
-  # - `gori update`                 → print how to update gori (no built-in self-update yet)
+  # - `gori update`                 → channel-aware self-update (binary / brew / snap / AUR)
   #
   # Old flat flags (`gori --headless`, `gori --export-ca` ...) continue to work
   # via the tui path for backward compatibility.
@@ -80,7 +80,7 @@ module Gori
       puts "  wizard    Interactive setup wizard (bind, theme) — also runs on first launch"
       puts "  tutorial  Guided tour of the TUI (navigation, palette, menu, edit mode)"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
-      puts "  update    Show how to update gori to the latest version"
+      puts "  update    Update gori (channel-aware: binary download or package manager)"
       puts ""
       puts "See 'gori <command> --help' for more."
       puts "Flags like --version and --help work at the top level too."
@@ -465,21 +465,28 @@ module Gori
     end
 
     private def self.run_update(args : Array(String)) : Nil
-      if args.any? { |a| ["-h", "--help"].includes?(a) }
-        puts "Usage: gori update"
-        puts "  Show how to update gori to the latest version."
-        return
+      exec_pkg = false
+      parser = OptionParser.new do |p|
+        p.banner = "Usage: gori update [--exec]"
+        p.on("--exec", "For Homebrew/Snap: run the upgrade command (default: print only)") { exec_pkg = true }
+        p.on("-h", "--help", "Show this help") do
+          puts p
+          puts ""
+          puts "Updates gori based on how it was installed:"
+          puts "  • standalone binary  — download the latest GitHub release asset"
+          puts "  • Homebrew           — print (or --exec) brew upgrade gori"
+          puts "  • Snap               — print (or --exec) snap refresh gori"
+          puts "  • AUR/pacman         — print yay/paru/pacman guidance"
+          exit 0
+        end
+        p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
       end
-      # No built-in self-update yet (no release/download pipeline). Rather than print a
-      # dead "not implemented" line, give the user the real ways to get a newer build.
-      puts "gori #{VERSION}"
-      puts ""
-      puts "gori has no built-in self-update yet. To update:"
-      puts ""
-      puts "  • From source:  git pull && shards install \\"
-      puts "                  && crystal build src/main.cr -o bin/gori --release"
-      puts "  • Releases:     #{REPOSITORY_URL}/releases"
-      puts "  • Homebrew:     brew upgrade gori   (once a formula is published)"
+      parser.parse(args)
+      begin
+        Update.run(exec_package_commands: exec_pkg)
+      rescue ex : Error
+        abort "gori update: #{ex.message}"
+      end
     end
   end
 end

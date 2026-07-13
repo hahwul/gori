@@ -63,6 +63,14 @@ tool, so scripts and AI agents can drive the same engagement.
 
 ## Installation
 
+### Quick install (macOS / Linux)
+
+```bash
+curl -fsSL https://gori.hahwul.com/install.sh | bash
+```
+
+Then update later with `gori update` (self-update for binary installs; package-manager guidance for Homebrew / Snap / AUR).
+
 ### Homebrew
 
 ```bash

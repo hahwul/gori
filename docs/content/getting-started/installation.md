@@ -1,9 +1,19 @@
 +++
 title = "Installation"
-description = "Install gori via Homebrew, the AUR, Docker, a pre-built binary, or from source."
+description = "Install gori via curl, Homebrew, the AUR, Docker, a pre-built binary, or from source."
 +++
 
 gori is written in [Crystal](https://crystal-lang.org/). Pick a pre-built channel below, or [build from source](#build-from-source) if none fits your platform. Every channel installs the same `gori` binary — once it's on your `PATH`, jump to [Verify the Installation](#verify-the-installation).
+
+## Quick install (curl)
+
+macOS and Linux one-liner — detects OS/arch, downloads the matching [GitHub Release](https://github.com/hahwul/gori/releases/latest) asset, and puts `gori` on your `PATH`:
+
+```bash
+curl -fsSL https://gori.hahwul.com/install.sh | bash
+```
+
+Installs under `/usr/local` when writable, otherwise `~/.local`. Override with `GORI_INSTALL_PREFIX`. After install, `gori update` self-updates the binary (or guides you through Homebrew / Snap / AUR when those channels own the install).
 
 ## Homebrew
 
