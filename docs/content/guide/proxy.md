@@ -77,7 +77,7 @@ gori run history -q 'status:5xx host:api.example.com'
 
 ## Match & Replace
 
-Press `m` (or `Ctrl-P` → **Match & Replace**) to open the rewrite editor. Rules rewrite the **head** (request line + headers) or the **body** of a request/response in flight — a literal substring swap applied to live traffic.
+Open **Match & Replace** from the command palette (`Ctrl-P` → **Match & Replace**; rebind it in `settings:hotkeys` if you want a Global chord). Rules rewrite the **head** (request line + headers) or the **body** of a request/response in flight — a literal substring swap applied to live traffic.
 
 Syntax is one line per rule:
 
