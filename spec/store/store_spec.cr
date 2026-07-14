@@ -377,6 +377,22 @@ describe Gori::Store do
     end
   end
 
+  it "distinct_hosts returns prefix-filtered hosts for QL Tab-complete" do
+    with_store do |store|
+      %w(api.example.com app.example.com cdn.other.com).each do |h|
+        store.insert_flow(sample_request(host: h, target: "/"))
+      end
+      store.distinct_hosts(limit: 10).sort.should eq(
+        ["api.example.com", "app.example.com", "cdn.other.com"])
+      store.distinct_hosts(prefix: "api", limit: 10).should eq(["api.example.com"])
+      store.distinct_hosts(prefix: "ap", limit: 10).sort.should eq(
+        ["api.example.com", "app.example.com"])
+      store.distinct_hosts(prefix: "API", limit: 10).should eq(["api.example.com"]) # case-insensitive
+      store.distinct_hosts(prefix: "nope", limit: 10).should be_empty
+      store.distinct_hosts(prefix: "a", limit: 1).size.should eq(1) # hard cap
+    end
+  end
+
   it "recent_flows / search return metadata-only rows (no body BLOBs on the list path)" do
     with_store do |store|
       big = Bytes.new(200_000) { |i| ((i % 26) + 65).to_u8 }

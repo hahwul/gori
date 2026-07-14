@@ -1372,6 +1372,30 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
     end
 
+    # Distinct host values for History QL Tab-complete (`host:`). Prefix-filtered
+    # (case-insensitive), hard-capped so a huge capture history never materialises
+    # the full DISTINCT set on every keystroke. Uses idx_flows_sitemap's leading
+    # host column; never raises into the TUI run loop.
+    def distinct_hosts(*, prefix : String = "", limit : Int32 = 16) : Array(String)
+      lim = limit.clamp(1, 64)
+      hosts = [] of String
+      if prefix.empty?
+        @db.query("SELECT DISTINCT host FROM flows ORDER BY host LIMIT ?", lim) do |rs|
+          rs.each { hosts << rs.read(String) }
+        end
+      else
+        # Prefix match only (trailing %); escape LIKE metacharacters in the typed prefix.
+        pat = "#{QL.like_escape(prefix.downcase)}%"
+        @db.query("SELECT DISTINCT host FROM flows WHERE lower(host) LIKE ? ESCAPE '\\' ORDER BY host LIMIT ?",
+          pat, lim) do |rs|
+          rs.each { hosts << rs.read(String) }
+        end
+      end
+      hosts
+    rescue
+      [] of String
+    end
+
     # Per-status flow counts (e.g. {200 => n, 404 => n, nil => pending}) for the Project
     # tab's status-distribution chart. Backed by idx_flows_status (V8) so it stays cheap
     # on a full history. A nil status is a still-pending flow (no response yet). Never

@@ -62,6 +62,11 @@ module Gori::Tui
       @preedit = ""
       @querying = false
       @query_note = nil.as(String?) # why an active filter is empty when it's INVALID (not just no-match)
+      # Weak back-pointer for host: Tab suggestions (set on every reload). Nil until
+      # the first reload — suggestions simply skip the host pool then.
+      @suggest_store = nil.as(Store?)
+      @host_suggest_prefix = nil.as(String?) # cache key (downcase prefix)
+      @host_suggest_values = [] of String
       @scope = nil.as(Scope?)
       @detail = nil.as(Store::FlowDetail?)
       @detail_ws = nil.as(Array(Store::WsMessage)?)
@@ -226,6 +231,8 @@ module Gori::Tui
     # Load flows applying the Scope lens AND the QL query. store.search returns
     # newest-first (ORDER BY id DESC); reverse when the layout pref is oldest-first.
     def reload(store : Store) : Nil
+      @suggest_store = store
+      invalidate_host_suggest_cache
       prev_id = @rows[@selected]?.try(&.id) # anchor the highlight to the flow, not the index
       query_filter = QL.parse(@query)
       @query_note = query_note_for(query_filter)
@@ -473,13 +480,19 @@ module Gori::Tui
     end
 
     # Suggestions for the token under the cursor: field names, then field values.
+    # Honours a leading `-` (QL negation) so `-ho` → `-host:` and `-host:a` → `-host:api…`.
     def query_suggestions : Array(String)
       token = current_token
       return [] of String if token.empty?
-      if (colon = token.index(':'))
-        suggest_values(token[0...colon].downcase, token[(colon + 1)..])
+      neg = token.starts_with?('-') && token.size > 1
+      core = neg ? token[1..] : token
+      neg_p = neg ? "-" : ""
+      if (colon = core.index(':'))
+        field = core[0...colon].downcase
+        prefix = core[(colon + 1)..]
+        suggest_values(field, prefix).map { |s| "#{neg_p}#{s}" }
       else
-        QL_FIELDS.select(&.starts_with?(token.downcase)).map { |f| "#{f}:" }
+        QL_FIELDS.select(&.starts_with?(core.downcase)).map { |f| "#{neg_p}#{f}:" }
       end
     end
 
@@ -1454,16 +1467,40 @@ module Gori::Tui
       screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: rect.w - 2)
     end
 
+    # Static pools for low-cardinality fields; `host:` is DISTINCT from the store
+    # (capped + prefix-filtered) so a large History stays cheap to complete.
     private def suggest_values(field : String, prefix : String) : Array(String)
+      p = prefix.downcase
       values = case field
                when "scheme" then ["http", "https"]
                when "method" then METHOD_VAL
-               when "status" then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500"]
+               when "status" then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
+               when "host"   then host_values_for(prefix)
                when "size"   then [">10000", ">100000", "<1000"]
                when "dur"    then [">500", ">1s", ">=200", "<100"]
                else               return [] of String
                end
-      values.select(&.downcase.starts_with?(prefix.downcase)).map { |v| "#{field}:#{v}" }
+      # host_values_for is already prefix-filtered by SQL; still apply starts_with so a
+      # stale cache entry can't surface a non-matching host if the key ever drifts.
+      values.select(&.downcase.starts_with?(p)).map { |v| "#{field}:#{v}" }
+    end
+
+    # DISTINCT hosts for the typed prefix. Cached per prefix so Tab + suggestion
+    # re-renders on the same token don't re-query SQLite every frame.
+    private def host_values_for(prefix : String) : Array(String)
+      key = prefix.downcase
+      if @host_suggest_prefix == key
+        return @host_suggest_values
+      end
+      store = @suggest_store
+      @host_suggest_prefix = key
+      @host_suggest_values = store ? store.distinct_hosts(prefix: prefix, limit: 16) : [] of String
+      @host_suggest_values
+    end
+
+    private def invalidate_host_suggest_cache : Nil
+      @host_suggest_prefix = nil
+      @host_suggest_values = [] of String
     end
 
     private def current_token : String

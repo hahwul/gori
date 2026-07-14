@@ -742,6 +742,59 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "Tab-completes method/scheme/status statically and host from the store" do
+    tmp_store do |store|
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "api.example.com", port: 443,
+        method: "GET", target: "/", http_version: "HTTP/1.1",
+        head: "GET / HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_slice, body: nil))
+      store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 2_i64, scheme: "https", host: "app.example.com", port: 443,
+        method: "POST", target: "/login", http_version: "HTTP/1.1",
+        head: "POST /login HTTP/1.1\r\nHost: app.example.com\r\n\r\n".to_slice, body: nil))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.start_query
+
+      "me".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should eq(["method:"])
+      view.query_complete.should be_true
+      view.query.should eq("method:")
+
+      view.cancel_query
+      view.start_query
+      "method:P".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should eq(["method:POST", "method:PUT", "method:PATCH"])
+      view.query_complete.should be_true
+      view.query.should eq("method:POST")
+
+      view.cancel_query
+      view.start_query
+      "scheme:h".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should eq(["scheme:http", "scheme:https"])
+
+      view.cancel_query
+      view.start_query
+      "status:4".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should contain("status:4xx")
+      view.query_suggestions.should contain("status:401")
+
+      view.cancel_query
+      view.start_query
+      "host:ap".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should eq(["host:api.example.com", "host:app.example.com"])
+      view.query_complete.should be_true
+      view.query.should eq("host:api.example.com")
+
+      # Negation prefix is preserved.
+      view.cancel_query
+      view.start_query
+      "-host:app".each_char { |c| view.query_insert(c) }
+      view.query_suggestions.should eq(["-host:app.example.com"])
+    end
+  end
+
   it "rejects an all-invalid QL query instead of matching every flow" do
     tmp_store do |store|
       3.times { |i| add_flow(store, "GET", "/#{i}", 200) }
