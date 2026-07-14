@@ -127,18 +127,18 @@ module Gori
                      " Project selection source: #{@selection_source || "unknown"}; call project_info before using data."
                    end
         base = "gori MCP exposes the selected project's captured HTTP traffic " \
-               "(history, flows, sitemap, scope, findings, notes, match&replace rules), plus a " \
+               "(history, flows, sitemap, scope, issues, notes, match&replace rules), plus a " \
                "pure `decoder` encode/decode/hash tool. Call ql_reference before " \
                "writing list_history/list_sitemap queries. Timestamps include unix " \
                "microseconds plus *_iso RFC3339 fields where available.#{selected}"
         if @allow_actions
           "#{base} Action tools are enabled: send_request (supports flow_id repeater), " \
           "send_websocket (executes a persisted WS repeater), " \
-          "fuzz_*, mine_*, create/update_finding, and create/delete_rule + set_rule_enabled " \
-          "make real outbound requests or mutate findings/rules."
+          "fuzz_*, mine_*, create/update_issue, and create/delete_rule + set_rule_enabled " \
+          "make real outbound requests or mutate issues/rules."
         else
           "#{base} Read-only mode: action tools (send_request, send_websocket, fuzz_*, mine_*, " \
-          "create/update_finding, create/delete_rule) are disabled — restart without --read-only to enable them."
+          "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them."
         end
       end
 

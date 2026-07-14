@@ -919,9 +919,9 @@ describe "Gori::Probe::Passive (new patterns)" do
 end
 
 describe "Gori::Probe::Passive (cookie deletion + prefixes)" do
-  it "suppresses hygiene findings for a cookie being cleared (empty value + deletion marker)" do
+  it "suppresses hygiene issues for a cookie being cleared (empty value + deletion marker)" do
     with_store do |store|
-      # A logout/reset cookie carries no secret — its missing flags are noise, not a finding.
+      # A logout/reset cookie carries no secret — its missing flags are noise, not an issue.
       maxage = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=; Max-Age=0\r\n\r\n",
         content_type: "text/html")
       codes_of(maxage).should_not contain("cookie_no_secure")
@@ -938,7 +938,7 @@ describe "Gori::Probe::Passive (cookie deletion + prefixes)" do
     end
   end
 
-  it "flags __Host-/__Secure- prefix violations and suppresses the duplicate no-secure finding" do
+  it "flags __Host-/__Secure- prefix violations and suppresses the duplicate no-secure issue" do
     with_store do |store|
       # __Host- requires Secure, Path=/, and no Domain — this one is missing Path=/.
       host_bad = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: __Host-sid=x; Secure\r\n\r\n",
@@ -1035,7 +1035,7 @@ describe "Gori::Probe::Passive (round-2 detection fixes)" do
   it "treats a cookie cleared with a non-empty sentinel value and a past Expires as a deletion" do
     with_store do |store|
       # `auth=deleted; Expires=<past>` (no Max-Age, non-empty value) is a logout clear —
-      # its missing flags are noise, not hygiene findings.
+      # its missing flags are noise, not hygiene issues.
       cleared = analyze(store,
         resp_head: "HTTP/1.1 200 OK\r\nSet-Cookie: auth=deleted; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT\r\n\r\n",
         content_type: "text/html")
@@ -1049,7 +1049,7 @@ describe "Gori::Probe::Passive (round-2 detection fixes)" do
       ineffective = analyze(store, content_type: "text/html",
         resp_head: "HTTP/1.1 200 OK\r\nX-Frame-Options: ALLOW-FROM https://x.test\r\n\r\n")
       codes_of(ineffective).should contain("missing_x_frame_options")
-      # DENY / SAMEORIGIN actually restrict framing → no finding.
+      # DENY / SAMEORIGIN actually restrict framing → no issue.
       deny = analyze(store, content_type: "text/html",
         resp_head: "HTTP/1.1 200 OK\r\nX-Frame-Options: DENY\r\n\r\n")
       codes_of(deny).should_not contain("missing_x_frame_options")

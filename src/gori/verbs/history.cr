@@ -62,7 +62,7 @@ module Gori
       # The single smart Copy: selection if one is active, else the whole focused
       # pane (ctx.read_copy — routes per-tab, added in Round 1). copy-all is gone.
       # Ordered right after Send (Round 5 — COMMON is curated most-used-first: Send,
-      # Copy, New, Fuzz, Mine, Link-finding, Link-note; registered here rather than
+      # Copy, New, Fuzz, Mine, Link-issue, Link-note; registered here rather than
       # farther down so the physical registration order matches).
       r.register Verb::Definition.new(
         "repeater.copy", "Copy", "Copy the selected text, or the whole focused pane if nothing is selected, to the clipboard",
@@ -265,19 +265,19 @@ module Gori
 
       # The flow actions mirror the History list's "space" menu so the muscle memory
       # carries into the drill-in (the user's goal). Each keeps the list's exact chord
-      # + mnemonic; repeater/finding/fuzz close the detail first so it doesn't float over
+      # + mnemonic; repeater/issue/fuzz close the detail first so it doesn't float over
       # the destination tab.
       r.register Verb::Definition.new(
         "detail.repeater", "Repeater flow", "Open this flow in the Repeater tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("r", ctrl: true)],
         mnemonic: 'r') { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
 
-      # Create a finding while reading the flow — the natural moment to file one.
+      # Create an issue while reading the flow — the natural moment to file one.
       # Without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb).
       r.register Verb::Definition.new(
-        "detail.finding", "Add finding", "Create a finding from this flow",
+        "detail.issue", "Add issue", "Create an issue from this flow",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("f", shift: true)],
-        mnemonic: 'a') { |ctx| ctx.close_detail; ctx.finding_create; nil }
+        mnemonic: 'a') { |ctx| ctx.close_detail; ctx.issue_create; nil }
 
       # Send the open flow to the Comparer (mirrors history.compare from the list).
       r.register Verb::Definition.new(
@@ -341,7 +341,7 @@ module Gori
       # COMMON (Round 5), not :tab: New-session is a top action the user reaches for
       # from anywhere in the Fuzzer tab, not just the tab bar — mirrors repeater.new
       # (Repeater) and decoder.new (Decoder, Round 4a), both :common. Fuzzer's COMMON
-      # is now curated most-used-first: Run, Stop, New, Copy, Link-finding, Link-note.
+      # is now curated most-used-first: Run, Stop, New, Copy, Link-issue, Link-note.
       r.register Verb::Definition.new(
         "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
         [Verb::Chord.new("n", ctrl: true)],
@@ -425,26 +425,26 @@ module Gori
       r.register Verb::Definition.new(
         "mine.stop", "Stop mining", "Stop the running mine", Verb::Scope::Miner,
         [Verb::Chord.new("x", ctrl: true)], available: in_miner, mnemonic: 's') { |ctx| ctx.mine_stop; nil }
-      # Send the selected finding (injected into the session request) to Repeater. COMMON so
-      # it's reachable from summary/results/detail; gated on a selected finding. 'p' is free
+      # Send the selected issue (injected into the session request) to Repeater. COMMON so
+      # it's reachable from summary/results/detail; gated on a selected issue. 'p' is free
       # in COMMON ∪ :subtab (COMMON: r/s/k/u; :subtab: d).
       r.register Verb::Definition.new(
-        "mine.repeater", "Send to Repeater", "Open the selected finding as a request in Repeater (param injected)",
+        "mine.repeater", "Send to Repeater", "Open the selected issue as a request in Repeater (param injected)",
         Verb::Scope::Miner,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.miner_finding_selected? },
         mnemonic: 'p') { |ctx| ctx.mine_repeater_selected; nil }
-      # Content-only clone of the active miner session (request + config; no findings).
+      # Content-only clone of the active miner session (request + config; no issues).
       # 'd' is free in COMMON ∪ :subtab (COMMON: r/s/k/u/p).
       r.register Verb::Definition.new(
         "mine.duplicate-subtab", "Duplicate subtab", "Open a new miner session with the same request and config",
         Verb::Scope::Miner, available: in_miner, mnemonic: 'd', section: :subtab) { |ctx| ctx.miner_duplicate_subtab; nil }
 
-      # Repeater's/Fuzzer's "Link to finding/note" (Round 5 — relocated OUT of
+      # Repeater's/Fuzzer's "Link to issue/note" (Round 5 — relocated OUT of
       # register_links, which registers before register_fuzz/register_miner in
-      # Verbs.registry: leaving them there put Link-finding/Link-note AHEAD of
+      # Verbs.registry: leaving them there put Link-issue/Link-note AHEAD of
       # Fuzz/Mine in the Repeater/Fuzzer COMMON group, when the curated order wants
-      # them LAST (COMMON = most-used-first: Send/Copy/New/Fuzz/Mine/Link-finding/
-      # Link-note for Repeater; Run/Stop/New/Copy/Link-finding/Link-note for Fuzzer).
+      # them LAST (COMMON = most-used-first: Send/Copy/New/Fuzz/Mine/Link-issue/
+      # Link-note for Repeater; Run/Stop/New/Copy/Link-issue/Link-note for Fuzzer).
       # Registering them here — after repeater.mine above, and after register_fuzz
       # already ran — achieves that order for free (menu order == registration
       # order, per Registry#for_scope with an empty query). Same ids/titles/
@@ -458,14 +458,14 @@ module Gori
         ctx.current_tab == :fuzzer && !ctx.link_fuzz_id.nil?
       }
       r.register Verb::Definition.new(
-        "link.repeater.to-finding", "Link to finding", "Attach this repeater session to a finding",
-        Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'k') { |ctx| ctx.link_to_finding; nil }
+        "link.repeater.to-issue", "Link to issue", "Attach this repeater session to an issue",
+        Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'k') { |ctx| ctx.link_to_issue; nil }
       r.register Verb::Definition.new(
         "link.repeater.to-note", "Link to note", "Attach this repeater session to a note",
         Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'u') { |ctx| ctx.link_to_note; nil }
       r.register Verb::Definition.new(
-        "link.fuzzer.to-finding", "Link to finding", "Attach this fuzz session to a finding",
-        Verb::Scope::Fuzzer, available: fuzz_linkable, mnemonic: 'k') { |ctx| ctx.link_to_finding; nil }
+        "link.fuzzer.to-issue", "Link to issue", "Attach this fuzz session to an issue",
+        Verb::Scope::Fuzzer, available: fuzz_linkable, mnemonic: 'k') { |ctx| ctx.link_to_issue; nil }
       r.register Verb::Definition.new(
         "link.fuzzer.to-note", "Link to note", "Attach this fuzz session to a note",
         Verb::Scope::Fuzzer, available: fuzz_linkable, mnemonic: 'u') { |ctx| ctx.link_to_note; nil }
@@ -479,7 +479,7 @@ module Gori
       register_history(r)
       register_sitemap(r)
       register_links(r)
-      register_findings(r)
+      register_issues(r)
       register_probe(r)
       register_fuzz(r)
       register_miner(r)

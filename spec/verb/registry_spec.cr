@@ -440,96 +440,96 @@ private class FakeContext < ExecContext
     @calls << :rules_open
   end
 
-  def finding_create : Nil
-    @calls << :finding_create
+  def issue_create : Nil
+    @calls << :issue_create
   end
 
-  def findings_new : Nil
-    @calls << :findings_new
+  def issues_new : Nil
+    @calls << :issues_new
   end
 
-  def findings_query : Nil
-    @calls << :findings_query
+  def issues_query : Nil
+    @calls << :issues_query
   end
 
-  def findings_move(delta : Int32) : Nil
-    @calls << :findings_move
+  def issues_move(delta : Int32) : Nil
+    @calls << :issues_move
   end
 
-  def findings_open : Nil
-    @calls << :findings_open
+  def issues_open : Nil
+    @calls << :issues_open
   end
 
-  def finding_close : Nil
-    @calls << :finding_close
+  def issue_close : Nil
+    @calls << :issue_close
   end
 
-  def findings_delete : Nil
-    @calls << :findings_delete
+  def issues_delete : Nil
+    @calls << :issues_delete
   end
 
-  def finding_severity(delta : Int32) : Nil
-    @calls << :finding_severity
+  def issue_severity(delta : Int32) : Nil
+    @calls << :issue_severity
   end
 
-  def finding_status(delta : Int32) : Nil
-    @calls << :finding_status
+  def issue_status(delta : Int32) : Nil
+    @calls << :issue_status
   end
 
-  def finding_set_severity : Nil
-    @calls << :finding_set_severity
+  def issue_set_severity : Nil
+    @calls << :issue_set_severity
   end
 
-  def finding_set_status : Nil
-    @calls << :finding_set_status
+  def issue_set_status : Nil
+    @calls << :issue_set_status
   end
 
-  def finding_edit_notes : Nil
-    @calls << :finding_edit_notes
+  def issue_edit_notes : Nil
+    @calls << :issue_edit_notes
   end
 
-  def finding_hscroll(delta : Int32) : Nil
-    @calls << :finding_hscroll
+  def issue_hscroll(delta : Int32) : Nil
+    @calls << :issue_hscroll
   end
 
-  def finding_edit_title : Nil
-    @calls << :finding_edit_title
+  def issue_edit_title : Nil
+    @calls << :issue_edit_title
   end
 
-  def finding_open_flow : Nil
-    @calls << :finding_open_flow
+  def issue_open_flow : Nil
+    @calls << :issue_open_flow
   end
 
-  def finding_repeater_flow : Nil
-    @calls << :finding_repeater_flow
+  def issue_repeater_flow : Nil
+    @calls << :issue_repeater_flow
   end
 
-  def finding_links : Nil
-    @calls << :finding_links
+  def issue_links : Nil
+    @calls << :issue_links
   end
 
-  def finding_open_link : Nil
-    @calls << :finding_open_link
+  def issue_open_link : Nil
+    @calls << :issue_open_link
   end
 
-  def finding_link_move(delta : Int32) : Nil
-    @calls << :finding_link_move
+  def issue_link_move(delta : Int32) : Nil
+    @calls << :issue_link_move
   end
 
-  def findings_notes_read_mode? : Bool
+  def issues_notes_read_mode? : Bool
     false
   end
 
-  def findings_copy : Nil
-    @calls << :findings_copy
+  def issues_copy : Nil
+    @calls << :issues_copy
   end
 
-  def findings_copy_all : Nil
-    @calls << :findings_copy_all
+  def issues_copy_all : Nil
+    @calls << :issues_copy_all
   end
 
-  def link_to_finding : Nil
-    @calls << :link_to_finding
+  def link_to_issue : Nil
+    @calls << :link_to_issue
   end
 
   def link_to_note : Nil
@@ -552,8 +552,8 @@ private class FakeContext < ExecContext
     nil
   end
 
-  def findings_export(format : Symbol) : Nil
-    @calls << :findings_export
+  def issues_export(format : Symbol) : Nil
+    @calls << :issues_export
   end
 
   def probe_move(delta : Int32) : Nil

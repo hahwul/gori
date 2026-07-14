@@ -73,7 +73,7 @@ module Gori
       puts "  tui       Start the interactive TUI (default when no command)"
       puts "  settings  Show the settings.json path (or --edit to open it)"
       puts "  ca        Print the root CA path, or regenerate it (see gori ca --help)"
-      puts "  run       Non-interactive CLI: capture, history, show, repeater, findings, projects"
+      puts "  run       Non-interactive CLI: capture, history, show, repeater, issues, projects"
       puts "  wizard    Interactive setup wizard (bind, theme) — also runs on first launch"
       puts "  tutorial  Guided TUI tour with try-it steps (nav, palette, menu, edit)"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
@@ -439,7 +439,7 @@ module Gori
         p.on("--project=NAME", "Serve a named project's db") { |v| project = v }
         p.on("--use-active-project", "Ignore the current Git workspace and serve the active TUI/MRU project") { use_active_project = true }
         p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
-        p.on("--read-only", "Disable action tools (send_request, create/update_finding)") { read_only = true }
+        p.on("--read-only", "Disable action tools (send_request, create/update_issue)") { read_only = true }
         p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_target = "agy" }
         p.on("--install-codex", "Install gori as an MCP server in Codex (~/.codex/config.toml)") { install_target = "codex" }
         p.on("--install-claude", "Install gori as an MCP server in Claude Desktop config") { install_target = "claude" }

@@ -34,7 +34,7 @@ module Gori
 
     # An in-memory predicate over Repeater sub-tabs, parsed from a History-like filter
     # string. Repeater sessions live wholly in memory, so — unlike History's QL→SQL —
-    # this matches Crystal-side (the same shape as Findings::Filter). Terms are
+    # this matches Crystal-side (the same shape as Issues::Filter). Terms are
     # whitespace-separated and AND-joined; a leading `-` negates a field term; an
     # unrecognised or bare token is free text over name + summary + target + tags.
     #

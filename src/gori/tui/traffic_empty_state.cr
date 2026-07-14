@@ -47,7 +47,7 @@ module Gori::Tui
       when :fuzzer         then "no fuzz session open"
       when :fuzzer_results then running ? "running…" : "no results yet"
       when :probe          then scan_on ? "no issues yet" : "scanning is OFF"
-      when :findings       then "no findings yet"
+      when :issues       then "no issues yet"
       when :notes          then "empty note"
       else                      "nothing here yet"
       end
@@ -64,7 +64,7 @@ module Gori::Tui
       when :fuzzer         then render_fuzzer_full(screen, rect, headline)
       when :fuzzer_results then render_fuzzer_results_full(screen, rect, headline, running)
       when :probe          then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
-      when :findings       then render_findings_full(screen, rect, headline)
+      when :issues       then render_issues_full(screen, rect, headline)
       when :notes          then render_notes_full(screen, rect)
       end
     end
@@ -87,8 +87,8 @@ module Gori::Tui
                 medium_fuzzer_results(headline, running)
               when :probe
                 medium_probe(headline, scan_on)
-              when :findings
-                medium_findings(headline)
+              when :issues
+                medium_issues(headline)
               when :notes
                 medium_notes(headline)
               else
@@ -115,7 +115,7 @@ module Gori::Tui
                running ? "sampling…" : "^R run · ^O sets"
              when :probe
                scan_on ? "traffic ──► scan · press m" : "press m to enable scanning"
-             when :findings
+             when :issues
                "⇧F from History · n create"
              when :notes
                "^N new note · start typing"
@@ -303,19 +303,19 @@ module Gori::Tui
       end
     end
 
-    private def render_findings_full(screen : Screen, rect : Rect, headline : String) : Nil
+    private def render_issues_full(screen : Screen, rect : Rect, headline : String) : Nil
       inner_h = 5 + 2
-      _, inner, ix, iw = begin_card(screen, rect, headline, "FINDINGS", inner_h)
+      _, inner, ix, iw = begin_card(screen, rect, headline, "ISSUES", inner_h)
       y = inner.y
 
       screen.text(ix, y, "Track confirmed vulnerabilities you triage by hand.", Theme.text, Theme.bg, width: iw)
       y += 2
-      screen.text(ix, y, "flow ──► finding ──► triage ──► resolve", Theme.muted, Theme.bg, width: iw)
+      screen.text(ix, y, "flow ──► issue ──► triage ──► resolve", Theme.muted, Theme.bg, width: iw)
       y += 2
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
-      y = draw_chord_hint(screen, ix, y, iw, " ⇧F ", "finding from History flow", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " n ", "create a finding here", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " ⇧F ", "issue from History flow", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " n ", "create an issue here", bullet: "▸ ")
     end
 
     private def render_notes_full(screen : Screen, rect : Rect) : Nil
@@ -378,8 +378,8 @@ module Gori::Tui
       end
     end
 
-    private def medium_findings(headline) : Array(String)
-      [headline, "flow ──► finding ──► triage", "⇧F from History · n create"]
+    private def medium_issues(headline) : Array(String)
+      [headline, "flow ──► issue ──► triage", "⇧F from History · n create"]
     end
 
     private def medium_notes(headline) : Array(String)

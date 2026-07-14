@@ -122,12 +122,12 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("m:MODE").should be_true
   end
 
-  it "renders the findings triage card" do
+  it "renders the issues triage card" do
     backend = MemoryBackend.new(60, 12)
     rect = Rect.new(0, 0, 60, 12)
-    TrafficEmptyState.render(Screen.new(backend), rect, variant: :findings)
-    backend.contains?("no findings yet").should be_true
-    backend.contains?("FINDINGS").should be_true
+    TrafficEmptyState.render(Screen.new(backend), rect, variant: :issues)
+    backend.contains?("no issues yet").should be_true
+    backend.contains?("ISSUES").should be_true
     backend.contains?("⇧F").should be_true
     backend.contains?("triage").should be_true
   end

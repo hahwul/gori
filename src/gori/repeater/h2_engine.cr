@@ -220,7 +220,7 @@ module Gori
       # RFC 9113 §8.2.1 forbids CR/LF in an h2 field name/value. If a non-compliant origin
       # smuggles one in, ESCAPE it (don't drop the header) so it can't fold into a phantom
       # line of the synthesized HTTP/1 head while STILL SHOWING the tester the injection
-      # attempt — a malformed response header is a security finding, not noise to hide. gori
+      # attempt — a malformed response header is a security issue, not noise to hide. gori
       # is a security-testing proxy: it must surface bad bytes, not silently swallow them.
       private def self.visualize_field(s : String) : String
         return s unless s.includes?('\r') || s.includes?('\n')

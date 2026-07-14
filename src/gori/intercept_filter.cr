@@ -99,7 +99,7 @@ module Gori
       colon = token.index(':')
       if colon && colon > 0
         field = field_symbol(token[0...colon].downcase)
-        # An unknown field → free-text the WHOLE token (mirrors QL / Findings::Filter), so a
+        # An unknown field → free-text the WHOLE token (mirrors QL / Issues::Filter), so a
         # typo'd field like `hsot:evil.com` searches literally instead of silently matching "evil.com".
         return Term.new(:text, token, negate) if field == :text
         value = token[(colon + 1)..]

@@ -3,20 +3,20 @@ require "./store"
 require "./links"
 
 module Gori
-  module Findings
-    # Serialises findings to a Markdown report or JSON. Extracted from the TUI's
-    # FindingsController so the in-app export verb and `gori run findings` share one
-    # source of truth. Pure: takes the findings + the store (to resolve linked flow
+  module Issues
+    # Serialises issues to a Markdown report or JSON. Extracted from the TUI's
+    # IssuesController so the in-app export verb and `gori run issues` share one
+    # source of truth. Pure: takes the issues + the store (to resolve linked flow
     # evidence) + the project name; returns a String.
     module Export
       # Per-side cap on evidence bytes embedded in the Markdown report.
       EVIDENCE_CAP = 64 * 1024
 
-      def self.markdown(findings : Array(Store::Finding), store : Store, project_name : String) : String
+      def self.markdown(issues : Array(Store::Issue), store : Store, project_name : String) : String
         String.build do |io|
-          io << "# Findings — " << project_name << "\n\n"
-          io << "_" << findings.size << " findings · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
-          findings.each do |f|
+          io << "# Issues — " << project_name << "\n\n"
+          io << "_" << issues.size << " issues · exported " << Time.local.to_s("%Y-%m-%d %H:%M") << "_\n"
+          issues.each do |f|
             flow = f.flow_id.try { |fid| store.get_flow(fid) }
             io << "\n## [" << f.severity.label << "] " << one_line(f.title) << "\n\n"
             io << "- **Severity:** " << f.severity.label << "\n"
@@ -44,10 +44,10 @@ module Gori
         end
       end
 
-      def self.json(findings : Array(Store::Finding), store : Store? = nil) : String
+      def self.json(issues : Array(Store::Issue), store : Store? = nil) : String
         JSON.build do |j|
           j.array do
-            findings.each do |f|
+            issues.each do |f|
               j.object do
                 j.field "id", f.id
                 j.field "title", f.title
@@ -70,14 +70,14 @@ module Gori
       # Collapse control characters (CR/LF/tab/…) to a single space so a value with
       # embedded newlines can't break the single-line structure it sits in — a
       # Markdown heading here, a one-row line in the text export. Shared with
-      # `gori run findings --format text`.
+      # `gori run issues --format text`.
       def self.one_line(s : String) : String
         s.gsub(/[[:cntrl:]]+/, " ").strip
       end
 
-      private def self.append_related_links(io : String::Builder, f : Store::Finding, store : Store) : Nil
-        links = store.list_links(Store::LinkOwnerKind::Finding, f.id)
-        links = Links.dedupe_finding_flow(links, f.flow_id)
+      private def self.append_related_links(io : String::Builder, f : Store::Issue, store : Store) : Nil
+        links = store.list_links(Store::LinkOwnerKind::Issue, f.id)
+        links = Links.dedupe_issue_flow(links, f.flow_id)
         return if links.empty?
         io << "\n### Related\n\n"
         Links.resolve_all(store, links).each do |res|
@@ -88,10 +88,10 @@ module Gori
         end
       end
 
-      def self.append_links_json(j : JSON::Builder, f : Store::Finding, store : Store?) : Nil
+      def self.append_links_json(j : JSON::Builder, f : Store::Issue, store : Store?) : Nil
         return unless store
-        links = Links.dedupe_finding_flow(
-          store.list_links(Store::LinkOwnerKind::Finding, f.id), f.flow_id)
+        links = Links.dedupe_issue_flow(
+          store.list_links(Store::LinkOwnerKind::Issue, f.id), f.flow_id)
         Links.resolve_all(store, links).each do |res|
           j.object do
             j.field "kind", res.link.ref_kind.label

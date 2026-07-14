@@ -21,7 +21,7 @@ module Gori
             # real Basic credential behind a later Bearer, mirroring the response-side WWW-Auth check.
             acc << det(ctx, "HTTP Basic credentials sent over cleartext HTTP",
               Store::Severity::High, "request Authorization: Basic")
-            return # one finding per flow is enough; the request side is the stronger signal
+            return # one issue per flow is enough; the request side is the stronger signal
           end
 
           return unless resp = ctx.response

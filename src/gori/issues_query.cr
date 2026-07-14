@@ -1,15 +1,15 @@
 require "./store"
 
 module Gori
-  module Findings
-    # An in-memory predicate over findings, parsed from a History-like filter
-    # string. Findings live wholly in memory (a small severity-sorted list), so —
+  module Issues
+    # An in-memory predicate over issues, parsed from a History-like filter
+    # string. Issues live wholly in memory (a small severity-sorted list), so —
     # unlike History's QL→SQL — this matches Crystal-side. Terms are whitespace-
     # separated and AND-joined; a leading `-` negates a field term; an unrecognised
     # or bare token is free text over the title + host.
     #
     #   open                      → free text "open" in title/host
-    #   status:open sev:>=high    → only OPEN findings at High or Critical
+    #   status:open sev:>=high    → only OPEN issues at High or Critical
     #   -status:resolved host:api → not-resolved AND host contains "api"
     class Filter
       # One parsed clause. `op` only matters for ordinal (severity) comparisons.
@@ -38,12 +38,12 @@ module Gori
       end
 
       # Keep store order; every term must match (AND). An empty filter passes all.
-      def apply(findings : Array(Store::Finding)) : Array(Store::Finding)
-        return findings if @terms.empty?
-        findings.select { |f| matches?(f) }
+      def apply(issues : Array(Store::Issue)) : Array(Store::Issue)
+        return issues if @terms.empty?
+        issues.select { |f| matches?(f) }
       end
 
-      def matches?(f : Store::Finding) : Bool
+      def matches?(f : Store::Issue) : Bool
         @terms.all? { |t| match_term(t, f) }
       end
 
@@ -81,7 +81,7 @@ module Gori
 
       # --- matching ------------------------------------------------------------
 
-      private def match_term(t : Term, f : Store::Finding) : Bool
+      private def match_term(t : Term, f : Store::Issue) : Bool
         # An empty value (mid-type "status:" / "sev:>=") matches all, so the list
         # doesn't blank out until a value is typed — uniform across every field
         # kind (host:/title: already do this via includes?("")). Negation is honoured:
@@ -97,7 +97,7 @@ module Gori
         t.negate ? !hit : hit
       end
 
-      private def free_text(text : String, f : Store::Finding) : Bool
+      private def free_text(text : String, f : Store::Issue) : Bool
         return true if text.empty?
         f.title.downcase.includes?(text) || (f.host || "").downcase.includes?(text)
       end

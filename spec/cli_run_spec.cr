@@ -123,15 +123,15 @@ describe Gori::Repeater::FlowRequest do
   end
 end
 
-describe Gori::Findings::Export do
-  it "serialises findings to JSON with the documented fields" do
-    findings = [
-      Gori::Store::Finding.new(1_i64, 10_i64, 20_i64, "XSS", Gori::Store::Severity::High,
+describe Gori::Issues::Export do
+  it "serialises issues to JSON with the documented fields" do
+    issues = [
+      Gori::Store::Issue.new(1_i64, 10_i64, 20_i64, "XSS", Gori::Store::Severity::High,
         "shop.test", 13_i64, "reflected", Gori::Store::Status::Confirmed),
-      Gori::Store::Finding.new(2_i64, 11_i64, 11_i64, "note", Gori::Store::Severity::Info,
+      Gori::Store::Issue.new(2_i64, 11_i64, 11_i64, "note", Gori::Store::Severity::Info,
         nil, nil, "", Gori::Store::Status::Open),
     ]
-    parsed = JSON.parse(Gori::Findings::Export.json(findings)).as_a
+    parsed = JSON.parse(Gori::Issues::Export.json(issues)).as_a
     parsed.size.should eq(2)
     parsed[0]["title"].as_s.should eq("XSS")
     parsed[0]["severity"].as_s.should eq("high")
@@ -142,16 +142,16 @@ describe Gori::Findings::Export do
     parsed[1]["flow_id"].raw.should be_nil
   end
 
-  it "serialises entity links in findings JSON export" do
+  it "serialises entity links in issues JSON export" do
     with_store do |store|
       fid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443, method: "GET",
         target: "/x", http_version: "HTTP/1.1",
         head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice))
-      finding_id = store.insert_finding("linked", Gori::Store::Severity::Medium, "api.test", fid)
-      store.add_link(Gori::Store::LinkOwnerKind::Finding, finding_id,
+      issue_id = store.insert_issue("linked", Gori::Store::Severity::Medium, "api.test", fid)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
         Gori::Store::LinkRefKind::Repeater, 9_i64)
-      parsed = JSON.parse(Gori::Findings::Export.json(store.findings, store)).as_a
+      parsed = JSON.parse(Gori::Issues::Export.json(store.issues, store)).as_a
       links = parsed[0]["links"].as_a
       links.size.should eq(1) # primary flow link is deduped from the export list
       links[0]["kind"].as_s.should eq("repeater")
@@ -162,10 +162,10 @@ describe Gori::Findings::Export do
 
   it "renders a Markdown report with severity/status labels and notes" do
     with_store do |store|
-      findings = [Gori::Store::Finding.new(1_i64, 0_i64, 0_i64, "Reflected XSS",
+      issues = [Gori::Store::Issue.new(1_i64, 0_i64, 0_i64, "Reflected XSS",
         Gori::Store::Severity::High, "shop.test", nil, "encode on output", Gori::Store::Status::Open)]
-      md = Gori::Findings::Export.markdown(findings, store, "demo")
-      md.should contain("# Findings — demo")
+      md = Gori::Issues::Export.markdown(issues, store, "demo")
+      md.should contain("# Issues — demo")
       md.should contain("## [high] Reflected XSS")
       md.should contain("**Severity:** high")
       md.should contain("**Status:** open")
@@ -181,9 +181,9 @@ describe Gori::Findings::Export do
         head: "GET /v1/debug HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice)
       fid = store.insert_flow(req)
       store.flush
-      findings = [Gori::Store::Finding.new(1_i64, 0_i64, 0_i64, "leak",
+      issues = [Gori::Store::Issue.new(1_i64, 0_i64, 0_i64, "leak",
         Gori::Store::Severity::Medium, "api.test", fid, "", Gori::Store::Status::Open)]
-      md = Gori::Findings::Export.markdown(findings, store, "demo")
+      md = Gori::Issues::Export.markdown(issues, store, "demo")
       md.should contain("### Request")
       md.should contain("GET /v1/debug HTTP/1.1")
       md.should contain("(##{fid})")
@@ -203,9 +203,9 @@ describe Gori::Findings::Export do
         body: "user=root".to_slice)
       fid = store.insert_flow(req)
       store.flush
-      findings = [Gori::Store::Finding.new(1_i64, 0_i64, 0_i64, "creds in body",
+      issues = [Gori::Store::Issue.new(1_i64, 0_i64, 0_i64, "creds in body",
         Gori::Store::Severity::High, "api.test", fid, "", Gori::Store::Status::Open)]
-      md = Gori::Findings::Export.markdown(findings, store, "demo")
+      md = Gori::Issues::Export.markdown(issues, store, "demo")
       # one blank line between the last header and the body — not three
       md.should contain("Content-Length: 9\n\nuser=root")
       md.should_not contain("Content-Length: 9\n\n\nuser=root")

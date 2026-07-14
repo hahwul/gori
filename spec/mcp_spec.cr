@@ -168,8 +168,8 @@ describe Gori::MCP::Server do
         names.should contain("get_repeater_context")
         names.should contain("send_request")
         names.should contain("send_websocket")
-        names.should contain("create_finding")
-        names.should contain("update_finding")
+        names.should contain("create_issue")
+        names.should contain("update_issue")
         # every tool has a well-formed object schema
         full.each do |t|
           t["name"].as_s.should_not be_empty
@@ -181,8 +181,8 @@ describe Gori::MCP::Server do
         ro_names = ro.map(&.["name"].as_s)
         ro_names.should contain("list_history")
         ro_names.should_not contain("send_request")
-        ro_names.should_not contain("create_finding")
-        ro_names.should_not contain("update_finding")
+        ro_names.should_not contain("create_issue")
+        ro_names.should_not contain("update_issue")
       end
     end
   end
@@ -373,16 +373,16 @@ describe Gori::MCP::Server do
     end
   end
 
-  describe "findings write tools" do
-    it "creates then updates a finding (full mode)" do
+  describe "issues write tools" do
+    it "creates then updates an issue (full mode)" do
       with_store do |store|
-        create = %({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"SQLi in login","severity":"high","host":"app.test"}}})
+        create = %({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"SQLi in login","severity":"high","host":"app.test"}}})
         new_id = tool_payload(drive(store, create)[0])["id"].as_i64
-        store.get_finding(new_id).not_nil!.severity.should eq(Gori::Store::Severity::High)
+        store.get_issue(new_id).not_nil!.severity.should eq(Gori::Store::Severity::High)
 
-        update = %({"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"update_finding","arguments":{"id":#{new_id},"status":"confirmed","severity":"critical"}}})
+        update = %({"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{new_id},"status":"confirmed","severity":"critical"}}})
         drive(store, update)[0]["result"]["isError"].as_bool.should be_false
-        reloaded = store.get_finding(new_id).not_nil!
+        reloaded = store.get_issue(new_id).not_nil!
         reloaded.status.should eq(Gori::Store::Status::Confirmed)
         reloaded.severity.should eq(Gori::Store::Severity::Critical)
       end
@@ -392,52 +392,52 @@ describe Gori::MCP::Server do
       with_store do |store|
         repeater_a = store.insert_repeater("https://ex.test", "GET /a HTTP/1.1\r\n\r\n", false, true, nil, 0)
         repeater_b = store.insert_repeater("https://ex.test", "GET /b HTTP/1.1\r\n\r\n", false, true, nil, 1)
-        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"linked","repeater_id":#{repeater_a}}}})
-        finding_id = tool_payload(drive(store, create)[0])["id"].as_i64
-        links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"linked","repeater_id":#{repeater_a}}}})
+        issue_id = tool_payload(drive(store, create)[0])["id"].as_i64
+        links = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
         links.map(&.ref_id).should contain(repeater_a)
 
-        update = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_finding","arguments":{"id":#{finding_id},"repeater_id":#{repeater_b}}}})
+        update = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{issue_id},"repeater_id":#{repeater_b}}}})
         drive(store, update)[0]["result"]["isError"].as_bool.should be_false
-        links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
+        links = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
         links.map(&.ref_id).should contain(repeater_b)
       end
     end
 
-    it "rejects an unknown repeater_id without creating a finding" do
+    it "rejects an unknown repeater_id without creating an issue" do
       with_store do |store|
-        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","repeater_id":999}}})
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"x","repeater_id":999}}})
         resp = drive(store, create)[0]
         resp["result"]["isError"].as_bool.should be_true
-        store.count_findings.should eq(0)
+        store.count_issues.should eq(0)
       end
     end
 
     it "rejects an invalid severity on create (not silently coerced to info)" do
       with_store do |store|
-        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","severity":"ultra"}}})
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"x","severity":"ultra"}}})
         resp = drive(store, create)[0]
         resp["result"]["isError"].as_bool.should be_true
         resp["result"]["content"][0]["text"].as_s.should contain("invalid severity")
-        store.count_findings.should eq(0)
+        store.count_issues.should eq(0)
       end
     end
 
     it "defaults an absent severity to info on create" do
       with_store do |store|
-        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x"}}})
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"x"}}})
         new_id = tool_payload(drive(store, create)[0])["id"].as_i64
-        store.get_finding(new_id).not_nil!.severity.should eq(Gori::Store::Severity::Info)
+        store.get_issue(new_id).not_nil!.severity.should eq(Gori::Store::Severity::Info)
       end
     end
 
     it "rejects a present-but-invalid flow_id instead of silently unlinking" do
       with_store do |store|
-        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","flow_id":1.9}}})
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"x","flow_id":1.9}}})
         resp = drive(store, create)[0]
         resp["result"]["isError"].as_bool.should be_true
         resp["result"]["content"][0]["text"].as_s.should contain("invalid 'flow_id'")
-        store.count_findings.should eq(0)
+        store.count_issues.should eq(0)
       end
     end
 
@@ -450,12 +450,12 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "reports an error (not updated:true) when update_finding has no fields" do
+    it "reports an error (not updated:true) when update_issue has no fields" do
       with_store do |store|
-        store.insert_finding("f", Gori::Store::Severity::Info, nil, nil)
+        store.insert_issue("f", Gori::Store::Severity::Info, nil, nil)
         store.flush
-        id = store.findings.first.id
-        upd = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_finding","arguments":{"id":#{id}}}})
+        id = store.issues.first.id
+        upd = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_issue","arguments":{"id":#{id}}}})
         resp = drive(store, upd)[0]
         resp["result"]["isError"].as_bool.should be_true
         resp["result"]["content"][0]["text"].as_s.should contain("no fields to update")
@@ -464,10 +464,10 @@ describe Gori::MCP::Server do
 
     it "rejects write tools in read-only mode" do
       with_store do |store|
-        create = %({"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x"}}})
+        create = %({"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"x"}}})
         resp = drive(store, create, allow_actions: false)[0]
         resp["result"]["isError"].as_bool.should be_true
-        store.count_findings.should eq(0)
+        store.count_issues.should eq(0)
       end
     end
   end
@@ -613,18 +613,18 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "creates a new repeater from a finding_id" do
+    it "creates a new repeater from a issue_id" do
       with_store do |store|
         flow_id = seed_flow(store, "ex.test", "POST", "/submit", 200)
-        store.insert_finding("Vuln Title", Gori::Store::Severity::High, "ex.test", flow_id)
+        store.insert_issue("Vuln Title", Gori::Store::Severity::High, "ex.test", flow_id)
         store.flush
-        finding_id = store.findings.first.id
+        issue_id = store.issues.first.id
 
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"finding_id":#{finding_id}}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"issue_id":#{issue_id}}}})
         payload = tool_payload(drive(store, call)[0])
         payload["target"].as_s.should eq("https://ex.test")
         payload["summary"].as_s.should eq("POST /submit")
-        links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
+        links = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
         links.any? { |link| link.ref_kind.repeater? && link.ref_id == payload["id"].as_i64 }.should be_true
       end
     end
@@ -836,13 +836,13 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "links a saved repeater to a finding even when the origin is unavailable" do
+    it "links a saved repeater to an issue even when the origin is unavailable" do
       with_store do |store|
-        finding_id = store.insert_finding("evidence", Gori::Store::Severity::Low, nil, nil)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","save_as_repeater":true,"finding_id":#{finding_id}}}})
+        issue_id = store.insert_issue("evidence", Gori::Store::Severity::Low, nil, nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","save_as_repeater":true,"issue_id":#{issue_id}}}})
         drive(store, call)[0]["result"]["isError"].as_bool.should be_true
         repeater_id = store.repeaters_meta.last.id
-        links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
+        links = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
         links.any? { |link| link.ref_kind.repeater? && link.ref_id == repeater_id }.should be_true
       end
     end
@@ -891,15 +891,15 @@ describe Gori::MCP::Server do
     end
   end
 
-  describe "list_findings" do
+  describe "list_issues" do
     it "returns a paginated object (not a bare array)" do
       with_store do |store|
-        store.insert_finding("a", Gori::Store::Severity::Info, nil, nil)
-        store.insert_finding("b", Gori::Store::Severity::High, nil, nil)
+        store.insert_issue("a", Gori::Store::Severity::Info, nil, nil)
+        store.insert_issue("b", Gori::Store::Severity::High, nil, nil)
         store.flush
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_findings","arguments":{"limit":1,"offset":1}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_issues","arguments":{"limit":1,"offset":1}}})
         payload = tool_payload(drive(store, call)[0])
-        payload.as_h.has_key?("findings").should be_true
+        payload.as_h.has_key?("issues").should be_true
         payload["returned"].as_i.should eq(1)
         payload["offset"].as_i.should eq(1)
         payload["total"].as_i.should eq(2)

@@ -56,7 +56,7 @@ module Gori::Tui
         Item.new("↑/↓ · ↵", "move · open the flow"),
         Item.new("^R", "send the flow to Repeater", "history.repeater"),
         Item.new("⇧I", "send the flow to the Fuzzer", "history.fuzz"),
-        Item.new("⇧F", "create a finding", "finding.create"),
+        Item.new("⇧F", "create an issue", "issue.create"),
         Item.new("f", "follow newest", "history.toggle-follow"),
         Item.new("/", "filter (query language)", "history.query"),
         Item.new("y", "copy flow", "history.copy"),
@@ -119,7 +119,7 @@ module Gori::Tui
       ]},
       {"OTHER TABS", [
         Item.new("Sitemap", "↑/↓ · / filter · ↵/→ expand · t tag · g group · ⇧S scope"),
-        Item.new("Findings", "detail notes: i/↵ edit · x line · ⇧select · y copy · space cmds · ↑/↓ links"),
+        Item.new("Issues", "detail notes: i/↵ edit · x line · ⇧select · y copy · space cmds · ↑/↓ links"),
         Item.new("Probe", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · ⇧S scope · space cmds"),
         Item.new("Notes", "i/↵ edit · x line · ⇧arrows select · y copy · space cmds (Copy selected when highlighted)"),
         Item.new("Project", "desc: i/↵ edit · x line · ⇧arrows select · y copy · space cmds"),

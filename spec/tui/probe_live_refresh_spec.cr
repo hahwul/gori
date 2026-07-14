@@ -19,7 +19,7 @@ describe "Probe live list refresh (generation poll)" do
       last_gen = store.probe_generation
       active_tab = :probe # user is watching Probe
 
-      # Scanner writes a finding (same path as Analyzer#run_active)
+      # Scanner writes an issue (same path as Analyzer#run_active)
       d = Gori::Probe::Detection.new(
         "reflected_param", Gori::Probe::Category::ACTIVE, "xss.test",
         "https://xss.test/level1/frame?query=12",

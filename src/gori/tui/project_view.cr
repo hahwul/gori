@@ -27,7 +27,7 @@ module Gori::Tui
 
     @project : Project?
     @flow_count : Int64
-    @findings_count : Int32
+    @issues_count : Int32
     @db_size : Int64
     @total_captured : Int64
     @created : Time?
@@ -45,7 +45,7 @@ module Gori::Tui
     def initialize(@scope : Scope, @host_overrides : HostOverrides)
       @project = nil
       @flow_count = 0
-      @findings_count = 0
+      @issues_count = 0
       @probe_tech = [] of String # Probe-detected representative technologies (project facts)
       @db_size = 0
       @total_captured = 0
@@ -99,13 +99,13 @@ module Gori::Tui
     def reload(project : Project, store : Store) : Nil
       @project = project
       @flow_count = store.count
-      @findings_count = store.count_findings
+      @issues_count = store.count_issues
       @probe_tech = scoped_tech(store.probe_tech_rows)
       @db_size = project.db_size
       @total_captured = store.total_size
-      # AT A GLANCE aggregates: status mix + combined finding/Probe severity tally.
+      # AT A GLANCE aggregates: status mix + combined issue/Probe severity tally.
       @status_counts = store.flow_status_counts
-      f = store.findings_severity_counts
+      f = store.issues_severity_counts
       p = store.probe_severity_counts
       @sev_tally = StaticArray(Int64, 5).new { |i| f[i] + p[i] }
       earliest = store.earliest_created_at
@@ -898,7 +898,7 @@ module Gori::Tui
         {"DB Size", human_size(@db_size)},
         {"Flows", @flow_count.to_s},
         {"Captured", human_size(@total_captured)},
-        {"Findings", @findings_count.to_s},
+        {"Issues", @issues_count.to_s},
         {"Technologies", @probe_tech.empty? ? "—" : @probe_tech.join(", ")},
       ]
       lines.each do |(label, value)|
@@ -911,7 +911,7 @@ module Gori::Tui
 
     # AT A GLANCE viz pane riding the right of the OVERVIEW band (read-only, like OVERVIEW
     # — no focus/keys). Two stacked micro-charts an analyst wants without leaving the tab:
-    # the captured traffic's HTTP status mix, then the finding/Probe severity breakdown.
+    # the captured traffic's HTTP status mix, then the issue/Probe severity breakdown.
     # Degrades top-down by height (mirrors the Fuzzer DIST pane).
     private def render_analytics(screen : Screen, rect : Rect) : Nil
       return if rect.w < 2 || rect.h < 2
@@ -953,7 +953,7 @@ module Gori::Tui
       out
     end
 
-    # Severity rows (Critical first) with nonzero counts, from the combined finding+Probe
+    # Severity rows (Critical first) with nonzero counts, from the combined issue+Probe
     # tally. The Int value feeds Theme.severity_color.
     private def severity_rows : Array({String, Int64, Int32})
       labels = { {4, "CRIT"}, {3, "HIGH"}, {2, "MED"}, {1, "LOW"}, {0, "INFO"} }

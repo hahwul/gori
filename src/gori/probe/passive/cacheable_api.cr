@@ -89,7 +89,7 @@ module Gori
         private def expires_disables?(expires : String?) : Bool
           return false unless exp = expires.try(&.strip)
           return true if exp == "0" || exp == "-1"
-          # HTTP-date in the past — best-effort parse; on failure don't suppress the finding.
+          # HTTP-date in the past — best-effort parse; on failure don't suppress the issue.
           t = Time::Format::HTTP_DATE.parse(exp)
           t <= Time.utc
         rescue

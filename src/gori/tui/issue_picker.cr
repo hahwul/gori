@@ -4,13 +4,13 @@ require "./frame"
 require "../store"
 
 module Gori::Tui
-  # Pick a finding to attach the current workbench ref to. Mirrors FlowPicker's
+  # Pick an issue to attach the current workbench ref to. Mirrors FlowPicker's
   # in-memory filter; the Runner owns the overlay lifecycle.
-  class FindingPicker
+  class IssuePicker
     getter selected : Int32
-    @indexed : Array({Store::Finding, String})
+    @indexed : Array({Store::Issue, String})
 
-    def initialize(@rows : Array(Store::Finding))
+    def initialize(@rows : Array(Store::Issue))
       @query = ""
       @preedit = ""
       @indexed = @rows.map { |f| {f, haystack(f)} }
@@ -23,7 +23,7 @@ module Gori::Tui
       @preedit = text
     end
 
-    def selected_finding : Store::Finding?
+    def selected_issue : Store::Issue?
       @filtered[@selected]?
     end
 
@@ -58,7 +58,7 @@ module Gori::Tui
       @scroll = 0
     end
 
-    private def haystack(f : Store::Finding) : String
+    private def haystack(f : Store::Issue) : String
       "#{f.title} #{f.host} #{f.severity.label} #{f.status.label} ##{f.id}".downcase
     end
 
@@ -84,7 +84,7 @@ module Gori::Tui
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
       return unless box
-      Frame.card(screen, box, "PICK FINDING", border: Theme.border_focus)
+      Frame.card(screen, box, "PICK ISSUE", border: Theme.border_focus)
       if @query.empty? && @preedit.empty?
         screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ link · esc cancel",
           Theme.muted, Theme.panel, width: box.w - 4)
@@ -98,7 +98,7 @@ module Gori::Tui
       list_h = box.bottom - 1 - list_top
       ensure_visible(list_h)
       if @filtered.empty?
-        msg = @rows.empty? ? "no findings yet" : "no findings match"
+        msg = @rows.empty? ? "no issues yet" : "no issues match"
         screen.text(box.x + 3, list_top, msg, Theme.muted, Theme.panel)
         return
       end
@@ -109,7 +109,7 @@ module Gori::Tui
       end
     end
 
-    private def draw_row(screen : Screen, box : Rect, ry : Int32, f : Store::Finding, active : Bool) : Nil
+    private def draw_row(screen : Screen, box : Rect, ry : Int32, f : Store::Issue, active : Bool) : Nil
       bg = active ? Theme.accent_bg : Theme.panel
       fg = active ? Theme.text_bright : Theme.text
       screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)

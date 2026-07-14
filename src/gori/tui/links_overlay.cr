@@ -5,7 +5,7 @@ require "../store"
 require "../links"
 
 module Gori::Tui
-  # Manage entity_links for a Finding or Note: list, select, add (via Runner sub-pickers),
+  # Manage entity_links for a Issue or Note: list, select, add (via Runner sub-pickers),
   # open, and remove. Pure state + rendering; the Runner owns @overlay lifecycle.
   class LinksOverlay
     getter owner_kind : Store::LinkOwnerKind
@@ -22,9 +22,9 @@ module Gori::Tui
 
     def reload(store : Store) : Nil
       links = store.list_links(@owner_kind, @owner_id)
-      if @owner_kind.finding?
-        if f = store.get_finding(@owner_id)
-          links = Links.dedupe_finding_flow(links, f.flow_id)
+      if @owner_kind.issue?
+        if f = store.get_issue(@owner_id)
+          links = Links.dedupe_issue_flow(links, f.flow_id)
         end
       end
       @resolved = Links.resolve_all(store, links)
@@ -66,7 +66,7 @@ module Gori::Tui
     end
 
     def title : String
-      owner = @owner_kind.finding? ? "FINDING ##{@owner_id}" : "NOTE ##{@owner_id}"
+      owner = @owner_kind.issue? ? "ISSUE ##{@owner_id}" : "NOTE ##{@owner_id}"
       "LINKS — #{owner}"
     end
 

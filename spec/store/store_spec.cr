@@ -54,6 +54,7 @@ describe Gori::Store do
       store.@db.exec("ALTER TABLE match_rules DROP COLUMN part")       # V30
       store.@db.exec("ALTER TABLE repeaters DROP COLUMN tags")           # V31
       store.@db.exec("ALTER TABLE repeaters RENAME TO replays")          # undo V32 so historical <V32 migrations replay against the old table name
+      store.@db.exec("ALTER TABLE issues RENAME TO findings")            # undo V34 (findings table predates V17, so it must carry the old name back)
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 
@@ -238,16 +239,16 @@ describe Gori::Store do
     end
   end
 
-  it "insert_finding returns the finding's own id, not the entity_links row id, when linked to a flow" do
+  it "insert_issue returns the issue's own id, not the entity_links row id, when linked to a flow" do
     with_store do |store|
       fid = store.insert_flow(sample_request(target: "/f"))
-      # An unlinked finding first (findings id 1, no entity_links row), so the linked
-      # finding's id (2) diverges from its link row's id (1) — exposing the old bug
+      # An unlinked issue first (issues id 1, no entity_links row), so the linked
+      # issue's id (2) diverges from its link row's id (1) — exposing the old bug
       # that returned last_insert_rowid AFTER the entity_links insert.
-      store.insert_finding("no-link", Gori::Store::Severity::Low, "acme.test", nil)
-      linked_id = store.insert_finding("linked", Gori::Store::Severity::High, "acme.test", fid)
+      store.insert_issue("no-link", Gori::Store::Severity::Low, "acme.test", nil)
+      linked_id = store.insert_issue("linked", Gori::Store::Severity::High, "acme.test", fid)
       linked_id.should eq(2)
-      store.findings.find { |f| f.id == linked_id }.not_nil!.title.should eq("linked")
+      store.issues.find { |f| f.id == linked_id }.not_nil!.title.should eq("linked")
     end
   end
 

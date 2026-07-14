@@ -78,7 +78,7 @@ module Gori
         # instance of the SAME project can't acquire it → VIEW-ONLY (no 2nd port; it
         # live-refreshes off the shared DB). A DIFFERENT project has its own lock, so
         # it captures on its own port (the bind falls back when the configured port
-        # is taken). The bind itself stays NON-FATAL: History/Repeater/Sitemap/Findings
+        # is taken). The bind itself stays NON-FATAL: History/Repeater/Sitemap/Issues
         # all read the store / dial upstream directly and don't need the listener.
         bind_error =
           begin

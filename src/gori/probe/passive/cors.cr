@@ -9,7 +9,7 @@ module Gori
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
           # The CORS algorithm requires EXACTLY one ACAO header; with zero or several the
-          # browser fails the check and blocks the response, so any "finding" would be a
+          # browser fails the check and blocks the response, so any "issue" would be a
           # non-exploitable false positive (a common proxy+app double-add misconfig).
           acao_all = resp.headers.get_all("Access-Control-Allow-Origin")
           return unless acao_all.size == 1

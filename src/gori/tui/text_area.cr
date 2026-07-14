@@ -334,7 +334,7 @@ module Gori::Tui
     # `highlight` overlays request/response syntax colours on the buffer while
     # keeping it fully editable: pass `:request` or `:response` for the held
     # HTTP message editors (Repeater, Intercept), nil for plain prose (Notes,
-    # Finding notes). The styled lines are 1:1 with `@lines`, so the cursor —
+    # Issue notes). The styled lines are 1:1 with `@lines`, so the cursor —
     # drawn last, on top — still lands on the right column.
     def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil) : Nil
       return if rect.empty?

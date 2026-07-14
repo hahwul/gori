@@ -172,34 +172,34 @@ module Gori
       # match&replace lens
       abstract def rules_open : Nil # open the match&replace overlay editor
 
-      # findings
-      abstract def finding_create : Nil # new finding from the selected flow
-      abstract def findings_new : Nil   # new blank finding
-      abstract def findings_query : Nil # focus the `/` filter bar (list)
-      abstract def findings_move(delta : Int32) : Nil
-      abstract def findings_open : Nil
-      abstract def finding_close : Nil
-      abstract def findings_delete : Nil
-      abstract def finding_severity(delta : Int32) : Nil # ±1 step (hidden [ ] chords)
-      abstract def finding_status(delta : Int32) : Nil   # ±1 step (hidden { } chords)
-      abstract def finding_set_severity : Nil            # open the severity colour picker
-      abstract def finding_set_status : Nil              # open the triage-status colour picker
-      abstract def finding_edit_notes : Nil
-      abstract def findings_notes_read_mode? : Bool # detail open, notes not in INS (gates y/copy)
-      abstract def findings_copy : Nil              # copy selection from finding notes (READ)
-      abstract def findings_copy_all : Nil          # copy all finding notes (space menu)
+      # issues
+      abstract def issue_create : Nil # new issue from the selected flow
+      abstract def issues_new : Nil   # new blank issue
+      abstract def issues_query : Nil # focus the `/` filter bar (list)
+      abstract def issues_move(delta : Int32) : Nil
+      abstract def issues_open : Nil
+      abstract def issue_close : Nil
+      abstract def issues_delete : Nil
+      abstract def issue_severity(delta : Int32) : Nil # ±1 step (hidden [ ] chords)
+      abstract def issue_status(delta : Int32) : Nil   # ±1 step (hidden { } chords)
+      abstract def issue_set_severity : Nil            # open the severity colour picker
+      abstract def issue_set_status : Nil              # open the triage-status colour picker
+      abstract def issue_edit_notes : Nil
+      abstract def issues_notes_read_mode? : Bool # detail open, notes not in INS (gates y/copy)
+      abstract def issues_copy : Nil              # copy selection from issue notes (READ)
+      abstract def issues_copy_all : Nil          # copy all issue notes (space menu)
       # Horizontal scroll (shift+←/→) for notes in READ (no-op in INS — follow_x tracks the caret).
-      abstract def finding_hscroll(delta : Int32) : Nil
-      abstract def finding_edit_title : Nil               # rename + set severity via the form overlay
-      abstract def finding_open_flow : Nil                # open the linked flow's detail in History
-      abstract def finding_repeater_flow : Nil              # send the linked flow to Repeater
-      abstract def finding_links : Nil                    # open the links overlay for the open finding
-      abstract def finding_open_link : Nil                # open the selected related item in its tab
-      abstract def finding_link_move(delta : Int32) : Nil # move selection in the RELATED list
-      abstract def findings_export(format : Symbol) : Nil # :markdown | :json → project dir
+      abstract def issue_hscroll(delta : Int32) : Nil
+      abstract def issue_edit_title : Nil               # rename + set severity via the form overlay
+      abstract def issue_open_flow : Nil                # open the linked flow's detail in History
+      abstract def issue_repeater_flow : Nil              # send the linked flow to Repeater
+      abstract def issue_links : Nil                    # open the links overlay for the open issue
+      abstract def issue_open_link : Nil                # open the selected related item in its tab
+      abstract def issue_link_move(delta : Int32) : Nil # move selection in the RELATED list
+      abstract def issues_export(format : Symbol) : Nil # :markdown | :json → project dir
 
       # entity links (cross-tab attach + link-target ids for availability gating)
-      abstract def link_to_finding : Nil
+      abstract def link_to_issue : Nil
       abstract def link_to_note : Nil
       abstract def link_flow_id : Int64?
       abstract def link_repeater_id : Int64?
@@ -220,7 +220,7 @@ module Gori
       abstract def probe_dismiss_host : Nil  # bulk-dismiss every open issue on the target's host
       abstract def probe_open_flow : Nil     # open the issue's sample flow in History
       abstract def probe_repeater_flow : Nil   # send the issue's sample flow to Repeater
-      abstract def probe_promote : Nil       # create a Finding from the open issue
+      abstract def probe_promote : Nil       # create a Issue from the open issue
 
       # intercept (hold-and-decide; P4)
       abstract def intercept_toggle : Nil          # toggle the hold queue on/off

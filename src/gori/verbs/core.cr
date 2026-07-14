@@ -10,7 +10,7 @@ module Gori
       # Discoverable from anywhere via the palette (Global). The 'q' KEY, though, only
       # fires on the tab bar (Sidebar) — where "q projects" is actually hinted —
       # because as a Global chord it also dumped you to the picker from the
-      # verb-driven Sitemap/Findings bodies (a surprising one-key dead-end mid-browse).
+      # verb-driven Sitemap/Issues bodies (a surprising one-key dead-end mid-browse).
       r.register Verb::Definition.new(
         "app.back", "Back to projects", "Close this project and return to the picker", Verb::Scope::Global,
         [] of Verb::Chord, category: Verb::Category::Navigation) { |ctx| ctx.leave_project; nil }
@@ -222,7 +222,7 @@ module Gori
       {
         :project => "Project", :sitemap => "Sitemap", :history => "History", :intercept => "Intercept",
         :repeater => "Repeater", :fuzzer => "Fuzzer", :miner => "Miner", :decoder => "Decoder",
-        :comparer => "Comparer", :probe => "Probe", :findings => "Findings", :notes => "Notes",
+        :comparer => "Comparer", :probe => "Probe", :issues => "Issues", :notes => "Notes",
       }.each do |tab, label|
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global,

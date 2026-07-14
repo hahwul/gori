@@ -12,7 +12,7 @@ module Gori::Tui
   # The Probe tab: a passive/active scan-issue list (already grouped by code+host at the
   # store) + a per-issue detail (affected URLs, remediation, sample evidence), topped by a
   # MODE band (OFF / PASSIVE / ACTIVE) and a detected-technologies summary. Mirrors
-  # FindingsView structurally; the issues ARE the groups (the DB upserts one row per
+  # IssuesView structurally; the issues ARE the groups (the DB upserts one row per
   # (code, host)), so there's no in-view folding.
   class ProbeView
     QUERY_FIELDS = Probe::Filter::FIELDS
@@ -202,7 +202,7 @@ module Gori::Tui
     end
 
     # Click hit-test: the MODE band (y), filter bar (y+1), header (y+2), divider (y+3),
-    # rows from y+4 — one row deeper than Findings because of the MODE band.
+    # rows from y+4 — one row deeper than Issues because of the MODE band.
     def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       list_rect, _ = list_split(rect)
       return nil if mx < list_rect.x || mx >= list_rect.right
@@ -220,7 +220,7 @@ module Gori::Tui
       !!prev.try(&.contains?(mx, my))
     end
 
-    # --- `/` filter bar (live, in memory — mirrors FindingsView) --------------
+    # --- `/` filter bar (live, in memory — mirrors IssuesView) --------------
 
     def start_query : Nil
       @querying = true
@@ -294,7 +294,7 @@ module Gori::Tui
     # `c`: one-key dismiss for the targeted issue. open → false-positive (mute), anything
     # already triaged → back to open (un-mute). Dismiss is the high-value triage action for
     # a passive scanner; the full open/confirmed/fp/resolved picker was over-built for
-    # machine-found issues (promote handles "this is real → Finding"). Returns the new state.
+    # machine-found issues (promote handles "this is real → Issue"). Returns the new state.
     def toggle_dismiss(store : Store) : Store::Status?
       return nil unless issue = target_issue
       next_status = issue.status.open? ? Store::Status::FalsePositive : Store::Status::Open

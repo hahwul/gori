@@ -357,9 +357,9 @@ describe Gori::Tui::SpaceMenu do
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     menu.open(Gori::Verb::Scope::Miner, :common, ctx)
-    menu.entries.map(&.id).should_not contain("mine.repeater") # no finding yet
+    menu.entries.map(&.id).should_not contain("mine.repeater") # no issue yet
 
-    ctx.miner_has_finding = true
+    ctx.miner_has_issue = true
     menu.open(Gori::Verb::Scope::Miner, :common, ctx)
     menu.entries.map(&.id).should contain("mine.repeater")
     menu.verb_for('p').try(&.id).should eq("mine.repeater")
@@ -489,9 +489,9 @@ describe Gori::Tui::SpaceMenu do
   it "gives every chordless menu verb a mnemonic, and never collides keys within a displayable view (COMMON ∪ one section)" do
     registry = Gori::Verbs.registry
     menu_scopes = [
-      Gori::Verb::Scope::Body, Gori::Verb::Scope::Repeater, Gori::Verb::Scope::Findings,
+      Gori::Verb::Scope::Body, Gori::Verb::Scope::Repeater, Gori::Verb::Scope::Issues,
       Gori::Verb::Scope::Comparer, Gori::Verb::Scope::Fuzzer, Gori::Verb::Scope::Intercept,
-      Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::FindingsDetail,
+      Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::IssuesDetail,
       Gori::Verb::Scope::Project, Gori::Verb::Scope::Decoder, Gori::Verb::Scope::Notes,
       Gori::Verb::Scope::Sitemap,
       Gori::Verb::Scope::Miner, Gori::Verb::Scope::Probe, Gori::Verb::Scope::ProbeDetail,

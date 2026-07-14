@@ -16,13 +16,13 @@ private def tmp_store(&)
   end
 end
 
-describe Gori::Tui::FindingsView do
+describe Gori::Tui::IssuesView do
   it "renders the severity-sorted list with badges + a status tag" do
     tmp_store do |store|
-      store.insert_finding("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
-      store.insert_finding("Missing header", Gori::Store::Severity::Low, "acme.test", nil)
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
+      store.insert_issue("Missing header", Gori::Store::Severity::Low, "acme.test", nil)
 
-      view = FindingsView.new
+      view = IssuesView.new
       view.reload(store)
       backend = MemoryBackend.new(80, 10)
       view.render(Screen.new(backend), Rect.new(0, 0, 80, 10))
@@ -37,58 +37,58 @@ describe Gori::Tui::FindingsView do
     end
   end
 
-  it "renders an empty-state when there are no findings" do
+  it "renders an empty-state when there are no issues" do
     tmp_store do |store|
-      view = FindingsView.new
+      view = IssuesView.new
       view.reload(store)
       backend = MemoryBackend.new(80, 12)
       view.render(Screen.new(backend), Rect.new(0, 0, 80, 12))
-      backend.contains?("no findings yet").should be_true
-      backend.contains?("FINDINGS").should be_true
+      backend.contains?("no issues yet").should be_true
+      backend.contains?("ISSUES").should be_true
       backend.contains?("⇧F").should be_true
     end
   end
 
   it "cycles triage status independently of severity" do
     tmp_store do |store|
-      id = store.insert_finding("IDOR", Gori::Store::Severity::High, "acme.test", nil)
-      store.get_finding(id).not_nil!.status.should eq(Gori::Store::Status::Open)
+      id = store.insert_issue("IDOR", Gori::Store::Severity::High, "acme.test", nil)
+      store.get_issue(id).not_nil!.status.should eq(Gori::Store::Status::Open)
 
-      view = FindingsView.new
+      view = IssuesView.new
       view.reload(store)
       view.open_detail(store).should be_true
       view.status_delta(1, store) # open -> confirmed
-      f = store.get_finding(id).not_nil!
+      f = store.get_issue(id).not_nil!
       f.status.should eq(Gori::Store::Status::Confirmed)
       f.severity.should eq(Gori::Store::Severity::High) # severity untouched
 
       view.status_delta(-1, store) # back to open
-      store.get_finding(id).not_nil!.status.should eq(Gori::Store::Status::Open)
+      store.get_issue(id).not_nil!.status.should eq(Gori::Store::Status::Open)
       # clamps at the bottom
       view.status_delta(-1, store)
-      store.get_finding(id).not_nil!.status.should eq(Gori::Store::Status::Open)
+      store.get_issue(id).not_nil!.status.should eq(Gori::Store::Status::Open)
     end
   end
 
   it "discards notes edits on cancel (^W) without persisting" do
     tmp_store do |store|
-      id = store.insert_finding("XSS", Gori::Store::Severity::Medium, nil, nil)
-      view = FindingsView.new
+      id = store.insert_issue("XSS", Gori::Store::Severity::Medium, nil, nil)
+      view = IssuesView.new
       view.reload(store)
       view.open_detail(store)
       view.start_notes_edit
       "junk".each_char { |c| view.notes_insert(c) }
       view.cancel_notes_edit
       view.editing_notes?.should be_false
-      store.get_finding(id).not_nil!.notes.should eq("") # nothing persisted
+      store.get_issue(id).not_nil!.notes.should eq("") # nothing persisted
     end
   end
 
   it "hscroll_notes scrolls a long notes line sideways into view (shift+←/→)" do
     tmp_store do |store|
-      id = store.insert_finding("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
-      store.update_finding(id, notes: "HEAD" + ("." * 80) + "TAIL")
-      view = FindingsView.new
+      id = store.insert_issue("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
+      store.update_issue(id, notes: "HEAD" + ("." * 80) + "TAIL")
+      view = IssuesView.new
       view.reload(store)
       view.open_detail(store).should be_true
       view.enter_notes_insert!
@@ -112,18 +112,18 @@ describe Gori::Tui::FindingsView do
 
   it "moves RELATED link selection with move_links (wheel/↑/↓)" do
     tmp_store do |store|
-      f1 = store.insert_finding("A", Gori::Store::Severity::Low, nil, nil)
-      f2 = store.insert_finding("B", Gori::Store::Severity::Low, nil, nil)
+      f1 = store.insert_issue("A", Gori::Store::Severity::Low, nil, nil)
+      f2 = store.insert_issue("B", Gori::Store::Severity::Low, nil, nil)
       fid1 = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "a.test", port: 443,
         method: "GET", target: "/", http_version: "HTTP/1.1", head: Bytes[0]))
       fid2 = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 2_i64, scheme: "https", host: "b.test", port: 443,
         method: "GET", target: "/b", http_version: "HTTP/1.1", head: Bytes[0]))
-      store.add_link(Gori::Store::LinkOwnerKind::Finding, f1, Gori::Store::LinkRefKind::Flow, fid1)
-      store.add_link(Gori::Store::LinkOwnerKind::Finding, f1, Gori::Store::LinkRefKind::Flow, fid2)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, f1, Gori::Store::LinkRefKind::Flow, fid1)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, f1, Gori::Store::LinkRefKind::Flow, fid2)
 
-      view = FindingsView.new
+      view = IssuesView.new
       view.reload(store)
       view.select_index(1) # newest-first sort → f1 (with links) is second in the list
       view.open_detail(store).should be_true
@@ -135,8 +135,8 @@ describe Gori::Tui::FindingsView do
 
   it "opens a detail, changes severity, and edits + saves notes" do
     tmp_store do |store|
-      id = store.insert_finding("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
-      view = FindingsView.new
+      id = store.insert_issue("XSS", Gori::Store::Severity::Medium, "acme.test", nil)
+      view = IssuesView.new
       view.reload(store)
       view.open_detail(store).should be_true
 
@@ -146,21 +146,21 @@ describe Gori::Tui::FindingsView do
       backend.contains?("MED").should be_true
 
       view.severity_delta(2, store) # medium -> critical
-      store.get_finding(id).not_nil!.severity.should eq(Gori::Store::Severity::Critical)
+      store.get_issue(id).not_nil!.severity.should eq(Gori::Store::Severity::Critical)
 
       view.start_notes_edit
       view.editing_notes?.should be_true
       "poc".each_char { |c| view.notes_insert(c) }
       view.save_notes(store)
-      store.get_finding(id).not_nil!.notes.should eq("poc")
+      store.get_issue(id).not_nil!.notes.should eq("poc")
     end
   end
 
   it "filters the list and tab-completes a field without mangling a trailing-space query" do
     tmp_store do |store|
-      store.insert_finding("SQL injection", Gori::Store::Severity::Critical, "api.test", nil)
-      store.insert_finding("Missing header", Gori::Store::Severity::Low, "app.test", nil)
-      view = FindingsView.new
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "api.test", nil)
+      store.insert_issue("Missing header", Gori::Store::Severity::Low, "app.test", nil)
+      view = IssuesView.new
       view.reload(store)
 
       view.start_query
@@ -176,37 +176,37 @@ describe Gori::Tui::FindingsView do
     end
   end
 
-  it "deletes a finding" do
+  it "deletes an issue" do
     tmp_store do |store|
-      store.insert_finding("temp", Gori::Store::Severity::Info, nil, nil)
-      view = FindingsView.new
+      store.insert_issue("temp", Gori::Store::Severity::Info, nil, nil)
+      view = IssuesView.new
       view.reload(store)
       view.delete(store)
-      store.count_findings.should eq(0)
+      store.count_issues.should eq(0)
     end
   end
 
-  it "re-anchors selection by finding id across reload (not by list index)" do
+  it "re-anchors selection by issue id across reload (not by list index)" do
     # severity DESC: Critical then Low. Selecting Low then inserting High between
     # would leave index 1 on the new High if we only clamped — id-anchor keeps Low.
     tmp_store do |store|
-      store.insert_finding("crit-row", Gori::Store::Severity::Critical, "h.test", nil)
-      store.insert_finding("low-row", Gori::Store::Severity::Low, "h.test", nil)
-      view = FindingsView.new
+      store.insert_issue("crit-row", Gori::Store::Severity::Critical, "h.test", nil)
+      store.insert_issue("low-row", Gori::Store::Severity::Low, "h.test", nil)
+      view = IssuesView.new
       view.reload(store)
       view.move(1)
-      view.target_finding.not_nil!.title.should eq("low-row")
+      view.target_issue.not_nil!.title.should eq("low-row")
 
-      store.insert_finding("high-row", Gori::Store::Severity::High, "h.test", nil)
+      store.insert_issue("high-row", Gori::Store::Severity::High, "h.test", nil)
       view.reload(store)
-      view.target_finding.not_nil!.title.should eq("low-row")
+      view.target_issue.not_nil!.title.should eq("low-row")
     end
   end
 end
 
-describe "FindingForm" do
+describe "IssueForm" do
   it "cycles severity (tab) and carries an edit id for re-titling" do
-    form = FindingForm.new("GET /x", "acme.test", 7_i64)
+    form = IssueForm.new("GET /x", "acme.test", 7_i64)
     form.severity.should eq(Gori::Store::Severity::Medium) # default
     form.severity_cycle(1)
     form.severity.should eq(Gori::Store::Severity::High)
@@ -214,25 +214,25 @@ describe "FindingForm" do
     form.severity.should eq(Gori::Store::Severity::Low)
     form.edit_id.should be_nil
 
-    edit = FindingForm.new("old", nil, nil, Gori::Store::Severity::Critical, edit_id: 42_i64)
+    edit = IssueForm.new("old", nil, nil, Gori::Store::Severity::Critical, edit_id: 42_i64)
     edit.edit_id.should eq(42_i64)
     edit.severity.should eq(Gori::Store::Severity::Critical)
   end
 end
 
-describe "Findings verbs" do
-  it "registers finding.create and the findings detail/export verbs in the registry" do
+describe "Issues verbs" do
+  it "registers issue.create and the issues detail/export verbs in the registry" do
     reg = Gori::Verbs.registry
     keymap = Gori::Verb::Keymap.build(reg)
-    keymap.lookup(Gori::Verb::Chord.new("f", shift: true), Gori::Verb::Scope::Body).should eq("finding.create")
-    keymap.lookup(Gori::Verb::Chord.new("enter"), Gori::Verb::Scope::Findings).should eq("findings.open")
-    keymap.lookup(Gori::Verb::Chord.new("]"), Gori::Verb::Scope::FindingsDetail).should eq("finding.severity-up")
-    keymap.lookup(Gori::Verb::Chord.new("}"), Gori::Verb::Scope::FindingsDetail).should eq("finding.status-up")
-    keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::FindingsDetail).should eq("finding.edit-title")
-    keymap.lookup(Gori::Verb::Chord.new("o"), Gori::Verb::Scope::FindingsDetail).should eq("finding.open-flow")
-    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::FindingsDetail).should eq("finding.repeater-flow")
+    keymap.lookup(Gori::Verb::Chord.new("f", shift: true), Gori::Verb::Scope::Body).should eq("issue.create")
+    keymap.lookup(Gori::Verb::Chord.new("enter"), Gori::Verb::Scope::Issues).should eq("issues.open")
+    keymap.lookup(Gori::Verb::Chord.new("]"), Gori::Verb::Scope::IssuesDetail).should eq("issue.severity-up")
+    keymap.lookup(Gori::Verb::Chord.new("}"), Gori::Verb::Scope::IssuesDetail).should eq("issue.status-up")
+    keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::IssuesDetail).should eq("issue.edit-title")
+    keymap.lookup(Gori::Verb::Chord.new("o"), Gori::Verb::Scope::IssuesDetail).should eq("issue.open-flow")
+    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::IssuesDetail).should eq("issue.repeater-flow")
     # export is a chord-less Global palette verb
-    reg["findings.export-md"]?.try(&.scope).should eq(Gori::Verb::Scope::Global)
-    reg["findings.export-json"]?.should_not be_nil
+    reg["issues.export-md"]?.try(&.scope).should eq(Gori::Verb::Scope::Global)
+    reg["issues.export-json"]?.should_not be_nil
   end
 end

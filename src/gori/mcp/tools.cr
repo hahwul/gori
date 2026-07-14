@@ -22,7 +22,7 @@ module Gori
     # Maps MCP tool calls to gori's store reads, the repeater engines, and (gated)
     # store writes. Read tools are always exposed; network action tools
     # (`send_request`/`send_websocket`) and write tools
-    # (`create_finding`/`update_finding`) are gated behind
+    # (`create_issue`/`update_issue`) are gated behind
     # `allow_actions` — off when the user runs `gori mcp --read-only`. A gated tool
     # is omitted from `tools/list` AND rejected by `call`.
     class Tools
@@ -96,7 +96,7 @@ module Gori
 
       # A background param-mining run, polled by mine_status / mine_results. Like FuzzJob,
       # only the runner fiber mutates these (single-threaded → no lock). `total` is the
-      # name count (the stable denominator); findings are capped at MINE_MAX_STORED.
+      # name count (the stable denominator); issues are capped at MINE_MAX_STORED.
       class MineJob
         getter id : String
         getter total : Int64
@@ -165,21 +165,21 @@ module Gori
             s.field "limit", intprop("max entries (default 200, max 5000)")
           end
 
-          tool j, "list_findings",
-            "List triage findings (severity + status), newest/most-severe first. " \
-            "Returns an object {findings, returned, offset, total} — not a bare array." do |s|
+          tool j, "list_issues",
+            "List triage issues (severity + status), newest/most-severe first. " \
+            "Returns an object {issues, returned, offset, total} — not a bare array." do |s|
             s.field "limit", intprop("max rows (default 100, max 500)")
             s.field "offset", intprop("start row (default 0)")
           end
 
-          tool j, "get_finding", "Get one finding by id." do |s|
-            s.field "id", intprop("finding id"), required: true
+          tool j, "get_issue", "Get one issue by id." do |s|
+            s.field "id", intprop("issue id"), required: true
           end
 
           tool j, "list_scope", "List the project's scope include/exclude rules." { }
 
           tool j, "project_info",
-            "Project totals: flow count, finding count, captured bytes, earliest capture time, " \
+            "Project totals: flow count, issue count, captured bytes, earliest capture time, " \
             "plus which project/db is being served and how it was selected. Always verify this " \
             "before reading or mutating security-test data." { }
 
@@ -278,7 +278,7 @@ module Gori
               s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
               s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false)")
               s.field "name", strprop("optional custom name for the saved repeater tab (only when save_as_repeater=true)")
-              s.field "finding_id", intprop("optional finding to link to the saved repeater; requires save_as_repeater=true")
+              s.field "issue_id", intprop("optional issue to link to the saved repeater; requires save_as_repeater=true")
             end
 
             tool j, "send_websocket",
@@ -290,16 +290,16 @@ module Gori
               s.field "messages", strarrprop("optional outbound text-message override; stored repeater messages are used when absent")
               s.field "idle_ms", intprop("server-silence timeout after the first inbound frame (100-60000 ms; default 3000)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
-              s.field "finding_id", intprop("optional finding to link to this repeater before sending")
+              s.field "issue_id", intprop("optional issue to link to this repeater before sending")
             end
 
-            tool j, "create_repeater", "Create a new repeater tab/session in the database. Provide either ('target' and 'request') OR ('flow_id') OR ('finding_id')." do |s|
+            tool j, "create_repeater", "Create a new repeater tab/session in the database. Provide either ('target' and 'request') OR ('flow_id') OR ('issue_id')." do |s|
               s.field "target", strprop("absolute target URL (scheme+host+optional port), e.g. https://api.example.com")
               s.field "request", strprop("verbatim raw HTTP request bytes/text")
               s.field "http2", boolprop("use HTTP/2 (default false)")
               s.field "auto_content_length", boolprop("auto-calculate Content-Length header (default true)")
               s.field "flow_id", intprop("optional original flow id this repeater stems from")
-              s.field "finding_id", intprop("optional finding id to populate target/request/messages from")
+              s.field "issue_id", intprop("optional issue id to populate target/request/messages from")
               s.field "position", intprop("tab position order index (optional, defaults to appending at end)")
               s.field "sni", strprop("optional TLS Server Name Indication override")
               s.field "mark_transform", boolprop("optional boolean indicating token substitution replacement is active (default false)")
@@ -323,21 +323,21 @@ module Gori
               s.field "id", intprop("repeater database id"), required: true
             end
 
-            tool j, "create_finding", "Record a new finding in the project." do |s|
-              s.field "title", strprop("finding title"), required: true
+            tool j, "create_issue", "Record a new issue in the project." do |s|
+              s.field "title", strprop("issue title"), required: true
               s.field "severity", strprop("info|low|medium|high|critical (default info)")
-              s.field "host", strprop("optional host the finding concerns")
-              s.field "flow_id", intprop("optional flow id this finding links to")
-              s.field "repeater_id", intprop("optional repeater id this finding links to")
+              s.field "host", strprop("optional host the issue concerns")
+              s.field "flow_id", intprop("optional flow id this issue links to")
+              s.field "repeater_id", intprop("optional repeater id this issue links to")
             end
 
-            tool j, "update_finding", "Update an existing finding's fields." do |s|
-              s.field "id", intprop("finding id"), required: true
+            tool j, "update_issue", "Update an existing issue's fields." do |s|
+              s.field "id", intprop("issue id"), required: true
               s.field "title", strprop("new title")
               s.field "severity", strprop("info|low|medium|high|critical")
               s.field "notes", strprop("free-form notes (replaces existing)")
               s.field "status", strprop("open|confirmed|false-positive|resolved")
-              s.field "repeater_id", intprop("optional repeater id to link to the finding")
+              s.field "repeater_id", intprop("optional repeater id to link to the issue")
             end
 
             tool j, "fuzz_start",
@@ -442,8 +442,8 @@ module Gori
         when "get_flow"                then get_flow(h)
         when "get_response_body_chunk" then get_response_body_chunk(h)
         when "list_sitemap"            then list_sitemap(h)
-        when "list_findings"           then list_findings(h)
-        when "get_finding"             then get_finding(h)
+        when "list_issues"           then list_issues(h)
+        when "get_issue"             then get_issue(h)
         when "list_scope"              then list_scope
         when "project_info"            then project_info
         when "get_current_context"     then get_current_context
@@ -465,8 +465,8 @@ module Gori
         when "create_repeater"    then gated { create_repeater(h) }
         when "update_repeater"    then gated { update_repeater(h) }
         when "delete_repeater"    then gated { delete_repeater(h) }
-        when "create_finding"   then gated { create_finding(h) }
-        when "update_finding"   then gated { update_finding(h) }
+        when "create_issue"   then gated { create_issue(h) }
+        when "update_issue"   then gated { update_issue(h) }
         when "fuzz_start"       then gated { fuzz_start(h) }
         when "fuzz_status"      then gated { fuzz_status(h) }
         when "fuzz_results"     then gated { fuzz_results(h) }
@@ -598,14 +598,14 @@ module Gori
         end)
       end
 
-      private def list_findings(h) : Result
+      private def list_issues(h) : Result
         offset = clamp_nonneg(int(h, "offset"))
         limit = clamp(int(h, "limit"), 100, 500)
-        all = @store.findings
-        page = all[offset, limit]? || [] of Store::Finding
+        all = @store.issues
+        page = all[offset, limit]? || [] of Store::Issue
         Result.new(JSON.build do |j|
           j.object do
-            j.field("findings") { j.array { page.each { |f| Serialize.finding(j, f, @store) } } }
+            j.field("issues") { j.array { page.each { |f| Serialize.issue(j, f, @store) } } }
             j.field "returned", page.size
             j.field "offset", offset
             j.field "total", all.size
@@ -613,12 +613,12 @@ module Gori
         end)
       end
 
-      private def get_finding(h) : Result
+      private def get_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        f = @store.get_finding(id)
-        return Result.new("no finding with id #{id}", is_error: true) unless f
-        Result.new(JSON.build { |j| Serialize.finding(j, f, @store) })
+        f = @store.get_issue(id)
+        return Result.new("no issue with id #{id}", is_error: true) unless f
+        Result.new(JSON.build { |j| Serialize.issue(j, f, @store) })
       end
 
       private def list_scope : Result
@@ -647,7 +647,7 @@ module Gori
             j.field "workspace_bound", !@workspace_root.nil?
             j.field "read_only", !@allow_actions
             j.field "flows", @store.count
-            j.field "findings", @store.count_findings
+            j.field "issues", @store.count_issues
             j.field "total_bytes", @store.total_size
             j.field "earliest_created_at", @store.earliest_created_at
             if ea = @store.earliest_created_at
@@ -940,11 +940,11 @@ module Gori
         save = bool_arg(h, "save_as_repeater", false)
         record_history = bool_arg(h, "record_history", true)
         include_sensitive_headers = bool_arg(h, "include_sensitive_headers", false)
-        finding_id = int(h, "finding_id")
-        return Result.new(id_error(h, "finding_id"), is_error: true) if finding_id.nil? && present?(h, "finding_id")
-        if finding_id
-          return Result.new("finding_id requires save_as_repeater=true", is_error: true) unless save
-          return Result.new("no finding with id #{finding_id}", is_error: true) unless @store.get_finding(finding_id)
+        issue_id = int(h, "issue_id")
+        return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
+        if issue_id
+          return Result.new("issue_id requires save_as_repeater=true", is_error: true) unless save
+          return Result.new("no issue with id #{issue_id}", is_error: true) unless @store.get_issue(issue_id)
         end
 
         built, http2, sni = build_send_request(h)
@@ -956,7 +956,7 @@ module Gori
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
 
         repeater_id = persist_send_repeater(h, save, built, http2, result,
-          finding_id, recorded_flow_id)
+          issue_id, recorded_flow_id)
 
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
           include_sensitive_headers), is_error: !result.ok?)
@@ -980,7 +980,7 @@ module Gori
 
       private def persist_send_repeater(h, save : Bool, built : RequestBuilder::Built,
                                       http2 : Bool, result : Repeater::Result,
-                                      finding_id : Int64?, recorded_flow_id : Int64?) : Int64?
+                                      issue_id : Int64?, recorded_flow_id : Int64?) : Int64?
         return nil unless save
         port_suffix = ((built.scheme == "https" && built.port == 443) ||
                        (built.scheme == "http" && built.port == 80)) ? "" : ":#{built.port}"
@@ -1002,8 +1002,8 @@ module Gori
         )
         return nil unless repeater_id > 0
 
-        @store.add_link(Store::LinkOwnerKind::Finding, finding_id,
-          Store::LinkRefKind::Repeater, repeater_id) if finding_id
+        @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
+          Store::LinkRefKind::Repeater, repeater_id) if issue_id
         if (name = str(h, "name")) && !name.empty?
           @store.set_repeater_name(repeater_id, Env.mask_secrets(name))
         end
@@ -1131,11 +1131,11 @@ module Gori
           return Result.new("repeater #{repeater_id} is not a WebSocket upgrade request", is_error: true)
         end
 
-        finding_id = int(h, "finding_id")
-        return Result.new(id_error(h, "finding_id"), is_error: true) if finding_id.nil? && present?(h, "finding_id")
-        if finding_id
-          return Result.new("no finding with id #{finding_id}", is_error: true) unless @store.get_finding(finding_id)
-          @store.add_link(Store::LinkOwnerKind::Finding, finding_id,
+        issue_id = int(h, "issue_id")
+        return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
+        if issue_id
+          return Result.new("no issue with id #{issue_id}", is_error: true) unless @store.get_issue(issue_id)
+          @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
 
@@ -1241,22 +1241,22 @@ module Gori
         end
       end
 
-      private def create_finding(h) : Result
+      private def create_issue(h) : Result
         title = str(h, "title")
         return Result.new("missing required 'title'", is_error: true) if title.nil? || title.empty?
-        # Mask secrets in finding title
+        # Mask secrets in issue title
         masked_title = Env.mask_secrets(title)
 
         # An unrecognised severity is rejected, not silently coerced to Info —
-        # matching update_finding (a typo'd 'severity' shouldn't quietly become
-        # an info finding). An absent/blank severity still defaults to Info.
+        # matching update_issue (a typo'd 'severity' shouldn't quietly become
+        # an info issue). An absent/blank severity still defaults to Info.
         sev_s = str(h, "severity")
         if err = bad_severity(sev_s)
           return err
         end
         severity = severity_from(sev_s) || Store::Severity::Info
         # A present-but-invalid flow_id (1.9 / "oops") would otherwise be
-        # silently nulled, creating an UNLINKED finding while reporting success —
+        # silently nulled, creating an UNLINKED issue while reporting success —
         # reject it, consistent with how get_flow rejects a non-integer id.
         flow_id = int(h, "flow_id")
         return Result.new("invalid 'flow_id' (expected an integer)", is_error: true) if flow_id.nil? && present?(h, "flow_id")
@@ -1267,13 +1267,13 @@ module Gori
         end
 
         host = str(h, "host").try { |hst| Env.mask_secrets(hst) }
-        id = @store.insert_finding(masked_title, severity, host, flow_id)
-        # insert_finding returns 0 (never raises) when the write batch fails — e.g.
+        id = @store.insert_issue(masked_title, severity, host, flow_id)
+        # insert_issue returns 0 (never raises) when the write batch fails — e.g.
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
-        return Result.new("failed to persist finding (store busy or unwritable)", is_error: true) if id == 0
+        return Result.new("failed to persist issue (store busy or unwritable)", is_error: true) if id == 0
         if repeater_id
-          @store.add_link(Store::LinkOwnerKind::Finding, id,
+          @store.add_link(Store::LinkOwnerKind::Issue, id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
         Result.new(JSON.build do |j|
@@ -1284,10 +1284,10 @@ module Gori
         end)
       end
 
-      private def update_finding(h) : Result
+      private def update_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        return Result.new("no finding with id #{id}", is_error: true) unless @store.get_finding(id)
+        return Result.new("no issue with id #{id}", is_error: true) unless @store.get_issue(id)
         # A blank severity/status means "leave unchanged"; only a present,
         # non-blank, unrecognised value is an error.
         sev_s = str(h, "severity")
@@ -1318,10 +1318,10 @@ module Gori
         end
 
         unless title.nil? && severity.nil? && notes.nil? && status.nil?
-          @store.update_finding(id, title: title, severity: severity, notes: notes, status: status)
+          @store.update_issue(id, title: title, severity: severity, notes: notes, status: status)
         end
         if repeater_id
-          @store.add_link(Store::LinkOwnerKind::Finding, id,
+          @store.add_link(Store::LinkOwnerKind::Issue, id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
         Result.new(JSON.build do |j|
@@ -1537,21 +1537,21 @@ module Gori
       end
 
       private def create_repeater(h) : Result
-        finding_id = int(h, "finding_id")
-        return Result.new(id_error(h, "finding_id"), is_error: true) if finding_id.nil? && present?(h, "finding_id")
+        issue_id = int(h, "issue_id")
+        return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
         flow_id = int(h, "flow_id")
         return Result.new(id_error(h, "flow_id"), is_error: true) if flow_id.nil? && present?(h, "flow_id")
 
         target = str(h, "target")
         request = str(h, "request")
 
-        if finding_id
-          finding = @store.get_finding(finding_id)
-          return Result.new("no finding with id #{finding_id}", is_error: true) unless finding
-          if fid = finding.flow_id
+        if issue_id
+          issue = @store.get_issue(issue_id)
+          return Result.new("no issue with id #{issue_id}", is_error: true) unless issue
+          if fid = issue.flow_id
             flow_id = fid
           elsif target.nil? || target.empty? || request.nil? || request.empty?
-            return Result.new("finding #{finding_id} has no associated flow_id", is_error: true)
+            return Result.new("issue #{issue_id} has no associated flow_id", is_error: true)
           end
         end
 
@@ -1626,8 +1626,8 @@ module Gori
 
         return Result.new("failed to persist repeater (store busy or unwritable)", is_error: true) if id == 0
 
-        if finding_id
-          @store.add_link(Store::LinkOwnerKind::Finding, finding_id,
+        if issue_id
+          @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
             Store::LinkRefKind::Repeater, id)
         end
 

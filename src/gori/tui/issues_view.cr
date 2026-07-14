@@ -8,22 +8,22 @@ require "./text_read_state"
 require "./gutter"
 require "../settings"
 require "../store"
-require "../findings_query"
+require "../issues_query"
 require "../links"
 
 module Gori::Tui
-  # The Findings tab (DESIGN.md: the final output — human-confirmed vulns). A
+  # The Issues tab (DESIGN.md: the final output — human-confirmed vulns). A
   # severity-sorted list + a detail with inline-editable notes and a severity
   # control. Created from a flow (History `F`) or blank (`n`).
-  class FindingsView
+  class IssuesView
     QUERY_FIELDS = %w(severity: status: host: title:)
 
     def initialize
-      @all = [] of Store::Finding      # the raw store list (severity-desc)
-      @findings = [] of Store::Finding # the filtered/visible subset
+      @all = [] of Store::Issue      # the raw store list (severity-desc)
+      @issues = [] of Store::Issue # the filtered/visible subset
       @selected = 0
       @scroll = 0
-      @detail = nil.as(Store::Finding?)
+      @detail = nil.as(Store::Issue?)
       @detail_flow = nil.as(Store::FlowRow?)
       @detail_links = [] of Store::EntityLink
       @detail_resolved = [] of Links::Resolved
@@ -40,13 +40,13 @@ module Gori::Tui
       @qcx = 0
       @preedit_q = ""
       @querying = false
-      # settings:layout Findings preview (list page bottom pane)
+      # settings:layout Issues preview (list page bottom pane)
       @preview_scroll = 0
       @preview_focus = :list # :list | :preview
     end
 
     def preview_enabled? : Bool
-      Settings.findings_preview
+      Settings.issues_preview
     end
 
     getter preview_focus : Symbol
@@ -74,22 +74,22 @@ module Gori::Tui
     end
 
     def reload(store : Store) : Nil
-      @all = store.findings
+      @all = store.issues
       apply_filter
       @loaded = true
     end
 
     # Recompute the visible list from the raw list through the active filter, then
-    # re-anchor selection by finding id (not index) so a data_version reload under
+    # re-anchor selection by issue id (not index) so a data_version reload under
     # live capture doesn't jump the highlight to a different row.
     private def apply_filter : Nil
-      prev_id = @findings[@selected]?.try(&.id)
-      @findings = Findings::Filter.parse(@query).apply(@all)
+      prev_id = @issues[@selected]?.try(&.id)
+      @issues = Issues::Filter.parse(@query).apply(@all)
       @selected =
-        if prev_id && (idx = @findings.index { |f| f.id == prev_id })
+        if prev_id && (idx = @issues.index { |f| f.id == prev_id })
           idx
         else
-          @selected.clamp(0, {@findings.size - 1, 0}.max)
+          @selected.clamp(0, {@issues.size - 1, 0}.max)
         end
     end
 
@@ -98,14 +98,14 @@ module Gori::Tui
         scroll_preview(delta)
         return
       end
-      return if @findings.empty?
-      @selected = (@selected + delta).clamp(0, @findings.size - 1)
+      return if @issues.empty?
+      @selected = (@selected + delta).clamp(0, @issues.size - 1)
       @preview_scroll = 0
     end
 
     # Inverts render_list's row layout (filter bar at rect.y, header at +1, divider
     # at +2, rows from top = rect.y + 3 spanning @scroll..): maps a click to a
-    # finding index, or nil past the last populated row / outside the list pane.
+    # issue index, or nil past the last populated row / outside the list pane.
     def list_row_at(rect : Rect, mx : Int32, my : Int32) : Int32?
       list_rect, _ = list_split(rect)
       return nil if mx < list_rect.x || mx >= list_rect.right
@@ -114,7 +114,7 @@ module Gori::Tui
       i = my - top
       return nil if i < 0 || i >= list_h
       idx = @scroll + i
-      idx < @findings.size ? idx : nil
+      idx < @issues.size ? idx : nil
     end
 
     def preview_at?(rect : Rect, mx : Int32, my : Int32) : Bool
@@ -138,8 +138,8 @@ module Gori::Tui
 
 
     def select_index(idx : Int32) : Nil
-      return if @findings.empty?
-      @selected = idx.clamp(0, @findings.size - 1)
+      return if @issues.empty?
+      @selected = idx.clamp(0, @issues.size - 1)
       @preview_scroll = 0
       @preview_focus = :list
     end
@@ -148,7 +148,7 @@ module Gori::Tui
       @selected
     end
 
-    # At the first (top) finding — lets the Runner pop focus to the tab bar on ↑.
+    # At the first (top) issue — lets the Runner pop focus to the tab bar on ↑.
     def at_top? : Bool
       @selected == 0
     end
@@ -177,7 +177,7 @@ module Gori::Tui
     end
 
     # --- `/` filter bar ------------------------------------------------------
-    # Findings are in memory, so filtering is live (no debounce) — each edit
+    # Issues are in memory, so filtering is live (no debounce) — each edit
     # re-derives the visible list. Mirrors History's QL-bar editing surface.
 
     def querying? : Bool
@@ -246,16 +246,16 @@ module Gori::Tui
     end
 
     def open_detail(store : Store) : Bool
-      finding = @findings[@selected]?
-      return false unless finding
-      @detail = finding
-      @detail_flow = finding.flow_id.try { |fid| store.flow_row(fid) }
+      issue = @issues[@selected]?
+      return false unless issue
+      @detail = issue
+      @detail_flow = issue.flow_id.try { |fid| store.flow_row(fid) }
       reload_detail_links(store)
       @links_scroll = 0
       @selected_link = 0
       @detail_focus = :links
       @notes_mode = InputMode::Read
-      @notes.set_text(finding.notes)
+      @notes.set_text(issue.notes)
       @notes_read.sync_from(@notes)
       true
     end
@@ -277,9 +277,9 @@ module Gori::Tui
     end
 
     def reload_detail_links(store : Store) : Nil
-      return unless finding = @detail
-      @detail_links = store.list_links(Store::LinkOwnerKind::Finding, finding.id)
-      @detail_links = Links.dedupe_finding_flow(@detail_links, finding.flow_id)
+      return unless issue = @detail
+      @detail_links = store.list_links(Store::LinkOwnerKind::Issue, issue.id)
+      @detail_links = Links.dedupe_issue_flow(@detail_links, issue.flow_id)
       @detail_resolved = Links.resolve_all(store, @detail_links)
       @selected_link = @selected_link.clamp(0, {@detail_resolved.size - 1, 0}.max)
     end
@@ -310,31 +310,31 @@ module Gori::Tui
     LINKS_VISIBLE = 4
 
     def severity_delta(delta : Int32, store : Store) : Nil
-      finding = @detail
-      return unless finding
-      level = (finding.severity.value + delta).clamp(0, 4)
-      store.update_finding(finding.id, severity: Store::Severity.new(level))
+      issue = @detail
+      return unless issue
+      level = (issue.severity.value + delta).clamp(0, 4)
+      store.update_issue(issue.id, severity: Store::Severity.new(level))
       refresh_detail(store)
     end
 
     def status_delta(delta : Int32, store : Store) : Nil
-      finding = @detail
-      return unless finding
-      level = (finding.status.value + delta).clamp(0, 3)
-      store.update_finding(finding.id, status: Store::Status.new(level))
+      issue = @detail
+      return unless issue
+      level = (issue.status.value + delta).clamp(0, 3)
+      store.update_issue(issue.id, status: Store::Status.new(level))
       refresh_detail(store)
     end
 
-    # The finding currently open in the detail view (for title-edit / evidence
+    # The issue currently open in the detail view (for title-edit / evidence
     # jumps driven from the Runner).
-    def detail_finding : Store::Finding?
+    def detail_issue : Store::Issue?
       @detail
     end
 
-    # The finding a delete would act on — the open detail, else the list selection
+    # The issue a delete would act on — the open detail, else the list selection
     # (matches #delete's own precedence) — so the Runner can name it in the confirm.
-    def target_finding : Store::Finding?
-      @detail || @findings[@selected]?
+    def target_issue : Store::Issue?
+      @detail || @issues[@selected]?
     end
 
     # Re-fetch the open detail + list after an external update (e.g. a title edit
@@ -344,11 +344,11 @@ module Gori::Tui
     end
 
     def delete(store : Store) : Nil
-      if finding = @detail
-        store.delete_finding(finding.id)
+      if issue = @detail
+        store.delete_issue(issue.id)
         close_detail
-      elsif finding = @findings[@selected]?
-        store.delete_finding(finding.id)
+      elsif issue = @issues[@selected]?
+        store.delete_issue(issue.id)
       end
       reload(store)
     end
@@ -359,10 +359,10 @@ module Gori::Tui
     end
 
     def enter_notes_insert! : Nil
-      return unless finding = @detail
+      return unless issue = @detail
       @detail_focus = :notes
       if @notes_mode == InputMode::Read
-        @notes.set_text(finding.notes)
+        @notes.set_text(issue.notes)
       end
       @notes_mode = InputMode::Insert
       @notes_read.sync_from(@notes)
@@ -430,11 +430,11 @@ module Gori::Tui
     end
 
     def save_notes(store : Store) : Nil
-      return unless finding = @detail
-      store.update_finding(finding.id, notes: String.new(@notes.to_bytes))
+      return unless issue = @detail
+      store.update_issue(issue.id, notes: String.new(@notes.to_bytes))
       exit_notes_insert!
       # refresh_detail already re-syncs @notes from the re-fetched @detail (now that
-      # notes-insert mode is off), and it nil-guards a peer-deleted finding — so no
+      # notes-insert mode is off), and it nil-guards a peer-deleted issue — so no
       # separate (unsafe) set_text here.
       refresh_detail(store)
     end
@@ -442,8 +442,8 @@ module Gori::Tui
     # Leave the notes editor WITHOUT persisting (^W) — discards the in-buffer
     # edits; the next edit re-seeds from the stored notes (enter_notes_insert!).
     def cancel_notes_edit : Nil
-      return unless finding = @detail
-      @notes.set_text(finding.notes)
+      return unless issue = @detail
+      @notes.set_text(issue.notes)
       exit_notes_insert!
       @notes_read.sync_from(@notes)
     end
@@ -470,14 +470,14 @@ module Gori::Tui
       top = rect.y + 3
       list_h = {rect.bottom - top, 0}.max
 
-      if @findings.empty?
+      if @issues.empty?
         list_rect = Rect.new(rect.x + 1, top, {rect.w - 2, 0}.max, {rect.bottom - top, 0}.max)
         if !filtering?
-          TrafficEmptyState.render(screen, list_rect, variant: :findings)
+          TrafficEmptyState.render(screen, list_rect, variant: :issues)
         elsif querying?
-          screen.text(rect.x + 1, top, "no findings match · esc clears the filter", Theme.muted)
+          screen.text(rect.x + 1, top, "no issues match · esc clears the filter", Theme.muted)
         else
-          screen.text(rect.x + 1, top, "no findings match · / to edit the filter", Theme.muted)
+          screen.text(rect.x + 1, top, "no issues match · / to edit the filter", Theme.muted)
         end
         return
       end
@@ -486,8 +486,8 @@ module Gori::Tui
       title_x = rect.x + 11
       (0...list_h).each do |i|
         idx = @scroll + i
-        break if idx >= @findings.size
-        f = @findings[idx]
+        break if idx >= @issues.size
+        f = @issues[idx]
         y = top + i
         selected = idx == @selected
         bg = selected ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
@@ -513,9 +513,9 @@ module Gori::Tui
       return if rect.empty? || rect.h < 2
       border = Frame.pane_border(focused)
       Frame.inner_divider(screen, rect, rect.y, border: border)
-      f = @findings[@selected]?
+      f = @issues[@selected]?
       unless f
-        screen.text(rect.x + 1, rect.y + 1, "preview — select a finding", Theme.muted,
+        screen.text(rect.x + 1, rect.y + 1, "preview — select an issue", Theme.muted,
           width: {rect.w - 2, 0}.max)
         return
       end
@@ -524,7 +524,7 @@ module Gori::Tui
       return if body.h < 1
       screen.fill(body, Theme.selection_dim) if active
       bg = active ? Theme.selection_dim : Theme.bg
-      lines = findings_preview_lines(f)
+      lines = issues_preview_lines(f)
       sc = @preview_scroll.clamp(0, {lines.size - 1, 0}.max)
       w = {body.w - 2, 0}.max
       (0...body.h).each do |i|
@@ -535,7 +535,7 @@ module Gori::Tui
       end
     end
 
-    private def findings_preview_lines(f : Store::Finding) : Array({Color, String})
+    private def issues_preview_lines(f : Store::Issue) : Array({Color, String})
       lines = [] of {Color, String}
       lines << {Theme.text_bright, "#{severity_badge(f.severity)}  #{f.title}"}
       host = f.host.try(&.presence) || "—"
@@ -543,7 +543,7 @@ module Gori::Tui
       if fid = f.flow_id
         lines << {Theme.muted, "evidence  flow ##{fid}"}
       else
-        lines << {Theme.muted, "evidence  (none — standalone finding)"}
+        lines << {Theme.muted, "evidence  (none — standalone issue)"}
       end
       notes = f.notes.strip
       if notes.empty?
@@ -569,7 +569,7 @@ module Gori::Tui
       end
       rx = rect.right - 1
       if filtering?
-        count = @findings.size.to_s
+        count = @issues.size.to_s
         screen.text({rx - count.size, rect.x}.max, rect.y, count, Theme.muted)
         rx -= count.size + 2
       end
@@ -582,33 +582,33 @@ module Gori::Tui
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
-      finding = @detail.not_nil!
+      issue = @detail.not_nil!
       w = {rect.w - 2, 0}.max
 
       # y0 — title row: a severity-coloured bullet + the bright title; #id at the right.
-      id_label = "##{finding.id}"
+      id_label = "##{issue.id}"
       screen.text(rect.right - id_label.size - 1, rect.y, id_label, Theme.muted)
-      screen.cell(rect.x + 1, rect.y, '●', severity_color(finding.severity))
+      screen.cell(rect.x + 1, rect.y, '●', severity_color(issue.severity))
       title_w = {(rect.right - id_label.size - 2) - (rect.x + 3), 0}.max
-      screen.text(rect.x + 3, rect.y, finding.title, Theme.text_bright, width: title_w, attr: Attribute::Bold)
+      screen.text(rect.x + 3, rect.y, issue.title, Theme.text_bright, width: title_w, attr: Attribute::Bold)
 
       # y1 — chips: a filled severity chip + a status chip.
       cx = rect.x + 1
-      cx = chip(screen, cx, rect.y + 1, " #{severity_badge(finding.severity)} ", severity_color(finding.severity))
-      chip(screen, cx + 1, rect.y + 1, " #{finding.status.label} ", status_color(finding.status))
+      cx = chip(screen, cx, rect.y + 1, " #{severity_badge(issue.severity)} ", severity_color(issue.severity))
+      chip(screen, cx + 1, rect.y + 1, " #{issue.status.label} ", status_color(issue.status))
 
       # y2 — timestamps.
-      meta = "created #{fmt_ts(finding.created_at)}"
-      meta += " · edited #{fmt_ts(finding.updated_at)}" if finding.updated_at > finding.created_at
+      meta = "created #{fmt_ts(issue.created_at)}"
+      meta += " · edited #{fmt_ts(issue.updated_at)}" if issue.updated_at > issue.created_at
       screen.text(rect.x + 1, rect.y + 2, meta, Theme.muted, width: w)
 
       # y3 — primary linked-flow evidence.
       evidence = if flow = @detail_flow
                    "evidence  #{flow.method} #{flow_location(flow)} → #{flow.status || "-"}"
-                 elsif fid = finding.flow_id
+                 elsif fid = issue.flow_id
                    "evidence  flow ##{fid} (no longer captured)"
                  else
-                   "evidence  (none — standalone finding)"
+                   "evidence  (none — standalone issue)"
                  end
       screen.text(rect.x + 1, rect.y + 3, evidence, Theme.muted, width: w)
 
@@ -727,11 +727,11 @@ module Gori::Tui
     end
 
     private def refresh_detail(store : Store) : Nil
-      if finding = @detail
-        @detail = store.get_finding(finding.id)
+      if issue = @detail
+        @detail = store.get_issue(issue.id)
         @detail_flow = @detail.try { |f| f.flow_id.try { |fid| store.flow_row(fid) } }
         reload_detail_links(store)
-        # get_finding returns nil when the row was deleted by a peer session (supported
+        # get_issue returns nil when the row was deleted by a peer session (supported
         # cross-session scenario) — guard the deref, mirroring ProbeView#refresh_detail.
         # When @detail is nil the render path already falls back to the list view.
         if !notes_insert_mode? && (d = @detail)
@@ -776,7 +776,7 @@ module Gori::Tui
       w <= 1 ? "…" : "#{s[0, w - 1]}…"
     end
 
-    # created_at/updated_at are unix MICROSECONDS (the findings.* unit) — to seconds
+    # created_at/updated_at are unix MICROSECONDS (the issues.* unit) — to seconds
     # for Time.unix, like Project/History formatting.
     private def fmt_ts(us : Int64) : String
       Time.unix(us // 1_000_000).to_local.to_s("%Y-%m-%d %H:%M")
@@ -810,11 +810,11 @@ module Gori::Tui
     end
   end
 
-  # The create / edit-title overlay for a finding: a title input plus a severity
+  # The create / edit-title overlay for an issue: a title input plus a severity
   # picker (tab cycles it). Carries the linking flow's host/id when opened from
-  # History; `edit_id` is set when re-titling an existing finding instead of
-  # creating one. `heading` labels the card ("NEW FINDING" / "EDIT FINDING").
-  class FindingForm
+  # History; `edit_id` is set when re-titling an existing issue instead of
+  # creating one. `heading` labels the card ("NEW ISSUE" / "EDIT ISSUE").
+  class IssueForm
     getter title : String
     getter host : String?
     getter flow_id : Int64?
@@ -823,7 +823,7 @@ module Gori::Tui
 
     def initialize(@title : String = "", @host : String? = nil, @flow_id : Int64? = nil,
                    @severity : Store::Severity = Store::Severity::Medium,
-                   @edit_id : Int64? = nil, @heading : String = "NEW FINDING")
+                   @edit_id : Int64? = nil, @heading : String = "NEW ISSUE")
       @cx = @title.size
       @preedit = ""
     end

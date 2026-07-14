@@ -14,7 +14,7 @@ module Gori
       class Cookies < Rule
         # A __Host- cookie is browser-rejected unless it is Secure, Path=/, and has NO Domain;
         # a __Secure- cookie is rejected unless Secure. A violation means the security intent
-        # silently fails (the cookie is dropped), so it is a distinct, higher-signal finding.
+        # silently fails (the cookie is dropped), so it is a distinct, higher-signal issue.
         HOST_PREFIX   = "__Host-"
         SECURE_PREFIX = "__Secure-"
 
@@ -36,7 +36,7 @@ module Gori
             has_secure = flags.includes?("secure")
             prefixed = check_prefix(ctx, name, flags, has_secure, acc)
 
-            # Secure: the generic finding is subsumed by the more specific prefix violation, so a
+            # Secure: the generic issue is subsumed by the more specific prefix violation, so a
             # prefixed cookie reports at most one Secure-related issue.
             if ctx.scheme == "https" && !has_secure && !prefixed
               acc << cookie(ctx, "cookie_no_secure", "Cookie without Secure flag", Store::Severity::Medium, name)
@@ -70,7 +70,7 @@ module Gori
 
         # An Expires already at/before now is a real clear. An UNparsable/odd date is treated as a
         # deletion too, so a framework clearing a cookie with a sentinel date isn't spammed with
-        # hygiene findings — only a genuinely FUTURE-dated empty cookie keeps its hygiene checks.
+        # hygiene issues — only a genuinely FUTURE-dated empty cookie keeps its hygiene checks.
         private def expires_past?(expires : String) : Bool
           Time::Format::HTTP_DATE.parse(expires) <= Time.utc
         rescue

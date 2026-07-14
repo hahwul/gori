@@ -607,7 +607,7 @@ module Gori::Tui
     end
 
     # Colour for a Store::Severity value (0=Info … 4=Critical). Takes a plain Int so
-    # Theme stays decoupled from Store (like status_color/method_color). The finding
+    # Theme stays decoupled from Store (like status_color/method_color). The issue
     # and Probe triage views keep their own private copies of this mapping.
     def self.severity_color(value : Int32) : Color
       case value

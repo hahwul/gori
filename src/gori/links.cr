@@ -32,8 +32,8 @@ module Gori
       links.map { |l| resolve(store, l) }
     end
 
-    # Drop links that duplicate the finding's primary flow_id (shown on the evidence row).
-    def self.dedupe_finding_flow(links : Array(Store::EntityLink), flow_id : Int64?) : Array(Store::EntityLink)
+    # Drop links that duplicate the issue's primary flow_id (shown on the evidence row).
+    def self.dedupe_issue_flow(links : Array(Store::EntityLink), flow_id : Int64?) : Array(Store::EntityLink)
       return links unless fid = flow_id
       links.reject { |l| l.ref_kind.flow? && l.ref_id == fid }
     end

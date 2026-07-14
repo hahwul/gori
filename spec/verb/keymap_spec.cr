@@ -68,7 +68,7 @@ describe Gori::Verb::Keymap do
   describe "the editable surface is conflict-free + reserved-free" do
     # The guards target the REBINDABLE surface (Hotkeys.rebindable?). Hidden nav
     # primitives legitimately reuse structural keys (escape on palette.close), have
-    # benign last-wins overlaps (FindingsDetail `left`), and nav-alias verbs carry a
+    # benign last-wins overlaps (IssuesDetail `left`), and nav-alias verbs carry a
     # structural primary (body.open = enter) — none are editable, so they're excluded.
     it "has no two rebindable verbs claiming the same chord in the SAME scope" do
       reg = Gori::Verbs.registry

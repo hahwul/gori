@@ -1,18 +1,18 @@
 require "./spec_helper"
-require "../src/gori/findings_query"
+require "../src/gori/issues_query"
 
 include Gori
 
 private def fnd(title : String, severity : Store::Severity, status : Store::Status = Store::Status::Open,
-                host : String? = nil) : Store::Finding
-  Store::Finding.new(1_i64, 0_i64, 0_i64, title, severity, host, nil, "", status)
+                host : String? = nil) : Store::Issue
+  Store::Issue.new(1_i64, 0_i64, 0_i64, title, severity, host, nil, "", status)
 end
 
-private def filtered(query : String, list : Array(Store::Finding)) : Array(Store::Finding)
-  Findings::Filter.parse(query).apply(list)
+private def filtered(query : String, list : Array(Store::Issue)) : Array(Store::Issue)
+  Issues::Filter.parse(query).apply(list)
 end
 
-describe Gori::Findings::Filter do
+describe Gori::Issues::Filter do
   list = [
     fnd("Reflected XSS in search", Store::Severity::High, Store::Status::Open, "app.example.com"),
     fnd("SQL injection in login", Store::Severity::Critical, Store::Status::Confirmed, "api.example.com"),
@@ -22,7 +22,7 @@ describe Gori::Findings::Filter do
 
   it "passes everything for an empty query" do
     filtered("", list).size.should eq(4)
-    Findings::Filter.parse("").empty?.should be_true
+    Issues::Filter.parse("").empty?.should be_true
   end
 
   it "filters by exact triage status" do

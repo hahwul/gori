@@ -17,7 +17,7 @@ module Gori::Tui
       {:decoder, "Decoder"},
       {:comparer, "Comparer"},
       {:probe, "Probe"},
-      {:findings, "Findings"},
+      {:issues, "Issues"},
       {:notes, "Notes"},
       {:help, "Help"},
     ]
@@ -49,7 +49,7 @@ module Gori::Tui
     # first occurrence, and catalog tabs absent from prefs are INSERTED at their
     # catalog-relative position (next to their catalog neighbours, not dumped at the end)
     # with their default visibility — so a tab added in a newer build (e.g. Probe, left of
-    # Findings) lands where the catalog puts it even for an existing config, and is never
+    # Issues) lands where the catalog puts it even for an existing config, and is never
     # hidden by an older one. Guarantees ≥1 visible (a hand-edited all-hidden config reveals #1).
     def self.reconcile(prefs : Array({String, Bool})) : Array({Symbol, String, Bool})
       label_of = {} of Symbol => String

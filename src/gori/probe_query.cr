@@ -2,14 +2,14 @@ require "./store"
 
 module Gori
   module Probe
-    # An in-memory predicate over Probe issues, parsed from a Findings-like filter string.
+    # An in-memory predicate over Probe issues, parsed from a Issues-like filter string.
     # Issues are already grouped (one row per code+host) and live wholly in memory, so —
-    # like Findings::Filter — this matches Crystal-side. Terms are whitespace-separated and
+    # like Issues::Filter — this matches Crystal-side. Terms are whitespace-separated and
     # AND-joined; a leading `-` negates a field term; a bare/unrecognised token is free text
     # over title + host + code.
     #
     #   reflected                  → free text "reflected" in title/host/code
-    #   category:tech sev:>=high   → tech findings at High or Critical
+    #   category:tech sev:>=high   → tech issues at High or Critical
     #   -status:resolved host:api  → not-resolved AND host contains "api"
     class Filter
       FIELDS = %w(severity: status: category: host: code:)

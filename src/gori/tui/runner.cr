@@ -12,7 +12,7 @@ require "./controllers/sitemap_controller"
 require "./controllers/intercept_controller"
 require "./controllers/notes_controller"
 require "./controllers/history_controller"
-require "./controllers/findings_controller"
+require "./controllers/issues_controller"
 require "./controllers/probe_controller"
 require "./controllers/project_controller"
 require "./controllers/repeater_controller"
@@ -25,7 +25,7 @@ require "./history_view"
 require "./repeater_view"
 require "./sitemap_view"
 require "./help_view"
-require "./findings_view"
+require "./issues_view"
 require "./notes_view"
 require "./project_view"
 require "./intercept_view"
@@ -38,7 +38,7 @@ require "./copy_picker"
 require "./flow_picker"
 require "./subtab_picker"
 require "./links_overlay"
-require "./finding_picker"
+require "./issue_picker"
 require "./note_picker"
 require "../links"
 require "../notes"
@@ -79,14 +79,14 @@ module Gori::Tui
       @keymap = Hotkeys.build_keymap(@session.registry) # base verbs + OS profile + user overrides
       @scope = @session.scope
       @rules_overlay = RulesOverlay.new(@session.rules)
-      @finding_form = FindingForm.new
+      @issue_form = IssueForm.new
       @palette = PaletteState.new(@session.registry)
       @space_menu = SpaceMenu.new(@session.registry)
       # Land on the home tab, but never on a hidden one (settings:tabs may hide Project;
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule | :ca_import
+      @overlay = :none # :none | :palette | :detail | :rules | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule | :ca_import
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -142,7 +142,7 @@ module Gori::Tui
       # The "open browser" picker (palette → browser.open); @overlay is :browser
       # while it's up.
       @browser_picker = nil.as(BrowserPicker?)
-      # The severity/status value picker (Findings detail → space); @overlay is :choice.
+      # The severity/status value picker (Issues detail → space); @overlay is :choice.
       @choice_picker = nil.as(ChoicePicker?)
       # The tab-bar "more" dropdown (the ⋯ affordance → ↵/↓): lists the settings-hidden
       # tabs (Miner by default). @overlay is :tabs_more while it's open; built fresh each
@@ -157,9 +157,9 @@ module Gori::Tui
       @flow_picker = nil.as(FlowPicker?)
       # The Repeater sub-tab search picker (space → s); @overlay is :repeater_subtab.
       @subtab_picker = nil.as(SubtabPicker?)
-      # Entity links overlay (Findings/Notes → space l) and pickers for add/link-to.
+      # Entity links overlay (Issues/Notes → space l) and pickers for add/link-to.
       @links_overlay = nil.as(LinksOverlay?)
-      @finding_picker = nil.as(FindingPicker?)
+      @issue_picker = nil.as(IssuePicker?)
       @note_picker = nil.as(NotePicker?)
       @link_pending_ref = nil.as({Store::LinkRefKind, Int64}?)
       @link_add_owner = nil.as({Store::LinkOwnerKind, Int64}?)
@@ -219,7 +219,7 @@ module Gori::Tui
         InterceptController.new(self),
         NotesController.new(self),
         HistoryController.new(self),
-        FindingsController.new(self),
+        IssuesController.new(self),
         ProbeController.new(self),
         ProjectController.new(self),
         RepeaterController.new(self),
@@ -255,8 +255,8 @@ module Gori::Tui
       @tabs[:history].as(HistoryController)
     end
 
-    private def findings_controller : FindingsController
-      @tabs[:findings].as(FindingsController)
+    private def issues_controller : IssuesController
+      @tabs[:issues].as(IssuesController)
     end
 
     private def probe_controller : ProbeController
@@ -612,10 +612,10 @@ module Gori::Tui
       case @overlay
       when :palette       then @palette.set_preedit(text)
       when :rules         then @rules_overlay.set_preedit(text)
-      when :finding_new   then @finding_form.set_preedit(text)
+      when :issue_new   then @issue_form.set_preedit(text)
       when :comparer_pick then @flow_picker.try(&.set_preedit(text))
       when :repeater_subtab then @subtab_picker.try(&.set_preedit(text))
-      when :finding_pick  then @finding_picker.try(&.set_preedit(text))
+      when :issue_pick  then @issue_picker.try(&.set_preedit(text))
       when :note_pick     then @note_picker.try(&.set_preedit(text))
       when :settings      then @settings_view.set_preedit(text)
       when :hosts         then @hosts_overlay.set_preedit(text)
@@ -685,7 +685,7 @@ module Gori::Tui
       end
       return handle_palette_key(ev) if @overlay == :palette
       return handle_rules_key(ev) if @overlay == :rules
-      return handle_finding_new_key(ev) if @overlay == :finding_new
+      return handle_issue_new_key(ev) if @overlay == :issue_new
       return handle_confirm_key(ev) if @overlay == :confirm
       return handle_browser_key(ev) if @overlay == :browser
       return handle_choice_key(ev) if @overlay == :choice
@@ -693,7 +693,7 @@ module Gori::Tui
       return handle_flow_picker_key(ev) if @overlay == :comparer_pick
       return handle_subtab_picker_key(ev) if @overlay == :repeater_subtab
       return handle_links_key(ev) if @overlay == :links
-      return handle_finding_picker_key(ev) if @overlay == :finding_pick
+      return handle_issue_picker_key(ev) if @overlay == :issue_pick
       return handle_note_picker_key(ev) if @overlay == :note_pick
       return handle_settings_key(ev) if @overlay == :settings
       return handle_tabs_key(ev) if @overlay == :tabs
@@ -720,8 +720,8 @@ module Gori::Tui
       if @active_tab == :intercept && @overlay == :none && @focus == :body && intercept_controller.querying?
         return if intercept_controller.handle_query_key(ev)
       end
-      if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.querying?
-        return if findings_controller.handle_query_key(ev)
+      if @active_tab == :issues && @overlay == :none && @focus == :body && issues_controller.view.querying?
+        return if issues_controller.handle_query_key(ev)
       end
       if @active_tab == :probe && @overlay == :none && @focus == :body && probe_controller.view.querying?
         return if probe_controller.handle_query_key(ev)
@@ -732,8 +732,8 @@ module Gori::Tui
         repeater_controller.handle_subtab_filter_key(ev)
         return
       end
-      if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.detail_open?
-        return if findings_controller.handle_detail_key(ev)
+      if @active_tab == :issues && @overlay == :none && @focus == :body && issues_controller.view.detail_open?
+        return if issues_controller.handle_detail_key(ev)
       end
       # History detail drill-in: shift+arrows select, space opens the action menu.
       if @active_tab == :history && @overlay == :detail && @focus == :body
@@ -848,7 +848,7 @@ module Gori::Tui
       # toggles a tree node (sitemap.toggle). The Project SCOPE pane instead DEFERS
       # space to here (its lens toggle is the menu-only scope.lens-toggle verb). Only
       # reached in NAVIGABLE contexts: text editors (Repeater request/target, Notes,
-      # Project desc, the QL "/" bar, Findings notes, Intercept edit) swallow keys
+      # Project desc, the QL "/" bar, Issues notes, Intercept edit) swallow keys
       # upstream, so space stays a literal char there. (The read-only Repeater response
       # pane + the Intercept queue route space from their own handlers, which return
       # before this point.)
@@ -949,7 +949,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule, :ca_import then true
+      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule, :ca_import then true
       else                                                                                                                                                                                                                                                               false
       end
     end
@@ -1045,7 +1045,7 @@ module Gori::Tui
       when :comparer_pick then click_flow_picker(area, mx, my)
       when :repeater_subtab then click_subtab_picker(area, mx, my)
       when :links         then click_links(area, mx, my)
-      when :finding_pick  then click_finding_picker(area, mx, my)
+      when :issue_pick  then click_issue_picker(area, mx, my)
       when :note_pick     then click_note_picker(area, mx, my)
       when :confirm       then click_confirm(area, mx, my)
       when :settings      then click_settings(area, mx, my)
@@ -1059,7 +1059,7 @@ module Gori::Tui
       when :fuzz_advanced then click_fuzz_advanced(area, mx, my)
       when :scope_rule    then click_scope_rule(area, mx, my)
       when :ca_import     then click_ca_import(area, mx, my)
-        # :finding_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
+        # :issue_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
 
@@ -1283,7 +1283,7 @@ module Gori::Tui
       when :comparer_pick then @flow_picker.try(&.move(step))
       when :repeater_subtab then @subtab_picker.try(&.move(step))
       when :links         then @links_overlay.try(&.move(step))
-      when :finding_pick  then @finding_picker.try(&.move(step))
+      when :issue_pick  then @issue_picker.try(&.move(step))
       when :note_pick     then @note_picker.try(&.move(step))
       when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
       when :tabs          then @tabs_overlay.select_move(step)
@@ -1452,22 +1452,22 @@ module Gori::Tui
       end
     end
 
-    # New-finding form: type a title; ↵ create, esc cancel.
-    private def handle_finding_new_key(ev : Termisu::Event::Key) : Nil
+    # New-issue form: type a title; ↵ create, esc cancel.
+    private def handle_issue_new_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
       case
       when key.escape?    then @overlay = :none
-      when key.enter?     then create_finding_from_form
-      when key.tab?       then @finding_form.severity_cycle(1)
-      when key.back_tab?  then @finding_form.severity_cycle(-1)
-      when key.left?      then @finding_form.move(-1)
-      when key.right?     then @finding_form.move(1)
-      when key.backspace? then @finding_form.backspace
+      when key.enter?     then create_issue_from_form
+      when key.tab?       then @issue_form.severity_cycle(1)
+      when key.back_tab?  then @issue_form.severity_cycle(-1)
+      when key.left?      then @issue_form.move(-1)
+      when key.right?     then @issue_form.move(1)
+      when key.backspace? then @issue_form.backspace
       else
         if c && !ev.ctrl? && !ev.alt?
-          @finding_form.insert(c)
-          @finding_form.set_preedit("") # commit any preedit
+          @issue_form.insert(c)
+          @issue_form.set_preedit("") # commit any preedit
         end
       end
     end
@@ -1529,7 +1529,7 @@ module Gori::Tui
       @browser_picker = nil
     end
 
-    # Severity/status value picker (Findings detail → space → s/c): ↑/↓ pick, ↵
+    # Severity/status value picker (Issues detail → space → s/c): ↑/↓ pick, ↵
     # set, a printable matching a row's mnemonic sets it directly, esc cancels.
     private def handle_choice_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
@@ -1568,13 +1568,13 @@ module Gori::Tui
       end
     end
 
-    # Persist the picked value to the open finding, then close. The detail finding
+    # Persist the picked value to the open issue, then close. The detail issue
     # can't change while the modal is up, so reading it at commit is safe.
     private def apply_choice : Nil
       p = @choice_picker
       return close_choice_picker unless p
       case p.kind
-      when :severity, :status then apply_finding_choice(p)
+      when :severity, :status then apply_issue_choice(p)
       when :probe_mode
         @session.probe.set_mode(Probe::Mode.new(p.selected_value))
         probe_controller.view.reload(@session.store)
@@ -1588,14 +1588,14 @@ module Gori::Tui
       close_choice_picker
     end
 
-    private def apply_finding_choice(p : ChoicePicker) : Nil
-      return unless f = findings_controller.view.detail_finding
+    private def apply_issue_choice(p : ChoicePicker) : Nil
+      return unless f = issues_controller.view.detail_issue
       store = @session.store
       case p.kind
-      when :severity then store.update_finding(f.id, severity: Store::Severity.new(p.selected_value))
-      when :status   then store.update_finding(f.id, status: Store::Status.new(p.selected_value))
+      when :severity then store.update_issue(f.id, severity: Store::Severity.new(p.selected_value))
+      when :status   then store.update_issue(f.id, status: Store::Status.new(p.selected_value))
       end
-      findings_controller.view.resync(store)
+      issues_controller.view.resync(store)
     end
 
     private def close_choice_picker : Nil
@@ -1899,8 +1899,8 @@ module Gori::Tui
 
     private def refresh_link_owners(kind : Store::LinkOwnerKind, id : Int64) : Nil
       case kind
-      when .finding?
-        findings_controller.view.reload_detail_links(@session.store)
+      when .issue?
+        issues_controller.view.reload_detail_links(@session.store)
       when .note?
         refresh_note_link_preview(id)
       end
@@ -1968,45 +1968,45 @@ module Gori::Tui
       @link_add_ref_kind = nil
     end
 
-    private def handle_finding_picker_key(ev : Termisu::Event::Key) : Nil
-      fp = @finding_picker
-      return close_finding_picker if fp.nil?
+    private def handle_issue_picker_key(ev : Termisu::Event::Key) : Nil
+      fp = @issue_picker
+      return close_issue_picker if fp.nil?
       key = ev.key
       case
-      when key.escape?    then close_finding_picker
+      when key.escape?    then close_issue_picker
       when key.up?        then fp.move(-1)
       when key.down?      then fp.move(1)
-      when key.enter?     then commit_finding_picker
+      when key.enter?     then commit_issue_picker
       when key.backspace? then fp.backspace
       else
         fp.query_char(ev.char.not_nil!) if ev.char
       end
     end
 
-    private def commit_finding_picker : Nil
-      fp = @finding_picker
-      return close_finding_picker if fp.nil?
-      if f = fp.selected_finding
+    private def commit_issue_picker : Nil
+      fp = @issue_picker
+      return close_issue_picker if fp.nil?
+      if f = fp.selected_issue
         if ref = @link_pending_ref
-          commit_link_to_owner(Store::LinkOwnerKind::Finding, f.id, ref[0], ref[1])
+          commit_link_to_owner(Store::LinkOwnerKind::Issue, f.id, ref[0], ref[1])
         end
       end
-      close_finding_picker
+      close_issue_picker
     end
 
-    private def click_finding_picker(area : Rect, mx : Int32, my : Int32) : Nil
-      fp = @finding_picker
+    private def click_issue_picker(area : Rect, mx : Int32, my : Int32) : Nil
+      fp = @issue_picker
       box = fp.try(&.overlay_box(area))
-      return close_finding_picker if fp.nil? || box.nil? || dismiss_zone?(box, mx, my)
+      return close_issue_picker if fp.nil? || box.nil? || dismiss_zone?(box, mx, my)
       if idx = fp.row_at(box, mx, my)
         fp.set_selected(idx)
-        commit_finding_picker
+        commit_issue_picker
       end
     end
 
-    private def close_finding_picker : Nil
+    private def close_issue_picker : Nil
       @overlay = :none
-      @finding_picker = nil
+      @issue_picker = nil
       @link_pending_ref = nil
     end
 
@@ -2236,7 +2236,7 @@ module Gori::Tui
       unless vis.any? { |(s, _)| s == @active_tab }
         # Persist the outgoing tab's dirty buffer before snapping off — @active_tab still
         # names the tab being hidden here. flush_active_tab_edits covers all hideable tabs
-        # (Notes/Fuzzer/Findings/Miner included), unlike the old project/repeater/decoder-only
+        # (Notes/Fuzzer/Issues/Miner included), unlike the old project/repeater/decoder-only
         # flush which silently dropped the others at hide-time.
         flush_active_tab_edits
         @active_tab = vis.first[0]
@@ -2624,21 +2624,21 @@ module Gori::Tui
     # `esc` leaves editing. While editing, EVERY letter is literal (incl. f/d) —
     # the queue's f/F/d shortcuts only apply when not editing, exactly like the
     # Repeater editor reserves actions for modifier chords.
-    private def create_finding_from_form : Nil
-      form = @finding_form
+    private def create_issue_from_form : Nil
+      form = @issue_form
       title = form.title.strip
-      title = "untitled finding" if title.empty?
+      title = "untitled issue" if title.empty?
       if id = form.edit_id
-        # editing an existing finding's title + severity (from its detail view)
-        @session.store.update_finding(id, title: title, severity: form.severity)
-        findings_controller.view.resync(@session.store)
-        @toast = "finding updated"
+        # editing an existing issue's title + severity (from its detail view)
+        @session.store.update_issue(id, title: title, severity: form.severity)
+        issues_controller.view.resync(@session.store)
+        @toast = "issue updated"
       else
-        @session.store.insert_finding(title, form.severity, form.host, form.flow_id)
-        @active_tab = :findings
+        @session.store.insert_issue(title, form.severity, form.host, form.flow_id)
+        @active_tab = :issues
         @focus = :body
-        findings_controller.view.reload(@session.store)
-        @toast = "finding created"
+        issues_controller.view.reload(@session.store)
+        @toast = "issue created"
       end
       @overlay = :none
     end
@@ -2683,7 +2683,7 @@ module Gori::Tui
         # A bound mnemonic always wins (helix leader). Only when j/k are NOT a live
         # mnemonic in this menu do they fall back to vim-style nav — so the reflex
         # keystroke moves the selection instead of dismissing the menu, while scopes
-        # that bind 'k' (e.g. link-to-finding) keep their mnemonic.
+        # that bind 'k' (e.g. link-to-issue) keep their mnemonic.
         if verb = @space_menu.verb_for(c)
           run_space_verb(verb)
         elsif c == 'j'
@@ -2941,7 +2941,7 @@ module Gori::Tui
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay == :palette
       @rules_overlay.render(screen, layout.body) if @overlay == :rules
-      @finding_form.render(screen, layout.body) if @overlay == :finding_new
+      @issue_form.render(screen, layout.body) if @overlay == :issue_new
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
       @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
       @choice_picker.try(&.render(screen, layout.body)) if @overlay == :choice
@@ -2949,7 +2949,7 @@ module Gori::Tui
       @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
       @subtab_picker.try(&.render(screen, layout.body)) if @overlay == :repeater_subtab
       @links_overlay.try(&.render(screen, layout.body)) if @overlay == :links
-      @finding_picker.try(&.render(screen, layout.body)) if @overlay == :finding_pick
+      @issue_picker.try(&.render(screen, layout.body)) if @overlay == :issue_pick
       @note_picker.try(&.render(screen, layout.body)) if @overlay == :note_pick
       @settings_view.render(screen, layout.body) if @overlay == :settings
       @tabs_overlay.render(screen, layout.body) if @overlay == :tabs
@@ -3041,7 +3041,7 @@ module Gori::Tui
       case @overlay
       when :palette       then "PALETTE"
       when :rules         then "RULES"
-      when :finding_new   then "FINDING"
+      when :issue_new   then "ISSUE"
       when :detail        then "DETAIL"
       when :confirm       then "CONFIRM"
       when :browser       then "BROWSER"
@@ -3049,7 +3049,7 @@ module Gori::Tui
       when :comparer_pick then "PICK FLOW"
       when :repeater_subtab then @subtab_picker.try(&.title) || "FIND SUB-TAB"
       when :links         then @links_overlay.try(&.title) || "LINKS"
-      when :finding_pick  then "PICK FINDING"
+      when :issue_pick  then "PICK ISSUE"
       when :note_pick     then "PICK NOTE"
       when :settings      then "SETTINGS"
       when :tabs          then "TAB BAR"
@@ -3089,7 +3089,7 @@ module Gori::Tui
       case @overlay
       when :palette       then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
       when :rules         then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
-      when :finding_new   then "type title · ↵ create · esc cancel"
+      when :issue_new   then "type title · ↵ create · esc cancel"
       when :confirm       then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
       when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
@@ -3097,7 +3097,7 @@ module Gori::Tui
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
       when :repeater_subtab then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
       when :links         then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
-      when :finding_pick  then "type to filter · ↑/↓ select · ↵ link · esc cancel"
+      when :issue_pick  then "type to filter · ↑/↓ select · ↵ link · esc cancel"
       when :note_pick     then "type to filter · ↑/↓ select · ↵ link · esc cancel"
       when :settings      then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
       when :tabs          then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
@@ -3178,14 +3178,14 @@ module Gori::Tui
 
     # Flush any in-progress editor before leaving/quitting (quit is now centralized,
     # so the per-handler ctrl-c saves moved here). save_notes/save_project_desc are
-    # dirty-guarded; findings notes only persist when actively being edited.
+    # dirty-guarded; issues notes only persist when actively being edited.
     private def commit_pending_edits : Nil
       notes_controller.save_notes
       project_controller.commit
       repeater_controller.save_current_repeater
       fuzzer_controller.save_current
       miner_controller.save_current
-      findings_controller.commit
+      issues_controller.commit
       decoder_controller.commit
     end
 
@@ -3648,7 +3648,7 @@ module Gori::Tui
       miner_controller.save_current if @active_tab == :miner
       decoder_controller.commit if @active_tab == :decoder
       notes_controller.save_notes if @active_tab == :notes
-      findings_controller.commit if @active_tab == :findings
+      issues_controller.commit if @active_tab == :issues
     end
 
     def focus_tab(tab : Symbol, focus : Symbol = :body) : Nil
@@ -3822,98 +3822,98 @@ module Gori::Tui
       @tabs[@active_tab]?.try(&.on_enter) # migrated tabs refresh their own derived data
     end
 
-    # --- findings ExecContext ---
+    # --- issues ExecContext ---
 
-    def finding_create : Nil
+    def issue_create : Nil
       id = history_target_flow_id
       return unless id
       if row = @session.store.flow_row(id)
-        @finding_form = FindingForm.new("#{row.method} #{row.target}", row.host, id)
-        @overlay = :finding_new
+        @issue_form = IssueForm.new("#{row.method} #{row.target}", row.host, id)
+        @overlay = :issue_new
       end
     end
 
-    def findings_new : Nil
-      @finding_form = FindingForm.new
-      @overlay = :finding_new
+    def issues_new : Nil
+      @issue_form = IssueForm.new
+      @overlay = :issue_new
     end
 
-    def findings_query : Nil
-      findings_controller.view.start_query
+    def issues_query : Nil
+      issues_controller.view.start_query
     end
 
-    def findings_move(delta : Int32) : Nil
-      findings_controller.findings_move(delta)
+    def issues_move(delta : Int32) : Nil
+      issues_controller.issues_move(delta)
     end
 
-    def findings_open : Nil
-      findings_controller.findings_open
+    def issues_open : Nil
+      issues_controller.issues_open
     end
 
-    def finding_close : Nil
-      findings_controller.finding_close
+    def issue_close : Nil
+      issues_controller.issue_close
     end
 
-    def findings_delete : Nil
-      findings_controller.findings_delete
+    def issues_delete : Nil
+      issues_controller.issues_delete
     end
 
-    def finding_severity(delta : Int32) : Nil
-      findings_controller.finding_severity(delta)
+    def issue_severity(delta : Int32) : Nil
+      issues_controller.issue_severity(delta)
     end
 
-    def finding_status(delta : Int32) : Nil
-      findings_controller.finding_status(delta)
+    def issue_status(delta : Int32) : Nil
+      issues_controller.issue_status(delta)
     end
 
-    # Open the colour pickers for the finding currently in the detail view. The
+    # Open the colour pickers for the issue currently in the detail view. The
     # picker (a shell overlay) applies the chosen value on commit (apply_choice).
-    def finding_set_severity : Nil
-      return unless f = findings_controller.view.detail_finding
+    def issue_set_severity : Nil
+      return unless f = issues_controller.view.detail_issue
       @choice_picker = ChoicePicker.for_severity(f.severity.value)
       @overlay = :choice
     end
 
-    def finding_set_status : Nil
-      return unless f = findings_controller.view.detail_finding
+    def issue_set_status : Nil
+      return unless f = issues_controller.view.detail_issue
       @choice_picker = ChoicePicker.for_status(f.status.value)
       @overlay = :choice
     end
 
-    def finding_edit_notes : Nil
-      findings_controller.finding_edit_notes
+    def issue_edit_notes : Nil
+      issues_controller.issue_edit_notes
     end
 
-    def findings_notes_read_mode? : Bool
-      findings_controller.findings_notes_read_mode?
+    def issues_notes_read_mode? : Bool
+      issues_controller.issues_notes_read_mode?
     end
 
-    def findings_copy : Nil
-      findings_controller.findings_copy
+    def issues_copy : Nil
+      issues_controller.issues_copy
     end
 
-    def findings_copy_all : Nil
-      findings_controller.findings_copy_all
+    def issues_copy_all : Nil
+      issues_controller.issues_copy_all
     end
 
-    def finding_hscroll(delta : Int32) : Nil
-      findings_controller.finding_hscroll(delta)
+    def issue_hscroll(delta : Int32) : Nil
+      issues_controller.issue_hscroll(delta)
     end
 
-    # Re-open the create form seeded from the open finding (title + severity), in
-    # edit mode — commit updates instead of inserting (create_finding_from_form).
-    # Stays in the shell: it opens the finding-form OVERLAY (shell-owned).
-    def finding_edit_title : Nil
-      return unless f = findings_controller.view.detail_finding
-      @finding_form = FindingForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT FINDING")
-      @overlay = :finding_new
+    # Re-open the create form seeded from the open issue (title + severity), in
+    # edit mode — commit updates instead of inserting (create_issue_from_form).
+    # Stays in the shell: it opens the issue-form OVERLAY (shell-owned).
+    def issue_edit_title : Nil
+      return unless f = issues_controller.view.detail_issue
+      @issue_form = IssueForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT ISSUE")
+      @overlay = :issue_new
     end
 
-    # Jump from a finding to its linked flow's request/response in History. CROSS-TAB
-    # mediator: reads the Findings controller, drives the History controller + overlay.
-    def finding_open_flow : Nil
-      return unless f = findings_controller.view.detail_finding
-      return (@toast = "this finding has no linked flow") unless fid = f.flow_id
+    # Jump from an issue to its linked flow's request/response in History. CROSS-TAB
+    # mediator: reads the Issues controller, drives the History controller + overlay.
+    def issue_open_flow : Nil
+      return unless f = issues_controller.view.detail_issue
+      return (@toast = "this issue has no linked flow") unless fid = f.flow_id
       if history_controller.view.open_detail_id(fid, @session.store)
         @active_tab = :history
         @focus = :body
@@ -3923,11 +3923,11 @@ module Gori::Tui
       end
     end
 
-    # Send a finding's linked flow to the Repeater tab to re-test the evidence. CROSS-TAB
-    # mediator: reads the Findings controller, opens a Repeater tab.
-    def finding_repeater_flow : Nil
-      return unless f = findings_controller.view.detail_finding
-      return (@toast = "this finding has no linked flow") unless fid = f.flow_id
+    # Send an issue's linked flow to the Repeater tab to re-test the evidence. CROSS-TAB
+    # mediator: reads the Issues controller, opens a Repeater tab.
+    def issue_repeater_flow : Nil
+      return unless f = issues_controller.view.detail_issue
+      return (@toast = "this issue has no linked flow") unless fid = f.flow_id
       if @session.store.get_flow(fid)
         repeater_flow(fid)
       else
@@ -3935,21 +3935,21 @@ module Gori::Tui
       end
     end
 
-    def finding_links : Nil
-      return unless f = findings_controller.view.detail_finding
-      open_links_overlay(Store::LinkOwnerKind::Finding, f.id)
+    def issue_links : Nil
+      return unless f = issues_controller.view.detail_issue
+      open_links_overlay(Store::LinkOwnerKind::Issue, f.id)
     end
 
-    def finding_open_link : Nil
-      if res = findings_controller.view.selected_resolved_link
+    def issue_open_link : Nil
+      if res = issues_controller.view.selected_resolved_link
         navigate_link_ref(res.link.ref_kind, res.link.ref_id)
       else
         @toast = "no related link selected"
       end
     end
 
-    def finding_link_move(delta : Int32) : Nil
-      findings_controller.finding_link_move(delta)
+    def issue_link_move(delta : Int32) : Nil
+      issues_controller.issue_link_move(delta)
     end
 
     def notes_links : Nil
@@ -3970,7 +3970,7 @@ module Gori::Tui
 
     # The flow a History action targets: the one pinned in the OPEN detail overlay, else the
     # list selection. Live capture can advance the list cursor (`@selected = 0` on a new flow)
-    # while the detail overlay stays on its flow, so detail.* verbs (repeater/finding/fuzz/mine/
+    # while the detail overlay stays on its flow, so detail.* verbs (repeater/issue/fuzz/mine/
     # comparer/copy/scope) must read the detail, not the cursor — or they act on the wrong flow.
     def history_target_flow_id : Int64?
       @overlay == :detail ? history_controller.view.detail_flow_id : history_controller.selected_flow_id
@@ -3988,18 +3988,18 @@ module Gori::Tui
       miner_controller.current_session_db_id if @active_tab == :miner
     end
 
-    def link_to_finding : Nil
+    def link_to_issue : Nil
       ref = current_link_ref
       return (@toast = "nothing to link") unless ref
-      if f = findings_controller.view.detail_finding
-        # An open finding detail is the implicit target — name it so it's clear which
-        # finding got the link (the picker path below is explicit, so it stays "linked").
-        @toast = "linked to finding ##{f.id}: #{link_title_snip(f.title)}" if commit_link_to_owner(Store::LinkOwnerKind::Finding, f.id, ref[0], ref[1])
+      if f = issues_controller.view.detail_issue
+        # An open issue detail is the implicit target — name it so it's clear which
+        # issue got the link (the picker path below is explicit, so it stays "linked").
+        @toast = "linked to issue ##{f.id}: #{link_title_snip(f.title)}" if commit_link_to_owner(Store::LinkOwnerKind::Issue, f.id, ref[0], ref[1])
         return
       end
       @link_pending_ref = ref
-      @finding_picker = FindingPicker.new(@session.store.findings)
-      @overlay = :finding_pick
+      @issue_picker = IssuePicker.new(@session.store.issues)
+      @overlay = :issue_pick
     end
 
     def link_to_note : Nil
@@ -4011,7 +4011,7 @@ module Gori::Tui
       @overlay = :note_pick
     end
 
-    # Trim a finding title for a one-line toast (avoid a wall of text on wide titles).
+    # Trim an issue title for a one-line toast (avoid a wall of text on wide titles).
     private def link_title_snip(title : String) : String
       t = title.strip
       t.size > 48 ? "#{t[0, 47]}…" : t
@@ -4029,8 +4029,8 @@ module Gori::Tui
       end
     end
 
-    def findings_export(format : Symbol) : Nil
-      findings_controller.findings_export(format)
+    def issues_export(format : Symbol) : Nil
+      issues_controller.issues_export(format)
     end
 
     # --- probe ExecContext ---
@@ -4102,7 +4102,7 @@ module Gori::Tui
       @toast = "this issue has no sample evidence"
     end
 
-    # Send an issue's sample flow to Repeater to re-test it (mirrors finding_repeater_flow).
+    # Send an issue's sample flow to Repeater to re-test it (mirrors issue_repeater_flow).
     # When the only evidence is a Repeater tab, jump there instead of re-spawning.
     def probe_repeater_flow : Nil
       return unless i = probe_controller.view.target_issue
@@ -4121,28 +4121,28 @@ module Gori::Tui
       @toast = "this issue has no sample evidence"
     end
 
-    # Promote a machine-found Probe issue to a human-confirmed Finding (the bridge to the
-    # Findings report). Reuses Store#insert_finding; the issue's severity/host/sample flow carry over.
+    # Promote a machine-found Probe issue to a human-confirmed Issue (the bridge to the
+    # Issues report). Reuses Store#insert_issue; the issue's severity/host/sample flow carry over.
     def probe_promote : Nil
       return unless i = probe_controller.view.target_issue
       # Promotion marks the source issue Confirmed; a second press would otherwise mint a
-      # duplicate Finding for the same issue. Already-Confirmed ⇒ already promoted.
+      # duplicate Issue for the same issue. Already-Confirmed ⇒ already promoted.
       if i.status.confirmed?
-        @toast = "already promoted to a finding"
+        @toast = "already promoted to an issue"
         return
       end
-      fid = @session.store.insert_finding(i.title, i.severity, i.host, i.sample_flow_id)
-      # Preserve Repeater-only evidence: with no source flow, link the Finding to the Repeater tab
-      # that produced the issue so the evidence pointer survives promotion (insert_finding only
+      fid = @session.store.insert_issue(i.title, i.severity, i.host, i.sample_flow_id)
+      # Preserve Repeater-only evidence: with no source flow, link the Issue to the Repeater tab
+      # that produced the issue so the evidence pointer survives promotion (insert_issue only
       # carries a flow id).
       if i.sample_flow_id.nil? && (rid = i.sample_repeater_id)
-        @session.store.add_link(Store::LinkOwnerKind::Finding, fid, Store::LinkRefKind::Repeater, rid)
+        @session.store.add_link(Store::LinkOwnerKind::Issue, fid, Store::LinkRefKind::Repeater, rid)
       end
-      # Mark the source confirmed (= "promoted to a Finding") so it leaves the default
+      # Mark the source confirmed (= "promoted to an Issue") so it leaves the default
       # open-only lens instead of lingering as unreviewed noise; still reachable via `a`.
       @session.store.update_probe_issue_status(i.id, Store::Status::Confirmed)
       probe_controller.view.reload(@session.store)
-      @toast = "promoted to finding — see the Findings tab"
+      @toast = "promoted to issue — see the Issues tab"
     end
 
     # 's' / scope.edit: the Scope editor lives in the Project tab now, so jump there
@@ -4326,7 +4326,7 @@ module Gori::Tui
       repeater_controller.repeater_flow(id) if id
     end
 
-    # Open flow `id` as a new Repeater tab. Shared by History's ^R + Findings' "send to
+    # Open flow `id` as a new Repeater tab. Shared by History's ^R + Issues' "send to
     # Repeater" mediator. Public so those mediators can drive it.
     def repeater_flow(id : Int64) : Nil
       repeater_controller.repeater_flow(id)
@@ -4908,7 +4908,7 @@ module Gori::Tui
     # flipping it here would be a no-op at best and misleading at worst (no
     # selection ⇒ it still only copies the current line, not "the whole pane").
     READ_COPY_VERBS = %w(
-      notes.copy repeater.copy decoder.copy finding.copy project.copy fuzzer.copy
+      notes.copy repeater.copy decoder.copy issue.copy project.copy fuzzer.copy
     )
 
     def space_menu_title(verb_id : String) : String?
@@ -4922,7 +4922,7 @@ module Gori::Tui
       when :repeater   then repeater_controller.repeater_selection_active?
       when :fuzzer   then fuzzer_controller.fuzzer_selection_active?
       when :decoder  then decoder_controller.decoder_selection_active?
-      when :findings then findings_controller.findings_notes_selection_active?
+      when :issues then issues_controller.issues_notes_selection_active?
       when :project  then project_controller.project_desc_selection_active?
       when :history
         @overlay == :detail && history_controller.detail_selection_active?
@@ -4937,7 +4937,7 @@ module Gori::Tui
       when :repeater   then repeater_controller.repeater_select_line
       when :fuzzer   then fuzzer_controller.fuzzer_select_line
       when :decoder  then decoder_controller.decoder_select_line
-      when :findings then findings_controller.findings_notes_select_line
+      when :issues then issues_controller.issues_notes_select_line
       when :project  then project_controller.project_desc_select_line
       when :history
         history_controller.detail_select_line if @overlay == :detail
@@ -4950,7 +4950,7 @@ module Gori::Tui
       when :repeater   then repeater_controller.repeater_clear_selection
       when :fuzzer   then fuzzer_controller.fuzzer_clear_selection
       when :decoder  then decoder_controller.decoder_clear_selection
-      when :findings then findings_controller.findings_notes_clear_selection
+      when :issues then issues_controller.issues_notes_clear_selection
       when :project  then project_controller.project_desc_clear_selection
       when :history
         history_controller.detail_clear_selection if @overlay == :detail
@@ -4967,7 +4967,7 @@ module Gori::Tui
       when :repeater   then read_selection_active? ? repeater_copy : repeater_copy_all
       when :fuzzer   then read_selection_active? ? fuzzer_copy : fuzzer_copy_all
       when :decoder  then read_selection_active? ? decoder_copy_selection : decoder_copy_all
-      when :findings then read_selection_active? ? findings_copy : findings_copy_all
+      when :issues then read_selection_active? ? issues_copy : issues_copy_all
       when :project  then read_selection_active? ? project_copy : project_copy_all
       when :history
         # No whole-rendered-pane delegator exists for the detail text pane — both

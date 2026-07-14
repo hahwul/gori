@@ -96,7 +96,7 @@ describe Gori::Tui::Chrome do
     backend.contains?("Intercept").should be_true
     backend.contains?("Sitemap").should be_true
     backend.contains?("(3)").should be_true        # held-message badge on Intercept (the only tab-bar count)
-    backend.contains?("Findings(").should be_false # findings/repeater/notes carry no count badge
+    backend.contains?("Issues(").should be_false # issues/repeater/notes carry no count badge
     # active segment ` Project ` (now first tab) starts at col 2 (rect.x+1 fill, +1 pad); FOCUS_GOLD pill.
     backend.fg_at(2, 1).should eq(Theme.ink_on(Theme.focus_gold))
     backend.bg_at(2, 1).should eq(Theme.focus_gold)
@@ -135,8 +135,8 @@ describe Gori::Tui::Chrome do
     # widest chip pair must not clobber the persistent focus badge.
     backend = MemoryBackend.new(36, 1)
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 36, 1),
-      focus: "FINDING", hints: "type title · esc cancel", insecure_upstream: true)
-    backend.row(0)[0, 9].should eq(" FINDING ") # badge survives, no chip bled into it
+      focus: "ISSUE", hints: "type title · esc cancel", insecure_upstream: true)
+    backend.row(0)[0, 7].should eq(" ISSUE ") # badge survives, no chip bled into it
     backend.fg_at(1, 0).should eq(Theme.text_bright)
     backend.contains?("upstream:insecure").should be_true # chips still present (truncated at the right edge)
   end

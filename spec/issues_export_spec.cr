@@ -1,5 +1,5 @@
 require "./spec_helper"
-require "../src/gori/findings_export"
+require "../src/gori/issues_export"
 
 private def with_store(&)
   path = File.tempname("gori-fexport", ".db")
@@ -34,12 +34,12 @@ private def strip_fences(md : String) : String
   out.join("\n")
 end
 
-describe Gori::Findings::Export do
+describe Gori::Issues::Export do
   describe ".one_line" do
     it "collapses control characters so a value stays on one line" do
-      Gori::Findings::Export.one_line("pwn\n## FAKE HEADING").should eq("pwn ## FAKE HEADING")
-      Gori::Findings::Export.one_line("a\r\n\tb").should eq("a b")
-      Gori::Findings::Export.one_line("  clean  ").should eq("clean")
+      Gori::Issues::Export.one_line("pwn\n## FAKE HEADING").should eq("pwn ## FAKE HEADING")
+      Gori::Issues::Export.one_line("a\r\n\tb").should eq("a b")
+      Gori::Issues::Export.one_line("  clean  ").should eq("clean")
     end
   end
 
@@ -55,9 +55,9 @@ describe Gori::Findings::Export do
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
           body: evil, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
-        store.insert_finding("pwn\n## FAKE TITLE HEADING", Gori::Store::Severity::High, "h.test", id)
+        store.insert_issue("pwn\n## FAKE TITLE HEADING", Gori::Store::Severity::High, "h.test", id)
 
-        md = Gori::Findings::Export.markdown(store.findings, store, "proj")
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
 
         # Body must be fenced with >3 backticks so its own ``` lines can't close it.
         md.should contain("````http")
@@ -76,16 +76,16 @@ describe Gori::Findings::Export do
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/", http_version: "HTTP/1.1",
           head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
-        cap = Gori::Findings::Export::EVIDENCE_CAP
+        cap = Gori::Issues::Export::EVIDENCE_CAP
         # Pad so a 3-byte char straddles the cap boundary: body[0, cap] ends mid-codepoint,
         # which used to make the slice's valid_encoding? false → whole body dropped as binary.
         big = ("a" * (cap - 1)) + "한" # 65535 ASCII + a 3-byte UTF-8 char → the cut splits it
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
           body: big.to_slice, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
-        store.insert_finding("big utf8 body", Gori::Store::Severity::High, "h.test", id)
+        store.insert_issue("big utf8 body", Gori::Store::Severity::High, "h.test", id)
 
-        md = Gori::Findings::Export.markdown(store.findings, store, "proj")
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.should_not contain("binary body omitted") # the valid text must NOT be dropped
         md.should contain("body truncated")          # it's shown (truncated), not omitted
       end
@@ -97,7 +97,7 @@ describe Gori::Findings::Export do
           created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
           method: "GET", target: "/", http_version: "HTTP/1.1",
           head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
-        cap = Gori::Findings::Export::EVIDENCE_CAP
+        cap = Gori::Issues::Export::EVIDENCE_CAP
         # Valid ASCII through the cap, then a stray 0xFF byte DEEPER than the cap. The slice
         # (first `cap` bytes) is valid text, so the readable prefix must still be shown —
         # checking the whole body would wrongly call it binary.
@@ -105,9 +105,9 @@ describe Gori::Findings::Export do
         store.update_response(Gori::Store::CapturedResponse.new(
           flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice,
           body: body, reason: "OK", content_type: "text/plain", duration_us: 1_i64))
-        store.insert_finding("deep invalid byte", Gori::Store::Severity::High, "h.test", id)
+        store.insert_issue("deep invalid byte", Gori::Store::Severity::High, "h.test", id)
 
-        md = Gori::Findings::Export.markdown(store.findings, store, "proj")
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         md.should_not contain("binary body omitted")
         md.should contain("body truncated")
       end
@@ -115,9 +115,9 @@ describe Gori::Findings::Export do
 
     it "collapses the host field so a fence/newline can't open a runaway block" do
       with_store do |store|
-        store.insert_finding("clean title", Gori::Store::Severity::Low,
+        store.insert_issue("clean title", Gori::Store::Severity::Low,
           "evil.test\n```\n## INJECTED VIA HOST", nil)
-        md = Gori::Findings::Export.markdown(store.findings, store, "proj")
+        md = Gori::Issues::Export.markdown(store.issues, store, "proj")
         # host collapses to one line: the ``` is inline (not its own fence line) and
         # the "## INJECTED" never becomes a heading.
         md.lines.count { |l| l.strip == "```" }.should eq(0)

@@ -5,10 +5,10 @@ require "../store"
 
 module Gori::Tui
   # A small centered value-picker overlay — pick one option from a short coloured
-  # list (a finding's severity or triage status). Structurally a twin of
+  # list (an issue's severity or triage status). Structurally a twin of
   # BrowserPicker: pure state + rendering, while the Runner owns opening/closing
   # and applying the choice. Each row is fronted by a mnemonic key (helix feel)
-  # and the value currently set on the finding is marked "● current".
+  # and the value currently set on the issue is marked "● current".
   class ChoicePicker
     record Choice, label : String, key : Char, color : Color, value : Int32
 

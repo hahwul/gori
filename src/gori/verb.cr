@@ -16,8 +16,8 @@ module Gori
       Fuzzer         # the Fuzzer tab has focus
       Miner          # the Miner (param-mining) tab has focus
       Sitemap        # the Sitemap tab has focus
-      Findings       # the Findings list has focus
-      FindingsDetail # a finding's detail is open
+      Issues       # the Issues list has focus
+      IssuesDetail # an issue's detail is open
       Probe          # the Probe scan-issue list has focus
       ProbeDetail    # a Probe issue's detail is open
       Intercept      # the Intercept queue tab has focus

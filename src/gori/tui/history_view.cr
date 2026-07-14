@@ -505,7 +505,7 @@ module Gori::Tui
     end
 
     # Open a specific flow's detail by id, regardless of the current list selection
-    # (used by the Findings tab to jump back to a finding's linked evidence). Also
+    # (used by the Issues tab to jump back to an issue's linked evidence). Also
     # syncs @selected to it when the row is in the current list, so back/▲▼ behave.
     def open_detail_id(id : Int64, store : Store) : Bool
       @detail = store.get_flow(id)
@@ -1056,7 +1056,7 @@ module Gori::Tui
       ensure_visible(list_h)
 
       if @rows.empty?
-        # Mirror Findings/Probe: a recovery hint under the message. The QL-clear
+        # Mirror Issues/Probe: a recovery hint under the message. The QL-clear
         # cue only applies to a real query (not a Scope-lens-only empty set, which
         # ⇧S toggles off), so branch on @querying / @query before filtering?.
         # Branch on a real `/` query FIRST (querying-aware hint): a blank-query empty

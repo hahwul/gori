@@ -131,15 +131,15 @@ describe "Gori::Store match rules (v4)" do
   end
 end
 
-describe "Gori::Store findings (v3)" do
-  it "creates, reads, updates, counts, and deletes findings" do
+describe "Gori::Store issues (v3)" do
+  it "creates, reads, updates, counts, and deletes issues" do
     with_store do |store|
-      store.count_findings.should eq(0)
-      id = store.insert_finding("Reflected XSS on /search", Gori::Store::Severity::High, "acme.test", 42_i64)
-      store.insert_finding("Verbose error", Gori::Store::Severity::Low, "acme.test", nil)
+      store.count_issues.should eq(0)
+      id = store.insert_issue("Reflected XSS on /search", Gori::Store::Severity::High, "acme.test", 42_i64)
+      store.insert_issue("Verbose error", Gori::Store::Severity::Low, "acme.test", nil)
 
-      store.count_findings.should eq(2)
-      f = store.get_finding(id).not_nil!
+      store.count_issues.should eq(2)
+      f = store.get_issue(id).not_nil!
       f.title.should eq("Reflected XSS on /search")
       f.severity.should eq(Gori::Store::Severity::High)
       f.host.should eq("acme.test")
@@ -147,16 +147,16 @@ describe "Gori::Store findings (v3)" do
       f.notes.should eq("")
 
       # ordered by severity desc
-      store.findings.first.id.should eq(id)
+      store.issues.first.id.should eq(id)
 
-      store.update_finding(id, severity: Gori::Store::Severity::Critical, notes: "PoC: <script>…")
-      updated = store.get_finding(id).not_nil!
+      store.update_issue(id, severity: Gori::Store::Severity::Critical, notes: "PoC: <script>…")
+      updated = store.get_issue(id).not_nil!
       updated.severity.should eq(Gori::Store::Severity::Critical)
       updated.notes.should eq("PoC: <script>…")
 
-      store.delete_finding(id)
-      store.count_findings.should eq(1)
-      store.get_finding(id).should be_nil
+      store.delete_issue(id)
+      store.count_issues.should eq(1)
+      store.get_issue(id).should be_nil
     end
   end
 end
@@ -197,15 +197,15 @@ describe "Gori::Store project-tab aggregates (AT A GLANCE viz)" do
     end
   end
 
-  it "tallies findings by severity into a 5-slot array (0=Info .. 4=Critical)" do
+  it "tallies issues by severity into a 5-slot array (0=Info .. 4=Critical)" do
     with_store do |store|
-      store.insert_finding("crit", Gori::Store::Severity::Critical, "acme.test", nil)
-      store.insert_finding("high a", Gori::Store::Severity::High, "acme.test", nil)
-      store.insert_finding("high b", Gori::Store::Severity::High, "acme.test", nil)
-      store.insert_finding("info", Gori::Store::Severity::Info, "acme.test", nil)
+      store.insert_issue("crit", Gori::Store::Severity::Critical, "acme.test", nil)
+      store.insert_issue("high a", Gori::Store::Severity::High, "acme.test", nil)
+      store.insert_issue("high b", Gori::Store::Severity::High, "acme.test", nil)
+      store.insert_issue("info", Gori::Store::Severity::Info, "acme.test", nil)
       store.flush
 
-      f = store.findings_severity_counts
+      f = store.issues_severity_counts
       f[0].should eq(1) # info
       f[2].should eq(0) # medium (none)
       f[3].should eq(2) # high

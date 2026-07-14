@@ -149,7 +149,7 @@ module Gori::Tui
 
     # Scroll the visible window so the selection stays on-screen (the list can be
     # taller than the box). Adjusted at render time because the row count is only
-    # known here. Mirrors FindingsView#ensure_visible.
+    # known here. Mirrors IssuesView#ensure_visible.
     private def ensure_visible(h : Int32) : Nil
       return if h <= 0
       @scroll = @selected if @selected < @scroll

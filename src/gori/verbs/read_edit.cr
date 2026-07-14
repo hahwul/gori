@@ -12,7 +12,7 @@ module Gori
     # relevant focus-area section instead of :common — available? still gates them by
     # read-mode across ALL of that tab's read-mode panes, so the keybinding (mostly
     # plain 'x'/'v') keeps working everywhere; only the SPACE-MENU listing is scoped to
-    # one section. Single-region tabs (Notes/Findings/Project/HistoryDetail) have
+    # one section. Single-region tabs (Notes/Issues/Project/HistoryDetail) have
     # nowhere else to put them, so they stay :common (their one and only group) —
     # unchanged, no clutter concern since there's only ever one group to show.
     def self.register_read_edit(r : Verb::Registry) : Nil
@@ -65,14 +65,14 @@ module Gori
         "fuzzer.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Fuzzer, available: in_sel, mnemonic: 'v', section: :template) { |ctx| ctx.read_clear_selection; nil }
 
-      in_findings_notes = ->(ctx : Verb::ExecContext) { ctx.findings_notes_read_mode? }
+      in_issues_notes = ->(ctx : Verb::ExecContext) { ctx.issues_notes_read_mode? }
       r.register Verb::Definition.new(
-        "finding.select-line", "Select line", "Select the entire current notes line",
-        Verb::Scope::FindingsDetail, [Verb::Chord.new("x")],
-        available: in_findings_notes, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
+        "issue.select-line", "Select line", "Select the entire current notes line",
+        Verb::Scope::IssuesDetail, [Verb::Chord.new("x")],
+        available: in_issues_notes, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
-        "finding.clear-selection", "Clear selection", "Clear the notes text selection",
-        Verb::Scope::FindingsDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+        "issue.clear-selection", "Clear selection", "Clear the notes text selection",
+        Verb::Scope::IssuesDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
 
       in_project_desc = ->(ctx : Verb::ExecContext) { ctx.project_desc_read_mode? }
       r.register Verb::Definition.new(

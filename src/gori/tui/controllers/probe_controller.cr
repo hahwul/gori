@@ -8,7 +8,7 @@ module Gori::Tui
   # The Probe tab: the grouped scan-issue list + a per-issue detail (affected URLs,
   # remediation, sample evidence). Owns ProbeView and drains the Session analyzer's events
   # (issue persisted → reload; active reflection → notification). Modeled on
-  # FindingsController: navigation/open/filter/mode are scoped VERBS dispatched centrally;
+  # IssuesController: navigation/open/filter/mode are scoped VERBS dispatched centrally;
   # only the `/` filter editing is a controller-claimed text sub-mode. The MODE and
   # set-status pickers are shell overlays (ChoicePicker), so they stay in the Runner.
   class ProbeController < TabController
@@ -119,7 +119,7 @@ module Gori::Tui
     end
 
     # The `/` filter bar — a text sub-mode the shell claims before the focus ring (mirrors
-    # Findings). Live filtering: every edit re-derives the visible list inside the view.
+    # Issues). Live filtering: every edit re-derives the visible list inside the view.
     def handle_query_key(ev : Termisu::Event::Key) : Bool
       key = ev.key
       c = ev.char || key.to_char

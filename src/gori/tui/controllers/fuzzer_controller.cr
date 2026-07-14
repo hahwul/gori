@@ -810,7 +810,7 @@ module Gori::Tui
       @host.status("duplicated fuzz session (#{@fuzzers.size} open)")
     end
 
-    # ⇧I from History (or Findings evidence): open a captured flow as a fuzz session.
+    # ⇧I from History (or Issues evidence): open a captured flow as a fuzz session.
     def fuzz_flow(id : Int64) : Nil
       return unless detail = @host.session.store.get_flow(id)
       view = FuzzerView.new

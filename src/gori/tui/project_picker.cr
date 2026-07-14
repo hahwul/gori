@@ -358,7 +358,7 @@ module Gori::Tui
     end
 
     # List click: SELECT-FIRST — first click highlights the entry, a second click on
-    # the already-selected entry activates it (same model as the History/Findings list).
+    # the already-selected entry activates it (same model as the History/Issues list).
     private def handle_list_mouse(mx : Int32, my : Int32) : Project | Symbol | Nil
       return nil unless idx = entry_at(mx, my)
       if idx == @selected

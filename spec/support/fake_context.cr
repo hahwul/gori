@@ -181,10 +181,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def miner_duplicate_subtab : Nil; end
 
-  property? miner_has_finding = false
+  property? miner_has_issue = false
 
   def miner_finding_selected? : Bool
-    @miner_has_finding
+    @miner_has_issue
   end
 
   def mine_repeater_selected : Nil; end
@@ -249,39 +249,39 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def rules_open : Nil; end
 
-  def finding_create : Nil; end
+  def issue_create : Nil; end
 
-  def findings_new : Nil; end
+  def issues_new : Nil; end
 
-  def findings_query : Nil; end
+  def issues_query : Nil; end
 
-  def findings_move(delta : Int32) : Nil; end
+  def issues_move(delta : Int32) : Nil; end
 
-  def findings_open : Nil; end
+  def issues_open : Nil; end
 
-  def finding_close : Nil; end
+  def issue_close : Nil; end
 
-  def findings_delete : Nil; end
+  def issues_delete : Nil; end
 
-  def finding_severity(delta : Int32) : Nil; end
+  def issue_severity(delta : Int32) : Nil; end
 
-  def finding_status(delta : Int32) : Nil; end
+  def issue_status(delta : Int32) : Nil; end
 
-  def finding_set_severity : Nil; end
+  def issue_set_severity : Nil; end
 
-  def finding_set_status : Nil; end
+  def issue_set_status : Nil; end
 
-  def finding_edit_notes : Nil; end
+  def issue_edit_notes : Nil; end
 
-  def finding_hscroll(delta : Int32) : Nil; end
+  def issue_hscroll(delta : Int32) : Nil; end
 
-  def finding_edit_title : Nil; end
+  def issue_edit_title : Nil; end
 
-  def finding_open_flow : Nil; end
+  def issue_open_flow : Nil; end
 
-  def finding_repeater_flow : Nil; end
+  def issue_repeater_flow : Nil; end
 
-  def findings_export(format : Symbol) : Nil; end
+  def issues_export(format : Symbol) : Nil; end
 
   def probe_move(delta : Int32) : Nil; end
 
@@ -433,21 +433,21 @@ class FakeExecContext < Gori::Verb::ExecContext
     nil
   end
 
-  def finding_links : Nil; end
+  def issue_links : Nil; end
 
-  def finding_open_link : Nil; end
+  def issue_open_link : Nil; end
 
-  def finding_link_move(delta : Int32) : Nil; end
+  def issue_link_move(delta : Int32) : Nil; end
 
-  def findings_notes_read_mode? : Bool
+  def issues_notes_read_mode? : Bool
     false
   end
 
-  def findings_copy : Nil; end
+  def issues_copy : Nil; end
 
-  def findings_copy_all : Nil; end
+  def issues_copy_all : Nil; end
 
-  def link_to_finding : Nil; end
+  def link_to_issue : Nil; end
 
   def link_to_note : Nil; end
 

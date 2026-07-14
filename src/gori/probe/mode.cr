@@ -1,7 +1,7 @@
 module Gori
   # Probe — the passive + lightweight-active scanner. It analyzes proxied traffic as it is
   # captured (zero-request passive checks) and, when armed, confirms reflected parameters
-  # with a handful of in-scope probes. Findings are GROUPED by (code, host) into
+  # with a handful of in-scope probes. Issues are GROUPED by (code, host) into
   # Store::ProbeIssue rows; technology fingerprints (category "tech") double as the
   # project's "representative technologies" surfaced in the Project tab.
   #

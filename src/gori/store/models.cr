@@ -140,7 +140,7 @@ module Gori
       end
     end
 
-    # Severity of a finding (stored as the enum value).
+    # Severity of an issue (stored as the enum value).
     enum Severity
       Info
       Low
@@ -153,8 +153,8 @@ module Gori
       end
     end
 
-    # Triage state of a finding, independent of severity (stored as the enum
-    # value; V12). Open is the default for a freshly captured finding.
+    # Triage state of an issue, independent of severity (stored as the enum
+    # value; V12). Open is the default for a freshly captured issue.
     enum Status
       Open
       Confirmed
@@ -173,7 +173,7 @@ module Gori
 
     # Owner of a row in `entity_links`.
     enum LinkOwnerKind
-      Finding
+      Issue
       Note
 
       def label : String
@@ -182,7 +182,7 @@ module Gori
 
       def self.parse(s : String) : LinkOwnerKind?
         case s
-        when "finding" then Finding
+        when "issue" then Issue
         when "note"    then Note
         else                nil
         end
@@ -219,7 +219,7 @@ module Gori
       end
     end
 
-    # A link from a Finding or Note to a workbench entity (flow/repeater/fuzz/miner).
+    # A link from an Issue or Note to a workbench entity (flow/repeater/fuzz/miner).
     struct EntityLink
       getter id : Int64
       getter owner_kind : LinkOwnerKind
@@ -232,9 +232,9 @@ module Gori
       end
     end
 
-    # A human-confirmed finding (DESIGN.md: the final output). Optionally linked
+    # A human-confirmed issue (DESIGN.md: the final output). Optionally linked
     # to a captured flow. One per project DB.
-    struct Finding
+    struct Issue
       getter id : Int64
       getter created_at : Int64
       getter updated_at : Int64
@@ -251,11 +251,11 @@ module Gori
     end
 
     # A grouped Probe scan issue (V20): one row per distinct (code, host). Machine-found
-    # (by the passive/active analyzer), as opposed to the human-confirmed `Finding`. The
+    # (by the passive/active analyzer), as opposed to the human-confirmed `Issue`. The
     # affected URLs accumulate in `affected` (capped) while `hit_count` counts every
     # observation; `severity` rises to the max seen. Reuses the shared Severity/Status
     # enums; `status` lets a group be triaged (confirmed / false-positive / resolved) or
-    # promoted to a Finding. `category` drives the filter lens and the project tech summary.
+    # promoted to an Issue. `category` drives the filter lens and the project tech summary.
     struct ProbeIssue
       getter id : Int64
       getter code : String

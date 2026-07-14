@@ -8,7 +8,7 @@ module Gori
       # Active CORS origin-reflection probe. Passive analysis can only judge the origins the
       # browser actually sent; it CANNOT prove a server reflects *arbitrary* origins. This rule
       # sends ONE safe-method request with a synthetic, attacker-controlled `Origin` and reports
-      # a High finding only when the server both ECHOES that probe origin AND allows credentials
+      # a High issue only when the server both ECHOES that probe origin AND allows credentials
       # — the definitive, exploitable reflected-origin CORS misconfiguration.
       #
       # Gated hard to keep the scan light and low-FP: only endpoints that ALREADY do CORS (the

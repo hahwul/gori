@@ -488,7 +488,7 @@ module Gori::Tui
       return if tree.h <= 0
 
       unless @loaded && !@hosts.empty?
-        # A recovery hint mirrors Findings/Probe. The QL-clear cue only applies to a
+        # A recovery hint mirrors Issues/Probe. The QL-clear cue only applies to a
         # real `/` query — a Scope-lens-only empty set isn't cleared with esc//.
         msg, hint =
           if !@query.blank?

@@ -3,7 +3,7 @@ require "../verb"
 module Gori
   module Verbs
     # Probe tab verbs. The list scope (Probe) and the open-issue scope (ProbeDetail) mirror
-    # Findings/FindingsDetail. Navigation/open/filter dispatch through the central keymap;
+    # Issues/IssuesDetail. Navigation/open/filter dispatch through the central keymap;
     # the `/` filter editing is a controller-claimed text sub-mode. Menu keys are unique
     # within each scope (the space menu takes the first match).
     def self.register_probe(r : Verb::Registry) : Nil
@@ -71,7 +71,7 @@ module Gori
         Verb::Scope::Probe, [Verb::Chord.new("r")]) { |ctx| ctx.probe_repeater_flow; nil }
 
       r.register Verb::Definition.new(
-        "probe.promote-selected", "Promote to finding", "Create a Finding from the selected issue",
+        "probe.promote-selected", "Promote to issue", "Create a Issue from the selected issue",
         Verb::Scope::Probe, [Verb::Chord.new("p")]) { |ctx| ctx.probe_promote; nil }
 
       r.register Verb::Definition.new(
@@ -100,7 +100,7 @@ module Gori
         Verb::Scope::ProbeDetail, [Verb::Chord.new("r")]) { |ctx| ctx.probe_repeater_flow; nil }
 
       r.register Verb::Definition.new(
-        "probe.promote", "Promote to finding", "Create a Finding from this issue", Verb::Scope::ProbeDetail,
+        "probe.promote", "Promote to issue", "Create a Issue from this issue", Verb::Scope::ProbeDetail,
         [Verb::Chord.new("p")]) { |ctx| ctx.probe_promote; nil }
 
       r.register Verb::Definition.new(

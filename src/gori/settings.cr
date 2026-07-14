@@ -29,7 +29,7 @@ module Gori
     # Layout (settings:layout): list previews off by default; Sitemap fully expanded.
     DEFAULT_HISTORY_PREVIEW      = false
     DEFAULT_PROBE_PREVIEW        = false
-    DEFAULT_FINDINGS_PREVIEW     = false
+    DEFAULT_ISSUES_PREVIEW     = false
     DEFAULT_HISTORY_LIST_ORDER   = "newest" # "newest" | "oldest" — list sort direction
     DEFAULT_SITEMAP_EXPAND_DEPTH = -1       # -1 = all
     # Statusline (settings:statusline): opt-in bottom row that runs a command on an
@@ -87,7 +87,7 @@ module Gori
     # history_list_order: "newest" (top) or "oldest" (top). sitemap_expand_depth: -1 = all.
     class_property history_preview : Bool = DEFAULT_HISTORY_PREVIEW
     class_property probe_preview : Bool = DEFAULT_PROBE_PREVIEW
-    class_property findings_preview : Bool = DEFAULT_FINDINGS_PREVIEW
+    class_property issues_preview : Bool = DEFAULT_ISSUES_PREVIEW
     class_property history_list_order : String = DEFAULT_HISTORY_LIST_ORDER
     class_property sitemap_expand_depth : Int32 = DEFAULT_SITEMAP_EXPAND_DEPTH
     # Statusline (settings:statusline). command is run via `/bin/sh -c` on statusline_interval
@@ -185,7 +185,7 @@ module Gori
       return unless o = node.try(&.as_h?)
       self.history_preview = load_bool_h(o, "history_preview", history_preview)
       self.probe_preview = load_bool_h(o, "probe_preview", probe_preview)
-      self.findings_preview = load_bool_h(o, "findings_preview", findings_preview)
+      self.issues_preview = load_bool_h(o, "issues_preview", issues_preview)
       if ord = o["history_list_order"]?.try(&.as_s?)
         self.history_list_order = normalize_history_list_order(ord)
       end
@@ -441,14 +441,14 @@ module Gori
           # Omit layout when every pref is factory default (quiet install; merge-safe section).
           unless history_preview == DEFAULT_HISTORY_PREVIEW &&
                  probe_preview == DEFAULT_PROBE_PREVIEW &&
-                 findings_preview == DEFAULT_FINDINGS_PREVIEW &&
+                 issues_preview == DEFAULT_ISSUES_PREVIEW &&
                  history_list_order == DEFAULT_HISTORY_LIST_ORDER &&
                  sitemap_expand_depth == DEFAULT_SITEMAP_EXPAND_DEPTH
             j.field "layout" do
               j.object do
                 j.field "history_preview", history_preview
                 j.field "probe_preview", probe_preview
-                j.field "findings_preview", findings_preview
+                j.field "issues_preview", issues_preview
                 j.field "history_list_order", history_list_order
                 j.field "sitemap_expand_depth", sitemap_expand_depth
               end

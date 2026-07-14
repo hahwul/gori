@@ -1096,7 +1096,7 @@ module Gori::Tui
     end
 
     # --- lifecycle / verbs ---
-    # Open flow `id` as a new Repeater tab. Shared by History's ^R and the Findings tab's
+    # Open flow `id` as a new Repeater tab. Shared by History's ^R and the Issues tab's
     # "send evidence to Repeater". No-op if the flow is gone (pruned).
     def repeater_flow(id : Int64) : Nil
       return unless detail = @host.session.store.get_flow(id)
@@ -1148,7 +1148,7 @@ module Gori::Tui
       @host.status("new repeater — edit the request & target · ^R send · ^1-9 switch · esc back")
     end
 
-    # Open a hand-authored repeater session from an arbitrary request (Miner finding, etc.).
+    # Open a hand-authored repeater session from an arbitrary request (Miner issue, etc.).
     # No source flow_id — the request is the seed; same persistence path as ^N.
     # `name` is an optional sub-tab chip label (e.g. the Miner param that was injected).
     def repeater_from_request(target : String, request_text : String, http2 : Bool, sni : String?,
