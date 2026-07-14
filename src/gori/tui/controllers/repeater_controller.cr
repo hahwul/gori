@@ -923,7 +923,7 @@ module Gori::Tui
           @host.session.store.update_repeater_response(id, result.head, result.body, result.error, result.duration_us)
           probe_scan_repeater(id, result.head, result.body, result.duration_us, tab.flow_id, view)
         end
-        @host.status(result.ok? ? "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}" : "repeater error: #{result.error}")
+        @host.status(result.ok? ? "sent → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}" : "repeater error: #{result.error}")
         applied = true
       end
       while pair = nonblocking_ws_result
@@ -932,7 +932,7 @@ module Gori::Tui
         view.apply_ws(result)
         if result.ok?
           recv = result.messages.count(&.direction.==("in"))
-          @host.status("ws replayed: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}")
+          @host.status("ws sent: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}")
           # Feed the handshake + captured frames into Probe (WS payload secrets, tech).
           if id = tab.db_id
             @host.session.store.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
@@ -1242,7 +1242,7 @@ module Gori::Tui
       sni = view.sni_override # custom TLS SNI host (nil → present the dialed host)
       results = @repeater_results
       view.inflight = true
-      @host.status("replaying → #{host}:#{port}#{sni ? " (SNI #{sni})" : ""}…")
+      @host.status("sending → #{host}:#{port}#{sni ? " (SNI #{sni})" : ""}…")
       # Off the UI fiber: a round-trip can block up to 30s. The fiber touches only these
       # captured locals + the inflight flag — and hands the Result back through the
       # channel; the run loop applies it (see #drain_results).
@@ -1275,7 +1275,7 @@ module Gori::Tui
       sni = view.sni_override
       results = @ws_results
       view.inflight = true
-      @host.status("ws repeater → #{host}:#{port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…")
+      @host.status("ws sending → #{host}:#{port} (#{messages.size} msg#{messages.size == 1 ? "" : "s"})…")
       spawn(name: "gori-ws-repeater") do
         result = Repeater::WsEngine.send(upgrade, messages, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni)
         select

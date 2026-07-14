@@ -2887,11 +2887,11 @@ module Gori::Tui
 
     private def format_status_message(message : String?) : String?
       return nil unless message
-      if message.starts_with?("replaying →") || message.starts_with?("ws repeater →") ||
+      if message.starts_with?("sending →") || message.starts_with?("ws sending →") ||
          message.starts_with?("fuzzing ") || message.starts_with?("fuzz running") ||
          message.starts_with?("stopping")
         "#{SPINNER[@spinner_frame % SPINNER.size]} #{message}"
-      elsif message.starts_with?("replayed →") || message.starts_with?("ws replayed:") ||
+      elsif message.starts_with?("sent →") || message.starts_with?("ws sent:") ||
             message.starts_with?("Fuzzer:")
         "✓ #{message}"
       elsif message.starts_with?("repeater error:") || message.starts_with?("ws repeater error:") ||
