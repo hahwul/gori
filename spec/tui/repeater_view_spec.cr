@@ -33,7 +33,7 @@ describe Gori::Tui::RepeaterView do
     backend.contains?("https://example.com").should be_true # target field
     backend.contains?("GET / HTTP/1.1").should be_true      # scaffold request line
     backend.contains?("Host: example.com").should be_true   # scaffold header
-    backend.contains?("— not sent — press ^R to repeater —").should be_true
+    backend.contains?("— not sent — press ^R to resend —").should be_true
   end
 
   it "duplicate_from copies request content, flags, and last response (no source flow)" do
@@ -534,7 +534,7 @@ describe Gori::Tui::RepeaterView do
     view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true)
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
-    backend.contains?("— not sent — press ^R to repeater —").should be_true
+    backend.contains?("— not sent — press ^R to resend —").should be_true
   end
 
   it "restore re-populates a persisted last response (survives a reopen)" do

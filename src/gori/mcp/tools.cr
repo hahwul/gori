@@ -260,13 +260,13 @@ module Gori
             end
 
             tool j, "send_request",
-              "Send/repeater an HTTP request to its origin and return the response. " \
+              "Send/resend an HTTP request to its origin and return the response. " \
               "ACTIVE: makes a real outbound request from this host. Either pass " \
-              "`flow_id` to repeater a captured flow byte-exact, OR give an absolute " \
+              "`flow_id` to resend a captured flow byte-exact, OR give an absolute " \
               "`url` with optional method/headers/body, or a verbatim `raw` request. " \
               "When `flow_id` is set, url/method/headers/body/raw are ignored. " \
               "Host + Content-Length are auto-added when omitted on the url path." do |s|
-              s.field "flow_id", intprop("repeater a captured flow by id (no url needed; like TUI repeater)")
+              s.field "flow_id", intprop("resend a captured flow by id (no url needed; like the TUI Repeater)")
               s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id is given)")
               s.field "method", strprop("HTTP method (default GET)")
               s.field "headers", objprop("header name->value map")

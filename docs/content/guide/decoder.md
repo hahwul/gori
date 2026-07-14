@@ -1,13 +1,13 @@
 +++
-title = "Convert"
+title = "Decoder"
 description = "Encode, decode, hash, and transform data in a multi-step pipeline inside the TUI."
 +++
 
-The **Convert** tab is a scratch workbench for encoding, decoding, hashing, and transforming data — without shelling out to another tool. Paste input, build a chain of converters, and read the intermediate and final results.
+The **Decoder** tab is a scratch workbench for encoding, decoding, hashing, and transforming data — without shelling out to another tool. Paste input, build a chain of converters, and read the intermediate and final results.
 
 <figure class="tui-shot">
-  <img src="/images/tui/convert.svg" alt="gori Convert tab with INPUT, CHAIN, PIPELINE and OUTPUT panes running a base64-encode then upper chain, showing each step's intermediate result">
-  <figcaption>The <strong>Convert</strong> workbench: an input, a chain of converters, and the per-step pipeline with the final output below.</figcaption>
+  <img src="/images/tui/decoder.svg" alt="gori Decoder tab with INPUT, CHAIN, PIPELINE and OUTPUT panes running a base64-encode then upper chain, showing each step's intermediate result">
+  <figcaption>The <strong>Decoder</strong> workbench: an input, a chain of converters, and the per-step pipeline with the final output below.</figcaption>
 </figure>
 
 ## Layout
@@ -35,7 +35,7 @@ gzip-decompress | json-unescape
 
 Aliases work the same as the primary name (`b64` → `base64-encode`, `url` → `url-encode`, and so on). Autocomplete helps when the name is fuzzy.
 
-Save a chain under a name (**Save chain by name** from the space menu) and reload it later — defaults also persist under the `convert` section of settings.
+Save a chain under a name (**Save chain by name** from the space menu) and reload it later — defaults also persist under the `decoder` section of settings.
 
 ## Converters
 
@@ -54,12 +54,12 @@ OUTPUT can cycle display modes (text → hex → base64) for binary results. Cop
 
 - Decode a JWT or nested Base64 blob from History without mutating the flow
 - Build the same transform you'll apply as a Fuzzer payload processor
-- Quickly hash or URL-encode values while writing Replay requests
+- Quickly hash or URL-encode values while writing Repeater requests
 
-Convert does not send network traffic; it's pure local transformation.
+Decoder does not send network traffic; it's pure local transformation.
 
 ## Next Steps
 
-- [Replay & Fuzzer](/guide/replay-and-fuzzer/) — payload processors use similar encode/hash steps
+- [Repeater & Fuzzer](/guide/repeater-and-fuzzer/) — payload processors use similar encode/hash steps
 - [Proxy & History](/guide/proxy/) — JWT / SAML / GraphQL are also decoded inline on captured flows
-- [Hotkeys](/guide/hotkeys/) — rebind Convert-scoped actions
+- [Hotkeys](/guide/hotkeys/) — rebind Decoder-scoped actions

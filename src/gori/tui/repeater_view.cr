@@ -2549,7 +2549,7 @@ module Gori::Tui
       render_response_chrome(screen, rect)
       body = rect.inset(1, 1)
       if @resp_hex
-        (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to repeater —", Theme.muted)
+        (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to resend —", Theme.muted)
       elsif @resp_mode == :diff
         render_diff(screen, body, focused)
       elsif @reveal && (rl = reveal_lines)
@@ -2572,7 +2572,7 @@ module Gori::Tui
       body = rect.inset(1, 1)
       return if body.h <= 0
       if lines.empty?
-        screen.text(body.x, body.y, "— not sent — press ^R to repeater —", Theme.muted)
+        screen.text(body.x, body.y, "— not sent — press ^R to resend —", Theme.muted)
         return
       end
       gw = {Gutter.width(lines.size), body.w}.min
@@ -2907,7 +2907,7 @@ module Gori::Tui
         result = @result
         @resp_pretty_applied = false
         if !result
-          RespView.new([[Highlight::Span.new("— not sent — press ^R to repeater —", Theme.muted)]], Highlight::BodyLines.empty, :text)
+          RespView.new([[Highlight::Span.new("— not sent — press ^R to resend —", Theme.muted)]], Highlight::BodyLines.empty, :text)
         elsif !result.ok?
           RespView.new([[Highlight::Span.new("repeater error: #{result.error}", Theme.red)]], Highlight::BodyLines.empty, :text)
         else

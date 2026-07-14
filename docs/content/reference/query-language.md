@@ -1,6 +1,6 @@
 +++
 title = "Query Language"
-description = "The filter syntax used across History, Prism, Sitemap, and the MCP tools."
+description = "The filter syntax used across History, Probe, Sitemap, and the MCP tools."
 +++
 
 gori has a small query language (QL) for filtering flows. The same syntax works in the TUI filter bars, in `gori run` (`-q`/`--query`, or positionally), and through the MCP tools. The built-in reference is also available as `gori run history --help` and the `ql_reference` MCP tool.
@@ -85,5 +85,5 @@ gori run history -q 'method:POST dur:>1s body:token'
 gori run history -q 'path~/admin/ -path~\.(css|js|png)$'
 
 # Scope a passive scan
-gori run prism -q 'host:example.com'
+gori run probe -q 'host:example.com'
 ```

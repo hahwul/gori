@@ -51,8 +51,8 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 {
   "layout": {
     "history_preview": false,
-    "prism_preview": false,
-    "findings_preview": false,
+    "probe_preview": false,
+    "issues_preview": false,
     "history_list_order": "newest",
     "sitemap_expand_depth": -1
   }
@@ -62,8 +62,8 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `history_preview` | bool | `false` | History list page shows a bottom Req\|Res preview for the selected flow |
-| `prism_preview` | bool | `false` | Prism list page shows a bottom summary of the selected issue |
-| `findings_preview` | bool | `false` | Findings list page shows a bottom summary of the selected finding |
+| `probe_preview` | bool | `false` | Probe list page shows a bottom summary of the selected issue |
+| `issues_preview` | bool | `false` | Issues list page shows a bottom summary of the selected issue |
 | `history_list_order` | string | `"newest"` | List sort: `"newest"` (newest at top) or `"oldest"` (oldest at top) |
 | `sitemap_expand_depth` | integer | `-1` | How deep the Sitemap tree opens after reload: `-1` = all expanded; `0`–`3` = expand only nodes shallower than this depth |
 
@@ -127,7 +127,7 @@ Edit from `Ctrl-P` → **Settings: Hostnames**, or the Project tab for per-proje
 
 ### env
 
-Tokens like `$TOKEN` expand at send time in Replay, Fuzzer, Miner, Intercept, CLI, and MCP:
+Tokens like `$TOKEN` expand at send time in Repeater, Fuzzer, Miner, Intercept, CLI, and MCP:
 
 ```json
 {
@@ -145,7 +145,7 @@ Tokens like `$TOKEN` expand at send time in Replay, Fuzzer, Miner, Intercept, CL
 | `prefix` | string | `"$"` | Token prefix (`$KEY`) |
 | `vars` | array | `[]` | Global key/value pairs; project vars (Project tab → ENV) override on collision |
 
-See [Environment Variables](/guide/replay-and-fuzzer/#environment-variables).
+See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables).
 
 ### Other sections
 
@@ -159,8 +159,8 @@ See [Environment Variables](/guide/replay-and-fuzzer/#environment-variables).
 | `hostname_overrides` | Global host → IP dial map — see [hostname_overrides](#hostname_overrides) above |
 | `env` | Env-token prefix and global values — see [env](#env) above |
 | `hotkeys` | Keybinding overrides (`os` layer + `bindings`) — see the [Hotkeys guide](/guide/hotkeys/) |
-| `convert` / `mine` | Saved defaults for the Convert tool and Param Miner |
-| `layout` | History / Prism / Findings previews + Sitemap expand depth — see [layout](#layout) above |
+| `decoder` / `mine` | Saved defaults for the Decoder tool and Param Miner |
+| `layout` | History / Probe / Issues previews + Sitemap expand depth — see [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval — see [statusline](#statusline) above |
 
 ## Per-Project Overrides
@@ -180,4 +180,4 @@ Saving a Project-tab field that equals the current global value deletes that KV 
 
 ## Projects & Database
 
-Each project is a SQLite database (via `crystal-db` / `crystal-sqlite3`) holding flows, WebSocket messages, scope rules, findings, match rules, HTTP/2 frames, replay and fuzz sessions, host overrides, sitemap tags, miner sessions, and Prism issues, plus a full-text index over flow bodies. Stored request/response bodies are capped at 2 MiB; larger bodies are truncated in the database, but their true wire size is still recorded. Serve any project's database directly with `--db PATH`, or select a named project with `--project NAME`.
+Each project is a SQLite database (via `crystal-db` / `crystal-sqlite3`) holding flows, WebSocket messages, scope rules, issues, match rules, HTTP/2 frames, repeater and fuzz sessions, host overrides, sitemap tags, miner sessions, and Probe issues, plus a full-text index over flow bodies. Stored request/response bodies are capped at 2 MiB; larger bodies are truncated in the database, but their true wire size is still recorded. Serve any project's database directly with `--db PATH`, or select a named project with `--project NAME`.

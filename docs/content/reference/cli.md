@@ -55,13 +55,13 @@ gori run <subcommand> [options]
 | `capture` | Run the proxy and stream captured flows to STDOUT |
 | `history` (`ls`) | List / query captured flows |
 | `show <flow-id>` | Print one flow's request and response |
-| `replay <flow-id>` · `list` · `create` | Re-send a captured flow, or list / create Replay workbench sessions |
+| `repeater <flow-id>` · `list` · `create` | Re-send a captured flow, or list / create Repeater workbench sessions |
 | `fuzz [<flow-id>]` | Intruder-style fuzzer |
 | `mine [<flow-id>]` | Hidden-parameter discovery |
-| `prism [QL]` | Passive security scan (no requests) |
+| `probe [QL]` | Passive security scan (no requests) |
 | `sitemap [QL]` | Host → path endpoint tree |
 | `notes [<n>]` | Read project notes |
-| `findings` · `create` · `update` | List / export findings, or write findings |
+| `issues` · `create` · `update` | List / export issues, or write issues |
 | `projects` | List known projects |
 | `scope` | List / add / delete / enable / disable scope rules |
 
@@ -103,12 +103,12 @@ gori run show <flow-id> --format raw
 
 `--format` is `text`, `json`, or `raw` (exact bytes). `--request-only` / `--response-only` limit the output. Decoded SAML/JWT/GraphQL/params, WebSocket messages, and SSE events are included where present.
 
-### run replay
+### run repeater
 
-Re-send one captured flow, or manage the Replay workbench sessions shared with the TUI.
+Re-send one captured flow, or manage the Repeater workbench sessions shared with the TUI.
 
 ```bash
-gori run replay <flow-id> --target https://staging.example.com --http2 --diff
+gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 ```
 
 | Option | Description |
@@ -122,13 +122,13 @@ gori run replay <flow-id> --target https://staging.example.com --http2 --diff
 | `--diff` | Diff against the original response |
 | `--format=FMT` | `text` (default) or `json` |
 
-**`replay list`** — list saved Replay sessions (`--format text|json`).
+**`repeater list`** — list saved Repeater sessions (`--format text|json`).
 
-**`replay create`** — create a Replay session:
+**`repeater create`** — create a Repeater session:
 
 ```bash
-gori run replay create --target https://api.example.com --request-file req.txt --name "login probe"
-gori run replay create --flow 42 --name "clone of 42"
+gori run repeater create --target https://api.example.com --request-file req.txt --name "login probe"
+gori run repeater create --flow 42 --name "clone of 42"
 ```
 
 | Option | Description |
@@ -169,10 +169,10 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | Rate control |
 | `--format` | `text`, `json`, or `jsonl` |
 
-### run prism
+### run probe
 
 ```bash
-gori run prism --severity high --category cors
+gori run probe --severity high --category cors
 ```
 
 `--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors` (passive only — `active` probes run in the TUI); `-q`/`--query` filters with QL.
@@ -185,19 +185,19 @@ gori run sitemap --in-scope --format paths
 
 `-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default `SITEMAP_MAX`), `--in-scope` limits to in-scope hosts, `--no-group` disables numeric path folding, `--format` is `text` (tree), `json`, or `paths`.
 
-### run findings / notes / projects
+### run issues / notes / projects
 
 ```bash
-gori run findings --format markdown --export report.md
+gori run issues --format markdown --export report.md
 gori run notes --all
 gori run projects --format json
 ```
 
-Write findings from scripts with `create` / `update`:
+Write issues from scripts with `create` / `update`:
 
 ```bash
-gori run findings create --title "Reflected XSS on /search" --severity high --host app.example.com --flow 42
-gori run findings update 7 --status confirmed --notes "Verified on staging" --severity critical
+gori run issues create --title "Reflected XSS on /search" --severity high --host app.example.com --flow 42
+gori run issues update 7 --status confirmed --notes "Verified on staging" --severity critical
 ```
 
 | Option | Description |
@@ -236,7 +236,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--project=NAME` | Serve a named project's database |
 | `--use-active-project` | Ignore Git-workspace selection and explicitly serve the active TUI/MRU project |
 | `--insecure-upstream` | `send_request`: skip upstream TLS verification |
-| `--read-only` | Disable action tools (`send_request`, create/update findings, fuzz/mine) |
+| `--read-only` | Disable action tools (`send_request`, create/update issues, fuzz/mine) |
 | `--install-claude` | Write Claude Desktop `mcpServers` config |
 | `--install-claude-code` | Write Claude Code `~/.claude.json` `mcpServers` entry |
 | `--install-codex` | Write OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` |

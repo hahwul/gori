@@ -9,4 +9,4 @@ Technical reference for gori.
 
 - **[CLI Reference](/reference/cli/)** — every subcommand and flag: `tui`, `run`, `mcp`, `ca`, `settings`, `wizard`, `tutorial`, `update`.
 - **[Configuration](/reference/config/)** — `settings.json` keys and the `GORI_HOME` layout.
-- **[Query Language](/reference/query-language/)** — the filter syntax used across History, Prism, Sitemap, and the MCP tools.
+- **[Query Language](/reference/query-language/)** — the filter syntax used across History, Probe, Sitemap, and the MCP tools.

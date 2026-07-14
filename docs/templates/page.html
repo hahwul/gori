@@ -7,7 +7,7 @@
     <div class="hero-copy reveal">
       <p class="home-kicker">HTTP intercepting proxy · TUI</p>
       <h1 id="home-title">Intercept the web from your terminal.</h1>
-      <p class="hero-lede">A fast, keyboard-driven HTTP/HTTPS proxy and security toolkit. Capture, replay, fuzz, scan, or drive it all from an AI agent.</p>
+      <p class="hero-lede">A fast, keyboard-driven HTTP/HTTPS proxy and security toolkit. Capture, repeater, fuzz, scan, or drive it all from an AI agent.</p>
       <div class="home-actions" aria-label="Primary links">
         <a class="button button-primary" href="{{ base_url }}{{ lang_prefix }}/getting-started/">Get started</a>
         <a class="button button-secondary" href="https://github.com/hahwul/gori">View on GitHub</a>
@@ -24,7 +24,7 @@
     <figure class="showcase-frame">
       <img src="{{ base_url }}/images/tui/history.svg" alt="gori History tab in the terminal, listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration">
     </figure>
-    <p class="showcase-note">Every request your client makes lands in <strong>History</strong> as a flow, one keystroke from Replay, the Fuzzer, or a finding.</p>
+    <p class="showcase-note">Every request your client makes lands in <strong>History</strong> as a flow, one keystroke from Repeater, the Fuzzer, or an issue.</p>
   </section>
 
   <section class="home-paths" aria-label="Documentation paths">
@@ -36,8 +36,8 @@
       </a>
       <a class="path-ring path-ring-mid" href="{{ base_url }}{{ lang_prefix }}/guide/">
         <span>Guide</span>
-        <h2>Proxy, Replay &amp; Fuzzer</h2>
-        <p>Intercept, scope, replay, fuzz, and scan.</p>
+        <h2>Proxy, Repeater &amp; Fuzzer</h2>
+        <p>Intercept, scope, repeater, fuzz, and scan.</p>
       </a>
       <a class="path-ring path-ring-tail" href="{{ base_url }}{{ lang_prefix }}/reference/">
         <span>Reference</span>
@@ -49,11 +49,11 @@
 
   <section class="home-structure" aria-labelledby="structure-title">
     <figure class="structure-art">
-      <img src="{{ base_url }}/images/tui/space-menu.svg" alt="gori History tab with the Space menu open, listing context actions like add host to scope, replay flow, and mine parameters">
+      <img src="{{ base_url }}/images/tui/space-menu.svg" alt="gori History tab with the Space menu open, listing context actions like add host to scope, repeater flow, and mine parameters">
     </figure>
     <div class="structure-copy">
       <h2 id="structure-title">One tool, the whole assessment.</h2>
-      <p>History, Intercept, Replay, Fuzzer, the Prism scanner, Param Miner, and Findings live in a single project, every flow one keystroke away.</p>
+      <p>History, Intercept, Repeater, Fuzzer, the Probe scanner, Param Miner, and Issues live in a single project, every flow one keystroke away.</p>
       <div class="structure-grid" aria-label="What makes gori fast">
         <div>
           <strong>Keyboard-native</strong>
@@ -72,7 +72,7 @@
   </section>
 
   <section class="home-flow" aria-labelledby="flow-title">
-    <h2 id="flow-title">From capture to finding.</h2>
+    <h2 id="flow-title">From capture to issue.</h2>
     <div class="flow-list">
       <div>
         <div class="flow-copy">
@@ -86,7 +86,7 @@
       <div>
         <div class="flow-copy">
           <span>Test</span>
-          <p>Send interesting flows to Replay or the Fuzzer, mine hidden parameters, and let Prism flag issues as you browse.</p>
+          <p>Send interesting flows to Repeater or the Fuzzer, mine hidden parameters, and let Probe flag issues as you browse.</p>
         </div>
         <figure class="flow-shot">
           <img src="{{ base_url }}/images/tui/fuzzer.svg" alt="gori Fuzzer tab with marked payload positions in the request, a results table, and a status distribution sidebar">
@@ -95,10 +95,10 @@
       <div>
         <div class="flow-copy">
           <span>Report</span>
-          <p>Triage results into Findings, take notes, and export, or hand the whole project to an agent over MCP.</p>
+          <p>Triage results into Issues, take notes, and export, or hand the whole project to an agent over MCP.</p>
         </div>
         <figure class="flow-shot">
-          <img src="{{ base_url }}/images/tui/prism.svg" alt="gori Prism scanner listing passive security findings grouped by severity and category">
+          <img src="{{ base_url }}/images/tui/probe.svg" alt="gori Probe scanner listing passive security issues grouped by severity and category">
         </figure>
       </div>
     </div>
@@ -107,7 +107,7 @@
   <section class="home-agent" aria-labelledby="agent-title">
     <h2 id="agent-title">Or hand it to an agent.</h2>
     <p class="agent-intro">gori has no chat window baked in. It exposes your project over <strong>MCP</strong>, so any agent — Claude, Codex, Grok — reads your captured traffic and drives the tools through one clean seam. You pick the model; your traffic stays where you put it.</p>
-    <figure class="agent-seam" aria-label="An AI agent connects to a gori project through the MCP server: the agent calls tools like list_history and send_request, and gori returns flows and findings">
+    <figure class="agent-seam" aria-label="An AI agent connects to a gori project through the MCP server: the agent calls tools like list_history and send_request, and gori returns flows and issues">
       <div class="seam-node">
         <span class="seam-kicker">AI agent</span>
         <strong>Claude · Codex · Grok</strong>
@@ -120,8 +120,8 @@
       </div>
       <div class="seam-node">
         <span class="seam-kicker">gori project</span>
-        <strong>History · Replay · Fuzzer · Findings</strong>
-        <span class="seam-toollist">list_history · get_flow · send_request · create_finding · fuzz_start</span>
+        <strong>History · Repeater · Fuzzer · Issues</strong>
+        <span class="seam-toollist">list_history · get_flow · send_request · create_issue · fuzz_start</span>
       </div>
     </figure>
     <a class="agent-link" href="{{ base_url }}{{ lang_prefix }}/guide/mcp/">Read the MCP guide →</a>

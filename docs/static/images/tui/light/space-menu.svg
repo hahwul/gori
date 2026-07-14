@@ -42,12 +42,12 @@
 <text x="144.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Sitemap</text>
 <text x="234.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" font-weight="700" xml:space="preserve">History</text>
 <text x="324.00" y="119.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Intercept</text>
-<text x="432.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Replay</text>
+<text x="432.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Repeater</text>
 <text x="513.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Fuzzer</text>
-<text x="594.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Convert</text>
+<text x="594.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Decoder</text>
 <text x="684.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Comparer</text>
-<text x="783.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Prism</text>
-<text x="855.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Findings</text>
+<text x="783.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Probe</text>
+<text x="855.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Issues</text>
 <text x="36.00" y="137.68" textLength="900.00" lengthAdjust="spacingAndGlyphs" fill="#8f6410" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
 <text x="36.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#8f6410" xml:space="preserve">│</text>
 <text x="54.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">/</text>
@@ -200,7 +200,7 @@
 <text x="711.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1f7a40" xml:space="preserve">2</text>
 <text x="720.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#9c9180" xml:space="preserve">│</text>
 <text x="738.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1b1b1d" font-weight="700" xml:space="preserve">r</text>
-<text x="756.00" y="353.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Replay</text>
+<text x="756.00" y="353.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Repeater</text>
 <text x="819.00" y="353.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">flow</text>
 <text x="918.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#9c9180" xml:space="preserve">│</text>
 <text x="927.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#8f6410" xml:space="preserve">│</text>
@@ -231,7 +231,7 @@
 <text x="738.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1b1b1d" font-weight="700" xml:space="preserve">k</text>
 <text x="756.00" y="389.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Link</text>
 <text x="801.00" y="389.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">to</text>
-<text x="828.00" y="389.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">finding</text>
+<text x="828.00" y="389.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">issue</text>
 <text x="918.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#9c9180" xml:space="preserve">│</text>
 <text x="927.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#8f6410" xml:space="preserve">│</text>
 <text x="36.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#8f6410" xml:space="preserve">│</text>
@@ -246,7 +246,7 @@
 <text x="720.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#9c9180" xml:space="preserve">│</text>
 <text x="738.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1b1b1d" font-weight="700" xml:space="preserve">a</text>
 <text x="756.00" y="425.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">Add</text>
-<text x="792.00" y="425.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">finding</text>
+<text x="792.00" y="425.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" xml:space="preserve">issue</text>
 <text x="918.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#9c9180" xml:space="preserve">│</text>
 <text x="927.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#8f6410" xml:space="preserve">│</text>
 <text x="36.00" y="443.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#8f6410" xml:space="preserve">│</text>

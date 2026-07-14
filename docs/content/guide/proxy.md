@@ -44,9 +44,9 @@ gori is protocol-aware, not just a byte pipe:
 
 | Protocol | Support |
 |----------|---------|
-| **HTTP/1.1** | Full capture and replay |
+| **HTTP/1.1** | Full capture and repeater |
 | **HTTP/2** | Transparent relay after ALPN, raw frame log, HPACK decode, stream → flow assembly |
-| **WebSocket** | Live message capture and replay (no permessage-deflate) |
+| **WebSocket** | Live message capture and repeater (no permessage-deflate) |
 | **gRPC** | Framed over HTTP/2 with status trailers; protobuf shown as raw bytes (no `.proto` schema) |
 | **Server-Sent Events** | Parsed into discrete events at display time |
 
@@ -107,7 +107,7 @@ You don't have to capture everything live. From the command palette (`Ctrl-P`):
 | **Import: URLs** | Text file, one URL per line → skeleton request flows |
 | **Import: OpenAPI** | OpenAPI/Swagger JSON or YAML → one request template per operation |
 
-Malformed entries are skipped rather than aborting the whole import. Imported flows land in History like captured traffic, so you can filter, Replay, Fuzz, and scan them the same way.
+Malformed entries are skipped rather than aborting the whole import. Imported flows land in History like captured traffic, so you can filter, Repeater, Fuzz, and scan them the same way.
 
 ## Host Overrides
 
@@ -133,7 +133,7 @@ The **Project** home tab is more than a summary. Focusable panes (cycle with `Ta
 |------|---------|
 | **SCOPE** | Include/exclude rules (host, string, or regex) |
 | **HOST OVERRIDES** | Per-project dial map |
-| **ENV** | Per-project `$KEY` variables for outbound requests — see [Replay & Fuzzer](/guide/replay-and-fuzzer/#environment-variables) |
+| **ENV** | Per-project `$KEY` variables for outbound requests — see [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
 | **DESCRIPTION** | Free-form project notes |
 | **SETTINGS** | Per-project network pins (bind / upstream) — override the global Settings default when set |
 
@@ -141,7 +141,7 @@ Scope rules are also scriptable: `gori run scope add --kind=include --type=host 
 
 ## Next Steps
 
-- [Replay & Fuzzer](/guide/replay-and-fuzzer/) — act on the flows you capture
-- [Convert](/guide/convert/) — encode / decode / hash without leaving the TUI
-- [Scanning & Findings](/guide/scanning/) — automated and manual analysis
+- [Repeater & Fuzzer](/guide/repeater-and-fuzzer/) — act on the flows you capture
+- [Decoder](/guide/decoder/) — encode / decode / hash without leaving the TUI
+- [Scanning & Issues](/guide/scanning/) — automated and manual analysis
 - [Query Language](/reference/query-language/) — the full filter syntax

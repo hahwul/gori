@@ -46,7 +46,7 @@ module Gori
         request.matches?(UPGRADE_HEADER)
       end
 
-      # An outbound message to repeater (opcode 1=text, 2=binary).
+      # An outbound message to resend (opcode 1=text, 2=binary).
       record OutMsg, opcode : Int32, payload : Bytes
 
       # One message in the replayed transcript. `direction` is "out" (we sent) or

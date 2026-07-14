@@ -46,12 +46,12 @@
 <text x="144.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Sitemap</text>
 <text x="234.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">History</text>
 <text x="324.00" y="119.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Intercept</text>
-<text x="432.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Replay</text>
+<text x="432.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Repeater</text>
 <text x="513.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Fuzzer</text>
-<text x="594.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Convert</text>
+<text x="594.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Decoder</text>
 <text x="684.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Comparer</text>
-<text x="783.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Prism</text>
-<text x="855.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Findings</text>
+<text x="783.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Probe</text>
+<text x="855.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Issues</text>
 <text x="36.00" y="137.68" textLength="900.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
 <text x="36.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="54.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">/</text>

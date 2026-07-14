@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="954" height="520" viewBox="0 0 954.0 520.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="gori · Convert">
+<svg xmlns="http://www.w3.org/2000/svg" width="954" height="520" viewBox="0 0 954.0 520.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="gori · Decoder">
 <rect x="0.5" y="0.5" width="953.0" height="519.0" rx="10" ry="10" fill="#faf9f7" stroke="#d2d1cf" stroke-width="1"/>
 <rect x="1" y="1" width="952.0" height="34.0" rx="10" ry="10" fill="#ebeae8"/>
 <rect x="1" y="24.0" width="952.0" height="10" fill="#ebeae8"/>
 <circle cx="18.0" cy="17.0" r="5.5" fill="#e0645f"/>
 <circle cx="34.0" cy="17.0" r="5.5" fill="#e0b24f"/>
 <circle cx="50.0" cy="17.0" r="5.5" fill="#4fb06a"/>
-<text x="477.0" y="22.0" text-anchor="middle" fill="#70706f" font-size="12.3px">gori · Convert</text>
+<text x="477.0" y="22.0" text-anchor="middle" fill="#70706f" font-size="12.3px">gori · Decoder</text>
 <rect x="585.00" y="106.00" width="81.00" height="18.00" fill="#8f6410"/>
 <rect x="54.00" y="142.00" width="81.00" height="18.00" fill="#eeece5"/>
 <rect x="36.00" y="484.00" width="54.00" height="18.00" fill="#e7e5de"/>
@@ -25,12 +25,12 @@
 <text x="144.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Sitemap</text>
 <text x="234.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">History</text>
 <text x="324.00" y="119.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Intercept</text>
-<text x="432.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Replay</text>
+<text x="432.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Repeater</text>
 <text x="513.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Fuzzer</text>
-<text x="594.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">Convert</text>
+<text x="594.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">Decoder</text>
 <text x="684.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Comparer</text>
-<text x="783.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Prism</text>
-<text x="855.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Findings</text>
+<text x="783.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Probe</text>
+<text x="855.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6b6454" xml:space="preserve">Issues</text>
 <text x="36.00" y="137.68" textLength="900.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
 <text x="36.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#a89a86" xml:space="preserve">│</text>
 <text x="63.00" y="155.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#33322f" font-weight="700" xml:space="preserve">1:empty</text>

@@ -3,7 +3,7 @@ title = "Hotkeys"
 description = "Rebind gori's keyboard shortcuts from settings:hotkeys."
 +++
 
-gori's keyboard shortcuts are rebindable from **`settings:hotkeys`** in the command palette (`Ctrl-P`). The editor lists every rebindable action grouped by where it fires (GLOBAL, HISTORY, REPLAY, FUZZER, INTERCEPT, …); pick a row, press a new key, done.
+gori's keyboard shortcuts are rebindable from **`settings:hotkeys`** in the command palette (`Ctrl-P`). The editor lists every rebindable action grouped by where it fires (GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …); pick a row, press a new key, done.
 
 ```text
 Ctrl-P → settings:hotkeys
@@ -16,7 +16,7 @@ Bare letter keys are scarce. New actions should pick a **price tier** before tak
 | Tier | Price | When | Examples |
 |------|-------|------|----------|
 | **L0 Structural** | `Esc` `Enter` `Tab` arrows `Space` (leader) | Always | focus, open/close, READ/INS, space menu |
-| **L1 Loop** | bare letter or sticky family (`^R`) | many times / minute | History `j/k` `/` `y`, Replay send |
+| **L1 Loop** | bare letter or sticky family (`^R`) | many times / minute | History `j/k` `/` `y`, Repeater send |
 | **L2 Session breath** | Global bare — **cap: `c` `i` `s` only** | many times / session | capture, intercept, scope lens |
 | **L3 Contextual** | `Space` then mnemonic | occasional, pane-local | compare, mine, send-group, copy-as |
 | **L4 Rare / config** | palette (`Ctrl-P`) only | rare | settings, Match & Replace, notifications |
@@ -25,7 +25,7 @@ Rules of thumb:
 
 - **Default for new pane actions is L3** (space menu only). Promote to a direct key only after the loop proves it.
 - **Ctrl** is for actions that must work while typing (INS) or that are destructive — not a general upgrade from bare.
-- **History → Replay** and **Replay send** stay on **`Ctrl-R`** (same muscle memory). Do not move History→Replay to bare `r`.
+- **History → Repeater** and **Repeater send** stay on **`Ctrl-R`** (same muscle memory). Do not move History→Repeater to bare `r`.
 - Match & Replace and Notifications ship **keyless** (palette / badge); rebind them if you want a Global chord.
 
 ## Editing
@@ -58,9 +58,9 @@ Some keys can't be rebound because the terminal or gori needs them:
 - **Quit** — `Ctrl-C`, `Ctrl-D`.
 - **Indistinguishable from named keys** — `Ctrl-M` / `Ctrl-J` (Enter), `Ctrl-I` (Tab), `Ctrl-H` (Backspace), `Ctrl-[` (Escape).
 - **Structural** — `Enter`, `Esc`, `Tab`, `Backspace`, and a bare `:` (the command line).
-- **gori shortcuts claimed before the keymap** — `Ctrl-G` (go to line), `Ctrl-F` (find), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new replay/fuzz/note), `Ctrl-W` (close sub-tab), and `Ctrl-1`…`Ctrl-9` (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **New replay request**, and **New fuzz session** aren't listed in the editor — their key is fixed.
+- **gori shortcuts claimed before the keymap** — `Ctrl-G` (go to line), `Ctrl-F` (find), `Ctrl-B` (reveal whitespace), `Ctrl-E` (external editor), `Ctrl-P` (command palette), `Ctrl-N` (new repeater/fuzz/note), `Ctrl-W` (close sub-tab), and `Ctrl-1`…`Ctrl-9` (switch sub-tab). These are handled by a hardcoded guard before the keymap, so a binding on them would never fire. For the same reason **Command palette**, **New repeater request**, and **New fuzz session** aren't listed in the editor — their key is fixed.
 
-Flow-control/signal chords like `Ctrl-S` are **not** reserved — gori runs the terminal in raw mode, so they reach the app (Replay's SNI toggle ships on `Ctrl-S`).
+Flow-control/signal chords like `Ctrl-S` are **not** reserved — gori runs the terminal in raw mode, so they reach the app (Repeater's SNI toggle ships on `Ctrl-S`).
 
 ## OS Default Profiles
 
@@ -89,9 +89,9 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 ## Limitations
 
 - Only an action's **primary** chord is shown/edited; navigation aliases (e.g. the arrow-key duplicates of `j` / `k`) aren't listed.
-- The **command palette** and the **Help** tab (Global / History / Replay rows wired to verb ids) resolve chords through the effective keymap after a rebind. Other Help sections and some status chips may still use curated defaults.
+- The **command palette** and the **Help** tab (Global / History / Repeater rows wired to verb ids) resolve chords through the effective keymap after a rebind. Other Help sections and some status chips may still use curated defaults.
 - Space-menu **mnemonic** letters are stable action identities (Helix-like); rebinding changes the *direct* chord, not the space-menu letter.
-- Pane-local keys that share a letter (Replay response `x` = hex vs request/target `x` = select line) stay controller-owned so both meanings can coexist.
+- Pane-local keys that share a letter (Repeater response `x` = hex vs request/target `x` = select line) stay controller-owned so both meanings can coexist.
 - Press **`?`** from a navigable context to jump to the **Help** tab (mitmproxy-style cheat-sheet).
 
 ## Next Steps

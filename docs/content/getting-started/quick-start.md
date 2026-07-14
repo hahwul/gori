@@ -3,7 +3,7 @@ title = "Quick Start"
 description = "Start the proxy, trust the CA, capture your first flows, and learn the Day-1 keys."
 +++
 
-Get from a fresh build to a full capture → inspect → replay loop in a few minutes. This page is the shortest path through gori's basics; the [Guide](/guide/) goes deeper once traffic is flowing.
+Get from a fresh build to a full capture → inspect → repeater loop in a few minutes. This page is the shortest path through gori's basics; the [Guide](/guide/) goes deeper once traffic is flowing.
 
 ## 1. Start gori
 
@@ -62,7 +62,7 @@ Almost everything is reachable from two places. Learn these before memorizing ta
 | Surface | Key | What it is for |
 |---------|-----|----------------|
 | **Command palette** | `Ctrl-P` | App-wide control: settings, Open browser, Export CA, jump actions, anything global |
-| **Space menu** | `Space` | Actions for **whatever has focus** right now (History row, detail pane, Replay, …) |
+| **Space menu** | `Space` | Actions for **whatever has focus** right now (History row, detail pane, Repeater, …) |
 
 The palette is the map of the whole tool. The space menu is the map of *this* pane. Both show key hints; if you forget a chord, open one of them.
 
@@ -82,7 +82,7 @@ Capture and intercept still have global toggles:
 
 ## 4. Move around the TUI
 
-gori is a row of **tabs**. Default order starts with Project → Sitemap → **History** → Intercept → Replay → Fuzzer → …
+gori is a row of **tabs**. Default order starts with Project → Sitemap → **History** → Intercept → Repeater → Fuzzer → …
 
 | Key | Action |
 |-----|--------|
@@ -129,21 +129,21 @@ Select a flow in History (list or detail), then:
 
 | Key | Action |
 |-----|--------|
-| `Ctrl-R` | Send the flow to **Replay** (edit and re-send) |
+| `Ctrl-R` | Send the flow to **Repeater** (edit and re-send) |
 | `Shift-I` | Send the flow to the **Fuzzer** |
-| `Shift-F` | Create a **Finding** from it |
+| `Shift-F` | Create a **Issue** from it |
 | `Space` | Other actions (Comparer, copy, scope host, …) |
 
-### Minimal Replay loop
+### Minimal Repeater loop
 
-1. In History, select a flow → `Ctrl-R` (lands in Replay).
+1. In History, select a flow → `Ctrl-R` (lands in Repeater).
 2. `Enter` or `i` on the request to edit (INS mode); `Esc` back to READ.
 3. `Ctrl-R` again to **send**; inspect the response (timing and diff against the previous reply).
 4. `Tab` cycles target → request → response.
 
 <figure class="tui-shot">
-  <img src="/images/tui/replay.svg" alt="gori Replay tab showing an editable request pane beside the response pane, with a status line reading replayed 200 in 1152ms">
-  <figcaption><strong>Replay</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
+  <img src="/images/tui/repeater.svg" alt="gori Repeater tab showing an editable request pane beside the response pane, with a status line reading replayed 200 in 1152ms">
+  <figcaption><strong>Repeater</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
 </figure>
 
 ### Minimal Fuzzer loop
@@ -153,7 +153,7 @@ Select a flow in History (list or detail), then:
 3. Attach a wordlist or list in the config pane (`Ctrl-O` focuses it).
 4. `Ctrl-R` to run; `Ctrl-X` to stop.
 
-While you browse, **Prism** flags passive issues with no extra traffic. Promote anything worth tracking into **Findings**. Full detail is in [Replay & Fuzzer](/guide/replay-and-fuzzer/) and [Scanning & Findings](/guide/scanning/).
+While you browse, **Probe** flags passive issues with no extra traffic. Promote anything worth tracking into **Issues**. Full detail is in [Repeater & Fuzzer](/guide/repeater-and-fuzzer/) and [Scanning & Issues](/guide/scanning/).
 
 ## Day-1 key map
 
@@ -167,9 +167,9 @@ Keep this table nearby until the chords stick:
 | `[` `]` · `1`–`9` | Anywhere | Switch tabs |
 | `/` | History | Query-language filter |
 | `Enter` | History | Open flow detail |
-| `Ctrl-R` | History | → Replay |
+| `Ctrl-R` | History | → Repeater |
 | `Shift-I` | History | → Fuzzer |
-| `Ctrl-R` | Replay / Fuzzer | Send request / run fuzz |
+| `Ctrl-R` | Repeater / Fuzzer | Send request / run fuzz |
 | `Esc` | Most places | Back out one level |
 
 ## First-run wizard
@@ -201,7 +201,7 @@ It is also offered at the end of the first-run wizard.
 
 - [Configuration](/getting-started/configuration/) — storage layout, network settings, and the CA
 - [Proxy & History](/guide/proxy/) — capture, intercept, scope, import, match & replace
-- [Replay & Fuzzer](/guide/replay-and-fuzzer/) — the testing workbench and env tokens
-- [Convert](/guide/convert/) — encode / decode / hash pipeline
+- [Repeater & Fuzzer](/guide/repeater-and-fuzzer/) — the testing workbench and env tokens
+- [Decoder](/guide/decoder/) — encode / decode / hash pipeline
 - [Query Language](/reference/query-language/) — full filter syntax
 - [Hotkeys](/guide/hotkeys/) — rebind any of the chords above

@@ -1,35 +1,35 @@
 +++
-title = "Replay & Fuzzer"
+title = "Repeater & Fuzzer"
 description = "The request workbench and the Intruder-style fuzzer, in the TUI and headless."
 +++
 
-Once you've captured an interesting flow, **Replay** and the **Fuzzer** are where you test it.
+Once you've captured an interesting flow, **Repeater** and the **Fuzzer** are where you test it.
 
-## Replay
+## Repeater
 
-Replay is a request workbench, like a repeater. Send a flow to it, edit any part of the request, and re-send — the response, timing, and a diff against the previous response are shown side by side. Sessions persist with the project, so you can come back to them later.
+Repeater is a request workbench, like a repeater. Send a flow to it, edit any part of the request, and re-send — the response, timing, and a diff against the previous response are shown side by side. Sessions persist with the project, so you can come back to them later.
 
 <figure class="tui-shot">
-  <img src="/images/tui/replay.svg" alt="gori Replay tab with an editable HTTP/2 request pane, a response pane showing headers and a JSON body, and a replayed 200 in 1152ms status line">
-  <figcaption><strong>Replay</strong>: an editable request on the left, the live response and timing on the right, with a diff against the previous send.</figcaption>
+  <img src="/images/tui/repeater.svg" alt="gori Repeater tab with an editable HTTP/2 request pane, a response pane showing headers and a JSON body, and a replayed 200 in 1152ms status line">
+  <figcaption><strong>Repeater</strong>: an editable request on the left, the live response and timing on the right, with a diff against the previous send.</figcaption>
 </figure>
 
-Replay handles more than HTTP/1:
+Repeater handles more than HTTP/1:
 
 - **HTTP/2** requests are re-sent over a real h2 connection.
-- **WebSocket** replay opens a handshake, then lets you send messages and watch the drained responses.
-- **gRPC** replay reuses the HTTP/2 engine for framed messages.
-- A **decode** mode re-encodes edited SAML / GraphQL payloads on send. (To decode or edit a JWT, use the [Convert](/guide/convert/) tab's `jwt-decode`.)
+- **WebSocket** repeater opens a handshake, then lets you send messages and watch the drained responses.
+- **gRPC** repeater reuses the HTTP/2 engine for framed messages.
+- A **decode** mode re-encodes edited SAML / GraphQL payloads on send. (To decode or edit a JWT, use the [Decoder](/guide/decoder/) tab's `jwt-decode`.)
 
-Replay from the command line, optionally against a new target:
+Repeater from the command line, optionally against a new target:
 
 ```bash
-gori run replay <flow-id> --target https://staging.example.com --diff
+gori run repeater <flow-id> --target https://staging.example.com --diff
 ```
 
 ## Environment Variables
 
-Outbound requests support `$KEY`-style substitution. Tokens stay as literal text in the editor and expand **only at send time** — in Replay, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
+Outbound requests support `$KEY`-style substitution. Tokens stay as literal text in the editor and expand **only at send time** — in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
 
 Define variables in two places (project wins on a key collision):
 
@@ -89,7 +89,7 @@ Sources can be a captured flow (`--flow`), a raw request file (`--request`), or 
 
 ## Next Steps
 
-- [Convert](/guide/convert/) — local encode/decode/hash chains
-- [Scanning & Findings](/guide/scanning/) — Prism and the Param Miner
+- [Decoder](/guide/decoder/) — local encode/decode/hash chains
+- [Scanning & Issues](/guide/scanning/) — Probe and the Param Miner
 - [CLI Reference](/reference/cli/) — every `run` flag
 - [MCP Server](/guide/mcp/) — drive fuzzing from an agent

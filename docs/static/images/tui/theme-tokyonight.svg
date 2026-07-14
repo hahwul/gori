@@ -25,12 +25,12 @@
 <text x="144.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Sitemap</text>
 <text x="234.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#a9b1d6" font-weight="700" xml:space="preserve">History</text>
 <text x="324.00" y="119.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Intercept</text>
-<text x="432.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Replay</text>
+<text x="432.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Repeater</text>
 <text x="513.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Fuzzer</text>
-<text x="594.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Convert</text>
+<text x="594.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Decoder</text>
 <text x="684.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Comparer</text>
-<text x="783.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Prism</text>
-<text x="855.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Findings</text>
+<text x="783.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Probe</text>
+<text x="855.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">Issues</text>
 <text x="36.00" y="137.68" textLength="900.00" lengthAdjust="spacingAndGlyphs" fill="#7aa2f7" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
 <text x="36.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#7aa2f7" xml:space="preserve">│</text>
 <text x="54.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">/</text>
@@ -209,10 +209,10 @@
 <text x="216.00" y="497.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">open</text>
 <text x="261.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">·</text>
 <text x="279.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">^R</text>
-<text x="306.00" y="497.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">replay</text>
+<text x="306.00" y="497.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">repeater</text>
 <text x="369.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">·</text>
 <text x="387.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">⇧F</text>
-<text x="414.00" y="497.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">finding</text>
+<text x="414.00" y="497.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">issue</text>
 <text x="486.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">·</text>
 <text x="504.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">f</text>
 <text x="522.00" y="497.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#7a84ad" xml:space="preserve">follow</text>
