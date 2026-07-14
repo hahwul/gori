@@ -42,6 +42,13 @@ module Gori::Tui
     DETAIL_LOG_CAP = 10_000
     QL_FIELDS      = %w(host method status path scheme proto body header size reqsize respsize dur flag)
     METHOD_VAL     = %w(GET POST PUT DELETE PATCH HEAD OPTIONS QUERY)
+    # Discoverability hints for the QL filter, kept loosely in sync with QL_FIELDS.
+    # FILTER_HINT sits on the idle bar (press `/` to start filtering); QUERY_HINT sits
+    # on the suggestion row at a cold start (already editing, nothing to Tab-complete
+    # yet) and also spells out that bare words are a free-text search. Example values
+    # double as syntax cues.
+    FILTER_HINT = "/ filter  ·  host:  method:  status:>=500  proto:ws  path:  size:>10000  dur:>500  header:  body~regex"
+    QUERY_HINT  = "fields:  host:  method:  status:  proto:  path:  scheme:  size:  dur:  header:  body    ·    or type words to search"
 
     getter rows : Array(Store::FlowRow)
     getter? follow : Bool
@@ -1458,18 +1465,29 @@ module Gori::Tui
       screen.text(fx, rect.y, fchip, @follow ? Theme.accent : Theme.muted) if follow_shown
 
       left_w = {(follow_shown ? fx : scope_x) - (rect.x + 1) - 1, 0}.max
-      if filtering?
-        label = @query.blank? ? "(in-scope only)" : ": #{@query}"
-        screen.text(rect.x + 1, rect.y, label, Theme.text, width: left_w)
+      if !@query.blank?
+        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  status:>=500  path:  scheme:  size:>10000  dur:>500  header:  body~regex", Theme.muted, width: left_w)
+        # No QL query typed — whether or not a Scope lens is active. Surface the filter
+        # affordance + fields rather than a bare "(in-scope only)": the Scope lens is
+        # already signalled by the ⇧S chip on the right, so this row isn't wasted
+        # repeating it, and the user's next move here is to ADD a query atop the lens.
+        screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
       end
     end
 
     private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
       sugg = query_suggestions
-      return if sugg.empty?
-      screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: rect.w - 2)
+      unless sugg.empty?
+        screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: rect.w - 2)
+        return
+      end
+      # No live completions to Tab through. At a cold start (nothing typed yet, or the
+      # cursor sits just after a space) show a standing hint so the query language is
+      # discoverable from the moment `/` opens; on a non-empty token with no match stay
+      # quiet — the user is deliberately free-texting a word.
+      return unless current_token.empty?
+      screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: rect.w - 2)
     end
 
     # Static pools for low-cardinality fields; `host:` is DISTINCT from the store

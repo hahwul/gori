@@ -142,9 +142,20 @@ module Gori::Tui
       (0...@repeaters.size).reject { |i| h.includes?(i) }
     end
 
+    # Cold-start hint shown on the suggestion row while editing with nothing typed
+    # yet — spells out the fields and that bare words are a free-text search, so the
+    # filter language is discoverable the moment `/` opens (mirrors History).
+    FILTER_EDIT_HINT = "fields:  tag:  name:  host:  method:    ·    or type words to search"
+
     # The `/` bar is currently capturing keystrokes (the shell routes keys here).
     def subtab_filter_editing? : Bool
       @subtab_filter_editing
+    end
+
+    # True at a cold start (nothing typed, or the caret sits just after a space) — used
+    # to decide whether the suggestion row shows the standing FILTER_EDIT_HINT.
+    private def filter_token_empty? : Bool
+      Repeater::SubtabFilter.token_at(@subtab_filter, @filter_cx)[0].empty?
     end
 
     # The filter bar always occupies a body row when the strip is up (History-style
@@ -393,7 +404,10 @@ module Gori::Tui
     private def filter_bar_height : Int32
       base = FILTER_BAR_H
       return base unless @subtab_filter_editing
-      filter_suggestions.empty? ? base : base + 1
+      # Reserve the extra row for the suggestion/hint line: live ↹ completions, OR the
+      # cold-start FILTER_EDIT_HINT shown while the token is empty. A non-empty token
+      # with no completions keeps the compact height (nothing to show there).
+      (!filter_suggestions.empty? || filter_token_empty?) ? base + 1 : base
     end
 
     # History-style 3-state bar under the sub-tab chips, with the strip hairline
@@ -425,9 +439,12 @@ module Gori::Tui
       div_y = row_y + 1
       if @subtab_filter_editing && rect.h >= 3
         sugg = filter_suggestions
-        unless sugg.empty?
+        # Live completions to Tab through, else (at a cold start) the standing hint so the
+        # row isn't blank the instant `/` opens; a non-empty no-match token stays quiet.
+        hint = !sugg.empty? ? "↹ #{sugg.first(8).join("  ")}" : (FILTER_EDIT_HINT if filter_token_empty?)
+        if hint
           screen.fill(Rect.new(rect.x, row_y + 1, rect.w, 1), Theme.panel)
-          screen.text(rect.x, row_y + 1, "↹ #{sugg.first(8).join("  ")}", Theme.muted, Theme.panel, width: rect.w)
+          screen.text(rect.x, row_y + 1, hint, Theme.muted, Theme.panel, width: rect.w)
           div_y = row_y + 2
         end
       end

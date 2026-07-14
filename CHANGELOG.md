@@ -15,6 +15,18 @@ being indistinguishable from plain HTTP:
   still-pending flows. No database column or migration — it is derived from data
   gori already stores.
 
+### Changed — clearer `/` filter guidance
+
+The filter bars on the History and Repeater tabs now surface what you can type
+from the moment they open:
+
+- The field hint no longer vanishes when the Scope lens is on (History) — the lens
+  is already signalled by the `⇧S` chip, so the row keeps listing the filter fields
+  instead of showing a bare `(in-scope only)`.
+- Opening `/` with nothing typed now shows a standing hint of the available fields
+  and a reminder that bare words are a free-text search (the row used to stay blank
+  until you started typing).
+
 ### Changed — four tabs renamed (BREAKING)
 
 Four tools were renamed for clearer, more conventional names. The rename is
