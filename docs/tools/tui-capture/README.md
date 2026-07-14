@@ -30,9 +30,8 @@ Requirements: `bash`, `tmux`, `python3`, `curl`.
 
 Captures are reproducible but not pixel-identical run to run (timestamps,
 durations, and live response bodies vary), so eyeball the output before
-committing. The theme gallery on the Themes page is shot by setting
-`"theme":"<name>"` in the seeded `settings.json` and re-running the `history`
-scene.
+committing. The theme gallery on the Themes page (`theme-<name>.svg`) is shot in
+the same run by `shoot_themes` — the History scene under each gallery palette.
 
 ## Render a single frame by hand
 

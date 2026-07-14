@@ -105,10 +105,22 @@ shoot_all() {
   run_scene sitemap      26 "gori · Sitemap"                   2 SLEEP1.2
   run_scene project      26 "gori · Project"                   1 SLEEP1.2
   run_scene intercept    26 "gori · Intercept"                 4 SLEEP1.2
-  run_scene prism        26 "gori · Prism scanner"             9 SLEEP1.4
-  run_scene convert      26 "gori · Convert"                   7 SLEEP1.2
-  run_scene replay       26 "gori · Replay"                    3 SLEEP0.6 Enter SLEEP0.4 C-r SLEEP1.2 C-r SLEEP3
+  run_scene probe        26 "gori · Probe scanner"             9 SLEEP1.4
+  run_scene decoder      26 "gori · Decoder"                   7 SLEEP1.2
+  run_scene repeater     26 "gori · Repeater"                  3 SLEEP0.6 Enter SLEEP0.4 C-r SLEEP1.2 C-r SLEEP3
   run_scene fuzzer       34 "gori · Fuzzer"                    3 SLEEP0.6 Enter SLEEP0.3 Down SLEEP0.3 I SLEEP1 C-a SLEEP0.6 C-l SLEEP0.8 admin Enter root SLEEP0.5 Escape SLEEP0.7 C-r SLEEP5
+}
+
+# The Themes-page gallery (docs/content/guide/themes.md): the same History scene shot
+# under each gallery palette, written flat into tui/ as theme-<name>.svg with a
+# "<theme> · default" window title. Not part of shoot_all — these are their own named
+# theme cards, not the light/dark split of a scene.
+shoot_themes() {
+  OUT="$TUI_ROOT"
+  for th in goridark goriday tokyonight gruvbox; do
+    write_settings "$th"
+    run_scene "theme-$th" 26 "$th · default" 3 SLEEP1 Enter
+  done
 }
 
 # One pass per "theme:subdir" spec in $SHOTS. The seeded DB is shared across
@@ -122,5 +134,8 @@ for spec in $SHOTS; do
   echo "▸ capturing $theme → $OUT"
   shoot_all
 done
+
+echo "▸ capturing the theme gallery → $TUI_ROOT/theme-*.svg"
+shoot_themes
 
 echo "▸ done. Review the SVGs under $TUI_ROOT"
