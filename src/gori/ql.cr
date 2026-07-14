@@ -15,7 +15,7 @@ module Gori
   #   header:set-cookie                 # substring over request/response head bytes
   #   body~secret\d+  host~^api\.       # `~` = regex (host path url header body)
   module QL
-    # `:` fields:  host path method scheme status size reqsize respsize dur header body
+    # `:` fields:  host path method scheme proto status size reqsize respsize dur header body
     # `~` regex on: host path url header body   (+ bare words = free text).
     # Comparison ops (<= >= < > =) apply to status/size/reqsize/respsize/dur.
     struct Filter
@@ -37,12 +37,14 @@ module Gori
         -host:cdn login                               # negation + free-text search
 
       Fields (use : for value match, ~ for regex):
-        host path method scheme status size reqsize respsize dur header body url
+        host path method scheme proto status size reqsize respsize dur header body url
 
       Comparisons (status size reqsize respsize dur):
         status:>=500  size:>10000  dur:>=500  dur:<2s  (dur defaults to ms; suffix ms|s)
 
       Status class shorthand: status:5xx  status:4xx
+
+      Protocol: proto:ws  proto:grpc  proto:sse  proto:http  (ws = 101 upgrade; grpc/sse by Content-Type)
 
       Regex (~): host~^api\\.  body~secret\\d+  path~/admin
 
@@ -156,6 +158,7 @@ module Gori
       when "path"                        then {"lower(target) LIKE ? ESCAPE '\\'", [like(value)] of DB::Any}
       when "method"                      then {"upper(method) = ?", [value.upcase] of DB::Any}
       when "scheme"                      then {"scheme = ?", [value.downcase] of DB::Any}
+      when "proto"                       then proto_cond(value)
       when "status"                      then status_cond(value)
       when "size", "reqsize", "respsize" then size_cond(field, value)
       when "dur"                         then duration_cond(value)
@@ -170,6 +173,29 @@ module Gori
         # (Store#flags_for is a stub), so there is nothing to match; it free-texts like any
         # other unknown field rather than advertising an unimplemented filter.
         free_text(term)
+      end
+    end
+
+    # proto: classifies a flow by application protocol WITHOUT a stored column —
+    # WS is the 101 upgrade handshake, gRPC/SSE are read off the response
+    # Content-Type, and http is everything else. Mirrors Gori::Proto.classify (the
+    # render-side source of truth). The LIKE patterns are constant literals (no user
+    # data), so they are inlined; the gRPC/SSE clauses carry an explicit NOT-NULL
+    # guard so `http` can negate them NULL-safely — a pending/typeless flow (NULL
+    # content_type) counts as http, and `-proto:grpc` correctly keeps it. An
+    # unknown value (proto:foo) drops the term, like a bad status: (never matches
+    # all). `websocket` is an alias for `ws`.
+    GRPC_SQL = "(content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%')"
+    SSE_SQL  = "(content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%')"
+
+    private def self.proto_cond(value : String) : {String, Array(DB::Any)}?
+      no_args = [] of DB::Any
+      case Proto::Kind.parse?(value)
+      in Proto::Kind::Ws   then {"status = 101", no_args}
+      in Proto::Kind::Grpc then {GRPC_SQL, no_args}
+      in Proto::Kind::Sse  then {SSE_SQL, no_args}
+      in Proto::Kind::Http then {"(status IS NULL OR status <> 101) AND NOT #{GRPC_SQL} AND NOT #{SSE_SQL}", no_args}
+      in nil               then nil
       end
     end
 

@@ -178,6 +178,28 @@ describe Gori::QL do
     f.sql.should eq("((lower(method) LIKE ? OR lower(host) LIKE ? OR lower(target) LIKE ?))")
     f.args.should eq(["%foo~[%", "%foo~[%", "%foo~[%"])
   end
+
+  it "compiles proto: without stored columns (ws=101, grpc/sse by Content-Type)" do
+    Gori::QL.parse("proto:ws").sql.should eq("(status = 101)")
+    Gori::QL.parse("proto:websocket").sql.should eq("(status = 101)") # alias
+    Gori::QL.parse("proto:grpc").sql.should eq(
+      "((content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%'))")
+    Gori::QL.parse("proto:sse").sql.should eq(
+      "((content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%'))")
+    Gori::QL.parse("proto:ws").args.should be_empty
+  end
+
+  it "compiles proto:http as a NULL-safe negation (pending/typeless flows count as http)" do
+    Gori::QL.parse("proto:http").sql.should eq(
+      "((status IS NULL OR status <> 101) " \
+      "AND NOT (content_type IS NOT NULL AND lower(content_type) LIKE 'application/grpc%') " \
+      "AND NOT (content_type IS NOT NULL AND lower(content_type) LIKE 'text/event-stream%'))")
+  end
+
+  it "drops an unknown proto: value (match-all EMPTY, not everything)" do
+    # Mirrors a bad status: — a typo like proto:htttp must not silently match all flows.
+    Gori::QL.parse("proto:htttp").sql.should eq("1")
+  end
 end
 
 describe "Gori::Store#search (QL)" do
@@ -201,6 +223,34 @@ describe "Gori::Store#search (QL)" do
       # which matches none of these flows' method/host/target.
       none = store.search(Gori::QL.parse("flag:reflected"), 50)
       none.should be_empty
+    end
+  end
+
+  it "filters by proto: over real captured flows (ws/grpc/sse/http, NULL-safe)" do
+    tmp_store do |store|
+      # WebSocket handshake (101, no content type).
+      ws = capture(store, "acme.test", "GET", "/socket", 101)
+      # gRPC + SSE distinguished only by Content-Type on a 200.
+      grpc = capture(store, "acme.test", "POST", "/rpc")
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: grpc, status: 200, content_type: "application/grpc+proto",
+        head: "HTTP/1.1 200 OK\r\nContent-Type: application/grpc+proto\r\n\r\n".to_slice))
+      sse = capture(store, "acme.test", "GET", "/events")
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: sse, status: 200, content_type: "text/event-stream; charset=utf-8",
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n".to_slice))
+      # Plain HTTP (typed) and a still-pending flow (NULL status + NULL content_type).
+      html = capture(store, "acme.test", "GET", "/", 200)
+      pending = capture(store, "acme.test", "GET", "/pending")
+
+      def_ids = ->(q : String) { store.search(Gori::QL.parse(q), 50).map(&.id).sort }
+      def_ids.call("proto:ws").should eq([ws])
+      def_ids.call("proto:grpc").should eq([grpc])
+      def_ids.call("proto:sse").should eq([sse])
+      # http = everything that is NOT ws/grpc/sse — including the NULL-column pending flow.
+      def_ids.call("proto:http").should eq([html, pending].sort)
+      # Negation is NULL-safe too: -proto:grpc keeps the pending (NULL content_type) flow.
+      def_ids.call("-proto:grpc").includes?(pending).should be_true
     end
   end
 

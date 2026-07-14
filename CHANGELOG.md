@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added — protocol filter in History
+
+WebSocket, gRPC, and SSE flows are now first-class in the History tab instead of
+being indistinguishable from plain HTTP:
+
+- **PROTO column** shows `WS` / `GRPC` / `SSE` (accented) for those flows; ordinary
+  requests keep showing the scheme (`HTTP` / `HTTPS`).
+- **New QL field `proto:`** — `proto:ws`, `proto:grpc`, `proto:sse`, `proto:http`
+  (`websocket` is an alias for `ws`). WS is the 101 upgrade handshake; gRPC/SSE are
+  matched by response Content-Type. `proto:http` is everything else, including
+  still-pending flows. No database column or migration — it is derived from data
+  gori already stores.
+
 ### Changed — four tabs renamed (BREAKING)
 
 Four tools were renamed for clearer, more conventional names. The rename is

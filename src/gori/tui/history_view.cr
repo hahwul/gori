@@ -40,7 +40,7 @@ module Gori::Tui
     # We load the MOST RECENT this-many (so a live tail keeps updating) and show an
     # "older not loaded" note; the raw frames remain whole in SQLite.
     DETAIL_LOG_CAP = 10_000
-    QL_FIELDS      = %w(host method status path scheme body header size reqsize respsize dur flag)
+    QL_FIELDS      = %w(host method status path scheme proto body header size reqsize respsize dur flag)
     METHOD_VAL     = %w(GET POST PUT DELETE PATCH HEAD OPTIONS QUERY)
 
     getter rows : Array(Store::FlowRow)
@@ -1095,7 +1095,12 @@ module Gori::Tui
         end
         screen.text(time_x, y, fmt_time(row.created_at), Theme.muted, bg)
         screen.text(method_x, y, row.method, Theme.method_color(row.method), bg)
-        screen.text(proto_x, y, row.scheme.upcase, Theme.muted, bg)
+        # PROTO: surface WS/GRPC/SSE (accented so they pop out of the HTTP stream);
+        # plain HTTP flows keep showing the scheme (HTTP/HTTPS) — the plaintext-vs-TLS
+        # signal — since there is nothing else worth flagging on them.
+        kind = Proto.classify(row.status, row.content_type)
+        proto_label = kind.http? ? row.scheme.upcase : kind.label
+        screen.text(proto_x, y, proto_label, kind.http? ? Theme.muted : Theme.accent, bg)
         screen.text(host_x, y, row.host, fg, bg, width: host_w) if host_w > 0
         screen.text(path_x, y, Url.origin_path(row.target), fg, bg, width: path_w) if path_w > 0
         # Failed flows store status 0 — FlowStatus shows the STATE (ERR/ABT) instead of
@@ -1473,6 +1478,7 @@ module Gori::Tui
       p = prefix.downcase
       values = case field
                when "scheme" then ["http", "https"]
+               when "proto"  then ["ws", "grpc", "sse", "http"]
                when "method" then METHOD_VAL
                when "status" then ["2xx", "3xx", "4xx", "5xx", ">=400", ">=500", "200", "301", "302", "401", "403", "404", "500", "502", "503"]
                when "host"   then host_values_for(prefix)
