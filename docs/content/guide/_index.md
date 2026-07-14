@@ -30,7 +30,7 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Miner** | Hidden-parameter discovery (hidden by default) |
 | **Convert** | Encode / decode / hash pipeline |
 | **Comparer** | Side-by-side diff of two flows |
-| **Prism** | Passive & active security scanner |
+| **Prism** | Passive & light-touch active security scanner |
 | **Findings** | Triage results by severity and status |
 | **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links |

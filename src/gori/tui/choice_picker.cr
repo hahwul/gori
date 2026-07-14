@@ -49,7 +49,7 @@ module Gori::Tui
       new("SET PRISM MODE", [
         Choice.new("OFF — no scanning", 'o', Theme.muted, 0),
         Choice.new("PASSIVE — observe only", 'p', Theme.accent, 1),
-        Choice.new("ACTIVE — passive + reflected-param probes (scope rules)", 'a', Theme.orange, 2),
+        Choice.new("ACTIVE — passive + light-touch probes (in-scope)", 'a', Theme.orange, 2),
       ], current, :prism_mode)
     end
 

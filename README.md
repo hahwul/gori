@@ -46,7 +46,7 @@ tool, so scripts and AI agents can drive the same engagement.
 - Inline JWT / SAML / GraphQL decoding, hex view, and pretty-printing
 
 ### Discover & Scan
-- Prism passive & active vulnerability scanner
+- Prism passive & light-touch active vulnerability scanner
 - Param Miner for hidden-parameter discovery
 - Findings triage with Markdown / JSON export
 
