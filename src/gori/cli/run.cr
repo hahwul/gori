@@ -15,6 +15,7 @@ require "../sitemap"
 require "../proxy/codec/content_decode"
 require "../replay/engine"
 require "../replay/h2_engine"
+require "../replay/ws_engine"
 require "../replay/flow_request"
 require "../replay/diff"
 require "../fuzz"
@@ -677,6 +678,15 @@ module Gori
           store.close
         end
         abort "gori run replay: no flow ##{id}" unless detail
+
+        # A WebSocket flow can't be replayed by a one-shot HTTP send: this path would only
+        # re-issue the upgrade request and report the 101 handshake, exchanging zero frames
+        # (a silently misleading "success"). Detect an upgrade that actually completed
+        # (status 101 + a WebSocket upgrade request) and refuse with an actionable pointer,
+        # rather than the plain h1/h2 engines that don't do the RFC 6455 framed exchange.
+        if detail.row.status == 101 && Replay::WsEngine.upgrade_request?(String.new(detail.request_head))
+          abort "gori run replay: flow ##{id} is a WebSocket session — `gori run replay` only re-sends the HTTP upgrade and captures the 101 handshake, not the framed messages. Replay it from the TUI Replay tab, or create a replay from it and use the MCP `send_websocket` tool for a real framed exchange."
+        end
 
         # The captured request body was capped at CAPTURE_MAX; FlowRequest.build re-syncs the
         # Content-Length to the stored bytes so the request stays well-formed, but warn that

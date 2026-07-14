@@ -807,6 +807,24 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "honors an explicit http2:false to downgrade an h2-captured flow to HTTP/1.1" do
+      with_store do |store|
+        port = start_mcp_http_origin("downgraded")
+        # A flow captured over h2 (http_version HTTP/2). Sending it to this HTTP/1.1
+        # origin only succeeds if http2:false actually downgrades the transport — the
+        # bug was `http2 = bool(h,"http2") || flow.http2`, where an explicit false was
+        # OR'd away and the send stayed h2 (h2c to an h1 origin, which fails).
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
+          method: "GET", target: "/h2flow", http_version: "HTTP/2",
+          head: "GET /h2flow HTTP/2\r\nHost: 127.0.0.1:#{port}\r\n\r\n".to_slice, body: nil))
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"http2":false}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_false
+        tool_payload(resp)["status"].as_i.should eq(200)
+      end
+    end
+
     it "returns isError on a connection failure (port 1)" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/"}}})
