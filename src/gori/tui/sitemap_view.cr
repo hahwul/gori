@@ -27,7 +27,13 @@ module Gori::Tui
     # The QL fields meaningful for the endpoint tree. Mirrors History's set so the same
     # `/` query language applies, plus `tag:` — a Sitemap-local field (handled here, not
     # in the shared QL) that filters the tree by a node's path memo.
-    QL_FIELDS = %w(host path method status scheme body header size dur tag)
+    QL_FIELDS = %w(host path method status scheme proto body header size dur tag)
+    # Discoverability hints for the filter, kept loosely in sync with QL_FIELDS.
+    # FILTER_HINT sits on the idle bar (press `/` to start); QUERY_HINT sits on the
+    # suggestion row at a cold start (already editing, nothing to Tab-complete yet) and
+    # spells out that bare words are a free-text search. Example values double as cues.
+    FILTER_HINT = "/ filter  ·  host:  method:  path:  status:>=500  proto:ws  size:>10000  dur:>500  header:  body~regex  tag:"
+    QUERY_HINT  = "fields:  host:  method:  path:  status:  proto:  scheme:  size:  dur:  header:  body:  tag:    ·    or type words to search"
 
     # Right-aligned column widths: path memo sits left of the method/aside cluster.
     TAG_COL_W     = 16
@@ -725,11 +731,14 @@ module Gori::Tui
       screen.text(gx, rect.y, gchip, @grouping ? Theme.accent : Theme.muted) if group_shown
 
       left_w = {(group_shown ? gx : scope_x) - (rect.x + 1) - 1, 0}.max
-      if filtering?
-        label = @query.blank? ? "(in-scope only)" : ": #{@query}"
-        screen.text(rect.x + 1, rect.y, label, Theme.text, width: left_w)
+      if !@query.blank?
+        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme.text, width: left_w)
       else
-        screen.text(rect.x + 1, rect.y, "/ filter  ·  host:  method:  path:  status:>=500  size:>10000  dur:>500  header:  body~regex  tag:", Theme.muted, width: left_w)
+        # No QL query typed — whether or not a Scope lens is active. Surface the filter
+        # affordance + fields rather than a bare "(in-scope only)": the Scope lens is
+        # already signalled by the ⇧S chip on the right, so this row isn't wasted
+        # repeating it, and the user's next move here is to ADD a query atop the lens.
+        screen.text(rect.x + 1, rect.y, FILTER_HINT, Theme.muted, width: left_w)
       end
     end
 
@@ -746,8 +755,16 @@ module Gori::Tui
 
     private def render_suggestions(screen : Screen, rect : Rect, y : Int32) : Nil
       sugg = query_suggestions
-      return if sugg.empty?
-      screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: rect.w - 2)
+      unless sugg.empty?
+        screen.text(rect.x + 1, y, "↹ #{sugg.first(8).join("  ")}", Theme.muted, width: rect.w - 2)
+        return
+      end
+      # No live completions to Tab through. At a cold start (nothing typed yet, or the
+      # cursor sits just after a space) show a standing hint so the query language is
+      # discoverable from the moment `/` opens; on a non-empty token with no match stay
+      # quiet — the user is deliberately free-texting a word.
+      return unless current_token.empty?
+      screen.text(rect.x + 1, y, QUERY_HINT, Theme.muted, width: rect.w - 2)
     end
 
     # Inverts render's tree placement (offset below the chrome band) to find which
