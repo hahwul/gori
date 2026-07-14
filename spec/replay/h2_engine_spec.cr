@@ -50,6 +50,39 @@ private def start_h2_origin(status : Int32, body : String, seen : Channel(String
   port
 end
 
+# A cleartext-h2 origin that records the decoded `:authority` pseudo-header of the
+# request (so a test can assert what authority the client actually put on the wire).
+private def start_h2_origin_authority(status : Int32, seen : Channel(String)) : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    Frame.read_preface(conn)
+    dec = HPACK::Decoder.new
+    authority = "(none)"
+    loop do
+      f = Frame.read(conn)
+      break if f.nil?
+      if f.frame_type == Frame::Type::Headers && f.stream_id == 1 && f.end_headers?
+        dec.decode(f.payload).each { |(n, v)| authority = v if n == ":authority" }
+        break if f.end_stream?
+      elsif f.frame_type == Frame::Type::Data && f.end_stream?
+        break
+      end
+    end
+    seen.send(authority)
+    conn.write(Frame::Header.new(Frame::Type::Settings.value, 0_u8, 0_u32, Bytes.empty).to_bytes)
+    sb = HPACK::Encoder.new.encode([{":status", status.to_s}])
+    conn.write(Frame::Header.new(Frame::Type::Headers.value, Frame::END_HEADERS, 1_u32, sb).to_bytes)
+    conn.write(Frame::Header.new(Frame::Type::Data.value, Frame::END_STREAM, 1_u32, "ok".to_slice).to_bytes)
+    conn.flush
+    sleep 0.2.seconds
+    conn.close
+  end
+  port
+end
+
 # A cleartext-h2 origin that sends HEADERS(:status) + one DATA frame WITHOUT
 # END_STREAM, then drops the connection — a truncated response the client must
 # flag as incomplete (no END_STREAM ever arrives).
@@ -201,6 +234,30 @@ describe Gori::Replay::H2Engine do
     result.ok?.should be_true
     result.response.not_nil!.status.should eq(200)
     String.new(result.body.not_nil!).should eq("pong-ok")
+  end
+
+  it "maps an edited Host header to :authority (h1↔h2 parity for host-confusion probes)" do
+    seen = Channel(String).new(1)
+    port = start_h2_origin_authority(200, seen)
+
+    # Connect to 127.0.0.1 but CLAIM a different authority via the Host header — the
+    # h2 engine must send :authority = the edited Host, not the dialed target.
+    request = "GET / HTTP/2\r\nHost: victim.internal\r\n\r\n".to_slice
+    result = Gori::Replay::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    seen.receive.should eq("victim.internal")
+    result.ok?.should be_true
+  end
+
+  it "falls back to the dialed host for :authority when no Host header is present" do
+    seen = Channel(String).new(1)
+    port = start_h2_origin_authority(200, seen)
+
+    result = Gori::Replay::H2Engine.send("GET / HTTP/2\r\n\r\n".to_slice,
+      scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+
+    seen.receive.should eq("127.0.0.1:#{port}")
+    result.ok?.should be_true
   end
 
   it "reports an error when the origin is unreachable" do

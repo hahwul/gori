@@ -947,10 +947,10 @@ module Gori
           return Result.new("no finding with id #{finding_id}", is_error: true) unless @store.get_finding(finding_id)
         end
 
-        built, http2 = build_send_request(h)
+        built, http2, sni = build_send_request(h)
         recorded_flow_id = record_history ? record_outbound_request(built, http2) : nil
         verify = @verify_upstream && !(bool(h, "insecure") || false)
-        result = send_built_request(built, http2, verify)
+        result = send_built_request(built, http2, verify, sni)
         record_outbound_response(recorded_flow_id, result) if recorded_flow_id
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
@@ -968,13 +968,13 @@ module Gori
       end
 
       private def send_built_request(built : RequestBuilder::Built, http2 : Bool,
-                                     verify_upstream : Bool) : Replay::Result
+                                     verify_upstream : Bool, sni : String? = nil) : Replay::Result
         if http2
           Replay::H2Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream)
+            port: built.port, verify_upstream: verify_upstream, sni: sni)
         else
           Replay::Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream)
+            port: built.port, verify_upstream: verify_upstream, sni: sni)
         end
       end
 
@@ -1214,7 +1214,8 @@ module Gori
       end
 
       # Either replays a captured flow (flow_id) or builds from url/raw/method args.
-      private def build_send_request(h) : {RequestBuilder::Built, Bool}
+      # Returns {request bytes + target, use-h2, captured TLS SNI (flow path only)}.
+      private def build_send_request(h) : {RequestBuilder::Built, Bool, String?}
         if present?(h, "flow_id")
           id = int(h, "flow_id")
           raise Gori::Error.new(id_error(h, "flow_id")) unless id
@@ -1226,11 +1227,17 @@ module Gori
           target = Env.expand(flow.target)
           scheme, host, port = Replay::FlowRequest.parse_target(target)
           raise Gori::Error.new("could not parse target from flow #{id}") if host.empty?
-          http2 = bool(h, "http2") || flow.http2
-          {RequestBuilder::Built.new(bytes, scheme, host, port), http2}
+          # Default to how the flow was captured, but honor an EXPLICIT http2 either way —
+          # `bool_arg` returns `flow.http2` only when the arg is absent, so `http2:false`
+          # can now downgrade an h2 capture to h1 (it used to be silently ignored because
+          # `false || flow.http2` kept h2). Carry the captured SNI so an origin where
+          # SNI ≠ Host (domain fronting / multi-cert vhost) presents the right certificate,
+          # matching `gori run replay`.
+          http2 = bool_arg(h, "http2", flow.http2)
+          {RequestBuilder::Built.new(bytes, scheme, host, port), http2, flow.sni}
         else
           built = RequestBuilder.build(h)
-          {built, bool(h, "http2") || false}
+          {built, bool_arg(h, "http2", false), nil}
         end
       end
 

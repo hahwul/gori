@@ -260,16 +260,33 @@ module Gori
         path = (first_sp && last_sp && last_sp > first_sp) ? line[(first_sp + 1)...last_sp] : "/"
         path = "/" if path.empty?
 
-        headers = [{":method", method}, {":path", path}, {":scheme", scheme},
-                   {":authority", authority(host, port, scheme)}]
+        # An explicit `Host:` header maps to `:authority` (RFC 9113 §8.3.1 — h2 has no
+        # Host field). Honor its value so editing the request's host (a vhost /
+        # host-header-confusion probe, in the TUI editor, MCP `headers`, or `gori run
+        # replay -H "Host: …"`) actually reaches the wire — matching the h1 engine, which
+        # sends the edited Host verbatim. Without this the edited Host was silently
+        # dropped and `:authority` always came from the dialed target. The connection
+        # target is unchanged: you still connect to `host`, but can CLAIM a different
+        # authority. Falls back to the dialed host when no Host line is present.
+        authority_override = nil
+        regular = [] of {String, String}
         lines[1..]?.try &.each do |line|
           next if line.empty?
           colon = line.index(':')
           next unless colon && colon > 0
           name = line[0...colon].strip.downcase
+          value = line[(colon + 1)..].strip
+          if name == "host"
+            authority_override = value unless value.empty?
+            next # folded into :authority below; a literal `host` header is illegal in h2
+          end
           next if FORBIDDEN.includes?(name)
-          headers << {name, line[(colon + 1)..].strip}
+          regular << {name, value}
         end
+
+        headers = [{":method", method}, {":path", path}, {":scheme", scheme},
+                   {":authority", authority_override || authority(host, port, scheme)}]
+        headers.concat(regular)
         {headers, body}
       end
 
