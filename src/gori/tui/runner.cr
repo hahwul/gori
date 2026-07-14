@@ -1580,7 +1580,7 @@ module Gori::Tui
         prism_controller.view.reload(@session.store)
         mode = @session.prism.mode
         @toast = if mode.active?
-                   "Prism mode: ACTIVE — probing recent in-scope traffic"
+                   "Prism mode: ACTIVE — light-touch probes over recent in-scope traffic"
                  else
                    "Prism mode: #{mode.title}"
                  end

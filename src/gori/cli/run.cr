@@ -1353,8 +1353,9 @@ module Gori
                      "Passively scan captured History flows AND Replay responses (zero outbound\n" \
                      "requests) and report grouped issues — the headless equivalent of the TUI Prism\n" \
                      "tab. QL filters apply to History only; all Replay tabs with a stored response\n" \
-                     "are scanned. Active/reflected-param checks send requests and are intentionally\n" \
-                     "excluded (use the TUI or fuzz/mine)."
+                     "are scanned. The light-touch active checks (reflected params, …) send requests,\n" \
+                     "so they are intentionally excluded here — arm active mode in the TUI, or reach\n" \
+                     "for fuzz/mine."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Only scan flows matching this QL query (host: status:>=500 size: …)") { |v| query = v }

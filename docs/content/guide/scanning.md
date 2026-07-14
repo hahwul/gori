@@ -7,7 +7,9 @@ gori includes automated analysis that runs alongside your manual testing. **Pris
 
 ## Prism — the Scanner
 
-**Prism** groups security issues by type and severity. Its passive checks run as you browse — with zero extra requests — inspecting **History** flows and **Replay** send results. Active checks send a small, controlled number of probes only when you ask for them.
+**Prism** groups security issues by type and severity. Its passive checks run as you browse — with zero extra requests — inspecting **History** flows and **Replay** send results.
+
+Its **active** checks are deliberately *light-touch* — a handful of safe, low-volume probes over traffic you've already captured, not the flood of attack payloads a heavyweight scanner throws at a target. Only safe methods (`GET` / `HEAD`) are probed, each unique surface is tested once, and nothing goes out until you arm active mode. It's built to confirm a quick hunch — a parameter reflects, an origin is honored — while keeping your footprint quiet.
 
 <figure class="tui-shot">
   <img src="/images/tui/prism.svg" alt="gori Prism scanner listing passive findings grouped by severity and category: permissive CORS, missing CSP and HSTS, cookie flag issues, and cacheable responses, each with an affected host">
@@ -21,7 +23,7 @@ gori includes automated analysis that runs alongside your manual testing. **Pris
 | `tech` | Technology and protocol fingerprints (also surface on the Project tab) |
 | `infoleak` | Body disclosures, secrets in URLs / WS frames, GraphQL introspection |
 | `cors` | Wildcard / null origin / credentialed misconfigurations; active origin reflection |
-| `active` | Confirmed by a probe (for example reflected parameters) — TUI active scan only |
+| `active` | Confirmed by a light-touch probe (for example reflected parameters) — TUI active scan only |
 
 Severities run `info`, `low`, `medium`, `high`, `critical`. Headless `gori run prism` runs **passive** checks only (categories except `active`).
 

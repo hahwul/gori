@@ -12,9 +12,11 @@ module Gori
     MODE_SETTING_KEY = "prism_mode"
 
     # Per-project scanning mode. Off = no analysis at all; Passive = zero-request checks on
-    # observed traffic (the safe default); Active = Passive plus the lightweight reflected-
-    # params probe (hosts/paths covered by Project scope rules only — the ⇧S display lens
-    # need not be on; one probe per unique target).
+    # observed traffic (the safe default); Active = Passive plus a set of light-touch probes
+    # (reflected params today) over hosts/paths covered by Project scope rules only — the ⇧S
+    # display lens need not be on; one probe per unique target. Keep active DELIBERATELY quiet:
+    # any new check must stay safe-method + low-volume (a handful of confirming probes), never a
+    # Burp-style flood of attack payloads.
     enum Mode
       Off
       Passive
