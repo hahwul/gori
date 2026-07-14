@@ -111,7 +111,7 @@ module Gori
         "replay.tag-subtab", "Tag subtab", "Add/edit flat tags on the active replay sub-tab",
         Verb::Scope::Replay, available: in_replay, mnemonic: 't', section: :subtab) { |ctx| ctx.replay_tag_subtab; nil }
       r.register Verb::Definition.new(
-        "replay.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host",
+        "replay.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host / method",
         Verb::Scope::Replay,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_subtab_count >= 2 },
         mnemonic: '/', section: :tab) { |ctx| ctx.replay_filter_subtabs; nil }

@@ -147,9 +147,11 @@ module Gori::Tui
       @subtab_filter_editing
     end
 
-    # The filter bar occupies a body row (editing, or a set filter that narrows chips).
+    # The filter bar always occupies a body row when the strip is up (History-style
+    # guidance), so idle users see `/ filter · tag: name: …` without having to discover
+    # `/` first. Empty Replay (no sessions) keeps the full body for the empty state.
     def subtab_filter_shown? : Bool
-      @subtab_filter_editing || !@subtab_filter.blank?
+      subtab_strip_shown?
     end
 
     # Open the `/` filter bar (from the strip or the space menu), seeding the caret.
@@ -159,7 +161,7 @@ module Gori::Tui
       @filter_preedit = ""
     end
 
-    # Enter: keep the (possibly blank) filter and close the bar; re-anchor the current
+    # Enter: keep the (possibly blank) filter and leave edit mode; re-anchor the current
     # session onto a still-visible chip so the body matches the narrowed strip.
     def commit_subtab_filter : Nil
       @subtab_filter_editing = false
@@ -167,7 +169,8 @@ module Gori::Tui
       reanchor_current
     end
 
-    # Esc: drop the filter entirely and close the bar (every chip returns).
+    # Esc: drop the filter entirely and leave edit mode (every chip returns; idle
+    # guidance row stays visible under the strip).
     def clear_subtab_filter : Nil
       @subtab_filter = ""
       @subtab_filter_editing = false
@@ -186,6 +189,8 @@ module Gori::Tui
         clear_subtab_filter
       elsif key.enter?
         commit_subtab_filter
+      elsif key.tab?
+        complete_subtab_filter # History-style Tab: first suggestion for the token
       elsif key.backspace?
         if @filter_cx > 0
           @subtab_filter = @subtab_filter[0, @filter_cx - 1] + @subtab_filter[@filter_cx..]
@@ -201,6 +206,28 @@ module Gori::Tui
         @filter_cx += 1
         @filter_preedit = ""
       end
+    end
+
+    # Subjects for the in-memory filter matcher + Tab suggestions (all open sessions).
+    private def filter_subjects : Array(Replay::SubtabFilter::Subject)
+      @replays.map { |t| filter_subject(t.view) }
+    end
+
+    def filter_suggestions : Array(String)
+      return [] of String unless @subtab_filter_editing
+      Replay::SubtabFilter.suggestions(@subtab_filter, @filter_cx, filter_subjects)
+    end
+
+    # Replace the token under the caret with the first suggestion (History query_complete).
+    def complete_subtab_filter : Bool
+      sugg = filter_suggestions
+      return false if sugg.empty?
+      _, s, e = Replay::SubtabFilter.token_at(@subtab_filter, @filter_cx)
+      first = sugg.first
+      @subtab_filter = "#{@subtab_filter[0, s]}#{first}#{@subtab_filter[e..]}"
+      @filter_cx = s + first.size
+      @filter_preedit = ""
+      true
     end
 
     # Keep the current session on a visible chip: if the filter hid it, jump to the
@@ -253,6 +280,12 @@ module Gori::Tui
     # no strip (the "no replays" placeholder takes the full body).
     def subtab_strip_shown? : Bool
       !@replays.empty?
+    end
+
+    # Filter bar owns the hairline under chips+filter so the divider sits below the
+    # guidance row, not between chips and filter.
+    def subtab_strip_divider? : Bool
+      false
     end
 
     def body_badge : Symbol # :editor only while INS (or hex/chain/SNI sub-modes)
@@ -325,14 +358,19 @@ module Gori::Tui
     end
 
     # --- rendering ---
+    # Filter chrome base height: guidance/input row + hairline (owns the strip divider).
+    # While editing, an optional suggestion row sits between input and hairline.
+    FILTER_BAR_H = 2
+
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       body_focused = focus == :body
       current_replay_tab.try { |t| t.view.reveal = @host.reveal?; t.view.pretty = @host.pretty? }
       labels = subtab_strip_shown? ? subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: !current_view.nil?)
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @current_replay_idx, @subtab_start, subtab_hidden) do |content|
+      subtabs_focused = focus == :subtabs
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_replay_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?) do |content|
         bar, body = carve_filter_bar(content)
-        render_subtab_filter_bar(screen, bar) if bar
+        render_subtab_filter_bar(screen, bar, subtabs_focused: subtabs_focused) if bar
         if v = current_view
           v.render(screen, body, focused: body_focused)
         else
@@ -341,33 +379,61 @@ module Gori::Tui
       end
     end
 
-    # The filter-bar row carved off the body top when the `/` filter is shown — used
-    # by BOTH render_body and handle_click so the body geometry never drifts. Returns
-    # {bar_rect | nil, body_rect}.
+    # Filter (+ optional suggestions) + hairline carved off the body top. Height is
+    # FILTER_BAR_H idle/active, +1 while editing when there are Tab suggestions.
     private def carve_filter_bar(content : Rect) : {Rect?, Rect}
-      return {nil, content} unless subtab_filter_shown? && content.h > 1
-      bar = Rect.new(content.x, content.y, content.w, 1)
-      body = Rect.new(content.x, content.y + 1, content.w, content.h - 1)
+      return {nil, content} unless subtab_filter_shown? && content.h > 0
+      h = filter_bar_height
+      h = {h, content.h}.min
+      bar = Rect.new(content.x, content.y, content.w, h)
+      body = content.h > h ? Rect.new(content.x, content.y + h, content.w, content.h - h) : Rect.new(content.x, content.y + h, content.w, 0)
       {bar, body}
     end
 
-    private def render_subtab_filter_bar(screen : Screen, rect : Rect) : Nil
-      return if rect.w < 8
-      screen.fill(rect, Theme.panel)
-      px = screen.text(rect.x, rect.y, "filter › ", Theme.accent, Theme.panel)
+    private def filter_bar_height : Int32
+      base = FILTER_BAR_H
+      return base unless @subtab_filter_editing
+      filter_suggestions.empty? ? base : base + 1
+    end
+
+    # History-style 3-state bar under the sub-tab chips, with the strip hairline
+    # drawn BELOW the filter so chips+filter read as one chrome group:
+    #   editing  → `filter › <input>` [+ `↹ tag:…` suggestions]
+    #   active   → `: <query>`
+    #   idle     → `/ filter  ·  tag:  name:  host:  method:`
+    # Right side always shows visible/total chip counts.
+    private def render_subtab_filter_bar(screen : Screen, rect : Rect, *, subtabs_focused : Bool) : Nil
+      return if rect.w < 8 || rect.h < 1
+      row_y = rect.y
+      screen.fill(Rect.new(rect.x, row_y, rect.w, 1), Theme.panel)
       vis = visible_indices.size
       count = "#{vis}/#{@replays.size}"
       count_x = rect.right - count.size
-      field_w = {count_x - 1 - px, 1}.max
+      left_w = {count_x - 1 - rect.x, 1}.max
       if @subtab_filter_editing
-        screen.input_line(px, rect.y, @subtab_filter, @filter_cx, @filter_preedit,
+        px = screen.text(rect.x, row_y, "filter › ", Theme.accent, Theme.panel)
+        field_w = {count_x - 1 - px, 1}.max
+        screen.input_line(px, row_y, @subtab_filter, @filter_cx, @filter_preedit,
           Theme.text_bright, Theme.panel, width: field_w)
-      elsif @subtab_filter.blank?
-        screen.text(px, rect.y, "tag:  name:  host:  method:  (esc clears)", Theme.muted, Theme.panel, width: field_w)
+      elsif !@subtab_filter.blank?
+        screen.text(rect.x, row_y, ": #{@subtab_filter}", Theme.text, Theme.panel, width: left_w)
       else
-        screen.text(px, rect.y, @subtab_filter, Theme.text, Theme.panel, width: field_w)
+        screen.text(rect.x, row_y, "/ filter  ·  tag:  name:  host:  method:", Theme.muted, Theme.panel, width: left_w)
       end
-      screen.text(count_x, rect.y, count, vis == 0 ? Theme.red : Theme.muted, Theme.panel)
+      screen.text(count_x, row_y, count, vis == 0 ? Theme.red : Theme.muted, Theme.panel)
+
+      div_y = row_y + 1
+      if @subtab_filter_editing && rect.h >= 3
+        sugg = filter_suggestions
+        unless sugg.empty?
+          screen.fill(Rect.new(rect.x, row_y + 1, rect.w, 1), Theme.panel)
+          screen.text(rect.x, row_y + 1, "↹ #{sugg.first(8).join("  ")}", Theme.muted, Theme.panel, width: rect.w)
+          div_y = row_y + 2
+        end
+      end
+      return if div_y >= rect.y + rect.h
+      border = subtabs_focused ? Theme.focus_gold : Theme.border
+      screen.hline(rect.x, div_y, rect.w, fg: border, bg: Theme.bg)
     end
 
     # --- input ---
@@ -597,7 +663,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
+      body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?, strip_divider: subtab_strip_divider?)
       _, body = carve_filter_bar(body) # keep body clicks aligned when the filter bar is up
       return true unless v = current_view
       # Border chips/badges consume the click (no caret move) — same toggles as keys.

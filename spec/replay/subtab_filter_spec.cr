@@ -73,4 +73,43 @@ describe Gori::Replay::SubtabFilter do
     filtered("tag:auth method:get", list).map(&.summary).should eq(["GET /orders"])
     filtered("tag:auth method:patch", list).should be_empty
   end
+
+  describe ".suggestions" do
+    it "completes field names from a partial token" do
+      Replay::SubtabFilter.suggestions("ta", 2, list).should eq(["tag:", "target:"])
+      Replay::SubtabFilter.suggestions("me", 2, list).should eq(["method:"])
+    end
+
+    it "suggests tag/name/host values from open sessions" do
+      Replay::SubtabFilter.suggestions("tag:", 4, list).should eq(["tag:idor", "tag:auth", "tag:done"])
+      Replay::SubtabFilter.suggestions("tag:i", 5, list).should eq(["tag:idor"])
+      Replay::SubtabFilter.suggestions("name:", 5, list).should contain("name:orders probe")
+      Replay::SubtabFilter.suggestions("host:api", 8, list).should eq(["host:api.example.com"])
+    end
+
+    it "suggests methods from sessions plus the static set" do
+      m = Replay::SubtabFilter.suggestions("method:", 7, list)
+      m.should contain("method:GET")
+      m.should contain("method:POST")
+      m.should contain("method:DELETE")
+      m.should contain("method:PUT") # static gap-fill
+    end
+
+    it "honours a leading - on field and value suggestions" do
+      Replay::SubtabFilter.suggestions("-ta", 3, list).should eq(["-tag:", "-target:"])
+      Replay::SubtabFilter.suggestions("-tag:a", 6, list).should eq(["-tag:auth"])
+    end
+
+    it "returns nothing for an empty token (caret on whitespace)" do
+      Replay::SubtabFilter.suggestions("tag:idor ", 9, list).should be_empty
+      Replay::SubtabFilter.suggestions("", 0, list).should be_empty
+    end
+  end
+
+  describe ".host_of" do
+    it "extracts the host from a URL" do
+      Replay::SubtabFilter.host_of("https://app.example.com/orders").should eq("app.example.com")
+      Replay::SubtabFilter.host_of("http://localhost:8080/").should eq("localhost")
+    end
+  end
 end

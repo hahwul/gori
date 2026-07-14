@@ -915,7 +915,7 @@ module Gori::Tui
         return
       end
       return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !copy_as_shown? && !@rename_open && !@tag_edit_open && subtabs_shown?
-      sub_rect = BodyChrome.strip_rect(layout.body, strip: true)
+      sub_rect = BodyChrome.strip_rect(layout.body, strip: true, strip_divider: subtab_strip_divider?)
       return unless sub_rect && sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start, current_subtab_hidden).find { |(_, r)| r.contains?(mx, my) }
         open_rename(seg[0])
@@ -974,8 +974,9 @@ module Gori::Tui
 
     # Click a Replay/Notes sub-tab chip (carved off the body's top row). Returns true
     # when the click landed on the strip row (handled), false to fall through to body.
+    # strip_divider must match framed_body (Replay carves chips only; filter owns hairline).
     private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
-      sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?)
+      sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?, strip_divider: subtab_strip_divider?)
       return false unless sub_rect && sub_rect.contains?(mx, my)
       if seg = Chrome.strip_segments(BodyChrome.tab_row(sub_rect), subtab_labels, current_subtab_index, current_subtab_start, current_subtab_hidden).find { |(_, r)| r.contains?(mx, my) }
         jump_subtab(seg[0])
@@ -2489,6 +2490,16 @@ module Gori::Tui
     # Notes/Convert ≥1 so a single session is still labelled + space-menu reachable).
     private def subtabs_shown? : Bool
       @tabs[@active_tab]?.try(&.subtab_strip_shown?) || false
+    end
+
+    # Whether the strip carve includes its hairline (must match framed_body). Replay
+    # returns false so clicks on the filter/divider rows fall through to the body.
+    private def subtab_strip_divider? : Bool
+      if t = @tabs[@active_tab]?
+        t.subtab_strip_divider?
+      else
+        true
+      end
     end
 
     # The focusable sub-tab strip for Replay/Fuzzer/Notes/Convert (@focus == :subtabs). Mirrors the

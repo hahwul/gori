@@ -157,6 +157,15 @@ describe Gori::Tui::Chrome do
     content.h.should eq(outer.h - 2 - BodyChrome::STRIP_H) # frame inset + strip
   end
 
+  it "carves chips-only when strip_divider is false (Replay filter owns the hairline)" do
+    outer = Rect.new(0, 0, 80, 20)
+    strip = BodyChrome.strip_rect(outer, strip: true, strip_divider: false).not_nil!
+    content = BodyChrome.content_rect(outer, strip: true, strip_divider: false)
+    strip.h.should eq(BodyChrome::CHIPS_H)
+    content.y.should eq(strip.y + strip.h)
+    content.h.should eq(outer.h - 2 - BodyChrome::CHIPS_H)
+  end
+
   it "renders the sub-tab strip without a row fill and a divider hairline" do
     backend = MemoryBackend.new(60, 2)
     screen = Screen.new(backend)
@@ -167,6 +176,16 @@ describe Gori::Tui::Chrome do
     backend.bg_at(12, 0).should_not eq(Theme.elevated)
     backend.bg_at(2, 0).should eq(Theme.focus_gold) # active pill when focused
     backend.row(1).should contain("─")              # hairline under the chips
+  end
+
+  it "skips the hairline when the strip is chips-only (h=1)" do
+    backend = MemoryBackend.new(60, 1)
+    screen = Screen.new(backend)
+    BodyChrome.render_subtab_strip(screen, Rect.new(0, 0, 60, 1),
+      ["1:alpha", "2:beta"], 0, focused: true)
+    # Chips still render; rect.h < 2 means no hline is drawn (Replay filter owns it).
+    backend.bg_at(2, 0).should eq(Theme.focus_gold)
+    backend.row(0).should_not contain("─")
   end
 
   it "settles the active sub-tab chip to selection_dim when the strip is unfocused" do

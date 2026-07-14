@@ -76,13 +76,17 @@ module Gori::Tui
 
     # Frame the tab body, carve the sub-tab strip from the interior top when
     # `labels` is given, then yield the remaining content rect.
+    # `strip_divider: false` carves chips only (height 1) so a sibling row — e.g.
+    # Replay's always-visible filter bar — can own the hairline underneath the
+    # whole chrome group instead of splitting chips from that row.
     def framed_body(screen : Screen, rect : Rect, shell_focused : Bool,
                     subtabs_focused : Bool, labels : Array(String)?, active : Int32,
-                    prev_start : Int32 = 0, hidden : Set(Int32)? = nil, & : Rect ->) : Int32
+                    prev_start : Int32 = 0, hidden : Set(Int32)? = nil, *,
+                    strip_divider : Bool = true, & : Rect ->) : Int32
       new_start = prev_start
       framed(screen, rect, shell_focused) do |inner|
         if labels
-          sub_rect, content = carve_subtab_row(inner)
+          sub_rect, content = carve_subtab_row(inner, divider: strip_divider)
           new_start = render_subtab_strip(screen, sub_rect, labels, active, subtabs_focused, prev_start, hidden)
           yield content
         else
@@ -94,25 +98,26 @@ module Gori::Tui
 
     # Content rect inside a framed body after optional sub-tab carving — keeps
     # render and click geometry aligned.
-    def content_rect(rect : Rect, *, strip : Bool) : Rect
+    def content_rect(rect : Rect, *, strip : Bool, strip_divider : Bool = true) : Rect
       inner = frame_inner(rect)
-      strip ? carve_subtab_row(inner)[1] : inner
+      strip ? carve_subtab_row(inner, divider: strip_divider)[1] : inner
     end
 
     # The sub-tab strip inside a framed body (nil when hidden).
-    def strip_rect(rect : Rect, *, strip : Bool) : Rect?
+    def strip_rect(rect : Rect, *, strip : Bool, strip_divider : Bool = true) : Rect?
       return nil unless strip
-      carve_subtab_row(frame_inner(rect))[0]
+      carve_subtab_row(frame_inner(rect), divider: strip_divider)[0]
     end
 
-    # Height of the sub-tab chrome carved off a body rect: one tab row on an elevated
-    # band + one hairline that anchors the strip to the body card below.
+    # Height of the sub-tab chrome carved off a body rect: chips only, or chips + the
+    # hairline that anchors the strip to the body card below.
+    CHIPS_H = 1
     STRIP_H = 2
 
     # Carve the top of a body rect for the sub-tab strip, returning {strip, body_below}.
-    # Degenerate heights keep the body on `rect`.
-    def carve_subtab_row(rect : Rect) : {Rect, Rect}
-      h = {STRIP_H, rect.h}.min
+    # Degenerate heights keep the body on `rect`. `divider: false` → chips row only.
+    def carve_subtab_row(rect : Rect, *, divider : Bool = true) : {Rect, Rect}
+      h = {(divider ? STRIP_H : CHIPS_H), rect.h}.min
       sub = Rect.new(rect.x, rect.y, rect.w, h)
       body = rect.h > h ? Rect.new(rect.x, rect.y + h, rect.w, rect.h - h) : rect
       {sub, body}
@@ -125,7 +130,7 @@ module Gori::Tui
 
     # The frame-less segmented control shared by Replay, Notes, Fuzzer, … `focused` =
     # the strip itself holds focus (←/→ switch) → active chip lights FOCUS_GOLD and the
-    # divider hairline matches.
+    # divider hairline matches (when the strip owns that hairline, i.e. rect.h ≥ 2).
     def render_subtab_strip(screen : Screen, rect : Rect, labels : Array(String),
                             active : Int32, focused : Bool, prev_start : Int32 = 0,
                             hidden : Set(Int32)? = nil) : Int32
@@ -246,6 +251,13 @@ module Gori::Tui
     # jump/rename/^N keep working unchanged.
     def subtab_hidden : Set(Int32)?
       nil
+    end
+
+    # Whether BodyChrome carves the hairline under the chip row. Default true.
+    # Replay returns false so its filter bar can draw the divider under chips+filter
+    # as one chrome group (runner strip hit-tests must use the same flag).
+    def subtab_strip_divider? : Bool
+      true
     end
 
     # A FIXED strip (Help): the chip set is constant — no ^N/^W create/close and the
