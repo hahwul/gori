@@ -72,6 +72,49 @@ describe Gori::Store do
     end
   end
 
+  it "V32-V34 rename migrations preserve existing project data" do
+    path = File.tempname("gori-rename", ".db")
+    begin
+      # Open fresh (migrates to the current VERSION with the new names), then reverse the
+      # rename migrations + roll back to V31 and seed rows under the OLD names — i.e. exactly
+      # what a project DB created before the Repeater/Probe/Issues rename looks like on disk.
+      store = Gori::Store.open(path)
+      db = store.@db
+      db.exec("ALTER TABLE repeaters RENAME TO replays")
+      db.exec("ALTER TABLE ws_messages RENAME COLUMN repeater_id TO replay_id")
+      db.exec("ALTER TABLE probe_issues RENAME COLUMN sample_repeater_id TO sample_replay_id")
+      db.exec("ALTER TABLE probe_issues RENAME TO prism_issues")
+      db.exec("ALTER TABLE probe_suppressions RENAME TO prism_suppressions")
+      db.exec("ALTER TABLE issues RENAME TO findings")
+      db.exec("INSERT INTO replays (created_at, updated_at, target, request, http2, auto_content_length, position) " \
+              "VALUES (1, 1, 'http://x.test/', 'GET / HTTP/1.1\r\n\r\n', 0, 1, 0)")
+      rid = db.scalar("SELECT id FROM replays").as(Int64)
+      db.exec("INSERT INTO prism_issues (code, category, host, title, severity, first_seen, last_seen, sample_replay_id) " \
+              "VALUES ('SECRET', 'infoleak', 'x.test', 'leak', 3, 1, 1, ?)", rid)
+      db.exec("INSERT INTO findings (id, created_at, updated_at, title, severity, host, flow_id, notes, status) " \
+              "VALUES (1, 1, 1, 'legacy', 2, 'x.test', NULL, '', 0)")
+      db.exec("INSERT INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES ('finding', 1, 'replay', ?, 1)", rid)
+      db.exec("INSERT INTO settings (key, value) VALUES ('prism_mode', 'active')")
+      db.exec("PRAGMA user_version = 31")
+      store.close
+
+      # Reopen: V32/V33/V34 run and must carry every row forward under the new names.
+      store = Gori::Store.open(path)
+      store.@db.scalar("PRAGMA user_version").should eq(Gori::Store::Schema::VERSION)
+      store.@db.scalar("SELECT COUNT(*) FROM repeaters").as(Int64).should eq(1)                    # replays -> repeaters
+      store.@db.scalar("SELECT sample_repeater_id FROM probe_issues").as(Int64).should eq(rid)     # column + table renamed, value intact
+      store.get_issue(1_i64).not_nil!.title.should eq("legacy")                                    # findings -> issues, row survived
+      links = store.list_links(Gori::Store::LinkOwnerKind::Issue, 1_i64)                            # owner 'finding'->'issue', ref 'replay'->'repeater'
+      links.map(&.ref_kind).should contain(Gori::Store::LinkRefKind::Repeater)
+      store.probe_mode.should eq(Gori::Probe::Mode::Active)                                         # settings 'prism_mode' -> 'probe_mode'
+      store.close
+    ensure
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+    end
+  end
+
   it "inserts a Pending flow and lists it newest-first with nil status" do
     with_store do |store|
       id1 = store.insert_flow(sample_request(target: "/first"))

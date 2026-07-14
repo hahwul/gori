@@ -166,7 +166,7 @@ module Gori
       self.hostname_overrides = parse_hostname_overrides(root["hostname_overrides"]?)
       parse_env(root["env"]?)
       parse_hotkeys(root["hotkeys"]?)
-      if cv = root["decoder"]?
+      if cv = (root["decoder"]? || root["convert"]?) # "convert" = pre-rename key (read for back-compat)
         self.decoder_input = cv["input"]?.try(&.as_s?) || decoder_input
         self.decoder_chain = cv["chain"]?.try(&.as_s?) || decoder_chain
         self.decoder_sessions = parse_decoder_sessions(cv["sessions"]?)
@@ -184,8 +184,9 @@ module Gori
     private def self.parse_layout(node : JSON::Any?) : Nil
       return unless o = node.try(&.as_h?)
       self.history_preview = load_bool_h(o, "history_preview", history_preview)
-      self.probe_preview = load_bool_h(o, "probe_preview", probe_preview)
-      self.issues_preview = load_bool_h(o, "issues_preview", issues_preview)
+      # "prism_preview"/"findings_preview" are the pre-rename keys, read as a fallback.
+      self.probe_preview = load_bool_h(o, "probe_preview", load_bool_h(o, "prism_preview", probe_preview))
+      self.issues_preview = load_bool_h(o, "issues_preview", load_bool_h(o, "findings_preview", issues_preview))
       if ord = o["history_list_order"]?.try(&.as_s?)
         self.history_list_order = normalize_history_list_order(ord)
       end
@@ -320,9 +321,24 @@ module Gori
         next unless o = e.as_h?
         id = o["id"]?.try(&.as_s?)
         next if id.nil? || id.empty?
-        out << {id, o["visible"]?.try(&.as_bool?) != false} # only explicit false hides
+        out << {remap_legacy_id(id), o["visible"]?.try(&.as_bool?) != false} # only explicit false hides
       end
       out
+    end
+
+    # Rewrite a pre-rename tab id or verb id to its current name, so a settings.json
+    # written before the Repeater/Probe/Issues/Decoder rename keeps its saved tab
+    # order/visibility and custom keybindings instead of Chrome.reconcile /
+    # Hotkeys.rebindable_overrides silently dropping the now-unknown id. Whole-string
+    # (not prefix) substitution so compound ids like "finding.replay-flow" become
+    # "issue.repeater-flow". Idempotent on already-new ids (they contain no old token).
+    # Order matters: "findings" before "finding".
+    private def self.remap_legacy_id(id : String) : String
+      id.gsub("findings", "issues")
+        .gsub("finding", "issue")
+        .gsub("replay", "repeater")
+        .gsub("prism", "probe")
+        .gsub("convert", "decoder")
     end
 
     # Tolerant hotkey parse: a non-object (or absent) node keeps current values. `os`
@@ -367,8 +383,9 @@ module Gori
         arr = v.as_a?
         next unless arr # a non-array entry is dropped (tolerant)
         # Keep only labels that parse to a real chord (round-trip safe); a list that
-        # ends up empty is a deliberate unbind and is preserved.
-        out[id] = arr.compact_map(&.as_s?).select { |s| !Verb::Chord.parse(s).nil? }
+        # ends up empty is a deliberate unbind and is preserved. The id is remapped from
+        # any pre-rename spelling so a saved binding on e.g. replay.send still resolves.
+        out[remap_legacy_id(id)] = arr.compact_map(&.as_s?).select { |s| !Verb::Chord.parse(s).nil? }
       end
       out
     end

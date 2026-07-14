@@ -357,7 +357,7 @@ describe Gori::Tui::SpaceMenu do
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     menu.open(Gori::Verb::Scope::Miner, :common, ctx)
-    menu.entries.map(&.id).should_not contain("mine.repeater") # no issue yet
+    menu.entries.map(&.id).should_not contain("mine.repeater") # no finding yet
 
     ctx.miner_has_issue = true
     menu.open(Gori::Verb::Scope::Miner, :common, ctx)

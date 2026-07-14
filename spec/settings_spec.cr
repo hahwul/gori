@@ -144,6 +144,41 @@ describe Gori::Settings do
     Gori::Settings.normalize_sitemap_depth(99).should eq(Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
   end
 
+  it "reads pre-rename keys/ids for back-compat (convert/prism/findings/replay)" do
+    dir = File.tempname("gori-settings-legacy")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    saved = {Gori::Settings.tab_prefs, Gori::Settings.keymap_overrides,
+             Gori::Settings.probe_preview, Gori::Settings.issues_preview,
+             Gori::Settings.decoder_input, Gori::Settings.decoder_sessions, Gori::Settings.decoder_chains}
+    begin
+      ENV["GORI_HOME"] = dir
+      legacy = {
+        "layout"  => {"prism_preview" => true, "findings_preview" => true},
+        "tabs"    => [{"id" => "replay", "visible" => false}, {"id" => "convert", "visible" => true}],
+        "hotkeys" => {"bindings" => {"replay.send" => ["ctrl+enter"], "finding.replay-flow" => ["r"], "prism.open" => ["o"]}},
+        "convert" => {"input" => "aGk=", "sessions" => [] of String, "chains" => [] of String},
+      }
+      File.write(Gori::Settings.path, legacy.to_json)
+      Gori::Settings.load
+
+      Gori::Settings.probe_preview.should be_true                       # layout "prism_preview" -> probe_preview
+      Gori::Settings.issues_preview.should be_true                      # layout "findings_preview" -> issues_preview
+      Gori::Settings.decoder_input.should eq("aGk=")                    # "convert" section -> decoder_*
+      Gori::Settings.tab_prefs.should contain({"repeater", false})      # tab id replay -> repeater (hidden kept)
+      Gori::Settings.tab_prefs.should contain({"decoder", true})        # tab id convert -> decoder
+      Gori::Settings.keymap_overrides.has_key?("repeater.send").should be_true   # verb id replay.send -> repeater.send
+      Gori::Settings.keymap_overrides.has_key?("issue.repeater-flow").should be_true # compound finding.replay-flow -> issue.repeater-flow
+      Gori::Settings.keymap_overrides.has_key?("probe.open").should be_true      # prism.open -> probe.open
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.tab_prefs, Gori::Settings.keymap_overrides,
+        Gori::Settings.probe_preview, Gori::Settings.issues_preview,
+        Gori::Settings.decoder_input, Gori::Settings.decoder_sessions, Gori::Settings.decoder_chains = saved
+    end
+  end
+
   it "merges a concurrent writer's unrelated change instead of clobbering it" do
     dir = File.tempname("gori-settings-merge")
     Dir.mkdir_p(dir)
