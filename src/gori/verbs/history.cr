@@ -70,12 +70,12 @@ module Gori
         available: in_replay_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # "Copy as X": a picker of focus-aware copy formats (REQUEST → url/headers/body/
-      # cookies/curl/raw · RESPONSE → status+headers/body/raw). Sits beside Copy in
+      # cookies/curl/wscat-for-WS/raw · RESPONSE → status+headers/body/raw). Sits beside Copy in
       # COMMON so it's reachable from any Replay pane; the picker's contents adapt to
       # the pane focused when it opens. Menu key 'Y' pairs with Copy's 'y' and is free
       # across COMMON ∪ every Replay section (all-lowercase keys there).
       r.register Verb::Definition.new(
-        "replay.copy-as", "Copy as…", "Pick a copy format for the focused pane (url/headers/body/cookies/curl/raw)",
+        "replay.copy-as", "Copy as…", "Pick a copy format for the focused pane (url/headers/body/cookies/curl/wscat/raw)",
         Verb::Scope::Replay, available: in_replay_read, mnemonic: 'Y') { |ctx| ctx.copy_as_open; nil }
 
       r.register Verb::Definition.new(

@@ -46,7 +46,7 @@ module Gori::Tui
         view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us,
           sni: r.sni || "", mark_transform: r.mark_transform?, ws_messages: ws_msgs)
-        view.name = r.name                    # custom sub-tab label survives reopen
+        view.name = r.name                     # custom sub-tab label survives reopen
         view.tags = Replay::Tags.parse(r.tags) # flat tags survive reopen (V31)
         seed_replay_original(view, r.flow_id)
         @replays << ReplayTab.new(view, r.flow_id, r.id)
@@ -701,14 +701,15 @@ module Gori::Tui
       when :request  then !v.pane_insert?(:request)
       when :target   then !v.pane_insert?(:target)
       when :response then true
-      else               false
+      else                false
       end
     end
 
     # The "copy as X" menu for the focused pane: {picker title, options}. The RESPONSE
     # pane offers status+headers/body/raw (or the whole transcript in WS/gRPC mode);
     # the REQUEST and TARGET panes offer url/headers/body/cookies/curl/raw parsed from
-    # the request as it'd be sent (env-expanded wire bytes + the resolved target URL).
+    # the request as it'd be sent (env-expanded wire bytes + the resolved target URL),
+    # plus wscat when the Replay is a WebSocket.
     def copy_as_menu : {String, Array(CopyMenu::Option)}
       v = current_view
       return {"COPY AS", [] of CopyMenu::Option} unless v
@@ -722,7 +723,10 @@ module Gori::Tui
     private def replay_request_options(v : ReplayView) : Array(CopyMenu::Option)
       wire = String.new(v.request_bytes)
       target = Env.expand(v.target)
-      CopyMenu.request_options(wire, target)
+      ws_messages = if v.ws_mode?
+                      v.ws_out_messages.map { |message| String.new(message.payload).scrub }
+                    end
+      CopyMenu.request_options(wire, target, websocket_messages: ws_messages)
     end
 
     private def replay_response_options(v : ReplayView) : Array(CopyMenu::Option)

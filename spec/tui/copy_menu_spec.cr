@@ -61,6 +61,51 @@ describe Gori::Tui::CopyMenu do
       curl = opt(opts, 'l').not_nil!.text
       curl.should_not contain("-X")
       curl.should_not contain("--data-raw")
+      opt(opts, 'w').should be_nil
+    end
+
+    it "builds a shell-safe wscat command for a WebSocket Replay" do
+      upgrade = "GET /gateway?bot=1 HTTP/1.1\r\n" \
+                "Host: socket.example:8443\r\n" \
+                "Connection: keep-alive, Upgrade\r\n" \
+                "Upgrade: websocket\r\n" \
+                "Sec-WebSocket-Key: stale-key\r\n" \
+                "Sec-WebSocket-Version: 13\r\n" \
+                "Sec-WebSocket-Extensions: permessage-deflate\r\n" \
+                "Sec-WebSocket-Protocol: chat, superchat\r\n" \
+                "Origin: https://app.example\r\n" \
+                "Authorization: Bearer test-token\r\n" \
+                "Cookie: sid=abc\r\n" \
+                "X-Note: it's here\r\n\r\n"
+      messages = [%({"op":1}), %({"text":"it's"})]
+      wscat = opt(CopyMenu.request_options(upgrade, "https://socket.example:8443",
+        websocket_messages: messages), 'w').not_nil!.text
+
+      wscat.should contain("wscat -c 'wss://socket.example:8443/gateway?bot=1'")
+      wscat.should contain("--host 'socket.example:8443'")
+      wscat.should contain("-o 'https://app.example'")
+      wscat.should contain("-s 'chat'")
+      wscat.should contain("-s 'superchat'")
+      wscat.should contain("-H 'Authorization: Bearer test-token'")
+      wscat.should contain("-H 'Cookie: sid=abc'")
+      wscat.should contain("-H 'X-Note: it'\\''s here'")
+      wscat.should contain(%(-x '{"op":1}'))
+      wscat.should contain(%(-x '{"text":"it'\\''s"}'))
+      wscat.should contain("-w -1")
+      wscat.should_not contain("Sec-WebSocket-Key")
+      wscat.should_not contain("Sec-WebSocket-Version")
+      wscat.should_not contain("Sec-WebSocket-Extensions")
+      wscat.should_not contain("Connection:")
+      wscat.should_not contain("Upgrade:")
+    end
+
+    it "offers interactive wscat without execute/wait flags when no messages exist" do
+      upgrade = "GET /ws HTTP/1.1\r\nHost: h\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+      wscat = opt(CopyMenu.request_options(upgrade, "ws://h",
+        websocket_messages: [] of String), 'w').not_nil!.text
+      wscat.should contain("wscat -c 'ws://h/ws'")
+      wscat.should_not contain("-x")
+      wscat.should_not contain("-w")
     end
 
     it "uses an absolute-form request line as the URL directly" do

@@ -1,7 +1,8 @@
 module Gori::Tui
   # Pure helpers that turn an HTTP message into the "copy as X" option set the
-  # CopyPicker overlay shows — split a request into url/headers/body/cookies/curl,
-  # a response into status+headers/body/raw. No TUI/state deps (Screen/Theme), so
+  # CopyPicker overlay shows — split a request into url/headers/body/cookies/curl
+  # (plus wscat for WebSocket Replay), a response into status+headers/body/raw. No
+  # TUI/state deps (Screen/Theme), so
   # the parsing is unit-testable on its own; the Runner wraps the result in a
   # CopyPicker and the controllers feed it the focused pane's bytes.
   module CopyMenu
@@ -14,7 +15,8 @@ module Gori::Tui
     # env-expanded — the bytes replay uses), `target` the "scheme://host[:port]" base
     # that resolves an origin-form request line ("GET /p HTTP/1.1") into a full URL.
     # Empty formats (no body, no Cookie header) drop out so every row is meaningful.
-    def self.request_options(wire : String, target : String) : Array(Option)
+    def self.request_options(wire : String, target : String, *,
+                             websocket_messages : Array(String)? = nil) : Array(Option)
       head, body = split_message(wire)
       lines = head.split(/\r?\n/)
       request_line = lines.first? || ""
@@ -31,6 +33,10 @@ module Gori::Tui
         opts << Option.new("Cookies", 'c', cookie)
       end
       opts << Option.new("cURL", 'l', curl_command(method, url, header_lines, body)) unless url.empty?
+      if messages = websocket_messages
+        ws_url = websocket_url(url)
+        opts << Option.new("wscat", 'w', wscat_command(ws_url, header_lines, messages)) unless ws_url.empty?
+      end
       opts << Option.new("Raw request", 'r', wire) unless wire.strip.empty?
       opts
     end
@@ -141,6 +147,53 @@ module Gori::Tui
       end
       parts << "--data-raw #{shell_quote(body)}" unless body.empty?
       parts.join(" \\\n  ")
+    end
+
+    # A copy-pasteable wscat invocation for a WebSocket Replay. wscat owns the
+    # RFC 6455 upgrade headers and generates a fresh Sec-WebSocket-Key, so those
+    # are deliberately omitted. Host, Origin and subprotocol have dedicated
+    # options; all remaining application headers use repeatable -H. Replay's
+    # outbound text frames become repeatable -x commands and -w -1 keeps the
+    # socket open after sending so subsequent server events remain visible.
+    private def self.wscat_command(url : String, header_lines : Array(String),
+                                   messages : Array(String)) : String
+      parts = ["wscat -c #{shell_quote(url)}"]
+      if host = header_value(header_lines, "host")
+        parts << "--host #{shell_quote(host)}"
+      end
+      if origin = header_value(header_lines, "origin")
+        parts << "-o #{shell_quote(origin)}"
+      end
+      each_header(header_lines) do |name, value|
+        if name.downcase == "sec-websocket-protocol"
+          value.split(',').each do |protocol|
+            protocol = protocol.strip
+            parts << "-s #{shell_quote(protocol)}" unless protocol.empty?
+          end
+        end
+      end
+      each_header(header_lines) do |name, value|
+        case name.downcase
+        when "host", "origin", "connection", "upgrade", "content-length",
+             "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions",
+             "sec-websocket-protocol"
+          next
+        else
+          parts << "-H #{shell_quote("#{name}: #{value}")}"
+        end
+      end
+      messages.each { |message| parts << "-x #{shell_quote(message)}" }
+      parts << "-w -1" unless messages.empty?
+      parts.join(" \\\n  ")
+    end
+
+    # CopyMenu resolves request lines as HTTP URLs because cURL is always offered.
+    # wscat needs the equivalent WebSocket scheme; already-ws targets remain intact.
+    private def self.websocket_url(url : String) : String
+      return "ws://#{url[7..]}" if url.starts_with?("http://")
+      return "wss://#{url[8..]}" if url.starts_with?("https://")
+      return url if url.starts_with?("ws://") || url.starts_with?("wss://")
+      ""
     end
 
     # POSIX single-quote: wrap in '…' and rewrite each embedded ' as '\'' so the
