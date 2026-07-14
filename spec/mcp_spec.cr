@@ -1,5 +1,7 @@
 require "./spec_helper"
 require "compress/gzip"
+require "socket"
+require "digest/sha1"
 
 # Drives Gori::MCP end-to-end with scripted JSON-RPC lines over IO::Memory, plus
 # unit tests for the body serializer and the send_request byte builder.
@@ -53,6 +55,35 @@ private def gzip_bytes(text : String) : Bytes
   io = IO::Memory.new
   Compress::Gzip::Writer.open(io, &.print(text))
   io.to_slice
+end
+
+# Minimal WebSocket origin for the MCP glue test: upgrade, echo one client frame,
+# then close normally so send_websocket returns without waiting for its idle timer.
+private def start_mcp_ws_origin : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    head = Gori::Proxy::Codec::Http1.read_head(conn).not_nil!
+    key = String.new(head).each_line
+      .find(&.downcase.starts_with?("sec-websocket-key:"))
+      .try { |line| line.split(':', 2)[1].strip } || ""
+    accept = Base64.strict_encode(Digest::SHA1.digest(key + Gori::Replay::WsEngine::GUID))
+    conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
+            "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
+    conn.flush
+    if (frame = Gori::Proxy::WS.read_frame(conn)) && frame.data?
+      conn.write(Gori::Proxy::WS.encode(frame.opcode, frame.payload, mask: false))
+    end
+    conn.write(Gori::Proxy::WS.encode(Gori::Proxy::WS::OP_CLOSE, Bytes[0x03, 0xE8], mask: false))
+    conn.flush
+    conn.close
+    origin.close
+  rescue
+    origin.close rescue nil
+  end
+  port
 end
 
 private INIT = %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}})
@@ -116,6 +147,7 @@ describe Gori::MCP::Server do
         names.should contain("project_info")
         names.should contain("get_replay_context")
         names.should contain("send_request")
+        names.should contain("send_websocket")
         names.should contain("create_finding")
         names.should contain("update_finding")
         # every tool has a well-formed object schema
@@ -319,6 +351,31 @@ describe Gori::MCP::Server do
         reloaded = store.get_finding(new_id).not_nil!
         reloaded.status.should eq(Gori::Store::Status::Confirmed)
         reloaded.severity.should eq(Gori::Store::Severity::Critical)
+      end
+    end
+
+    it "links a replay on create and on a link-only update" do
+      with_store do |store|
+        replay_a = store.insert_replay("https://ex.test", "GET /a HTTP/1.1\r\n\r\n", false, true, nil, 0)
+        replay_b = store.insert_replay("https://ex.test", "GET /b HTTP/1.1\r\n\r\n", false, true, nil, 1)
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"linked","replay_id":#{replay_a}}}})
+        finding_id = tool_payload(drive(store, create)[0])["id"].as_i64
+        links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
+        links.map(&.ref_id).should contain(replay_a)
+
+        update = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_finding","arguments":{"id":#{finding_id},"replay_id":#{replay_b}}}})
+        drive(store, update)[0]["result"]["isError"].as_bool.should be_false
+        links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
+        links.map(&.ref_id).should contain(replay_b)
+      end
+    end
+
+    it "rejects an unknown replay_id without creating a finding" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","replay_id":999}}})
+        resp = drive(store, create)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        store.count_findings.should eq(0)
       end
     end
 
@@ -533,6 +590,8 @@ describe Gori::MCP::Server do
         payload = tool_payload(drive(store, call)[0])
         payload["target"].as_s.should eq("https://ex.test")
         payload["summary"].as_s.should eq("POST /submit")
+        links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
+        links.any? { |link| link.ref_kind.replay? && link.ref_id == payload["id"].as_i64 }.should be_true
       end
     end
   end
@@ -549,7 +608,15 @@ describe Gori::MCP::Server do
         sess = payload["sessions"][0]
         sess["db_id"].as_i64.should eq(id)
         sess["last_status"].as_i64.should eq(400)
-        sess["request"].as_s.should contain("GET /x")
+        sess.as_h.has_key?("request").should be_false
+        sess.as_h.has_key?("last_response_head").should be_false
+        payload["content_included"].as_bool.should be_false
+
+        with_content = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_replay_context","arguments":{"id":#{id},"include_content":true}}})
+        detailed = tool_payload(drive(store, with_content)[0])
+        detailed["sessions"].as_a.size.should eq(1)
+        detailed["sessions"][0]["request"].as_s.should contain("GET /x")
+        detailed["sessions"][0]["last_response_head"].as_s.should contain("400 Bad")
       end
     end
 
@@ -561,7 +628,7 @@ describe Gori::MCP::Server do
         store.insert_ws_message(0_i64, "out", 1, "ping".to_slice, replay_id: id)        # text frame
         store.insert_ws_message(0_i64, "in", 2, Bytes[0x00, 0xff, 0x80], replay_id: id) # binary (invalid UTF-8)
         store.flush
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{"include_content":true}}})
         msgs = tool_payload(drive(store, call)[0])["sessions"][0]["ws_messages"].as_a
         text = msgs.find { |m| m["opcode"].as_i == 1 }.not_nil!
         text["payload"].as_s.should eq("ping")
@@ -597,7 +664,12 @@ describe Gori::MCP::Server do
           end
         end
         store.set_setting(Gori::Store::UI_STATE_KEY, ui)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{}}})
+        metadata = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{}}})
+        metadata_payload = tool_payload(drive(store, metadata, project_name: "demo", project_slug: "demo")[0])
+        metadata_payload.as_h.has_key?("tui_replay").should be_false
+        metadata_payload["tui_replay_available"].as_bool.should be_true
+
+        call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_replay_context","arguments":{"include_content":true}}})
         payload = tool_payload(drive(store, call, project_name: "demo", project_slug: "demo")[0])
         payload["tui_on_replay_tab"].as_bool.should be_true
         payload["tui_replay"]["active"]["http2"].as_bool.should be_true
@@ -658,6 +730,60 @@ describe Gori::MCP::Server do
         resp = drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
         resp["result"]["content"][0]["text"].as_s.downcase.should contain("fail")
+      end
+    end
+
+    it "links a saved replay to a finding even when the origin is unavailable" do
+      with_store do |store|
+        finding_id = store.insert_finding("evidence", Gori::Store::Severity::Low, nil, nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","save_as_replay":true,"finding_id":#{finding_id}}}})
+        drive(store, call)[0]["result"]["isError"].as_bool.should be_true
+        replay_id = store.replays_meta.last.id
+        links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
+        links.any? { |link| link.ref_kind.replay? && link.ref_id == replay_id }.should be_true
+      end
+    end
+  end
+
+  describe "send_websocket" do
+    it "performs the upgrade and returns the inbound frame transcript" do
+      with_store do |store|
+        port = start_mcp_ws_origin
+        request = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+        replay_id = store.insert_replay("ws://127.0.0.1:#{port}", request, false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"replay_id":#{replay_id},"messages":["ping"],"idle_ms":100}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_false
+        payload = tool_payload(resp)
+        payload["upgraded"].as_bool.should be_true
+        payload["handshake_status"].as_i.should eq(101)
+        payload["close_code"].as_i.should eq(1000)
+        payload["messages"].as_a.map { |message| {message["direction"].as_s, message["payload"].as_s} }
+          .should eq([{"out", "ping"}, {"in", "ping"}])
+        store.replays.find(&.id.==(replay_id)).not_nil!.response_head.should_not be_nil
+      end
+    end
+
+    it "rejects a non-WebSocket replay before making a connection" do
+      with_store do |store|
+        replay_id = store.insert_replay("http://127.0.0.1:1", "GET / HTTP/1.1\r\nHost: x\r\n\r\n", false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"replay_id":#{replay_id}}}})
+        resp = drive(store, call)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        resp["result"]["content"][0]["text"].as_s.should contain("not a WebSocket")
+      end
+    end
+
+    it "uses the WebSocket engine and returns a clean connection error" do
+      with_store do |store|
+        replay_id = store.insert_replay("ws://127.0.0.1:1", "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"replay_id":#{replay_id},"messages":["ping"],"idle_ms":100}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        payload = tool_payload(resp)
+        payload["replay_id"].as_i64.should eq(replay_id)
+        payload["upgraded"].as_bool.should be_false
+        payload["error"].as_s.should contain("connect failed")
       end
     end
   end

@@ -14,6 +14,19 @@ private def with_store(&)
 end
 
 describe "entity_links (V21)" do
+  it "never replaces a pre-existing finding when allocating the next id" do
+    with_store do |store|
+      store.@db.exec(
+        "INSERT INTO findings (id, created_at, updated_at, title, severity, host, flow_id, notes, status) " \
+        "VALUES (1, 1, 1, 'existing', 0, NULL, NULL, '', 0)")
+      new_id = store.insert_finding("new", Gori::Store::Severity::Info, nil, nil)
+      new_id.should eq(2_i64)
+      store.count_findings.should eq(2)
+      store.get_finding(1_i64).not_nil!.title.should eq("existing")
+      store.get_finding(2_i64).not_nil!.title.should eq("new")
+    end
+  end
+
   it "creates a flow link when inserting a finding with flow_id" do
     with_store do |store|
       store.@db.scalar("PRAGMA user_version").should eq(Gori::Store::Schema::VERSION)

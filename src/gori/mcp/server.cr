@@ -125,10 +125,11 @@ module Gori
                "microseconds plus *_iso RFC3339 fields where available."
         if @allow_actions
           "#{base} Action tools are enabled: send_request (supports flow_id replay), " \
+          "send_websocket (executes a persisted WS replay), " \
           "fuzz_*, mine_*, create/update_finding, and create/delete_rule + set_rule_enabled " \
           "make real outbound requests or mutate findings/rules."
         else
-          "#{base} Read-only mode: action tools (send_request, fuzz_*, mine_*, " \
+          "#{base} Read-only mode: action tools (send_request, send_websocket, fuzz_*, mine_*, " \
           "create/update_finding, create/delete_rule) are disabled — restart without --read-only to enable them."
         end
       end

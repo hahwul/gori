@@ -18,8 +18,9 @@ require "./request_builder"
 module Gori
   module MCP
     # Maps MCP tool calls to gori's store reads, the replay engines, and (gated)
-    # store writes. Read tools are always exposed; the action tool (`send_request`)
-    # and write tools (`create_finding`/`update_finding`) are gated behind
+    # store writes. Read tools are always exposed; network action tools
+    # (`send_request`/`send_websocket`) and write tools
+    # (`create_finding`/`update_finding`) are gated behind
     # `allow_actions` — off when the user runs `gori mcp --read-only`. A gated tool
     # is omitted from `tools/list` AND rejected by `call`.
     class Tools
@@ -172,14 +173,15 @@ module Gori
             "`available:false` means the TUI never ran against this project." { }
 
           tool j, "get_replay_context",
-            "The Replay workbench state: persisted replay sessions (target, request, http2, last " \
-            "response status) plus, when the TUI is on the Replay tab, a live snapshot of the active " \
-            "sub-tab (including ephemeral WebSocket/gRPC tabs that are not stored in `replays`). " \
-            "Use this instead of guessing from History when the user is editing a replay. " \
-            "Supports pagination and query filtering." do |s|
+            "The Replay workbench state. Defaults to metadata only so request headers, WebSocket " \
+            "payloads, response headers, and the live TUI editor snapshot are not copied into the " \
+            "model context. Set include_content=true only when those bytes are necessary. Supports " \
+            "single-id lookup, pagination, and query filtering." do |s|
+            s.field "id", intprop("return one replay database id")
             s.field "limit", intprop("max rows to return (default 50, max 500)")
             s.field "offset", intprop("start row (default 0)")
             s.field "query", strprop("filter replays by name or target URL (case-insensitive substring match)")
+            s.field "include_content", boolprop("include request text, WebSocket payloads, response head, and live TUI replay snapshot (default false; may expose secrets)")
           end
 
           tool j, "list_notes", "List all project notes (markdown/text documents) with metadata like title and line count." { }
@@ -255,6 +257,19 @@ module Gori
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "save_as_replay", boolprop("save this request and its response to the Replay workbench (default false)")
               s.field "name", strprop("optional custom name for the saved replay tab (only when save_as_replay=true)")
+              s.field "finding_id", intprop("optional finding to link to the saved replay; requires save_as_replay=true")
+            end
+
+            tool j, "send_websocket",
+              "Execute a persisted WebSocket replay: perform a fresh RFC 6455 handshake, send the " \
+              "replay's outbound messages (or a supplied override), and return inbound frames. " \
+              "ACTIVE: makes a real outbound connection. The handshake response is persisted on " \
+              "the replay, while the outbound message template is left unchanged." do |s|
+              s.field "replay_id", intprop("WebSocket replay database id"), required: true
+              s.field "messages", strarrprop("optional outbound text-message override; stored replay messages are used when absent")
+              s.field "idle_ms", intprop("server-silence timeout after the first inbound frame (100-60000 ms; default 3000)")
+              s.field "insecure", boolprop("skip upstream TLS verification (default false)")
+              s.field "finding_id", intprop("optional finding to link to this replay before sending")
             end
 
             tool j, "create_replay", "Create a new replay tab/session in the database. Provide either ('target' and 'request') OR ('flow_id') OR ('finding_id')." do |s|
@@ -292,6 +307,7 @@ module Gori
               s.field "severity", strprop("info|low|medium|high|critical (default info)")
               s.field "host", strprop("optional host the finding concerns")
               s.field "flow_id", intprop("optional flow id this finding links to")
+              s.field "replay_id", intprop("optional replay id this finding links to")
             end
 
             tool j, "update_finding", "Update an existing finding's fields." do |s|
@@ -300,6 +316,7 @@ module Gori
               s.field "severity", strprop("info|low|medium|high|critical")
               s.field "notes", strprop("free-form notes (replaces existing)")
               s.field "status", strprop("open|confirmed|false-positive|resolved")
+              s.field "replay_id", intprop("optional replay id to link to the finding")
             end
 
             tool j, "fuzz_start",
@@ -421,26 +438,27 @@ module Gori
       # isn't one of them.
       private def action_tool(name : String, h) : Result?
         case name
-        when "send_request"   then gated { send_request(h) }
-        when "create_replay"  then gated { create_replay(h) }
-        when "update_replay"  then gated { update_replay(h) }
-        when "delete_replay"  then gated { delete_replay(h) }
-        when "create_finding" then gated { create_finding(h) }
-        when "update_finding" then gated { update_finding(h) }
-        when "fuzz_start"     then gated { fuzz_start(h) }
-        when "fuzz_status"    then gated { fuzz_status(h) }
-        when "fuzz_results"   then gated { fuzz_results(h) }
-        when "fuzz_stop"      then gated { fuzz_stop(h) }
-        when "mine_start"     then gated { mine_start(h) }
-        when "mine_status"    then gated { mine_status(h) }
-        when "mine_results"   then gated { mine_results(h) }
-        when "mine_stop"      then gated { mine_stop(h) }
-        when "create_note"    then gated { create_note(h) }
-        when "update_note"    then gated { update_note(h) }
-        when "delete_note"    then gated { delete_note(h) }
-        when "create_rule"       then gated { create_rule(h) }
-        when "set_rule_enabled"  then gated { set_rule_enabled(h) }
-        when "delete_rule"       then gated { delete_rule(h) }
+        when "send_request"     then gated { send_request(h) }
+        when "send_websocket"   then gated { send_websocket(h) }
+        when "create_replay"    then gated { create_replay(h) }
+        when "update_replay"    then gated { update_replay(h) }
+        when "delete_replay"    then gated { delete_replay(h) }
+        when "create_finding"   then gated { create_finding(h) }
+        when "update_finding"   then gated { update_finding(h) }
+        when "fuzz_start"       then gated { fuzz_start(h) }
+        when "fuzz_status"      then gated { fuzz_status(h) }
+        when "fuzz_results"     then gated { fuzz_results(h) }
+        when "fuzz_stop"        then gated { fuzz_stop(h) }
+        when "mine_start"       then gated { mine_start(h) }
+        when "mine_status"      then gated { mine_status(h) }
+        when "mine_results"     then gated { mine_results(h) }
+        when "mine_stop"        then gated { mine_stop(h) }
+        when "create_note"      then gated { create_note(h) }
+        when "update_note"      then gated { update_note(h) }
+        when "delete_note"      then gated { delete_note(h) }
+        when "create_rule"      then gated { create_rule(h) }
+        when "set_rule_enabled" then gated { set_rule_enabled(h) }
+        when "delete_rule"      then gated { delete_rule(h) }
         end
       end
 
@@ -606,12 +624,23 @@ module Gori
 
       private def get_replay_context(h) : Result
         ui = parse_ui_state
+        replay_id = int(h, "id")
+        return Result.new(id_error(h, "id"), is_error: true) if replay_id.nil? && present?(h, "id")
+        include_content = bool(h, "include_content")
+        if include_content.nil? && present?(h, "include_content")
+          return Result.new("invalid 'include_content' (expected true or false)", is_error: true)
+        end
+        include_content = include_content || false
         limit = clamp(int(h, "limit"), 50, 500)
         offset = clamp_nonneg(int(h, "offset"))
         query_str = str(h, "query").try(&.strip)
         query_rx = query_str.try { |q| q.empty? ? nil : Regex.new(Regex.escape(q), Regex::Options::IGNORE_CASE) }
 
         all_replays = @store.replays_mcp
+        if replay_id && !all_replays.any? { |r| r.id == replay_id }
+          return Result.new("no replay with id #{replay_id}", is_error: true)
+        end
+        all_replays = all_replays.select { |r| r.id == replay_id } if replay_id
 
         filtered_replays = if rx = query_rx
                              all_replays.select do |r|
@@ -650,17 +679,20 @@ module Gori
                   j.field "ui_age_seconds", (Time.utc.to_unix_ms - rec) // 1000
                 end
               end
-              if replay = ui["replay"]?
+              if include_content && (replay = ui["replay"]?)
                 j.field "tui_replay", replay
+              elsif ui["replay"]?
+                j.field "tui_replay_available", true
               end
             end
+            j.field "content_included", include_content
             j.field "total_count", total_count
             j.field "offset", offset
             j.field "limit", limit
             j.field "sessions" do
               j.array do
                 paginated_replays.each do |r|
-                  emit_replay_session(j, r)
+                  emit_replay_session(j, r, include_content)
                 end
               end
             end
@@ -671,13 +703,14 @@ module Gori
         end)
       end
 
-      private def emit_replay_sessions(j : JSON::Builder) : Nil
+      private def emit_replay_sessions(j : JSON::Builder, include_content : Bool = false) : Nil
         @store.replays_mcp.each do |r|
-          emit_replay_session(j, r)
+          emit_replay_session(j, r, include_content)
         end
       end
 
-      private def emit_replay_session(j : JSON::Builder, r : Store::ReplayRecord) : Nil
+      private def emit_replay_session(j : JSON::Builder, r : Store::ReplayRecord,
+                                      include_content : Bool = false) : Nil
         j.object do
           j.field "db_id", r.id
           j.field "position", r.position
@@ -688,11 +721,12 @@ module Gori
           j.field "flow_id", r.flow_id if r.flow_id
           j.field "name", r.name if r.name
           j.field "sni", r.sni if r.sni
-          emit_capped_text(j, "request", r.request)
+          emit_capped_text(j, "request", r.request) if include_content
 
           if Replay::WsEngine.upgrade_request?(r.request)
             ws_msgs = @store.ws_messages_for_replay(r.id)
             j.field "ws_mode", true
+            j.field "ws_message_count", ws_msgs.size
             j.field "ws_messages" do
               j.array do
                 ws_msgs.each do |m|
@@ -711,7 +745,7 @@ module Gori
                   end
                 end
               end
-            end
+            end if include_content
           end
 
           if err = r.response_error
@@ -730,7 +764,7 @@ module Gori
               j.field "last_status", resp.status
               j.field "last_reason", resp.reason
             end
-            j.field "last_response_head", Serialize.head_text(head)
+            j.field "last_response_head", Serialize.head_text(head) if include_content
           end
         end
       end
@@ -813,6 +847,14 @@ module Gori
       # --- action / write tools (gated) ---------------------------------------
 
       private def send_request(h) : Result
+        save = bool(h, "save_as_replay") || false
+        finding_id = int(h, "finding_id")
+        return Result.new(id_error(h, "finding_id"), is_error: true) if finding_id.nil? && present?(h, "finding_id")
+        if finding_id
+          return Result.new("finding_id requires save_as_replay=true", is_error: true) unless save
+          return Result.new("no finding with id #{finding_id}", is_error: true) unless @store.get_finding(finding_id)
+        end
+
         built, http2 = build_send_request(h)
         verify = @verify_upstream && !(bool(h, "insecure") || false)
         result =
@@ -825,7 +867,6 @@ module Gori
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} -> #{result.ok? ? "ok" : result.error}" }
 
         # Save as replay if requested
-        save = bool(h, "save_as_replay") || false
         replay_id = nil.as(Int64?)
         if save
           port_suffix = ((built.scheme == "https" && built.port == 443) || (built.scheme == "http" && built.port == 80)) ? "" : ":#{built.port}"
@@ -849,6 +890,10 @@ module Gori
           )
 
           if replay_id > 0
+            if finding_id
+              @store.add_link(Store::LinkOwnerKind::Finding, finding_id,
+                Store::LinkRefKind::Replay, replay_id)
+            end
             # If name is specified
             name = str(h, "name")
             if name && !name.empty?
@@ -904,6 +949,100 @@ module Gori
         Result.new(ex.message || "invalid request arguments", is_error: true)
       end
 
+      # Execute a stored WebSocket replay from MCP. Unlike send_request, this uses
+      # WsEngine's fresh Sec-WebSocket-Key + framed message exchange and therefore
+      # returns the inbound transcript instead of stopping at the 101 response.
+      private def send_websocket(h) : Result
+        replay_id = int(h, "replay_id")
+        return Result.new(id_error(h, "replay_id"), is_error: true) unless replay_id
+        replay = @store.get_replay(replay_id)
+        return Result.new("no replay with id #{replay_id}", is_error: true) unless replay
+        unless Replay::WsEngine.upgrade_request?(replay.request)
+          return Result.new("replay #{replay_id} is not a WebSocket upgrade request", is_error: true)
+        end
+
+        finding_id = int(h, "finding_id")
+        return Result.new(id_error(h, "finding_id"), is_error: true) if finding_id.nil? && present?(h, "finding_id")
+        if finding_id
+          return Result.new("no finding with id #{finding_id}", is_error: true) unless @store.get_finding(finding_id)
+          @store.add_link(Store::LinkOwnerKind::Finding, finding_id,
+            Store::LinkRefKind::Replay, replay_id)
+        end
+
+        idle_ms = int(h, "idle_ms")
+        return Result.new(id_error(h, "idle_ms"), is_error: true) if idle_ms.nil? && present?(h, "idle_ms")
+        idle = (idle_ms || 3000_i64).clamp(100_i64, 60_000_i64).milliseconds
+
+        out_messages = if present?(h, "messages")
+                         arr = h["messages"]?.try(&.as_a?)
+                         return Result.new("invalid 'messages' (expected an array of strings)", is_error: true) unless arr
+                         parsed = [] of Replay::WsEngine::OutMsg
+                         arr.each do |item|
+                           text = item.as_s?
+                           return Result.new("invalid 'messages' (expected an array of strings)", is_error: true) unless text
+                           parsed << Replay::WsEngine::OutMsg.new(1, Env.expand(text).to_slice)
+                         end
+                         parsed
+                       else
+                         @store.ws_messages_for_replay(replay_id).compact_map do |m|
+                           next unless m.direction == "out"
+                           payload = m.text? ? Env.expand(String.new(m.payload).scrub).to_slice : m.payload
+                           Replay::WsEngine::OutMsg.new(m.opcode, payload)
+                         end
+                       end
+
+        target = Env.expand(replay.target)
+        scheme, host, port = Replay::FlowRequest.parse_target(target)
+        return Result.new("could not parse target for replay #{replay_id}", is_error: true) if host.empty? || port <= 0
+        verify = @verify_upstream && !(bool(h, "insecure") || false)
+        request = Env.expand_wire(replay.request)
+        sni = replay.sni.try { |value| Env.expand(value) }
+        result = Replay::WsEngine.send(request, out_messages,
+          scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni, idle: idle)
+
+        @store.update_replay_response(replay_id, result.handshake_head, Bytes.empty,
+          result.error, result.duration_us)
+        Log.info { "send_websocket #{scheme}://#{host}:#{port} replay_id=#{replay_id} -> #{result.ok? ? "ok" : result.error}" }
+
+        payload = JSON.build do |j|
+          j.object do
+            j.field "replay_id", replay_id
+            j.field "upgraded", result.upgraded?
+            j.field "duration_us", result.duration_us
+            j.field "close_code", result.close_code if result.close_code
+            j.field "note", Env.mask_secrets(result.note.not_nil!) if result.note
+            j.field "error", Env.mask_secrets(result.error.not_nil!) if result.error
+            unless result.handshake_head.empty?
+              response = begin
+                Proxy::Codec::Http1.parse_response_head(result.handshake_head)
+              rescue
+                nil
+              end
+              j.field "handshake_status", response.status if response
+            end
+            j.field "messages" do
+              j.array do
+                result.messages.each do |message|
+                  j.object do
+                    j.field "direction", message.direction
+                    j.field "opcode", message.opcode
+                    if message.opcode == 1
+                      j.field "payload", Env.mask_secrets(String.new(message.payload).scrub)
+                    else
+                      j.field "binary", true
+                      j.field "payload_base64", Base64.strict_encode(message.payload)
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+        Result.new(payload, is_error: !result.ok?)
+      rescue ex : Gori::Error
+        Result.new(ex.message || "invalid WebSocket request arguments", is_error: true)
+      end
+
       # Either replays a captured flow (flow_id) or builds from url/raw/method args.
       private def build_send_request(h) : {RequestBuilder::Built, Bool}
         if present?(h, "flow_id")
@@ -944,6 +1083,11 @@ module Gori
         # reject it, consistent with how get_flow rejects a non-integer id.
         flow_id = int(h, "flow_id")
         return Result.new("invalid 'flow_id' (expected an integer)", is_error: true) if flow_id.nil? && present?(h, "flow_id")
+        replay_id = int(h, "replay_id")
+        return Result.new(id_error(h, "replay_id"), is_error: true) if replay_id.nil? && present?(h, "replay_id")
+        if replay_id && !@store.get_replay(replay_id)
+          return Result.new("no replay with id #{replay_id}", is_error: true)
+        end
 
         host = str(h, "host").try { |hst| Env.mask_secrets(hst) }
         id = @store.insert_finding(masked_title, severity, host, flow_id)
@@ -951,7 +1095,16 @@ module Gori
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
         return Result.new("failed to persist finding (store busy or unwritable)", is_error: true) if id == 0
-        Result.new(JSON.build { |j| j.object { j.field "id", id } })
+        if replay_id
+          @store.add_link(Store::LinkOwnerKind::Finding, id,
+            Store::LinkRefKind::Replay, replay_id)
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", id
+            j.field "replay_id", replay_id if replay_id
+          end
+        end)
       end
 
       private def update_finding(h) : Result
@@ -974,16 +1127,33 @@ module Gori
         notes = str(h, "notes").try { |n| Env.mask_secrets(n) }
         severity = severity_from(sev_s)
         status = status_from(stat_s)
+        replay_id = int(h, "replay_id")
+        return Result.new(id_error(h, "replay_id"), is_error: true) if replay_id.nil? && present?(h, "replay_id")
+        if replay_id && !@store.get_replay(replay_id)
+          return Result.new("no replay with id #{replay_id}", is_error: true)
+        end
 
         # Don't claim updated:true on a no-op. With no resolvable field the store
         # write is a silent no-op, so returning success would mislead the caller
         # (e.g. it'd think a typo'd field name took effect).
-        if title.nil? && severity.nil? && notes.nil? && status.nil?
+        if title.nil? && severity.nil? && notes.nil? && status.nil? && replay_id.nil?
           return Result.new("no fields to update (provide at least one of title/severity/notes/status)", is_error: true)
         end
 
-        @store.update_finding(id, title: title, severity: severity, notes: notes, status: status)
-        Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "updated", true } })
+        unless title.nil? && severity.nil? && notes.nil? && status.nil?
+          @store.update_finding(id, title: title, severity: severity, notes: notes, status: status)
+        end
+        if replay_id
+          @store.add_link(Store::LinkOwnerKind::Finding, id,
+            Store::LinkRefKind::Replay, replay_id)
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", id
+            j.field "updated", true
+            j.field "replay_id", replay_id if replay_id
+          end
+        end)
       end
 
       private def create_note(h) : Result
@@ -1195,17 +1365,19 @@ module Gori
         flow_id = int(h, "flow_id")
         return Result.new(id_error(h, "flow_id"), is_error: true) if flow_id.nil? && present?(h, "flow_id")
 
+        target = str(h, "target")
+        request = str(h, "request")
+
         if finding_id
           finding = @store.get_finding(finding_id)
           return Result.new("no finding with id #{finding_id}", is_error: true) unless finding
-          unless fid = finding.flow_id
+          if fid = finding.flow_id
+            flow_id = fid
+          elsif target.nil? || target.empty? || request.nil? || request.empty?
             return Result.new("finding #{finding_id} has no associated flow_id", is_error: true)
           end
-          flow_id = fid
         end
 
-        target = str(h, "target")
-        request = str(h, "request")
         http2_val = bool(h, "http2")
         http2 = http2_val || false
         auto_cl_val = bool(h, "auto_content_length")
@@ -1276,6 +1448,11 @@ module Gori
         )
 
         return Result.new("failed to persist replay (store busy or unwritable)", is_error: true) if id == 0
+
+        if finding_id
+          @store.add_link(Store::LinkOwnerKind::Finding, finding_id,
+            Store::LinkRefKind::Replay, id)
+        end
 
         if name && !name.empty?
           @store.set_replay_name(id, name)

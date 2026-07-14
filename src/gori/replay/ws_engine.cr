@@ -81,7 +81,8 @@ module Gori
         # the read_timeout is narrowed to `idle` only once we enter the drain, where a
         # read that times out is the EXPECTED "server went quiet → stop" signal.
         ht = HANDSHAKE_TIMEOUT
-        upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, io_timeout: ht) : Proxy::Upstream.dial(host, port, io_timeout: ht)
+        tls = scheme == "https" || scheme == "wss"
+        upstream = tls ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, io_timeout: ht) : Proxy::Upstream.dial(host, port, io_timeout: ht)
         return err("connect failed: #{host}:#{port}", started) unless upstream
 
         begin

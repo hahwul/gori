@@ -14,6 +14,12 @@ describe Gori::Replay::FlowRequest do
       Gori::Replay::FlowRequest.parse_target(t).should eq({"http", "api.test", 8080})
     end
 
+    it "uses the standard ports for ws and wss targets" do
+      Gori::Replay::FlowRequest.parse_target("ws://api.test/socket").should eq({"ws", "api.test", 80})
+      Gori::Replay::FlowRequest.parse_target("wss://api.test/socket").should eq({"wss", "api.test", 443})
+      Gori::Replay::FlowRequest.build_target("wss", "api.test", 443).should eq("wss://api.test")
+    end
+
     it "brackets an IPv6 literal host so it round-trips (was dropped to host=\"\")" do
       t = Gori::Replay::FlowRequest.build_target("http", "::1", 80)
       t.should eq("http://[::1]")

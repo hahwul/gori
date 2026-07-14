@@ -85,7 +85,7 @@ module Gori
       # "scheme://host[:port]", omitting the port when it's the scheme default —
       # matches ReplayView#build_target so the parsed {scheme,host,port} round-trips.
       def self.build_target(scheme : String, host : String, port : Int32) : String
-        default = scheme == "https" ? 443 : 80
+        default = (scheme == "https" || scheme == "wss") ? 443 : 80
         # An IPv6 literal host (contains ':') must be bracketed in a URL, else both the
         # `:port` suffix below and URI.parse in parse_target split it wrong (host → "").
         h = host.includes?(':') && !host.starts_with?('[') ? "[#{host}]" : host
@@ -100,7 +100,7 @@ module Gori
         uri = URI.parse(raw)
         scheme = uri.scheme || "http"
         host = strip_ipv6_brackets(uri.host || "")
-        port = uri.port || (scheme == "https" ? 443 : 80)
+        port = uri.port || ((scheme == "https" || scheme == "wss") ? 443 : 80)
         {scheme, host, port}
       rescue
         {"http", "", 0}
