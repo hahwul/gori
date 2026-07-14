@@ -236,7 +236,11 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 | `--project=NAME` | Serve a named project's database |
 | `--insecure-upstream` | `send_request`: skip upstream TLS verification |
 | `--read-only` | Disable action tools (`send_request`, create/update findings, fuzz/mine) |
-| `--install-claude` / `--install-claude-code` / `--install-codex` / `--install-agy` / `--install-grok` | Write the MCP config for that client |
+| `--install-claude` | Write Claude Desktop `mcpServers` config |
+| `--install-claude-code` | Write Claude Code `~/.claude.json` `mcpServers` entry |
+| `--install-codex` | Write OpenAI Codex `~/.codex/config.toml` `[mcp_servers.gori]` |
+| `--install-agy` | Write Antigravity `~/.gemini/antigravity-cli/mcp_config.json` |
+| `--install-grok` | Write Grok `~/.grok/config.toml` `[mcp_servers.gori]` |
 
 ## gori ca
 

@@ -46,17 +46,21 @@ gori mcp --read-only
 
 gori can write the MCP configuration for common clients for you:
 
-| Flag | Client |
-|------|--------|
-| `--install-claude` | Claude Desktop |
-| `--install-claude-code` | Claude Code |
-| `--install-codex` | Codex |
-| `--install-agy` | Antigravity |
-| `--install-grok` | Grok |
+| Flag | Client | Config written |
+|------|--------|----------------|
+| `--install-claude` | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) |
+| `--install-claude-code` | Claude Code | `~/.claude.json` (`mcpServers.gori`) |
+| `--install-codex` | OpenAI Codex | `~/.codex/config.toml` (`[mcp_servers.gori]`) |
+| `--install-agy` | Antigravity CLI | `~/.gemini/antigravity-cli/mcp_config.json` |
+| `--install-grok` | Grok | `~/.grok/config.toml` (`[mcp_servers.gori]`) |
 
 ```bash
 gori mcp --install-claude-code
+gori mcp --install-codex
+gori mcp --install-grok
 ```
+
+Codex and Grok use TOML with an `[mcp_servers.gori]` table (not JSON). Restart the client (or re-open the session) after installing so it reloads MCP servers.
 
 ## Tools
 

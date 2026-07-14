@@ -2,6 +2,7 @@ require "./mcp/serialize"
 require "./mcp/request_builder"
 require "./mcp/tools"
 require "./mcp/server"
+require "./mcp/install"
 
 module Gori
   # The `gori mcp` server: exposes captured data + the replay engines to an AI

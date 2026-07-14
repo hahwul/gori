@@ -437,11 +437,11 @@ module Gori
         p.on("--project=NAME", "Serve a named project's db") { |v| project = v }
         p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
         p.on("--read-only", "Disable action tools (send_request, create/update_finding)") { read_only = true }
-        p.on("--install-agy", "Install gori as an MCP server in Antigravity's mcp_config.json") { install_target = "agy" }
-        p.on("--install-codex", "Install gori as an MCP server in Codex's mcp_config.json") { install_target = "codex" }
+        p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_target = "agy" }
+        p.on("--install-codex", "Install gori as an MCP server in Codex (~/.codex/config.toml)") { install_target = "codex" }
         p.on("--install-claude", "Install gori as an MCP server in Claude Desktop config") { install_target = "claude" }
-        p.on("--install-claude-code", "Install gori as an MCP server in Claude Code config") { install_target = "claude-code" }
-        p.on("--install-grok", "Install gori as an MCP server in Grok's mcp.json") { install_target = "grok" }
+        p.on("--install-claude-code", "Install gori as an MCP server in Claude Code (~/.claude.json)") { install_target = "claude-code" }
+        p.on("--install-grok", "Install gori as an MCP server in Grok (~/.grok/config.toml)") { install_target = "grok" }
         p.on("-h", "--help", "Show this help") { puts p; exit 0 }
         p.invalid_option { |flag| abort "unknown option: #{flag}\n#{p}" }
         p.missing_option { |flag| abort "missing value for #{flag}" }
@@ -482,84 +482,13 @@ module Gori
       end
     end
 
-    private def self.mcp_config_path(target : String) : String
-      case target
-      when "agy"
-        File.join(ENV["HOME"], ".gemini", "antigravity-cli", "mcp_config.json")
-      when "codex"
-        File.join(ENV["HOME"], ".gemini", "config", "mcp_config.json")
-      when "claude"
-        {% if flag?(:win32) %}
-          appdata = ENV["APPDATA"]? || File.join(ENV["HOME"], "AppData", "Roaming")
-          File.join(appdata, "Claude", "claude_desktop_config.json")
-        {% else %}
-          File.join(ENV["HOME"], "Library", "Application Support", "Claude", "claude_desktop_config.json")
-        {% end %}
-      when "claude-code"
-        File.join(ENV["HOME"], ".claude.json")
-      when "grok"
-        File.join(ENV["HOME"], ".config", "grok", "mcp.json")
-      else
-        abort "Unknown install target: #{target}"
-      end
-    end
-
     private def self.install_mcp_config(target : String, db_path : String?, project : String?, read_only : Bool, insecure_upstream : Bool) : Nil
-      config_path = mcp_config_path(target)
-      config_dir = File.dirname(config_path)
-
-      # Determine command path
-      exe_path = Process.executable_path
-      exe_path = File.realpath(PROGRAM_NAME) if exe_path.nil? || exe_path.empty?
-
-      # Build args
-      args = ["mcp"]
-      # expand_path (not realpath): the db need not exist yet — `gori mcp` creates it on
-      # first serve. realpath raises File::NotFoundError on a fresh path and aborts install.
-      args << "--db=#{File.expand_path(db_path)}" if db_path && !db_path.empty?
-      args << "--project=#{project}" if project && !project.empty?
-      args << "--read-only" if read_only
-      args << "--insecure-upstream" if insecure_upstream
-
-      # Ensure config directory exists
-      Dir.mkdir_p(config_dir) unless Dir.exists?(config_dir)
-
-      # Load existing config or initialize. If the file exists but doesn't parse as a
-      # JSON object, REFUSE rather than clobber it — for `claude-code` this is
-      # ~/.claude.json (the user's entire CLI state: projects, auth, other MCP servers),
-      # so a transient/hand-edit parse error must never wipe it.
-      config = if File.file?(config_path)
-                 raw = File.read(config_path)
-                 if raw.strip.empty?
-                   Hash(String, JSON::Any).new
-                 else
-                   begin
-                     JSON.parse(raw).as_h
-                   rescue
-                     abort "Refusing to overwrite #{config_path}: it exists but isn't a valid JSON object. " \
-                           "Fix or remove it, then re-run the installer."
-                   end
-                 end
-               else
-                 Hash(String, JSON::Any).new
-               end
-
-      mcp_servers = config["mcpServers"]?.try(&.as_h?) || Hash(String, JSON::Any).new
-
-      # Convert args to JSON::Any array
-      json_args = args.map { |a| JSON::Any.new(a) }
-
-      # Create/update gori entry
-      gori_entry = Hash(String, JSON::Any).new
-      gori_entry["command"] = JSON::Any.new(exe_path)
-      gori_entry["args"] = JSON::Any.new(json_args)
-
-      mcp_servers["gori"] = JSON::Any.new(gori_entry)
-      config["mcpServers"] = JSON::Any.new(mcp_servers)
-
-      File.write(config_path, config.to_json)
-      puts "Successfully installed gori MCP server configuration to #{config_path}"
-      puts "Command: #{exe_path} #{args.join(" ")}"
+      path = MCP::Install.install(target, db_path: db_path, project: project,
+        read_only: read_only, insecure_upstream: insecure_upstream)
+      exe = MCP::Install.executable_path
+      args = MCP::Install.build_args(db_path, project, read_only, insecure_upstream)
+      puts "Successfully installed gori MCP server configuration to #{path}"
+      puts "Command: #{exe} #{args.join(" ")}"
     rescue ex
       abort "Failed to install MCP config for #{target}: #{ex.message}"
     end
