@@ -6,6 +6,8 @@ require "../ql"
 require "../replay/engine"
 require "../replay/h2_engine"
 require "../replay/flow_request"
+require "../flow_mapper"
+require "../proxy/codec/http1"
 require "../fuzz"
 require "../convert"
 require "../env"
@@ -30,6 +32,8 @@ module Gori
       # failure the model is meant to see and recover from, distinct from a
       # JSON-RPC protocol error.
       record Result, text : String, is_error : Bool = false
+      record BodyChunkOptions, flow_id : Int64?, replay_id : Int64?, offset : Int64,
+        limit : Int32, raw : Bool
 
       EMPTY_HASH = {} of String => JSON::Any
 
@@ -53,7 +57,8 @@ module Gori
 
       def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool,
                      @project_name : String? = nil, @project_slug : String? = nil,
-                     @db_path : String? = nil)
+                     @db_path : String? = nil, @selection_source : String? = nil,
+                     @workspace_root : String? = nil)
         Env.load_project(@store)
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
@@ -136,8 +141,21 @@ module Gori
           tool j, "get_flow",
             "Full request+response for one flow id (heads + decoded bodies). " \
             "Bodies are de-chunked/decompressed and summarised: inline text when " \
-            "UTF-8 (capped 64KB), else a base64 sample." do |s|
+            "UTF-8 (capped 64KB), else a base64 sample. Use get_response_body_chunk " \
+            "with the same flow id to retrieve exact continuation bytes." do |s|
             s.field "id", intprop("flow id from list_history"), required: true
+          end
+
+          tool j, "get_response_body_chunk",
+            "Read a byte range from a response body when get_flow/send_request reports truncation. " \
+            "Pass exactly one of flow_id or replay_id. Content encoding is decoded by default so " \
+            "offsets continue the inline view; raw=true pages stored wire bytes. Returns UTF-8 text " \
+            "or base64 plus next_offset/complete." do |s|
+            s.field "flow_id", intprop("History flow id")
+            s.field "replay_id", intprop("Replay workbench database id")
+            s.field "offset", intprop("zero-based byte offset (default 0)")
+            s.field "limit", intprop("bytes to return (default 65536, max 262144)")
+            s.field "raw", boolprop("page stored response bytes without content decoding (default false)")
           end
 
           tool j, "list_sitemap",
@@ -162,7 +180,8 @@ module Gori
 
           tool j, "project_info",
             "Project totals: flow count, finding count, captured bytes, earliest capture time, " \
-            "plus which project/db is being served (important when no --project was passed)." { }
+            "plus which project/db is being served and how it was selected. Always verify this " \
+            "before reading or mutating security-test data." { }
 
           tool j, "get_current_context",
             "What the user is currently viewing in the gori TUI: active tab, focused pane, the " \
@@ -255,7 +274,9 @@ module Gori
               s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
               s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
+              s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
               s.field "save_as_replay", boolprop("save this request and its response to the Replay workbench (default false)")
+              s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false)")
               s.field "name", strprop("optional custom name for the saved replay tab (only when save_as_replay=true)")
               s.field "finding_id", intprop("optional finding to link to the saved replay; requires save_as_replay=true")
             end
@@ -417,20 +438,21 @@ module Gori
       # Read-only tools (always exposed). nil when `name` isn't one of them.
       private def read_tool(name : String, h) : Result?
         case name
-        when "list_history"        then list_history(h)
-        when "get_flow"            then get_flow(h)
-        when "list_sitemap"        then list_sitemap(h)
-        when "list_findings"       then list_findings(h)
-        when "get_finding"         then get_finding(h)
-        when "list_scope"          then list_scope
-        when "project_info"        then project_info
-        when "get_current_context" then get_current_context
-        when "get_replay_context"  then get_replay_context(h)
-        when "ql_reference"        then ql_reference
-        when "list_notes"          then list_notes
-        when "get_note"            then get_note(h)
-        when "convert"             then convert(h)
-        when "list_rules"          then list_rules
+        when "list_history"            then list_history(h)
+        when "get_flow"                then get_flow(h)
+        when "get_response_body_chunk" then get_response_body_chunk(h)
+        when "list_sitemap"            then list_sitemap(h)
+        when "list_findings"           then list_findings(h)
+        when "get_finding"             then get_finding(h)
+        when "list_scope"              then list_scope
+        when "project_info"            then project_info
+        when "get_current_context"     then get_current_context
+        when "get_replay_context"      then get_replay_context(h)
+        when "ql_reference"            then ql_reference
+        when "list_notes"              then list_notes
+        when "get_note"                then get_note(h)
+        when "convert"                 then convert(h)
+        when "list_rules"              then list_rules
         end
       end
 
@@ -488,6 +510,71 @@ module Gori
         # surfaces the frames (parity with `gori run show`). Non-WS flows skip the query.
         ws_msgs = detail.row.status == 101 ? @store.ws_messages(id) : [] of Store::WsMessage
         Result.new(Serialize.flow_detail_json(detail, ws_msgs))
+      end
+
+      private def get_response_body_chunk(h) : Result
+        options = body_chunk_options(h)
+
+        loaded = load_response_body(options.flow_id, options.replay_id)
+        return loaded if loaded.is_a?(Result)
+        head, body = loaded
+        stored = body || Bytes.new(0)
+        decoded, decode_note = options.raw ? {nil, nil} : Proxy::Codec::ContentDecode.decode(head, stored)
+        bytes = decoded || stored
+        total = bytes.size.to_i64
+        start = Math.min(options.offset, total).to_i
+        count = Math.min(options.limit, bytes.size - start)
+        chunk = count.zero? ? Bytes.new(0) : bytes[start, count]
+        next_offset = start.to_i64 + count
+        text = String.new(chunk)
+
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "flow_id", options.flow_id
+            j.field "replay_id", options.replay_id
+            j.field "offset", start
+            j.field "returned_bytes", count
+            j.field "total_bytes", total
+            j.field "representation", decoded ? "decoded" : "raw"
+            j.field "decode_note", decode_note if decode_note
+            j.field "complete", next_offset >= total
+            j.field "next_offset", next_offset < total ? next_offset : nil
+            if text.valid_encoding?
+              j.field "encoding", "text"
+              j.field "text", text
+            else
+              j.field "encoding", "base64"
+              j.field "base64", Base64.strict_encode(chunk)
+            end
+          end
+        end)
+      rescue ex : Gori::Error
+        Result.new(ex.message || "invalid response-body arguments", is_error: true)
+      end
+
+      private def body_chunk_options(h) : BodyChunkOptions
+        flow_id = optional_int_arg(h, "flow_id")
+        replay_id = optional_int_arg(h, "replay_id")
+        if flow_id.nil? == replay_id.nil?
+          raise Gori::Error.new("pass exactly one of flow_id or replay_id")
+        end
+        offset = bounded_int_arg(h, "offset", 0_i64, min: 0_i64)
+        limit = bounded_int_arg(h, "limit", 65_536_i64, min: 1_i64, max: 262_144_i64).to_i
+        BodyChunkOptions.new(flow_id, replay_id, offset, limit, bool_arg(h, "raw", false))
+      end
+
+      private def load_response_body(flow_id : Int64?, replay_id : Int64?) : {Bytes?, Bytes?} | Result
+        if id = flow_id
+          detail = @store.get_flow(id)
+          return Result.new("no flow with id #{id}", is_error: true) unless detail
+          {detail.response_head, detail.response_body}
+        elsif id = replay_id
+          replay = @store.get_replay_full(id)
+          return Result.new("no replay with id #{id}", is_error: true) unless replay
+          {replay.response_head, replay.response_body}
+        else
+          Result.new("pass exactly one of flow_id or replay_id", is_error: true)
+        end
       end
 
       private def list_sitemap(h) : Result
@@ -555,6 +642,9 @@ module Gori
             j.field "project", @project_name
             j.field "project_slug", @project_slug
             j.field "db_path", @db_path
+            j.field "selection_source", @selection_source
+            j.field "workspace_root", @workspace_root
+            j.field "workspace_bound", !@workspace_root.nil?
             j.field "read_only", !@allow_actions
             j.field "flows", @store.count
             j.field "findings", @store.count_findings
@@ -847,7 +937,9 @@ module Gori
       # --- action / write tools (gated) ---------------------------------------
 
       private def send_request(h) : Result
-        save = bool(h, "save_as_replay") || false
+        save = bool_arg(h, "save_as_replay", false)
+        record_history = bool_arg(h, "record_history", true)
+        include_sensitive_headers = bool_arg(h, "include_sensitive_headers", false)
         finding_id = int(h, "finding_id")
         return Result.new(id_error(h, "finding_id"), is_error: true) if finding_id.nil? && present?(h, "finding_id")
         if finding_id
@@ -856,97 +948,175 @@ module Gori
         end
 
         built, http2 = build_send_request(h)
+        recorded_flow_id = record_history ? record_outbound_request(built, http2) : nil
         verify = @verify_upstream && !(bool(h, "insecure") || false)
-        result =
-          if http2
-            Replay::H2Engine.send(built.bytes, scheme: built.scheme, host: built.host, port: built.port, verify_upstream: verify)
-          else
-            Replay::Engine.send(built.bytes, scheme: built.scheme, host: built.host, port: built.port, verify_upstream: verify)
-          end
+        result = send_built_request(built, http2, verify)
+        record_outbound_response(recorded_flow_id, result) if recorded_flow_id
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
-        Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} -> #{result.ok? ? "ok" : result.error}" }
+        Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
 
-        # Save as replay if requested
-        replay_id = nil.as(Int64?)
-        if save
-          port_suffix = ((built.scheme == "https" && built.port == 443) || (built.scheme == "http" && built.port == 80)) ? "" : ":#{built.port}"
-          target_url = "#{built.scheme}://#{built.host}#{port_suffix}"
-          pos = @store.replays_meta.size
-          flow_id = int(h, "flow_id")
+        replay_id = persist_send_replay(h, save, built, http2, result,
+          finding_id, recorded_flow_id)
 
-          # Mask secrets in request and target
-          masked_target = Env.mask_secrets(target_url)
-          masked_req = Env.mask_secrets(String.new(built.bytes))
-
-          replay_id = @store.insert_replay(
-            target: masked_target,
-            request: masked_req,
-            http2: http2,
-            auto_cl: true,
-            flow_id: flow_id,
-            position: pos.to_i32,
-            sni: nil,
-            mark_transform: false
-          )
-
-          if replay_id > 0
-            if finding_id
-              @store.add_link(Store::LinkOwnerKind::Finding, finding_id,
-                Store::LinkRefKind::Replay, replay_id)
-            end
-            # If name is specified
-            name = str(h, "name")
-            if name && !name.empty?
-              @store.set_replay_name(replay_id, Env.mask_secrets(name))
-            end
-
-            # Update response
-            if result.ok?
-              head_bytes = result.head || Bytes.new(0)
-              body_bytes = result.body
-              duration = result.duration_us || 0_i64
-              @store.update_replay_response(replay_id, head_bytes, body_bytes, nil, duration)
-              # Feed into Prism when scanning is on (mirrors the TUI Replay path).
-              prism_scan_saved_replay(replay_id, masked_target, masked_req, http2, flow_id,
-                head_bytes, body_bytes, duration)
-            else
-              duration = result.duration_us || 0_i64
-              @store.update_replay_response(replay_id, Bytes.new(0), nil, result.error, duration)
-            end
-          end
-        end
-
-        return Result.new("send failed: #{result.error}", is_error: true) unless result.ok?
-
-        if save && replay_id && replay_id > 0
-          Result.new(JSON.build do |j|
-            j.object do
-              j.field "saved_replay_id", replay_id
-              if resp = result.response
-                j.field "status", resp.status
-                j.field "reason", resp.reason
-                j.field "http_version", resp.version
-                j.field "headers" do
-                  j.array do
-                    resp.headers.each do |hdr|
-                      j.object { j.field "name", hdr.name; j.field "value", hdr.value }
-                    end
-                  end
-                end
-              end
-              j.field "duration_us", result.duration_us
-              j.field "incomplete", true if result.incomplete?
-              Serialize.emit_body(j, "body", result.head, result.body, false)
-            end
-          end)
-        else
-          Result.new(Serialize.replay_result_json(result))
-        end
+        Result.new(send_result_json(result, recorded_flow_id, replay_id,
+          include_sensitive_headers), is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
         # actionable message instead of letting call()'s generic "tool error:"
         # wrapper swallow it, matching fuzz_start's FuzzArgError handling.
         Result.new(ex.message || "invalid request arguments", is_error: true)
+      end
+
+      private def send_built_request(built : RequestBuilder::Built, http2 : Bool,
+                                     verify_upstream : Bool) : Replay::Result
+        if http2
+          Replay::H2Engine.send(built.bytes, scheme: built.scheme, host: built.host,
+            port: built.port, verify_upstream: verify_upstream)
+        else
+          Replay::Engine.send(built.bytes, scheme: built.scheme, host: built.host,
+            port: built.port, verify_upstream: verify_upstream)
+        end
+      end
+
+      private def persist_send_replay(h, save : Bool, built : RequestBuilder::Built,
+                                      http2 : Bool, result : Replay::Result,
+                                      finding_id : Int64?, recorded_flow_id : Int64?) : Int64?
+        return nil unless save
+        port_suffix = ((built.scheme == "https" && built.port == 443) ||
+                       (built.scheme == "http" && built.port == 80)) ? "" : ":#{built.port}"
+        target_url = "#{built.scheme}://#{built.host}#{port_suffix}"
+        # Preserve the original source flow for a flow replay; otherwise link
+        # the Replay tab to the newly recorded History evidence.
+        flow_id = int(h, "flow_id") || recorded_flow_id
+        masked_target = Env.mask_secrets(target_url)
+        masked_req = Env.mask_secrets(String.new(built.bytes))
+        replay_id = @store.insert_replay(
+          target: masked_target,
+          request: masked_req,
+          http2: http2,
+          auto_cl: true,
+          flow_id: flow_id,
+          position: @store.replays_meta.size.to_i32,
+          sni: nil,
+          mark_transform: false
+        )
+        return nil unless replay_id > 0
+
+        @store.add_link(Store::LinkOwnerKind::Finding, finding_id,
+          Store::LinkRefKind::Replay, replay_id) if finding_id
+        if (name = str(h, "name")) && !name.empty?
+          @store.set_replay_name(replay_id, Env.mask_secrets(name))
+        end
+
+        # Persist whatever was received even when framing failed after the
+        # response head. This keeps partial evidence and enables paged reads.
+        @store.update_replay_response(replay_id, result.head, result.body,
+          result.error, result.duration_us)
+        if result.response
+          prism_scan_saved_replay(replay_id, masked_target, masked_req, http2, flow_id,
+            result.head, result.body, result.duration_us)
+        end
+        replay_id
+      end
+
+      private def record_outbound_request(built : RequestBuilder::Built, http2 : Bool) : Int64
+        head, body = split_wire_request(built.bytes)
+        parsed = Proxy::Codec::Http1.parse_request_head(head)
+        captured = Store::CapturedRequest.new(
+          created_at: Time.utc.to_unix_ms * 1000_i64,
+          scheme: built.scheme,
+          host: built.host,
+          port: built.port,
+          method: parsed.method,
+          target: parsed.target,
+          http_version: http2 ? "HTTP/2" : parsed.version,
+          head: head,
+          body: body,
+          body_size: body.try(&.size.to_i64),
+        )
+        id = @store.insert_flow(captured)
+        if id <= 0
+          raise Gori::Error.new("could not record outbound request in History; pass record_history=false only if an unaudited send is intentional")
+        end
+        id
+      end
+
+      private def record_outbound_response(flow_id : Int64, result : Replay::Result) : Nil
+        if response = result.response
+          error = result.error
+          error ||= "upstream response body was incomplete" if result.incomplete?
+          state = error ? Store::FlowState::Error : Store::FlowState::Complete
+          @store.update_response(FlowMapper.response(response,
+            flow_id: flow_id,
+            body: result.body,
+            duration_us: result.duration_us,
+            state: state,
+            error: error,
+            body_size: result.body.try(&.size.to_i64)))
+        else
+          @store.update_response(FlowMapper.error_response(flow_id,
+            result.error || "request failed before a response was received"))
+        end
+      rescue ex
+        # The request already left the host. Keep its result usable, but surface
+        # a failed evidence update on STDERR (never the JSON-RPC channel).
+        Log.error(exception: ex) { "send_request: failed to finalize History flow #{flow_id}" }
+      end
+
+      private def split_wire_request(bytes : Bytes) : {Bytes, Bytes?}
+        boundary = nil.as(Int32?)
+        i = 0
+        while i + 3 < bytes.size
+          if bytes[i] == 0x0d_u8 && bytes[i + 1] == 0x0a_u8 &&
+             bytes[i + 2] == 0x0d_u8 && bytes[i + 3] == 0x0a_u8
+            boundary = i + 4
+            break
+          end
+          i += 1
+        end
+        raise Gori::Error.new("request has no CRLF header terminator; cannot record it in History") unless boundary
+        head = bytes[0, boundary]
+        body_size = bytes.size - boundary
+        body = body_size > 0 ? bytes[boundary, body_size] : nil
+        {head, body}
+      end
+
+      private def send_result_json(result : Replay::Result, recorded_flow_id : Int64?,
+                                   replay_id : Int64?, include_sensitive_headers : Bool) : String
+        JSON.build do |j|
+          j.object do
+            j.field "recorded_flow_id", recorded_flow_id
+            j.field "saved_replay_id", replay_id if replay_id && replay_id > 0
+            j.field "error", result.error unless result.ok?
+            if response = result.response
+              j.field "status", response.status
+              j.field "reason", response.reason
+              j.field "http_version", response.version
+              redacted = false
+              j.field "headers" do
+                j.array do
+                  response.headers.each do |header|
+                    sensitive = sensitive_header?(header.name) && !include_sensitive_headers
+                    redacted ||= sensitive
+                    j.object do
+                      j.field "name", header.name
+                      j.field "value", sensitive ? "[REDACTED]" : header.value
+                    end
+                  end
+                end
+              end
+              j.field "sensitive_headers_redacted", redacted
+            end
+            j.field "duration_us", result.duration_us
+            j.field "incomplete", true if result.incomplete?
+            Serialize.emit_body(j, "body", result.head, result.body, false)
+          end
+        end
+      end
+
+      private def sensitive_header?(name : String) : Bool
+        name.downcase.in?("authorization", "proxy-authorization", "cookie", "set-cookie",
+          "x-api-key", "api-key", "x-auth-token")
       end
 
       # Execute a stored WebSocket replay from MCP. Unlike send_request, this uses
@@ -2125,6 +2295,23 @@ module Gori
         nil
       end
 
+      private def optional_int_arg(h, key : String) : Int64?
+        value = int(h, key)
+        if present?(h, key) && value.nil?
+          raise Gori::Error.new("invalid '#{key}' (expected an integer)")
+        end
+        value
+      end
+
+      private def bounded_int_arg(h, key : String, default : Int64, *, min : Int64,
+                                  max : Int64 = Int64::MAX) : Int64
+        value = optional_int_arg(h, key) || default
+        if value < min
+          raise Gori::Error.new("invalid '#{key}' (expected an integer >= #{min})")
+        end
+        value.clamp(min, max)
+      end
+
       private def bool(h, key : String) : Bool?
         v = h[key]?
         return nil unless v
@@ -2137,6 +2324,14 @@ module Gori
         when "false" then false
         else              nil
         end
+      end
+
+      private def bool_arg(h, key : String, default : Bool) : Bool
+        value = bool(h, key)
+        if present?(h, key) && value.nil?
+          raise Gori::Error.new("invalid '#{key}' (expected true or false)")
+        end
+        value.nil? ? default : value
       end
 
       private def clamp(n : Int64?, default : Int32, max : Int32) : Int32

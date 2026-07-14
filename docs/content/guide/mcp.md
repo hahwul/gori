@@ -25,14 +25,20 @@ gori ships a built-in **MCP (Model Context Protocol) server**. Instead of embedd
 gori mcp
 ```
 
-The server speaks JSON-RPC 2.0 over stdio: STDOUT carries the protocol, STDERR carries logs. With no `--db` or `--project` it serves the most-recently-active project.
+The server speaks JSON-RPC 2.0 over stdio: STDOUT carries the protocol, STDERR carries logs. Tool results include both backward-compatible text and MCP `structuredContent` when the payload is JSON.
 
 ## Choosing a Project
 
 ```bash
+cd /path/to/my-repository && gori mcp # path-binds this Git workspace to its own gori project
 gori mcp --project my-engagement   # serve a named project's database
 gori mcp --db /path/to/project.db  # serve a specific database file
+gori mcp --use-active-project      # explicitly serve the active TUI/MRU project
 ```
+
+With no explicit selector, gori discovers the nearest Git root and binds its canonical path to an isolated project. The binding prevents two repositories with the same directory name from sharing a database. If the process is outside a Git workspace, gori fails closed instead of silently serving an unrelated active project; pass `--project`, `--db`, `GORI_MCP_PROJECT`, `GORI_MCP_DB`, or the explicit `--use-active-project` opt-in.
+
+Call `project_info` before using data. It reports the selected project, database path, workspace root, and selection source.
 
 ## Read-Only Mode
 
@@ -62,6 +68,8 @@ gori mcp --install-grok
 
 Codex and Grok use TOML with an `[mcp_servers.gori]` table (not JSON). Restart the client (or re-open the session) after installing so it reloads MCP servers.
 
+If a client starts MCP outside your repository directory, pin the installation to a project, for example `gori mcp --project my-engagement --install-codex`.
+
 ## Tools
 
 **Read tools** (always available):
@@ -70,13 +78,14 @@ Codex and Grok use TOML with an `[mcp_servers.gori]` table (not JSON). Restart t
 |------|---------|
 | `list_history` | List flows newest-first, with optional QL and pagination |
 | `get_flow` | Full request + response for one flow |
+| `get_response_body_chunk` | Page through decoded (or raw) flow/Replay responses beyond the inline 64 KiB cap |
 | `list_sitemap` | Distinct endpoints (host, method, path) |
 | `list_findings` / `get_finding` | Read triaged findings |
 | `list_scope` | Current scope include/exclude rules |
 | `list_notes` / `get_note` | Read project notes |
 | `list_rules` | List the project's Match & Replace rules in apply order |
 | `convert` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
-| `project_info` | Flow / finding counts and which database is served |
+| `project_info` | Flow / finding counts, database, workspace binding, and selection source |
 | `get_current_context` | What the user is viewing in the TUI right now |
 | `get_replay_context` | Replay workbench state and saved sessions |
 | `ql_reference` | The query-language reference |
@@ -85,7 +94,7 @@ Codex and Grok use TOML with an `[mcp_servers.gori]` table (not JSON). Restart t
 
 | Tool | Purpose |
 |------|---------|
-| `send_request` | Send / replay an HTTP request (active; expands `$KEY` env tokens) |
+| `send_request` | Send / replay an HTTP request (active; records History by default, expands `$KEY` env tokens, and redacts sensitive response-header values unless explicitly requested) |
 | `create_replay` / `update_replay` / `delete_replay` | Manage Replay sessions |
 | `create_finding` / `update_finding` | Record and update findings |
 | `create_note` / `update_note` / `delete_note` | Manage project notes |

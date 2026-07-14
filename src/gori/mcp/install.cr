@@ -43,7 +43,8 @@ module Gori
 
       # Build the argv passed to the gori binary after the executable path.
       def self.build_args(db_path : String? = nil, project : String? = nil,
-                          read_only : Bool = false, insecure_upstream : Bool = false) : Array(String)
+                          read_only : Bool = false, insecure_upstream : Bool = false,
+                          use_active_project : Bool = false) : Array(String)
         args = ["mcp"]
         # expand_path (not realpath): the db need not exist yet — `gori mcp` creates it on
         # first serve. realpath raises File::NotFoundError on a fresh path and aborts install.
@@ -51,6 +52,7 @@ module Gori
         args << "--project=#{project}" if project && !project.empty?
         args << "--read-only" if read_only
         args << "--insecure-upstream" if insecure_upstream
+        args << "--use-active-project" if use_active_project
         args
       end
 
@@ -64,9 +66,10 @@ module Gori
       # Install gori into the target client's config. Returns the path written.
       def self.install(target : String, *, exe_path : String = executable_path,
                        db_path : String? = nil, project : String? = nil,
-                       read_only : Bool = false, insecure_upstream : Bool = false) : String
+                       read_only : Bool = false, insecure_upstream : Bool = false,
+                       use_active_project : Bool = false) : String
         config_path = config_path(target)
-        args = build_args(db_path, project, read_only, insecure_upstream)
+        args = build_args(db_path, project, read_only, insecure_upstream, use_active_project)
         Dir.mkdir_p(File.dirname(config_path)) unless Dir.exists?(File.dirname(config_path))
 
         if toml_target?(target)

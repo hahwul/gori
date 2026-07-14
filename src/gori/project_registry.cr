@@ -13,6 +13,11 @@ module Gori
     # (lossily) from the slugified directory. Lives inside the project dir, so it
     # is never itself listed as a project.
     NAME_FILE = ".name"
+    # Optional absolute source-workspace binding used by headless integrations
+    # such as MCP. A display name alone is not a safe identity: two checkouts can
+    # share the same basename, and the globally active TUI project can belong to
+    # an entirely different repository.
+    WORKSPACE_FILE = ".workspace"
 
     def initialize(@root : String)
     end
@@ -23,14 +28,39 @@ module Gori
     def find(name_or_slug : String) : Project?
       q = name_or_slug.strip.downcase
       return nil if q.empty?
-      list.find do |p|
-        p.name.downcase == q || slug_of(p).downcase == q
-      end
+      projects = list
+      # A slug is unique while display names need not be (two workspaces with the
+      # same basename deliberately share a display name). Prefer an exact slug so
+      # `--project=api` cannot resolve the newer `api-2` merely due to MRU order.
+      projects.find { |project| slug_of(project).downcase == q } ||
+        projects.find { |project| project.name.downcase == q }
     end
 
     # The on-disk directory name for a project (the slugified workspace dir).
     def slug_of(project : Project) : String
       File.basename(project.dir)
+    end
+
+    # Resolve a project by the workspace path it was explicitly bound to.
+    def find_by_workspace(path : String) : Project?
+      wanted = normalized_workspace(path)
+      return nil unless Dir.exists?(@root)
+      Dir.each_child(@root) do |child|
+        next if child.starts_with?(TEMP_PREFIX) || child.starts_with?('.')
+        dir = File.join(@root, child)
+        next unless Dir.exists?(dir)
+        project = Project.new(display_name(dir, child), File.join(dir, Project::DB_FILE))
+        return project if workspace_of(project) == wanted
+      end
+      nil
+    end
+
+    # The canonical workspace bound to this project, if any. Legacy projects do
+    # not have this sidecar and remain usable by name/slug.
+    def workspace_of(project : Project) : String?
+      File.read(File.join(project.dir, WORKSPACE_FILE)).strip.presence
+    rescue
+      nil
     end
 
     # Existing named projects, most-recently-active first.
@@ -85,6 +115,50 @@ module Gori
       proj
     end
 
+    # Resolve or create the project for a source workspace. Exact path binding
+    # wins. An unbound legacy project is never adopted implicitly: selecting its
+    # existing traffic requires --project/--db, while automatic selection creates
+    # an isolated numeric slug. Directory creation is atomic across MCP processes.
+    def create_for_workspace(name : String, workspace_path : String) : Project
+      workspace = normalized_workspace(workspace_path)
+      if existing = find_by_workspace(workspace)
+        return existing
+      end
+
+      display = name.strip
+      base_slug = slugify(display)
+      raise Gori::Error.new("invalid project name") if base_slug.empty?
+
+      slug = base_slug
+      n = 2
+      loop do
+        dir = File.join(@root, slug)
+        db = File.join(dir, Project::DB_FILE)
+        unless Dir.exists?(dir)
+          begin
+            # Unlike mkdir_p, mkdir is an atomic claim. Two different workspaces
+            # racing for the same basename cannot both bind this directory.
+            Dir.mkdir(dir, Paths::DIR_MODE)
+            File.chmod(dir, Paths::DIR_MODE) rescue nil
+            File.write(File.join(dir, WORKSPACE_FILE), workspace)
+            File.write(File.join(dir, NAME_FILE), display) rescue nil
+            return Project.new(display, db)
+          rescue File::AlreadyExistsError
+            # Another process claimed it after the exists? check; inspect below.
+          end
+        end
+
+        project = Project.new(display_name(dir, slug), db)
+        bound = workspace_of(project)
+        if bound == workspace
+          return project
+        end
+
+        slug = "#{base_slug}-#{n}"
+        n += 1
+      end
+    end
+
     # Keep `slug` when the directory is free OR already belongs to a project with the SAME
     # display name (reopen-by-name, the documented behaviour); otherwise append -2/-3/… so two
     # different names that slugify identically ("Test Project" vs "test!project") don't overwrite
@@ -105,6 +179,15 @@ module Gori
       dir = File.join(@root, slug)
       return false unless Dir.exists?(dir) && File.exists?(File.join(dir, Project::DB_FILE))
       display_name(dir, slug).downcase != display.downcase
+    end
+
+    private def normalized_workspace(path : String) : String
+      expanded = File.expand_path(path)
+      begin
+        File.realpath(expanded)
+      rescue
+        expanded
+      end
     end
 
     # A throwaway workspace, deleted when its session closes.

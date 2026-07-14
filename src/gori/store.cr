@@ -831,6 +831,25 @@ module Gori
       nil
     end
 
+    # One full Replay row including its persisted response body. MCP uses this
+    # for explicit, paged body reads; unlike `replays`, it never materializes all
+    # replay response BLOBs just to retrieve one continuation chunk.
+    def get_replay_full(id : Int64) : ReplayRecord?
+      @db.query(
+        "SELECT id, target, request, http2, auto_content_length, flow_id, position, " \
+        "response_head, response_body, response_error, response_duration_us, name, sni, mark_transform, tags " \
+        "FROM replays WHERE id = ?", id) do |rs|
+        if rs.move_next
+          return ReplayRecord.new(
+            rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
+            rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
+            mark_transform: rs.read(Int32) != 0, tags: rs.read(String?))
+        end
+      end
+      nil
+    end
+
     def replays_meta : Array(ReplayRecord)
       list = [] of ReplayRecord
       @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform FROM replays ORDER BY position, id") do |rs|

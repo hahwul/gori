@@ -28,12 +28,14 @@ module Gori
       EMPTY_ARGS = JSON::Any.new({} of String => JSON::Any)
 
       def initialize(@store : Store, *, allow_actions : Bool, verify_upstream : Bool,
-                     project_name : String? = nil, project_slug : String? = nil,
-                     db_path : String? = nil,
+                     @project_name : String? = nil, @project_slug : String? = nil,
+                     @db_path : String? = nil, @selection_source : String? = nil,
+                     @workspace_root : String? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
         @tools = Tools.new(@store, allow_actions, verify_upstream,
-          project_name: project_name, project_slug: project_slug, db_path: db_path)
+          project_name: @project_name, project_slug: @project_slug, db_path: @db_path,
+          selection_source: @selection_source, workspace_root: @workspace_root)
         @initialized = false
       end
 
@@ -118,11 +120,17 @@ module Gori
       # exposes — in particular whether the (otherwise simply absent) action tools are
       # disabled by read-only mode, rather than discovering it only on a rejected call.
       private def instructions_text : String
-        base = "gori MCP exposes the active project's captured HTTP traffic " \
+        selected = if @project_name || @project_slug
+                     " This server is pinned to project #{@project_name || @project_slug}#{" [#{@project_slug}]" if @project_slug}" \
+                     " via #{@selection_source || "an explicit database"}#{" for workspace #{@workspace_root}" if @workspace_root}."
+                   else
+                     " Project selection source: #{@selection_source || "unknown"}; call project_info before using data."
+                   end
+        base = "gori MCP exposes the selected project's captured HTTP traffic " \
                "(history, flows, sitemap, scope, findings, notes, match&replace rules), plus a " \
                "pure `convert` encode/decode/hash tool. Call ql_reference before " \
                "writing list_history/list_sitemap queries. Timestamps include unix " \
-               "microseconds plus *_iso RFC3339 fields where available."
+               "microseconds plus *_iso RFC3339 fields where available.#{selected}"
         if @allow_actions
           "#{base} Action tools are enabled: send_request (supports flow_id replay), " \
           "send_websocket (executes a persisted WS replay), " \
@@ -152,9 +160,27 @@ module Gori
                 j.object { j.field "type", "text"; j.field "text", result.text }
               end
             end
+            if structured = structured_content(result.text)
+              j.field("structuredContent") { structured.to_json(j) }
+            end
             j.field "isError", result.is_error
           end
         end
+      end
+
+      # MCP structuredContent is an object. Preserve the text block for older
+      # clients, while giving newer clients parsed data directly so callers do
+      # not have to JSON-decode content[0].text a second time. Array/scalar tool
+      # payloads are wrapped to satisfy the object shape required by MCP.
+      private def structured_content(text : String) : JSON::Any?
+        parsed = JSON.parse(text)
+        return parsed if parsed.as_h?
+        if parsed.as_a?
+          return JSON::Any.new({"items" => parsed})
+        end
+        JSON::Any.new({"value" => parsed})
+      rescue JSON::ParseException
+        nil
       end
 
       # Field of a JSON object that may be nil/non-object — never raises.

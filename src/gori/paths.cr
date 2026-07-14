@@ -36,10 +36,9 @@ module Gori
     end
 
     # A tiny global marker holding the DB PATH of the project the interactive TUI last
-    # opened, so a separate `gori mcp` process (given no --db/--project) serves what the user
-    # is viewing instead of an mtime-MRU guess. Path (not name) so display-name-vs-slug never
-    # breaks resolution. Never cleared — the last-viewed project is the sensible default after
-    # the TUI closes (a since-deleted path just falls through to MRU). Read by CLI.resolve_mcp_db.
+    # opened. Headless integrations use this only after an explicit opt-in (for MCP,
+    # `--use-active-project`); a source workspace must never silently inherit another
+    # repository's active project. Path (not name) avoids display-name/slug ambiguity.
     def self.active_project_file : String
       File.join(home_dir, "active_project")
     end
@@ -51,7 +50,7 @@ module Gori
       File.write(tmp, path)
       File.rename(tmp, dest)
     rescue
-      # best-effort: a missing/failed marker just falls back to MRU in resolve_mcp_db.
+      # best-effort: a missing/failed marker leaves explicit active-project lookup unavailable.
     end
 
     def self.read_active_project : String?

@@ -86,6 +86,26 @@ private def start_mcp_ws_origin : Int32
   port
 end
 
+# One-shot HTTP/1 origin used to verify send_request audit recording, response
+# header redaction, and continuation reads for bodies larger than the MCP cap.
+private def start_mcp_http_origin(body : String, extra_headers = "") : Int32
+  origin = TCPServer.new("127.0.0.1", 0)
+  port = origin.local_address.port
+  spawn do
+    next unless conn = origin.accept?
+    conn.read_timeout = 5.seconds
+    Gori::Proxy::Codec::Http1.read_head(conn)
+    conn << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n" \
+            "Content-Length: #{body.bytesize}\r\n#{extra_headers}\r\n#{body}"
+    conn.flush
+    conn.close
+    origin.close
+  rescue
+    origin.close rescue nil
+  end
+  port
+end
+
 private INIT = %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}})
 
 describe Gori::MCP::Server do
@@ -226,6 +246,20 @@ describe Gori::MCP::Server do
         body = tool_payload(drive(store, call)[0])["response_body"]
         body["encoding"].as_s.should eq("text")
         body["text"].as_s.should eq("hello gzip world")
+      end
+    end
+
+    it "continues paging in the decoded representation for compressed bodies" do
+      with_store do |store|
+        text = "z" * (Gori::MCP::Serialize::MAX_TEXT + 512)
+        id = seed_flow(store, "ex.test", "GET", "/gzip-big", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n",
+          resp_body: gzip_bytes(text), content_type: "text/plain")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_response_body_chunk","arguments":{"flow_id":#{id},"offset":#{Gori::MCP::Serialize::MAX_TEXT},"limit":512}}})
+        chunk = tool_payload(drive(store, call)[0])
+        chunk["representation"].as_s.should eq("decoded")
+        chunk["text"].as_s.should eq("z" * 512)
+        chunk["complete"].as_bool.should be_true
       end
     end
 
@@ -706,14 +740,63 @@ describe Gori::MCP::Server do
     it "includes project metadata fields" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"project_info","arguments":{}}})
-        info = tool_payload(drive(store, call)[0])
+        response = drive(store, call, project_name: "demo", project_slug: "demo")[0]
+        info = tool_payload(response)
         info["flows"].as_i.should eq(0)
         info["read_only"].as_bool.should be_false
+        # Modern MCP clients get parsed data directly; content[0].text remains
+        # for backward compatibility.
+        response["result"]["structuredContent"]["project"].as_s.should eq("demo")
       end
     end
   end
 
   describe "send_request" do
+    it "records a successful request in History by default and redacts sensitive response headers" do
+      with_store do |store|
+        port = start_mcp_http_origin("hello", "Set-Cookie: session=top-secret\r\n")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/audit"}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_false
+        payload = tool_payload(resp)
+        flow_id = payload["recorded_flow_id"].as_i64
+        payload["headers"].as_a.find { |header| header["name"].as_s == "Set-Cookie" }.not_nil!["value"].as_s.should eq("[REDACTED]")
+        payload["sensitive_headers_redacted"].as_bool.should be_true
+        detail = store.get_flow(flow_id).not_nil!
+        detail.row.target.should eq("/audit")
+        detail.row.status.should eq(200)
+        String.new(detail.response_body.not_nil!).should eq("hello")
+      end
+    end
+
+    it "allows an explicit unaudited send and an explicit sensitive-header response" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok", "Set-Cookie: session=visible\r\n")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","record_history":false,"include_sensitive_headers":true}}})
+        payload = tool_payload(drive(store, call, verify_upstream: false)[0])
+        payload["recorded_flow_id"].raw.should be_nil
+        payload["headers"].as_a.find { |header| header["name"].as_s == "Set-Cookie" }.not_nil!["value"].as_s.should eq("session=visible")
+        store.count.should eq(0)
+      end
+    end
+
+    it "pages the complete stored response after the inline body is truncated" do
+      with_store do |store|
+        body = "a" * (Gori::MCP::Serialize::MAX_TEXT + 4096)
+        port = start_mcp_http_origin(body)
+        send = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/big"}}})
+        sent = tool_payload(drive(store, send, verify_upstream: false)[0])
+        sent["body"]["truncated"].as_bool.should be_true
+        flow_id = sent["recorded_flow_id"].as_i64
+
+        chunk_call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_response_body_chunk","arguments":{"flow_id":#{flow_id},"offset":#{Gori::MCP::Serialize::MAX_TEXT},"limit":4096}}})
+        chunk = tool_payload(drive(store, chunk_call)[0])
+        chunk["returned_bytes"].as_i.should eq(4096)
+        chunk["complete"].as_bool.should be_true
+        chunk["text"].as_s.should eq("a" * 4096)
+      end
+    end
+
     it "replays a captured flow via flow_id without a url" do
       with_store do |store|
         id = seed_flow(store, "ex.test", "GET", "/replay-me", 200)
@@ -729,7 +812,9 @@ describe Gori::MCP::Server do
         call = %({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/"}}})
         resp = drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
-        resp["result"]["content"][0]["text"].as_s.downcase.should contain("fail")
+        payload = tool_payload(resp)
+        payload["error"].as_s.downcase.should contain("fail")
+        store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!.row.state.error?.should be_true
       end
     end
 

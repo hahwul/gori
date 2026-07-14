@@ -1,5 +1,6 @@
 require "./mcp/serialize"
 require "./mcp/request_builder"
+require "./mcp/project_resolver"
 require "./mcp/tools"
 require "./mcp/server"
 require "./mcp/install"

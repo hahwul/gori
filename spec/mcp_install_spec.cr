@@ -32,6 +32,8 @@ describe Gori::MCP::Install do
       Gori::MCP::Install.build_args.should eq(["mcp"])
       Gori::MCP::Install.build_args(project: "eng", read_only: true).should eq(
         ["mcp", "--project=eng", "--read-only"])
+      Gori::MCP::Install.build_args(use_active_project: true).should eq(
+        ["mcp", "--use-active-project"])
     end
   end
 

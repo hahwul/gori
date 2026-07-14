@@ -288,9 +288,9 @@ module Gori::Tui
     end
 
     def run : Symbol
-      # Record the opened project's db path globally so a separate `gori mcp` (given no
-      # --db/--project) serves what the user is viewing instead of an mtime-MRU guess. Path,
-      # not name, so display-name-vs-slug never breaks resolution (see CLI.resolve_mcp_db).
+      # Record the opened project's db path globally for explicitly opted-in headless
+      # integrations (`gori mcp --use-active-project`). Workspace-aware MCP launches use
+      # their path binding instead, preventing a different repository from inheriting this.
       Paths.write_active_project(@session.project.db_path)
       history_controller.view.reload(@session.store)
       notes_controller.view.reload(@session.store) # load persisted notes up front so the tab is ready before it's ever focused

@@ -234,6 +234,7 @@ MCP stdio server. See the [MCP guide](/guide/mcp/) for tool details.
 |--------|-------------|
 | `--db=PATH` | Serve this database (overrides `--project`) |
 | `--project=NAME` | Serve a named project's database |
+| `--use-active-project` | Ignore Git-workspace selection and explicitly serve the active TUI/MRU project |
 | `--insecure-upstream` | `send_request`: skip upstream TLS verification |
 | `--read-only` | Disable action tools (`send_request`, create/update findings, fuzz/mine) |
 | `--install-claude` | Write Claude Desktop `mcpServers` config |

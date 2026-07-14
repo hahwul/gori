@@ -426,15 +426,18 @@ module Gori
       project = nil.as(String?)
       insecure_upstream = false
       read_only = false
+      use_active_project = false
       install_target = nil.as(String?)
 
       parser = OptionParser.new do |p|
         p.banner = "Usage: gori mcp [options]\n\n" \
                    "Start an MCP (Model Context Protocol) server over stdio. An AI client\n" \
                    "spawns this and talks JSON-RPC on stdin/stdout. With no --db/--project,\n" \
-                   "the most-recently-used project is served."
+                   "a Git workspace is path-bound to its own project. Outside a workspace,\n" \
+                   "choose --project/--db or explicitly pass --use-active-project."
         p.on("--db=PATH", "Serve this SQLite db (overrides --project)") { |v| db_path = v }
         p.on("--project=NAME", "Serve a named project's db") { |v| project = v }
+        p.on("--use-active-project", "Ignore the current Git workspace and serve the active TUI/MRU project") { use_active_project = true }
         p.on("--insecure-upstream", "send_request: skip upstream TLS verification") { insecure_upstream = true }
         p.on("--read-only", "Disable action tools (send_request, create/update_finding)") { read_only = true }
         p.on("--install-agy", "Install gori as an MCP server in Antigravity (~/.gemini/antigravity-cli/mcp_config.json)") { install_target = "agy" }
@@ -448,8 +451,12 @@ module Gori
       end
       parser.parse(args)
 
+      if use_active_project && (db_path.try(&.presence) || project.try(&.presence))
+        abort "gori mcp: --use-active-project cannot be combined with --db/--project"
+      end
+
       if target = install_target
-        install_mcp_config(target, db_path, project, read_only, insecure_upstream)
+        install_mcp_config(target, db_path, project, read_only, insecure_upstream, use_active_project)
         exit 0
       end
 
@@ -457,12 +464,17 @@ module Gori
       Log.setup(:info, Log::IOBackend.new(STDERR))
       Settings.load # send_request's replay engines read the upstream-proxy setting from here
 
-      resolved, project_name, project_slug = resolve_mcp_db(db_path, project)
-      Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name}#{" [#{project_slug}]" if project_slug} (actions=#{!read_only})" }
-      # Make the implicit fallback visible (STDERR only — STDOUT is the JSON-RPC stream):
-      # with no --db/--project the most-recently-used project (or the default db) is served,
-      # which can silently be an empty database an AI client then queries as if it were real.
-      Log.warn { "mcp: no --db/--project given — defaulting to #{resolved}" } if db_path.nil? && project.nil?
+      selection = resolve_mcp_project(db_path, project, workspace_project: !use_active_project,
+        allow_active_fallback: use_active_project)
+      resolved = selection.db_path
+      project_name = selection.project_name
+      project_slug = selection.project_slug
+      Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name}#{" [#{project_slug}]" if project_slug} source=#{selection.source} (actions=#{!read_only})" }
+      if selection.auto_created
+        Log.warn { "mcp: created an isolated project for workspace #{selection.workspace_root}; use --project/--db to override" }
+      elsif selection.source.in?("active-tui", "mru", "default-db")
+        Log.warn { "mcp: no source workspace or explicit selector — defaulting via #{selection.source} to #{resolved}" }
+      end
 
       # Opening a non-SQLite / unreadable file raises deep in the driver; turn that
       # into a clean error instead of an unhandled backtrace (parity with `gori run`).
@@ -475,56 +487,33 @@ module Gori
       Log.warn { "mcp: #{resolved} has no captured flows (empty database)" } if store.count.zero?
       begin
         server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
-          project_name: project_name, project_slug: project_slug, db_path: resolved)
+          project_name: project_name, project_slug: project_slug, db_path: resolved,
+          selection_source: selection.source, workspace_root: selection.workspace_root)
         server.run # blocks until STDIN EOF (client closed)
       ensure
         store.close
       end
     end
 
-    private def self.install_mcp_config(target : String, db_path : String?, project : String?, read_only : Bool, insecure_upstream : Bool) : Nil
+    private def self.install_mcp_config(target : String, db_path : String?, project : String?, read_only : Bool,
+                                        insecure_upstream : Bool, use_active_project : Bool) : Nil
       path = MCP::Install.install(target, db_path: db_path, project: project,
-        read_only: read_only, insecure_upstream: insecure_upstream)
+        read_only: read_only, insecure_upstream: insecure_upstream,
+        use_active_project: use_active_project)
       exe = MCP::Install.executable_path
-      args = MCP::Install.build_args(db_path, project, read_only, insecure_upstream)
+      args = MCP::Install.build_args(db_path, project, read_only, insecure_upstream, use_active_project)
       puts "Successfully installed gori MCP server configuration to #{path}"
       puts "Command: #{exe} #{args.join(" ")}"
     rescue ex
       abort "Failed to install MCP config for #{target}: #{ex.message}"
     end
 
-    # Resolves which project DB `gori mcp` serves: explicit --db wins, then a named
-    # --project (display name or directory slug), then the most-recently-used project,
-    # then the default headless db. Returns {db_path, display_name, slug}.
-    private def self.resolve_mcp_db(db : String?, project : String?) : {String, String?, String?}
-      Paths.ensure_dirs
-      registry = ProjectRegistry.new(Paths.projects_dir)
-      if d = db
-        unless d.empty? # an empty --db= falls through to project/MRU (Crystal: "" is truthy)
-          # Validate parent directory exists, allowing SQLite to auto-create the DB file on first serve
-          parent = File.dirname(d)
-          abort "gori mcp: --db directory does not exist: #{parent}" unless Dir.exists?(parent)
-          proj = registry.list.find { |p| p.db_path == d }
-          return {d, proj.try(&.name), proj.try { |p| registry.slug_of(p) }}
-        end
-      end
-      if name = project
-        proj = registry.find(name)
-        abort "gori mcp: no such project: #{name} (match display name or directory slug)" unless proj
-        return {proj.db_path, proj.name, registry.slug_of(proj)}
-      end
-      # Prefer the db path the interactive TUI last recorded (its ui-state is what
-      # get_current_context reports). Match by PATH, not name, so a project's display name
-      # vs its dir slug can't miss. Fall back to the mtime-MRU project, then the default db.
-      if path = Paths.read_active_project
-        if File.file?(path)
-          proj = registry.list.find { |p| p.db_path == path }
-          return {path, proj.try(&.name), proj.try { |p| registry.slug_of(p) }}
-        end
-      end
-      mru = registry.list.first?
-      db = mru.try(&.db_path) || Paths.default_db
-      {db, mru.try(&.name), mru.try { |p| registry.slug_of(p) }}
+    private def self.resolve_mcp_project(db : String?, project : String?, *, workspace_project : Bool,
+                                         allow_active_fallback : Bool) : MCP::ProjectResolver::Selection
+      MCP::ProjectResolver.resolve(db, project, workspace_project: workspace_project,
+        allow_active_fallback: allow_active_fallback)
+    rescue ex : MCP::ProjectResolver::Error | Gori::Error
+      abort "gori mcp: #{ex.message}"
     end
 
     private def self.run_update(args : Array(String)) : Nil
