@@ -18,7 +18,7 @@ private class HiddenParamBackend < F::Backend
                  @grow : Array(String) = [] of String, @echo : Bool = false)
   end
 
-  def send(bytes : Bytes) : Gori::Replay::Result
+  def send(bytes : Bytes) : Gori::Repeater::Result
     @sent += 1
     params = query_params(bytes)
     body = "BASELINE BODY CONTENT"
@@ -44,10 +44,10 @@ private class HiddenParamBackend < F::Backend
     pairs
   end
 
-  private def ok(body : String) : Gori::Replay::Result
+  private def ok(body : String) : Gori::Repeater::Result
     head = "HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
     resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
-    Gori::Replay::Result.new(head, body.to_slice, resp, 1000_i64)
+    Gori::Repeater::Result.new(head, body.to_slice, resp, 1000_i64)
   end
 end
 
@@ -59,10 +59,10 @@ private class FixedBodyBackend < F::Backend
   def initialize(@origin : F::Origin, @body : String)
   end
 
-  def send(bytes : Bytes) : Gori::Replay::Result
+  def send(bytes : Bytes) : Gori::Repeater::Result
     head = "HTTP/1.1 200 OK\r\nContent-Length: #{@body.bytesize}\r\n\r\n".to_slice
     resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
-    Gori::Replay::Result.new(head, @body.to_slice, resp, 1000_i64)
+    Gori::Repeater::Result.new(head, @body.to_slice, resp, 1000_i64)
   end
 end
 

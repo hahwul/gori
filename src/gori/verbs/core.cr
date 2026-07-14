@@ -138,7 +138,7 @@ module Gori
         "scope.delete-rule", "Delete scope rule", "Remove the selected scope rule",
         Verb::Scope::Project, [Verb::Chord.new("d")], available: scope_rule) { |ctx| ctx.scope_delete_rule; nil }
 
-      # The single smart Copy (see replay.copy in verbs/history.cr) — copy-all is gone.
+      # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       # Was `hidden: true` (the menu only ever showed "Copy description"); now that
       # this IS the one Copy action, it needs to be visible. Project shares
       # Verb::Scope::Body with the History list (Body is the generic "content pane
@@ -221,7 +221,7 @@ module Gori
       # default-hidden one (Miner) — stays reachable from the command palette.
       {
         :project => "Project", :sitemap => "Sitemap", :history => "History", :intercept => "Intercept",
-        :replay => "Replay", :fuzzer => "Fuzzer", :miner => "Miner", :decoder => "Decoder",
+        :repeater => "Repeater", :fuzzer => "Fuzzer", :miner => "Miner", :decoder => "Decoder",
         :comparer => "Comparer", :prism => "Prism", :findings => "Findings", :notes => "Notes",
       }.each do |tab, label|
         r.register Verb::Definition.new(

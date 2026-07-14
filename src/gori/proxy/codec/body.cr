@@ -201,7 +201,7 @@ module Gori::Proxy::Codec
     # so the caller must close the connection (a half-delivered body can't be
     # followed by a keep-alive request without desyncing the peer).
     #
-    # `buf` is the scratch copy buffer. When nil (Replay/Fuzz/Miner callers) a body
+    # `buf` is the scratch copy buffer. When nil (Repeater/Fuzz/Miner callers) a body
     # allocates a fresh 64 KiB slice, as before. A caller that forwards many bodies on
     # one connection (ClientConn) passes ONE reused buffer so a keep-alive stream stops
     # churning a large-object 64 KiB allocation per body — safe because a body is pumped
@@ -220,21 +220,21 @@ module Gori::Proxy::Codec
       complete
     end
 
-    # Reads a message body (by framing) into a single buffer — used by the Replay
+    # Reads a message body (by framing) into a single buffer — used by the Repeater
     # engine to capture a response without forwarding it anywhere.
     def self.read(src : IO, framing : BodyFraming, length : Int64) : Bytes?
       read_complete(src, framing, length)[0]
     end
 
     # As `read`, but also returns whether the body completed (false = a
-    # Content-Length/chunked body the origin cut short). Lets the Replay engine
+    # Content-Length/chunked body the origin cut short). Lets the Repeater engine
     # flag a half-delivered response instead of presenting it as whole.
     def self.read_complete(src : IO, framing : BodyFraming, length : Int64) : {Bytes?, Bool}
       return {nil, true} if framing.none?
       capture = IO::Memory.new
       # The body is already buffered once in `capture`; tee into a discard sink rather than
       # a second IO::Memory so a large response isn't held in memory TWICE (the old
-      # `IO::Memory.new` tee doubled peak RAM on every replay/read_complete).
+      # `IO::Memory.new` tee doubled peak RAM on every repeater/read_complete).
       complete = stream(src, capture, framing, length, DiscardIO.new)
       {capture.to_slice.dup, complete}
     end

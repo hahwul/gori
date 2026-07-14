@@ -96,7 +96,7 @@ describe Gori::Tui::Chrome do
     backend.contains?("Intercept").should be_true
     backend.contains?("Sitemap").should be_true
     backend.contains?("(3)").should be_true        # held-message badge on Intercept (the only tab-bar count)
-    backend.contains?("Findings(").should be_false # findings/replay/notes carry no count badge
+    backend.contains?("Findings(").should be_false # findings/repeater/notes carry no count badge
     # active segment ` Project ` (now first tab) starts at col 2 (rect.x+1 fill, +1 pad); FOCUS_GOLD pill.
     backend.fg_at(2, 1).should eq(Theme.ink_on(Theme.focus_gold))
     backend.bg_at(2, 1).should eq(Theme.focus_gold)
@@ -157,7 +157,7 @@ describe Gori::Tui::Chrome do
     content.h.should eq(outer.h - 2 - BodyChrome::STRIP_H) # frame inset + strip
   end
 
-  it "carves chips-only when strip_divider is false (Replay filter owns the hairline)" do
+  it "carves chips-only when strip_divider is false (Repeater filter owns the hairline)" do
     outer = Rect.new(0, 0, 80, 20)
     strip = BodyChrome.strip_rect(outer, strip: true, strip_divider: false).not_nil!
     content = BodyChrome.content_rect(outer, strip: true, strip_divider: false)
@@ -183,7 +183,7 @@ describe Gori::Tui::Chrome do
     screen = Screen.new(backend)
     BodyChrome.render_subtab_strip(screen, Rect.new(0, 0, 60, 1),
       ["1:alpha", "2:beta"], 0, focused: true)
-    # Chips still render; rect.h < 2 means no hline is drawn (Replay filter owns it).
+    # Chips still render; rect.h < 2 means no hline is drawn (Repeater filter owns it).
     backend.bg_at(2, 0).should eq(Theme.focus_gold)
     backend.row(0).should_not contain("─")
   end

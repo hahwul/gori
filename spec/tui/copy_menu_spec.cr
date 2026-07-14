@@ -64,7 +64,7 @@ describe Gori::Tui::CopyMenu do
       opt(opts, 'w').should be_nil
     end
 
-    it "builds a shell-safe wscat command for a WebSocket Replay" do
+    it "builds a shell-safe wscat command for a WebSocket Repeater" do
       upgrade = "GET /gateway?bot=1 HTTP/1.1\r\n" \
                 "Host: socket.example:8443\r\n" \
                 "Connection: keep-alive, Upgrade\r\n" \

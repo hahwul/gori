@@ -49,7 +49,7 @@ module Gori::Proxy::H2
       # The full wire octets (header + payload) for frames READ off the wire —
       # `payload` is a non-copying view into it. Lets the relay forward the frame
       # without a second allocation + memcpy (to_bytes). nil for SYNTHETIC frames
-      # (the replay engine builds Headers with no wire buffer).
+      # (the repeater engine builds Headers with no wire buffer).
       getter raw : Bytes?
 
       def initialize(@type : UInt8, @flags : UInt8, @stream_id : UInt32, @payload : Bytes, @raw : Bytes? = nil)

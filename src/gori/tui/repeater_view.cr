@@ -14,12 +14,12 @@ require "./reveal"
 require "./fmt"
 require "../store"
 require "../proxy/h2/grpc"
-require "../replay/engine"
-require "../replay/h2_engine"
-require "../replay/ws_engine"
-require "../replay/diff"
-require "../replay/flow_request"
-require "../replay/subtab_filter"
+require "../repeater/engine"
+require "../repeater/h2_engine"
+require "../repeater/ws_engine"
+require "../repeater/diff"
+require "../repeater/flow_request"
+require "../repeater/subtab_filter"
 require "../fuzz"
 require "../decoder"
 require "./chain_pane"
@@ -30,11 +30,11 @@ require "./line_field_read"
 require "./subtab_clone"
 
 module Gori::Tui
-  # The Replay workbench (a tab). Layout: a target URL field on top, then a split
+  # The Repeater workbench (a tab). Layout: a target URL field on top, then a split
   # of REQUEST (inline editor, origin-form) | RESPONSE (toggles to DIFF). Request
   # and target default to READ (space cmds, select/copy); i/↵ enters INS. Tab
   # cycles focus (target → request → response); Ctrl-R resends byte-exact.
-  class ReplayView
+  class RepeaterView
     getter? loaded : Bool
     getter? http2 : Bool
     getter focus : Symbol  # :request | :response | :target
@@ -69,15 +69,15 @@ module Gori::Tui
       @reveal_lines = nil.as(Array(String)?)
       @reveal_lines_src = Pointer(UInt8).null
       @original_lines = [] of String
-      @result = nil.as(Replay::Result?)
-      @prev_result = nil.as(Replay::Result?) # the previous send's result — the diff baseline
+      @result = nil.as(Repeater::Result?)
+      @prev_result = nil.as(Repeater::Result?) # the previous send's result — the diff baseline
       # Per-result render caches (rebuilt only when @result/@prev_result change, not
       # every frame): the windowed response view (head styled + body kept RAW and
       # styled per visible line, so a multi-MiB replayed response doesn't freeze),
       # and the LCS diff lines.
       @resp_view_cache = nil.as(RespView?)
       @resp_view_rev = Theme.revision # the theme the cached (colour-baked) response head was built under
-      @diff_lines_cache = nil.as(Array(Replay::DiffLine)?)
+      @diff_lines_cache = nil.as(Array(Repeater::DiffLine)?)
       @resp_hex = false                        # 'x' toggles a raw hex dump of the response bytes
       @resp_hex_bytes = nil.as(Bytes?)         # cached combined head+body of the last result (hex source)
       @pretty = Settings.pretty_bodies_default # 'p' pretty-prints the response body (display only); pushed from the runner
@@ -90,15 +90,15 @@ module Gori::Tui
       @xscroll = 0 # horizontal scroll offset shared by response/diff/reveal/transcript
       @loaded = false
       @http2 = false
-      # WebSocket replay mode (a 101 flow): the request editor holds the editable
+      # WebSocket repeater mode (a 101 flow): the request editor holds the editable
       # outbound MESSAGES (one per line) and the response pane shows the TRANSCRIPT.
       # Session-only — these tabs are never persisted/synced (db_id stays nil).
       @ws_mode = false
       @ws_upgrade = nil.as(Bytes?) # the captured upgrade-request bytes (handshake source)
-      @ws_result = nil.as(Replay::WsEngine::Result?)
+      @ws_result = nil.as(Repeater::WsEngine::Result?)
       @ws_lines_cache = nil.as(Array({String, Color})?)
       @transcript_rev = Theme.revision # theme the colour-baked transcript cache was built under
-      # gRPC replay mode (an application/grpc h2 flow): the editor holds the editable
+      # gRPC repeater mode (an application/grpc h2 flow): the editor holds the editable
       # request HEAD (metadata headers) and the framed message body is sent byte-exact
       # from @grpc_body; the response pane shows a deframed gRPC transcript + status.
       # Session-only like WS (db_id nil) — the binary body can't round-trip the text store.
@@ -116,9 +116,9 @@ module Gori::Tui
       # `%%%` line; a group send pipelines them on ONE keep-alive connection (active smuggling
       # / keep-alive-reuse), and the response pane shows a TRANSCRIPT of every response. Set
       # only while a group result is displayed; a normal ^R send clears it. {label, result}.
-      @group_results = nil.as(Array({String, Replay::Result})?)
+      @group_results = nil.as(Array({String, Repeater::Result})?)
       @group_lines_cache = nil.as(Array({String, Color})?)
-      # Split-decode replay mode (a flow carrying an encoded payload — SAML or GraphQL):
+      # Split-decode repeater mode (a flow carrying an encoded payload — SAML or GraphQL):
       # the SPLIT REQUEST column shows the full request envelope (@editor — headers,
       # target, other params: all editable) on top and the DECODED payload (@decoded —
       # SAML XML / GraphQL query+variables) below. ^T toggles which sub-pane is active
@@ -137,7 +137,7 @@ module Gori::Tui
       @saml_binding = :post       # :post (base64) | :redirect (deflate+base64)
       @saml_location = :body      # :body (form) | :query (request line)
       @graphql_location = :body   # :body (POST JSON) | :query (GET ?query=) — where the op lives
-      @inflight = false           # a replay round-trip is outstanding — gates re-send (^R mashing)
+      @inflight = false           # a repeater round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
       # Mark-transform mode (V22, opt-in, default off): when on, `§…§` markers in the
@@ -334,7 +334,7 @@ module Gori::Tui
       mark_req_edit
     end
 
-    # A short, human label for this replay — "METHOD /path" from the request line,
+    # A short, human label for this repeater — "METHOD /path" from the request line,
     # truncated to `max`. Used by the sub-tab strip, the open toast, and the close
     # prompt: far more recognizable than the source flow's internal numeric id, and
     # it tracks live as the request is edited.
@@ -393,7 +393,7 @@ module Gori::Tui
       @decoded_dirty = false
     end
 
-    # The starting scaffold for a hand-authored request (Replay `^N`): a minimal
+    # The starting scaffold for a hand-authored request (Repeater `^N`): a minimal
     # but immediately sendable HTTP/1.1 message the user edits in place.
     BLANK_TARGET  = "https://example.com"
     BLANK_REQUEST = "GET / HTTP/1.1\nHost: example.com\nUser-Agent: gori\nAccept: */*\n\n"
@@ -426,7 +426,7 @@ module Gori::Tui
 
     getter? ws_mode : Bool
 
-    # Load a captured WebSocket flow (101) for replay. The request editor is seeded
+    # Load a captured WebSocket flow (101) for repeater. The request editor is seeded
     # with the handshake upgrade request; the messages editor is seeded with the
     # recorded client→server TEXT messages (one per line, editable). Binary outbound
     # messages aren't representable as editable text, so they're omitted from the seed.
@@ -466,9 +466,9 @@ module Gori::Tui
     # to_bytes (CRLF-joined), else every frame but the last would carry a spurious
     # trailing '\r'. (A captured frame with an embedded newline can't be represented
     # one-per-line — a known v1 limit.)
-    def ws_out_messages : Array(Replay::WsEngine::OutMsg)
+    def ws_out_messages : Array(Repeater::WsEngine::OutMsg)
       @decoded.text.split('\n').compact_map do |line|
-        line.empty? ? nil : Replay::WsEngine::OutMsg.new(1, Env.expand(line).to_slice)
+        line.empty? ? nil : Repeater::WsEngine::OutMsg.new(1, Env.expand(line).to_slice)
       end
     end
 
@@ -483,9 +483,9 @@ module Gori::Tui
       @ws_mode ? expanded_text_to_bytes(@editor.text) : (@ws_upgrade || Bytes.empty)
     end
 
-    # Cross-process snapshot for `gori mcp get_replay_context` (written into ui_state
+    # Cross-process snapshot for `gori mcp get_repeater_context` (written into ui_state
     # by the TUI). Captures what the user is actually editing/sending — including
-    # ephemeral WS/gRPC/decode tabs that never land in the `replays` table.
+    # ephemeral WS/gRPC/decode tabs that never land in the `repeaters` table.
     def write_mcp_fields(j : JSON::Builder) : Nil
       j.field "target", @target
       j.field "summary", summary(80)
@@ -542,14 +542,14 @@ module Gori::Tui
       end
     end
 
-    # Apply a finished WS replay transcript (the counterpart of #apply for HTTP).
-    def apply_ws(result : Replay::WsEngine::Result) : Nil
+    # Apply a finished WS repeater transcript (the counterpart of #apply for HTTP).
+    def apply_ws(result : Repeater::WsEngine::Result) : Nil
       @ws_result = result
       @ws_lines_cache = nil
       @scroll = 0
       @xscroll = 0
       # Seed @result so the HTTP response tab can render the handshake response
-      @result = Replay::Result.new(result.handshake_head, Bytes.empty, nil, result.duration_us, result.error)
+      @result = Repeater::Result.new(result.handshake_head, Bytes.empty, nil, result.duration_us, result.error)
       reset_result_caches
     end
 
@@ -557,7 +557,7 @@ module Gori::Tui
     getter? grpc_reframable : Bool # a unary gRPC call whose payload is hex-editable + reframed
     getter grpc_msg_count : Int32  # deframed request-message count (gates/explains hex availability)
 
-    # Load a captured gRPC flow (an application/grpc HTTP/2 call) for replay. The request
+    # Load a captured gRPC flow (an application/grpc HTTP/2 call) for repeater. The request
     # HEAD is seeded into the editor (editable — metadata headers). protobuf is opaque
     # without a .proto, so the message body isn't text-editable — but a UNARY call (exactly
     # one framed message) exposes its payload for HEX editing (^X), with the 5-byte length
@@ -614,7 +614,7 @@ module Gori::Tui
     getter? decode_kind : Symbol? # nil | :saml | :graphql (the active payload codec)
     getter req_pane : Symbol      # :envelope | :decoded (active request sub-pane)
 
-    # Load a SAML flow into split-decode replay: the envelope editor holds the FULL
+    # Load a SAML flow into split-decode repeater: the envelope editor holds the FULL
     # request (headers/target/params — all editable); the decoded editor holds the XML,
     # re-encoded back into the param on send (if edited). Sent as a NORMAL request.
     def load_saml(detail : Store::FlowDetail, doc : Saml::Doc) : Nil
@@ -936,7 +936,7 @@ module Gori::Tui
 
     # Show a pipelined group's responses (one transcript, replacing the single-response
     # pane). `labeled` pairs each request's label with its Result, in send order.
-    def apply_group(labeled : Array({String, Replay::Result})) : Nil
+    def apply_group(labeled : Array({String, Repeater::Result})) : Nil
       @result = nil # the group transcript takes over the response pane
       @prev_result = nil
       @group_results = labeled
@@ -951,7 +951,7 @@ module Gori::Tui
       @loaded = true
     end
 
-    # Re-open a persisted tab (from the `replays` table) without a live FlowDetail.
+    # Re-open a persisted tab (from the `repeaters` table) without a live FlowDetail.
     # Seeds the editable request + target + flags, and (V11) the LAST send response
     # when one was persisted — so a reopened tab shows it instead of "— not sent —".
     # Non-diffable on its own; a ^R-from-History tab regains its captured-original
@@ -975,7 +975,7 @@ module Gori::Tui
       # marks a real stored response; both nil → never sent → empty pane.
       @result =
         if response_head || response_error
-          Replay::Result.new(response_head || Bytes.empty, response_body, nil,
+          Repeater::Result.new(response_head || Bytes.empty, response_body, nil,
             response_duration_us || 0_i64, response_error)
         end
       @prev_result = nil
@@ -1026,7 +1026,7 @@ module Gori::Tui
       @scx = @sni.size
       @target_field = :url
 
-      is_ws = !ws_messages.nil? || Replay::WsEngine.upgrade_request?(request)
+      is_ws = !ws_messages.nil? || Repeater::WsEngine.upgrade_request?(request)
       if is_ws
         @ws_mode = true
         @ws_upgrade = request.to_slice
@@ -1057,7 +1057,7 @@ module Gori::Tui
       @diff_lines_cache = nil # the baseline changed → drop any memoized diff
     end
 
-    # Open a hand-authored request not tied to any captured flow (Replay `^N`).
+    # Open a hand-authored request not tied to any captured flow (Repeater `^N`).
     # Seeds the editable scaffold so the user can immediately tweak and send;
     # there is no original response, so the result stays in plain response mode
     # rather than diffing against nothing. Focus starts on the target field — the
@@ -1089,7 +1089,7 @@ module Gori::Tui
     # Content-only clone for the sub-tab strip "Duplicate" action. Copies the editable
     # request (all modes: HTTP / WS / gRPC / SAML / GraphQL), flags, last response, and
     # chip name (+ " copy"). Drops source flow linkage, inflight state, and scroll/cursor.
-    def duplicate_from(src : ReplayView) : Nil
+    def duplicate_from(src : RepeaterView) : Nil
       @flow = nil
       @http2 = src.@http2
       @target = src.@target
@@ -1130,7 +1130,7 @@ module Gori::Tui
       @scroll_req = 0
 
       if res = src.@result
-        @result = Replay::Result.new(
+        @result = Repeater::Result.new(
           res.head.dup, res.body.try(&.dup), res.response,
           res.duration_us, res.error, res.incomplete?)
       else
@@ -1180,7 +1180,7 @@ module Gori::Tui
     # Env-expand the LF editor text and normalize to CRLF wire form. Uses
     # `Env.expand_wire` (gsub `/\r?\n/`) — NOT `split('\n').join("\r\n")` — so a `$KEY`
     # whose value itself carries a CRLF isn't doubled into `\r\r\n`, which would corrupt
-    # the header line (or the head/body separator). Shared logic with the CLI/MCP replay
+    # the header line (or the head/body separator). Shared logic with the CLI/MCP repeater
     # send paths so the TUI can't disagree with them on the bytes it puts on the wire.
     private def expanded_text_to_bytes(text : String) : Bytes
       Env.expand_wire(text)
@@ -1207,7 +1207,7 @@ module Gori::Tui
       tmpl.render(tmpl.apply_chains(tmpl.default_payloads, Decoder.shared_registry))
     end
 
-    # A replay round-trip is outstanding (set/cleared by the Runner around the
+    # A repeater round-trip is outstanding (set/cleared by the Runner around the
     # background send fiber) — used to refuse a second concurrent send.
     def inflight? : Bool
       @inflight
@@ -1228,7 +1228,7 @@ module Gori::Tui
     end
 
     # Flip the transport between HTTP/1.1 and HTTP/2 (`^V`). Drives which engine
-    # `replay_send` dials (Engine vs H2Engine) and lets the user OVERRIDE the captured
+    # `repeater_send` dials (Engine vs H2Engine) and lets the user OVERRIDE the captured
     # protocol — e.g. resend an h1 request as h2, or force an h2 flow down to h1 for a
     # downgrade/smuggling probe. Refused in the intrinsic-protocol modes: WebSocket is
     # HTTP/1.1 by definition and gRPC rides h2, so their flag is fixed. Rewrites the
@@ -1247,7 +1247,7 @@ module Gori::Tui
     # or is already correct. replace_line keeps the cursor/undo intact (vs set_text).
     private def retarget_request_version : Nil
       first = @editor.text.split('\n', 2).first? || return
-      updated = Replay::FlowRequest.retarget_version_line(first, @http2) || return
+      updated = Repeater::FlowRequest.retarget_version_line(first, @http2) || return
       @editor.replace_line(0, updated)
       reflect_content_length_in_editor if @auto_content_length
     end
@@ -1387,9 +1387,9 @@ module Gori::Tui
     # tampering with a captured body — you change the JSON and the length should
     # follow. Only an EXISTING header is updated (never added, so GETs stay clean);
     # chunked/h2 bodies have no Content-Length and are left untouched. Shared with the
-    # headless CLI/MCP replay-send paths via FlowRequest so they can't drift apart.
+    # headless CLI/MCP repeater-send paths via FlowRequest so they can't drift apart.
     private def sync_content_length(raw : Bytes) : Bytes
-      Replay::FlowRequest.resync_content_length(raw)
+      Repeater::FlowRequest.resync_content_length(raw)
     end
 
     # Mirror the auto-Content-Length resync into the visible REQUEST editor (^L on) so
@@ -1433,10 +1433,10 @@ module Gori::Tui
     end
 
     # {scheme, host, port} parsed from the target field.
-    # Delegate to the engine's parser so the TUI field and `gori run`/the replay engine never
+    # Delegate to the engine's parser so the TUI field and `gori run`/the repeater engine never
     # disagree on host/port (they used to be byte-for-byte duplicate implementations).
     def parse_target : {String, String, Int32}
-      Replay::FlowRequest.parse_target(Env.expand(@target))
+      Repeater::FlowRequest.parse_target(Env.expand(@target))
     end
 
     # The TARGET card grows to a second content row (4 high vs 3) whenever an SNI
@@ -1675,7 +1675,7 @@ module Gori::Tui
       end
     end
 
-    def apply(result : Replay::Result) : Nil
+    def apply(result : Repeater::Result) : Nil
       # The prior send becomes the diff baseline (diff vs the *previous* request,
       # not always the original captured flow). For the first send we still fall
       # back to the captured original (when loaded from History).
@@ -2196,7 +2196,7 @@ module Gori::Tui
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?
       unless @loaded
-        TrafficEmptyState.render(screen, rect, variant: :replay, title: "no flow loaded")
+        TrafficEmptyState.render(screen, rect, variant: :repeater, title: "no flow loaded")
         return
       end
 
@@ -2549,7 +2549,7 @@ module Gori::Tui
       render_response_chrome(screen, rect)
       body = rect.inset(1, 1)
       if @resp_hex
-        (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to replay —", Theme.muted)
+        (b = resp_hex_bytes) ? HexView.render(screen, body, b, @scroll) : screen.text(body.x, body.y, "— not sent — press ^R to repeater —", Theme.muted)
       elsif @resp_mode == :diff
         render_diff(screen, body, focused)
       elsif @reveal && (rl = reveal_lines)
@@ -2572,7 +2572,7 @@ module Gori::Tui
       body = rect.inset(1, 1)
       return if body.h <= 0
       if lines.empty?
-        screen.text(body.x, body.y, "— not sent — press ^R to replay —", Theme.muted)
+        screen.text(body.x, body.y, "— not sent — press ^R to repeater —", Theme.muted)
         return
       end
       gw = {Gutter.width(lines.size), body.w}.min
@@ -2658,7 +2658,7 @@ module Gori::Tui
       drop_transcript_cache_on_theme_change
       @group_lines_cache ||= begin
         rows = [] of {String, Color}
-        results = @group_results || [] of {String, Replay::Result}
+        results = @group_results || [] of {String, Repeater::Result}
         results.each_with_index do |(label, res), i|
           st = res.response.try(&.status)
           head_color = res.error ? Theme.red : ((st && st >= 400) ? Theme.yellow : Theme.green)
@@ -2684,7 +2684,7 @@ module Gori::Tui
       end
     end
 
-    private def grpc_response_rows(result : Replay::Result) : Array({String, Color})
+    private def grpc_response_rows(result : Repeater::Result) : Array({String, Color})
       rows = [] of {String, Color}
       msgs = Proxy::H2::Grpc.messages(result.body || Bytes.empty)
       if msgs.empty?
@@ -2700,7 +2700,7 @@ module Gori::Tui
 
     # grpc-status/grpc-message arrive as response trailers (absorbed into the synth
     # head by H2Engine), so they're plain response headers here.
-    private def grpc_status_row(result : Replay::Result) : {String, Color}
+    private def grpc_status_row(result : Repeater::Result) : {String, Color}
       resp = result.response
       code = resp.try(&.headers.get?("grpc-status"))
       return {"⚠ no grpc-status trailer", Theme.yellow} unless code
@@ -2880,7 +2880,7 @@ module Gori::Tui
     end
 
     # Memoized + dropped only when a new result is applied (reset_result_caches), so
-    # a held Replay tab isn't re-parsed / re-highlighted / re-diffed 20×/sec.
+    # a held Repeater tab isn't re-parsed / re-highlighted / re-diffed 20×/sec.
     private def reset_result_caches : Nil
       @resp_view_cache = nil
       @diff_lines_cache = nil
@@ -2907,9 +2907,9 @@ module Gori::Tui
         result = @result
         @resp_pretty_applied = false
         if !result
-          RespView.new([[Highlight::Span.new("— not sent — press ^R to replay —", Theme.muted)]], Highlight::BodyLines.empty, :text)
+          RespView.new([[Highlight::Span.new("— not sent — press ^R to repeater —", Theme.muted)]], Highlight::BodyLines.empty, :text)
         elsif !result.ok?
-          RespView.new([[Highlight::Span.new("replay error: #{result.error}", Theme.red)]], Highlight::BodyLines.empty, :text)
+          RespView.new([[Highlight::Span.new("repeater error: #{result.error}", Theme.red)]], Highlight::BodyLines.empty, :text)
         else
           src = display_body(result.head, result.body)
           # Pretty-print the response body (display only). The DIFF path uses
@@ -2923,15 +2923,15 @@ module Gori::Tui
       end
     end
 
-    private def diff_lines : Array(Replay::DiffLine)
+    private def diff_lines : Array(Repeater::DiffLine)
       @diff_lines_cache ||= begin
         result = @result
         if !(result && result.ok?)
-          [Replay::DiffLine.new(Replay::DiffKind::Same, "send the request (^R) to see a diff")]
+          [Repeater::DiffLine.new(Repeater::DiffKind::Same, "send the request (^R) to see a diff")]
         elsif !(baseline = diff_baseline_lines)
-          [Replay::DiffLine.new(Replay::DiffKind::Same, "— first send: resend (^R) to diff against the previous response —")]
+          [Repeater::DiffLine.new(Repeater::DiffKind::Same, "— first send: resend (^R) to diff against the previous response —")]
         else
-          Replay::Diff.lines(baseline, message_lines(result.head, display_body(result.head, result.body)))
+          Repeater::Diff.lines(baseline, message_lines(result.head, display_body(result.head, result.body)))
         end
       end
     end
@@ -2948,7 +2948,7 @@ module Gori::Tui
     end
 
     private def build_target(scheme : String, host : String, port : Int32) : String
-      Replay::FlowRequest.build_target(scheme, host, port) # shared with the engine (was duplicated)
+      Repeater::FlowRequest.build_target(scheme, host, port) # shared with the engine (was duplicated)
     end
 
     # Rewrites an absolute-form request-line ("GET http://h/p ...") to origin-form

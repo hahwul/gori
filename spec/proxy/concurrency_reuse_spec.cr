@@ -256,7 +256,7 @@ describe "Gori::Proxy concurrency & upstream reuse" do
     read_one_response(client).should contain("post-ok")
 
     # POST #2 (body-less): the parked upstream is stale. A POST is NOT a safe
-    # method, so the proxy must NOT silently replay it — no fresh dial happens.
+    # method, so the proxy must NOT silently repeater it — no fresh dial happens.
     client << "POST /p2 HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nContent-Length: 0\r\n\r\n"
     client.flush
     resp2 = read_one_response(client) # 502 or connection close — never a replayed success

@@ -51,7 +51,7 @@ module Gori
         Verb::Scope::Prism, [Verb::Chord.new("s", shift: true)], mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
 
       # Bulk dismiss — space-menu only (mnemonic, no stray hotkey): mute a whole check
-      # code, or a whole host, in one confirmed action. 'r' is reserved for replay-evidence
+      # code, or a whole host, in one confirmed action. 'r' is reserved for repeater-evidence
       # (parity with the detail scope).
       r.register Verb::Definition.new(
         "prism.dismiss-code", "Dismiss all with this code", "Mute every open issue sharing the selected issue's check code",
@@ -67,8 +67,8 @@ module Gori
         Verb::Scope::Prism, [Verb::Chord.new("o")]) { |ctx| ctx.prism_open_flow; nil }
 
       r.register Verb::Definition.new(
-        "prism.replay-evidence", "Replay evidence", "Send the selected issue's sample flow to Replay",
-        Verb::Scope::Prism, [Verb::Chord.new("r")]) { |ctx| ctx.prism_replay_flow; nil }
+        "prism.repeater-evidence", "Repeater evidence", "Send the selected issue's sample flow to Repeater",
+        Verb::Scope::Prism, [Verb::Chord.new("r")]) { |ctx| ctx.prism_repeater_flow; nil }
 
       r.register Verb::Definition.new(
         "prism.promote-selected", "Promote to finding", "Create a Finding from the selected issue",
@@ -96,8 +96,8 @@ module Gori
         Verb::Scope::PrismDetail, [Verb::Chord.new("o")]) { |ctx| ctx.prism_open_flow; nil }
 
       r.register Verb::Definition.new(
-        "prism.replay-flow", "Replay evidence", "Send the sample flow to the Replay tab",
-        Verb::Scope::PrismDetail, [Verb::Chord.new("r")]) { |ctx| ctx.prism_replay_flow; nil }
+        "prism.repeater-flow", "Repeater evidence", "Send the sample flow to the Repeater tab",
+        Verb::Scope::PrismDetail, [Verb::Chord.new("r")]) { |ctx| ctx.prism_repeater_flow; nil }
 
       r.register Verb::Definition.new(
         "prism.promote", "Promote to finding", "Create a Finding from this issue", Verb::Scope::PrismDetail,

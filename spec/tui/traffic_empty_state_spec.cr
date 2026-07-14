@@ -71,12 +71,12 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("i:CATCH").should be_true
   end
 
-  it "renders the replay resend card" do
+  it "renders the repeater resend card" do
     backend = MemoryBackend.new(60, 12)
     rect = Rect.new(0, 0, 60, 12)
-    TrafficEmptyState.render(Screen.new(backend), rect, variant: :replay)
-    backend.contains?("no replay open").should be_true
-    backend.contains?("REPLAY").should be_true
+    TrafficEmptyState.render(Screen.new(backend), rect, variant: :repeater)
+    backend.contains?("no repeater open").should be_true
+    backend.contains?("REPEATER").should be_true
     backend.contains?("edit").should be_true
     backend.contains?("^R").should be_true
   end

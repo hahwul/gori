@@ -37,7 +37,7 @@ module Gori::Tui
     @sev_tally : StaticArray(Int64, 5)
     @desc_area : TextArea
 
-    # The body has two focusable panes (cycled with Tab, like Replay's panes): the
+    # The body has two focusable panes (cycled with Tab, like Repeater's panes): the
     # SCOPE rule editor and the DESCRIPTION editor. @pane drives where keys land while
     # the Project tab body holds focus.
     getter pane : Symbol
@@ -234,7 +234,7 @@ module Gori::Tui
     end
 
     # Step between panes; false when there's no further pane in `dir` (the Runner ring
-    # then wraps back to the tab bar). Mirrors ReplayView#pane_advance.
+    # then wraps back to the tab bar). Mirrors RepeaterView#pane_advance.
     def pane_advance(dir : Int32) : Bool
       panes = enabled_panes
       i = panes.index(@pane) || 0
@@ -842,7 +842,7 @@ module Gori::Tui
       @desc_area.at_bottom?
     end
 
-    # Self-framed (like Replay/Intercept): an OVERVIEW card on top (read-only stats),
+    # Self-framed (like Repeater/Intercept): an OVERVIEW card on top (read-only stats),
     # then SCOPE (top-left) over HOST OVERRIDES (bottom-left) and DESCRIPTION (right) —
     # three focusable panes. The focused pane's card lights gold.
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil

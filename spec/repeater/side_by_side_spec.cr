@@ -1,8 +1,8 @@
 require "../spec_helper"
 
-include Gori::Replay
+include Gori::Repeater
 
-describe Gori::Replay::SideBySide do
+describe Gori::Repeater::SideBySide do
   it "marks identical inputs as all Same" do
     a = ["one", "two", "three"]
     rows = SideBySide.rows(Diff.lines(a, a))

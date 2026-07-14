@@ -45,14 +45,14 @@ module Gori
 
     struct InsertWs < WriteOp
       getter flow_id : Int64
-      getter replay_id : Int64?
+      getter repeater_id : Int64?
       getter created_at : Int64
       getter direction : String
       getter opcode : Int32
       getter payload : Bytes
       getter reply : Channel(Nil)
 
-      def initialize(@flow_id, @replay_id, @created_at, @direction, @opcode, @payload, @reply)
+      def initialize(@flow_id, @repeater_id, @created_at, @direction, @opcode, @payload, @reply)
       end
     end
 
@@ -266,9 +266,9 @@ module Gori
 
     # Records one captured WebSocket message for a flow. Blocks until committed
     # (the forward already happened, so the peer is not delayed).
-    def insert_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes, replay_id : Int64? = nil) : Nil
+    def insert_ws_message(flow_id : Int64, direction : String, opcode : Int32, payload : Bytes, repeater_id : Int64? = nil) : Nil
       reply = Channel(Nil).new(1) # buffered: the writer must never block sending a reply
-      @writes.send(InsertWs.new(flow_id, replay_id, now_us, direction, opcode, payload, reply))
+      @writes.send(InsertWs.new(flow_id, repeater_id, now_us, direction, opcode, payload, reply))
       reply.receive
     rescue Channel::ClosedError
       nil
@@ -516,7 +516,7 @@ module Gori
     PRISM_EVIDENCE_CAP = 12
 
     PRISM_COLS = "id, code, category, host, title, severity, status, hit_count, affected, " \
-                 "sample_flow_id, evidence, first_seen, last_seen, sample_replay_id"
+                 "sample_flow_id, evidence, first_seen, last_seen, sample_repeater_id"
 
     # Group-merge upsert keyed by (code, host): a read-modify-write run INSIDE the writer
     # closure (atomic — the writer is the only writer), which a plain ON CONFLICT can't do
@@ -554,10 +554,10 @@ module Gori
             urls.to_json, new_sev, new_title, new_evidence, ts, id)
         else
           c.exec("INSERT INTO prism_issues (code, category, host, title, severity, status, hit_count, " \
-                 "affected, sample_flow_id, evidence, first_seen, last_seen, sample_replay_id) " \
+                 "affected, sample_flow_id, evidence, first_seen, last_seen, sample_repeater_id) " \
                  "VALUES (?,?,?,?,?,0,1,?,?,?,?,?,?)",
             d.code, d.category, d.host, d.title, d.severity.value,
-            [d.url].to_json, d.flow_id, d.evidence, ts, ts, d.replay_id)
+            [d.url].to_json, d.flow_id, d.evidence, ts, ts, d.repeater_id)
         end
         wrote = true
         nil
@@ -791,22 +791,22 @@ module Gori
       exec_task ->(c : DB::Connection) { c.exec("DELETE FROM match_rules WHERE id = ?", id); nil }
     end
 
-    # --- Replay workbench tabs (persisted + cross-session synced) -------------
+    # --- Repeater workbench tabs (persisted + cross-session synced) -------------
     # Writes go through exec_task on the long-lived writer connection. That IS a
     # different connection from the read pool, so PRAGMA data_version (polled on a
     # pool connection) DOES bump for our own commits — the TUI's apply_external_change
     # / reconcile must soft-sync and skip unchanged rows, not assume "own writes are
     # invisible". Callers that full-restore on every poll self-clobber.
 
-    # Full replay rows INCLUDING the persisted response BLOBs. Used once at project
+    # Full repeater rows INCLUDING the persisted response BLOBs. Used once at project
     # open to seed each tab's last response (V11). NOT for the recurring reconcile
-    # poll — use `replays_meta` there to avoid re-materializing every tab's
+    # poll — use `repeaters_meta` there to avoid re-materializing every tab's
     # (potentially multi-MB) response on each cross-session commit.
-    def replays : Array(ReplayRecord)
-      list = [] of ReplayRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, mark_transform, tags FROM replays ORDER BY position, id") do |rs|
+    def repeaters : Array(RepeaterRecord)
+      list = [] of RepeaterRecord
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, mark_transform, tags FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
-          list << ReplayRecord.new(
+          list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
@@ -819,11 +819,11 @@ module Gori
     # Request-side metadata only (no response BLOBs) — for the 750ms reconcile poll,
     # which only converges target/request/flags/position and never reads the
     # response (responses are personal per session). Response fields stay nil.
-    def get_replay(id : Int64) : ReplayRecord?
+    def get_repeater(id : Int64) : RepeaterRecord?
       @db.query(
-        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform, name FROM replays WHERE id = ?",
+        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform, name FROM repeaters WHERE id = ?",
         id) do |rs|
-        return ReplayRecord.new(
+        return RepeaterRecord.new(
           rs.read(Int64), rs.read(String), rs.read(String),
           rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
           sni: rs.read(String?), mark_transform: rs.read(Int32) != 0, name: rs.read(String?)) if rs.move_next
@@ -831,16 +831,16 @@ module Gori
       nil
     end
 
-    # One full Replay row including its persisted response body. MCP uses this
-    # for explicit, paged body reads; unlike `replays`, it never materializes all
-    # replay response BLOBs just to retrieve one continuation chunk.
-    def get_replay_full(id : Int64) : ReplayRecord?
+    # One full Repeater row including its persisted response body. MCP uses this
+    # for explicit, paged body reads; unlike `repeaters`, it never materializes all
+    # repeater response BLOBs just to retrieve one continuation chunk.
+    def get_repeater_full(id : Int64) : RepeaterRecord?
       @db.query(
         "SELECT id, target, request, http2, auto_content_length, flow_id, position, " \
         "response_head, response_body, response_error, response_duration_us, name, sni, mark_transform, tags " \
-        "FROM replays WHERE id = ?", id) do |rs|
+        "FROM repeaters WHERE id = ?", id) do |rs|
         if rs.move_next
-          return ReplayRecord.new(
+          return RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
@@ -850,11 +850,11 @@ module Gori
       nil
     end
 
-    def replays_meta : Array(ReplayRecord)
-      list = [] of ReplayRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform FROM replays ORDER BY position, id") do |rs|
+    def repeaters_meta : Array(RepeaterRecord)
+      list = [] of RepeaterRecord
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
-          list << ReplayRecord.new(
+          list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             sni: rs.read(String?), mark_transform: rs.read(Int32) != 0)
@@ -863,15 +863,15 @@ module Gori
       list
     end
 
-    # Persisted replay tabs for MCP: request-side fields plus the last response HEAD
+    # Persisted repeater tabs for MCP: request-side fields plus the last response HEAD
     # (no response body — keeps the tool lightweight).
-    def replays_mcp : Array(ReplayRecord)
-      list = [] of ReplayRecord
+    def repeaters_mcp : Array(RepeaterRecord)
+      list = [] of RepeaterRecord
       @db.query(
         "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform, " \
-        "name, response_head, response_error, response_duration_us FROM replays ORDER BY position, id") do |rs|
+        "name, response_head, response_error, response_duration_us FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
-          list << ReplayRecord.new(
+          list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             sni: rs.read(String?), mark_transform: rs.read(Int32) != 0, name: rs.read(String?),
@@ -883,80 +883,80 @@ module Gori
 
     # Returns the new row id (or 0 if the store is closing — the caller normalizes
     # 0 → nil so a later update never targets a bogus row).
-    def insert_replay(target : String, request : String, http2 : Bool,
+    def insert_repeater(target : String, request : String, http2 : Bool,
                       auto_cl : Bool, flow_id : Int64?, position : Int32, sni : String? = nil,
                       mark_transform : Bool = false) : Int64
       ts = now_us
       exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO replays (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        c.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform) VALUES (?,?,?,?,?,?,?,?,?,?)",
           ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position, sni, mark_transform ? 1 : 0)
         nil
       }
     end
 
-    def update_replay(id : Int64, target : String, request : String, http2 : Bool, auto_cl : Bool,
+    def update_repeater(id : Int64, target : String, request : String, http2 : Bool, auto_cl : Bool,
                       sni : String? = nil, mark_transform : Bool = false) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE replays SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, mark_transform = ?, updated_at = ? WHERE id = ?",
+        c.exec("UPDATE repeaters SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, mark_transform = ?, updated_at = ? WHERE id = ?",
           target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, mark_transform ? 1 : 0, now_us, id)
         nil
       }
     end
 
-    # Set (or clear, with nil) a replay tab's custom name — its own UPDATE, separate
-    # from the request-side update_replay so a rename never rewrites the request.
-    def set_replay_name(id : Int64, name : String?) : Nil
+    # Set (or clear, with nil) a repeater tab's custom name — its own UPDATE, separate
+    # from the request-side update_repeater so a rename never rewrites the request.
+    def set_repeater_name(id : Int64, name : String?) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE replays SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
+        c.exec("UPDATE repeaters SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
         nil
       }
     end
 
-    # Set (or clear, with nil) a replay tab's flat tags (V31) — its own narrow UPDATE,
-    # like set_replay_name, so tagging never rewrites the request. `tags` is the
+    # Set (or clear, with nil) a repeater tab's flat tags (V31) — its own narrow UPDATE,
+    # like set_repeater_name, so tagging never rewrites the request. `tags` is the
     # space-joined token set; nil/blank clears it.
-    def set_replay_tags(id : Int64, tags : String?) : Nil
+    def set_repeater_tags(id : Int64, tags : String?) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE replays SET tags = ?, updated_at = ? WHERE id = ?", tags, now_us, id)
+        c.exec("UPDATE repeaters SET tags = ?, updated_at = ? WHERE id = ?", tags, now_us, id)
         nil
       }
     end
 
-    # Persist a replay tab's LAST send result (V11) so it survives a reopen. Kept
-    # separate from update_replay (the request side) — called once each send
+    # Persist a repeater tab's LAST send result (V11) so it survives a reopen. Kept
+    # separate from update_repeater (the request side) — called once each send
     # completes. `head` is the response head bytes (empty on error), `error` is set
     # only when the send failed. Via exec_task (writer connection), so this DOES
-    # bump the TUI data_version poll; Replay reconcile soft-syncs around it.
-    def update_replay_response(id : Int64, head : Bytes, body : Bytes?, error : String?, duration_us : Int64) : Nil
+    # bump the TUI data_version poll; Repeater reconcile soft-syncs around it.
+    def update_repeater_response(id : Int64, head : Bytes, body : Bytes?, error : String?, duration_us : Int64) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE replays SET response_head = ?, response_body = ?, response_error = ?, response_duration_us = ?, updated_at = ? WHERE id = ?",
+        c.exec("UPDATE repeaters SET response_head = ?, response_body = ?, response_error = ?, response_duration_us = ?, updated_at = ? WHERE id = ?",
           head, body, error, duration_us, now_us, id)
         nil
       }
     end
 
-    def delete_replay(id : Int64) : Nil
+    def delete_repeater(id : Int64) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("DELETE FROM ws_messages WHERE replay_id = ?", id)
-        c.exec("DELETE FROM replays WHERE id = ?", id)
+        c.exec("DELETE FROM ws_messages WHERE repeater_id = ?", id)
+        c.exec("DELETE FROM repeaters WHERE id = ?", id)
         nil
       }
     end
 
-    def update_replay_ws_messages(id : Int64, messages : Array(String)) : Nil
+    def update_repeater_ws_messages(id : Int64, messages : Array(String)) : Nil
       exec_task ->(conn : DB::Connection) {
-        conn.exec("DELETE FROM ws_messages WHERE replay_id = ?", id)
+        conn.exec("DELETE FROM ws_messages WHERE repeater_id = ?", id)
         messages.each do |msg_text|
           masked_msg = Env.mask_secrets(msg_text)
           ts = now_us
           # See insert_ws_one: an empty payload binds SQL NULL and violates the NOT NULL
-          # column (an empty replay message text hits this), so store X'' for it.
+          # column (an empty repeater message text hits this), so store X'' for it.
           slice = masked_msg.to_slice
           empty = slice.empty?
           args = [0_i64, id, ts, "out", 1] of DB::Any
           args << slice unless empty
           conn.exec(
-            "INSERT INTO ws_messages (flow_id, replay_id, created_at, direction, opcode, payload) " \
+            "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload) " \
             "VALUES (?,?,?,?,?,#{empty ? "X''" : "?"})", args: args
           )
         end
@@ -1013,7 +1013,7 @@ module Gori
 
     # Set (or clear, with nil) a fuzz session's custom sub-tab name — its own UPDATE,
     # separate from update_fuzz_session so a rename never rewrites the template/config
-    # (mirrors set_replay_name).
+    # (mirrors set_repeater_name).
     def set_fuzz_session_name(id : Int64, name : String?) : Nil
       exec_task ->(c : DB::Connection) {
         c.exec("UPDATE fuzz_sessions SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
@@ -1202,7 +1202,7 @@ module Gori
     # `limit` messages (ascending for display) to bound the detail view; nil = all.
     def ws_messages(flow_id : Int64, limit : Int32? = nil) : Array(WsMessage)
       msgs = [] of WsMessage
-      cols = "id, flow_id, replay_id, created_at, direction, opcode, payload"
+      cols = "id, flow_id, repeater_id, created_at, direction, opcode, payload"
       q, args = if lim = limit
                   {"SELECT * FROM (SELECT #{cols} FROM ws_messages WHERE flow_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
                    [flow_id, lim.to_i64] of DB::Any}
@@ -1224,7 +1224,7 @@ module Gori
     # was evicted from the analyzed-set and re-scanned.
     def ws_messages_after(flow_id : Int64, after_id : Int64, limit : Int32) : Array(WsMessage)
       msgs = [] of WsMessage
-      cols = "id, flow_id, replay_id, created_at, direction, opcode, payload"
+      cols = "id, flow_id, repeater_id, created_at, direction, opcode, payload"
       @db.query("SELECT #{cols} FROM ws_messages WHERE flow_id = ? AND id > ? ORDER BY id LIMIT ?",
         args: [flow_id, after_id, limit.to_i64] of DB::Any) do |rs|
         rs.each do
@@ -1235,14 +1235,14 @@ module Gori
       msgs
     end
 
-    def ws_messages_for_replay(replay_id : Int64, limit : Int32? = nil) : Array(WsMessage)
+    def ws_messages_for_repeater(repeater_id : Int64, limit : Int32? = nil) : Array(WsMessage)
       msgs = [] of WsMessage
-      cols = "id, flow_id, replay_id, created_at, direction, opcode, payload"
+      cols = "id, flow_id, repeater_id, created_at, direction, opcode, payload"
       q, args = if lim = limit
-                  {"SELECT * FROM (SELECT #{cols} FROM ws_messages WHERE replay_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
-                   [replay_id, lim.to_i64] of DB::Any}
+                  {"SELECT * FROM (SELECT #{cols} FROM ws_messages WHERE repeater_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id",
+                   [repeater_id, lim.to_i64] of DB::Any}
                 else
-                  {"SELECT #{cols} FROM ws_messages WHERE replay_id = ? ORDER BY id", [replay_id] of DB::Any}
+                  {"SELECT #{cols} FROM ws_messages WHERE repeater_id = ? ORDER BY id", [repeater_id] of DB::Any}
                 end
       @db.query(q, args: args) do |rs|
         rs.each do
@@ -1640,12 +1640,12 @@ module Gori
         # compare ws_message.created_at against a WS-relative recency floor (flows.created_at and
         # ws_messages.created_at are set from different sources), so it is left for a focused
         # retention change rather than bundled here.
-        # Only CAPTURED ws messages (replay_id IS NULL, real flow_id) cascade with their
-        # pruned flow. WebSocket-Replay output rows (update_replay_ws_messages) are stored
-        # with the sentinel flow_id = 0 and keyed by replay_id, so a bare `flow_id <= cutoff`
-        # (cutoff is always > 0 here) matched EVERY replay row and wiped saved replay traffic
-        # on each sweep. Gate on replay_id so replay-owned rows are never reaped by flow retention.
-        c.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND replay_id IS NULL", cutoff)
+        # Only CAPTURED ws messages (repeater_id IS NULL, real flow_id) cascade with their
+        # pruned flow. WebSocket-Repeater output rows (update_repeater_ws_messages) are stored
+        # with the sentinel flow_id = 0 and keyed by repeater_id, so a bare `flow_id <= cutoff`
+        # (cutoff is always > 0 here) matched EVERY repeater row and wiped saved repeater traffic
+        # on each sweep. Gate on repeater_id so repeater-owned rows are never reaped by flow retention.
+        c.exec("DELETE FROM ws_messages WHERE flow_id <= ? AND repeater_id IS NULL", cutoff)
         c.exec("DELETE FROM flows_fts WHERE rowid <= ?", cutoff)
         c.exec("DELETE FROM flows WHERE id <= ?", cutoff)
         # h2 frames/connections key off conn_id, not flow id. Reap a connection's raw
@@ -1869,10 +1869,10 @@ module Gori
       # reaches here with an empty payload, so use the SQL literal X'' for it, mirroring
       # insert_h2_frame_one's empty-DATA handling.
       empty = op.payload.empty?
-      args = [op.flow_id, op.replay_id, op.created_at, op.direction, op.opcode] of DB::Any
+      args = [op.flow_id, op.repeater_id, op.created_at, op.direction, op.opcode] of DB::Any
       args << op.payload unless empty
       conn.exec(
-        "INSERT INTO ws_messages (flow_id, replay_id, created_at, direction, opcode, payload) " \
+        "INSERT INTO ws_messages (flow_id, repeater_id, created_at, direction, opcode, payload) " \
         "VALUES (?,?,?,?,?,#{empty ? "X''" : "?"})", args: args)
     end
 

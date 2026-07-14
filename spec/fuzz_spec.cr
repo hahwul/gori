@@ -8,19 +8,19 @@ private class FakeBackend < F::Backend
   getter origin : F::Origin
   getter sent : Int32 = 0
 
-  def initialize(@origin : F::Origin, &@fn : Bytes -> Gori::Replay::Result)
+  def initialize(@origin : F::Origin, &@fn : Bytes -> Gori::Repeater::Result)
   end
 
-  def send(bytes : Bytes) : Gori::Replay::Result
+  def send(bytes : Bytes) : Gori::Repeater::Result
     @sent += 1
     @fn.call(bytes)
   end
 end
 
-private def ok_result(status : Int32, body : String) : Gori::Replay::Result
+private def ok_result(status : Int32, body : String) : Gori::Repeater::Result
   head = "HTTP/1.1 #{status} OK\r\nContent-Length: #{body.bytesize}\r\n\r\n".to_slice
   resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
-  Gori::Replay::Result.new(head, body.to_slice, resp, 1234_i64)
+  Gori::Repeater::Result.new(head, body.to_slice, resp, 1234_i64)
 end
 
 private def drain(engine : F::Engine) : {Array(F::Result), F::DoneEvent?}
@@ -378,7 +378,7 @@ describe F::Engine do
     gen = F::Generator.new(base, [set], cfg)
     backend = FakeBackend.new(F::Origin.new("http", "h", 80)) do |_b|
       attempts += 1
-      attempts < 3 ? Gori::Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, "boom") : ok_result(200, "ok")
+      attempts < 3 ? Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "boom") : ok_result(200, "ok")
     end
     engine = F::Engine.new(gen, F::Matcher.new, backend, cfg)
     results, _ = drain(engine)
@@ -406,7 +406,7 @@ describe F::Engine do
     backend = FakeBackend.new(F::Origin.new("http", "h", 80)) do |_b|
       attempts += 1
       # Odd attempts fail so each successful job burns 2 real sends.
-      attempts.odd? ? Gori::Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, "boom") : ok_result(200, "ok")
+      attempts.odd? ? Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "boom") : ok_result(200, "ok")
     end
     drain(F::Engine.new(gen, F::Matcher.new, backend, cfg))
     backend.sent.should be <= 3

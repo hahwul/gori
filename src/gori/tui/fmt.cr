@@ -1,6 +1,6 @@
 module Gori::Tui
   # Compact, fixed-width formatters for the frequently-scanned size/latency cells
-  # shared by the History list and the Replay response pane. Pure functions (no
+  # shared by the History list and the Repeater response pane. Pure functions (no
   # Screen/Theme) so any view can reuse them — kept here so there is ONE rounding
   # convention (e.g. 1023.6 KB rolls up to "1.0MB", not the misleading "1024KB").
   module Fmt

@@ -162,7 +162,7 @@ module Gori::Proxy
 
     # `sni` overrides the name presented in the TLS ClientHello (and, under verify,
     # the name the cert is checked against) WITHOUT changing the dialed host:port —
-    # the replay workbench uses it for domain-fronting / vhost-confusion / IP-direct
+    # the repeater workbench uses it for domain-fronting / vhost-confusion / IP-direct
     # sends. nil → the dialed host is used (the usual case).
     def self.dial_tls(host : String, port : Int32, verify : Bool, alpn : String? = nil, sni : String? = nil,
                       connect_timeout : Time::Span = CONNECT_TIMEOUT,

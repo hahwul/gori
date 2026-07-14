@@ -1,5 +1,5 @@
 module Gori::Proxy
-  # An IO that replays a small `prefix` of already-read bytes before delegating
+  # An IO that repeaters a small `prefix` of already-read bytes before delegating
   # to the underlying IO. Used to "un-read" the bytes we peek to tell apart a TLS
   # ClientHello from an HTTP/2 cleartext preface after a CONNECT, so the chosen
   # handler (TLS MITM or h2c relay) still sees the complete byte stream (P7).

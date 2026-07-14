@@ -7,7 +7,7 @@ require "../../env"
 
 module Gori::Tui
   # One open mining session (a sub-tab under the Miner tab). `flow_id` is the source
-  # History flow, or nil for a Replay-seeded one. `db_id` is the persisted
+  # History flow, or nil for a Repeater-seeded one. `db_id` is the persisted
   # `miner_sessions` row id (nil only if the store was closing).
   record MinerTab, view : MinerView, flow_id : Int64?, db_id : Int64?
 
@@ -85,7 +85,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       v = current_view
-      return "↹/esc tabs · mine from History/Replay (space → Mine parameters)" unless v
+      return "↹/esc tabs · mine from History/Repeater (space → Mine parameters)" unless v
       case v.focus
       when :results then "↑/↓ select · ↵ detail · ^X stop · space cmds · ↹ pane · esc tabs"
       when :detail  then "↑/↓ scroll · esc back"
@@ -103,7 +103,7 @@ module Gori::Tui
           v.render(screen, content, body_focused)
         else
           screen.text(content.x + 1, content.y,
-            "no mining sessions — from History/Replay press space → \"Mine parameters\"", Theme.muted)
+            "no mining sessions — from History/Repeater press space → \"Mine parameters\"", Theme.muted)
         end
       end
     end
@@ -156,7 +156,7 @@ module Gori::Tui
     end
 
     # esc focus ring: detail → results/summary area; else sub-tab strip (when shown)
-    # then tab bar — same body → subtabs → menu ladder as Replay/Fuzzer/Decoder.
+    # then tab bar — same body → subtabs → menu ladder as Repeater/Fuzzer/Decoder.
     private def handle_escape(v : MinerView) : Nil
       if v.focus == :detail
         v.close_detail
@@ -292,7 +292,7 @@ module Gori::Tui
     # --- cross-tab seeds (build the config-overlay seed) ---
     def build_seed_from_flow(id : Int64) : MineSeed?
       return nil unless detail = @host.session.store.get_flow(id)
-      built = Replay::FlowRequest.build(detail)
+      built = Repeater::FlowRequest.build(detail)
       appl = Miner::Detect.detect(built.bytes)
       summary = request_summary(built.bytes)
       MineSeed.new(built.target, built.bytes, built.http2, nil, id, summary, appl.applicable, appl.default)
@@ -340,28 +340,28 @@ module Gori::Tui
       @host.status("duplicated miner session (#{@miners.size} open)")
     end
 
-    # Seed handed to ReplayController for "Send to Replay" (Miner finding → injected request).
-    record ReplaySeed,
+    # Seed handed to RepeaterController for "Send to Repeater" (Miner finding → injected request).
+    record RepeaterSeed,
       target : String,
       request_text : String,
       http2 : Bool,
       sni : String?,
       label : String # sub-tab chip + toast ("name (location)")
 
-    # True when the focused session has a selected finding (gates space → Send to Replay).
+    # True when the focused session has a selected finding (gates space → Send to Repeater).
     def finding_selected? : Bool
       !current_view.try(&.selected_finding).nil?
     end
 
     # Inject the selected finding into the session request; nil when nothing is selected.
-    def selected_replay_seed : ReplaySeed?
+    def selected_repeater_seed : RepeaterSeed?
       return nil unless v = current_view
       return nil unless f = v.selected_finding
       injected = v.request_with_finding(f)
-      # Replay editors store LF text; send expands back to CRLF (ReplayView#expanded_text_to_bytes).
-      # Same LF shape as History→Replay (origin_form_text) and hand-authored tabs.
+      # Repeater editors store LF text; send expands back to CRLF (RepeaterView#expanded_text_to_bytes).
+      # Same LF shape as History→Repeater (origin_form_text) and hand-authored tabs.
       text = String.new(injected).scrub.gsub("\r\n", "\n")
-      ReplaySeed.new(v.target, text, v.http2?, v.sni_override, "#{f.name} (#{f.location.label})")
+      RepeaterSeed.new(v.target, text, v.http2?, v.sni_override, "#{f.name} (#{f.location.label})")
     end
 
     private def persist_new(view : MinerView, flow_id : Int64?) : Int64?

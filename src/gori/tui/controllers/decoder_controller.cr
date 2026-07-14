@@ -106,14 +106,14 @@ module Gori::Tui
       @idx
     end
 
-    # Show the strip from the FIRST session (not ≥2), like Replay/Notes: a lone
+    # Show the strip from the FIRST session (not ≥2), like Repeater/Notes: a lone
     # conversion still labels its chip and exposes the strip's space-menu.
     def subtab_strip_shown? : Bool
       true
     end
 
     # The chip label: the custom name if set, else a compact preview of the chain
-    # spec (or "empty" when blank), capped to ~18 cols like Replay/Notes.
+    # spec (or "empty" when blank), capped to ~18 cols like Repeater/Notes.
     private def session_label(s : DecoderSession) : String
       raw = (n = s.view.name) ? n : (s.chain.strip.empty? ? "empty" : s.chain.strip)
       raw.size > 18 ? raw[0, 17] + "…" : raw
@@ -442,7 +442,7 @@ module Gori::Tui
     # The no-selection fallback for the space-menu/palette "Copy" verb (decoder.copy):
     # routes on the FOCUSED pane like decoder_copy_selection, but copies the WHOLE pane
     # content rather than always OUTPUT (that was the bug — copy_output ignored focus
-    # entirely). Mirrors Replay/Fuzzer's pane_copy_all_text pattern.
+    # entirely). Mirrors Repeater/Fuzzer's pane_copy_all_text pattern.
     def decoder_copy_all : Nil
       s = cur
       text = case s.pane
@@ -601,7 +601,7 @@ module Gori::Tui
     end
 
     # ---- OUTPUT pane (read-only but navigable) ----
-    # Mirrors Replay's response pane: space opens the action menu (nothing to type
+    # Mirrors Repeater's response pane: space opens the action menu (nothing to type
     # here), ↑/↓ scroll, and ↑ at the top pops focus up to the CHAIN field above.
     # Command letters defer to the keymap (rebindable copy + Global breath).
     private def handle_output(ev : Termisu::Event::Key) : Bool

@@ -6,7 +6,7 @@ require "json"
 include Gori::Tui
 
 # A minimal Complete FlowDetail from raw head/body (no DB), enough to drive the
-# split-decode Replay path (load_saml / load_graphql read only these bytes).
+# split-decode Repeater path (load_saml / load_graphql read only these bytes).
 private def detail_of(target : String, head : String, body : String)
   row = Gori::Store::FlowRow.new(
     id: 1_i64, created_at: 0_i64, scheme: "https", method: "POST", host: "api.test",
@@ -14,21 +14,21 @@ private def detail_of(target : String, head : String, body : String)
   Gori::Store::FlowDetail.new(row, "HTTP/1.1", head.to_slice, body.to_slice, nil, nil)
 end
 
-private def move_to_line_end(view : ReplayView)
+private def move_to_line_end(view : RepeaterView)
   # A toggle/refresh leaves the caret at the top (line 1 = the query / single-line XML);
   # edit_end reaches its end WITHOUT an ↑ move (which would cross back to the envelope).
   view.edit_end
 end
 
-private def load_gql(head : String, body : String) : ReplayView
+private def load_gql(head : String, body : String) : RepeaterView
   detail = detail_of("/graphql", head, body)
   op = Gori::Graphql.from_flow("/graphql", head.to_slice, body.to_slice).not_nil!
-  view = ReplayView.new
+  view = RepeaterView.new
   view.load_graphql(detail, op)
   view
 end
 
-describe "ReplayView split-decode (SAML/GraphQL)" do
+describe "RepeaterView split-decode (SAML/GraphQL)" do
   before_each { Gori::Settings.pretty_bodies_default = false }
 
   describe "GraphQL" do
@@ -73,7 +73,7 @@ describe "ReplayView split-decode (SAML/GraphQL)" do
       get_head = "GET #{get_target} HTTP/1.1\r\nHost: api.test\r\n\r\n"
       detail = detail_of(get_target, get_head, "")
       op = Gori::Graphql.from_flow(get_target, get_head.to_slice, nil).not_nil!
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_graphql(detail, op)
 
       view.toggle_req_pane.should eq(:decoded)
@@ -107,7 +107,7 @@ describe "ReplayView split-decode (SAML/GraphQL)" do
     it "re-encodes an edited XML into the param, preserving RelayState + resyncing CL" do
       detail = detail_of("/acs", saml_head, saml_body)
       doc = Gori::Saml.from_flow("/acs", saml_head.to_slice, saml_body.to_slice, nil, nil).not_nil!
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_saml(detail, doc)
 
       view.toggle_req_pane.should eq(:decoded)
@@ -135,7 +135,7 @@ describe "ReplayView split-decode (SAML/GraphQL)" do
     it "↓ off the ENVELOPE bottom crosses to DECODED; ↑ off the DECODED top crosses back" do
       detail = detail_of("/graphql", gql_head, gql_body)
       op = Gori::Graphql.from_flow("/graphql", gql_head.to_slice, gql_body.to_slice).not_nil!
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_graphql(detail, op)
 
       view.edit_move(999, 0) # to the ENVELOPE's last line (bottom)

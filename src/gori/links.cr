@@ -22,7 +22,7 @@ module Gori
     def self.resolve(store : Store, link : Store::EntityLink) : Resolved
       case link.ref_kind
       when .flow?   then resolve_flow(store, link)
-      when .replay? then resolve_replay(store, link)
+      when .repeater? then resolve_repeater(store, link)
       when .fuzz?   then resolve_fuzz(store, link)
       else               resolve_miner(store, link)
       end
@@ -47,12 +47,12 @@ module Gori
       end
     end
 
-    private def self.resolve_replay(store : Store, link : Store::EntityLink) : Resolved
-      if rec = store.get_replay(link.ref_id)
-        label = rec.name || first_line(rec.request) || "replay ##{rec.id}"
+    private def self.resolve_repeater(store : Store, link : Store::EntityLink) : Resolved
+      if rec = store.get_repeater(link.ref_id)
+        label = rec.name || first_line(rec.request) || "repeater ##{rec.id}"
         Resolved.new(link, link.ref_kind.tag, label, rec.target)
       else
-        Resolved.new(link, link.ref_kind.tag, "replay ##{link.ref_id} (gone)", "replay ##{link.ref_id}", stale: true)
+        Resolved.new(link, link.ref_kind.tag, "repeater ##{link.ref_id} (gone)", "repeater ##{link.ref_id}", stale: true)
       end
     end
 

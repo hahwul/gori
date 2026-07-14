@@ -15,8 +15,8 @@ module Gori
     # store writer only does an extra non-blocking publish to feed us; the TUI render loop
     # is never touched. Single-threaded scheduler ⇒ plain ivars need no locks.
     #
-    # Public `scan_detail` also accepts Replay-sourced details (and optional WS messages)
-    # so the Replay tab / CLI / MCP can feed the same passive engine without going through
+    # Public `scan_detail` also accepts Repeater-sourced details (and optional WS messages)
+    # so the Repeater tab / CLI / MCP can feed the same passive engine without going through
     # the History event channel.
     class Analyzer
       ANALYZED_CAP     = 10_000     # bound the seen-flow set (memory plateaus on long runs)
@@ -105,16 +105,16 @@ module Gori
       rescue Channel::ClosedError
       end
 
-      # Public entry for History, Replay, and CLI/MCP: run passive checks, upsert issues,
+      # Public entry for History, Repeater, and CLI/MCP: run passive checks, upsert issues,
       # optionally enqueue active probes (History-only: when `enqueue_active` is true).
-      # `replay_id` stamps Detection.replay_id for evidence linking back to a Replay tab.
-      def scan_detail(detail : Store::FlowDetail, *, replay_id : Int64? = nil,
+      # `repeater_id` stamps Detection.repeater_id for evidence linking back to a Repeater tab.
+      def scan_detail(detail : Store::FlowDetail, *, repeater_id : Int64? = nil,
                       ws_messages : Array(Store::WsMessage) = [] of Store::WsMessage,
                       enqueue_active : Bool = false) : Nil
         return if @stopped
         return unless @mode.scanning?
         detections = Passive.analyze(detail, ws_messages)
-        persist(detections, flow_id: detail.row.id, replay_id: replay_id)
+        persist(detections, flow_id: detail.row.id, repeater_id: repeater_id)
         maybe_enqueue_active(detail) if enqueue_active
       rescue ex : DB::Error | SQLite3::Exception
         raise ex
@@ -218,7 +218,7 @@ module Gori
           break if msgs.empty?
           note_ws_scanned(flow_id, msgs) # ordered asc → advance the hwm to the last id in the batch
           detections = Passive.analyze_ws(detail, msgs)
-          persist(detections, flow_id: flow_id, replay_id: nil)
+          persist(detections, flow_id: flow_id, repeater_id: nil)
           break if msgs.size < WS_MSG_CAP # fewer than a full page ⇒ backlog drained
         end
       rescue DB::Error | SQLite3::Exception
@@ -241,13 +241,13 @@ module Gori
         end
       end
 
-      private def persist(detections : Array(Detection), *, flow_id : Int64, replay_id : Int64?) : Nil
+      private def persist(detections : Array(Detection), *, flow_id : Int64, repeater_id : Int64?) : Nil
         return if detections.empty?
         host = nil.as(String?)
         wrote = false
         detections.each do |d|
           next if suppressed?(d.code, d.host)
-          stamped = Prism.with_source(d, flow_id: (flow_id > 0 ? flow_id : nil), replay_id: replay_id)
+          stamped = Prism.with_source(d, flow_id: (flow_id > 0 ? flow_id : nil), repeater_id: repeater_id)
           @store.upsert_prism_issue(stamped)
           host ||= stamped.host
           wrote = true

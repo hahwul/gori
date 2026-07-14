@@ -5,7 +5,7 @@ require "../env"
 module Gori
   module MCP
     # Turns a `send_request` tool's structured arguments into the raw HTTP/1.1
-    # request bytes the replay engines expect, plus the scheme/host/port they dial.
+    # request bytes the repeater engines expect, plus the scheme/host/port they dial.
     # Two modes: structured ({method,url,headers,body}) or a verbatim `raw` request
     # string (still taking scheme/host/port from `url`, since the engines need a
     # target to dial). Byte-exactness is the engines' contract (P7), so we only add

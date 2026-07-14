@@ -2,7 +2,7 @@ require "./screen"
 require "./geometry"
 
 module Gori::Tui
-  # Cursor + optional anchor selection for read-only panes (Replay response, request
+  # Cursor + optional anchor selection for read-only panes (Repeater response, request
   # READ mode). Plain-text lines are supplied by the owner; scroll is external.
   #
   # Two access shapes are supported:

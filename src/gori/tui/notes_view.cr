@@ -13,7 +13,7 @@ require "./subtab_clone"
 
 module Gori::Tui
   # The Notes tab (DESIGN.md: notes/report — the running scratchpad/report).
-  # Multiple free-form, per-project documents kept as sub-tabs (like Replay):
+  # Multiple free-form, per-project documents kept as sub-tabs (like Repeater):
   # `^N` opens a new note, `^W` closes the current one, `^1-9` switches. Each
   # note defaults to READ (navigate/select/copy); i/↵ enters INS to type. The whole set
   # is persisted in the project's settings KV as JSON (key "notes.docs") and
@@ -334,7 +334,7 @@ module Gori::Tui
     end
 
     # `focused` = the editor has focus (cursor + bright). The sub-tab strip is now
-    # runner-owned chrome above this frame (shared with Replay), so the view simply
+    # runner-owned chrome above this frame (shared with Repeater), so the view simply
     # fills its framed interior with the current note's editor.
     def render(screen : Screen, rect : Rect, focused : Bool = true) : Nil
       return if rect.empty?

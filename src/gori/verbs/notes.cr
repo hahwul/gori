@@ -24,7 +24,7 @@ module Gori
         Verb::Scope::Notes, available: in_notes, mnemonic: 'd', section: :subtab) { |ctx| ctx.notes_duplicate_subtab; nil }
 
       # Search-and-jump across note sub-tabs (section :tab, tab-bar space menu — like
-      # replay.find-subtab). A jump path that doesn't need Ctrl+digit. 's' is free in
+      # repeater.find-subtab). A jump path that doesn't need Ctrl+digit. 's' is free in
       # Notes COMMON ∪ :tab.
       r.register Verb::Definition.new(
         "notes.find-subtab", "Search sub-tabs", "Filter the open notes and jump to one",
@@ -32,7 +32,7 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 },
         mnemonic: 's', section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
-      # The single smart Copy (see replay.copy in verbs/history.cr) — copy-all is gone.
+      # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       in_notes_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.notes_read_mode? }
       r.register Verb::Definition.new(
         "notes.copy", "Copy", "Copy the selected text, or the whole current note if nothing is selected, to the clipboard",
@@ -56,7 +56,7 @@ module Gori
         Verb::Scope::Notes, available: in_notes, mnemonic: 'f') { |ctx| ctx.notes_find; nil }
 
       r.register Verb::Definition.new(
-        "notes.links", "Manage links", "View/add/remove related History/Replay/Fuzzer/Miner URLs",
+        "notes.links", "Manage links", "View/add/remove related History/Repeater/Fuzzer/Miner URLs",
         Verb::Scope::Notes, available: in_notes, mnemonic: 'l') { |ctx| ctx.notes_links; nil }
     end
   end

@@ -9,7 +9,7 @@ require "./reveal"
 require "./env_complete"
 
 module Gori::Tui
-  # A minimal multi-line text editor for inline editing (e.g. the Replay
+  # A minimal multi-line text editor for inline editing (e.g. the Repeater
   # request). Holds lines + a cursor; no modes — typing edits directly. Converts
   # back to bytes with CRLF line endings (HTTP wire form).
   class TextArea
@@ -36,7 +36,7 @@ module Gori::Tui
       @styled_kind = nil.as(Symbol?)
       @styled_rev = Theme.revision
       @styled_env_rev = Env.highlight_rev
-      @gutter = false # left line-number gutter (on for the Replay request body)
+      @gutter = false # left line-number gutter (on for the Repeater request body)
       @search_hl = "" # active ^F query → matches highlighted in render
       @reveal = false # show whitespace (space ·, tab →) instead of syntax colours
       @edits = 0      # monotonic content-change counter — cheap cache key for owners
@@ -44,12 +44,12 @@ module Gori::Tui
       @lc_lines_rev = -1
       # Opt-in background tints: [start, end) FULL-buffer char offsets + colour, painted
       # UNDER the text (over syntax/plain, beneath search + cursor). Empty for every editor
-      # except the Fuzzer template — Replay/Notes never set it, so they're unaffected. The
+      # except the Fuzzer template — Repeater/Notes never set it, so they're unaffected. The
       # widget knows nothing about §-markers; the owner supplies offsets + resolved colours.
       @bg_regions = [] of {Int32, Int32, Color}
       @undo_stack = [] of UndoState
       # Opt-in `$ENV` autocomplete popup (nil = disabled). Enabled only on the outbound
-      # request editors (Replay request, Fuzzer template) where env tokens are expanded on
+      # request editors (Repeater request, Fuzzer template) where env tokens are expanded on
       # send; every other editor keeps it nil so its edit path is byte-for-byte unchanged.
       @env_complete = nil.as(EnvComplete?)
       set_text(text)
@@ -291,7 +291,7 @@ module Gori::Tui
       @lines.size
     end
 
-    # Replace one line in-place (cursor clamped when on that row). Used by Replay to
+    # Replace one line in-place (cursor clamped when on that row). Used by Repeater to
     # resync a lone Content-Length header without resetting the whole buffer.
     def replace_line(idx : Int32, content : String) : Nil
       return if idx < 0 || idx >= @lines.size
@@ -333,7 +333,7 @@ module Gori::Tui
 
     # `highlight` overlays request/response syntax colours on the buffer while
     # keeping it fully editable: pass `:request` or `:response` for the held
-    # HTTP message editors (Replay, Intercept), nil for plain prose (Notes,
+    # HTTP message editors (Repeater, Intercept), nil for plain prose (Notes,
     # Finding notes). The styled lines are 1:1 with `@lines`, so the cursor —
     # drawn last, on top — still lands on the right column.
     def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil) : Nil
@@ -348,7 +348,7 @@ module Gori::Tui
       # Buffer char-offset of the first visible line — advanced per row so each line
       # knows its start for the bg-region overlay without an O(n²) rescan. Only the
       # opt-in bg_regions consumer (the Fuzzer template) pays the O(@scroll) prefix sum;
-      # Replay/Notes (no regions) skip it so their hot path is unchanged.
+      # Repeater/Notes (no regions) skip it so their hot path is unchanged.
       line_off = 0
       (0...@scroll).each { |k| line_off += @lines[k].size + 1 } unless @bg_regions.empty? # +1 for '\n'
       caret_cell = nil.as({Int32, Int32}?) # the drawn caret's screen cell — anchors the env-complete popup

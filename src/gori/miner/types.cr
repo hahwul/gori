@@ -5,7 +5,7 @@ module Gori
   # request, diffs the response against a calibrated baseline, then BINARY-SEARCHES
   # the batch to isolate the responsible name — far cheaper than one name per request.
   #
-  # Headless and self-contained: it depends only on the Replay send engines (via the
+  # Headless and self-contained: it depends only on the Repeater send engines (via the
   # reused Fuzz::Sender/Backend), the body decoder, and Fuzz::ContentLength — never on
   # Store or the TUI. The one engine drives the TUI Miner tab, `gori run mine`, and the
   # MCP mine_* tools.

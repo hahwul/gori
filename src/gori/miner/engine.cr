@@ -338,7 +338,7 @@ module Gori::Miner
 
     # ── sending / pacing ────────────────────────────────────────────────────────────
 
-    private def send_with_retries(bytes : Bytes) : Replay::Result
+    private def send_with_retries(bytes : Bytes) : Repeater::Result
       attempts = 0
       loop do
         raw = @backend.send(bytes)

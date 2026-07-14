@@ -1,7 +1,7 @@
 module Gori::Tui
   # Pure helpers that turn an HTTP message into the "copy as X" option set the
   # CopyPicker overlay shows — split a request into url/headers/body/cookies/curl
-  # (plus wscat for WebSocket Replay), a response into status+headers/body/raw. No
+  # (plus wscat for WebSocket Repeater), a response into status+headers/body/raw. No
   # TUI/state deps (Screen/Theme), so
   # the parsing is unit-testable on its own; the Runner wraps the result in a
   # CopyPicker and the controllers feed it the focused pane's bytes.
@@ -12,7 +12,7 @@ module Gori::Tui
     record Option, label : String, key : Char, text : String
 
     # Options for a REQUEST pane. `wire` is the request as it'd be sent (CRLF-framed,
-    # env-expanded — the bytes replay uses), `target` the "scheme://host[:port]" base
+    # env-expanded — the bytes repeater uses), `target` the "scheme://host[:port]" base
     # that resolves an origin-form request line ("GET /p HTTP/1.1") into a full URL.
     # Empty formats (no body, no Cookie header) drop out so every row is meaningful.
     def self.request_options(wire : String, target : String, *,
@@ -149,10 +149,10 @@ module Gori::Tui
       parts.join(" \\\n  ")
     end
 
-    # A copy-pasteable wscat invocation for a WebSocket Replay. wscat owns the
+    # A copy-pasteable wscat invocation for a WebSocket Repeater. wscat owns the
     # RFC 6455 upgrade headers and generates a fresh Sec-WebSocket-Key, so those
     # are deliberately omitted. Host, Origin and subprotocol have dedicated
-    # options; all remaining application headers use repeatable -H. Replay's
+    # options; all remaining application headers use repeatable -H. Repeater's
     # outbound text frames become repeatable -x commands and -w -1 keeps the
     # socket open after sending so subsequent server events remain visible.
     private def self.wscat_command(url : String, header_lines : Array(String),

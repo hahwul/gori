@@ -1,8 +1,8 @@
 require "./diff"
 
 module Gori
-  module Replay
-    # Maps a unified line-diff (`Replay::Diff.lines`) into aligned side-by-side rows
+  module Repeater
+    # Maps a unified line-diff (`Repeater::Diff.lines`) into aligned side-by-side rows
     # for the Comparer's two-column view. Within each changed region the deleted
     # (A/left) lines are zipped against the added (B/right) lines so an edited line
     # shows old-on-left / new-on-right on the SAME row; surplus lines on either side

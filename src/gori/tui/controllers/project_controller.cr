@@ -75,7 +75,7 @@ module Gori::Tui
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
-      # Self-frames its OVERVIEW + SCOPE|DESCRIPTION cards (multi-pane, like Replay).
+      # Self-frames its OVERVIEW + SCOPE|DESCRIPTION cards (multi-pane, like Repeater).
       @project_view.render(screen, rect, focused: focus == :body)
     end
 

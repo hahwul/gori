@@ -82,7 +82,7 @@ module Gori
     class_property editor_markdown : Bool = DEFAULT_EDITOR_MARKDOWN     # syntax-highlight markdown in Notes/Project
     class_property theme : String = DEFAULT_THEME                       # TUI colour theme name (settings:theme); applied by Theme.apply
     class_property mouse : Bool = DEFAULT_MOUSE                         # TUI mouse (click + scroll-wheel) navigation; off restores native text-selection
-    class_property pretty_bodies_default : Bool = DEFAULT_PRETTY_BODIES # pretty-print JSON/XML/form/… bodies in History detail + Replay response (display only)
+    class_property pretty_bodies_default : Bool = DEFAULT_PRETTY_BODIES # pretty-print JSON/XML/form/… bodies in History detail + Repeater response (display only)
     # Layout prefs (settings:layout). *_preview: list page shows a bottom detail pane.
     # history_list_order: "newest" (top) or "oldest" (top). sitemap_expand_depth: -1 = all.
     class_property history_preview : Bool = DEFAULT_HISTORY_PREVIEW

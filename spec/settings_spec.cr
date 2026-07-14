@@ -313,9 +313,9 @@ describe Gori::Settings do
       Gori::Settings.tab_prefs.should eq([{"notes", false}])
 
       # malformed entries are tolerated: blank/missing id dropped, non-bool visible ⇒ visible
-      File.write(Gori::Settings.path, %({"tabs":[{"id":"replay"},{"id":""},{"visible":false},{"id":"notes","visible":"x"}]}))
+      File.write(Gori::Settings.path, %({"tabs":[{"id":"repeater"},{"id":""},{"visible":false},{"id":"notes","visible":"x"}]}))
       Gori::Settings.load
-      Gori::Settings.tab_prefs.should eq([{"replay", true}, {"notes", true}])
+      Gori::Settings.tab_prefs.should eq([{"repeater", true}, {"notes", true}])
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)

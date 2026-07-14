@@ -3,7 +3,7 @@ require "../support/memory_backend"
 
 include Gori::Tui
 
-private def replay_tmp_store(&)
+private def repeater_tmp_store(&)
   path = File.tempname("gori-rv", ".db")
   store = Gori::Store.open(path)
   begin
@@ -16,13 +16,13 @@ private def replay_tmp_store(&)
   end
 end
 
-describe Gori::Tui::ReplayView do
+describe Gori::Tui::RepeaterView do
   # These specs assert on RAW response rendering; keep the display-only pretty-printer
   # off so a (future) valid-JSON/XML fixture can't silently reflow and shift assertions.
   before_each { Gori::Settings.pretty_bodies_default = false }
 
   it "load_blank seeds an editable, sendable scaffold (no source flow)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.loaded?.should be_true
     view.http2?.should be_false
@@ -33,18 +33,18 @@ describe Gori::Tui::ReplayView do
     backend.contains?("https://example.com").should be_true # target field
     backend.contains?("GET / HTTP/1.1").should be_true      # scaffold request line
     backend.contains?("Host: example.com").should be_true   # scaffold header
-    backend.contains?("— not sent — press ^R to replay —").should be_true
+    backend.contains?("— not sent — press ^R to repeater —").should be_true
   end
 
   it "duplicate_from copies request content, flags, and last response (no source flow)" do
-    src = ReplayView.new
+    src = RepeaterView.new
     src.load_blank
     src.name = "alpha"
-    ok = Gori::Replay::Result.new(
+    ok = Gori::Repeater::Result.new(
       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64)
     src.apply(ok)
 
-    dst = ReplayView.new
+    dst = RepeaterView.new
     dst.duplicate_from(src)
     dst.loaded?.should be_true
     dst.target.should eq(src.target)
@@ -59,9 +59,9 @@ describe Gori::Tui::ReplayView do
   end
 
   it "stays in plain response mode after sending a blank (nothing to diff against)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
-    ok = Gori::Replay::Result.new(
+    ok = Gori::Repeater::Result.new(
       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64)
     view.apply(ok)
     view.focus.should eq(:target) # send keeps the current focus (was :target from load_blank)
@@ -77,9 +77,9 @@ describe Gori::Tui::ReplayView do
   end
 
   it "explains there is nothing to diff when a blank's response pane is toggled to diff" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
-    ok = Gori::Replay::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64)
+    ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64)
     view.apply(ok)
     view.toggle_resp_mode # response → diff
 
@@ -90,15 +90,15 @@ describe Gori::Tui::ReplayView do
   end
 
   it "diffs the latest response against the PREVIOUS send (not just the original)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
-    first = Gori::Replay::Result.new(
+    first = Gori::Repeater::Result.new(
       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "ONE".to_slice, nil, 1000_i64)
     view.apply(first) # first send: nothing to diff against yet → response mode
     view.focus.should eq(:target)
     view.toggle_resp_mode # user opens the diff tab
 
-    second = Gori::Replay::Result.new(
+    second = Gori::Repeater::Result.new(
       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "TWO".to_slice, nil, 1000_i64)
     view.apply(second) # second send keeps the diff tab (last-open) → diffs vs the first send
 
@@ -109,7 +109,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "keeps the last-open response tab on send (does not auto-jump to diff)" do
-    replay_tmp_store do |store|
+    repeater_tmp_store do |store|
       # A History-loaded flow is diffable from the very first send (baseline = the
       # captured original), which used to force the diff tab open on send.
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -118,10 +118,10 @@ describe Gori::Tui::ReplayView do
         head: "GET / HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: Bytes.empty))
       store.update_response(Gori::Store::CapturedResponse.new(
         flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice, body: "ORIG".to_slice))
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load(store.get_flow(id).not_nil!)
 
-      ok = Gori::Replay::Result.new(
+      ok = Gori::Repeater::Result.new(
         "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "NEW".to_slice, nil, 1000_i64)
       view.apply(ok) # send: must stay on response (the last-open tab), not jump to diff
 
@@ -136,18 +136,18 @@ describe Gori::Tui::ReplayView do
   end
 
   it "drops back to response when an errored send can't render the held diff tab" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
-    first = Gori::Replay::Result.new(
+    first = Gori::Repeater::Result.new(
       "HTTP/1.1 200 OK\r\n\r\n".to_slice, "ONE".to_slice, nil, 1000_i64)
     view.apply(first)
     view.toggle_resp_mode # open the diff tab
-    err = Gori::Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, "connection refused")
+    err = Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "connection refused")
     view.apply(err) # errored send: fall back so the error is visible in the response view
 
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
-    backend.contains?("replay error: connection refused").should be_true
+    backend.contains?("repeater error: connection refused").should be_true
     # fell back to the response view — the diff toggle is inactive (muted)
     ry = (0...20).find { |y| backend.row(y).includes?("d:diff") }.not_nil!
     dx = backend.row(ry).index("diff").not_nil!
@@ -155,7 +155,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "auto-updates an existing Content-Length to match the edited body on send" do
-    replay_tmp_store do |store|
+    repeater_tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "http", host: "h.test", port: 80,
         method: "POST", target: "/x", http_version: "HTTP/1.1",
@@ -165,7 +165,7 @@ describe Gori::Tui::ReplayView do
         flow_id: id, status: 200, head: "HTTP/1.1 200 OK\r\n\r\n".to_slice))
       detail = store.get_flow(id).not_nil!
 
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load(detail)
       view.auto_content_length?.should be_true                        # default on
       view.request_text.includes?("Content-Length: 5").should be_true # reflected in the editor too
@@ -176,7 +176,7 @@ describe Gori::Tui::ReplayView do
       view.toggle_auto_content_length # off → send byte-exact (the already-synced editor)
       String.new(view.request_bytes).includes?("Content-Length: 5").should be_true
 
-      byte_exact = ReplayView.new
+      byte_exact = RepeaterView.new
       byte_exact.restore("https://h.test",
         "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nhello", false, false)
       String.new(byte_exact.request_bytes).includes?("Content-Length: 99").should be_true
@@ -184,7 +184,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "reflects auto Content-Length in the visible REQUEST editor (^L on)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://h.test",
       "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nhello", false, false)
     view.request_text.includes?("Content-Length: 99").should be_true
@@ -195,7 +195,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "reflects the RENDERED Content-Length when MARK transform + auto-CL are both on" do
-    view = ReplayView.new
+    view = RepeaterView.new
     # auto-CL (^L) on and MARK transform (^K) on. Body q=§hi§ is 8 raw bytes but renders
     # to q=hi (4 bytes) — the value ^R actually sends.
     view.restore("https://a.test",
@@ -206,7 +206,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "keeps the REQUEST editor's Content-Length in sync while editing the body" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://h.test",
       "POST /x HTTP/1.1\nHost: h.test\nContent-Length: 99\n\nhi", false, true)
     view.pane_advance(1)      # :target → :request
@@ -217,7 +217,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "MARK transform off (default) sends § verbatim — byte-identical to today" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://a.test", "POST /x HTTP/1.1\nHost: a.test\n\nq=§hi§", false, false)
     view.mark_transform?.should be_false
     String.new(view.request_bytes).should eq("POST /x HTTP/1.1\r\nHost: a.test\r\n\r\nq=§hi§")
@@ -230,7 +230,7 @@ describe Gori::Tui::ReplayView do
     prev = Gori::Settings.env_vars
     begin
       Gori::Settings.env_vars = [{"MULTI", "a\r\nb"}]
-      view = ReplayView.new
+      view = RepeaterView.new
       view.restore("https://h.test", "POST /x HTTP/1.1\nHost: h.test\n\n$MULTI", false, false)
       sent = String.new(view.request_bytes)
       sent.should eq("POST /x HTTP/1.1\r\nHost: h.test\r\n\r\na\r\nb")
@@ -241,7 +241,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "MARK transform on applies a marker's inline chain on send + resyncs Content-Length" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://a.test",
       "POST /x HTTP/1.1\nHost: a.test\nContent-Length: 99\n\ntok=§secret¦base64-encode§", false, true)
     view.toggle_mark_transform
@@ -253,13 +253,13 @@ describe Gori::Tui::ReplayView do
   end
 
   it "restore round-trips the MARK transform flag" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://a.test", "GET / HTTP/1.1\n\n", false, true, mark_transform: true)
     view.mark_transform?.should be_true
   end
 
   it "MARK CHAIN pane: focus a marker, type a chain, commit writes it back" do
-    view = ReplayView.new
+    view = RepeaterView.new
     # marker at offset 0 → set_text zeroes the cursor, so it sits inside §v§
     view.restore("https://a.test", "§v§ HTTP/1.1\nHost: a.test\n\n", false, false)
     view.toggle_mark_transform
@@ -274,7 +274,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "MARK CHAIN pane hints when MARK is off or the cursor isn't in a marker" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://a.test", "GET / HTTP/1.1\n\n", false, false)
     view.focus_pane(:request)
     view.focus_chain_pane.should_not be_nil # MARK off → hint, not activated
@@ -285,7 +285,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "load_grpc keeps the framed body byte-exact and the head editable" do
-    replay_tmp_store do |store|
+    repeater_tmp_store do |store|
       # one gRPC message: 1-byte flag + 4-byte len(3) + payload incl a non-UTF-8 0xFF
       body = Bytes[0x00, 0x00, 0x00, 0x00, 0x03, 0xFF, 0x01, 0x02]
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -295,7 +295,7 @@ describe Gori::Tui::ReplayView do
         body: body))
       detail = store.get_flow(id).not_nil!
 
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_grpc(detail)
       view.grpc_mode?.should be_true
       view.http2?.should be_true
@@ -309,14 +309,14 @@ describe Gori::Tui::ReplayView do
   end
 
   it "reframes an edited unary gRPC payload with a corrected length prefix" do
-    replay_tmp_store do |store|
+    repeater_tmp_store do |store|
       body = Bytes[0x00, 0x00, 0x00, 0x00, 0x03, 0xFF, 0x01, 0x02] # one message, payload 0xFF 01 02
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/S/M", http_version: "HTTP/2",
         head: "POST /S/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
         body: body))
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_grpc(store.get_flow(id).not_nil!)
       view.grpc_reframable?.should be_true
 
@@ -335,7 +335,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "pipeline_requests splits the editor on lone %%% lines and labels each request" do
-    view = ReplayView.new
+    view = RepeaterView.new
     req = "GET /a HTTP/1.1\nHost: h\n\n%%%\nGET /b HTTP/1.1\nHost: h\n\n"
     view.restore("http://127.0.0.1", req, false, false)
     reqs = view.pipeline_requests
@@ -348,7 +348,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "pipeline_requests keeps a bodied request's separator (no double terminator)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     req = "POST /a HTTP/1.1\nHost: h\nContent-Length: 4\n\ndata\n%%%\nGET /b HTTP/1.1\nHost: h\n"
     view.restore("http://127.0.0.1", req, false, false)
     reqs = view.pipeline_requests
@@ -358,7 +358,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "group_sendable? is false in h2 / hex / gRPC modes" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.group_sendable?.should be_true
     view.toggle_http2 # h2 → send_pipeline is an h1 primitive
@@ -366,12 +366,12 @@ describe Gori::Tui::ReplayView do
   end
 
   it "apply_group shows a per-response transcript and a single ^R send reclaims the pane" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     head = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n".to_slice
     resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
-    r1 = Gori::Replay::Result.new(head, "hi".to_slice, resp, 1_000_i64)
-    r2 = Gori::Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, "connect failed")
+    r1 = Gori::Repeater::Result.new(head, "hi".to_slice, resp, 1_000_i64)
+    r2 = Gori::Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, "connect failed")
     view.apply_group([{"GET /a HTTP/1.1", r1}, {"GET /b HTTP/1.1", r2}])
 
     view.group_mode?.should be_true
@@ -382,12 +382,12 @@ describe Gori::Tui::ReplayView do
     lines.any?(&.includes?("connect failed")).should be_true
 
     # a normal single send takes the response pane back from the group transcript
-    view.apply(Gori::Replay::Result.new(head, "hi".to_slice, resp, 1_000_i64))
+    view.apply(Gori::Repeater::Result.new(head, "hi".to_slice, resp, 1_000_i64))
     view.group_mode?.should be_false
   end
 
   it "does not reframe a multi-message gRPC body — verbatim, hex refused" do
-    replay_tmp_store do |store|
+    repeater_tmp_store do |store|
       body = Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0xAA,
         0x00, 0x00, 0x00, 0x00, 0x01, 0xBB] # two framed messages
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
@@ -395,7 +395,7 @@ describe Gori::Tui::ReplayView do
         method: "POST", target: "/S/M", http_version: "HTTP/2",
         head: "POST /S/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
         body: body))
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_grpc(store.get_flow(id).not_nil!)
       view.grpc_reframable?.should be_false
       view.toggle_request_hex.should be_false # nothing single-payload to edit
@@ -405,7 +405,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "toggle_http2 flips the transport and retargets the request-line version token" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.http2?.should be_false
     view.request_text.should contain("HTTP/1.1")
@@ -421,13 +421,13 @@ describe Gori::Tui::ReplayView do
   end
 
   it "toggle_http2 is refused for gRPC (h2) and WebSocket (h1) — the transport is intrinsic" do
-    replay_tmp_store do |store|
+    repeater_tmp_store do |store|
       gid = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/demo.Greeter/SayHello", http_version: "HTTP/2",
         head: "POST /demo.Greeter/SayHello HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
         body: Bytes[0x00, 0x00, 0x00, 0x00, 0x00]))
-      gview = ReplayView.new
+      gview = RepeaterView.new
       gview.load_grpc(store.get_flow(gid).not_nil!)
       gview.toggle_http2.should be_true # stays h2 — no flip
       gview.http2?.should be_true
@@ -436,7 +436,7 @@ describe Gori::Tui::ReplayView do
         created_at: 2_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws", http_version: "HTTP/1.1",
         head: "GET /ws HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
-      wview = ReplayView.new
+      wview = RepeaterView.new
       wview.load_ws(store.get_flow(wid).not_nil!, [] of String)
       wview.toggle_http2.should be_false # stays h1 — no flip
       wview.http2?.should be_false
@@ -444,12 +444,12 @@ describe Gori::Tui::ReplayView do
   end
 
   it "ws_out_messages yields one clean frame per line and labels the tab by the upgrade request" do
-    replay_tmp_store do |store|
+    repeater_tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws/chat", http_version: "HTTP/1.1",
         head: "GET /ws/chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_ws(store.get_flow(id).not_nil!, ["{\"a\":1}", "ping"])
 
       msgs = view.ws_out_messages
@@ -463,12 +463,12 @@ describe Gori::Tui::ReplayView do
     end
   end
   it "allows editing both handshake request and messages in ws_mode" do
-    replay_tmp_store do |store|
+    repeater_tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "ws.test", port: 443,
         method: "GET", target: "/ws/chat", http_version: "HTTP/1.1",
         head: "GET /ws/chat HTTP/1.1\r\nHost: ws.test\r\nUpgrade: websocket\r\n\r\n".to_slice, body: nil))
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_ws(store.get_flow(id).not_nil!, ["{\"a\":1}", "ping"])
 
       view.ws_mode?.should be_true
@@ -491,13 +491,13 @@ describe Gori::Tui::ReplayView do
   end
 
   it "renders a gRPC response as deframed messages + grpc-status" do
-    replay_tmp_store do |store|
+    repeater_tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(
         created_at: 1_i64, scheme: "https", host: "api.test", port: 443,
         method: "POST", target: "/svc/M", http_version: "HTTP/2",
         head: "POST /svc/M HTTP/2\r\nHost: api.test\r\ncontent-type: application/grpc\r\n\r\n".to_slice,
         body: Bytes[0x00, 0x00, 0x00, 0x00, 0x01, 0x41]))
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_grpc(store.get_flow(id).not_nil!)
 
       # a framed "Hello!" response + grpc-status 0 trailer (as H2Engine synthesises it)
@@ -507,7 +507,7 @@ describe Gori::Tui::ReplayView do
       body.write(msg)
       head = "HTTP/2 200 OK\r\ncontent-type: application/grpc\r\ngrpc-status: 0\r\ngrpc-message: OK\r\n\r\n"
       resp = Gori::Proxy::Codec::Http1.parse_response_head(head.to_slice)
-      view.apply(Gori::Replay::Result.new(head.to_slice, body.to_slice, resp, 5000_i64))
+      view.apply(Gori::Repeater::Result.new(head.to_slice, body.to_slice, resp, 5000_i64))
 
       backend = MemoryBackend.new(160, 24)
       view.render(Screen.new(backend), Rect.new(0, 0, 160, 24))
@@ -519,7 +519,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "restore re-opens a persisted tab and starts clean (not dirty)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://api.test", "POST /x HTTP/1.1\nHost: api.test\n\nbody", true, false)
     view.loaded?.should be_true
     view.target.should eq("https://api.test")
@@ -530,15 +530,15 @@ describe Gori::Tui::ReplayView do
   end
 
   it "restore with no persisted response starts the pane empty" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true)
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
-    backend.contains?("— not sent — press ^R to replay —").should be_true
+    backend.contains?("— not sent — press ^R to repeater —").should be_true
   end
 
   it "restore re-populates a persisted last response (survives a reopen)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
     view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true,
       head, "RESTORED".to_slice, nil, 1234_i64)
@@ -550,22 +550,22 @@ describe Gori::Tui::ReplayView do
   end
 
   it "restore shows a persisted errored send" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true,
       Bytes.empty, nil, "connect failed: api.test:443", 0_i64)
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
-    backend.contains?("replay error: connect failed: api.test:443").should be_true
+    backend.contains?("repeater error: connect failed: api.test:443").should be_true
   end
 
   it "seed_original re-arms the captured-original diff baseline after restore (reopened ^R tab)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     # reopened, never-sent History tab: restore() alone is non-diffable …
     view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true)
     orig_head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
     view.seed_original(orig_head, "ORIGINAL".to_slice) # … the Runner re-seeds it from flow_id
 
-    sent = Gori::Replay::Result.new(
+    sent = Gori::Repeater::Result.new(
       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "CHANGED".to_slice, nil, 1000_i64)
     view.apply(sent)      # first resend after reopen → baseline is the seeded original
     view.toggle_resp_mode # response → diff
@@ -577,10 +577,10 @@ describe Gori::Tui::ReplayView do
   end
 
   it "seed_original is a no-op when the source flow captured no response" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://api.test", "GET / HTTP/1.1\n\n", false, true)
     view.seed_original(nil, nil) # flow without a response → stays non-diffable
-    ok = Gori::Replay::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "X".to_slice, nil, 1000_i64)
+    ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "X".to_slice, nil, 1000_i64)
     view.apply(ok)
     view.toggle_resp_mode # → diff
     backend = MemoryBackend.new(120, 20)
@@ -589,7 +589,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "marks dirty on edits + flag toggles, and clears on restore" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.dirty?.should be_false # a freshly opened tab is clean (persisted on creation)
 
@@ -611,7 +611,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "label uses the custom name when set, else the request summary" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.label(18).should eq("GET /") # auto-derived from the request line
     view.name = "auth flow"
@@ -623,7 +623,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "label truncates a long custom name" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.name = "a-very-long-custom-tab-name"
     label = view.label(8)
@@ -631,22 +631,22 @@ describe Gori::Tui::ReplayView do
     label.should end_with("…")
   end
 
-  it "persists a replay tab's custom name (set / clear)" do
-    replay_tmp_store do |store|
-      id = store.insert_replay("http://h/x", "GET /x HTTP/1.1", false, true, nil, 0)
-      store.set_replay_name(id, "my-tab")
-      store.replays.first.name.should eq("my-tab")
-      store.set_replay_name(id, nil) # blank clears the custom name
-      store.replays.first.name.should be_nil
+  it "persists a repeater tab's custom name (set / clear)" do
+    repeater_tmp_store do |store|
+      id = store.insert_repeater("http://h/x", "GET /x HTTP/1.1", false, true, nil, 0)
+      store.set_repeater_name(id, "my-tab")
+      store.repeaters.first.name.should eq("my-tab")
+      store.set_repeater_name(id, nil) # blank clears the custom name
+      store.repeaters.first.name.should be_nil
     end
   end
 
   it "shows the response duration and size on the RESPONSE pane after a send" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
     body = ("x" * 2048).to_slice
-    view.apply(Gori::Replay::Result.new(head, body, nil, 234_000_i64)) # 234 ms, head+body ≈ 2 KB
+    view.apply(Gori::Repeater::Result.new(head, body, nil, 234_000_i64)) # 234 ms, head+body ≈ 2 KB
 
     backend = MemoryBackend.new(120, 20)
     view.render(Screen.new(backend), Rect.new(0, 0, 120, 20))
@@ -655,7 +655,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "edits and exposes an SNI override (^S sub-field of the target)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank # focus starts on :target
     view.sni_override.should be_nil
     view.editing_sni?.should be_false
@@ -675,7 +675,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "leaving the target pane exits the SNI sub-field (URL edits never land in SNI)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.toggle_sni_field
     "evil.com".each_char { |c| view.target_insert(c) }
@@ -692,7 +692,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "a click on the TARGET card's bottom border does not enter the SNI sub-field" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://10.0.0.5", "GET / HTTP/1.1\n\n", false, true, sni: "evil.com")
     rect = Rect.new(0, 0, 120, 20)
     # With an SNI override the card is 4 rows: border@y, URL@y+1, SNI@y+2, border@y+3.
@@ -703,7 +703,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "restore seeds a persisted SNI override and shows it" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.restore("https://10.0.0.5", "GET / HTTP/1.1\n\n", false, true, sni: "evil.com")
     view.sni_override.should eq("evil.com")
     view.dirty?.should be_false # a restored tab must never be re-saved
@@ -713,21 +713,21 @@ describe Gori::Tui::ReplayView do
     backend.contains?("evil.com").should be_true
   end
 
-  it "persists a replay tab's SNI override (set / clear)" do
-    replay_tmp_store do |store|
-      id = store.insert_replay("https://h/x", "GET /x HTTP/1.1", false, true, nil, 0, "evil.com")
-      store.replays.first.sni.should eq("evil.com")
-      store.replays_meta.first.sni.should eq("evil.com")                          # syncs via the fast reconcile poll too
-      store.update_replay(id, "https://h/x", "GET /x HTTP/1.1", false, true, nil) # clear
-      store.replays.first.sni.should be_nil
+  it "persists a repeater tab's SNI override (set / clear)" do
+    repeater_tmp_store do |store|
+      id = store.insert_repeater("https://h/x", "GET /x HTTP/1.1", false, true, nil, 0, "evil.com")
+      store.repeaters.first.sni.should eq("evil.com")
+      store.repeaters_meta.first.sni.should eq("evil.com")                          # syncs via the fast reconcile poll too
+      store.update_repeater(id, "https://h/x", "GET /x HTTP/1.1", false, true, nil) # clear
+      store.repeaters.first.sni.should be_nil
     end
   end
 
   it "hscroll scrolls a long response body line sideways into view (shift+←/→)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     long_line = "HEAD" + ("." * 60) + "TAIL"
-    ok = Gori::Replay::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, long_line.to_slice, nil, 1000_i64)
+    ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, long_line.to_slice, nil, 1000_i64)
     view.apply(ok)
 
     rect = Rect.new(0, 0, 100, 20)
@@ -744,14 +744,14 @@ describe Gori::Tui::ReplayView do
   end
 
   it "defaults request and target to READ mode" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.request_insert?.should be_false
     view.target_insert?.should be_false
   end
 
   it "toggles INS mode and shows the badge on the request pane" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.focus_pane(:request)
     view.enter_request_insert!
@@ -766,9 +766,9 @@ describe Gori::Tui::ReplayView do
   end
 
   it "resp_move + selection returns plain text for copy" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
-    ok = Gori::Replay::Result.new(
+    ok = Gori::Repeater::Result.new(
       "HTTP/1.1 200 OK\r\n\r\n".to_slice, "LINE1\nLINE2".to_slice, nil, 1000_i64)
     view.apply(ok)
     view.focus_pane(:response)
@@ -781,9 +781,9 @@ describe Gori::Tui::ReplayView do
   end
 
   it "^G go-to-line in the response pane also moves the caret (not just the scroll)" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
-    ok = Gori::Replay::Result.new(
+    ok = Gori::Repeater::Result.new(
       "HTTP/1.1 200 OK\r\n\r\n".to_slice, "LINE1\nLINE2\nLINE3\nLINE4".to_slice, nil, 1000_i64)
     view.apply(ok)
     view.focus_pane(:response)
@@ -798,12 +798,12 @@ describe Gori::Tui::ReplayView do
   it "apply_peer_request keeps live response + focus (reconcile must not wipe a send)" do
     # Regression: reconcile used full restore() for request-side sync. restore() always
     # sets focus=:target and clears @result when no response BLOBs are passed — so a
-    # post-send data_version poll (update_replay_response bumps it) looked like the
+    # post-send data_version poll (update_repeater_response bumps it) looked like the
     # response was reset and focus jumped to Target.
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.focus_pane(:response)
-    ok = Gori::Replay::Result.new(
+    ok = Gori::Repeater::Result.new(
       "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64)
     view.apply(ok)
     view.focus_pane(:response)
@@ -822,7 +822,7 @@ describe Gori::Tui::ReplayView do
   end
 
   it "request_side_matches? treats empty SNI nil and \"\" as equal" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     view.request_side_matches?(view.target, view.request_text, view.http2?,
       view.auto_content_length?, view.mark_transform?, nil).should be_true
@@ -838,23 +838,23 @@ describe Gori::Tui::ReplayView do
     path = File.tempname("gori-send-sync", ".db")
     store = Gori::Store.open(path)
     begin
-      view = ReplayView.new
+      view = RepeaterView.new
       view.load_blank
-      rid = store.insert_replay(view.target, view.request_text, view.http2?, view.auto_content_length?,
+      rid = store.insert_repeater(view.target, view.request_text, view.http2?, view.auto_content_length?,
         nil, 0, view.sni_override, mark_transform: view.mark_transform?)
       view.clear_dirty
-      ok = Gori::Replay::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "KEEPME".to_slice, nil, 500_i64)
+      ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "KEEPME".to_slice, nil, 500_i64)
       view.apply(ok)
       view.focus_pane(:response)
-      store.update_replay_response(rid, ok.head, ok.body, nil, ok.duration_us)
+      store.update_repeater_response(rid, ok.head, ok.body, nil, ok.duration_us)
       store.flush
 
-      row = store.replays_meta.find { |r| r.id == rid }.not_nil!
+      row = store.repeaters_meta.find { |r| r.id == rid }.not_nil!
       # Own row still matches → reconcile would skip. Force a peer-like request edit.
-      store.update_replay(rid, "https://peer.test", "GET /from-peer HTTP/1.1\nHost: peer.test\n\n",
+      store.update_repeater(rid, "https://peer.test", "GET /from-peer HTTP/1.1\nHost: peer.test\n\n",
         false, true, nil, false)
       store.flush
-      row = store.replays_meta.find { |r| r.id == rid }.not_nil!
+      row = store.repeaters_meta.find { |r| r.id == rid }.not_nil!
       view.request_side_matches?(row.target, row.request, row.http2?,
         row.auto_content_length?, row.mark_transform?, row.sni).should be_false
 
@@ -878,7 +878,7 @@ describe Gori::Tui::ReplayView do
     # visible row every frame — with BodyLines that re-materialised ~N lines × H
     # rows (~300ms+ for 50k). Focused render + resp_scroll_view must stay far below
     # that full-body cost (same bar as History visible-only path).
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     line = ("w" * 20) + "\n"
     n = 30_000
@@ -886,7 +886,7 @@ describe Gori::Tui::ReplayView do
     n.times { io << line }
     body = io.to_slice
     head = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice
-    view.apply(Gori::Replay::Result.new(head, body, nil, 1000_i64))
+    view.apply(Gori::Repeater::Result.new(head, body, nil, 1000_i64))
     view.focus_pane(:response)
     view.resp_line_source[0].should be > 25_000
 
@@ -910,7 +910,7 @@ describe Gori::Tui::ReplayView do
 
   describe "pretty_print_request" do
     it "pretty-prints JSON request body in-place and preserves markers" do
-      view = ReplayView.new
+      view = RepeaterView.new
       view.restore("https://api.test", "POST /x HTTP/1.1\nHost: api.test\nContent-Type: application/json\nContent-Length: 30\n\n{\"a\":\"§val§\",\"b\":[1,2]}", false, true)
 
       view.pretty_print_request.should be_nil # success

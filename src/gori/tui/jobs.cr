@@ -1,12 +1,12 @@
 module Gori::Tui
   # Registry of background jobs for the bottom-bar activity indicator (and, on finish,
   # notifications). The FIRST consumer is the Miner, but it's generic — any long-running
-  # feature (scans, big replays) can register a job.
+  # feature (scans, big repeaters) can register a job.
   #
   # INVARIANT: mutated ONLY on the main fiber, from the run loop's controller `drain_*`
   # methods. Background engine fibers never touch this; they push results through a
   # Channel the controller drains. So there are NO locks. Ephemeral per open project
-  # (a fresh Runner is built per project), like replay results.
+  # (a fresh Runner is built per project), like repeater results.
   class Jobs
     # An immutable "jump to result" target for a finished job's notification.
     record Goto, tab : Symbol, session_id : Int64? = nil

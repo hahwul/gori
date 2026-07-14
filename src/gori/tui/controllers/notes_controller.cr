@@ -7,9 +7,9 @@ require "../../hotkeys"
 require "../theme"
 
 module Gori::Tui
-  # The Notes tab: a multi-note scratchpad (sub-tabs, like Replay). Owns the
+  # The Notes tab: a multi-note scratchpad (sub-tabs, like Repeater). Owns the
   # NotesView; the sub-tab STRIP itself is shared runner-owned chrome (Notes +
-  # Replay), so the shell still drives the strip and reaches the view's count /
+  # Repeater), so the shell still drives the strip and reaches the view's count /
   # labels / switch via `view`. The note reload is lock-guarded by the shell (a
   # dirty/focused note must not be clobbered by a peer's commit), so this controller
   # does NOT override on_external_change.
@@ -194,7 +194,7 @@ module Gori::Tui
       save_notes
     end
 
-    # --- sub-tab strip (shared chrome with Replay) ---
+    # --- sub-tab strip (shared chrome with Repeater) ---
     def subtab_labels : Array(String)
       @notes.subtab_labels
     end
@@ -203,7 +203,7 @@ module Gori::Tui
       @notes.current_index
     end
 
-    # Show the strip from the FIRST note (not ≥2), like Replay/Fuzzer: a lone note
+    # Show the strip from the FIRST note (not ≥2), like Repeater/Fuzzer: a lone note
     # still labels its chip and exposes the strip's space-menu. NotesView never goes
     # empty (always ≥1 note to type into), so this is unconditional.
     def subtab_strip_shown? : Bool
@@ -260,7 +260,7 @@ module Gori::Tui
 
     # Open a fresh note and drop into it (^N from the tab bar / strip / editor).
     # The Notes tab is always already active when this fires, so only the body focus
-    # changes (mirrors Replay's ^N).
+    # changes (mirrors Repeater's ^N).
     def notes_new : Nil
       @notes.new_note
       @notes.enter_insert!

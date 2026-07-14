@@ -35,7 +35,7 @@ module Gori
           row.host
         end
 
-        # Source flow id for Detection.flow_id. Synthetic Replay details use id 0 when there
+        # Source flow id for Detection.flow_id. Synthetic Repeater details use id 0 when there
         # is no parent History flow — treat that as nil so we never link to a non-existent row.
         def fid : Int64?
           id = row.id

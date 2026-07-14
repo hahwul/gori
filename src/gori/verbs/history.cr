@@ -39,9 +39,9 @@ module Gori
         available: history_selected) { |ctx| ctx.copy_selection; nil }
 
       r.register Verb::Definition.new(
-        "history.replay", "Replay flow", "Open the selected flow in the Replay tab",
+        "history.repeater", "Repeater flow", "Open the selected flow in the Repeater tab",
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
-        available: history_selected, mnemonic: 'r') { |ctx| ctx.replay_selected; nil }
+        available: history_selected, mnemonic: 'r') { |ctx| ctx.repeater_selected; nil }
 
       # Send the selected flow to the Comparer's next slot (A → B → A), then open the
       # Comparer tab to view the diff.
@@ -49,15 +49,15 @@ module Gori
         "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
         Verb::Scope::Body, available: history_selected, mnemonic: 'c') { |ctx| ctx.comparer_add_selected; nil }
 
-      # --- replay workbench (request editing is inline; these power the palette
+      # --- repeater workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
-      in_replay = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay }
-      in_replay_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_read_mode? }
+      in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
+      in_repeater_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_read_mode? }
 
       r.register Verb::Definition.new(
-        "replay.send", "Send replay", "Resend the request byte-exact and diff the response",
-        Verb::Scope::Replay, [Verb::Chord.new("r", ctrl: true)],
-        available: in_replay, mnemonic: 'r') { |ctx| ctx.replay_send; nil }
+        "repeater.send", "Send repeater", "Resend the request byte-exact and diff the response",
+        Verb::Scope::Repeater, [Verb::Chord.new("r", ctrl: true)],
+        available: in_repeater, mnemonic: 'r') { |ctx| ctx.repeater_send; nil }
 
       # The single smart Copy: selection if one is active, else the whole focused
       # pane (ctx.read_copy — routes per-tab, added in Round 1). copy-all is gone.
@@ -65,35 +65,35 @@ module Gori
       # Copy, New, Fuzz, Mine, Link-finding, Link-note; registered here rather than
       # farther down so the physical registration order matches).
       r.register Verb::Definition.new(
-        "replay.copy", "Copy", "Copy the selected text, or the whole focused pane if nothing is selected, to the clipboard",
-        Verb::Scope::Replay, [Verb::Chord.new("y")],
-        available: in_replay_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
+        "repeater.copy", "Copy", "Copy the selected text, or the whole focused pane if nothing is selected, to the clipboard",
+        Verb::Scope::Repeater, [Verb::Chord.new("y")],
+        available: in_repeater_read, mnemonic: 'y') { |ctx| ctx.read_copy; nil }
 
       # "Copy as X": a picker of focus-aware copy formats (REQUEST → url/headers/body/
       # cookies/curl/wscat-for-WS/raw · RESPONSE → status+headers/body/raw). Sits beside Copy in
-      # COMMON so it's reachable from any Replay pane; the picker's contents adapt to
+      # COMMON so it's reachable from any Repeater pane; the picker's contents adapt to
       # the pane focused when it opens. Menu key 'Y' pairs with Copy's 'y' and is free
-      # across COMMON ∪ every Replay section (all-lowercase keys there).
+      # across COMMON ∪ every Repeater section (all-lowercase keys there).
       r.register Verb::Definition.new(
-        "replay.copy-as", "Copy as…", "Pick a copy format for the focused pane (url/headers/body/cookies/curl/wscat/raw)",
-        Verb::Scope::Replay, available: in_replay_read, mnemonic: 'Y') { |ctx| ctx.copy_as_open; nil }
+        "repeater.copy-as", "Copy as…", "Pick a copy format for the focused pane (url/headers/body/cookies/curl/wscat/raw)",
+        Verb::Scope::Repeater, available: in_repeater_read, mnemonic: 'Y') { |ctx| ctx.copy_as_open; nil }
 
       r.register Verb::Definition.new(
-        "replay.new", "New replay request", "Open a blank request in Replay to author and send",
-        Verb::Scope::Replay, [Verb::Chord.new("n", ctrl: true)],
-        available: in_replay, mnemonic: 'n') { |ctx| ctx.replay_new; nil }
+        "repeater.new", "New repeater request", "Open a blank request in Repeater to author and send",
+        Verb::Scope::Repeater, [Verb::Chord.new("n", ctrl: true)],
+        available: in_repeater, mnemonic: 'n') { |ctx| ctx.repeater_new; nil }
 
-      # Search the open replay sub-tabs and jump to the chosen one — menu-only
+      # Search the open repeater sub-tabs and jump to the chosen one — menu-only
       # (no chord), shown only when there are ≥2 sessions to pick between. Tagged
       # :tab (session-level) rather than :common: it's the one verb that seeds
-      # has_section?(Replay, :tab), so the tab-bar space menu shows a deliberate
+      # has_section?(Repeater, :tab), so the tab-bar space menu shows a deliberate
       # TAB group (COMMON + this) instead of falling back to whatever body focus
       # section (request/response/target) happened to be active last.
       r.register Verb::Definition.new(
-        "replay.find-subtab", "Search sub-tabs", "Filter the open replay sessions and jump to one",
-        Verb::Scope::Replay,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_subtab_count >= 2 },
-        mnemonic: 's', section: :tab) { |ctx| ctx.replay_find_subtab; nil }
+        "repeater.find-subtab", "Search sub-tabs", "Filter the open repeater sessions and jump to one",
+        Verb::Scope::Repeater,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 2 },
+        mnemonic: 's', section: :tab) { |ctx| ctx.repeater_find_subtab; nil }
 
       # Sub-tab rename/close — today's raw key-dispatch on the strip (`r` rename, ^W
       # close) promoted to verbs so the :subtab space-menu group (reachable from the
@@ -102,92 +102,92 @@ module Gori
       # keys are r/y/n/f/m/k/u — 'e' and 'w' only collide with OTHER sections,
       # which never render alongside :subtab).
       r.register Verb::Definition.new(
-        "replay.rename-subtab", "Rename subtab", "Rename the active replay sub-tab's chip",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'e', section: :subtab) { |ctx| ctx.replay_rename_subtab; nil }
+        "repeater.rename-subtab", "Rename subtab", "Rename the active repeater sub-tab's chip",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'e', section: :subtab) { |ctx| ctx.repeater_rename_subtab; nil }
       # Tag / filter the sub-tab strip (issue #121). `t` tags the active session, `/`
       # opens the tag-filter bar. 't' is free in COMMON ∪ :subtab (COMMON: r/y/n/f/m/k/u;
       # :subtab: e/w/d); the filter uses '/' (the shared filter idiom, unique here).
       r.register Verb::Definition.new(
-        "replay.tag-subtab", "Tag subtab", "Add/edit flat tags on the active replay sub-tab",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 't', section: :subtab) { |ctx| ctx.replay_tag_subtab; nil }
+        "repeater.tag-subtab", "Tag subtab", "Add/edit flat tags on the active repeater sub-tab",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 't', section: :subtab) { |ctx| ctx.repeater_tag_subtab; nil }
       r.register Verb::Definition.new(
-        "replay.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host / method",
-        Verb::Scope::Replay,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_subtab_count >= 2 },
-        mnemonic: '/', section: :tab) { |ctx| ctx.replay_filter_subtabs; nil }
+        "repeater.filter-subtabs", "Filter sub-tabs", "Filter the sub-tab strip by tag / name / host / method",
+        Verb::Scope::Repeater,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 2 },
+        mnemonic: '/', section: :tab) { |ctx| ctx.repeater_filter_subtabs; nil }
       r.register Verb::Definition.new(
-        "replay.close-subtab", "Close subtab", "Close the active replay sub-tab",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'w', section: :subtab) { |ctx| ctx.replay_close_subtab; nil }
+        "repeater.close-subtab", "Close subtab", "Close the active repeater sub-tab",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'w', section: :subtab) { |ctx| ctx.repeater_close_subtab; nil }
       # Duplicate the active session into a new sibling (content only — no flow/links).
       # 'd' is free in COMMON ∪ :subtab (COMMON: r/y/n/f/m/k/u; :subtab already has e/w).
       r.register Verb::Definition.new(
-        "replay.duplicate-subtab", "Duplicate subtab", "Open a new sub-tab with the same request content",
-        Verb::Scope::Replay,
-        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_subtab_count >= 1 },
-        mnemonic: 'd', section: :subtab) { |ctx| ctx.replay_duplicate_subtab; nil }
+        "repeater.duplicate-subtab", "Duplicate subtab", "Open a new sub-tab with the same request content",
+        Verb::Scope::Repeater,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 1 },
+        mnemonic: 'd', section: :subtab) { |ctx| ctx.repeater_duplicate_subtab; nil }
 
       # --- REQUEST pane, mark-transform (mark request values, attach Decoder chains
       # applied on send) — Round 5 order: the marker actions the user reaches for
       # most (toggle the mode, then insert/mark/auto/clear/attach), THEN the view
       # toggles (hex/decoded/pretty) below.
       r.register Verb::Definition.new(
-        "replay.toggle-mark-transform", "Toggle MARK transform", "Mark request values (§…§) and apply Decoder chains on send",
-        Verb::Scope::Replay, [Verb::Chord.new("k", ctrl: true)],
-        available: in_replay, mnemonic: 't', section: :request) { |ctx| ctx.replay_toggle_mark_transform; nil }
+        "repeater.toggle-mark-transform", "Toggle MARK transform", "Mark request values (§…§) and apply Decoder chains on send",
+        Verb::Scope::Repeater, [Verb::Chord.new("k", ctrl: true)],
+        available: in_repeater, mnemonic: 't', section: :request) { |ctx| ctx.repeater_toggle_mark_transform; nil }
       r.register Verb::Definition.new(
-        "replay.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'i', section: :request) { |ctx| ctx.replay_insert_marker; nil }
+        "repeater.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'i', section: :request) { |ctx| ctx.repeater_insert_marker; nil }
       r.register Verb::Definition.new(
-        "replay.mark-word", "Mark word", "Toggle a §…§ marker around the token at the cursor",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'w', section: :request) { |ctx| ctx.replay_mark_word; nil }
+        "repeater.mark-word", "Mark word", "Toggle a §…§ marker around the token at the cursor",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'w', section: :request) { |ctx| ctx.repeater_mark_word; nil }
       r.register Verb::Definition.new(
-        "replay.auto-mark", "Auto-mark params", "Wrap every request parameter value in a §…§ marker",
-        Verb::Scope::Replay, [Verb::Chord.new("a", ctrl: true)],
-        available: in_replay, mnemonic: 'a', section: :request) { |ctx| ctx.replay_auto_mark; nil }
+        "repeater.auto-mark", "Auto-mark params", "Wrap every request parameter value in a §…§ marker",
+        Verb::Scope::Repeater, [Verb::Chord.new("a", ctrl: true)],
+        available: in_repeater, mnemonic: 'a', section: :request) { |ctx| ctx.repeater_auto_mark; nil }
       r.register Verb::Definition.new(
-        "replay.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain)",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'c', section: :request) { |ctx| ctx.replay_clear_marks; nil }
+        "repeater.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain)",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'c', section: :request) { |ctx| ctx.repeater_clear_marks; nil }
       r.register Verb::Definition.new(
-        "replay.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
-        Verb::Scope::Replay, [Verb::Chord.new("y", ctrl: true)],
-        available: in_replay, mnemonic: 'e', section: :request) { |ctx| ctx.replay_attach_chain; nil }
+        "repeater.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
+        Verb::Scope::Repeater, [Verb::Chord.new("y", ctrl: true)],
+        available: in_repeater, mnemonic: 'e', section: :request) { |ctx| ctx.repeater_attach_chain; nil }
 
-      # Request-pane VIEW toggles — keymap-driven (Replay scope) so they're rebindable.
+      # Request-pane VIEW toggles — keymap-driven (Repeater scope) so they're rebindable.
       # The Runner delegators carry the pane-gating + status messages. Hex-edit the
       # request bytes, switch its envelope/decoded split, pretty-print its body —
       # mnemonics added so they front the :request space-menu group (previously
       # ctrl-only, so menu_key was nil and they were invisible there).
       r.register Verb::Definition.new(
-        "replay.toggle-hex", "Toggle hex edit", "Edit the request as raw bytes — sends exactly what you type",
-        Verb::Scope::Replay, [Verb::Chord.new("x", ctrl: true)],
-        available: in_replay, mnemonic: 'x', section: :request) { |ctx| ctx.replay_toggle_hex; nil }
+        "repeater.toggle-hex", "Toggle hex edit", "Edit the request as raw bytes — sends exactly what you type",
+        Verb::Scope::Repeater, [Verb::Chord.new("x", ctrl: true)],
+        available: in_repeater, mnemonic: 'x', section: :request) { |ctx| ctx.repeater_toggle_hex; nil }
       r.register Verb::Definition.new(
-        "replay.toggle-decoded", "Switch envelope/decoded", "SAML/GraphQL flow: switch envelope/decoded · in MARK mode: insert a § at the cursor",
-        Verb::Scope::Replay, [Verb::Chord.new("t", ctrl: true)],
-        available: in_replay, mnemonic: 'd', section: :request) { |ctx| ctx.replay_toggle_decoded; nil }
+        "repeater.toggle-decoded", "Switch envelope/decoded", "SAML/GraphQL flow: switch envelope/decoded · in MARK mode: insert a § at the cursor",
+        Verb::Scope::Repeater, [Verb::Chord.new("t", ctrl: true)],
+        available: in_repeater, mnemonic: 'd', section: :request) { |ctx| ctx.repeater_toggle_decoded; nil }
       r.register Verb::Definition.new(
-        "replay.pretty-request", "Pretty-print request", "Format the request body in-place (JSON/XML/form-urlencoded)",
-        Verb::Scope::Replay, [Verb::Chord.new("u", ctrl: true)],
-        available: in_replay, mnemonic: 'p', section: :request) { |ctx| ctx.replay_pretty_request; nil }
+        "repeater.pretty-request", "Pretty-print request", "Format the request body in-place (JSON/XML/form-urlencoded)",
+        Verb::Scope::Repeater, [Verb::Chord.new("u", ctrl: true)],
+        available: in_repeater, mnemonic: 'p', section: :request) { |ctx| ctx.repeater_pretty_request; nil }
 
       # Target-pane toggle (SNI override) — tagged :target so it fronts the space menu
       # when the TARGET field has focus (previously ctrl-only ⇒ invisible there).
       r.register Verb::Definition.new(
-        "replay.toggle-sni", "Toggle SNI override", "Override the TLS SNI on the target pane (dialed host unchanged)",
-        Verb::Scope::Replay, [Verb::Chord.new("s", ctrl: true)],
-        available: in_replay, mnemonic: 's', section: :target) { |ctx| ctx.replay_toggle_sni; nil }
+        "repeater.toggle-sni", "Toggle SNI override", "Override the TLS SNI on the target pane (dialed host unchanged)",
+        Verb::Scope::Repeater, [Verb::Chord.new("s", ctrl: true)],
+        available: in_repeater, mnemonic: 's', section: :target) { |ctx| ctx.repeater_toggle_sni; nil }
       r.register Verb::Definition.new(
-        "replay.toggle-auto-content-length", "Toggle auto Content-Length", "Recompute Content-Length from the body on send",
-        Verb::Scope::Replay, [Verb::Chord.new("l", ctrl: true)],
-        available: in_replay) { |ctx| ctx.replay_toggle_auto_content_length; nil }
+        "repeater.toggle-auto-content-length", "Toggle auto Content-Length", "Recompute Content-Length from the body on send",
+        Verb::Scope::Repeater, [Verb::Chord.new("l", ctrl: true)],
+        available: in_repeater) { |ctx| ctx.repeater_toggle_auto_content_length; nil }
       r.register Verb::Definition.new(
-        "replay.toggle-http2", "Toggle HTTP/2 (h2)", "Send this request over HTTP/2 or HTTP/1.1, overriding the captured protocol",
-        Verb::Scope::Replay, [Verb::Chord.new("v", ctrl: true)],
-        available: in_replay, mnemonic: 'h', section: :request) { |ctx| ctx.replay_toggle_http2; nil }
+        "repeater.toggle-http2", "Toggle HTTP/2 (h2)", "Send this request over HTTP/2 or HTTP/1.1, overriding the captured protocol",
+        Verb::Scope::Repeater, [Verb::Chord.new("v", ctrl: true)],
+        available: in_repeater, mnemonic: 'h', section: :request) { |ctx| ctx.repeater_toggle_http2; nil }
       r.register Verb::Definition.new(
-        "replay.send-group", "Send group (one connection)",
+        "repeater.send-group", "Send group (one connection)",
         "Pipeline every request (split on a lone %%% line) over ONE keep-alive connection — active request-smuggling / keep-alive reuse — and show each response",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'g', section: :request) { |ctx| ctx.replay_send_group; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'g', section: :request) { |ctx| ctx.repeater_send_group; nil }
 
       # --- RESPONSE pane (diff / pretty via keymap so rebind works; hex stays
       # controller-owned on the response pane because plain `x` is also select-line
@@ -196,16 +196,16 @@ module Gori
       # space menu only; keymap last-wins is avoided because request toggles use
       # ctrl chords). Handlers no-op unless the response pane is focused.
       r.register Verb::Definition.new(
-        "replay.toggle-diff", "Toggle diff", "Switch the response pane between the raw response and a diff against the previous one",
-        Verb::Scope::Replay, [Verb::Chord.new("d")],
-        available: in_replay, mnemonic: 'd', section: :response) { |ctx| ctx.replay_toggle_resp_diff; nil }
+        "repeater.toggle-diff", "Toggle diff", "Switch the response pane between the raw response and a diff against the previous one",
+        Verb::Scope::Repeater, [Verb::Chord.new("d")],
+        available: in_repeater, mnemonic: 'd', section: :response) { |ctx| ctx.repeater_toggle_resp_diff; nil }
       r.register Verb::Definition.new(
-        "replay.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'x', section: :response) { |ctx| ctx.replay_toggle_resp_hex; nil }
+        "repeater.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'x', section: :response) { |ctx| ctx.repeater_toggle_resp_hex; nil }
       r.register Verb::Definition.new(
-        "replay.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
-        Verb::Scope::Replay, [Verb::Chord.new("p")],
-        available: in_replay, mnemonic: 'p', section: :response) { |ctx| ctx.toggle_pretty; nil }
+        "repeater.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
+        Verb::Scope::Repeater, [Verb::Chord.new("p")],
+        available: in_repeater, mnemonic: 'p', section: :response) { |ctx| ctx.toggle_pretty; nil }
 
       # --- detail view ---
       # esc/q always leave. ← walks back through the panes (FRAMES→RES→REQ) and only
@@ -265,12 +265,12 @@ module Gori
 
       # The flow actions mirror the History list's "space" menu so the muscle memory
       # carries into the drill-in (the user's goal). Each keeps the list's exact chord
-      # + mnemonic; replay/finding/fuzz close the detail first so it doesn't float over
+      # + mnemonic; repeater/finding/fuzz close the detail first so it doesn't float over
       # the destination tab.
       r.register Verb::Definition.new(
-        "detail.replay", "Replay flow", "Open this flow in the Replay tab",
+        "detail.repeater", "Repeater flow", "Open this flow in the Repeater tab",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("r", ctrl: true)],
-        mnemonic: 'r') { |ctx| ctx.close_detail; ctx.replay_selected; nil }
+        mnemonic: 'r') { |ctx| ctx.close_detail; ctx.repeater_selected; nil }
 
       # Create a finding while reading the flow — the natural moment to file one.
       # Without this, ⇧F silently dead-ends in the detail (it's a Body-scope verb).
@@ -291,7 +291,7 @@ module Gori
         Verb::Scope::HistoryDetail, [Verb::Chord.new("y")],
         mnemonic: 'y') { |ctx| ctx.detail_copy_selection; nil }
 
-      # "Copy as X" for the drill-in: same focus-aware format picker as Replay, over the
+      # "Copy as X" for the drill-in: same focus-aware format picker as Repeater, over the
       # REQUEST/RESPONSE pane bytes. Menu key 'Y' pairs with copy's 'y' (free in the
       # HistoryDetail menu, whose keys are y/O/r/a/c/z/h/x/b/p).
       r.register Verb::Definition.new(
@@ -317,20 +317,20 @@ module Gori
     end
 
     # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette
-    # from Replay) + the Fuzzer-scope actions. run/stop/automark are keymap-driven
+    # from Repeater) + the Fuzzer-scope actions. run/stop/automark are keymap-driven
     # (rebindable); markword/point/clear/config stay inline in the controller for now.
     def self.register_fuzz(r : Verb::Registry) : Nil
       history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
       in_fuzzer = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer }
-      in_replay = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay }
+      in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
 
       r.register Verb::Definition.new(
         "history.fuzz", "Send to Fuzzer", "Open the selected flow in the Fuzzer tab",
         Verb::Scope::Body, [Verb::Chord.new("i", shift: true)],
         available: history_selected, mnemonic: 'z') { |ctx| ctx.fuzz_selected; nil }
       r.register Verb::Definition.new(
-        "replay.fuzz", "Send to Fuzzer", "Turn this replay request into a fuzz template",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'f') { |ctx| ctx.fuzz_from_replay; nil }
+        "repeater.fuzz", "Send to Fuzzer", "Turn this repeater request into a fuzz template",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'f') { |ctx| ctx.fuzz_from_repeater; nil }
 
       r.register Verb::Definition.new(
         "fuzz.run", "Run fuzz", "Start the fuzz/intruder run", Verb::Scope::Fuzzer,
@@ -339,16 +339,16 @@ module Gori
         "fuzz.stop", "Stop fuzz", "Stop the running fuzz", Verb::Scope::Fuzzer,
         [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
       # COMMON (Round 5), not :tab: New-session is a top action the user reaches for
-      # from anywhere in the Fuzzer tab, not just the tab bar — mirrors replay.new
-      # (Replay) and decoder.new (Decoder, Round 4a), both :common. Fuzzer's COMMON
+      # from anywhere in the Fuzzer tab, not just the tab bar — mirrors repeater.new
+      # (Repeater) and decoder.new (Decoder, Round 4a), both :common. Fuzzer's COMMON
       # is now curated most-used-first: Run, Stop, New, Copy, Link-finding, Link-note.
       r.register Verb::Definition.new(
         "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
         [Verb::Chord.new("n", ctrl: true)],
         available: in_fuzzer, mnemonic: 'n') { |ctx| ctx.fuzz_new; nil }
 
-      # Search-and-jump across open fuzz sessions — the Replay find-subtab picker,
-      # generalised (section :tab so it shows in the tab-bar space menu, like replay).
+      # Search-and-jump across open fuzz sessions — the Repeater find-subtab picker,
+      # generalised (section :tab so it shows in the tab-bar space menu, like repeater).
       # Gives Fuzzer a sub-tab jump that doesn't depend on Ctrl+digit. 'f' (find) since
       # 's' is taken by fuzz.stop in Fuzzer COMMON.
       r.register Verb::Definition.new(
@@ -357,7 +357,7 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 2 },
         mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
-      # Sub-tab rename/close — mirrors replay.rename-subtab/replay.close-subtab above:
+      # Sub-tab rename/close — mirrors repeater.rename-subtab/repeater.close-subtab above:
       # the strip's raw `r` rename / ^W close, promoted to verbs so :subtab isn't
       # empty. 'e'/'w' are free in COMMON ∪ :subtab (Fuzzer COMMON keys: r/s/y/k/u/S/v).
       r.register Verb::Definition.new(
@@ -394,7 +394,7 @@ module Gori
         "fuzz.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain) from the template",
         Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'x', section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
       in_fuzzer_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_read_mode? }
-      # The single smart Copy (see replay.copy above) — copy-all is gone.
+      # The single smart Copy (see repeater.copy above) — copy-all is gone.
       r.register Verb::Definition.new(
         "fuzzer.copy", "Copy", "Copy the selected text, or the whole focused pane if nothing is selected, to the clipboard",
         Verb::Scope::Fuzzer, [Verb::Chord.new("y")],
@@ -402,12 +402,12 @@ module Gori
     end
 
     # Param-miner verbs: the cross-tab "Mine parameters" entry (space menu in History,
-    # History detail, and Replay) opens a small config popup, then mining runs in the
+    # History detail, and Repeater) opens a small config popup, then mining runs in the
     # BACKGROUND (the UI stays put). run/stop act on the focused Miner session.
     def self.register_miner(r : Verb::Registry) : Nil
       history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
       in_miner = ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner }
-      in_replay = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay }
+      in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
 
       r.register Verb::Definition.new(
         "history.mine", "Mine parameters", "Discover hidden parameters for the selected flow",
@@ -416,8 +416,8 @@ module Gori
         "detail.mine", "Mine parameters", "Discover hidden parameters for this flow",
         Verb::Scope::HistoryDetail, mnemonic: 'm') { |ctx| ctx.close_detail; ctx.mine_selected; nil }
       r.register Verb::Definition.new(
-        "replay.mine", "Mine parameters", "Discover hidden parameters for this replay request",
-        Verb::Scope::Replay, available: in_replay, mnemonic: 'm') { |ctx| ctx.mine_from_replay; nil }
+        "repeater.mine", "Mine parameters", "Discover hidden parameters for this repeater request",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'm') { |ctx| ctx.mine_from_repeater; nil }
 
       r.register Verb::Definition.new(
         "mine.run", "Run mining", "Re-run parameter mining for this session", Verb::Scope::Miner,
@@ -425,44 +425,44 @@ module Gori
       r.register Verb::Definition.new(
         "mine.stop", "Stop mining", "Stop the running mine", Verb::Scope::Miner,
         [Verb::Chord.new("x", ctrl: true)], available: in_miner, mnemonic: 's') { |ctx| ctx.mine_stop; nil }
-      # Send the selected finding (injected into the session request) to Replay. COMMON so
+      # Send the selected finding (injected into the session request) to Repeater. COMMON so
       # it's reachable from summary/results/detail; gated on a selected finding. 'p' is free
       # in COMMON ∪ :subtab (COMMON: r/s/k/u; :subtab: d).
       r.register Verb::Definition.new(
-        "mine.replay", "Send to Replay", "Open the selected finding as a request in Replay (param injected)",
+        "mine.repeater", "Send to Repeater", "Open the selected finding as a request in Repeater (param injected)",
         Verb::Scope::Miner,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.miner_finding_selected? },
-        mnemonic: 'p') { |ctx| ctx.mine_replay_selected; nil }
+        mnemonic: 'p') { |ctx| ctx.mine_repeater_selected; nil }
       # Content-only clone of the active miner session (request + config; no findings).
       # 'd' is free in COMMON ∪ :subtab (COMMON: r/s/k/u/p).
       r.register Verb::Definition.new(
         "mine.duplicate-subtab", "Duplicate subtab", "Open a new miner session with the same request and config",
         Verb::Scope::Miner, available: in_miner, mnemonic: 'd', section: :subtab) { |ctx| ctx.miner_duplicate_subtab; nil }
 
-      # Replay's/Fuzzer's "Link to finding/note" (Round 5 — relocated OUT of
+      # Repeater's/Fuzzer's "Link to finding/note" (Round 5 — relocated OUT of
       # register_links, which registers before register_fuzz/register_miner in
       # Verbs.registry: leaving them there put Link-finding/Link-note AHEAD of
-      # Fuzz/Mine in the Replay/Fuzzer COMMON group, when the curated order wants
+      # Fuzz/Mine in the Repeater/Fuzzer COMMON group, when the curated order wants
       # them LAST (COMMON = most-used-first: Send/Copy/New/Fuzz/Mine/Link-finding/
-      # Link-note for Replay; Run/Stop/New/Copy/Link-finding/Link-note for Fuzzer).
-      # Registering them here — after replay.mine above, and after register_fuzz
+      # Link-note for Repeater; Run/Stop/New/Copy/Link-finding/Link-note for Fuzzer).
+      # Registering them here — after repeater.mine above, and after register_fuzz
       # already ran — achieves that order for free (menu order == registration
       # order, per Registry#for_scope with an empty query). Same ids/titles/
       # handlers as before; only the registration SITE moved. History's own
       # link.history.*/link.history-detail.* and Miner's link.miner.* stay in
       # register_links (their relative order wasn't in scope for this round).
-      replay_linkable = ->(ctx : Verb::ExecContext) {
-        ctx.current_tab == :replay && !ctx.link_replay_id.nil?
+      repeater_linkable = ->(ctx : Verb::ExecContext) {
+        ctx.current_tab == :repeater && !ctx.link_repeater_id.nil?
       }
       fuzz_linkable = ->(ctx : Verb::ExecContext) {
         ctx.current_tab == :fuzzer && !ctx.link_fuzz_id.nil?
       }
       r.register Verb::Definition.new(
-        "link.replay.to-finding", "Link to finding", "Attach this replay session to a finding",
-        Verb::Scope::Replay, available: replay_linkable, mnemonic: 'k') { |ctx| ctx.link_to_finding; nil }
+        "link.repeater.to-finding", "Link to finding", "Attach this repeater session to a finding",
+        Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'k') { |ctx| ctx.link_to_finding; nil }
       r.register Verb::Definition.new(
-        "link.replay.to-note", "Link to note", "Attach this replay session to a note",
-        Verb::Scope::Replay, available: replay_linkable, mnemonic: 'u') { |ctx| ctx.link_to_note; nil }
+        "link.repeater.to-note", "Link to note", "Attach this repeater session to a note",
+        Verb::Scope::Repeater, available: repeater_linkable, mnemonic: 'u') { |ctx| ctx.link_to_note; nil }
       r.register Verb::Definition.new(
         "link.fuzzer.to-finding", "Link to finding", "Attach this fuzz session to a finding",
         Verb::Scope::Fuzzer, available: fuzz_linkable, mnemonic: 'k') { |ctx| ctx.link_to_finding; nil }

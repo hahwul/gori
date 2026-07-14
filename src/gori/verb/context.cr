@@ -37,7 +37,7 @@ module Gori
       abstract def menu_left : Nil
       abstract def menu_right : Nil
       # Descend from the tab menu into the active tab's content. Tabs with a
-      # navigable sub-tab strip (Replay/Notes) land on the STRIP first; others go
+      # navigable sub-tab strip (Repeater/Notes) land on the STRIP first; others go
       # straight to the body. (The strip then descends into the editor itself.)
       abstract def enter_content : Nil
 
@@ -68,48 +68,48 @@ module Gori
       # Toggle pretty-print of req/res bodies (display only; `p` in History detail).
       abstract def toggle_pretty : Nil
 
-      # replay workbench (text editing + focus/pane nav stay inline; these request-pane
+      # repeater workbench (text editing + focus/pane nav stay inline; these request-pane
       # toggles are verbs so they're keymap-driven and rebindable)
-      abstract def replay_selected : Nil       # load History's selection into Replay
-      abstract def replay_new : Nil            # open a blank, hand-authored replay request
-      abstract def replay_send : Nil           # resend the (edited) request to the target
-      abstract def replay_send_group : Nil     # pipeline %%%-split requests on one connection
-      abstract def replay_find_subtab : Nil    # open the sub-tab search picker (filter + jump)
-      abstract def replay_subtab_count : Int32 # open replay session count (gates the search menu entry)
-      # Generic sub-tab search — the Replay picker generalised to Fuzzer/Notes/Decoder so
+      abstract def repeater_selected : Nil       # load History's selection into Repeater
+      abstract def repeater_new : Nil            # open a blank, hand-authored repeater request
+      abstract def repeater_send : Nil           # resend the (edited) request to the target
+      abstract def repeater_send_group : Nil     # pipeline %%%-split requests on one connection
+      abstract def repeater_find_subtab : Nil    # open the sub-tab search picker (filter + jump)
+      abstract def repeater_subtab_count : Int32 # open repeater session count (gates the search menu entry)
+      # Generic sub-tab search — the Repeater picker generalised to Fuzzer/Notes/Decoder so
       # jumping to a sub-tab never depends on the fragile Ctrl+digit chord (which many
       # terminals can't deliver). Operate on the active tab; count gates the menu entry.
       abstract def subtab_search_open : Nil                # open the sub-tab search picker for the active tab
       abstract def subtab_search_count : Int32             # active tab's open sub-tab count (gates the search entry)
-      abstract def replay_rename_subtab : Nil              # open the rename prompt for the active sub-tab
-      abstract def replay_tag_subtab : Nil                 # open the tag editor for the active sub-tab (issue #121)
-      abstract def replay_filter_subtabs : Nil             # open the `/` tag-filter bar over the sub-tab strip
-      abstract def replay_close_subtab : Nil               # close the active sub-tab (confirm-gated)
-      abstract def replay_duplicate_subtab : Nil           # clone the active sub-tab's content into a new sibling
-      abstract def replay_toggle_hex : Nil                 # toggle byte-exact hex editing of the request pane
-      abstract def replay_toggle_decoded : Nil             # toggle the envelope/decoded split sub-pane (SAML/GraphQL)
-      abstract def replay_toggle_sni : Nil                 # toggle the SNI-override sub-field (target pane)
-      abstract def replay_toggle_auto_content_length : Nil # recompute Content-Length on send
-      abstract def replay_toggle_http2 : Nil               # flip the request transport h1↔h2 (override captured protocol)
-      abstract def replay_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
-      abstract def replay_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
+      abstract def repeater_rename_subtab : Nil              # open the rename prompt for the active sub-tab
+      abstract def repeater_tag_subtab : Nil                 # open the tag editor for the active sub-tab (issue #121)
+      abstract def repeater_filter_subtabs : Nil             # open the `/` tag-filter bar over the sub-tab strip
+      abstract def repeater_close_subtab : Nil               # close the active sub-tab (confirm-gated)
+      abstract def repeater_duplicate_subtab : Nil           # clone the active sub-tab's content into a new sibling
+      abstract def repeater_toggle_hex : Nil                 # toggle byte-exact hex editing of the request pane
+      abstract def repeater_toggle_decoded : Nil             # toggle the envelope/decoded split sub-pane (SAML/GraphQL)
+      abstract def repeater_toggle_sni : Nil                 # toggle the SNI-override sub-field (target pane)
+      abstract def repeater_toggle_auto_content_length : Nil # recompute Content-Length on send
+      abstract def repeater_toggle_http2 : Nil               # flip the request transport h1↔h2 (override captured protocol)
+      abstract def repeater_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
+      abstract def repeater_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
       # mark-transform mode: mark request values (§…§) and attach Decoder chains applied on send
-      abstract def replay_toggle_mark_transform : Nil # toggle MARK mode on/off
-      abstract def replay_pretty_request : Nil
+      abstract def repeater_toggle_mark_transform : Nil # toggle MARK mode on/off
+      abstract def repeater_pretty_request : Nil
       abstract def fuzz_pretty_template : Nil
       abstract def fuzz_toggle_http2 : Nil    # flip the fuzz transport h1↔h2 (override seed protocol)
-      abstract def replay_auto_mark : Nil     # wrap every request param value in §…§
-      abstract def replay_mark_word : Nil     # toggle a marker around the token at the cursor
-      abstract def replay_insert_marker : Nil # drop a single § at the cursor (bracket by hand)
-      abstract def replay_clear_marks : Nil   # strip all markers (and their chains)
-      abstract def replay_attach_chain : Nil  # open the chain-edit prompt for the marker at the cursor
-      abstract def replay_copy : Nil          # copy selection or current line (READ panes)
-      abstract def replay_copy_all : Nil      # copy the whole focused pane text
-      abstract def replay_read_mode? : Bool   # focused pane is READ (y/copy verbs gate on this)
+      abstract def repeater_auto_mark : Nil     # wrap every request param value in §…§
+      abstract def repeater_mark_word : Nil     # toggle a marker around the token at the cursor
+      abstract def repeater_insert_marker : Nil # drop a single § at the cursor (bracket by hand)
+      abstract def repeater_clear_marks : Nil   # strip all markers (and their chains)
+      abstract def repeater_attach_chain : Nil  # open the chain-edit prompt for the marker at the cursor
+      abstract def repeater_copy : Nil          # copy selection or current line (READ panes)
+      abstract def repeater_copy_all : Nil      # copy the whole focused pane text
+      abstract def repeater_read_mode? : Bool   # focused pane is READ (y/copy verbs gate on this)
 
       # fuzzer workbench (run/stop/marking handled inline; these power the palette + cross-tab)
       abstract def fuzz_selected : Nil           # send History's selection to the Fuzzer tab
-      abstract def fuzz_from_replay : Nil        # turn the current Replay request into a fuzz template
+      abstract def fuzz_from_repeater : Nil        # turn the current Repeater request into a fuzz template
       abstract def fuzz_run : Nil                # start the fuzz run
       abstract def fuzz_stop : Nil               # stop the running fuzz
       abstract def fuzz_new : Nil                # open a blank fuzz session
@@ -126,12 +126,12 @@ module Gori
 
       # param miner (cross-tab seeds open a config popup, then mining runs in background)
       abstract def mine_selected : Nil            # mine History's selected flow (opens the config popup)
-      abstract def mine_from_replay : Nil         # mine the current Replay request
+      abstract def mine_from_repeater : Nil         # mine the current Repeater request
       abstract def mine_run : Nil                 # re-run mining for the focused Miner session
       abstract def mine_stop : Nil                # stop the running mine
       abstract def miner_duplicate_subtab : Nil   # clone the active miner sub-tab's content into a new sibling
       abstract def miner_finding_selected? : Bool # a finding is selected in the focused miner session
-      abstract def mine_replay_selected : Nil     # send the selected miner finding to Replay
+      abstract def mine_repeater_selected : Nil     # send the selected miner finding to Repeater
 
       # sitemap tree
       abstract def sitemap_move(delta : Int32) : Nil
@@ -192,7 +192,7 @@ module Gori
       abstract def finding_hscroll(delta : Int32) : Nil
       abstract def finding_edit_title : Nil               # rename + set severity via the form overlay
       abstract def finding_open_flow : Nil                # open the linked flow's detail in History
-      abstract def finding_replay_flow : Nil              # send the linked flow to Replay
+      abstract def finding_repeater_flow : Nil              # send the linked flow to Repeater
       abstract def finding_links : Nil                    # open the links overlay for the open finding
       abstract def finding_open_link : Nil                # open the selected related item in its tab
       abstract def finding_link_move(delta : Int32) : Nil # move selection in the RELATED list
@@ -202,7 +202,7 @@ module Gori
       abstract def link_to_finding : Nil
       abstract def link_to_note : Nil
       abstract def link_flow_id : Int64?
-      abstract def link_replay_id : Int64?
+      abstract def link_repeater_id : Int64?
       abstract def link_fuzz_id : Int64?
       abstract def link_miner_id : Int64?
 
@@ -219,7 +219,7 @@ module Gori
       abstract def prism_dismiss_code : Nil  # bulk-dismiss every open issue with the target's code
       abstract def prism_dismiss_host : Nil  # bulk-dismiss every open issue on the target's host
       abstract def prism_open_flow : Nil     # open the issue's sample flow in History
-      abstract def prism_replay_flow : Nil   # send the issue's sample flow to Replay
+      abstract def prism_repeater_flow : Nil   # send the issue's sample flow to Repeater
       abstract def prism_promote : Nil       # create a Finding from the open issue
 
       # intercept (hold-and-decide; P4)

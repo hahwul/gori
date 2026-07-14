@@ -12,7 +12,7 @@ describe Gori::Tui::HelpView do
     backend.contains?("GLOBAL").should be_true
     backend.contains?("command palette").should be_true
     backend.contains?("MOUSE").should be_true
-    backend.contains?("REPLAY").should be_true
+    backend.contains?("REPEATER").should be_true
     backend.contains?("rename").should be_true  # the new sub-tab rename shortcut is documented
     backend.contains?("DECODER").should be_true # the Decoder tab cheat-sheet
   end

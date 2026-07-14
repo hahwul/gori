@@ -1,8 +1,8 @@
 require "../spec_helper"
 
-include Gori::Replay
+include Gori::Repeater
 
-describe Gori::Replay::MessageLines do
+describe Gori::Repeater::MessageLines do
   it "joins head + a blank separator + body" do
     head = "GET / HTTP/1.1\r\nHost: x".to_slice
     body = "hello\nworld".to_slice

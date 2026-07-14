@@ -13,10 +13,10 @@ module Gori::Tui
   record FuzzerTab, view : FuzzerView, flow_id : Int64?, db_id : Int64?
 
   # The Fuzzer tab: a workbench of independent fuzz/intruder sessions (sub-tabs).
-  # Mirrors ReplayController (multi-session, sub-tab strip, save-on-leave, async drain),
+  # Mirrors RepeaterController (multi-session, sub-tab strip, save-on-leave, async drain),
   # but a run streams MANY results (blocking Result/Done sends — never dropped; only
   # Progress is droppable). The session (template+config) persists across reopen; the
-  # results stay in-memory per session (like Replay responses before V11).
+  # results stay in-memory per session (like Repeater responses before V11).
   class FuzzerController < TabController
     CONFIRM_THRESHOLD = 1000 # confirm before a run larger than this (or unknown size)
     DRAIN_CAP         =  512 # bounded per-tick drain so a fast run can't starve render
@@ -30,7 +30,7 @@ module Gori::Tui
         @fuzzers << FuzzerTab.new(view, rec.flow_id, rec.id)
       end
       @current_idx = @fuzzers.empty? ? -1 : 0
-      # Bigger than Replay's 8 — a run emits one event per request plus progress.
+      # Bigger than Repeater's 8 — a run emits one event per request plus progress.
       @fuzz_events = Channel({FuzzerView, Fuzz::Event}).new(256)
     end
 
@@ -245,7 +245,7 @@ module Gori::Tui
     end
 
     # Strip every §…§ marker (and its chain) from the template. Space-menu only —
-    # `^U` now pretty-prints (matching Replay); clearing lives in the space menu here too.
+    # `^U` now pretty-prints (matching Repeater); clearing lives in the space menu here too.
     def fuzz_clear_marks : Nil
       return unless view = current_view
       @host.status(view.clear_marks)
@@ -819,7 +819,7 @@ module Gori::Tui
       @host.status("fuzzer: #{view.summary} — ^A auto-mark · ^K word · ^O config · ^R run")
     end
 
-    # Turn a Replay request (or any reconstructed request) into a fuzz session.
+    # Turn a Repeater request (or any reconstructed request) into a fuzz session.
     def fuzz_from_request(target : String, request_text : String, http2 : Bool, sni : String?) : Nil
       view = FuzzerView.new
       view.load_request(target, request_text, http2, sni || "")
@@ -938,7 +938,7 @@ module Gori::Tui
       @fuzzers[@current_idx]
     end
 
-    # Don't clobber a tab mid-edit or mid-run (mirrors Replay).
+    # Don't clobber a tab mid-edit or mid-run (mirrors Repeater).
     private def fuzz_tab_locked?(tab : FuzzerTab) : Bool
       v = tab.view
       v.running? || v.dirty? || v.pane_insert?(:template) || v.pane_insert?(:target)

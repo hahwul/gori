@@ -8,7 +8,7 @@ describe Gori::Hotkeys do
       Gori::Hotkeys.rebindable?(reg["rules.edit"]).should be_true      # keyless but assignable
       Gori::Hotkeys.rebindable?(reg["view.reveal-ws"]).should be_false # guard-shadowed (^B)
       Gori::Hotkeys.rebindable?(reg["app.palette"]).should be_false    # ^P hardcoded in controllers
-      Gori::Hotkeys.rebindable?(reg["replay.new"]).should be_false     # ^N hardcoded in the runner
+      Gori::Hotkeys.rebindable?(reg["repeater.new"]).should be_false     # ^N hardcoded in the runner
       Gori::Hotkeys.rebindable?(reg["app.quit"]).should be_false       # deliberately keyless FIXED
       Gori::Hotkeys.rebindable?(reg["body.down"]).should be_false      # hidden nav primitive
       Gori::Hotkeys.rebindable?(reg["body.open"]).should be_false      # multi-chord nav alias
@@ -35,8 +35,8 @@ describe Gori::Hotkeys do
       Gori::Hotkeys.display_label(Gori::Verb::Chord.new("i", shift: true)).should eq("⇧I")
       Gori::Hotkeys.display_label(Gori::Verb::Chord.new("f")).should eq("f")
       reg = Gori::Verbs.registry
-      Gori::Hotkeys.binding_label(reg, "history.replay", "?").should eq("^R")
-      Gori::Hotkeys.binding_label(reg, "replay.send", "?").should eq("^R")
+      Gori::Hotkeys.binding_label(reg, "history.repeater", "?").should eq("^R")
+      Gori::Hotkeys.binding_label(reg, "repeater.send", "?").should eq("^R")
       Gori::Hotkeys.binding_label(reg, "no.such.verb", "∅").should eq("∅")
     end
   end

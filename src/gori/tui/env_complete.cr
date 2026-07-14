@@ -3,7 +3,7 @@ require "./theme"
 
 module Gori::Tui
   # A caret-anchored autocomplete dropdown for `$ENV` variable references typed inside a
-  # text editor (the Replay request, the Fuzzer template, …). The owning TextArea computes
+  # text editor (the Repeater request, the Fuzzer template, …). The owning TextArea computes
   # the `$partial` token span under the caret + the matching {key, value} pairs and feeds
   # them via `set`; this holds only the open/selection/scroll state and the rendering.
   # Accepting rewrites the `$partial` back to the full `$KEY`. Modelled on ChainComplete,

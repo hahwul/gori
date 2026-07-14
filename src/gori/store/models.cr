@@ -126,13 +126,13 @@ module Gori
     struct WsMessage
       getter id : Int64
       getter flow_id : Int64
-      getter replay_id : Int64?
+      getter repeater_id : Int64?
       getter created_at : Int64
       getter direction : String
       getter opcode : Int32
       getter payload : Bytes
 
-      def initialize(@id, @flow_id, @replay_id, @created_at, @direction, @opcode, @payload)
+      def initialize(@id, @flow_id, @repeater_id, @created_at, @direction, @opcode, @payload)
       end
 
       def text? : Bool
@@ -192,7 +192,7 @@ module Gori
     # Target workbench entity referenced by an `entity_links` row.
     enum LinkRefKind
       Flow
-      Replay
+      Repeater
       Fuzz
       Miner
 
@@ -203,7 +203,7 @@ module Gori
       def self.parse(s : String) : LinkRefKind?
         case s
         when "flow"   then Flow
-        when "replay" then Replay
+        when "repeater" then Repeater
         when "fuzz"   then Fuzz
         when "miner"  then Miner
         else               nil
@@ -213,13 +213,13 @@ module Gori
       # Short tag for the TUI list (e.g. "[hist]").
       def tag : String
         return "hist" if flow?
-        return "replay" if replay?
+        return "repeater" if repeater?
         return "fuzz" if fuzz?
         "miner"
       end
     end
 
-    # A link from a Finding or Note to a workbench entity (flow/replay/fuzz/miner).
+    # A link from a Finding or Note to a workbench entity (flow/repeater/fuzz/miner).
     struct EntityLink
       getter id : Int64
       getter owner_kind : LinkOwnerKind
@@ -270,11 +270,11 @@ module Gori
       getter evidence : String?       # short snippet/header value/param name — NEVER a secret value
       getter first_seen : Int64       # unix micros
       getter last_seen : Int64
-      getter sample_replay_id : Int64? # representative Replay tab when the hit came from Replay
+      getter sample_repeater_id : Int64? # representative Repeater tab when the hit came from Repeater
 
       def initialize(@id, @code, @category, @host, @title, @severity, @status, @hit_count,
                      @affected, @sample_flow_id, @evidence, @first_seen, @last_seen,
-                     @sample_replay_id = nil)
+                     @sample_repeater_id = nil)
       end
     end
 
@@ -327,11 +327,11 @@ module Gori
       end
     end
 
-    # A persisted Replay workbench tab: the editable request plus the LAST send
+    # A persisted Repeater workbench tab: the editable request plus the LAST send
     # response (V11 — head/body/error/duration; all nil until the first send).
     # Shared across sessions on the same project — the TUI reconciles local tabs
     # against these rows by `id` on the data_version poll.
-    struct ReplayRecord
+    struct RepeaterRecord
       getter id : Int64
       getter target : String
       getter request : String
@@ -357,7 +357,7 @@ module Gori
 
     # A persisted Fuzzer/Intruder session: the marked template (with §…§ positions)
     # plus an opaque `config` JSON the TUI owns (mode / payload sets / matchers /
-    # engine opts). Mirrors ReplayRecord — survives reopen and syncs across sessions.
+    # engine opts). Mirrors RepeaterRecord — survives reopen and syncs across sessions.
     struct FuzzSessionRecord
       getter id : Int64
       getter target : String
@@ -376,7 +376,7 @@ module Gori
     # One persisted parameter-mining session (a sub-tab under the Miner tab). Stores the
     # byte-exact `request` to re-run, plus opaque `config` JSON (locations, bucket sizes,
     # concurrency) managed by the frontend. Results are NOT persisted (in-memory per
-    # session, like Replay responses before V11).
+    # session, like Repeater responses before V11).
     struct MinerSessionRecord
       getter id : Int64
       getter target : String

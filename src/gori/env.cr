@@ -4,7 +4,7 @@ require "./store"
 
 module Gori
   # Global + per-project environment variables for `$KEY`-style substitution in
-  # outbound requests (Replay, Fuzzer, Miner, Intercept, CLI, MCP). The editor
+  # outbound requests (Repeater, Fuzzer, Miner, Intercept, CLI, MCP). The editor
   # keeps the raw `$KEY` text; `expand` runs at send time only. Highlighting
   # reuses the same prefix/KEY rules via `token_regions`.
   module Env
@@ -34,7 +34,7 @@ module Gori
     # Expand env tokens in wire-form HTTP text (LF or CRLF) and return CRLF bytes.
     # Uses `gsub(/\r?\n/, "\r\n")` — NOT `split('\n').join("\r\n")` — so already-CRLF
     # input (captured flow bytes) isn't doubled into `\r\r\n`, which would destroy the
-    # head/body separator and break framing on every CLI/MCP replay+mine send path.
+    # head/body separator and break framing on every CLI/MCP repeater+mine send path.
     def self.expand_wire(text : String, vars : Hash(String, String) = effective_vars,
                          prefix : String = Settings.env_prefix) : Bytes
       expand(text, vars, prefix).gsub(/\r?\n/, "\r\n").to_slice

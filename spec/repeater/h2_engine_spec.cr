@@ -186,13 +186,13 @@ private def start_h2_origin_pings(status : Int32, body : String, pings : Int32) 
   port
 end
 
-describe Gori::Replay::H2Engine do
-  it "replays a GET as real cleartext h2 and reassembles the response" do
+describe Gori::Repeater::H2Engine do
+  it "repeaters a GET as real cleartext h2 and reassembles the response" do
     seen = Channel(String).new(1)
     port = start_h2_origin(200, "replayed!", seen)
 
-    request = "GET /api/thing HTTP/2\r\nx-replay: yes\r\n\r\n".to_slice
-    result = Gori::Replay::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+    request = "GET /api/thing HTTP/2\r\nx-repeater: yes\r\n\r\n".to_slice
+    result = Gori::Repeater::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
 
     seen.receive.should eq("GET /api/thing body=") # origin saw the HPACK-encoded request
     result.ok?.should be_true
@@ -207,7 +207,7 @@ describe Gori::Replay::H2Engine do
     port = start_h2_origin_truncated(200, "partial")
 
     request = "GET /trunc HTTP/2\r\n\r\n".to_slice
-    result = Gori::Replay::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+    result = Gori::Repeater::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
 
     result.ok?.should be_true # a status + partial body did arrive
     result.response.not_nil!.status.should eq(200)
@@ -220,7 +220,7 @@ describe Gori::Replay::H2Engine do
     port = start_h2_origin(201, "created", seen)
 
     request = "POST /submit HTTP/2\r\ncontent-type: text/plain\r\n\r\nhello-h2-body".to_slice
-    result = Gori::Replay::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+    result = Gori::Repeater::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
 
     seen.receive.should eq("POST /submit body=hello-h2-body")
     result.response.not_nil!.status.should eq(201)
@@ -229,7 +229,7 @@ describe Gori::Replay::H2Engine do
 
   it "handles interleaved PING frames before the response without stalling" do
     port = start_h2_origin_pings(200, "pong-ok", 20)
-    result = Gori::Replay::H2Engine.send("GET / HTTP/2\r\n\r\n".to_slice,
+    result = Gori::Repeater::H2Engine.send("GET / HTTP/2\r\n\r\n".to_slice,
       scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
     result.ok?.should be_true
     result.response.not_nil!.status.should eq(200)
@@ -243,7 +243,7 @@ describe Gori::Replay::H2Engine do
     # Connect to 127.0.0.1 but CLAIM a different authority via the Host header — the
     # h2 engine must send :authority = the edited Host, not the dialed target.
     request = "GET / HTTP/2\r\nHost: victim.internal\r\n\r\n".to_slice
-    result = Gori::Replay::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
+    result = Gori::Repeater::H2Engine.send(request, scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
 
     seen.receive.should eq("victim.internal")
     result.ok?.should be_true
@@ -253,7 +253,7 @@ describe Gori::Replay::H2Engine do
     seen = Channel(String).new(1)
     port = start_h2_origin_authority(200, seen)
 
-    result = Gori::Replay::H2Engine.send("GET / HTTP/2\r\n\r\n".to_slice,
+    result = Gori::Repeater::H2Engine.send("GET / HTTP/2\r\n\r\n".to_slice,
       scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
 
     seen.receive.should eq("127.0.0.1:#{port}")
@@ -261,7 +261,7 @@ describe Gori::Replay::H2Engine do
   end
 
   it "reports an error when the origin is unreachable" do
-    result = Gori::Replay::H2Engine.send("GET / HTTP/2\r\n\r\n".to_slice,
+    result = Gori::Repeater::H2Engine.send("GET / HTTP/2\r\n\r\n".to_slice,
       scheme: "http", host: "127.0.0.1", port: 1, verify_upstream: false)
     result.ok?.should be_false
     result.error.should_not be_nil
@@ -271,7 +271,7 @@ describe Gori::Replay::H2Engine do
     body = Bytes.new(100_000) { |i| (65 + i % 26).to_u8 } # 100 KB > the 65535 window
     port = start_h2_origin_flow_controlled(200, body)
 
-    result = Gori::Replay::H2Engine.send("GET / HTTP/2\r\nhost: 127.0.0.1\r\n\r\n".to_slice,
+    result = Gori::Repeater::H2Engine.send("GET / HTTP/2\r\nhost: 127.0.0.1\r\n\r\n".to_slice,
       scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)
 
     result.ok?.should be_true # would time out (incomplete) without WINDOW_UPDATE

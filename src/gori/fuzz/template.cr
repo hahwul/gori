@@ -10,8 +10,8 @@ module Gori::Fuzz
   #
   # The template keeps wire-form CRLF line endings so `render` produces a sendable
   # request byte-for-byte (only the payload spans differ between variations). Binary
-  # request bodies can't be carried as text — the same limit the Replay editor has;
-  # the byte-exact path remains `gori run replay` / export.
+  # request bodies can't be carried as text — the same limit the Repeater editor has;
+  # the byte-exact path remains `gori run repeater` / export.
   struct Template
     MARKER = '§'
     # Value|chain delimiter inside a marker: `§value¦chain§`. NOT '|' — the Decoder

@@ -4,7 +4,7 @@ require "./frame"
 
 module Gori::Tui
   # A centered yes/no confirmation modal for destructive actions — deleting a
-  # project, closing a Replay/Notes sub-tab. Pure state + rendering: the host
+  # project, closing a Repeater/Notes sub-tab. Pure state + rendering: the host
   # (the Runner's overlay, the ProjectPicker's mode) drives it and decides what a
   # confirmation actually does. Selection defaults to Cancel — the safe choice —
   # so a reflexive ↵ never destroys anything; the operator must move to (or press

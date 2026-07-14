@@ -21,7 +21,7 @@ module Gori
         "decoder.close", "Close conversion", "Close the active conversion sub-tab (keeps at least one)",
         Verb::Scope::Decoder, available: in_decoder, mnemonic: 'w') { |ctx| ctx.decoder_close; nil }
 
-      # Rename the active sub-tab's chip — mirrors replay.rename-subtab/fuzz.rename-subtab
+      # Rename the active sub-tab's chip — mirrors repeater.rename-subtab/fuzz.rename-subtab
       # (verbs/history.cr): Decoder is also in renameable_subtabs? (runner.cr), but had no
       # :subtab verb of its own, so its sub-tab-strip space menu was flat COMMON with no
       # way to rename. 'e' is free within COMMON ∪ :subtab (COMMON keys: n/w/y).
@@ -40,7 +40,7 @@ module Gori
         Verb::Scope::Decoder, available: in_decoder, mnemonic: 'l', section: :input) { |ctx| ctx.decoder_clear; nil }
 
       in_decoder_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.decoder_read_mode? }
-      # The single smart Copy (see replay.copy in verbs/history.cr) — copy-all is gone.
+      # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       r.register Verb::Definition.new(
         "decoder.copy", "Copy", "Copy the selected text, or the whole focused pane if nothing is selected, from INPUT/OUTPUT",
         Verb::Scope::Decoder, [Verb::Chord.new("y")],
@@ -53,7 +53,7 @@ module Gori
 
       # Save/load a chain spec by name — tagged :tab (session-level), not :chain:
       # naming and recalling a saved chain is closer to session management (like
-      # Replay's find-subtab / Fuzzer's new-session) than a per-keystroke CHAIN-pane
+      # Repeater's find-subtab / Fuzzer's new-session) than a per-keystroke CHAIN-pane
       # action, and it keeps that pane from carrying its own near-empty group. This
       # also seeds has_section?(Decoder, :tab), so the tab-bar space menu shows a
       # deliberate TAB group (COMMON + Save/Load) instead of falling back to
@@ -66,7 +66,7 @@ module Gori
         "decoder.load", "Load a saved chain", "Load a previously saved chain spec by name",
         Verb::Scope::Decoder, available: in_decoder, mnemonic: 'o', section: :tab) { |ctx| ctx.decoder_load; nil }
 
-      # Search-and-jump across conversion sub-tabs (section :tab — like replay.find-subtab)
+      # Search-and-jump across conversion sub-tabs (section :tab — like repeater.find-subtab)
       # so jumping never needs Ctrl+digit. 'f' (find) since 's'/'o' are taken here by
       # Save/Load in the same :tab group.
       r.register Verb::Definition.new(

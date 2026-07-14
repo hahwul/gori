@@ -8,7 +8,7 @@ module Gori
     # strictly local to the focused pane.
     #
     # Round 5: these are low-frequency next to Send/Copy/New/etc., so on the
-    # multi-section tabs (Replay/Fuzzer/Decoder) they're tagged into the single most
+    # multi-section tabs (Repeater/Fuzzer/Decoder) they're tagged into the single most
     # relevant focus-area section instead of :common — available? still gates them by
     # read-mode across ALL of that tab's read-mode panes, so the keybinding (mostly
     # plain 'x'/'v') keeps working everywhere; only the SPACE-MENU listing is scoped to
@@ -28,19 +28,19 @@ module Gori
         Verb::Scope::Notes, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
 
       # Tagged :response (not :common): select/clear are equally available in the
-      # REQUEST/TARGET panes (in_replay_read covers all three), but :response is
+      # REQUEST/TARGET panes (in_repeater_read covers all three), but :response is
       # where reading-then-copying a snippet is the natural flow, and :request is
       # already the busiest section (9 marker/view-toggle actions) — keeping these
       # out of it (and out of COMMON) keeps both lean. The plain 'x' keybinding still
       # works in every read-mode pane regardless of where the menu lists it.
-      in_replay_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_read_mode? }
+      in_repeater_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_read_mode? }
       r.register Verb::Definition.new(
-        "replay.select-line", "Select line", "Select the entire current line",
-        Verb::Scope::Replay, [Verb::Chord.new("x")],
-        available: in_replay_read, mnemonic: 'l', section: :response) { |ctx| ctx.read_select_line; nil }
+        "repeater.select-line", "Select line", "Select the entire current line",
+        Verb::Scope::Repeater, [Verb::Chord.new("x")],
+        available: in_repeater_read, mnemonic: 'l', section: :response) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
-        "replay.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Replay, available: in_sel, mnemonic: 'v', section: :response) { |ctx| ctx.read_clear_selection; nil }
+        "repeater.clear-selection", "Clear selection", "Clear the text selection",
+        Verb::Scope::Repeater, available: in_sel, mnemonic: 'v', section: :response) { |ctx| ctx.read_clear_selection; nil }
 
       # Tagged :input (Decoder's read-mode panes are INPUT-read and OUTPUT; :input is
       # the more relevant "editing" pane — OUTPUT keeps 'x' reachable by keybinding).

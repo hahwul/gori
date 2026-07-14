@@ -230,7 +230,7 @@ describe "Findings verbs" do
     keymap.lookup(Gori::Verb::Chord.new("}"), Gori::Verb::Scope::FindingsDetail).should eq("finding.status-up")
     keymap.lookup(Gori::Verb::Chord.new("t"), Gori::Verb::Scope::FindingsDetail).should eq("finding.edit-title")
     keymap.lookup(Gori::Verb::Chord.new("o"), Gori::Verb::Scope::FindingsDetail).should eq("finding.open-flow")
-    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::FindingsDetail).should eq("finding.replay-flow")
+    keymap.lookup(Gori::Verb::Chord.new("r"), Gori::Verb::Scope::FindingsDetail).should eq("finding.repeater-flow")
     # export is a chord-less Global palette verb
     reg["findings.export-md"]?.try(&.scope).should eq(Gori::Verb::Scope::Global)
     reg["findings.export-json"]?.should_not be_nil

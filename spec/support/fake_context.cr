@@ -65,20 +65,20 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def toggle_pretty : Nil; end
 
-  def replay_selected : Nil; end
+  def repeater_selected : Nil; end
 
-  def replay_new : Nil; end
+  def repeater_new : Nil; end
 
-  def replay_send : Nil; end
+  def repeater_send : Nil; end
 
-  def replay_send_group : Nil; end
+  def repeater_send_group : Nil; end
 
-  def replay_find_subtab : Nil; end
+  def repeater_find_subtab : Nil; end
 
-  property replay_tab_count : Int32 = 0
+  property repeater_tab_count : Int32 = 0
 
-  def replay_subtab_count : Int32
-    @replay_tab_count
+  def repeater_subtab_count : Int32
+    @repeater_tab_count
   end
 
   def subtab_search_open : Nil; end
@@ -89,59 +89,59 @@ class FakeExecContext < Gori::Verb::ExecContext
     @subtab_search_tab_count
   end
 
-  def replay_rename_subtab : Nil; end
+  def repeater_rename_subtab : Nil; end
 
-  def replay_tag_subtab : Nil; end
+  def repeater_tag_subtab : Nil; end
 
-  def replay_filter_subtabs : Nil; end
+  def repeater_filter_subtabs : Nil; end
 
-  def replay_close_subtab : Nil; end
+  def repeater_close_subtab : Nil; end
 
-  def replay_duplicate_subtab : Nil; end
+  def repeater_duplicate_subtab : Nil; end
 
-  def replay_toggle_hex : Nil; end
+  def repeater_toggle_hex : Nil; end
 
-  def replay_toggle_decoded : Nil; end
+  def repeater_toggle_decoded : Nil; end
 
-  def replay_toggle_sni : Nil; end
+  def repeater_toggle_sni : Nil; end
 
-  def replay_toggle_auto_content_length : Nil; end
+  def repeater_toggle_auto_content_length : Nil; end
 
-  def replay_toggle_http2 : Nil; end
+  def repeater_toggle_http2 : Nil; end
 
-  def replay_toggle_resp_diff : Nil; end
+  def repeater_toggle_resp_diff : Nil; end
 
-  def replay_toggle_resp_hex : Nil; end
+  def repeater_toggle_resp_hex : Nil; end
 
-  def replay_toggle_mark_transform : Nil; end
+  def repeater_toggle_mark_transform : Nil; end
 
-  def replay_pretty_request : Nil; end
+  def repeater_pretty_request : Nil; end
 
   def fuzz_pretty_template : Nil; end
 
   def fuzz_toggle_http2 : Nil; end
 
-  def replay_auto_mark : Nil; end
+  def repeater_auto_mark : Nil; end
 
-  def replay_mark_word : Nil; end
+  def repeater_mark_word : Nil; end
 
-  def replay_insert_marker : Nil; end
+  def repeater_insert_marker : Nil; end
 
-  def replay_clear_marks : Nil; end
+  def repeater_clear_marks : Nil; end
 
-  def replay_attach_chain : Nil; end
+  def repeater_attach_chain : Nil; end
 
-  def replay_copy : Nil; end
+  def repeater_copy : Nil; end
 
-  def replay_copy_all : Nil; end
+  def repeater_copy_all : Nil; end
 
-  def replay_read_mode? : Bool
+  def repeater_read_mode? : Bool
     false
   end
 
   def fuzz_selected : Nil; end
 
-  def fuzz_from_replay : Nil; end
+  def fuzz_from_repeater : Nil; end
 
   def fuzz_run : Nil; end
 
@@ -173,7 +173,7 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def mine_selected : Nil; end
 
-  def mine_from_replay : Nil; end
+  def mine_from_repeater : Nil; end
 
   def mine_run : Nil; end
 
@@ -187,7 +187,7 @@ class FakeExecContext < Gori::Verb::ExecContext
     @miner_has_finding
   end
 
-  def mine_replay_selected : Nil; end
+  def mine_repeater_selected : Nil; end
 
   def sitemap_move(delta : Int32) : Nil; end
 
@@ -279,7 +279,7 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def finding_open_flow : Nil; end
 
-  def finding_replay_flow : Nil; end
+  def finding_repeater_flow : Nil; end
 
   def findings_export(format : Symbol) : Nil; end
 
@@ -307,7 +307,7 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def prism_open_flow : Nil; end
 
-  def prism_replay_flow : Nil; end
+  def prism_repeater_flow : Nil; end
 
   def prism_promote : Nil; end
 
@@ -455,7 +455,7 @@ class FakeExecContext < Gori::Verb::ExecContext
     nil
   end
 
-  def link_replay_id : Int64?
+  def link_repeater_id : Int64?
     nil
   end
 

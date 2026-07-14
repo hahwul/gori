@@ -143,7 +143,7 @@ describe Gori::Session do
       taken = first.proxy.port
 
       # second session on the SAME port: the bind fails, but the project still
-      # opens (capture off) — History/Replay read the store / dial directly.
+      # opens (capture off) — History/Repeater read the store / dial directly.
       second = Gori::Session.open(Gori::Config.new(listen: "127.0.0.1", port: taken), ca, registry, reg.temp("b"))
       second.bind_error.should_not be_nil
       second.capturing?.should be_false

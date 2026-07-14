@@ -66,12 +66,12 @@ module Gori
         "finding.severity-down", "Lower severity", "Decrease severity", Verb::Scope::FindingsDetail,
         [Verb::Chord.new("[")], hidden: true) { |ctx| ctx.finding_severity(-1); nil }
 
-      # edit-notes/edit-title/open-flow/replay-flow/delete are NON-hidden so they front
+      # edit-notes/edit-title/open-flow/repeater-flow/delete are NON-hidden so they front
       # the finding-detail "space" action menu (parity with the History detail; the
       # palette stays Global-only, so this doesn't leak there). Each menu key derives
       # from its plain chord — the key you'd press directly. severity/status keep their
       # bracket chords ([ ] { }) hidden (awkward as menu mnemonics; discoverable in Help).
-      # The single smart Copy (see replay.copy in verbs/history.cr) — copy-all is gone.
+      # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       in_findings_notes_read = ->(ctx : Verb::ExecContext) { ctx.findings_notes_read_mode? }
 
       r.register Verb::Definition.new(
@@ -114,11 +114,11 @@ module Gori
         Verb::Scope::FindingsDetail, [Verb::Chord.new("o")]) { |ctx| ctx.finding_open_flow; nil }
 
       r.register Verb::Definition.new(
-        "finding.replay-flow", "Replay evidence", "Send the linked flow to the Replay tab",
-        Verb::Scope::FindingsDetail, [Verb::Chord.new("r")]) { |ctx| ctx.finding_replay_flow; nil }
+        "finding.repeater-flow", "Repeater evidence", "Send the linked flow to the Repeater tab",
+        Verb::Scope::FindingsDetail, [Verb::Chord.new("r")]) { |ctx| ctx.finding_repeater_flow; nil }
 
       r.register Verb::Definition.new(
-        "finding.links", "Manage links", "View/add/remove related History/Replay/Fuzzer/Miner URLs",
+        "finding.links", "Manage links", "View/add/remove related History/Repeater/Fuzzer/Miner URLs",
         Verb::Scope::FindingsDetail, mnemonic: 'l') { |ctx| ctx.finding_links; nil }
 
       r.register Verb::Definition.new(

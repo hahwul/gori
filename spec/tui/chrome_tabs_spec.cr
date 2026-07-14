@@ -37,10 +37,10 @@ describe "Chrome.reconcile" do
   end
 
   it "drops unknown ids and collapses duplicates to the first occurrence" do
-    out = Chrome.reconcile([{"bogus", true}, {"replay", false}, {"replay", true}])
+    out = Chrome.reconcile([{"bogus", true}, {"repeater", false}, {"repeater", true}])
     out.map(&.first).includes?(:bogus).should be_false
-    out.count { |(s, _, _)| s == :replay }.should eq(1)
-    out.find { |(s, _, _)| s == :replay }.not_nil![2].should be_false # first wins (hidden)
+    out.count { |(s, _, _)| s == :repeater }.should eq(1)
+    out.find { |(s, _, _)| s == :repeater }.not_nil![2].should be_false # first wins (hidden)
   end
 
   it "reveals the first entry when a hand-edited config hides everything" do
@@ -96,12 +96,12 @@ describe "Chrome.hidden_tabs" do
   end
 
   it "lists a user-hidden tab and preserves catalog order" do
-    prefs = [{"replay", false}, {"decoder", false}]
+    prefs = [{"repeater", false}, {"decoder", false}]
     hid = Chrome.hidden_tabs(prefs).map(&.first)
-    hid.includes?(:replay).should be_true
+    hid.includes?(:repeater).should be_true
     hid.includes?(:decoder).should be_true
     hid.includes?(:miner).should be_true                                 # still default-hidden
-    hid.index(:replay).not_nil!.should be < hid.index(:decoder).not_nil! # catalog order
+    hid.index(:repeater).not_nil!.should be < hid.index(:decoder).not_nil! # catalog order
   end
 end
 

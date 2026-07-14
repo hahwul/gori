@@ -10,7 +10,7 @@ module Gori::Proxy::H2
   # Turns the raw frame stream of one h2 connection into the decoded projection:
   # it assembles HEADERS(+CONTINUATION) and DATA per stream, decodes headers via
   # HPACK, and emits a `flows` row per request/response exchange (so h2 traffic
-  # lands in History/QL/Replay next to h1). The raw frame log remains the truth
+  # lands in History/QL/Repeater next to h1). The raw frame log remains the truth
   # (P7); this is the derived, human-readable view.
   #
   # One Assembler per connection. Its two HPACK decoders are direction-scoped

@@ -5,7 +5,7 @@ module Gori
     #
     # gori's TUI runs the terminal in raw mode (IXON/ISIG cleared — it uses ^C as a
     # quit KEY), so flow-control/signal chords (^S/^Q/^Z/^\) DO reach the app as
-    # distinct chords and are bindable (replay's SNI toggle ships on ^S). What stays
+    # distinct chords and are bindable (repeater's SNI toggle ships on ^S). What stays
     # reserved here is purely terminal-structural: ^C/^D (quit) and the control bytes
     # ^M/^J/^I/^H/^[ that are INDISTINGUISHABLE from enter/tab/backspace/escape — those
     # actually arrive as the named keys (the bare-name branch fires at runtime; the

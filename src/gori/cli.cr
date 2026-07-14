@@ -73,7 +73,7 @@ module Gori
       puts "  tui       Start the interactive TUI (default when no command)"
       puts "  settings  Show the settings.json path (or --edit to open it)"
       puts "  ca        Print the root CA path, or regenerate it (see gori ca --help)"
-      puts "  run       Non-interactive CLI: capture, history, show, replay, findings, projects"
+      puts "  run       Non-interactive CLI: capture, history, show, repeater, findings, projects"
       puts "  wizard    Interactive setup wizard (bind, theme) — also runs on first launch"
       puts "  tutorial  Guided TUI tour with try-it steps (nav, palette, menu, edit)"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"
@@ -391,7 +391,7 @@ module Gori
     # `gori tutorial` launches the guided TUI tour — tab/pane navigation, the
     # command palette (^P), the action menu (space), and edit mode (READ/INS) —
     # on a harmless mock of the UI. It is also offered at the end of `gori wizard`
-    # / first launch; this command replays it anytime. Like the wizard it drives
+    # / first launch; this command repeaters it anytime. Like the wizard it drives
     # /dev/tty directly, so it sets up its own terminal instead of going through App.
     private def self.run_tutorial(args : Array(String)) : Nil
       if args.any? { |a| ["-h", "--help"].includes?(a) }
@@ -419,7 +419,7 @@ module Gori
 
     # `gori mcp` starts a Model Context Protocol server over stdio (JSON-RPC 2.0):
     # an AI client (Claude Desktop / Claude Code) spawns it and queries gori's
-    # captured data + drives replays. STDOUT is the protocol channel, so EVERYTHING
+    # captured data + drives repeaters. STDOUT is the protocol channel, so EVERYTHING
     # else (logs, the resolved-db banner, errors) goes to STDERR.
     private def self.run_mcp(args : Array(String)) : Nil
       db_path = nil.as(String?)
@@ -462,7 +462,7 @@ module Gori
 
       # Logs to STDERR ONLY — STDOUT is reserved for the JSON-RPC stream.
       Log.setup(:info, Log::IOBackend.new(STDERR))
-      Settings.load # send_request's replay engines read the upstream-proxy setting from here
+      Settings.load # send_request's repeater engines read the upstream-proxy setting from here
 
       selection = resolve_mcp_project(db_path, project, workspace_project: !use_active_project,
         allow_active_fallback: use_active_project)

@@ -16,7 +16,7 @@ module Gori::Proxy::H2
     end
 
     # gRPC status codes (https://grpc.io/docs/guides/status-codes/). 0 = OK; the
-    # rest are surfaced by the Replay transcript so a non-OK call reads clearly.
+    # rest are surfaced by the Repeater transcript so a non-OK call reads clearly.
     STATUS_NAMES = {
       0 => "OK", 1 => "CANCELLED", 2 => "UNKNOWN", 3 => "INVALID_ARGUMENT",
       4 => "DEADLINE_EXCEEDED", 5 => "NOT_FOUND", 6 => "ALREADY_EXISTS",
@@ -31,7 +31,7 @@ module Gori::Proxy::H2
 
     # The inverse of `messages` for ONE message: the 5-byte length prefix (1-byte
     # compressed flag + 4-byte big-endian length) followed by the payload. Used when the
-    # Replay editor mutates a gRPC message body — reframing keeps the length prefix in sync
+    # Repeater editor mutates a gRPC message body — reframing keeps the length prefix in sync
     # with the edited payload so the origin doesn't reject a length mismatch (a hex edit
     # that changes the byte count would otherwise leave a stale prefix). The length is a
     # UInt32; a payload larger than that can't be gRPC-framed, so it's rejected by the

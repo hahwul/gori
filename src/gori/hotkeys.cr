@@ -5,7 +5,7 @@ module Gori
   # Facade over the hotkey engine (Verb::Keymap / OsProfile / Reserved / Conflicts) and
   # the persisted Settings. The read-path the DISPATCH keymap (`build_keymap`), the
   # settings:hotkeys editor, the command PALETTE, Help (verb-id rows), and status body
-  # hints (History/Replay) share for a verb's effective chord — so a rebind is reflected
+  # hints (History/Repeater) share for a verb's effective chord — so a rebind is reflected
   # on those surfaces via #binding_for / #binding_label.
   module Hotkeys
     # Selectable OS default profiles (the Settings.keymap_os domain). "auto" tracks the
@@ -16,9 +16,9 @@ module Gori
     # handler BEFORE the keymap — so a rebind/unbind on them can't take effect:
     #   view.reveal-ws  ^B  — Runner#handle_key global guard
     #   app.palette     ^P  — every controller's handle_body_key opens the palette (save-first)
-    #   replay.new/fuzz.new ^N — Runner#handle_key intercepts ^N at menu/body/subtabs focus
+    #   repeater.new/fuzz.new ^N — Runner#handle_key intercepts ^N at menu/body/subtabs focus
     #   app.quit/app.back   — deliberately palette-only (single-key quit is a footgun)
-    FIXED_IDS = {"view.reveal-ws", "app.quit", "app.back", "app.palette", "replay.new", "fuzz.new"}
+    FIXED_IDS = {"view.reveal-ws", "app.quit", "app.back", "app.palette", "repeater.new", "fuzz.new"}
 
     # Chords consumed by a hardcoded handler BEFORE the keymap is consulted, so binding ANY
     # verb to one would be silently shadowed — the editor refuses them on top of the

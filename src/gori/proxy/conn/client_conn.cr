@@ -186,7 +186,7 @@ module Gori::Proxy
       end
 
       # Non-hold path: stream the request body byte-for-byte (P6), unchanged.
-      # Replay-safety keys on the ACTUALLY-SENT method (sent_req): an M&R rule that rewrites
+      # Repeater-safety keys on the ACTUALLY-SENT method (sent_req): an M&R rule that rewrites
       # the request line GET→POST must not leave a non-idempotent request marked retryable.
       retryable = retryable_request?(sent_req, req_framing.none?)
       req_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX, capture_hint(req_framing, req_len))
@@ -252,7 +252,7 @@ module Gori::Proxy
       # the human chose to send (e.g. a deliberately CL-mismatched smuggling probe).
       sent_head, edited_body = split_message(decision.bytes)
       sent_req = Codec::Http1.parse_request_head(sent_head)
-      # Key replay-safety on the EDITED request: if the human changed the method (e.g.
+      # Key repeater-safety on the EDITED request: if the human changed the method (e.g.
       # GET→POST), retryability must follow the method actually being sent, not the
       # original — else a now-non-idempotent request could be replayed on a stale-conn retry.
       retryable = retryable_request?(sent_req, edited_body.nil? || edited_body.empty?)
@@ -1014,7 +1014,7 @@ module Gori::Proxy
 
     # Whether a request may be transparently REPLAYED on a fresh connection after a
     # stale-reuse failure. Only SAFE methods (RFC 7231 §4.2.1: GET/HEAD/OPTIONS/
-    # TRACE — no side effects, idempotent) with NO body qualify: replay is then
+    # TRACE — no side effects, idempotent) with NO body qualify: repeater is then
     # harmless even if the origin had already processed the first attempt. A
     # mutating method (POST/PUT/PATCH/DELETE), even body-less, is never auto-resent
     # — a wire-inspection proxy must not silently double-submit; the request fails

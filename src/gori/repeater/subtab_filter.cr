@@ -1,8 +1,8 @@
 require "uri"
 
 module Gori
-  module Replay
-    # Normalize the flat tag set a Replay session carries. Tags are whitespace-free
+  module Repeater
+    # Normalize the flat tag set a Repeater session carries. Tags are whitespace-free
     # tokens ("idor", "auth-bypass"); the editor accepts them space/comma separated
     # and may prefix them with `#`. Stored as one space-joined column (V31); the
     # multi-label set lives in memory as an Array.
@@ -32,8 +32,8 @@ module Gori
       end
     end
 
-    # An in-memory predicate over Replay sub-tabs, parsed from a History-like filter
-    # string. Replay sessions live wholly in memory, so — unlike History's QL→SQL —
+    # An in-memory predicate over Repeater sub-tabs, parsed from a History-like filter
+    # string. Repeater sessions live wholly in memory, so — unlike History's QL→SQL —
     # this matches Crystal-side (the same shape as Findings::Filter). Terms are
     # whitespace-separated and AND-joined; a leading `-` negates a field term; an
     # unrecognised or bare token is free text over name + summary + target + tags.
@@ -49,7 +49,7 @@ module Gori
       # Common HTTP methods suggested even when no open session uses them yet.
       METHODS = %w(GET POST PUT PATCH DELETE HEAD OPTIONS CONNECT TRACE)
 
-      # The searchable projection of one Replay session. Kept free of TUI types so the
+      # The searchable projection of one Repeater session. Kept free of TUI types so the
       # matcher is pure + unit-testable; the controller builds these from its views.
       record Subject,
         name : String?,

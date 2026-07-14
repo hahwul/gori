@@ -23,7 +23,7 @@ module Gori
         PRIMARY.plan(detail)
       end
 
-      def self.detections(plan : Plan, result : Replay::Result, detail : Store::FlowDetail) : Array(Detection)
+      def self.detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
         PRIMARY.detections(plan, result, detail)
       end
     end

@@ -13,11 +13,11 @@ require "../ql"
 require "../scope"
 require "../sitemap"
 require "../proxy/codec/content_decode"
-require "../replay/engine"
-require "../replay/h2_engine"
-require "../replay/ws_engine"
-require "../replay/flow_request"
-require "../replay/diff"
+require "../repeater/engine"
+require "../repeater/h2_engine"
+require "../repeater/ws_engine"
+require "../repeater/flow_request"
+require "../repeater/diff"
 require "../fuzz"
 require "../decoder"
 require "../miner"
@@ -30,7 +30,7 @@ require "./output"
 module Gori
   module CLI
     # `gori run <subcommand>` — the non-interactive CLI. Scripts the same project
-    # data the TUI works on, built directly on the Store / Replay / Session APIs
+    # data the TUI works on, built directly on the Store / Repeater / Session APIs
     # (NOT the verb system, whose ExecContext is ~60 UI-action methods that only
     # make sense in front of a terminal). Read subcommands open the store directly
     # and never take the capture lock, so they're safe to run alongside a live
@@ -60,7 +60,7 @@ module Gori
         when "capture"           then cmd_capture(args[1..])
         when "history", "ls"     then cmd_history(args[1..])
         when "show"              then cmd_show(args[1..])
-        when "replay"            then cmd_replay(args[1..])
+        when "repeater"            then cmd_repeater(args[1..])
         when "fuzz"              then cmd_fuzz(args[1..])
         when "mine"              then cmd_mine(args[1..])
         else                          dispatch_subcommand2(sub, args[1..])
@@ -87,7 +87,7 @@ module Gori
 
       private def self.print_help : Nil
         puts <<-HELP
-        gori run — non-interactive CLI (script the proxy / history / replay)
+        gori run — non-interactive CLI (script the proxy / history / repeater)
 
         Usage: gori run <subcommand> [options]
 
@@ -95,7 +95,7 @@ module Gori
           capture            Start the proxy and stream captured flows to STDOUT
           history (ls)       List / QL-query captured flows
           show <id>          Print a flow's request/response (text, json, or raw bytes)
-          replay             Re-send a captured flow, or list/create replay sessions
+          repeater             Re-send a captured flow, or list/create repeater sessions
           fuzz [<id>]        Fuzz/intrude a request: mark §…§ positions, sweep payloads
           mine [<id>]        Discover hidden parameters (query/body/json/header/cookie)
           sitemap            Print the host → path endpoint tree (text, json, paths)
@@ -462,45 +462,45 @@ module Gori
         end
       end
 
-      # --- replay ------------------------------------------------------------
+      # --- repeater ------------------------------------------------------------
 
-      private def self.cmd_replay(args : Array(String)) : Nil
+      private def self.cmd_repeater(args : Array(String)) : Nil
         sub = args.first?
         if sub == "list"
-          cmd_replay_list(args[1..])
+          cmd_repeater_list(args[1..])
           return
         elsif sub == "create"
-          cmd_replay_create(args[1..])
+          cmd_repeater_create(args[1..])
           return
         end
 
-        cmd_replay_single(args)
+        cmd_repeater_single(args)
       end
 
-      private def self.cmd_replay_list(args : Array(String)) : Nil
+      private def self.cmd_repeater_list(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         format = :text
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run replay list [options]"
+          p.banner = "Usage: gori run repeater list [options]"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run replay list: unknown option: #{f}\n#{p}" }
-          p.missing_option { |f| abort "gori run replay list: missing value for #{f}" }
+          p.invalid_option { |f| abort "gori run repeater list: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run repeater list: missing value for #{f}" }
         end
         parser.parse(args)
 
         project = resolve_read_project(project_name, db_path)
         store = open_store(project)
         begin
-          replays = store.replays_mcp
+          repeaters = store.repeaters_mcp
           if format == :json
             puts(JSON.build do |j|
               j.array do
-                replays.each do |r|
+                repeaters.each do |r|
                   j.object do
                     j.field "id", r.id
                     j.field "position", r.position
@@ -518,10 +518,10 @@ module Gori
               end
             end)
           else
-            if replays.empty?
-              puts "No replay sessions in the workbench."
+            if repeaters.empty?
+              puts "No repeater sessions in the workbench."
             else
-              replays.each do |r|
+              repeaters.each do |r|
                 name = r.name || "Untitled"
                 h2 = r.http2? ? "H2" : "H1"
                 puts "##{r.id}  [#{h2}]  #{name.ljust(20)}  → #{r.target}"
@@ -533,7 +533,7 @@ module Gori
         end
       end
 
-      private def self.cmd_replay_create(args : Array(String)) : Nil
+      private def self.cmd_repeater_create(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         target : String? = nil
@@ -548,33 +548,33 @@ module Gori
         mark_transform = false
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run replay create [options]"
+          p.banner = "Usage: gori run repeater create [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-tURL", "--target=URL", "Target URL (scheme://host[:port])") { |v| target = v }
           p.on("-fFILE", "--request-file=FILE", "Read raw HTTP request from FILE") { |v| request_file = v }
           p.on("-rRAW", "--request-raw=RAW", "Verbatim raw HTTP request string") { |v| request_raw = v }
-          p.on("--name=NAME", "Custom replay tab name") { |v| name = v }
+          p.on("--name=NAME", "Custom repeater tab name") { |v| name = v }
           p.on("--http2", "Use HTTP/2 (default: false)") { http2 = true; http2_given = true }
           p.on("--no-auto-cl", "Do not auto-calculate Content-Length header") { auto_cl = false }
-          p.on("--flow=ID", "Optional original flow ID this replay stems from") { |v| flow_id = parse_flow_id(v) }
+          p.on("--flow=ID", "Optional original flow ID this repeater stems from") { |v| flow_id = parse_flow_id(v) }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
           p.on("--mark-transform", "Enable token substitution replacement (default: false)") { mark_transform = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
-          p.invalid_option { |f| abort "gori run replay create: unknown option: #{f}\n#{p}" }
-          p.missing_option { |f| abort "gori run replay create: missing value for #{f}" }
+          p.invalid_option { |f| abort "gori run repeater create: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
         end
         parser.parse(args)
 
         req_content = ""
         if file = request_file
-          abort "gori run replay create: request-file '#{file}' is not readable" unless File.file?(file)
+          abort "gori run repeater create: request-file '#{file}' is not readable" unless File.file?(file)
           req_content = File.read(file)
         elsif raw = request_raw
           req_content = raw
         else
           if flow_id.nil?
-            abort "gori run replay create: either --request-file, --request-raw, or --flow is required"
+            abort "gori run repeater create: either --request-file, --request-raw, or --flow is required"
           end
         end
 
@@ -588,8 +588,8 @@ module Gori
 
           if fid = flow_id
             detail = store.get_flow(fid)
-            abort "gori run replay create: no flow ##{fid} to clone" unless detail
-            built = Replay::FlowRequest.build(detail)
+            abort "gori run repeater create: no flow ##{fid} to clone" unless detail
+            built = Repeater::FlowRequest.build(detail)
             req_content = String.new(built.bytes)
             if tgt_str.empty?
               bt = built.target
@@ -606,11 +606,11 @@ module Gori
             end
           end
 
-          abort "gori run replay create: --target is required" if tgt_str.empty?
+          abort "gori run repeater create: --target is required" if tgt_str.empty?
 
-          pos = store.replays_meta.size
+          pos = store.repeaters_meta.size
           
-          id = store.insert_replay(
+          id = store.insert_repeater(
             target: Env.mask_secrets(tgt_str),
             request: Env.mask_secrets(req_content),
             http2: http2,
@@ -621,23 +621,23 @@ module Gori
             mark_transform: mark_transform
           )
           
-          abort "gori run replay create: failed to create replay session" if id == 0
+          abort "gori run repeater create: failed to create repeater session" if id == 0
           
           if n = name
-            store.set_replay_name(id, Env.mask_secrets(n))
+            store.set_repeater_name(id, Env.mask_secrets(n))
           end
 
           if is_ws && !ws_messages.empty?
-            store.update_replay_ws_messages(id, ws_messages)
+            store.update_repeater_ws_messages(id, ws_messages)
           end
 
-          puts "Replay session ##{id} created successfully."
+          puts "Repeater session ##{id} created successfully."
         ensure
           store.close
         end
       end
 
-       private def self.cmd_replay_single(args : Array(String)) : Nil
+       private def self.cmd_repeater_single(args : Array(String)) : Nil
          db_path : String? = nil
          project_name : String? = nil
          target_override : String? = nil
@@ -651,7 +651,7 @@ module Gori
          positional = [] of String
 
          parser = OptionParser.new do |p|
-           p.banner = "Usage: gori run replay <flow-id> [options]"
+           p.banner = "Usage: gori run repeater <flow-id> [options]"
            p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
            p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
            p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept") { |v| target_override = v }
@@ -664,11 +664,11 @@ module Gori
            p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
            p.on("-h", "--help", "Show this help") { puts p; exit 0 }
            p.unknown_args { |rest, _| positional = rest }
-           p.invalid_option { |f| abort "gori run replay: unknown option: #{f}\n#{p}" }
-           p.missing_option { |f| abort "gori run replay: missing value for #{f}" }
+           p.invalid_option { |f| abort "gori run repeater: unknown option: #{f}\n#{p}" }
+           p.missing_option { |f| abort "gori run repeater: missing value for #{f}" }
          end
          parser.parse(args)
-        id = take_flow_id(positional, "replay")
+        id = take_flow_id(positional, "repeater")
 
         # get_flow loads all the BLOBs, so the store can close before the send.
         store = open_store(resolve_read_project(project_name, db_path))
@@ -677,15 +677,15 @@ module Gori
         ensure
           store.close
         end
-        abort "gori run replay: no flow ##{id}" unless detail
+        abort "gori run repeater: no flow ##{id}" unless detail
 
         # A WebSocket flow can't be replayed by a one-shot HTTP send: this path would only
         # re-issue the upgrade request and report the 101 handshake, exchanging zero frames
         # (a silently misleading "success"). Detect an upgrade that actually completed
         # (status 101 + a WebSocket upgrade request) and refuse with an actionable pointer,
         # rather than the plain h1/h2 engines that don't do the RFC 6455 framed exchange.
-        if detail.row.status == 101 && Replay::WsEngine.upgrade_request?(String.new(detail.request_head))
-          abort "gori run replay: flow ##{id} is a WebSocket session — `gori run replay` only re-sends the HTTP upgrade and captures the 101 handshake, not the framed messages. Replay it from the TUI Replay tab, or create a replay from it and use the MCP `send_websocket` tool for a real framed exchange."
+        if detail.row.status == 101 && Repeater::WsEngine.upgrade_request?(String.new(detail.request_head))
+          abort "gori run repeater: flow ##{id} is a WebSocket session — `gori run repeater` only re-sends the HTTP upgrade and captures the 101 handshake, not the framed messages. Repeater it from the TUI Repeater tab, or create a repeater from it and use the MCP `send_websocket` tool for a real framed exchange."
         end
 
         # The captured request body was capped at CAPTURE_MAX; FlowRequest.build re-syncs the
@@ -693,10 +693,10 @@ module Gori
         # the resent body differs from what the origin originally received.
         if detail.request_body_truncated?
           cap_mib = Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)
-          STDERR.puts "gori run replay: request body was truncated at the #{cap_mib} MiB capture cap — resending the stored (shorter) body with a corrected Content-Length"
+          STDERR.puts "gori run repeater: request body was truncated at the #{cap_mib} MiB capture cap — resending the stored (shorter) body with a corrected Content-Length"
         end
 
-        built = Replay::FlowRequest.build(detail)
+        built = Repeater::FlowRequest.build(detail)
 
         raw_bytes = built.bytes
         crlf_crlf_idx = -1
@@ -708,7 +708,7 @@ module Gori
           end
         end
 
-        abort "gori run replay: malformed request bytes in captured flow" if crlf_crlf_idx == -1
+        abort "gori run repeater: malformed request bytes in captured flow" if crlf_crlf_idx == -1
 
         head_bytes = raw_bytes[0, crlf_crlf_idx + 4]
         body_bytes = raw_bytes[crlf_crlf_idx + 4..]
@@ -782,7 +782,7 @@ module Gori
         # host-header-confusion / vhost test deliberately pairs --target (where to connect)
         # with a different claimed Host, so that override must win.
         if (override = target_override) && !custom_headers.has_key?("host")
-          scheme_part, host_part, port_part = Replay::FlowRequest.parse_target(override)
+          scheme_part, host_part, port_part = Repeater::FlowRequest.parse_target(override)
           default_port = scheme_part == "https" ? 443 : 80
           host_hdr_val = port_part == default_port ? host_part : "#{host_part}:#{port_part}"
           host_idx = new_headers.index { |h| h.name.compare("Host", case_insensitive: true) == 0 }
@@ -806,17 +806,17 @@ module Gori
         override = target_override # copy the closured flag into a plain local so || narrows
         # Re-sync Content-Length after expansion — a `$KEY` in the body changes its length,
         # and `build` framed CL over the pre-expansion bytes.
-        bytes = Replay::FlowRequest.resync_content_length(Env.expand_wire(String.new(final_request_bytes)))
+        bytes = Repeater::FlowRequest.resync_content_length(Env.expand_wire(String.new(final_request_bytes)))
         target = Env.expand(override || built.target)
-        scheme, host, port = Replay::FlowRequest.parse_target(target)
-        abort "gori run replay: could not determine a target host" if host.empty?
-        abort "gori run replay: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
+        scheme, host, port = Repeater::FlowRequest.parse_target(target)
+        abort "gori run repeater: could not determine a target host" if host.empty?
+        abort "gori run repeater: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
          use_h2 = force_h2 || built.http2
          verify = !insecure
          sni_val = sni_override.presence || built.sni
          result = use_h2 ?
-           Replay::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val) :
-           Replay::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val)
+           Repeater::H2Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val) :
+           Repeater::Engine.send(bytes, scheme: scheme, host: host, port: port, verify_upstream: verify, sni: sni_val)
 
         # Decode the response body once for TEXT display (--diff / plain print); only
         # build the diff lines when --diff asked for them (decoding the captured
@@ -826,27 +826,27 @@ module Gori
         diff =
           if do_diff
             orig = message_lines(detail.response_head, display_body(detail.response_head, detail.response_body))
-            Replay::Diff.lines(orig, message_lines(result.head, new_body))
+            Repeater::Diff.lines(orig, message_lines(result.head, new_body))
           end
 
         if format == :json
-          puts replay_json(result, diff)
+          puts repeater_json(result, diff)
         elsif result.ok?
           STDERR.puts "→ #{result.response.try(&.status) || "?"} in #{CLI::Output.human_us(result.duration_us)}#{result.incomplete? ? " (incomplete — origin closed before the framed body finished)" : ""}"
           if d = diff
             print_diff(d)
-            n = Replay::Diff.change_count(d)
+            n = Repeater::Diff.change_count(d)
             STDERR.puts(n == 0 ? "no differences" : "#{n} line#{n == 1 ? "" : "s"} changed")
           else
             print_message_text(result.head, new_body)
           end
         else
-          STDERR.puts "replay failed: #{result.error}"
+          STDERR.puts "repeater failed: #{result.error}"
         end
         exit 1 unless result.ok?
       end
 
-      private def self.replay_json(result : Replay::Result, diff : Array(Replay::DiffLine)?) : String
+      private def self.repeater_json(result : Repeater::Result, diff : Array(Repeater::DiffLine)?) : String
         JSON.build do |j|
           j.object do
             j.field "ok", result.ok?
@@ -857,7 +857,7 @@ module Gori
             j.field "head", scrub(result.head)
             emit_body_json(j, "body", result.head, result.body, false)
             if d = diff
-              j.field "changed_lines", Replay::Diff.change_count(d)
+              j.field "changed_lines", Repeater::Diff.change_count(d)
             end
           end
         end
@@ -986,7 +986,7 @@ module Gori
             store.close
           end
           abort "gori run fuzz: no flow ##{id}" unless detail
-          built = Replay::FlowRequest.build(detail)
+          built = Repeater::FlowRequest.build(detail)
           {String.new(built.bytes).scrub, built.target, built.http2}
         elsif !STDIN.tty?
           {STDIN.gets_to_end, nil, false}
@@ -1095,7 +1095,7 @@ module Gori
 
       private def self.resolve_fuzz_target(override : String?, default_target : String?) : {String, String, Int32}
         target = Env.expand(override || default_target || abort("gori run fuzz: --target is required for --request/stdin"))
-        scheme, host, port = Replay::FlowRequest.parse_target(target)
+        scheme, host, port = Repeater::FlowRequest.parse_target(target)
         abort "gori run fuzz: could not determine a target host" if host.empty?
         abort "gori run fuzz: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
         {scheme, host, port}
@@ -1197,7 +1197,7 @@ module Gori
             store.close
           end
           abort "gori run mine: no flow ##{id}" unless detail
-          built = Replay::FlowRequest.build(detail)
+          built = Repeater::FlowRequest.build(detail)
           {Env.expand_wire(String.new(built.bytes)), built.target, built.http2}
         elsif !STDIN.tty?
           {Env.expand_wire(STDIN.gets_to_end), nil, false}
@@ -1208,7 +1208,7 @@ module Gori
 
       private def self.resolve_mine_target(override : String?, default_target : String?) : {String, String, Int32}
         target = Env.expand(override || default_target || abort("gori run mine: --target is required for --request/stdin"))
-        scheme, host, port = Replay::FlowRequest.parse_target(target)
+        scheme, host, port = Repeater::FlowRequest.parse_target(target)
         abort "gori run mine: could not determine a target host" if host.empty?
         abort "gori run mine: unsupported target scheme #{scheme.inspect} (use http:// or https://)" unless scheme.in?("http", "https")
         {scheme, host, port}
@@ -1360,9 +1360,9 @@ module Gori
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run prism [QL query] [options]\n\n" \
-                     "Passively scan captured History flows AND Replay responses (zero outbound\n" \
+                     "Passively scan captured History flows AND Repeater responses (zero outbound\n" \
                      "requests) and report grouped issues — the headless equivalent of the TUI Prism\n" \
-                     "tab. QL filters apply to History only; all Replay tabs with a stored response\n" \
+                     "tab. QL filters apply to History only; all Repeater tabs with a stored response\n" \
                      "are scanned. The light-touch active checks (reflected params, …) send requests,\n" \
                      "so they are intentionally excluded here — arm active mode in the TUI, or reach\n" \
                      "for fuzz/mine."
@@ -1400,7 +1400,7 @@ module Gori
         end
 
         store = open_store(resolve_read_project(project_name, db_path))
-        groups, flow_n, replay_n = begin
+        groups, flow_n, repeater_n = begin
           ids = begin
             prism_scan_ids(store, filter)
           rescue ex
@@ -1418,15 +1418,15 @@ module Gori
         if cat = category
           groups = groups.select { |g| g.category == cat }
         end
-        report_prism(groups, flow_n, replay_n, format, query, min_sev, category)
+        report_prism(groups, flow_n, repeater_n, format, query, min_sev, category)
       end
 
-      private def self.report_prism(groups : Array(Prism::Group), flow_n : Int32, replay_n : Int32,
+      private def self.report_prism(groups : Array(Prism::Group), flow_n : Int32, repeater_n : Int32,
                                     format : Symbol, query : String?, min_sev : Store::Severity?,
                                     category : String?) : Nil
         parts = [] of String
         parts << "#{flow_n} flow#{flow_n == 1 ? "" : "s"}"
-        parts << "#{replay_n} replay#{replay_n == 1 ? "" : "s"}" if replay_n > 0 || query.nil?
+        parts << "#{repeater_n} repeater#{repeater_n == 1 ? "" : "s"}" if repeater_n > 0 || query.nil?
         STDERR.puts "scanned #{parts.join(" + ")} · #{groups.size} issue#{groups.size == 1 ? "" : "s"}"
         if format == :json
           puts CLI::Output.prism_array_json(groups)
@@ -1447,13 +1447,13 @@ module Gori
         rows.map(&.id).reverse! # search/recent_flows are newest-first; reverse → ascending id
       end
 
-      # Passively analyze History flows (with responses) + every Replay tab that has a stored
-      # response. Returns {detections, replay_count_scanned}. QL filters apply to History only.
+      # Passively analyze History flows (with responses) + every Repeater tab that has a stored
+      # response. Returns {detections, repeater_count_scanned}. QL filters apply to History only.
       private def self.scan_all(store : Store, ids : Array(Int64)) : {Array(Prism::Detection), Int32}
         detections = scan_flows(store, ids)
-        replay_dets, replay_n = scan_replays(store)
-        detections.concat(replay_dets)
-        {detections, replay_n}
+        repeater_dets, repeater_n = scan_repeaters(store)
+        detections.concat(repeater_dets)
+        {detections, repeater_n}
       end
 
       # Passively analyze each flow THAT HAS A CAPTURED RESPONSE — mirroring the live analyzer,
@@ -1480,16 +1480,16 @@ module Gori
         detections
       end
 
-      # Scan Replay tabs that have a persisted response head (V11). Stamps sample_replay_id.
-      private def self.scan_replays(store : Store) : {Array(Prism::Detection), Int32}
+      # Scan Repeater tabs that have a persisted response head (V11). Stamps sample_repeater_id.
+      private def self.scan_repeaters(store : Store) : {Array(Prism::Detection), Int32}
         detections = [] of Prism::Detection
         n = 0
-        store.replays.each do |rec|
-          next unless detail = Prism.detail_from_replay(rec)
+        store.repeaters.each do |rec|
+          next unless detail = Prism.detail_from_repeater(rec)
           n += 1
-          ws = store.ws_messages_for_replay(rec.id, 200)
+          ws = store.ws_messages_for_repeater(rec.id, 200)
           Prism::Passive.analyze(detail, ws).each do |d|
-            detections << Prism.with_source(d, flow_id: rec.flow_id, replay_id: rec.id)
+            detections << Prism.with_source(d, flow_id: rec.flow_id, repeater_id: rec.id)
           end
         end
         {detections, n}
@@ -2313,12 +2313,12 @@ module Gori
         String.new(bytes).scrub.split('\n').map(&.rstrip('\r'))
       end
 
-      private def self.print_diff(diff : Array(Replay::DiffLine)) : Nil
+      private def self.print_diff(diff : Array(Repeater::DiffLine)) : Nil
         diff.each do |dl|
           prefix = case dl.kind
-                   in Replay::DiffKind::Same then " "
-                   in Replay::DiffKind::Add  then "+"
-                   in Replay::DiffKind::Del  then "-"
+                   in Repeater::DiffKind::Same then " "
+                   in Repeater::DiffKind::Add  then "+"
+                   in Repeater::DiffKind::Del  then "-"
                    end
           puts "#{prefix}#{dl.text}"
         end

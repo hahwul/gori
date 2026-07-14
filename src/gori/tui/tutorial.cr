@@ -22,7 +22,7 @@ module Gori::Tui
   # Progression is never blocked — clickable Prev/Next buttons always work.
   class Tutorial
     # The mock tab bar; mirrors the real top-level tabs the user will see.
-    TABS = %w[History Replay Fuzzer Project Help]
+    TABS = %w[History Repeater Fuzzer Project Help]
 
     # Short labels for the progress rail (keep narrow so 7 chips fit).
     STEP_RAIL = [
@@ -46,7 +46,7 @@ module Gori::Tui
 
     # Fake palette rows used by the palette lesson + practice overlay.
     PALETTE_ROWS = [
-      {"»", "Go to Replay"},
+      {"»", "Go to Repeater"},
       {"≡", "Settings: Theme"},
       {"×", "Quit gori"},
       {"→", "Go to History"},
@@ -54,7 +54,7 @@ module Gori::Tui
     ]
 
     # Fake space-menu rows (mnemonic key + label).
-    SPACE_ROWS = [{'o', "Open"}, {'r', "Replay"}, {'y', "Copy"}, {'/', "Filter"}]
+    SPACE_ROWS = [{'o', "Open"}, {'r', "Repeater"}, {'y', "Copy"}, {'/', "Filter"}]
 
     FLOW_ROWS = [{"GET ", "/api/users", 200}, {"POST", "/login", 401}, {"GET ", "/admin", 500}]
 
@@ -453,7 +453,7 @@ module Gori::Tui
         if (row = rows[@pal_sel]?)
           # Mirror a couple of real "Go to …" actions so the palette feels alive.
           case row[1]
-          when "Go to Replay"  then @p_tab = 1; mark_switch
+          when "Go to Repeater"  then @p_tab = 1; mark_switch
           when "Go to History" then @p_tab = 0; mark_switch
           when "Open Help"     then @p_tab = 4; mark_switch
           end
@@ -1091,7 +1091,7 @@ module Gori::Tui
         {"1.", "run  gori  — start the TUI (proxy on your bind address)"},
         {"2.", "browse via Project, or point a client at the proxy"},
         {"3.", "History — pick a captured flow"},
-        {"4.", "^R — send it to Replay · edit (i) · send again"},
+        {"4.", "^R — send it to Repeater · edit (i) · send again"},
         {"5.", "Help tab — full cheat-sheet anytime"},
       ].each do |(num, desc)|
         screen.text(ix, y, num, Theme.accent, Theme.panel, width: 3)

@@ -227,7 +227,7 @@ describe Gori::Tui::FuzzerView do
       tinted.should contain('§') # both delimiters bracketed
     end
 
-    it "does not tint Replay/Notes editors (opt-in: bg_regions stays empty)" do
+    it "does not tint Repeater/Notes editors (opt-in: bg_regions stays empty)" do
       ta = TextArea.new("GET /?x=§foo§ HTTP/1.1")
       backend = MemoryBackend.new(60, 5)
       ta.render(Screen.new(backend), Rect.new(0, 0, 60, 5), cursor: false, highlight: :request)
@@ -318,7 +318,7 @@ describe Gori::Tui::FuzzerView do
       view.results_selected_index.should eq(2)
     end
 
-    # Replays FuzzerController#click_results: first click on a row grabs focus + selects
+    # Repeaters FuzzerController#click_results: first click on a row grabs focus + selects
     # it; a second click on the already-selected row (pane already focused) opens detail.
     it "first click selects + focuses, a second click on the same row opens detail" do
       view = loaded_fuzzer

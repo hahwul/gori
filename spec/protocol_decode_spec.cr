@@ -100,7 +100,7 @@ describe Gori::Saml do
     end
   end
 
-  # Mirrors the Replay split-decode send path (saml_splice): re-encode the edited XML
+  # Mirrors the Repeater split-decode send path (saml_splice): re-encode the edited XML
   # into the param, leaving sibling form fields (RelayState, the envelope edits) intact.
   it "splices an edited payload into the form body, preserving siblings" do
     body = "SAMLResponse=#{URI.encode_www_form(Base64.strict_encode(SAML_XML))}&RelayState=#{URI.encode_www_form("/dashboard")}"

@@ -60,7 +60,7 @@ describe "entity_links (V21)" do
     with_store do |store|
       finding_id = store.insert_finding("t", Gori::Store::Severity::Info, nil, nil)
       store.add_link(Gori::Store::LinkOwnerKind::Finding, finding_id,
-        Gori::Store::LinkRefKind::Replay, 7_i64)
+        Gori::Store::LinkRefKind::Repeater, 7_i64)
       store.delete_finding(finding_id)
       store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id).should be_empty
     end
@@ -78,15 +78,16 @@ describe "entity_links (V21)" do
         "INSERT INTO findings (id, created_at, updated_at, title, severity, host, flow_id, notes, status) " \
         "VALUES (1, 5, 5, 'legacy', 2, 'a.test', ?, '', 0)", fid)
       store.@db.exec("DROP TABLE entity_links")
-      store.@db.exec("ALTER TABLE replays DROP COLUMN mark_transform")        # V22 (added a column to a pre-V17 table)
+      store.@db.exec("ALTER TABLE repeaters DROP COLUMN mark_transform")        # V22 (added a column to a pre-V17 table)
       store.@db.exec("DROP INDEX idx_flows_sizes")                            # V23
-      store.@db.exec("DROP INDEX idx_ws_messages_replay")                     # V26
-      store.@db.exec("ALTER TABLE ws_messages DROP COLUMN replay_id")         # V26
+      store.@db.exec("DROP INDEX idx_ws_messages_replay")                      # V26 (index keeps its historical name)
+      store.@db.exec("ALTER TABLE ws_messages DROP COLUMN repeater_id")         # V26
       store.@db.exec("DROP INDEX idx_h2_frames_created")                      # V27
-      store.@db.exec("ALTER TABLE prism_issues DROP COLUMN sample_replay_id") # V28
+      store.@db.exec("ALTER TABLE prism_issues DROP COLUMN sample_repeater_id") # V28
       store.@db.exec("DROP TABLE prism_suppressions")                         # V29
       store.@db.exec("ALTER TABLE match_rules DROP COLUMN part")              # V30
-      store.@db.exec("ALTER TABLE replays DROP COLUMN tags")                  # V31
+      store.@db.exec("ALTER TABLE repeaters DROP COLUMN tags")                  # V31
+      store.@db.exec("ALTER TABLE repeaters RENAME TO replays")                 # undo V32 so historical <V32 migrations replay against the old table name
       store.@db.exec("PRAGMA user_version = 20")
       store.close
 
@@ -128,12 +129,12 @@ describe Gori::Links do
         head: "GET / HTTP/1.1\r\nHost: a.test\r\n\r\n".to_slice))
       finding_id = store.insert_finding("t", Gori::Store::Severity::Info, nil, fid)
       store.add_link(Gori::Store::LinkOwnerKind::Finding, finding_id,
-        Gori::Store::LinkRefKind::Replay, 3_i64)
+        Gori::Store::LinkRefKind::Repeater, 3_i64)
       raw = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
       raw.size.should eq(2)
       deduped = Gori::Links.dedupe_finding_flow(raw, fid)
       deduped.size.should eq(1)
-      deduped[0].ref_kind.should eq(Gori::Store::LinkRefKind::Replay)
+      deduped[0].ref_kind.should eq(Gori::Store::LinkRefKind::Repeater)
     end
   end
 end

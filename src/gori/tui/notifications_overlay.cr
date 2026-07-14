@@ -11,7 +11,7 @@ module Gori::Tui
   # reuses the existing modal-overlay machinery.
   #
   #   ▎ ✓ Miner: 3 params found on GET /api/x          3s
-  #     ⚠ Replay: upstream timeout                      5m
+  #     ⚠ Repeater: upstream timeout                      5m
   class NotificationsOverlay
     def initialize(@store : Notifications)
       @selected = 0

@@ -39,7 +39,7 @@ module Gori::Decoder
   # A process-wide registry built once and reused. The catalog is pure, read-only
   # data after construction, so concurrent reads (fuzz worker fibers all splice
   # through it) are safe. Callers that would otherwise rebuild `default_registry`
-  # per request/run — the Fuzzer/Replay send paths, `gori run fuzz`, MCP fuzz —
+  # per request/run — the Fuzzer/Repeater send paths, `gori run fuzz`, MCP fuzz —
   # share this instance instead.
   @@shared : Registry?
 

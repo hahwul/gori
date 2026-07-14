@@ -220,13 +220,13 @@ describe Gori::Prism::Active do
       canary = plan.params.first.canary
       String.new(plan.request).should contain("q=#{canary}") # original value replaced
 
-      reflected = Gori::Replay::Result.new(
+      reflected = Gori::Repeater::Result.new(
         "HTTP/1.1 200 OK\r\n\r\n".to_slice, "<p>you searched #{canary}</p>".to_slice, nil, 1_i64)
       dets = Gori::Prism::Active.detections(plan, reflected, detail)
       dets.size.should eq(1)
       dets.first.code.should eq("reflected_param")
 
-      not_reflected = Gori::Replay::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "<p>nothing</p>".to_slice, nil, 1_i64)
+      not_reflected = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "<p>nothing</p>".to_slice, nil, 1_i64)
       Gori::Prism::Active.detections(plan, not_reflected, detail).should be_empty
     end
   end
@@ -1224,7 +1224,7 @@ describe "Gori::Prism::Active::CorsReflection" do
       plan = probe.plan(cors).not_nil!
       origin = Gori::Prism::Active::CorsReflection::PROBE_ORIGIN
 
-      reflected = Gori::Replay::Result.new(
+      reflected = Gori::Repeater::Result.new(
         "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: #{origin}\r\n" \
         "Access-Control-Allow-Credentials: true\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
       dets = probe.detections(plan, reflected, cors)
@@ -1233,18 +1233,18 @@ describe "Gori::Prism::Active::CorsReflection" do
       dets.first.severity.should eq(Gori::Store::Severity::High)
 
       # Reflected but NO credentials → not exploitable → not flagged.
-      no_creds = Gori::Replay::Result.new(
+      no_creds = Gori::Repeater::Result.new(
         "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: #{origin}\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
       probe.detections(plan, no_creds, cors).should be_empty
 
       # A correctly-behaving allowlist rejects the probe origin (echoes its own) → not flagged.
-      allowlisted = Gori::Replay::Result.new(
+      allowlisted = Gori::Repeater::Result.new(
         "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://real.test\r\n" \
         "Access-Control-Allow-Credentials: true\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
       probe.detections(plan, allowlisted, cors).should be_empty
 
       # A wildcard is handled by the passive check, not proven here.
-      wildcard = Gori::Replay::Result.new(
+      wildcard = Gori::Repeater::Result.new(
         "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
       probe.detections(plan, wildcard, cors).should be_empty
     end
@@ -1276,7 +1276,7 @@ describe "Gori::Prism::Active (safety + coverage)" do
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/go?url=here", content_type: nil)
       plan = Gori::Prism::Active.plan(detail).not_nil!
       canary = plan.params.first.canary
-      result = Gori::Replay::Result.new(
+      result = Gori::Repeater::Result.new(
         "HTTP/1.1 302 Found\r\nLocation: https://site/?url=#{canary}\r\n\r\n".to_slice,
         Bytes.empty, nil, 1_i64)
       dets = Gori::Prism::Active.detections(plan, result, detail)
@@ -1290,11 +1290,11 @@ describe "Gori::Prism::Active (safety + coverage)" do
       detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi", content_type: nil)
       plan = Gori::Prism::Active.plan(detail).not_nil!
       canary = plan.params.first.canary
-      html = Gori::Replay::Result.new(
+      html = Gori::Repeater::Result.new(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n".to_slice,
         "<p>#{canary}</p>".to_slice, nil, 1_i64)
       Gori::Prism::Active.detections(plan, html, detail).first.severity.should eq(Gori::Store::Severity::Medium)
-      json = Gori::Replay::Result.new(
+      json = Gori::Repeater::Result.new(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n".to_slice,
         %({"q":"#{canary}"}).to_slice, nil, 1_i64)
       Gori::Prism::Active.detections(plan, json, detail).first.severity.should eq(Gori::Store::Severity::Low)
@@ -1418,7 +1418,7 @@ describe Gori::Prism do
   end
 end
 
-describe Gori::Prism, "WebSocket + Replay sources" do
+describe Gori::Prism, "WebSocket + Repeater sources" do
   it "fingerprints a WebSocket upgrade and includes the path in evidence" do
     with_store do |store|
       req_headers = "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: chat\r\n"
@@ -1455,44 +1455,44 @@ describe Gori::Prism, "WebSocket + Replay sources" do
     end
   end
 
-  it "builds a FlowDetail from a ReplayRecord and passive-scans it" do
+  it "builds a FlowDetail from a RepeaterRecord and passive-scans it" do
     with_store do |store|
-      req = "GET /api HTTP/1.1\r\nHost: replay.test\r\n\r\n"
+      req = "GET /api HTTP/1.1\r\nHost: repeater.test\r\n\r\n"
       resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nServer: nginx/1.25\r\n\r\n"
-      id = store.insert_replay("https://replay.test", req, false, true, nil, 0)
-      store.update_replay_response(id, resp.to_slice, "<html/>".to_slice, nil, 12_i64)
-      rec = store.get_replay(id).not_nil!
-      # get_replay may not load response blobs — use full replays list
-      rec = store.replays.find!(&.id.== id)
-      detail = Gori::Prism.detail_from_replay(rec).not_nil!
-      detail.row.host.should eq("replay.test")
+      id = store.insert_repeater("https://repeater.test", req, false, true, nil, 0)
+      store.update_repeater_response(id, resp.to_slice, "<html/>".to_slice, nil, 12_i64)
+      rec = store.get_repeater(id).not_nil!
+      # get_repeater may not load response blobs — use full repeaters list
+      rec = store.repeaters.find!(&.id.== id)
+      detail = Gori::Prism.detail_from_repeater(rec).not_nil!
+      detail.row.host.should eq("repeater.test")
       detail.row.method.should eq("GET")
       detail.row.status.should eq(200)
       dets = Gori::Prism::Passive.analyze(detail).map { |d|
-        Gori::Prism.with_source(d, replay_id: id)
+        Gori::Prism.with_source(d, repeater_id: id)
       }
       dets.map(&.code).should contain("tech_server")
       dets.map(&.code).should contain("missing_csp")
       dets.each { |d| store.upsert_prism_issue(d) }
       issue = store.prism_issues.find!(&.code.==("tech_server"))
-      issue.sample_replay_id.should eq(id)
+      issue.sample_repeater_id.should eq(id)
       issue.sample_flow_id.should be_nil
     end
   end
 
-  it "parses request headers from an LF-joined Replay request (normalizes the head to CRLF)" do
+  it "parses request headers from an LF-joined Repeater request (normalizes the head to CRLF)" do
     with_store do |store|
-      # The Replay editor serializes request text with BARE-LF line endings; without CRLF
+      # The Repeater editor serializes request text with BARE-LF line endings; without CRLF
       # normalization Http1.parse_headers returns an empty list and every request-side rule
       # (CORS Origin, Basic auth, request tech) silently misses.
       req = "POST /login HTTP/1.1\nHost: acme.test\nAuthorization: Basic dXNlcjpwYXNz\n" \
             "Origin: https://evil.example\n"
       resp = "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://evil.example\r\n" \
              "Access-Control-Allow-Credentials: true\r\n\r\n"
-      id = store.insert_replay("http://acme.test", req, false, false, nil, 0)
-      store.update_replay_response(id, resp.to_slice, "{}".to_slice, nil, 5_i64)
-      rec = store.replays.find!(&.id.== id)
-      detail = Gori::Prism.detail_from_replay(rec).not_nil!
+      id = store.insert_repeater("http://acme.test", req, false, false, nil, 0)
+      store.update_repeater_response(id, resp.to_slice, "{}".to_slice, nil, 5_i64)
+      rec = store.repeaters.find!(&.id.== id)
+      detail = Gori::Prism.detail_from_repeater(rec).not_nil!
       detail.row.method.should eq("POST")
       codes = Gori::Prism::Passive.analyze(detail).map(&.code)
       codes.should contain("insecure_basic_auth")   # Authorization header now visible over http
@@ -1500,12 +1500,12 @@ describe Gori::Prism, "WebSocket + Replay sources" do
     end
   end
 
-  it "skips Replay tabs with no response head" do
+  it "skips Repeater tabs with no response head" do
     with_store do |store|
-      id = store.insert_replay("https://empty.test", "GET / HTTP/1.1\r\nHost: empty.test\r\n\r\n",
+      id = store.insert_repeater("https://empty.test", "GET / HTTP/1.1\r\nHost: empty.test\r\n\r\n",
         false, true, nil, 0)
-      rec = store.replays_meta.find!(&.id.== id)
-      Gori::Prism.detail_from_replay(rec).should be_nil
+      rec = store.repeaters_meta.find!(&.id.== id)
+      Gori::Prism.detail_from_repeater(rec).should be_nil
     end
   end
 end

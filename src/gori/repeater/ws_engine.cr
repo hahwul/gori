@@ -6,23 +6,23 @@ require "../proxy/ws/frame"
 require "./flow_request"
 
 module Gori
-  module Replay
-    # Re-establishes a WebSocket session to an origin and replays recorded
+  module Repeater
+    # Re-establishes a WebSocket session to an origin and repeaters recorded
     # client→server messages, capturing the server's responses. Unlike Engine /
     # H2Engine (one request → one buffered response), this does the HTTP/1.1
     # upgrade handshake, then a scripted exchange: send each outbound message as a
     # masked client frame, then drain inbound frames until the server sends Close
     # or goes idle.
     #
-    # Two deliberate limitations of this simplified replay:
+    # Two deliberate limitations of this simplified repeater:
     #  - Sequential, not interleaved: ALL recorded client→server messages are sent
     #    first, then the server's responses are drained. A protocol that depends on
-    #    per-message request/response interleaving will not replay faithfully.
+    #    per-message request/response interleaving will not repeater faithfully.
     #  - No permessage-deflate: the handshake omits the extension, AND the live
     #    capture relay stores frame payloads verbatim without decompressing them. So
     #    a session captured over a compressed connection holds COMPRESSED bytes;
     #    replaying them to a server that isn't negotiating deflate sends undecodable
-    #    input (and compressed server frames likewise can't be read). To replay such
+    #    input (and compressed server frames likewise can't be read). To repeater such
     #    a session, capture it with compression disabled in the browser.
     module WsEngine
       GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" # RFC 6455 §1.3 accept magic
@@ -39,14 +39,14 @@ module Gori
       # header case-insensitively (RFC 6455: the token is case-insensitive; browsers
       # send lowercase, but `Upgrade: WebSocket` and no-space forms are equally valid),
       # tolerating flexible whitespace after the colon. The single source of truth for
-      # "is this replay a WebSocket flow?" across the TUI restore paths and MCP tools.
+      # "is this repeater a WebSocket flow?" across the TUI restore paths and MCP tools.
       UPGRADE_HEADER = /(?:^|\n)upgrade:[ \t]*websocket/i
 
       def self.upgrade_request?(request : String) : Bool
         request.matches?(UPGRADE_HEADER)
       end
 
-      # An outbound message to replay (opcode 1=text, 2=binary).
+      # An outbound message to repeater (opcode 1=text, 2=binary).
       record OutMsg, opcode : Int32, payload : Bytes
 
       # One message in the replayed transcript. `direction` is "out" (we sent) or
@@ -117,7 +117,7 @@ module Gori
         rescue ex
           # A failure BEFORE/at the upgrade is a real error; once upgraded, drain swallows
           # mid-exchange IO errors itself, so reaching here means the handshake failed.
-          err(ex.message || "ws replay error", started)
+          err(ex.message || "ws repeater error", started)
         ensure
           upstream.close rescue nil
         end
@@ -206,10 +206,10 @@ module Gori
         # socket already gone — nothing to close gracefully
       end
 
-      # Rebuilds the upgrade request for replay: origin-form request line, a FRESH
-      # Sec-WebSocket-Key (avoids any server replay-guard), and Sec-WebSocket-
+      # Rebuilds the upgrade request for repeater: origin-form request line, a FRESH
+      # Sec-WebSocket-Key (avoids any server repeater-guard), and Sec-WebSocket-
       # Extensions stripped (no permessage-deflate → frames are plain). Everything
-      # else (Host, Cookie, Authorization, Origin, …) is kept so the replay carries
+      # else (Host, Cookie, Authorization, Origin, …) is kept so the repeater carries
       # the original session. Header VALUE bytes are copied verbatim (only the ASCII
       # request line + header NAMES are decoded) so a non-UTF-8-bearing cookie/auth
       # token survives byte-exact, mirroring FlowRequest.origin_form_bytes. Returns
@@ -220,7 +220,7 @@ module Gori
 
         io = IO::Memory.new(head.size + 64)
         req_line = lines.empty? ? "GET / HTTP/1.1" : String.new(lines[0])
-        io << (Replay::FlowRequest.rewrite_request_line(req_line) || req_line) << "\r\n"
+        io << (Repeater::FlowRequest.rewrite_request_line(req_line) || req_line) << "\r\n"
         lines[1..].each do |line|
           next if line.empty?
           name = header_name(line)

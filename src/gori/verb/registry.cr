@@ -43,7 +43,7 @@ module Gori
       # mnemonic, else the first plain single-char chord) that could appear in the
       # SAME view means the later one is silently unreachable by that key —
       # SpaceMenu#verb_for is a first-match find, so the collision has no other
-      # symptom. Two DIFFERENT sections may reuse a key freely (e.g. Replay's request
+      # symptom. Two DIFFERENT sections may reuse a key freely (e.g. Repeater's request
       # `i` and response `i`) since they never render together. Cross-scope reuse is
       # likewise fine (the space menu is scoped), mirroring Conflicts' same-scope
       # rule. space_menu_spec asserts the same invariant; calling this at build time
@@ -96,7 +96,7 @@ module Gori
       #   • Ctrl-P palette → for_scope(Global)  — gori-wide app control (settings,
       #     capture, scope/rules, tab nav, quit …).
       #   • space menu → for_scope(current_scope) — only the FOCUSED area's own
-      #     actions (Body: replay/copy/open …, Replay: send/new, …).
+      #     actions (Body: repeater/copy/open …, Repeater: send/new, …).
       # Keeping them disjoint is the whole point: app control never clutters the
       # space menu, and area actions never clutter the palette. Per-verb available? gates
       # (e.g. history.copy only when current_tab == :history).

@@ -2,18 +2,18 @@ require "json"
 require "base64"
 require "../store"
 require "../findings_export"
-require "../replay/engine"
+require "../repeater/engine"
 require "../fuzz"
 require "../proxy/codec/content_decode"
 
 module Gori
   module MCP
-    # Pure functions that render gori's store/replay structs into the JSON the MCP
+    # Pure functions that render gori's store/repeater structs into the JSON the MCP
     # tools return. The codebase builds JSON by hand (no JSON::Serializable), so we
     # follow suit with JSON.build. Bodies are decoded for display (de-chunk +
     # gzip/deflate/br/zstd via ContentDecode) and SUMMARISED — text when valid
     # UTF-8 (capped), base64 otherwise (capped). Byte-exact bodies are gori's own
-    # replay/export job; MCP trades fidelity for a token budget the model can read.
+    # repeater/export job; MCP trades fidelity for a token budget the model can read.
     module Serialize
       MAX_TEXT = 64 * 1024 # cap on inlined decoded text
       MAX_B64  = 64 * 1024 # cap on raw bytes base64-encoded for binary bodies
@@ -192,8 +192,8 @@ module Gori
         end
       end
 
-      # --- replay / send_request response -------------------------------------
-      def self.replay_result_json(r : Replay::Result) : String
+      # --- repeater / send_request response -------------------------------------
+      def self.repeater_result_json(r : Repeater::Result) : String
         JSON.build do |j|
           j.object do
             if resp = r.response

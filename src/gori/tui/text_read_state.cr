@@ -2,7 +2,7 @@ require "./read_cursor"
 require "./text_area"
 
 module Gori::Tui
-  # Read-mode navigation + selection for a TextArea (shared by Replay, Fuzzer, Notes, …).
+  # Read-mode navigation + selection for a TextArea (shared by Repeater, Fuzzer, Notes, …).
   class TextReadState
     getter cursor : ReadCursor
 

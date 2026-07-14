@@ -69,7 +69,7 @@ private def start_mcp_ws_origin : Int32
     key = String.new(head).each_line
       .find(&.downcase.starts_with?("sec-websocket-key:"))
       .try { |line| line.split(':', 2)[1].strip } || ""
-    accept = Base64.strict_encode(Digest::SHA1.digest(key + Gori::Replay::WsEngine::GUID))
+    accept = Base64.strict_encode(Digest::SHA1.digest(key + Gori::Repeater::WsEngine::GUID))
     conn << "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n" \
             "Connection: Upgrade\r\nSec-WebSocket-Accept: #{accept}\r\n\r\n"
     conn.flush
@@ -165,7 +165,7 @@ describe Gori::MCP::Server do
         names.should contain("get_flow")
         names.should contain("ql_reference")
         names.should contain("project_info")
-        names.should contain("get_replay_context")
+        names.should contain("get_repeater_context")
         names.should contain("send_request")
         names.should contain("send_websocket")
         names.should contain("create_finding")
@@ -388,25 +388,25 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "links a replay on create and on a link-only update" do
+    it "links a repeater on create and on a link-only update" do
       with_store do |store|
-        replay_a = store.insert_replay("https://ex.test", "GET /a HTTP/1.1\r\n\r\n", false, true, nil, 0)
-        replay_b = store.insert_replay("https://ex.test", "GET /b HTTP/1.1\r\n\r\n", false, true, nil, 1)
-        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"linked","replay_id":#{replay_a}}}})
+        repeater_a = store.insert_repeater("https://ex.test", "GET /a HTTP/1.1\r\n\r\n", false, true, nil, 0)
+        repeater_b = store.insert_repeater("https://ex.test", "GET /b HTTP/1.1\r\n\r\n", false, true, nil, 1)
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"linked","repeater_id":#{repeater_a}}}})
         finding_id = tool_payload(drive(store, create)[0])["id"].as_i64
         links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
-        links.map(&.ref_id).should contain(replay_a)
+        links.map(&.ref_id).should contain(repeater_a)
 
-        update = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_finding","arguments":{"id":#{finding_id},"replay_id":#{replay_b}}}})
+        update = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_finding","arguments":{"id":#{finding_id},"repeater_id":#{repeater_b}}}})
         drive(store, update)[0]["result"]["isError"].as_bool.should be_false
         links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
-        links.map(&.ref_id).should contain(replay_b)
+        links.map(&.ref_id).should contain(repeater_b)
       end
     end
 
-    it "rejects an unknown replay_id without creating a finding" do
+    it "rejects an unknown repeater_id without creating a finding" do
       with_store do |store|
-        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","replay_id":999}}})
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_finding","arguments":{"title":"x","repeater_id":999}}})
         resp = drive(store, create)[0]
         resp["result"]["isError"].as_bool.should be_true
         store.count_findings.should eq(0)
@@ -577,22 +577,22 @@ describe Gori::MCP::Server do
     end
   end
 
-  describe "create_replay and update_replay" do
-    it "creates a new replay from raw payload and returns context fields" do
+  describe "create_repeater and update_repeater" do
+    it "creates a new repeater from raw payload and returns context fields" do
       with_store do |store|
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_replay","arguments":{"target":"https://api.test","request":"GET /x HTTP/1.1\\r\\nHost: api.test\\r\\n\\r\\n","name":"My Replay Tab"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"target":"https://api.test","request":"GET /x HTTP/1.1\\r\\nHost: api.test\\r\\n\\r\\n","name":"My Repeater Tab"}}})
         resp = drive(store, call)[0]
         resp["result"]["isError"]?.should_not eq(true)
         payload = tool_payload(resp)
         payload["id"].as_i64.should_not eq(0)
-        payload["name"].as_s.should eq("My Replay Tab")
+        payload["name"].as_s.should eq("My Repeater Tab")
         payload["target"].as_s.should eq("https://api.test")
         payload["summary"].as_s.should eq("GET /x")
         payload["position"].as_i64.should eq(0)
 
-        # Let's test update_replay
+        # Let's test update_repeater
         id = payload["id"].as_i64
-        upd_call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_replay","arguments":{"id":#{id},"target":"https://updated.test","name":"Updated Name"}}})
+        upd_call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"update_repeater","arguments":{"id":#{id},"target":"https://updated.test","name":"Updated Name"}}})
         resp2 = drive(store, upd_call)[0]
         resp2["result"]["isError"]?.should_not eq(true)
         payload2 = tool_payload(resp2)
@@ -603,40 +603,40 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "creates a new replay from a flow_id" do
+    it "creates a new repeater from a flow_id" do
       with_store do |store|
         flow_id = seed_flow(store, "ex.test", "GET", "/flow-endpoint", 200)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_replay","arguments":{"flow_id":#{flow_id}}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"flow_id":#{flow_id}}}})
         payload = tool_payload(drive(store, call)[0])
         payload["target"].as_s.should eq("https://ex.test")
         payload["summary"].as_s.should eq("GET /flow-endpoint")
       end
     end
 
-    it "creates a new replay from a finding_id" do
+    it "creates a new repeater from a finding_id" do
       with_store do |store|
         flow_id = seed_flow(store, "ex.test", "POST", "/submit", 200)
         store.insert_finding("Vuln Title", Gori::Store::Severity::High, "ex.test", flow_id)
         store.flush
         finding_id = store.findings.first.id
 
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_replay","arguments":{"finding_id":#{finding_id}}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_repeater","arguments":{"finding_id":#{finding_id}}}})
         payload = tool_payload(drive(store, call)[0])
         payload["target"].as_s.should eq("https://ex.test")
         payload["summary"].as_s.should eq("POST /submit")
         links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
-        links.any? { |link| link.ref_kind.replay? && link.ref_id == payload["id"].as_i64 }.should be_true
+        links.any? { |link| link.ref_kind.repeater? && link.ref_id == payload["id"].as_i64 }.should be_true
       end
     end
   end
 
-  describe "get_replay_context" do
-    it "lists persisted replay sessions with last response status" do
+  describe "get_repeater_context" do
+    it "lists persisted repeater sessions with last response status" do
       with_store do |store|
-        store.insert_replay("https://ex.test", "GET /x HTTP/1.1\nHost: ex.test\n\n", false, true, nil, 0)
-        id = store.replays_meta.last.id
-        store.update_replay_response(id, "HTTP/1.1 400 Bad\r\n\r\n".to_slice, "nope".to_slice, nil, 99_i64)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{}}})
+        store.insert_repeater("https://ex.test", "GET /x HTTP/1.1\nHost: ex.test\n\n", false, true, nil, 0)
+        id = store.repeaters_meta.last.id
+        store.update_repeater_response(id, "HTTP/1.1 400 Bad\r\n\r\n".to_slice, "nope".to_slice, nil, 99_i64)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{}}})
         payload = tool_payload(drive(store, call)[0])
         payload["sessions"].as_a.size.should eq(1)
         sess = payload["sessions"][0]
@@ -646,7 +646,7 @@ describe Gori::MCP::Server do
         sess.as_h.has_key?("last_response_head").should be_false
         payload["content_included"].as_bool.should be_false
 
-        with_content = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_replay_context","arguments":{"id":#{id},"include_content":true}}})
+        with_content = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{"id":#{id},"include_content":true}}})
         detailed = tool_payload(drive(store, with_content)[0])
         detailed["sessions"].as_a.size.should eq(1)
         detailed["sessions"][0]["request"].as_s.should contain("GET /x")
@@ -656,13 +656,13 @@ describe Gori::MCP::Server do
 
     it "base64-encodes a binary WebSocket frame (keeps the JSON-RPC stream valid UTF-8)" do
       with_store do |store|
-        store.insert_replay("wss://ex.test/ws",
+        store.insert_repeater("wss://ex.test/ws",
           "GET /ws HTTP/1.1\r\nHost: ex.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", false, true, nil, 0)
-        id = store.replays_meta.last.id
-        store.insert_ws_message(0_i64, "out", 1, "ping".to_slice, replay_id: id)        # text frame
-        store.insert_ws_message(0_i64, "in", 2, Bytes[0x00, 0xff, 0x80], replay_id: id) # binary (invalid UTF-8)
+        id = store.repeaters_meta.last.id
+        store.insert_ws_message(0_i64, "out", 1, "ping".to_slice, repeater_id: id)        # text frame
+        store.insert_ws_message(0_i64, "in", 2, Bytes[0x00, 0xff, 0x80], repeater_id: id) # binary (invalid UTF-8)
         store.flush
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{"include_content":true}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{"include_content":true}}})
         msgs = tool_payload(drive(store, call)[0])["sessions"][0]["ws_messages"].as_a
         text = msgs.find { |m| m["opcode"].as_i == 1 }.not_nil!
         text["payload"].as_s.should eq("ping")
@@ -673,14 +673,14 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "includes the live TUI replay snapshot when ui_state carries it" do
+    it "includes the live TUI repeater snapshot when ui_state carries it" do
       with_store do |store|
         ui = JSON.build do |j|
           j.object do
-            j.field "active_tab", "replay"
+            j.field "active_tab", "repeater"
             j.field "focus_pane", "body"
             j.field "subtab", 0
-            j.field "replay" do
+            j.field "repeater" do
               j.object do
                 j.field "count", 1
                 j.field "active_subtab", 0
@@ -698,15 +698,15 @@ describe Gori::MCP::Server do
           end
         end
         store.set_setting(Gori::Store::UI_STATE_KEY, ui)
-        metadata = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_replay_context","arguments":{}}})
+        metadata = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{}}})
         metadata_payload = tool_payload(drive(store, metadata, project_name: "demo", project_slug: "demo")[0])
-        metadata_payload.as_h.has_key?("tui_replay").should be_false
-        metadata_payload["tui_replay_available"].as_bool.should be_true
+        metadata_payload.as_h.has_key?("tui_repeater").should be_false
+        metadata_payload["tui_repeater_available"].as_bool.should be_true
 
-        call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_replay_context","arguments":{"include_content":true}}})
+        call = %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{"include_content":true}}})
         payload = tool_payload(drive(store, call, project_name: "demo", project_slug: "demo")[0])
-        payload["tui_on_replay_tab"].as_bool.should be_true
-        payload["tui_replay"]["active"]["http2"].as_bool.should be_true
+        payload["tui_on_repeater_tab"].as_bool.should be_true
+        payload["tui_repeater"]["active"]["http2"].as_bool.should be_true
         payload["project_slug"].as_s.should eq("demo")
       end
     end
@@ -797,9 +797,9 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "replays a captured flow via flow_id without a url" do
+    it "repeaters a captured flow via flow_id without a url" do
       with_store do |store|
-        id = seed_flow(store, "ex.test", "GET", "/replay-me", 200)
+        id = seed_flow(store, "ex.test", "GET", "/repeater-me", 200)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id}}}})
         resp = drive(store, call, verify_upstream: false)[0]
         # May fail to connect in CI, but must NOT error with 'url is required'.
@@ -836,14 +836,14 @@ describe Gori::MCP::Server do
       end
     end
 
-    it "links a saved replay to a finding even when the origin is unavailable" do
+    it "links a saved repeater to a finding even when the origin is unavailable" do
       with_store do |store|
         finding_id = store.insert_finding("evidence", Gori::Store::Severity::Low, nil, nil)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","save_as_replay":true,"finding_id":#{finding_id}}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","save_as_repeater":true,"finding_id":#{finding_id}}}})
         drive(store, call)[0]["result"]["isError"].as_bool.should be_true
-        replay_id = store.replays_meta.last.id
+        repeater_id = store.repeaters_meta.last.id
         links = store.list_links(Gori::Store::LinkOwnerKind::Finding, finding_id)
-        links.any? { |link| link.ref_kind.replay? && link.ref_id == replay_id }.should be_true
+        links.any? { |link| link.ref_kind.repeater? && link.ref_id == repeater_id }.should be_true
       end
     end
   end
@@ -853,8 +853,8 @@ describe Gori::MCP::Server do
       with_store do |store|
         port = start_mcp_ws_origin
         request = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
-        replay_id = store.insert_replay("ws://127.0.0.1:#{port}", request, false, true, nil, 0)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"replay_id":#{replay_id},"messages":["ping"],"idle_ms":100}}})
+        repeater_id = store.insert_repeater("ws://127.0.0.1:#{port}", request, false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":["ping"],"idle_ms":100}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_false
         payload = tool_payload(resp)
@@ -863,14 +863,14 @@ describe Gori::MCP::Server do
         payload["close_code"].as_i.should eq(1000)
         payload["messages"].as_a.map { |message| {message["direction"].as_s, message["payload"].as_s} }
           .should eq([{"out", "ping"}, {"in", "ping"}])
-        store.replays.find(&.id.==(replay_id)).not_nil!.response_head.should_not be_nil
+        store.repeaters.find(&.id.==(repeater_id)).not_nil!.response_head.should_not be_nil
       end
     end
 
-    it "rejects a non-WebSocket replay before making a connection" do
+    it "rejects a non-WebSocket repeater before making a connection" do
       with_store do |store|
-        replay_id = store.insert_replay("http://127.0.0.1:1", "GET / HTTP/1.1\r\nHost: x\r\n\r\n", false, true, nil, 0)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"replay_id":#{replay_id}}}})
+        repeater_id = store.insert_repeater("http://127.0.0.1:1", "GET / HTTP/1.1\r\nHost: x\r\n\r\n", false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id}}}})
         resp = drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
         resp["result"]["content"][0]["text"].as_s.should contain("not a WebSocket")
@@ -879,12 +879,12 @@ describe Gori::MCP::Server do
 
     it "uses the WebSocket engine and returns a clean connection error" do
       with_store do |store|
-        replay_id = store.insert_replay("ws://127.0.0.1:1", "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", false, true, nil, 0)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"replay_id":#{replay_id},"messages":["ping"],"idle_ms":100}}})
+        repeater_id = store.insert_repeater("ws://127.0.0.1:1", "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":["ping"],"idle_ms":100}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_true
         payload = tool_payload(resp)
-        payload["replay_id"].as_i64.should eq(replay_id)
+        payload["repeater_id"].as_i64.should eq(repeater_id)
         payload["upgraded"].as_bool.should be_false
         payload["error"].as_s.should contain("connect failed")
       end
@@ -969,17 +969,17 @@ describe Gori::MCP::Serialize do
     text.should contain("A")
   end
 
-  it "flags a replay result as incomplete when the origin cut the body short" do
+  it "flags a repeater result as incomplete when the origin cut the body short" do
     head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
-    r = Gori::Replay::Result.new(head, "hi".to_slice, nil, 1000_i64, incomplete: true)
-    out = JSON.parse(Gori::MCP::Serialize.replay_result_json(r))
+    r = Gori::Repeater::Result.new(head, "hi".to_slice, nil, 1000_i64, incomplete: true)
+    out = JSON.parse(Gori::MCP::Serialize.repeater_result_json(r))
     out["incomplete"].as_bool.should be_true
   end
 
-  it "omits the incomplete field for a complete replay result" do
+  it "omits the incomplete field for a complete repeater result" do
     head = "HTTP/1.1 200 OK\r\n\r\n".to_slice
-    r = Gori::Replay::Result.new(head, "hi".to_slice, nil, 1000_i64)
-    out = JSON.parse(Gori::MCP::Serialize.replay_result_json(r))
+    r = Gori::Repeater::Result.new(head, "hi".to_slice, nil, 1000_i64)
+    out = JSON.parse(Gori::MCP::Serialize.repeater_result_json(r))
     out["incomplete"]?.should be_nil
   end
 end

@@ -2,16 +2,16 @@ require "uri"
 require "../store"
 
 module Gori
-  module Replay
+  module Repeater
     # Reconstructs a replayable request from a captured flow — the headless
-    # counterpart of the TUI's ReplayView#load. Unlike the editor (which splits the
+    # counterpart of the TUI's RepeaterView#load. Unlike the editor (which splits the
     # request into text lines and re-encodes them), this keeps request_head +
     # request_body BYTE-EXACT, rewriting ONLY an absolute-form request line
     # ("GET http://h/p HTTP/1.1" → "GET /p HTTP/1.1") so the bytes can go straight
     # to the origin server. Byte-exactness matters for binary bodies, which a text
     # round-trip would corrupt.
     #
-    # The result feeds Replay::Engine.send / Replay::H2Engine.send, which take
+    # The result feeds Repeater::Engine.send / Repeater::H2Engine.send, which take
     # `request, scheme:, host:, port:, verify_upstream:`.
     module FlowRequest
       record Built, target : String, bytes : Bytes, http2 : Bool, sni : String?
@@ -21,10 +21,10 @@ module Gori
         head = detail.request_head
         body = detail.request_body
         # The captured body is capped at CAPTURE_MAX. If it was truncated, a faithful
-        # h1 replay would BLOCK the origin waiting for bytes that no longer exist (a
+        # h1 repeater would BLOCK the origin waiting for bytes that no longer exist (a
         # Content-Length over-promising, or a chunked stream cut before its 0-chunk). Byte-
         # exactness is already lost at the cap, so re-frame the head to a fixed Content-Length
-        # over the bytes we actually send, so the replay terminates instead of hanging.
+        # over the bytes we actually send, so the repeater terminates instead of hanging.
         head = resync_truncated_head(head, body.try(&.size) || 0) if detail.request_body_truncated?
         Built.new(
           target: build_target(row.scheme, row.host, row.port),
@@ -34,7 +34,7 @@ module Gori
         )
       end
 
-      # Make a TRUNCATED request self-framed so the replay can't hang. Used ONLY when the
+      # Make a TRUNCATED request self-framed so the repeater can't hang. Used ONLY when the
       # captured body was capped. Rewrites an existing Content-Length to the stored byte
       # count, OR replaces a Transfer-Encoding (chunked — whose stored wire-form bytes were
       # cut mid-stream) with a Content-Length over those bytes so the origin reads a complete
@@ -67,8 +67,8 @@ module Gori
       # request. Used after env-var expansion changes body bytes (a `$KEY` in the body):
       # `build` framed the CL over the pre-expansion body, so re-sync it or the origin
       # over/under-reads. Never ADDS a header (GETs stay clean) and leaves chunked/h2
-      # bodies (no Content-Length) untouched. Shared by the TUI Replay editor and the
-      # headless CLI/MCP replay-send paths so they can't disagree.
+      # bodies (no Content-Length) untouched. Shared by the TUI Repeater editor and the
+      # headless CLI/MCP repeater-send paths so they can't disagree.
       def self.resync_content_length(bytes : Bytes) : Bytes
         text = String.new(bytes)
         sep = text.index("\r\n\r\n")
@@ -83,7 +83,7 @@ module Gori
       end
 
       # "scheme://host[:port]", omitting the port when it's the scheme default —
-      # matches ReplayView#build_target so the parsed {scheme,host,port} round-trips.
+      # matches RepeaterView#build_target so the parsed {scheme,host,port} round-trips.
       def self.build_target(scheme : String, host : String, port : Int32) : String
         default = (scheme == "https" || scheme == "wss") ? 443 : 80
         # An IPv6 literal host (contains ':') must be bracketed in a URL, else both the

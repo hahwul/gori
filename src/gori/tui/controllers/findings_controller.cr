@@ -9,7 +9,7 @@ module Gori::Tui
   # The Findings tab: the triage list + a finding's detail (with an inline notes
   # editor) + Markdown/JSON export. Owns FindingsView. The "new/edit finding" FORM is
   # a shell overlay (@overlay == :finding_new), so it stays in the Runner; the three
-  # cross-tab jumps (finding → its flow in History, finding → Replay, new-from-flow)
+  # cross-tab jumps (finding → its flow in History, finding → Repeater, new-from-flow)
   # are shell mediators. Detail notes use READ/INS (like Notes): the shell routes
   # detail keys here before the focus ring when a finding is open.
   class FindingsController < TabController
@@ -54,7 +54,7 @@ module Gori::Tui
         elsif @findings.notes_focused?
           "↑/↓ move · ⇧arrows select · #{y} copy · i/↵ edit · space cmds · ⇧←/→ h-scroll · esc links"
         else
-          "↑/↓ links · ↵ open · i/↵ notes · o flow · r replay · space cmds · ←/esc back"
+          "↑/↓ links · ↵ open · i/↵ notes · o flow · r repeater · space cmds · ←/esc back"
         end
       elsif @findings.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"

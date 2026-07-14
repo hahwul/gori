@@ -2,7 +2,7 @@ require "./screen"
 require "./theme"
 
 module Gori::Tui
-  # Left line-number gutter for the multi-line HTTP message views (Replay request/
+  # Left line-number gutter for the multi-line HTTP message views (Repeater request/
   # response, History detail). Pairs with ^G go-to-line so the target line is
   # legible. Hex panes are excluded — they already carry an offset column.
   module Gutter

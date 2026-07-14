@@ -40,7 +40,7 @@ module Gori::Tui
 
     # Card rects for the four sections, stacked top-to-bottom. Each is a full
     # `Frame.card` (border + interior), NOT a divided slice of one outer frame —
-    # so focusing INPUT or CHAIN lights only that card (mirrors Replay's
+    # so focusing INPUT or CHAIN lights only that card (mirrors Repeater's
     # TARGET/REQUEST/RESPONSE). CHAIN is a fixed 3-high single-line field; INPUT
     # takes ~a quarter; PIPELINE sizes to its step count; OUTPUT gets the rest.
     # Tight bodies fold PIPELINE away, then collapse toward an OUTPUT-only card.
@@ -149,7 +149,7 @@ module Gori::Tui
     end
 
     # CHAIN — a framed single-line spec field with a "›" prompt; gold when focused.
-    # Only the focused field shows the block caret (matches Replay's target row).
+    # Only the focused field shows the block caret (matches Repeater's target row).
     private def render_chain(screen : Screen, card : Rect, chain : String, chain_cx : Int32,
                              chain_pre : String, active : Bool) : Nil
       Frame.card(screen, card, "CHAIN", bg: Theme.bg, border: Frame.pane_border(active))

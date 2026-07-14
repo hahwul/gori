@@ -12,7 +12,7 @@ module Gori
       Sidebar        # the tab list has focus
       Body           # the content pane has focus (e.g. the History list)
       HistoryDetail  # a flow's detail view is open
-      Replay         # the Replay tab has focus
+      Repeater         # the Repeater tab has focus
       Fuzzer         # the Fuzzer tab has focus
       Miner          # the Miner (param-mining) tab has focus
       Sitemap        # the Sitemap tab has focus

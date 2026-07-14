@@ -5,7 +5,7 @@ require "../miner"
 require "../settings"
 
 module Gori::Tui
-  # Everything needed to start a mining session, captured from History/Replay when the
+  # Everything needed to start a mining session, captured from History/Repeater when the
   # user picks "Mine parameters". `applicable`/`default` come from Miner::Detect so the
   # config overlay only offers locations that make sense for THIS request.
   record MineSeed,
@@ -37,7 +37,7 @@ module Gori::Tui
       restore_saved_prefs
     end
 
-    # Remember the last confirmed overlay for the next History/Replay mine.
+    # Remember the last confirmed overlay for the next History/Repeater mine.
     def save_prefs : Nil
       locs = @seed.applicable.select { |l| @checked[l]? }.map(&.label)
       notify = NOTIFY_CHOICES[@notify_idx].token

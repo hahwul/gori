@@ -21,7 +21,7 @@ module Gori::Tui
     abstract def request_focus(pane : Symbol) : Nil   # drive the focus model via focus_pane (:menu | :subtabs | :body)
     abstract def focus_body : Nil                     # raw: focus the body WITHOUT resetting the pane (for clicks)
     abstract def switch_tab(tab : Symbol) : Nil       # change the active tab (with save-on-leave + on_enter)
-    abstract def goto_tab(tab : Symbol) : Nil         # raw: set active tab + body focus, no on_enter/view_focus_first (e.g. ^R → Replay)
+    abstract def goto_tab(tab : Symbol) : Nil         # raw: set active tab + body focus, no on_enter/view_focus_first (e.g. ^R → Repeater)
     abstract def open_palette : Nil                   # open the command palette overlay
     abstract def open_space_menu : Nil                # open the space action menu (bottom-right)
     # Open the Fuzzer's payload-set editor overlay (nil = add a new set, else edit that
@@ -35,12 +35,12 @@ module Gori::Tui
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, &action : -> Nil) : Nil
     abstract def session : Session             # store / scope / proxy / registry / interceptor
     abstract def overlay : Symbol              # read the overlay state (e.g. History reads :detail)
-    abstract def active_tab : Symbol           # read the active tab (Replay reconcile gates on it)
+    abstract def active_tab : Symbol           # read the active tab (Repeater reconcile gates on it)
     abstract def focus : Symbol                # read the focus model (:menu | :subtabs | :body)
     abstract def reveal? : Bool                # global whitespace-reveal pref, pushed into views
     abstract def toggle_reveal : Nil           # flip the whitespace-reveal pref (^B from any view)
     abstract def pretty? : Bool                # global pretty-print-bodies pref, pushed into views
-    abstract def toggle_pretty : Nil           # flip the pretty-print pref (`p` from History/Replay)
+    abstract def toggle_pretty : Nil           # flip the pretty-print pref (`p` from History/Repeater)
     abstract def jobs : Jobs                   # shared background-job registry (bottom-bar activity)
     abstract def notifications : Notifications # shared notification store (center + badge)
     abstract def toggle_scope_lens : Nil       # flip the scope display lens (Project settings pane row/click)
@@ -49,7 +49,7 @@ module Gori::Tui
   end
 
   # Shared, state-free body chrome used by BOTH Runner and the per-tab
-  # controllers, so the framed-card outline and the Replay/Notes sub-tab strip are
+  # controllers, so the framed-card outline and the Repeater/Notes sub-tab strip are
   # drawn identically wherever they appear. Extracted from Runner so a controller
   # can frame its own body without reaching back into the shell.
   module BodyChrome
@@ -69,7 +69,7 @@ module Gori::Tui
     end
 
     # True when the outer body shell should gild its border — single-pane tabs only.
-    # Multi-pane views (Replay, Fuzzer, …) highlight the focused pane themselves.
+    # Multi-pane views (Repeater, Fuzzer, …) highlight the focused pane themselves.
     def shell_focused(focus : Symbol, *, multi_pane : Bool) : Bool
       focus == :body && !multi_pane
     end
@@ -77,7 +77,7 @@ module Gori::Tui
     # Frame the tab body, carve the sub-tab strip from the interior top when
     # `labels` is given, then yield the remaining content rect.
     # `strip_divider: false` carves chips only (height 1) so a sibling row — e.g.
-    # Replay's always-visible filter bar — can own the hairline underneath the
+    # Repeater's always-visible filter bar — can own the hairline underneath the
     # whole chrome group instead of splitting chips from that row.
     def framed_body(screen : Screen, rect : Rect, shell_focused : Bool,
                     subtabs_focused : Bool, labels : Array(String)?, active : Int32,
@@ -128,7 +128,7 @@ module Gori::Tui
       Rect.new(strip.x, strip.y, strip.w, 1)
     end
 
-    # The frame-less segmented control shared by Replay, Notes, Fuzzer, … `focused` =
+    # The frame-less segmented control shared by Repeater, Notes, Fuzzer, … `focused` =
     # the strip itself holds focus (←/→ switch) → active chip lights FOCUS_GOLD and the
     # divider hairline matches (when the strip owns that hairline, i.e. rect.h ≥ 2).
     def render_subtab_strip(screen : Screen, rect : Rect, labels : Array(String),
@@ -147,7 +147,7 @@ module Gori::Tui
   # per-tab input/render/focus logic that used to live in Runner's `case @active_tab`
   # ladders. Concrete defaults make most hooks optional, so a simple read-only tab
   # (Help) overrides only `tab`/`render_body`/`command_scope`, while a rich tab
-  # (Replay) overrides the input/focus/lifecycle hooks too.
+  # (Repeater) overrides the input/focus/lifecycle hooks too.
   abstract class TabController
     property subtab_start : Int32 = 0
 
@@ -159,7 +159,7 @@ module Gori::Tui
     abstract def command_scope : Verb::Scope # the space-menu scope when this tab + body has focus
 
     # The space menu's CONTEXT section when this tab's body holds focus — the current
-    # focus-area within the tab (e.g. Replay :request/:response/:target). Default
+    # focus-area within the tab (e.g. Repeater :request/:response/:target). Default
     # :common: single-region tabs (History, Sitemap, …) have no sub-area to single
     # out, so their menu is just the one COMMON group, identical to today.
     def command_section : Symbol
@@ -206,7 +206,7 @@ module Gori::Tui
       false
     end
 
-    # --- sub-tab strip (Replay/Notes); nil = no strip ---
+    # --- sub-tab strip (Repeater/Notes); nil = no strip ---
     def subtab_labels : Array(String)?
       nil
     end
@@ -217,7 +217,7 @@ module Gori::Tui
 
     # Whether the sub-tab strip is drawn AND `:subtabs` is a focusable pane. Default:
     # only with ≥2 chips — a lone chip has nowhere to switch to, so the row is better
-    # spent on the body. Replay/Fuzzer override to show a single chip too, so the active
+    # spent on the body. Repeater/Fuzzer override to show a single chip too, so the active
     # session is always labelled and the strip's space-menu is reachable with one open
     # tab. The Runner reads this (not a raw count) so render + focus + click stay in sync.
     def subtab_strip_shown? : Bool
@@ -232,7 +232,7 @@ module Gori::Tui
     end
 
     # Rows for the "find sub-tab" search picker (space → search). Default: one row per
-    # strip label — good enough for Fuzzer/Notes/Decoder. Replay overrides to add a
+    # strip label — good enough for Fuzzer/Notes/Decoder. Repeater overrides to add a
     # summary/URL detail line. Only meaningful when there are ≥2 sub-tabs (the verb gates
     # on subtab_count), so jumping to a sub-tab never needs the Ctrl+digit chord.
     def subtab_search_rows : Array(SubtabPicker::Row)
@@ -246,7 +246,7 @@ module Gori::Tui
       subtab_labels.try(&.size) || 0
     end
 
-    # Absolute chip indices to hide from the strip (Replay's tag filter); nil = show
+    # Absolute chip indices to hide from the strip (Repeater's tag filter); nil = show
     # all. Rendering + click hit-tests skip these, but the indices stay absolute so
     # jump/rename/^N keep working unchanged.
     def subtab_hidden : Set(Int32)?
@@ -254,7 +254,7 @@ module Gori::Tui
     end
 
     # Whether BodyChrome carves the hairline under the chip row. Default true.
-    # Replay returns false so its filter bar can draw the divider under chips+filter
+    # Repeater returns false so its filter bar can draw the divider under chips+filter
     # as one chrome group (runner strip hit-tests must use the same flag).
     def subtab_strip_divider? : Bool
       true
@@ -276,7 +276,7 @@ module Gori::Tui
     end
 
     # --- orthogonal ^G/^F prompts: the symbol naming the currently-focused
-    # searchable pane (e.g. :replay_request, :notes), or nil if none. The shell's
+    # searchable pane (e.g. :repeater_request, :notes), or nil if none. The shell's
     # goto/search prompt dispatches on this symbol. A future cleanup could return a
     # richer Searchable object to also fold the shell's per-symbol jump/search
     # dispatch into the controller. ---
@@ -334,7 +334,7 @@ module Gori::Tui
     end
 
     # Focus a specific session/sub-tab by its persisted id (notification "jump to
-    # result"). Default no-op; Replay/Fuzzer/Miner controllers override to reveal the row.
+    # result"). Default no-op; Repeater/Fuzzer/Miner controllers override to reveal the row.
     def reveal_session(id : Int64) : Nil
     end
   end

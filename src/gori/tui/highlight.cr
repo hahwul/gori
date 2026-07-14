@@ -4,7 +4,7 @@ require "../env"
 require "termisu"
 
 module Gori::Tui
-  # Syntax highlighting for the request/response panes (History detail, Replay,
+  # Syntax highlighting for the request/response panes (History detail, Repeater,
   # Intercept). Turns raw HTTP message text into styled spans so every view
   # colours the request line, status line, header names, and structured bodies
   # (JSON / form-encoded / markup) the same way instead of re-implementing it.
@@ -24,7 +24,7 @@ module Gori::Tui
     # --- public entry points -------------------------------------------------
 
     # Highlight a full HTTP message held as separate head/body byte slices (the
-    # History detail and Replay response shapes): styled head, then exactly ONE
+    # History detail and Repeater response shapes): styled head, then exactly ONE
     # blank line, then the styled body.
     def self.message(head : Bytes?, body : Bytes?, request : Bool) : Array(Line)
       head_lines = to_lines(head)
@@ -171,7 +171,7 @@ module Gori::Tui
     end
 
     # Highlight a message held as one combined text blob (Intercept's byte-exact
-    # `raw`, and the Replay/Intercept editors). Splits head from body at the
+    # `raw`, and the Repeater/Intercept editors). Splits head from body at the
     # first blank line and stays strictly 1:1 with `text.split('\n')`, so it can
     # back an editable buffer where each styled line must line up with the
     # cursor's line.
@@ -781,7 +781,7 @@ module Gori::Tui
       return [] of String unless bytes
       # `.scrub` maps invalid UTF-8 to U+FFFD (width-1, printable) so a body with stray
       # bytes never feeds raw invalid sequences into width/search math — mirrors the
-      # `.scrub` the Fuzzer/Replay/Comparer views already apply on their byte→line seam.
+      # `.scrub` the Fuzzer/Repeater/Comparer views already apply on their byte→line seam.
       String.new(bytes).scrub.split('\n').map(&.rstrip('\r'))
     end
 

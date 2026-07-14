@@ -1,6 +1,6 @@
 require "uri"
-require "../replay/engine"
-require "../replay/h2_engine"
+require "../repeater/engine"
+require "../repeater/h2_engine"
 
 module Gori::Fuzz
   # The origin a run targets (also the boundary for redirect following).
@@ -9,11 +9,11 @@ module Gori::Fuzz
   # The send seam. Swappable so specs (and the baseline calibrator) can drive the
   # engine without a real socket.
   abstract class Backend
-    abstract def send(bytes : Bytes) : Replay::Result
+    abstract def send(bytes : Bytes) : Repeater::Result
     abstract def origin : Origin
   end
 
-  # Production backend over the Replay engines (fresh connection per send — there is
+  # Production backend over the Repeater engines (fresh connection per send — there is
   # no upstream pool; worker count == max simultaneous connections).
   class Sender < Backend
     getter origin : Origin
@@ -22,12 +22,12 @@ module Gori::Fuzz
                    @sni : String? = nil, @timeout : Time::Span? = nil)
     end
 
-    def send(bytes : Bytes) : Replay::Result
+    def send(bytes : Bytes) : Repeater::Result
       if @http2
-        Replay::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
+        Repeater::H2Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
           port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout)
       else
-        Replay::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
+        Repeater::Engine.send(bytes, scheme: @origin.scheme, host: @origin.host,
           port: @origin.port, verify_upstream: @verify, sni: @sni, timeout: @timeout)
       end
     end
@@ -55,8 +55,8 @@ module Gori::Fuzz
       (c = @cap) && c > 0 ? @sent >= c : false
     end
 
-    def send(bytes : Bytes) : Replay::Result
-      return Replay::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) if cap_reached?
+    def send(bytes : Bytes) : Repeater::Result
+      return Repeater::Result.new(Bytes.new(0), nil, nil, 0_i64, CAP_ERROR) if cap_reached?
       @sent += 1
       @inner.send(bytes)
     end
@@ -254,7 +254,7 @@ module Gori::Fuzz
     # Follow up to max_redirects SAME-ORIGIN redirects (relative, or absolute to the
     # same scheme/host/port), re-issuing a GET. Cross-origin redirects are left as the
     # final 3xx (no implicit off-target sends).
-    private def follow_redirects(raw : Replay::Result) : Replay::Result
+    private def follow_redirects(raw : Repeater::Result) : Repeater::Result
       current = raw
       total_us = raw.duration_us
       hops = 0
@@ -272,7 +272,7 @@ module Gori::Fuzz
       end
       # Report the whole chain's end-to-end time, not just the final hop's — otherwise a
       # slow original request that 3xx's to a fast resource masks a time-based signal.
-      hops > 0 ? Replay::Result.new(current.head, current.body, current.response, total_us, current.error, current.incomplete?) : current
+      hops > 0 ? Repeater::Result.new(current.head, current.body, current.response, total_us, current.error, current.incomplete?) : current
     end
 
     private def redirect_request(loc : String) : Bytes?

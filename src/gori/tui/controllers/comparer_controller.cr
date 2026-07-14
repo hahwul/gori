@@ -7,7 +7,7 @@ module Gori::Tui
   # The Comparer tab: multi-session (sub-tabs) workspace for side-by-side flow diffs.
   # Each session is an independent ComparerView (A/B slots + pane + scroll). Session-
   # only (no project DB) — switching sub-tabs keeps prior pairs so History "Send to
-  # Comparer" no longer clobbers earlier work. Strip chrome mirrors Decoder/Replay.
+  # Comparer" no longer clobbers earlier work. Strip chrome mirrors Decoder/Repeater.
   class ComparerController < TabController
     def initialize(host : Host)
       super(host)
@@ -38,7 +38,7 @@ module Gori::Tui
     end
 
     def subtab_strip_shown? : Bool
-      true # from the first session (Replay/Notes style)
+      true # from the first session (Repeater/Notes style)
     end
 
     def move_subtab(dir : Int32) : Nil

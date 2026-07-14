@@ -132,8 +132,8 @@ module Gori
                "writing list_history/list_sitemap queries. Timestamps include unix " \
                "microseconds plus *_iso RFC3339 fields where available.#{selected}"
         if @allow_actions
-          "#{base} Action tools are enabled: send_request (supports flow_id replay), " \
-          "send_websocket (executes a persisted WS replay), " \
+          "#{base} Action tools are enabled: send_request (supports flow_id repeater), " \
+          "send_websocket (executes a persisted WS repeater), " \
           "fuzz_*, mine_*, create/update_finding, and create/delete_rule + set_rule_enabled " \
           "make real outbound requests or mutate findings/rules."
         else

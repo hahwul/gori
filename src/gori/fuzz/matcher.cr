@@ -1,6 +1,6 @@
 require "../proxy/codec/content_decode"
 require "../intercept_filter"
-require "../replay/engine"
+require "../repeater/engine"
 
 module Gori::Fuzz
   # Decoded-response metrics for one send.
@@ -40,12 +40,12 @@ module Gori::Fuzz
 
     # Build the metrics for a raw send WITHOUT deciding match (used to seed the
     # baseline from the unmodified request).
-    def metrics(raw : Replay::Result) : Metrics
+    def metrics(raw : Repeater::Result) : Metrics
       body = decode(raw)
       Metrics.new(raw.response.try(&.status), body.size.to_i64, count_words(body), count_lines(body), raw.duration_us)
     end
 
-    def build(job : Job, raw : Replay::Result) : Result
+    def build(job : Job, raw : Repeater::Result) : Result
       body = decode(raw)
       status = raw.response.try(&.status)
       length = body.size.to_i64
@@ -66,7 +66,7 @@ module Gori::Fuzz
         head: keep ? present(raw.head) : nil, body: keep ? raw.body : nil)
     end
 
-    private def decide(raw : Replay::Result, status : Int32?, length : Int64,
+    private def decide(raw : Repeater::Result, status : Int32?, length : Int64,
                        words : Int32, lines : Int32, text : String) : Bool
       return false unless raw.error.nil?
       return false if calibrated_out?(status, length, words)
@@ -82,7 +82,7 @@ module Gori::Fuzz
     end
 
     # Every active matcher dimension must pass.
-    private def matchers_pass?(raw : Replay::Result, status : Int32?, length : Int64,
+    private def matchers_pass?(raw : Repeater::Result, status : Int32?, length : Int64,
                                words : Int32, lines : Int32, text : String) : Bool
       status_pass?(@match_status, status, default: true) &&
         num_pass?(@match_size, length, default: true) &&
@@ -106,7 +106,7 @@ module Gori::Fuzz
       re ? re.matches?(text) : default
     end
 
-    private def header_pass?(raw : Replay::Result) : Bool
+    private def header_pass?(raw : Repeater::Result) : Bool
       h = @match_header
       return true unless h
       String.new(raw.head).scrub.downcase.includes?(h.downcase)
@@ -135,7 +135,7 @@ module Gori::Fuzz
       md[1]? || md[0]
     end
 
-    private def decode(raw : Replay::Result) : Bytes
+    private def decode(raw : Repeater::Result) : Bytes
       decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body)
       decoded || raw.body || Bytes.empty
     end

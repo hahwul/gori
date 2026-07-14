@@ -43,7 +43,7 @@ module Gori::Tui
       when :history        then "waiting for traffic…"
       when :sitemap        then "no traffic captured yet"
       when :intercept      then "no held messages"
-      when :replay         then "no replay open"
+      when :repeater         then "no repeater open"
       when :fuzzer         then "no fuzz session open"
       when :fuzzer_results then running ? "running…" : "no results yet"
       when :prism          then scan_on ? "no issues yet" : "scanning is OFF"
@@ -60,7 +60,7 @@ module Gori::Tui
       when :history        then render_history_full(screen, rect, headline, addr, capturing)
       when :sitemap        then render_sitemap_full(screen, rect, headline, addr, capturing)
       when :intercept      then render_intercept_full(screen, rect, headline, addr, capturing, catch_on)
-      when :replay         then render_replay_full(screen, rect, headline)
+      when :repeater         then render_repeater_full(screen, rect, headline)
       when :fuzzer         then render_fuzzer_full(screen, rect, headline)
       when :fuzzer_results then render_fuzzer_results_full(screen, rect, headline, running)
       when :prism          then render_prism_full(screen, rect, headline, addr, capturing, scan_on)
@@ -79,8 +79,8 @@ module Gori::Tui
                 medium_sitemap(headline, addr, capturing)
               when :intercept
                 medium_intercept(headline, catch_on)
-              when :replay
-                medium_replay(headline)
+              when :repeater
+                medium_repeater(headline)
               when :fuzzer
                 medium_fuzzer(headline)
               when :fuzzer_results
@@ -107,8 +107,8 @@ module Gori::Tui
                "◆ proxy #{addr} · ^P Open browser#{capturing ? "" : " · press c"}"
              when :intercept
                catch_on ? "⏸ queue empty · i catch · / filter" : "press i to enable catch"
-             when :replay
-               "^N new · History ^R replay"
+             when :repeater
+               "^N new · History ^R repeater"
              when :fuzzer
                "^N new · ⇧I from History"
              when :fuzzer_results
@@ -234,9 +234,9 @@ module Gori::Tui
       draw_palette_hint(screen, ix, y, iw, bullet: "▸ ")
     end
 
-    private def render_replay_full(screen : Screen, rect : Rect, headline : String) : Nil
+    private def render_repeater_full(screen : Screen, rect : Rect, headline : String) : Nil
       inner_h = 5 + 2
-      _, inner, ix, iw = begin_card(screen, rect, headline, "REPLAY", inner_h)
+      _, inner, ix, iw = begin_card(screen, rect, headline, "REPEATER", inner_h)
       y = inner.y
 
       screen.text(ix, y, "Edit a captured request and resend it — compare the response.", Theme.text, Theme.bg, width: iw)
@@ -245,8 +245,8 @@ module Gori::Tui
       y += 2
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
-      y = draw_chord_hint(screen, ix, y, iw, " ^R ", "replay from History", bullet: "▸ ")
-      draw_chord_hint(screen, ix, y, iw, " ^N ", "new blank replay tab", bullet: "▸ ")
+      y = draw_chord_hint(screen, ix, y, iw, " ^R ", "repeater from History", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " ^N ", "new blank repeater tab", bullet: "▸ ")
     end
 
     private def render_fuzzer_full(screen : Screen, rect : Rect, headline : String) : Nil
@@ -261,7 +261,7 @@ module Gori::Tui
       Frame.inner_divider(screen, inner, y, bg: Theme.bg, border: Theme.border)
       y += 1
       y = draw_chord_hint(screen, ix, y, iw, " ^N ", "new fuzz session", bullet: "§ ")
-      draw_chord_hint(screen, ix, y, iw, " ⇧I ", "send from History/Replay", bullet: "▸ ")
+      draw_chord_hint(screen, ix, y, iw, " ⇧I ", "send from History/Repeater", bullet: "▸ ")
     end
 
     private def render_fuzzer_results_full(screen : Screen, rect : Rect, headline : String, running : Bool) : Nil
@@ -358,8 +358,8 @@ module Gori::Tui
       lines
     end
 
-    private def medium_replay(headline) : Array(String)
-      [headline, "flow ──► edit ──► send", "^N new tab · History ^R replay"]
+    private def medium_repeater(headline) : Array(String)
+      [headline, "flow ──► edit ──► send", "^N new tab · History ^R repeater"]
     end
 
     private def medium_fuzzer(headline) : Array(String)

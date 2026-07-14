@@ -1,14 +1,14 @@
 module Gori
-  module Replay
+  module Repeater
     enum DiffKind
       Same
-      Add # present only in the new (replay) response
+      Add # present only in the new (repeater) response
       Del # present only in the original response
     end
 
     record DiffLine, kind : DiffKind, text : String
 
-    # Minimal LCS line diff. `a` = original, `b` = new (replay). Capped to keep
+    # Minimal LCS line diff. `a` = original, `b` = new (repeater). Capped to keep
     # the O(n*m) table bounded; very long bodies are truncated (the cap is noted
     # by the caller). Good enough for response comparison this milestone.
     module Diff

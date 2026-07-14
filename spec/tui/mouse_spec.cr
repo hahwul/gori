@@ -218,9 +218,9 @@ describe "HexEdit#click_to_nibble" do
   end
 end
 
-describe "ReplayView#pane_at" do
+describe "RepeaterView#pane_at" do
   it "splits the body into target / request / response panes" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     rect = Rect.new(0, 0, 80, 24)
     view.render(Screen.new(MemoryBackend.new(80, 24)), rect, focused: false)
@@ -262,9 +262,9 @@ describe "Frame.left_chip_hit / right_badge_hit" do
   end
 end
 
-describe "ReplayView#chrome_hit" do
+describe "RepeaterView#chrome_hit" do
   it "hits response d/x/p chips and request SEND/CL/MARK badges on the border row" do
-    view = ReplayView.new
+    view = RepeaterView.new
     view.load_blank
     rect = Rect.new(0, 0, 100, 24)
     view.render(Screen.new(MemoryBackend.new(100, 24)), rect, focused: false)

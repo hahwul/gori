@@ -14,7 +14,7 @@ require "./flow_status"
 require "./read_cursor"
 require "./copy_menu"
 require "../store"
-require "../replay/flow_request"
+require "../repeater/flow_request"
 require "../ql"
 require "../scope"
 require "../proxy/h2/frame"
@@ -724,7 +724,7 @@ module Gori::Tui
       when :request
         wire = String.new(combine_bytes(detail.request_head, detail.request_body) || Bytes.empty)
         row = detail.row
-        target = Replay::FlowRequest.build_target(row.scheme, row.host, row.port)
+        target = Repeater::FlowRequest.build_target(row.scheme, row.host, row.port)
         {"COPY REQUEST AS", CopyMenu.request_options(wire, target)}
       when :response
         # The WS MESSAGES pane reuses the :response slot but renders the transcript
@@ -1339,7 +1339,7 @@ module Gori::Tui
       gw = {Gutter.width(total), body.w}.min
       cw = {body.w - gw, 0}.max
       # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
-      # never re-styles just to measure width (mirrors ReplayView#render_response_body).
+      # never re-styles just to measure width (mirrors RepeaterView#render_response_body).
       rows = (0...body.h).compact_map { |i| (li = @detail_scroll + i) < total ? dv.line_at(li) : nil }
       @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
       ensure_detail_visible(body.h) if detail_navigable? && focused
@@ -1613,7 +1613,7 @@ module Gori::Tui
         return dv
       end
       request = @detail_pane == :request
-      # A failed/pending flow has no response bytes — surface WHY (like Replay does)
+      # A failed/pending flow has no response bytes — surface WHY (like Repeater does)
       # instead of a blank pane.
       if !request && ((rh = detail.response_head).nil? || rh.empty?)
         span = if (err = detail.error) && !err.empty?
@@ -1679,7 +1679,7 @@ module Gori::Tui
         trailer = note + trailer # decode note before the truncation note
       end
       # No pretty trailer: the "PRETTY" mode indicator in the pane header already
-      # signals the reflow, so the "— pretty: … —" footer is redundant (and Replay
+      # signals the reflow, so the "— pretty: … —" footer is redundant (and Repeater
       # never showed one — this keeps the two response views consistent).
       DetailView.new(win.head, win.body, win.kind, trailer, pretty: pretty != nil)
     end
@@ -1703,7 +1703,7 @@ module Gori::Tui
     private def wrap(strs : Array(String)) : Array(Highlight::Line)
       # `.scrub` maps invalid UTF-8 to U+FFFD (width-1) so stray bytes in a WS text
       # payload or SSE data line never desync the terminal — the same guard every
-      # sibling surface (Replay/CLI/MCP) already applies on this byte→line seam.
+      # sibling surface (Repeater/CLI/MCP) already applies on this byte→line seam.
       strs.map { |s| [Highlight::Span.new(s.scrub, Theme.text)] of Highlight::Span }
     end
 

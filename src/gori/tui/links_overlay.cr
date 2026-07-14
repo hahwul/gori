@@ -98,7 +98,7 @@ module Gori::Tui
       Frame.card(screen, box, title, border: Theme.border_focus)
 
       hint = if @adding
-               "add: f flow · r replay · z fuzz · m miner · esc back"
+               "add: f flow · r repeater · z fuzz · m miner · esc back"
              else
                "↑/↓ select · ↵/o open · a add · d remove · esc close"
              end

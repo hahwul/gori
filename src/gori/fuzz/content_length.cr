@@ -3,7 +3,7 @@ module Gori::Fuzz
   # payload was substituted into the body. Burp's "update Content-Length" option,
   # default on.
   #
-  # Deliberately NOT the TUI's replay_view#sync_content_length: that one round-trips
+  # Deliberately NOT the TUI's repeater_view#sync_content_length: that one round-trips
   # the WHOLE request through `String` (corrupting non-UTF-8 body bytes) and only
   # touches an existing header. This rewrites ONLY the head and splices the body slice
   # back byte-exact, so a binary payload survives. h1 and h2 are handled identically —

@@ -14,7 +14,7 @@ module Gori
   # unsupported type, tag imbalance — collapses to `nil` ("leave the body raw"), so a
   # caller has exactly one fallback branch and Pretty structurally cannot corrupt a
   # render. Only the human request/response views wire it in; machine consumers
-  # (fuzz matcher, MCP serialize, CLI, replay diff) keep reading faithful bytes.
+  # (fuzz matcher, MCP serialize, CLI, repeater diff) keep reading faithful bytes.
   module Pretty
     extend self
 

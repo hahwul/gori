@@ -31,7 +31,7 @@ module Gori::Tui
       Field.new("External editor", "e.g. vim · code --wait — blank = $VISUAL/$EDITOR/vi"),
       Field.new("Markdown highlight", "syntax-colour markdown in Notes/Project — ←/→/space toggles", bool: true),
       Field.new("Mouse", "click + scroll-wheel navigation (off restores native text selection)", bool: true),
-      Field.new("Pretty-print bodies", "reflow JSON/XML/form/… in History detail + Replay response — display only; ←/→/space toggles", bool: true),
+      Field.new("Pretty-print bodies", "reflow JSON/XML/form/… in History detail + Repeater response — display only; ←/→/space toggles", bool: true),
     ]
     # The THEME section is special: a single field whose value is the selected theme
     # name, but rendered as a vertical, scrollable list (built-ins + user themes) rather

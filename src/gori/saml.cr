@@ -9,7 +9,7 @@ module Gori
   # `SAMLResponse` parameter — so a captured assertion is an opaque blob in the
   # request body or URL. This is a DISPLAY-time projection (like `Gori::Sse`): no
   # table, parsed from the stored bytes on demand. It also re-encodes edited XML for
-  # the Replay SAML send-mode (the inverse path).
+  # the Repeater SAML send-mode (the inverse path).
   #
   # Bindings (auto-detected from the decoded bytes, never trusted from the method):
   #   HTTP-POST     — `param = base64(xml)`            (a form POST, e.g. to the ACS)
@@ -100,7 +100,7 @@ module Gori
       nil
     end
 
-    # Re-encode edited XML back into a wire parameter value (url-encoded) for replay —
+    # Re-encode edited XML back into a wire parameter value (url-encoded) for repeater —
     # the inverse of decode_value. HTTP-Redirect re-applies raw DEFLATE; HTTP-POST does
     # not. (XML is sent as UTF-8 bytes, matching how the SP/IdP produced it.)
     def encode_value(xml : String, binding : Symbol) : String

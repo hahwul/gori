@@ -97,7 +97,7 @@ module Gori::Proxy::WS
   # Returns nil on EOF / truncated frame, or when the advertised length exceeds
   # MAX_FRAME (so `n.to_i` can't overflow and one frame can't OOM us). The relay
   # streams oversized frames instead (see `stream_payload`); this buffered form is
-  # for the WS replay engine and per-frame capture.
+  # for the WS repeater engine and per-frame capture.
   def self.read_frame(io : IO) : Frame?
     h = read_header(io) || return nil
     return nil if h.len > MAX_FRAME # oversized — caller must stream, not buffer
@@ -171,7 +171,7 @@ module Gori::Proxy::WS
 
   # Encodes one frame for sending. Client→server frames MUST be masked (RFC 6455
   # §5.3) with a fresh random 32-bit key; server→client frames are unmasked. Used
-  # by the WS replay engine (the live relay only forwards `raw` bytes verbatim, so
+  # by the WS repeater engine (the live relay only forwards `raw` bytes verbatim, so
   # it never needs to build a frame). Control frames (close/ping/pong) carry ≤125
   # bytes and so always take the short length path.
   def self.encode(opcode : UInt8, payload : Bytes, *, mask : Bool = true, fin : Bool = true) : Bytes

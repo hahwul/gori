@@ -7,7 +7,7 @@ require "../../hotkeys"
 module Gori::Tui
   # The Intercept tab: the hold-and-decide queue (P4). Owns the InterceptView (a
   # list pane + an inline editor pane) and the intercept verbs. The shell frames
-  # the body (like History/Replay's empty state); the view self-frames its inner
+  # the body (like History/Repeater's empty state); the view self-frames its inner
   # panes. Reloaded every frame off the 50ms loop so async holds appear live.
   # `view` is exposed for the shell's still-centralized orthogonal prompts (^G/^F/^E).
   class InterceptController < TabController

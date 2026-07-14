@@ -3,8 +3,8 @@ require "../proxy/codec/http1"
 require "../proxy/codec/body"
 
 module Gori
-  module Replay
-    # Outcome of one replay send.
+  module Repeater
+    # Outcome of one repeater send.
     struct Result
       getter head : Bytes  # response head bytes (empty on error)
       getter body : Bytes? # response body bytes
@@ -51,7 +51,7 @@ module Gori
       end
 
       # Sends several requests back-to-back on ONE keep-alive connection, capturing each
-      # response in order — the primitive behind Replay's "send group". Active HTTP request
+      # response in order — the primitive behind Repeater's "send group". Active HTTP request
       # smuggling (CL.TE / TE.CL desync) and keep-alive-reuse probes NEED this: a desync
       # induced by request N surfaces only as a corrupted/misaligned response to request N+1
       # on the SAME socket, which the fresh-connection-per-send path can never reveal.
@@ -106,7 +106,7 @@ module Gori
         resp = Proxy::Codec::Http1.parse_response_head(head)
         # Skip interim 1xx informational responses (RFC 9110 §15.2): a captured request
         # carrying `Expect: 100-continue`, or an origin/CDN that emits 103 Early Hints,
-        # would otherwise return the 100/103 as the replay result. Read on until the final
+        # would otherwise return the 100/103 as the repeater result. Read on until the final
         # (>=200) status. 101 Switching Protocols is terminal (a protocol upgrade), NOT skipped.
         interim_seen = 0
         while resp.status >= 100 && resp.status < 200 && resp.status != 101
@@ -117,7 +117,7 @@ module Gori
             return error("malformed interim 1xx response (declared a body) from #{host}:#{port}", started)
           end
           # Cap the run so an origin streaming endless body-less 103s can't hang the
-          # replay/fuzz worker fiber indefinitely (there is no whole-request deadline).
+          # repeater/fuzz worker fiber indefinitely (there is no whole-request deadline).
           interim_seen += 1
           return error("too many interim 1xx responses from #{host}:#{port}", started) if interim_seen > MAX_INTERIM
           head = Proxy::Codec::Http1.read_head(upstream)
@@ -136,7 +136,7 @@ module Gori
           Result.new(head, nil, resp, elapsed(started), error: ex.message || "response read failed", incomplete: true)
         end
       rescue ex
-        error(ex.message || "replay error", started)
+        error(ex.message || "repeater error", started)
       end
 
       private def self.error(message : String, started : Time::Instant) : Result

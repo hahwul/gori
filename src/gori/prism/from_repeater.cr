@@ -1,17 +1,17 @@
 require "../store"
-require "../replay/flow_request"
+require "../repeater/flow_request"
 require "../proxy/codec/http1"
 
 module Gori
   module Prism
-    # Build a synthetic FlowDetail from a persisted Replay tab so Passive.analyze can
-    # run over Replay send results the same way it runs over History flows. Returns nil
+    # Build a synthetic FlowDetail from a persisted Repeater tab so Passive.analyze can
+    # run over Repeater send results the same way it runs over History flows. Returns nil
     # when there is no scorable response (no head, or only an error with empty head).
-    def self.detail_from_replay(record : Store::ReplayRecord) : Store::FlowDetail?
+    def self.detail_from_repeater(record : Store::RepeaterRecord) : Store::FlowDetail?
       head = record.response_head
       return nil if head.nil? || head.empty?
 
-      scheme, host, port = Replay::FlowRequest.parse_target(record.target)
+      scheme, host, port = Repeater::FlowRequest.parse_target(record.target)
       return nil if host.empty?
 
       req_text = record.request
@@ -24,11 +24,11 @@ module Gori
                      n = req_text[sep, 4]? == "\r\n\r\n" ? 4 : 2
                      req_text[(sep + n)..]?
                    end
-      # The Replay editor serializes request text with BARE-LF line endings, but
+      # The Repeater editor serializes request text with BARE-LF line endings, but
       # Http1.parse_headers recognizes only CRLF: without normalizing the internal separators,
       # the first CRLF found is the appended terminator, so parse_headers starts at the blank
       # line and returns an EMPTY header list — every request-side rule (CORS Origin, Basic
-      # auth, request tech fingerprints) then silently misses on Replay/CLI/MCP-sourced scans.
+      # auth, request tech fingerprints) then silently misses on Repeater/CLI/MCP-sourced scans.
       # Normalize LF→CRLF, then ensure the head ends with a blank line for parse_request_head.
       head_crlf = req_head_s.gsub(/\r?\n/, "\r\n")
       req_head_bytes = (head_crlf.ends_with?("\r\n\r\n") ? head_crlf : "#{head_crlf.rstrip}\r\n\r\n").to_slice

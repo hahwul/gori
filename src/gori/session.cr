@@ -35,7 +35,7 @@ module Gori
     getter host_overrides : HostOverrides
     getter interceptor : Interceptor
     # Why the live proxy isn't listening (e.g. "port in use"), or nil when capture
-    # is up. The project still opens for History/Replay/Sitemap/etc. — only live
+    # is up. The project still opens for History/Repeater/Sitemap/etc. — only live
     # capture needs the bind — so a bind failure is non-fatal.
     getter bind_error : String?
 
@@ -78,7 +78,7 @@ module Gori
         # instance of the SAME project can't acquire it → VIEW-ONLY (no 2nd port; it
         # live-refreshes off the shared DB). A DIFFERENT project has its own lock, so
         # it captures on its own port (the bind falls back when the configured port
-        # is taken). The bind itself stays NON-FATAL: History/Replay/Sitemap/Findings
+        # is taken). The bind itself stays NON-FATAL: History/Repeater/Sitemap/Findings
         # all read the store / dial upstream directly and don't need the listener.
         bind_error =
           begin

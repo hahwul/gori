@@ -1,6 +1,6 @@
 require "../issue"
 require "../../store"
-require "../../replay/engine"
+require "../../repeater/engine"
 
 module Gori
   module Prism
@@ -49,7 +49,7 @@ module Gori
         # to the key `plan` produces or the seen-set would re-probe / skip (see the equivalence spec).
         abstract def dedup_key(detail : Store::FlowDetail) : String?
         abstract def plan(detail : Store::FlowDetail) : Plan?
-        abstract def detections(plan : Plan, result : Replay::Result, detail : Store::FlowDetail) : Array(Detection)
+        abstract def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
       end
     end
   end

@@ -16,7 +16,7 @@ module Gori::Tui
   # queue (REQ/RES badge, method, host+target, waiting age). Right: the selected
   # item's raw bytes in a TextArea (editable — Forward sends the edited bytes).
   # Pure view: it reads the shared Interceptor snapshot; the Runner performs the
-  # actual forward/drop. No diff (that's Replay's job).
+  # actual forward/drop. No diff (that's Repeater's job).
   class InterceptView
     # Height of the top filter bar (catch direction + condition), reserved above the
     # queue|detail split — the Intercept tab's analogue of History's QL bar.
@@ -178,7 +178,7 @@ module Gori::Tui
     # Content-Length", default on; add_when_missing: true so adding a body to a GET
     # that had none still gets framed). The proxy itself stays byte-exact — the
     # update-CL decision lives here, in the human's editor, not the wire path. (An edit
-    # still normalizes line endings — a text-editor limitation shared with Replay.)
+    # still normalizes line endings — a text-editor limitation shared with Repeater.)
     def forward_bytes(it : Interceptor::Item) : Bytes
       edit = pending_edit
       (edit && edit[0] == it.id) ? edit[1] : it.raw
@@ -521,7 +521,7 @@ module Gori::Tui
         # Upper-bound clamp lives here (mirrors @detail_xscroll below).
         @detail_scroll = @detail_scroll.clamp(0, {total - inner.h, 0}.max)
         # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
-        # mirrors ReplayView#render_response_body / HistoryView#render_detail.
+        # mirrors RepeaterView#render_response_body / HistoryView#render_detail.
         rows = (0...inner.h).compact_map { |i| (li = @detail_scroll + i) < total ? win.line_at(li) : nil }
         @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + inner.w + 1) } || 0) - inner.w, 0}.max)
         rows.each_with_index do |styled, i|
@@ -549,7 +549,7 @@ module Gori::Tui
     # Windowed view of the held item's raw bytes, cached by item id (held bytes
     # never change; ids never repeat). The head is styled eagerly, the body kept RAW
     # and styled per visible line — a multi-MiB held body no longer freezes the UI
-    # fiber on selection (mirrors the History/Replay windowing).
+    # fiber on selection (mirrors the History/Repeater windowing).
     private def detail_window_for(it : Interceptor::Item) : Highlight::Windowed
       # When this is the item loaded in the editor AND it was modified, preview the EDITED
       # bytes (mirrors forward_bytes / effective_method_target) rather than the pristine

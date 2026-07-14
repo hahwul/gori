@@ -17,7 +17,7 @@ require "../fuzz"
 require "../decoder"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
-require "../replay/flow_request"
+require "../repeater/flow_request"
 require "../env"
 require "./highlight"
 require "../saml"
@@ -172,7 +172,7 @@ module Gori::Tui
 
     # --- loading -------------------------------------------------------------
     def load(detail : Store::FlowDetail) : Nil
-      built = Replay::FlowRequest.build(detail)
+      built = Repeater::FlowRequest.build(detail)
       @http2 = built.http2
       @target = built.target
       @tcx = @target.size
@@ -195,7 +195,7 @@ module Gori::Tui
 
     # A fresh, hand-authored fuzz session (^N). Focus starts on the TARGET field —
     # the scaffold URL is a placeholder you almost always change first (mirrors
-    # ReplayView#load_blank; the ⇧I/from-Replay paths keep template focus since their
+    # RepeaterView#load_blank; the ⇧I/from-Repeater paths keep template focus since their
     # URL is already real).
     def load_blank : Nil
       load_request("https://example.com", "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", false, "")
@@ -493,7 +493,7 @@ module Gori::Tui
     def toggle_http2 : Bool
       @http2 = !@http2
       if first = @editor.text.split('\n', 2).first?
-        if updated = Replay::FlowRequest.retarget_version_line(first, @http2)
+        if updated = Repeater::FlowRequest.retarget_version_line(first, @http2)
           @editor.replace_line(0, updated)
         end
       end
@@ -875,7 +875,7 @@ module Gori::Tui
       @pending_template = template # committed to @run_template in begin_run (see detail_request_bytes)
       return {nil, "mark a position first — ^A params · ^K word"} if template.position_count == 0
       return {nil, "add a payload set — ^O config · + Add set (^L for a List)"} if @sets.empty?
-      scheme, host, port = Replay::FlowRequest.parse_target(Env.expand(@target))
+      scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(@target))
       return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       sets = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)) }
       gen_sets = @config.mode.per_position? ? sets : [sets.first]
@@ -889,7 +889,7 @@ module Gori::Tui
     end
 
     def target_origin : String
-      scheme, host, port = Replay::FlowRequest.parse_target(Env.expand(@target))
+      scheme, host, port = Repeater::FlowRequest.parse_target(Env.expand(@target))
       "#{scheme}://#{host}:#{port}"
     end
 

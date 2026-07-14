@@ -2,9 +2,9 @@ require "../verb"
 
 module Gori
   module Verbs
-    # Replay's/Fuzzer's own "Link to finding/note" (link.replay.*/link.fuzzer.*) are
+    # Repeater's/Fuzzer's own "Link to finding/note" (link.repeater.*/link.fuzzer.*) are
     # registered in register_miner (history.cr) instead of here — Round 5 moved them
-    # there so their Replay/Fuzzer COMMON menu position lands AFTER Fuzz/Mine (see
+    # there so their Repeater/Fuzzer COMMON menu position lands AFTER Fuzz/Mine (see
     # the comment at their new registration site for why). History's/HistoryDetail's/
     # Miner's own link verbs are unaffected and stay below.
     def self.register_links(r : Verb::Registry) : Nil

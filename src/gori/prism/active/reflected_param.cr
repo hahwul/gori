@@ -47,8 +47,8 @@ module Gori
           return nil if req.malformed?
           return nil unless SAFE_METHODS.includes?(req.method.upcase)
           # A plaintext forward-proxy flow is captured ABSOLUTE-form ("GET http://h/p"); the
-          # probe is sent DIRECT to the origin (Fuzz::Sender → Replay::Engine, no rewrite),
-          # so normalize to origin-form here the way the regular replay path (FlowRequest)
+          # probe is sent DIRECT to the origin (Fuzz::Sender → Repeater::Engine, no rewrite),
+          # so normalize to origin-form here the way the regular repeater path (FlowRequest)
           # does — some origins reject an absolute-form target on a non-proxied request.
           path, query = split_target(Active.origin_form(req.target))
 
@@ -116,7 +116,7 @@ module Gori
         end
 
         # Interpret the probe's response: any reflected-parameter Detection (one grouped row per host).
-        def detections(plan : Plan, result : Replay::Result, detail : Store::FlowDetail) : Array(Detection)
+        def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
           reflected = reflections(result, plan.params)
           return [] of Detection if reflected.empty?
           names = reflected.map { |p| "#{p.name} (#{p.location})" }
@@ -134,7 +134,7 @@ module Gori
         # Scan BOTH the response head (reflected Location/Set-Cookie/custom headers) and the
         # decoded body for each canary — header reflections (e.g. open-redirect Location) are
         # invisible to a body-only scan.
-        private def reflections(result : Replay::Result, params : Array(Param)) : Array(Param)
+        private def reflections(result : Repeater::Result, params : Array(Param)) : Array(Param)
           return [] of Param unless result.ok?
           head = String.new(result.head).scrub
           # Canary search only reads the first BODY_CAP bytes, so cap the inflate to match.
@@ -145,7 +145,7 @@ module Gori
           params.select { |p| hay.includes?(p.canary) }
         end
 
-        private def response_content_type(result : Replay::Result) : String
+        private def response_content_type(result : Repeater::Result) : String
           if r = result.response
             return (r.headers.get?("Content-Type") || "").downcase
           end

@@ -52,7 +52,7 @@ module Gori
           "cors_reflection|#{detail.row.host}:#{detail.row.port}|#{method_upcase}|#{path_key(target)}"
         end
 
-        def detections(plan : Plan, result : Replay::Result, detail : Store::FlowDetail) : Array(Detection)
+        def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
           return [] of Detection unless result.ok?
           resp = Proxy::Codec::Http1.parse_response_head(result.head)
           acao = resp.headers.get?("Access-Control-Allow-Origin").try(&.strip)

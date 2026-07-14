@@ -128,27 +128,27 @@ private class FakeContext < ExecContext
     @calls << :toggle_pretty
   end
 
-  def replay_selected : Nil
-    @calls << :replay_selected
+  def repeater_selected : Nil
+    @calls << :repeater_selected
   end
 
-  def replay_new : Nil
-    @calls << :replay_new
+  def repeater_new : Nil
+    @calls << :repeater_new
   end
 
-  def replay_send : Nil
-    @calls << :replay_send
+  def repeater_send : Nil
+    @calls << :repeater_send
   end
 
-  def replay_send_group : Nil
-    @calls << :replay_send_group
+  def repeater_send_group : Nil
+    @calls << :repeater_send_group
   end
 
-  def replay_find_subtab : Nil
-    @calls << :replay_find_subtab
+  def repeater_find_subtab : Nil
+    @calls << :repeater_find_subtab
   end
 
-  def replay_subtab_count : Int32
+  def repeater_subtab_count : Int32
     0
   end
 
@@ -160,91 +160,91 @@ private class FakeContext < ExecContext
     0
   end
 
-  def replay_rename_subtab : Nil
-    @calls << :replay_rename_subtab
+  def repeater_rename_subtab : Nil
+    @calls << :repeater_rename_subtab
   end
 
-  def replay_tag_subtab : Nil
-    @calls << :replay_tag_subtab
+  def repeater_tag_subtab : Nil
+    @calls << :repeater_tag_subtab
   end
 
-  def replay_filter_subtabs : Nil
-    @calls << :replay_filter_subtabs
+  def repeater_filter_subtabs : Nil
+    @calls << :repeater_filter_subtabs
   end
 
-  def replay_close_subtab : Nil
-    @calls << :replay_close_subtab
+  def repeater_close_subtab : Nil
+    @calls << :repeater_close_subtab
   end
 
-  def replay_duplicate_subtab : Nil
-    @calls << :replay_duplicate_subtab
+  def repeater_duplicate_subtab : Nil
+    @calls << :repeater_duplicate_subtab
   end
 
-  def replay_toggle_hex : Nil
-    @calls << :replay_toggle_hex
+  def repeater_toggle_hex : Nil
+    @calls << :repeater_toggle_hex
   end
 
-  def replay_toggle_decoded : Nil
-    @calls << :replay_toggle_decoded
+  def repeater_toggle_decoded : Nil
+    @calls << :repeater_toggle_decoded
   end
 
-  def replay_toggle_sni : Nil
-    @calls << :replay_toggle_sni
+  def repeater_toggle_sni : Nil
+    @calls << :repeater_toggle_sni
   end
 
-  def replay_toggle_auto_content_length : Nil
-    @calls << :replay_toggle_auto_content_length
+  def repeater_toggle_auto_content_length : Nil
+    @calls << :repeater_toggle_auto_content_length
   end
 
-  def replay_toggle_http2 : Nil
-    @calls << :replay_toggle_http2
+  def repeater_toggle_http2 : Nil
+    @calls << :repeater_toggle_http2
   end
 
-  def replay_toggle_resp_diff : Nil
-    @calls << :replay_toggle_resp_diff
+  def repeater_toggle_resp_diff : Nil
+    @calls << :repeater_toggle_resp_diff
   end
 
-  def replay_toggle_resp_hex : Nil
-    @calls << :replay_toggle_resp_hex
+  def repeater_toggle_resp_hex : Nil
+    @calls << :repeater_toggle_resp_hex
   end
 
-  def replay_toggle_mark_transform : Nil
-    @calls << :replay_toggle_mark_transform
+  def repeater_toggle_mark_transform : Nil
+    @calls << :repeater_toggle_mark_transform
   end
 
-  def replay_pretty_request : Nil
-    @calls << :replay_pretty_request
+  def repeater_pretty_request : Nil
+    @calls << :repeater_pretty_request
   end
 
-  def replay_auto_mark : Nil
-    @calls << :replay_auto_mark
+  def repeater_auto_mark : Nil
+    @calls << :repeater_auto_mark
   end
 
-  def replay_mark_word : Nil
-    @calls << :replay_mark_word
+  def repeater_mark_word : Nil
+    @calls << :repeater_mark_word
   end
 
-  def replay_insert_marker : Nil
-    @calls << :replay_insert_marker
+  def repeater_insert_marker : Nil
+    @calls << :repeater_insert_marker
   end
 
-  def replay_clear_marks : Nil
-    @calls << :replay_clear_marks
+  def repeater_clear_marks : Nil
+    @calls << :repeater_clear_marks
   end
 
-  def replay_attach_chain : Nil
-    @calls << :replay_attach_chain
+  def repeater_attach_chain : Nil
+    @calls << :repeater_attach_chain
   end
 
-  def replay_copy : Nil
-    @calls << :replay_copy
+  def repeater_copy : Nil
+    @calls << :repeater_copy
   end
 
-  def replay_copy_all : Nil
-    @calls << :replay_copy_all
+  def repeater_copy_all : Nil
+    @calls << :repeater_copy_all
   end
 
-  def replay_read_mode? : Bool
+  def repeater_read_mode? : Bool
     false
   end
 
@@ -252,8 +252,8 @@ private class FakeContext < ExecContext
     @calls << :fuzz_selected
   end
 
-  def fuzz_from_replay : Nil
-    @calls << :fuzz_from_replay
+  def fuzz_from_repeater : Nil
+    @calls << :fuzz_from_repeater
   end
 
   def fuzz_run : Nil
@@ -320,8 +320,8 @@ private class FakeContext < ExecContext
     @calls << :mine_selected
   end
 
-  def mine_from_replay : Nil
-    @calls << :mine_from_replay
+  def mine_from_repeater : Nil
+    @calls << :mine_from_repeater
   end
 
   def mine_run : Nil
@@ -340,8 +340,8 @@ private class FakeContext < ExecContext
     false
   end
 
-  def mine_replay_selected : Nil
-    @calls << :mine_replay_selected
+  def mine_repeater_selected : Nil
+    @calls << :mine_repeater_selected
   end
 
   def sitemap_move(delta : Int32) : Nil
@@ -500,8 +500,8 @@ private class FakeContext < ExecContext
     @calls << :finding_open_flow
   end
 
-  def finding_replay_flow : Nil
-    @calls << :finding_replay_flow
+  def finding_repeater_flow : Nil
+    @calls << :finding_repeater_flow
   end
 
   def finding_links : Nil
@@ -540,7 +540,7 @@ private class FakeContext < ExecContext
     nil
   end
 
-  def link_replay_id : Int64?
+  def link_repeater_id : Int64?
     nil
   end
 
@@ -604,8 +604,8 @@ private class FakeContext < ExecContext
     @calls << :prism_open_flow
   end
 
-  def prism_replay_flow : Nil
-    @calls << :prism_replay_flow
+  def prism_repeater_flow : Nil
+    @calls << :prism_repeater_flow
   end
 
   def prism_promote : Nil
@@ -909,14 +909,14 @@ describe Gori::Verb do
       ctx.calls.should contain(:scope_open)
     end
 
-    it "binds ctrl-n to a new blank replay in the Replay scope" do
+    it "binds ctrl-n to a new blank repeater in the Repeater scope" do
       reg = Gori::Verbs.registry
       keymap = Keymap.build(reg)
-      keymap.lookup(Chord.new("n", ctrl: true), Scope::Replay).should eq("replay.new")
+      keymap.lookup(Chord.new("n", ctrl: true), Scope::Repeater).should eq("repeater.new")
 
       ctx = FakeContext.new
-      reg["replay.new"].call(ctx)
-      ctx.calls.should contain(:replay_new)
+      reg["repeater.new"].call(ctx)
+      ctx.calls.should contain(:repeater_new)
     end
 
     it "descends from the tab menu via enter_content (so sub-tab tabs land on the strip first)" do
@@ -927,7 +927,7 @@ describe Gori::Verb do
       keymap.lookup(Chord.new("enter"), Scope::Sidebar).should eq("sidebar.enter")
 
       # …which descends through enter_content (NOT focus_pane), letting the Runner
-      # route Replay/Notes onto their sub-tab strip before the body.
+      # route Repeater/Notes onto their sub-tab strip before the body.
       ctx = FakeContext.new
       reg["sidebar.enter"].call(ctx)
       ctx.calls.should contain(:enter_content)
@@ -936,12 +936,12 @@ describe Gori::Verb do
   end
 
   describe "migrated tab-local chords resolve in their per-tab scope" do
-    it "binds the Replay request-pane toggles + send in Replay scope" do
+    it "binds the Repeater request-pane toggles + send in Repeater scope" do
       km = Keymap.build(Gori::Verbs.registry)
-      km.lookup(Chord.new("r", ctrl: true), Scope::Replay).should eq("replay.send")
-      km.lookup(Chord.new("x", ctrl: true), Scope::Replay).should eq("replay.toggle-hex")
-      km.lookup(Chord.new("s", ctrl: true), Scope::Replay).should eq("replay.toggle-sni")
-      km.lookup(Chord.new("l", ctrl: true), Scope::Replay).should eq("replay.toggle-auto-content-length")
+      km.lookup(Chord.new("r", ctrl: true), Scope::Repeater).should eq("repeater.send")
+      km.lookup(Chord.new("x", ctrl: true), Scope::Repeater).should eq("repeater.toggle-hex")
+      km.lookup(Chord.new("s", ctrl: true), Scope::Repeater).should eq("repeater.toggle-sni")
+      km.lookup(Chord.new("l", ctrl: true), Scope::Repeater).should eq("repeater.toggle-auto-content-length")
     end
 
     it "binds the Fuzzer run/stop/automark chords in Fuzzer scope" do
@@ -960,30 +960,30 @@ describe Gori::Verb do
       km.lookup(Chord.new("/"), Scope::Body).should eq("history.query")
     end
 
-    it "routes the new Replay toggle verbs through the matching ExecContext methods" do
+    it "routes the new Repeater toggle verbs through the matching ExecContext methods" do
       reg = Gori::Verbs.registry
       ctx = FakeContext.new
-      reg["replay.toggle-hex"].call(ctx)
-      reg["replay.toggle-decoded"].call(ctx)
-      reg["replay.toggle-sni"].call(ctx)
-      reg["replay.toggle-auto-content-length"].call(ctx)
-      ctx.calls.should contain(:replay_toggle_hex)
-      ctx.calls.should contain(:replay_toggle_decoded)
-      ctx.calls.should contain(:replay_toggle_sni)
-      ctx.calls.should contain(:replay_toggle_auto_content_length)
+      reg["repeater.toggle-hex"].call(ctx)
+      reg["repeater.toggle-decoded"].call(ctx)
+      reg["repeater.toggle-sni"].call(ctx)
+      reg["repeater.toggle-auto-content-length"].call(ctx)
+      ctx.calls.should contain(:repeater_toggle_hex)
+      ctx.calls.should contain(:repeater_toggle_decoded)
+      ctx.calls.should contain(:repeater_toggle_sni)
+      ctx.calls.should contain(:repeater_toggle_auto_content_length)
     end
 
-    it "routes the Round-4 Replay :subtab/:response verbs through the matching ExecContext methods" do
+    it "routes the Round-4 Repeater :subtab/:response verbs through the matching ExecContext methods" do
       reg = Gori::Verbs.registry
       ctx = FakeContext.new
-      reg["replay.rename-subtab"].call(ctx)
-      reg["replay.close-subtab"].call(ctx)
-      reg["replay.toggle-diff"].call(ctx)
-      reg["replay.toggle-resp-hex"].call(ctx)
-      ctx.calls.should contain(:replay_rename_subtab)
-      ctx.calls.should contain(:replay_close_subtab)
-      ctx.calls.should contain(:replay_toggle_resp_diff)
-      ctx.calls.should contain(:replay_toggle_resp_hex)
+      reg["repeater.rename-subtab"].call(ctx)
+      reg["repeater.close-subtab"].call(ctx)
+      reg["repeater.toggle-diff"].call(ctx)
+      reg["repeater.toggle-resp-hex"].call(ctx)
+      ctx.calls.should contain(:repeater_rename_subtab)
+      ctx.calls.should contain(:repeater_close_subtab)
+      ctx.calls.should contain(:repeater_toggle_resp_diff)
+      ctx.calls.should contain(:repeater_toggle_resp_hex)
     end
 
     it "routes the Round-4 Fuzzer :subtab verbs through the matching ExecContext methods" do
@@ -1039,7 +1039,7 @@ describe Gori::Verb do
         v.scope.should eq(Scope::Body) # strictly Body — Global app-control stays out of ":"
       end
       ids = body.map(&.id)
-      ids.should contain("history.replay") # an area action surfaces
+      ids.should contain("history.repeater") # an area action surfaces
       ids.should_not contain("app.quit")   # app-control belongs to Ctrl-P, not ":"
       ids.should_not contain("nav.next-tab")
 
@@ -1050,7 +1050,7 @@ describe Gori::Verb do
       gids.any?(&.starts_with?("history.")).should be_false
 
       # fuzzy query narrows within the scope (same ranking as #search)
-      reg.for_scope(Scope::Body, ctx, "replay").first.id.should eq("history.replay")
+      reg.for_scope(Scope::Body, ctx, "repeater").first.id.should eq("history.repeater")
     end
 
     it "rejects duplicate ids" do

@@ -12,7 +12,7 @@ module Gori
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return if ctx.ws_messages.empty?
-          seen = Set(String).new # distinct type labels per flow (avoid ×N from echo/replay)
+          seen = Set(String).new # distinct type labels per flow (avoid ×N from echo/repeater)
           ctx.ws_messages.each do |msg|
             next unless msg.text?
             text = payload_text(msg.payload)

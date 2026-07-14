@@ -24,15 +24,15 @@ module Gori
       severity : Store::Severity,
       evidence : String? = nil,
       flow_id : Int64? = nil,
-      replay_id : Int64? = nil
+      repeater_id : Int64? = nil
 
-    # Stamp source ids on a detection (Replay path, or normalize synthetic flow id 0 → nil).
-    def self.with_source(d : Detection, *, flow_id : Int64? = nil, replay_id : Int64? = nil) : Detection
+    # Stamp source ids on a detection (Repeater path, or normalize synthetic flow id 0 → nil).
+    def self.with_source(d : Detection, *, flow_id : Int64? = nil, repeater_id : Int64? = nil) : Detection
       fid = flow_id
       fid = d.flow_id if fid.nil?
       fid = nil if fid == 0
       Detection.new(d.code, d.category, d.host, d.url, d.title, d.severity, d.evidence,
-        flow_id: fid, replay_id: replay_id || d.replay_id)
+        flow_id: fid, repeater_id: repeater_id || d.repeater_id)
     end
 
     # Display-only remediation hints, keyed by issue code (shown in the Prism detail pane).

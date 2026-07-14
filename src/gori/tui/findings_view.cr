@@ -626,7 +626,7 @@ module Gori::Tui
       max_scroll = {@detail_resolved.size - list_h, 0}.max
       @links_scroll = @links_scroll.clamp(0, max_scroll)
       if @detail_resolved.empty?
-        screen.text(rect.x + 1, list_y, "(none — space l to link History/Replay/…)", Theme.muted, width: w)
+        screen.text(rect.x + 1, list_y, "(none — space l to link History/Repeater/…)", Theme.muted, width: w)
       else
         (0...list_h).each do |i|
           idx = @links_scroll + i

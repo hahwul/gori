@@ -7,7 +7,7 @@ module Gori::Tui
   # read-only HexView). Holds the bytes as a mutable Array(UInt8) and a nibble
   # cursor; supports overtype (hex digits), insert/delete bytes, and navigation.
   # Byte-faithful — bytes never round-trip through a String here (only at the
-  # ReplayView boundary on enter/exit/persist, which is documented as lossy).
+  # RepeaterView boundary on enter/exit/persist, which is documented as lossy).
   class HexEdit
     COLS = HexView::COLS # 16 bytes/row
     HEXD = "0123456789abcdef"

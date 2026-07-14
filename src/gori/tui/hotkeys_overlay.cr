@@ -23,7 +23,7 @@ module Gori::Tui
       Verb::Scope::Sidebar        => "TAB BAR",
       Verb::Scope::Body           => "HISTORY",
       Verb::Scope::HistoryDetail  => "FLOW DETAIL",
-      Verb::Scope::Replay         => "REPLAY",
+      Verb::Scope::Repeater         => "REPEATER",
       Verb::Scope::Fuzzer         => "FUZZER",
       Verb::Scope::Sitemap        => "SITEMAP",
       Verb::Scope::Findings       => "FINDINGS",

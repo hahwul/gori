@@ -1,6 +1,6 @@
 require "../proxy/codec/content_decode"
 require "../fuzz/matcher"
-require "../replay/engine"
+require "../repeater/engine"
 
 module Gori::Miner
   # A decoded view of one response: metrics + the SET of canary tokens that appear in the
@@ -22,7 +22,7 @@ module Gori::Miner
   end
 
   module Fingerprint
-    def self.probe(raw : Replay::Result) : Probe
+    def self.probe(raw : Repeater::Result) : Probe
       decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body)
       body = decoded || raw.body || Bytes.empty
       metrics = Fuzz::Metrics.new(

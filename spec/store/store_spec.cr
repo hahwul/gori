@@ -45,14 +45,15 @@ describe Gori::Store do
       store.@db.exec("DROP TABLE miner_sessions")                      # V19
       store.@db.exec("DROP TABLE prism_issues")                        # V20
       store.@db.exec("DROP TABLE entity_links")                        # V21
-      store.@db.exec("ALTER TABLE replays DROP COLUMN mark_transform") # V22 (added a column to a pre-V17 table)
+      store.@db.exec("ALTER TABLE repeaters DROP COLUMN mark_transform") # V22 (added a column to a pre-V17 table)
       store.@db.exec("DROP INDEX idx_flows_sizes")                     # V23
-      store.@db.exec("DROP INDEX idx_ws_messages_replay")              # V26
-      store.@db.exec("ALTER TABLE ws_messages DROP COLUMN replay_id")  # V26
+      store.@db.exec("DROP INDEX idx_ws_messages_replay")               # V26 (index keeps its historical name)
+      store.@db.exec("ALTER TABLE ws_messages DROP COLUMN repeater_id")  # V26
       store.@db.exec("DROP INDEX idx_h2_frames_created")               # V27
       store.@db.exec("DROP TABLE prism_suppressions")                  # V29
       store.@db.exec("ALTER TABLE match_rules DROP COLUMN part")       # V30
-      store.@db.exec("ALTER TABLE replays DROP COLUMN tags")           # V31
+      store.@db.exec("ALTER TABLE repeaters DROP COLUMN tags")           # V31
+      store.@db.exec("ALTER TABLE repeaters RENAME TO replays")          # undo V32 so historical <V32 migrations replay against the old table name
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 
@@ -188,19 +189,19 @@ describe Gori::Store do
     end
   end
 
-  it "retention prune spares saved WebSocket-Replay messages (flow_id=0 sentinel, keyed by replay_id)" do
+  it "retention prune spares saved WebSocket-Repeater messages (flow_id=0 sentinel, keyed by repeater_id)" do
     path = File.tempname("gori-wsret", ".db")
     db = DB.open("sqlite3:#{path}?journal_mode=wal&busy_timeout=5000")
     Gori::Store::Schema.migrate!(db)
     store = Gori::Store.new(db, nil, retention_flows: 5, prune_interval: 10)
     begin
-      rid = store.insert_replay("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n", false, false, nil, 0)
-      store.update_replay_ws_messages(rid, ["client frame 1", "client frame 2"])
+      rid = store.insert_repeater("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n", false, false, nil, 0)
+      store.update_repeater_ws_messages(rid, ["client frame 1", "client frame 2"])
       # Churn flows well past retention so prune fires (cutoff = max_id - 5 > 0). The bug:
-      # DELETE ... WHERE flow_id <= cutoff also matched the replay rows (flow_id = 0), wiping them.
+      # DELETE ... WHERE flow_id <= cutoff also matched the repeater rows (flow_id = 0), wiping them.
       12.times { |i| store.insert_flow(sample_request(target: "/#{i}")) }
       store.flush
-      store.ws_messages_for_replay(rid).size.should eq(2) # replay traffic survives flow retention
+      store.ws_messages_for_repeater(rid).size.should eq(2) # repeater traffic survives flow retention
       store.write_failures.should eq(0)
     ensure
       store.close
@@ -227,12 +228,12 @@ describe Gori::Store do
     end
   end
 
-  it "update_replay_ws_messages stores an empty frame text without aborting the batch" do
+  it "update_repeater_ws_messages stores an empty frame text without aborting the batch" do
     with_store do |store|
-      rid = store.insert_replay("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n", false, false, nil, 0)
-      store.update_replay_ws_messages(rid, ["", "frame"])
+      rid = store.insert_repeater("wss://acme.test/ws", "GET /ws HTTP/1.1\r\n\r\n", false, false, nil, 0)
+      store.update_repeater_ws_messages(rid, ["", "frame"])
       store.flush
-      store.ws_messages_for_replay(rid).size.should eq(2)
+      store.ws_messages_for_repeater(rid).size.should eq(2)
       store.write_failures.should eq(0)
     end
   end

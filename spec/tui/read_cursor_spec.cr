@@ -3,7 +3,7 @@ require "../spec_helper"
 include Gori::Tui
 
 # Regression coverage for ReadCursor's multi-line selection math. The read-only
-# panes (History detail, Replay/Fuzzer response, Notes, Decoder) all share this,
+# panes (History detail, Repeater/Fuzzer response, Notes, Decoder) all share this,
 # so a wrongly-assigned boundary column corrupts copied text everywhere at once —
 # and, for an upward selection over a short top line, used to crash on copy.
 describe Gori::Tui::ReadCursor do

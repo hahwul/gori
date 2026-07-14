@@ -35,10 +35,10 @@ private def with_store(&)
   end
 end
 
-describe Gori::Replay::FlowRequest do
+describe Gori::Repeater::FlowRequest do
   it "rewrites an absolute-form request line to origin-form, keeping the rest exact" do
     head = "GET http://example.com/a?b=1 HTTP/1.1\r\nHost: example.com\r\nX-T: 1\r\n\r\n"
-    built = Gori::Replay::FlowRequest.build(flow_detail("http", "example.com", 80, head))
+    built = Gori::Repeater::FlowRequest.build(flow_detail("http", "example.com", 80, head))
     String.new(built.bytes).should eq("GET /a?b=1 HTTP/1.1\r\nHost: example.com\r\nX-T: 1\r\n\r\n")
     built.target.should eq("http://example.com") # default port omitted
     built.http2.should be_false
@@ -46,25 +46,25 @@ describe Gori::Replay::FlowRequest do
 
   it "leaves an origin-form request byte-exact and derives the https target" do
     head = "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n"
-    built = Gori::Replay::FlowRequest.build(flow_detail("https", "api.test", 443, head))
+    built = Gori::Repeater::FlowRequest.build(flow_detail("https", "api.test", 443, head))
     String.new(built.bytes).should eq(head)
     built.target.should eq("https://api.test")
   end
 
   it "keeps a non-default port in the target" do
-    built = Gori::Replay::FlowRequest.build(flow_detail("https", "api.test", 8443, "GET / HTTP/1.1\r\n\r\n"))
+    built = Gori::Repeater::FlowRequest.build(flow_detail("https", "api.test", 8443, "GET / HTTP/1.1\r\n\r\n"))
     built.target.should eq("https://api.test:8443")
   end
 
   it "flags HTTP/2 flows" do
-    built = Gori::Replay::FlowRequest.build(flow_detail("https", "h", 443, "GET / HTTP/1.1\r\n\r\n", http_version: "HTTP/2"))
+    built = Gori::Repeater::FlowRequest.build(flow_detail("https", "h", 443, "GET / HTTP/1.1\r\n\r\n", http_version: "HTTP/2"))
     built.http2.should be_true
   end
 
   it "preserves a binary body byte-for-byte (no text round-trip corruption)" do
     head = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 4\r\n\r\n"
     body = Bytes[0x00, 0x0A, 0xFF, 0x0D] # contains LF/CR bytes a line-splitter would mangle
-    built = Gori::Replay::FlowRequest.build(flow_detail("https", "h", 443, head, request_body: body))
+    built = Gori::Repeater::FlowRequest.build(flow_detail("https", "h", 443, head, request_body: body))
     expected = head.to_slice.to_a + body.to_a
     built.bytes.to_a.should eq(expected)
   end
@@ -72,7 +72,7 @@ describe Gori::Replay::FlowRequest do
   it "rewrites the request line but keeps an absolute-form body exact" do
     head = "POST http://h/p HTTP/1.1\r\nHost: h\r\n\r\n"
     body = Bytes[0x0A, 0x41, 0x0A]
-    built = Gori::Replay::FlowRequest.build(flow_detail("http", "h", 80, head, request_body: body))
+    built = Gori::Repeater::FlowRequest.build(flow_detail("http", "h", 80, head, request_body: body))
     String.new(built.bytes).should eq("POST /p HTTP/1.1\r\nHost: h\r\n\r\n\nA\n")
   end
 
@@ -81,7 +81,7 @@ describe Gori::Replay::FlowRequest do
     # original CL would hang the origin. build() rewrites CL to the actual length.
     head = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 9999\r\nX-T: 1\r\n\r\n"
     body = Bytes[0x41, 0x42, 0x43] # "ABC"
-    built = Gori::Replay::FlowRequest.build(
+    built = Gori::Repeater::FlowRequest.build(
       flow_detail("http", "h", 80, head, request_body: body, request_body_truncated: true))
     String.new(built.bytes).should eq("POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\nX-T: 1\r\n\r\nABC")
   end
@@ -89,7 +89,7 @@ describe Gori::Replay::FlowRequest do
   it "leaves Content-Length untouched when the body was NOT truncated" do
     head = "POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\n"
     body = Bytes[0x41, 0x42, 0x43]
-    built = Gori::Replay::FlowRequest.build(flow_detail("http", "h", 80, head, request_body: body))
+    built = Gori::Repeater::FlowRequest.build(flow_detail("http", "h", 80, head, request_body: body))
     String.new(built.bytes).should eq("POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 3\r\n\r\nABC")
   end
 
@@ -98,28 +98,28 @@ describe Gori::Replay::FlowRequest do
     # Transfer-Encoding with a Content-Length over the stored bytes so the request terminates.
     head = "POST /u HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n"
     body = "5\r\nhello\r\n".to_slice # 10 bytes of wire-form chunk data (cut before the 0-chunk)
-    built = Gori::Replay::FlowRequest.build(
+    built = Gori::Repeater::FlowRequest.build(
       flow_detail("http", "h", 80, head, request_body: body, request_body_truncated: true))
     String.new(built.bytes).should eq("POST /u HTTP/1.1\r\nHost: h\r\nContent-Length: 10\r\n\r\n5\r\nhello\r\n")
   end
 
   it "preserves a bare-LF request-line terminator when rewriting (no mixed endings)" do
     head = "GET http://h/p HTTP/1.1\nHost: h\n\n" # LF-only, absolute-form
-    built = Gori::Replay::FlowRequest.build(flow_detail("http", "h", 80, head))
+    built = Gori::Repeater::FlowRequest.build(flow_detail("http", "h", 80, head))
     String.new(built.bytes).should eq("GET /p HTTP/1.1\nHost: h\n\n") # stays LF — no \r introduced
   end
 
   it "parses targets (the inverse of build_target)" do
-    Gori::Replay::FlowRequest.parse_target("https://h").should eq({"https", "h", 443})
-    Gori::Replay::FlowRequest.parse_target("http://h:8080").should eq({"http", "h", 8080})
-    Gori::Replay::FlowRequest.parse_target("h:9000").should eq({"http", "h", 9000}) # bare → http
-    Gori::Replay::FlowRequest.parse_target("https://h:8443/p").should eq({"https", "h", 8443})
+    Gori::Repeater::FlowRequest.parse_target("https://h").should eq({"https", "h", 443})
+    Gori::Repeater::FlowRequest.parse_target("http://h:8080").should eq({"http", "h", 8080})
+    Gori::Repeater::FlowRequest.parse_target("h:9000").should eq({"http", "h", 9000}) # bare → http
+    Gori::Repeater::FlowRequest.parse_target("https://h:8443/p").should eq({"https", "h", 8443})
   end
 
   it "only rewrites a well-formed absolute request line" do
-    Gori::Replay::FlowRequest.rewrite_request_line("GET http://e/a HTTP/1.1").should eq("GET /a HTTP/1.1")
-    Gori::Replay::FlowRequest.rewrite_request_line("GET /a HTTP/1.1").should be_nil # already origin-form
-    Gori::Replay::FlowRequest.rewrite_request_line("garbage").should be_nil
+    Gori::Repeater::FlowRequest.rewrite_request_line("GET http://e/a HTTP/1.1").should eq("GET /a HTTP/1.1")
+    Gori::Repeater::FlowRequest.rewrite_request_line("GET /a HTTP/1.1").should be_nil # already origin-form
+    Gori::Repeater::FlowRequest.rewrite_request_line("garbage").should be_nil
   end
 end
 
@@ -150,11 +150,11 @@ describe Gori::Findings::Export do
         head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice))
       finding_id = store.insert_finding("linked", Gori::Store::Severity::Medium, "api.test", fid)
       store.add_link(Gori::Store::LinkOwnerKind::Finding, finding_id,
-        Gori::Store::LinkRefKind::Replay, 9_i64)
+        Gori::Store::LinkRefKind::Repeater, 9_i64)
       parsed = JSON.parse(Gori::Findings::Export.json(store.findings, store)).as_a
       links = parsed[0]["links"].as_a
       links.size.should eq(1) # primary flow link is deduped from the export list
-      links[0]["kind"].as_s.should eq("replay")
+      links[0]["kind"].as_s.should eq("repeater")
       links[0]["ref_id"].as_i.should eq(9)
       links[0]["label"].as_s.should_not be_empty
     end

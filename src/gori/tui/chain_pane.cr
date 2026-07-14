@@ -6,7 +6,7 @@ require "../decoder"
 
 module Gori::Tui
   # A single-line editor for a Decoder chain spec (`base64-encode > url-encode`) with
-  # converter-name autocomplete. Embedded below the marker editor in Replay/Fuzzer MARK
+  # converter-name autocomplete. Embedded below the marker editor in Repeater/Fuzzer MARK
   # mode; the owning view BINDS it to the §…§ marker at the cursor — `load` on focus-in,
   # `value` on focus-out (the view writes it back via Fuzz::Template.set_chain). Modelled
   # on the Decoder tab's chain field (String + caret + ChainComplete), not a TextArea.

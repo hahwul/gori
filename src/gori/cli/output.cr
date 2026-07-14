@@ -50,7 +50,7 @@ module Gori
 
       # Like `term_safe` but preserves '\n'/'\t', so a captured multi-line head/body keeps
       # its layout while ANSI/OSC/CSI escapes and other control bytes are neutralized. Use
-      # for captured text written to a live terminal (the `show`/`replay` text views).
+      # for captured text written to a live terminal (the `show`/`repeater` text views).
       # `--format raw` stays the exact-bytes path for scripts/redirection.
       def self.term_safe_multiline(s : String) : String
         return s unless s.each_char.any? { |c| c.control? && c != '\n' && c != '\t' }
@@ -157,7 +157,7 @@ module Gori
           j.field "affected_count", g.affected.size
           j.field "evidence", g.evidence
           j.field "sample_flow_id", g.sample_flow_id
-          j.field "sample_replay_id", g.sample_replay_id
+          j.field "sample_repeater_id", g.sample_repeater_id
           j.field "remediation", Prism.remediation(g.code)
         end
       end

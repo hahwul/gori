@@ -4,7 +4,7 @@ require "digest/sha1"
 require "base64"
 
 private alias WS = Gori::Proxy::WS
-private alias WsEngine = Gori::Replay::WsEngine
+private alias WsEngine = Gori::Repeater::WsEngine
 
 # A minimal WS origin: completes the upgrade with a correct Sec-WebSocket-Accept,
 # optionally echoes one client message back unmasked, then sends a Close so the
@@ -46,8 +46,8 @@ private UPGRADE = ("GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\n" \
                    "Upgrade: websocket\r\nConnection: Upgrade\r\n" \
                    "Sec-WebSocket-Key: dGhlIHNhbXBsZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").to_slice
 
-describe Gori::Replay::WsEngine do
-  it "upgrades, replays an outbound message, and captures the echo" do
+describe Gori::Repeater::WsEngine do
+  it "upgrades, repeaters an outbound message, and captures the echo" do
     port = start_ws_origin
     result = WsEngine.send(UPGRADE, [WsEngine::OutMsg.new(1, "ping".to_slice)],
       scheme: "http", host: "127.0.0.1", port: port, verify_upstream: false)

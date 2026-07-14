@@ -83,7 +83,7 @@ module Gori::Tui
 
     # A left-aligned mode/toggle chip at (x,y), returning the x past it. `lit` (active)
     # paints bright text on an accent fill; off is a muted, background-less label. Used
-    # for keyed toggle chips on a pane's top border (e.g. Replay's `d:diff`/`x:hex`).
+    # for keyed toggle chips on a pane's top border (e.g. Repeater's `d:diff`/`x:hex`).
     def self.chip(screen : Screen, x : Int32, y : Int32, label : String, lit : Bool) : Int32
       screen.text(x, y, label, lit ? Theme.text_bright : Theme.muted, lit ? Theme.accent_bg : Theme.bg)
     end

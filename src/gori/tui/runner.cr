@@ -15,14 +15,14 @@ require "./controllers/history_controller"
 require "./controllers/findings_controller"
 require "./controllers/prism_controller"
 require "./controllers/project_controller"
-require "./controllers/replay_controller"
+require "./controllers/repeater_controller"
 require "./controllers/fuzzer_controller"
 require "./controllers/miner_controller"
 require "./controllers/comparer_controller"
 require "./controllers/decoder_controller"
 require "./controllers/statusline_controller"
 require "./history_view"
-require "./replay_view"
+require "./repeater_view"
 require "./sitemap_view"
 require "./help_view"
 require "./findings_view"
@@ -86,7 +86,7 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :replay_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule | :ca_import
+      @overlay = :none # :none | :palette | :detail | :rules | :finding_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :finding_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule | :ca_import
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -104,21 +104,21 @@ module Gori::Tui
       @search_target = :none
       @search_hits = [] of Int32
       @search_idx = 0
-      # The sub-tab rename prompt (Replay + Fuzzer + Decoder + Miner) — orthogonal to
+      # The sub-tab rename prompt (Repeater + Fuzzer + Decoder + Miner) — orthogonal to
       # @overlay (floats over the bottom status row, like ^G/^F).
       @rename_open = false
       @rename_buffer = ""
       @rename_preedit = ""
       # The target is held by VIEW identity (not a positional index): the cross-session
-      # reconcile can reorder/remove replay tabs while the prompt is open, so the
+      # reconcile can reorder/remove repeater tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
-      @rename_view = nil.as(ReplayView | FuzzerView | DecoderView | MinerView | ComparerView | Nil)
-      # The Replay sub-tab TAG editor (issue #121) — a bottom prompt mirroring rename,
+      @rename_view = nil.as(RepeaterView | FuzzerView | DecoderView | MinerView | ComparerView | Nil)
+      # The Repeater sub-tab TAG editor (issue #121) — a bottom prompt mirroring rename,
       # space-separated tags. Held by VIEW identity for the same reconcile-race reason.
       @tag_edit_open = false
       @tag_buffer = ""
       @tag_preedit = ""
-      @tag_view = nil.as(ReplayView?)
+      @tag_view = nil.as(RepeaterView?)
       # The import path prompt (palette → import:har/urls/oas) — bottom-anchored like
       # ^G/^F, with filesystem tab-completion via PathComplete.
       @import_open = false
@@ -130,7 +130,7 @@ module Gori::Tui
       # propagated to the focused view in render_body. Handy for smuggling tests.
       @reveal = false
       # Pretty-print bodies (JSON/XML/form/…) toggle — global view pref like reveal,
-      # seeded from the persisted default, propagated to History/Replay each frame.
+      # seeded from the persisted default, propagated to History/Repeater each frame.
       @pretty = Settings.pretty_bodies_default
       # A destructive-action guard (delete project / close a sub-tab). When set,
       # @overlay is :confirm; accepting runs @confirm_action. @confirm_return is the
@@ -148,14 +148,14 @@ module Gori::Tui
       # tabs (Miner by default). @overlay is :tabs_more while it's open; built fresh each
       # time from the current hidden set.
       @more_menu = nil.as(MoreMenu?)
-      # The "copy as X" format picker (Replay/History detail → space Y). ORTHOGONAL to
+      # The "copy as X" format picker (Repeater/History detail → space Y). ORTHOGONAL to
       # @overlay (like @space_menu_open) so it floats over whatever's underneath — the
-      # Replay body (@overlay :none) OR the History detail drill-in (@overlay :detail) —
+      # Repeater body (@overlay :none) OR the History detail drill-in (@overlay :detail) —
       # without disturbing that state. Non-nil ⇔ shown (see copy_as_shown?).
       @copy_picker = nil.as(CopyPicker?)
       # The Comparer flow picker (a/b → choose flow A/B); @overlay is :comparer_pick.
       @flow_picker = nil.as(FlowPicker?)
-      # The Replay sub-tab search picker (space → s); @overlay is :replay_subtab.
+      # The Repeater sub-tab search picker (space → s); @overlay is :repeater_subtab.
       @subtab_picker = nil.as(SubtabPicker?)
       # Entity links overlay (Findings/Notes → space l) and pickers for add/link-to.
       @links_overlay = nil.as(LinksOverlay?)
@@ -184,7 +184,7 @@ module Gori::Tui
       # ANSI-coloured stdout. Disabled by default (no fiber, no reserved row until on).
       @statusline = StatuslineController.new(@session)
       @spinner_frame = 0
-      # The Miner config popup (History/Replay → space → "Mine parameters"); @overlay is
+      # The Miner config popup (History/Repeater → space → "Mine parameters"); @overlay is
       # :mine_config while it's up. Built fresh each time it opens (holds the seed request).
       @mine_config_overlay = nil.as(MineConfigOverlay?)
       # The Fuzzer config overlays (CONFIG pane → ↵ on a set / Add / Advanced): a payload-set
@@ -222,7 +222,7 @@ module Gori::Tui
         FindingsController.new(self),
         PrismController.new(self),
         ProjectController.new(self),
-        ReplayController.new(self),
+        RepeaterController.new(self),
         FuzzerController.new(self),
         MinerController.new(self),
         ComparerController.new(self),
@@ -267,8 +267,8 @@ module Gori::Tui
       @tabs[:project].as(ProjectController)
     end
 
-    private def replay_controller : ReplayController
-      @tabs[:replay].as(ReplayController)
+    private def repeater_controller : RepeaterController
+      @tabs[:repeater].as(RepeaterController)
     end
 
     private def fuzzer_controller : FuzzerController
@@ -301,10 +301,10 @@ module Gori::Tui
         @toast =
           if @session.capturing_lock_held?
             # We own this project's capture but the bind failed (port taken).
-            "capture OFF — #{err}. History/Replay work; set a free port in settings (^P) then press c"
+            "capture OFF — #{err}. History/Repeater work; set a free port in settings (^P) then press c"
           else
             # View-only: another live instance owns this project's capture.
-            "view-only — #{err}. History/Replay work; press c to take over if it closed"
+            "view-only — #{err}. History/Repeater work; press c to take over if it closed"
           end
       elsif requested > 0 && @session.proxy.port != requested
         # Reflect the fallback port in whichever layer is effective so the settings UIs show the
@@ -323,7 +323,7 @@ module Gori::Tui
       render # initial paint (the loop below only re-renders when something changed)
       # The render loop polls input on a 50ms cadence (so async channels are still
       # checked ≤50ms), but RENDER only runs when the frame would actually change —
-      # input handled, flow events / replay results drained, the interceptor queue
+      # input handled, flow events / repeater results drained, the interceptor queue
       # changed (async holds bump a revision), or a write failure was recorded.
       # Idle (no traffic, no keys) burns ~no CPU instead of rebuilding 20 frames/s.
       last_rev = @session.interceptor.revision
@@ -353,7 +353,7 @@ module Gori::Tui
           drain_burst
         end
         dirty = true if drain_events # always drains; true if anything arrived
-        if replay_controller.drain_results
+        if repeater_controller.drain_results
           search_recompute # a ^F over a now-updated response keeps fresh hits
           dirty = true
         end
@@ -399,7 +399,7 @@ module Gori::Tui
         # Animate the bottom-bar background-job spinner: while any job runs, advance the
         # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
         # CPU at zero when nothing is running.
-        if (@jobs.any_active? || replay_controller.any_inflight?) && now - last_spin >= SPINNER_INTERVAL
+        if (@jobs.any_active? || repeater_controller.any_inflight?) && now - last_spin >= SPINNER_INTERVAL
           last_spin = now
           @spinner_frame &+= 1
           dirty = true
@@ -484,7 +484,7 @@ module Gori::Tui
     SPINNER = ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷']
 
     # The flow the user is looking at, but only where that's meaningful — the History list.
-    # Replay/Fuzzer/etc. carry their own selection semantics (session ids, not flow ids), so we
+    # Repeater/Fuzzer/etc. carry their own selection semantics (session ids, not flow ids), so we
     # don't conflate them under one "selected flow" that get_current_context would misreport.
     private def current_selected_flow_id : Int64?
       @active_tab == :history ? history_controller.selected_flow_id : nil
@@ -509,8 +509,8 @@ module Gori::Tui
             j.field "selected_flow_id", fid
           end
           j.field "subtab", current_subtab_index
-          if @active_tab == :replay
-            j.field "replay" { replay_controller.write_mcp_context(j) }
+          if @active_tab == :repeater
+            j.field "repeater" { repeater_controller.write_mcp_context(j) }
           end
           j.field "recorded_at", Time.utc.to_unix_ms
         end
@@ -539,14 +539,14 @@ module Gori::Tui
     end
 
     # Store data_version advanced (own writer and/or peer process). Re-query
-    # store-backed views. Active-tab reloads use id/path soft-anchors; Replay/Notes
+    # store-backed views. Active-tab reloads use id/path soft-anchors; Repeater/Notes
     # soft-merge and skip dirty buffers so session UI is not clobbered.
     private def apply_external_change : Nil
       # Reload a store-backed view only when it's the ACTIVE tab (others reload on
       # tab entry via on_enter_tab) — avoids re-querying History's page ~1.3×/sec
       # while the user is elsewhere. Own-session captures also arrive via flow_events.
       @tabs[@active_tab]?.try(&.on_external_change) # migrated tabs refresh themselves
-      replay_controller.reconcile
+      repeater_controller.reconcile
       fuzzer_controller.reconcile
       miner_controller.reconcile
       notes_controller.view.reload(@session.store) unless notes_locked?
@@ -599,8 +599,8 @@ module Gori::Tui
         @import_preedit = text
         return
       end
-      if @active_tab == :replay && replay_controller.subtab_filter_editing?
-        replay_controller.set_subtab_filter_preedit(text)
+      if @active_tab == :repeater && repeater_controller.subtab_filter_editing?
+        repeater_controller.set_subtab_filter_preedit(text)
         return
       end
       # Route preedit to whichever input is active so composing text (e.g. Hangul
@@ -608,13 +608,13 @@ module Gori::Tui
       # commits (a normal char insert then clears the preedit). The dispatch
       # priority mirrors handle_key: overlays first, then text-entry sub-modes,
       # then the focused tab body — so EVERY text field gets the same live
-      # composition preview, not just the Notes/Project/Replay editors.
+      # composition preview, not just the Notes/Project/Repeater editors.
       case @overlay
       when :palette       then @palette.set_preedit(text)
       when :rules         then @rules_overlay.set_preedit(text)
       when :finding_new   then @finding_form.set_preedit(text)
       when :comparer_pick then @flow_picker.try(&.set_preedit(text))
-      when :replay_subtab then @subtab_picker.try(&.set_preedit(text))
+      when :repeater_subtab then @subtab_picker.try(&.set_preedit(text))
       when :finding_pick  then @finding_picker.try(&.set_preedit(text))
       when :note_pick     then @note_picker.try(&.set_preedit(text))
       when :settings      then @settings_view.set_preedit(text)
@@ -664,7 +664,7 @@ module Gori::Tui
       return handle_goto_key(ev) if @goto_open             # the ^G line prompt is modal while up
       return handle_search_key(ev) if @search_open         # the ^F find prompt is modal while up
       return handle_rename_key(ev) if @rename_open         # the sub-tab rename prompt is modal while up
-      return handle_tag_edit_key(ev) if @tag_edit_open     # the Replay tag editor is modal while up
+      return handle_tag_edit_key(ev) if @tag_edit_open     # the Repeater tag editor is modal while up
       return handle_import_key(ev) if @import_open         # the import path prompt is modal while up
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
       # multi-line view (editors move the cursor, read-only panes scroll). Modifier
@@ -691,7 +691,7 @@ module Gori::Tui
       return handle_choice_key(ev) if @overlay == :choice
       return handle_more_menu_key(ev) if @overlay == :tabs_more
       return handle_flow_picker_key(ev) if @overlay == :comparer_pick
-      return handle_subtab_picker_key(ev) if @overlay == :replay_subtab
+      return handle_subtab_picker_key(ev) if @overlay == :repeater_subtab
       return handle_links_key(ev) if @overlay == :links
       return handle_finding_picker_key(ev) if @overlay == :finding_pick
       return handle_note_picker_key(ev) if @overlay == :note_pick
@@ -726,10 +726,10 @@ module Gori::Tui
       if @active_tab == :prism && @overlay == :none && @focus == :body && prism_controller.view.querying?
         return if prism_controller.handle_query_key(ev)
       end
-      # Replay sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc.
+      # Repeater sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc.
       # Opened from the strip (not the body), so it's not gated on @focus.
-      if @active_tab == :replay && @overlay == :none && replay_controller.subtab_filter_editing?
-        replay_controller.handle_subtab_filter_key(ev)
+      if @active_tab == :repeater && @overlay == :none && repeater_controller.subtab_filter_editing?
+        repeater_controller.handle_subtab_filter_key(ev)
         return
       end
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.detail_open?
@@ -750,7 +750,7 @@ module Gori::Tui
       if @active_tab == :decoder && @overlay == :none && @focus == :body && decoder_controller.completing?
         return if decoder_controller.handle_complete_key(ev)
       end
-      # The $ENV autocomplete popup in an editor (Replay request, Fuzzer template) owns
+      # The $ENV autocomplete popup in an editor (Repeater request, Fuzzer template) owns
       # Tab/↵/↑/↓/Esc while open — before the focus ring claims Tab, so Tab accepts the
       # suggestion. Non-popup keys fall through (return false) so editing + refilter flow on.
       if @overlay == :none && @focus == :body && (ac = @tabs[@active_tab]?) && ac.editor_completing?
@@ -762,14 +762,14 @@ module Gori::Tui
       if @overlay == :none && @focus == :body && ev.key.tab? && (at = @tabs[@active_tab]?) && at.editor_captures_tab?
         return if at.handle_editor_tab(ev)
       end
-      # Focusable sub-tab strip (Replay/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
+      # Focusable sub-tab strip (Repeater/Notes): ←/→ switch sub-tabs, ↓/↵ drop into
       # the editor, ↑/esc pop to the tab bar. Claimed BEFORE the Tab ring + ^N so the
-      # strip owns Tab and its own ^N. @focus is only ever :subtabs for Replay/Notes.
+      # strip owns Tab and its own ^N. @focus is only ever :subtabs for Repeater/Notes.
       return handle_subtabs_key(ev) if @overlay == :none && @focus == :subtabs
 
       # Unified focus ring: Tab / Shift-Tab move focus across the tab bar and the
       # current tab's panes (tab-bar ▸ pane1 ▸ pane2 ▸ tab-bar). Claimed here so it
-      # wins over the per-tab body editors below (Replay used to hijack Tab).
+      # wins over the per-tab body editors below (Repeater used to hijack Tab).
       # termisu decodes Shift-Tab as the distinct BackTab key (not Tab+shift).
       # The scope add/edit row owns Tab while open (it stays inert) so a stray ↹ can't
       # strand a half-composed rule over the description editor.
@@ -779,10 +779,10 @@ module Gori::Tui
         return
       end
 
-      # ^N opens a new blank replay whenever the Replay tab is active — body OR
+      # ^N opens a new blank repeater whenever the Repeater tab is active — body OR
       # tab-bar focus — so the advertised empty-state shortcut is never a dead key.
-      if @active_tab == :replay && @overlay == :none && ev.ctrl? && ev.key.lower_n?
-        replay_controller.replay_new
+      if @active_tab == :repeater && @overlay == :none && ev.ctrl? && ev.key.lower_n?
+        repeater_controller.repeater_new
         return
       end
 
@@ -793,7 +793,7 @@ module Gori::Tui
       end
 
       # ^N opens a new note from the Notes tab (body OR tab-bar focus), mirroring
-      # Replay's new-request shortcut so it's never a dead key.
+      # Repeater's new-request shortcut so it's never a dead key.
       if @active_tab == :notes && @overlay == :none && ev.ctrl? && ev.key.lower_n?
         notes_controller.notes_new
         return
@@ -803,7 +803,7 @@ module Gori::Tui
       # settings:editor). A Body-scope verb would be shadowed by the per-tab handlers
       # below, so claim it inline here. Each target is gated to where it's editable.
       if @overlay == :none && @focus == :body && ev.ctrl? && ev.key.lower_e?
-        if @active_tab == :replay && (v = replay_controller.current_view) && v.focus == :request
+        if @active_tab == :repeater && (v = repeater_controller.current_view) && v.focus == :request
           v.toggle_request_hex if v.request_hex?                                             # commit + drop the hex buffer (external editor is text)
           run_external_editor(v.edit_buffer_text, :request) { |t| v.replace_edit_buffer(t) } # active sub-pane (envelope/decoded)
           return
@@ -836,7 +836,7 @@ module Gori::Tui
       chord = Keybind.from_event(ev)
       return unless chord
       # Resolve through the keymap, honouring available? so a scoped binding that is
-      # gated off (e.g. Replay copy only in READ) does not swallow the chord — and so
+      # gated off (e.g. Repeater copy only in READ) does not swallow the chord — and so
       # Global breath keys (c/i/s) still fire when a scoped verb is unavailable.
       if id = resolve_verb_id(chord, current_scope)
         @toast = @session.registry[id].call(self) || @toast
@@ -847,9 +847,9 @@ module Gori::Tui
       # scoped keymap so any area that already binds space wins — Sitemap's space
       # toggles a tree node (sitemap.toggle). The Project SCOPE pane instead DEFERS
       # space to here (its lens toggle is the menu-only scope.lens-toggle verb). Only
-      # reached in NAVIGABLE contexts: text editors (Replay request/target, Notes,
+      # reached in NAVIGABLE contexts: text editors (Repeater request/target, Notes,
       # Project desc, the QL "/" bar, Findings notes, Intercept edit) swallow keys
-      # upstream, so space stays a literal char there. (The read-only Replay response
+      # upstream, so space stays a literal char there. (The read-only Repeater response
       # pane + the Intercept queue route space from their own handlers, which return
       # before this point.)
       open_space_menu if ev.key.space? && !ev.ctrl? && !ev.alt?
@@ -857,7 +857,7 @@ module Gori::Tui
 
     # Keymap id for `chord` in `scope` (then Global) whose verb is currently available.
     # A scoped hit that fails available? does not block the Global fallback — so e.g.
-    # Replay's READ-only `y` does not shadow a future Global on the same letter when
+    # Repeater's READ-only `y` does not shadow a future Global on the same letter when
     # the user is in INS, and gated response tools never swallow breath keys.
     private def resolve_verb_id(chord : Verb::Chord, scope : Verb::Scope) : String?
       if id = @keymap.lookup(chord, scope)
@@ -901,7 +901,7 @@ module Gori::Tui
       end
     end
 
-    # Right-click: rename a Replay/Fuzzer/Decoder/Miner sub-tab chip (the one context menu we have).
+    # Right-click: rename a Repeater/Fuzzer/Decoder/Miner sub-tab chip (the one context menu we have).
     # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
       if @goto_open || @search_open || @rename_open || @tag_edit_open || @import_open
@@ -949,7 +949,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :replay_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule, :ca_import then true
+      when :palette, :rules, :finding_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :finding_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule, :ca_import then true
       else                                                                                                                                                                                                                                                               false
       end
     end
@@ -968,13 +968,13 @@ module Gori::Tui
       if seg
         seg[0] == @active_tab ? focus_pane(:menu) : focus_tab(seg[0], focus: :menu)
       else
-        focus_pane(:menu) # empty menu area: land on the tab bar like the keyboard (clears a stale overlay, saves replay edits)
+        focus_pane(:menu) # empty menu area: land on the tab bar like the keyboard (clears a stale overlay, saves repeater edits)
       end
     end
 
-    # Click a Replay/Notes sub-tab chip (carved off the body's top row). Returns true
+    # Click a Repeater/Notes sub-tab chip (carved off the body's top row). Returns true
     # when the click landed on the strip row (handled), false to fall through to body.
-    # strip_divider must match framed_body (Replay carves chips only; filter owns hairline).
+    # strip_divider must match framed_body (Repeater carves chips only; filter owns hairline).
     private def click_subtab_strip(body : Rect, mx : Int32, my : Int32) : Bool
       sub_rect = BodyChrome.strip_rect(body, strip: subtabs_shown?, strip_divider: subtab_strip_divider?)
       return false unless sub_rect && sub_rect.contains?(mx, my)
@@ -998,7 +998,7 @@ module Gori::Tui
       @tabs[@active_tab]?.try(&.subtab_start) || 0
     end
 
-    # Absolute chip indices hidden by the active tab's sub-tab filter (Replay only);
+    # Absolute chip indices hidden by the active tab's sub-tab filter (Repeater only);
     # nil = show all. Threaded into every strip_segments/render call so click hit-tests
     # skip filtered chips exactly like rendering does.
     private def current_subtab_hidden : Set(Int32)?
@@ -1043,7 +1043,7 @@ module Gori::Tui
       when :choice        then click_choice(area, mx, my)
       when :tabs_more     then click_more_menu(layout, mx, my)
       when :comparer_pick then click_flow_picker(area, mx, my)
-      when :replay_subtab then click_subtab_picker(area, mx, my)
+      when :repeater_subtab then click_subtab_picker(area, mx, my)
       when :links         then click_links(area, mx, my)
       when :finding_pick  then click_finding_picker(area, mx, my)
       when :note_pick     then click_note_picker(area, mx, my)
@@ -1260,7 +1260,7 @@ module Gori::Tui
 
     # --- scroll wheel --------------------------------------------------------
     # ±3 per notch. Lists move the SELECTION (selection-follow, matches the keyboard);
-    # free-scroll panes (History detail, Replay response) scroll independently.
+    # free-scroll panes (History detail, Repeater response) scroll independently.
     private def handle_wheel(layout : Layout, mx : Int32, my : Int32, dir : Int32) : Nil
       step = dir * 3
       return @space_menu.move(step) if @space_menu_open
@@ -1281,7 +1281,7 @@ module Gori::Tui
       when :choice        then @choice_picker.try(&.move(step))
       when :tabs_more     then @more_menu.try(&.move(step))
       when :comparer_pick then @flow_picker.try(&.move(step))
-      when :replay_subtab then @subtab_picker.try(&.move(step))
+      when :repeater_subtab then @subtab_picker.try(&.move(step))
       when :links         then @links_overlay.try(&.move(step))
       when :finding_pick  then @finding_picker.try(&.move(step))
       when :note_pick     then @note_picker.try(&.move(step))
@@ -1624,8 +1624,8 @@ module Gori::Tui
     # The focus-aware option set for the active context (empty ⇒ no copy-as variants).
     private def copy_as_menu : {String, Array(CopyMenu::Option)}
       case @active_tab
-      when :replay
-        replay_controller.copy_as_menu
+      when :repeater
+        repeater_controller.copy_as_menu
       when :history
         @overlay == :detail ? history_controller.detail_copy_as_menu : {"COPY AS", [] of CopyMenu::Option}
       else
@@ -1689,7 +1689,7 @@ module Gori::Tui
     end
 
     # Orthogonal to @overlay — closing just drops the picker; whatever was underneath
-    # (Replay body or the History detail drill-in) is untouched, so the user returns
+    # (Repeater body or the History detail drill-in) is untouched, so the user returns
     # exactly where they invoked it.
     private def close_copy_picker : Nil
       @copy_picker = nil
@@ -1753,7 +1753,7 @@ module Gori::Tui
       end
     end
 
-    # Replay sub-tab search (space → s): type to filter the open sessions, ↑/↓
+    # Repeater sub-tab search (space → s): type to filter the open sessions, ↑/↓
     # select, ↵ jump to the highlighted one, esc cancel.
     private def handle_subtab_picker_key(ev : Termisu::Event::Key) : Nil
       sp = @subtab_picker
@@ -1781,7 +1781,7 @@ module Gori::Tui
           ref_kind = @link_add_ref_kind
           ref_id = if rk = ref_kind
                      case rk
-                     when .replay? then replay_controller.db_id_at(idx)
+                     when .repeater? then repeater_controller.db_id_at(idx)
                      when .fuzz?   then fuzzer_controller.db_id_at(idx)
                      when .miner?  then miner_controller.db_id_at(idx)
                      else               nil
@@ -1800,7 +1800,7 @@ module Gori::Tui
         return
       end
       if idx = sp.selected_index
-        @tabs[@active_tab]?.try(&.jump_subtab(idx)) # active tab owns the strip (Replay/Fuzzer/Notes/Decoder)
+        @tabs[@active_tab]?.try(&.jump_subtab(idx)) # active tab owns the strip (Repeater/Fuzzer/Notes/Decoder)
         @focus = :body                              # land on the chosen session's content
       end
       close_subtab_picker
@@ -1839,7 +1839,7 @@ module Gori::Tui
       if lo.adding?
         case c
         when 'f' then open_link_add_flow_picker(lo)
-        when 'r' then open_link_add_replay_picker(lo)
+        when 'r' then open_link_add_repeater_picker(lo)
         when 'z' then open_link_add_fuzz_picker(lo)
         when 'm' then open_link_add_miner_picker(lo)
         when nil
@@ -1915,13 +1915,13 @@ module Gori::Tui
       lo.stop_add
     end
 
-    private def open_link_add_replay_picker(lo : LinksOverlay) : Nil
-      rows = replay_controller.subtab_search_rows
-      return (@toast = "no replay sessions to link"; lo.stop_add) if rows.empty?
+    private def open_link_add_repeater_picker(lo : LinksOverlay) : Nil
+      rows = repeater_controller.subtab_search_rows
+      return (@toast = "no repeater sessions to link"; lo.stop_add) if rows.empty?
       @link_add_owner = {lo.owner_kind, lo.owner_id}
-      @link_add_ref_kind = Store::LinkRefKind::Replay
-      @subtab_picker = SubtabPicker.new("PICK REPLAY", rows, action: "link")
-      @overlay = :replay_subtab
+      @link_add_ref_kind = Store::LinkRefKind::Repeater
+      @subtab_picker = SubtabPicker.new("PICK REPEATER", rows, action: "link")
+      @overlay = :repeater_subtab
       lo.stop_add
     end
 
@@ -1931,7 +1931,7 @@ module Gori::Tui
       @link_add_owner = {lo.owner_kind, lo.owner_id}
       @link_add_ref_kind = Store::LinkRefKind::Fuzz
       @subtab_picker = SubtabPicker.new("PICK FUZZ", rows, action: "link")
-      @overlay = :replay_subtab
+      @overlay = :repeater_subtab
       lo.stop_add
     end
 
@@ -1941,7 +1941,7 @@ module Gori::Tui
       @link_add_owner = {lo.owner_kind, lo.owner_id}
       @link_add_ref_kind = Store::LinkRefKind::Miner
       @subtab_picker = SubtabPicker.new("PICK MINER", rows, action: "link")
-      @overlay = :replay_subtab
+      @overlay = :repeater_subtab
       lo.stop_add
     end
 
@@ -2074,13 +2074,13 @@ module Gori::Tui
         else
           @toast = "flow no longer captured"
         end
-      when .replay?
-        if idx = replay_controller.index_for_db_id(ref_id)
-          @active_tab = :replay
-          replay_controller.jump_subtab(idx)
+      when .repeater?
+        if idx = repeater_controller.index_for_db_id(ref_id)
+          @active_tab = :repeater
+          repeater_controller.jump_subtab(idx)
           @focus = :body
         else
-          @toast = "replay session gone"
+          @toast = "repeater session gone"
         end
       when .fuzz?
         if idx = fuzzer_controller.index_for_db_id(ref_id)
@@ -2224,7 +2224,7 @@ module Gori::Tui
     # Commit the tab-bar working copy: persist once, force a full repaint (the tab set/
     # order changed behind the centered overlay), and if the active tab was just hidden
     # snap to the first visible one — committing the outgoing tab's edits first (a hidden
-    # Project desc / Replay request must not be silently dropped), mirroring focus_tab.
+    # Project desc / Repeater request must not be silently dropped), mirroring focus_tab.
     private def save_tabs : Nil
       Settings.tab_prefs = @tabs_overlay.to_prefs
       ok = Settings.save
@@ -2236,7 +2236,7 @@ module Gori::Tui
       unless vis.any? { |(s, _)| s == @active_tab }
         # Persist the outgoing tab's dirty buffer before snapping off — @active_tab still
         # names the tab being hidden here. flush_active_tab_edits covers all hideable tabs
-        # (Notes/Fuzzer/Findings/Miner included), unlike the old project/replay/decoder-only
+        # (Notes/Fuzzer/Findings/Miner included), unlike the old project/repeater/decoder-only
         # flush which silently dropped the others at hide-time.
         flush_active_tab_edits
         @active_tab = vis.first[0]
@@ -2486,13 +2486,13 @@ module Gori::Tui
     end
 
     # A navigable sub-tab strip is showing — gates entry into :subtabs (and the strip
-    # click/rename paths). Each controller decides its own threshold (Replay/Fuzzer/
+    # click/rename paths). Each controller decides its own threshold (Repeater/Fuzzer/
     # Notes/Decoder ≥1 so a single session is still labelled + space-menu reachable).
     private def subtabs_shown? : Bool
       @tabs[@active_tab]?.try(&.subtab_strip_shown?) || false
     end
 
-    # Whether the strip carve includes its hairline (must match framed_body). Replay
+    # Whether the strip carve includes its hairline (must match framed_body). Repeater
     # returns false so clicks on the filter/divider rows fall through to the body.
     private def subtab_strip_divider? : Bool
       if t = @tabs[@active_tab]?
@@ -2502,7 +2502,7 @@ module Gori::Tui
       end
     end
 
-    # The focusable sub-tab strip for Replay/Fuzzer/Notes/Decoder (@focus == :subtabs). Mirrors the
+    # The focusable sub-tab strip for Repeater/Fuzzer/Notes/Decoder (@focus == :subtabs). Mirrors the
     # tab bar's idiom one level down: ←/→ switch sub-tabs, ↓/↵/Tab enter the editor,
     # ↑/esc pop to the tab bar. ^1-9 jumps and stays on the strip; ^N/^W create/close.
     private def handle_subtabs_key(ev : Termisu::Event::Key) : Nil
@@ -2520,13 +2520,13 @@ module Gori::Tui
       when ev.ctrl? && c && '1' <= c <= '9'
         jump_subtab(c.to_i - 1) # switch + stay on the strip
       when rename_chord?(ev)
-        open_rename(current_subtab_index) # rename the active sub-tab (Replay/Fuzzer/Decoder/Miner)
-      when @active_tab == :replay && ev.ctrl? && key.lower_r?
-        replay_controller.replay_send # send from the strip too — not just :body focus
-      when @active_tab == :replay && !ev.ctrl? && !ev.alt? && key.lower_t?
-        open_tag_edit(current_subtab_index) # tag the active Replay sub-tab (issue #121)
-      when @active_tab == :replay && !ev.ctrl? && !ev.alt? && c == '/'
-        replay_controller.start_subtab_filter # open the `/` tag-filter bar
+        open_rename(current_subtab_index) # rename the active sub-tab (Repeater/Fuzzer/Decoder/Miner)
+      when @active_tab == :repeater && ev.ctrl? && key.lower_r?
+        repeater_controller.repeater_send # send from the strip too — not just :body focus
+      when @active_tab == :repeater && !ev.ctrl? && !ev.alt? && key.lower_t?
+        open_tag_edit(current_subtab_index) # tag the active Repeater sub-tab (issue #121)
+      when @active_tab == :repeater && !ev.ctrl? && !ev.alt? && c == '/'
+        repeater_controller.start_subtab_filter # open the `/` tag-filter bar
       when key.left?, key.lower_h?
         move_subtab(-1)
       when key.right?, key.lower_l?
@@ -2546,12 +2546,12 @@ module Gori::Tui
     # tab is matched explicitly (NOT an `else → notes`): tabs with a FIXED strip
     # (Help) also expose subtab_labels, so a stray ^N/^W/^P-commit from their strip
     # must no-op here, never leak into Notes. :miner is intentionally absent — mining
-    # sessions are seeded by a background job (History/Replay → "Mine parameters"),
+    # sessions are seeded by a background job (History/Repeater → "Mine parameters"),
     # not created in-place, so ^N is a deliberate no-op on the Miner strip (its
     # body_hint never advertises it). Rename/close still work.
     private def subtab_new : Nil
       case @active_tab
-      when :replay   then replay_controller.replay_new
+      when :repeater   then repeater_controller.repeater_new
       when :fuzzer   then fuzzer_controller.fuzz_new
       when :decoder  then decoder_controller.decoder_new
       when :notes    then notes_controller.notes_new
@@ -2563,14 +2563,14 @@ module Gori::Tui
     # — its sessions are seeded by a background job, not ^N — so the strip hint omits ^N new.
     private def subtab_new_supported? : Bool
       case @active_tab
-      when :replay, :fuzzer, :decoder, :notes, :comparer then true
+      when :repeater, :fuzzer, :decoder, :notes, :comparer then true
       else                                                    false
       end
     end
 
     private def subtab_close : Nil
       case @active_tab
-      when :replay   then replay_controller.request_close
+      when :repeater   then repeater_controller.request_close
       when :fuzzer   then fuzzer_controller.request_close
       when :miner    then miner_controller.request_close
       when :decoder  then decoder_controller.decoder_close
@@ -2581,7 +2581,7 @@ module Gori::Tui
 
     private def subtab_commit : Nil
       case @active_tab
-      when :replay  then replay_controller.save_current_replay
+      when :repeater  then repeater_controller.save_current_repeater
       when :fuzzer  then fuzzer_controller.save_current
       when :miner   then miner_controller.save_current
       when :decoder then decoder_controller.commit
@@ -2601,12 +2601,12 @@ module Gori::Tui
     end
 
     # After ^W on the strip the chip count may drop below 2 (strip gone) or to 0
-    # (Replay only) — re-resolve focus so we never sit on an invisible strip.
+    # (Repeater only) — re-resolve focus so we never sit on an invisible strip.
     private def resolve_subtab_focus_after_close : Nil
       case @active_tab
-      when :replay
-        focus_pane(:menu) if replay_controller.empty?
-        focus_pane(:body) if !replay_controller.empty? && !subtabs_shown?
+      when :repeater
+        focus_pane(:menu) if repeater_controller.empty?
+        focus_pane(:body) if !repeater_controller.empty? && !subtabs_shown?
       when :fuzzer
         focus_pane(:menu) if fuzzer_controller.empty?
         focus_pane(:body) if !fuzzer_controller.empty? && !subtabs_shown?
@@ -2620,10 +2620,10 @@ module Gori::Tui
     # True while the Project SCOPE pane's inline add/edit row is composing — Tab stays
     # inert then (the row owns it) instead of switching panes.
     # The Intercept queue. Not editing: navigate + decide. Editing: typing edits
-    # the held bytes (Replay-style): type to edit, `^R` forwards the edited bytes,
+    # the held bytes (Repeater-style): type to edit, `^R` forwards the edited bytes,
     # `esc` leaves editing. While editing, EVERY letter is literal (incl. f/d) —
     # the queue's f/F/d shortcuts only apply when not editing, exactly like the
-    # Replay editor reserves actions for modifier chords.
+    # Repeater editor reserves actions for modifier chords.
     private def create_finding_from_form : Nil
       form = @finding_form
       title = form.title.strip
@@ -2738,8 +2738,8 @@ module Gori::Tui
     # read-only panes). Shared by ^G go-to-line and ^F search.
     private def jump_line(target : Symbol, n : Int32) : Nil
       case target
-      when :replay_request  then replay_controller.current_view.try(&.goto_request_line(n))
-      when :replay_response then replay_controller.current_view.try(&.goto_response_line(n))
+      when :repeater_request  then repeater_controller.current_view.try(&.goto_request_line(n))
+      when :repeater_response then repeater_controller.current_view.try(&.goto_response_line(n))
       when :notes           then notes_controller.view.goto_line(n)
       when :project         then project_controller.view.goto_line(n)
       when :detail          then history_controller.view.goto_detail_line(n)
@@ -2749,8 +2749,8 @@ module Gori::Tui
 
     private def search_lines_for(target : Symbol, query : String) : Array(Int32)
       case target
-      when :replay_request  then replay_controller.current_view.try(&.request_search_lines(query)) || [] of Int32
-      when :replay_response then replay_controller.current_view.try(&.response_search_lines(query)) || [] of Int32
+      when :repeater_request  then repeater_controller.current_view.try(&.request_search_lines(query)) || [] of Int32
+      when :repeater_response then repeater_controller.current_view.try(&.response_search_lines(query)) || [] of Int32
       when :notes           then notes_controller.view.search_lines(query)
       when :project         then project_controller.view.search_lines(query)
       when :detail          then history_controller.view.detail_search_lines(query)
@@ -2760,11 +2760,11 @@ module Gori::Tui
     end
 
     # Push the active ^F query to the target view so it highlights matches (cleared
-    # with "" on close). Routes like jump_line; replay covers both panes.
+    # with "" on close). Routes like jump_line; repeater covers both panes.
     private def set_search_hl(q : String) : Nil
       case @search_target
-      when :replay_request  then replay_controller.current_view.try(&.request_search_hl=(q))
-      when :replay_response then replay_controller.current_view.try(&.response_search_hl=(q))
+      when :repeater_request  then repeater_controller.current_view.try(&.request_search_hl=(q))
+      when :repeater_response then repeater_controller.current_view.try(&.response_search_hl=(q))
       when :notes           then notes_controller.view.search_hl = q
       when :project         then project_controller.view.search_hl = q
       when :detail          then history_controller.view.search_hl = q
@@ -2808,7 +2808,7 @@ module Gori::Tui
     end
 
     # Re-find without re-jumping — called when the searched view's content changes
-    # under an open prompt (a replay result lands / a peer fills the detail), so the
+    # under an open prompt (a repeater result lands / a peer fills the detail), so the
     # cached hits + count stay correct without re-scanning on every ↑/↓ step.
     private def search_recompute : Nil
       return unless @search_open
@@ -2843,7 +2843,7 @@ module Gori::Tui
     end
 
     # Toggle pretty-print of req/res bodies (display only) — global like reveal, so a
-    # single `p` flips both History detail and the Replay response.
+    # single `p` flips both History detail and the Repeater response.
     def toggle_pretty : Nil
       @pretty = !@pretty
       @toast = "pretty bodies: #{@pretty ? "on" : "off"}"
@@ -2863,7 +2863,7 @@ module Gori::Tui
 
     # The (scope, section) the space menu renders for, captured at the space
     # keystroke. Deliberately DISTINCT from current_scope (the keymap's resolver,
-    # unchanged above) — the tab bar keeps Sidebar for keybindings (so Replay's
+    # unchanged above) — the tab bar keeps Sidebar for keybindings (so Repeater's
     # chords don't fire while navigating tabs) but the space menu on the tab bar
     # should show that TAB's own top actions instead. By the time this is read,
     # @overlay is always :none or :detail — every other overlay handles its own
@@ -2887,14 +2887,14 @@ module Gori::Tui
 
     private def format_status_message(message : String?) : String?
       return nil unless message
-      if message.starts_with?("replaying →") || message.starts_with?("ws replay →") ||
+      if message.starts_with?("replaying →") || message.starts_with?("ws repeater →") ||
          message.starts_with?("fuzzing ") || message.starts_with?("fuzz running") ||
          message.starts_with?("stopping")
         "#{SPINNER[@spinner_frame % SPINNER.size]} #{message}"
       elsif message.starts_with?("replayed →") || message.starts_with?("ws replayed:") ||
             message.starts_with?("Fuzzer:")
         "✓ #{message}"
-      elsif message.starts_with?("replay error:") || message.starts_with?("ws replay error:") ||
+      elsif message.starts_with?("repeater error:") || message.starts_with?("ws repeater error:") ||
             message.starts_with?("fuzz error:") || message.starts_with?("fuzz:") ||
             message.starts_with?("cannot run")
         "✗ #{message}"
@@ -2947,7 +2947,7 @@ module Gori::Tui
       @choice_picker.try(&.render(screen, layout.body)) if @overlay == :choice
       @more_menu.try(&.render(screen, more_anchor_rect(layout), layout.body)) if @overlay == :tabs_more
       @flow_picker.try(&.render(screen, layout.body)) if @overlay == :comparer_pick
-      @subtab_picker.try(&.render(screen, layout.body)) if @overlay == :replay_subtab
+      @subtab_picker.try(&.render(screen, layout.body)) if @overlay == :repeater_subtab
       @links_overlay.try(&.render(screen, layout.body)) if @overlay == :links
       @finding_picker.try(&.render(screen, layout.body)) if @overlay == :finding_pick
       @note_picker.try(&.render(screen, layout.body)) if @overlay == :note_pick
@@ -3047,7 +3047,7 @@ module Gori::Tui
       when :browser       then "BROWSER"
       when :choice        then @choice_picker.try(&.title) || "CHOOSE"
       when :comparer_pick then "PICK FLOW"
-      when :replay_subtab then @subtab_picker.try(&.title) || "FIND SUB-TAB"
+      when :repeater_subtab then @subtab_picker.try(&.title) || "FIND SUB-TAB"
       when :links         then @links_overlay.try(&.title) || "LINKS"
       when :finding_pick  then "PICK FINDING"
       when :note_pick     then "PICK NOTE"
@@ -3095,7 +3095,7 @@ module Gori::Tui
       when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
       when :tabs_more     then "↑/↓ select · ↵ open tab · ←/esc close"
       when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when :replay_subtab then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
+      when :repeater_subtab then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
       when :links         then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
       when :finding_pick  then "type to filter · ↑/↓ select · ↵ link · esc cancel"
       when :note_pick     then "type to filter · ↑/↓ select · ↵ link · esc cancel"
@@ -3182,7 +3182,7 @@ module Gori::Tui
     private def commit_pending_edits : Nil
       notes_controller.save_notes
       project_controller.commit
-      replay_controller.save_current_replay
+      repeater_controller.save_current_repeater
       fuzzer_controller.save_current
       miner_controller.save_current
       findings_controller.commit
@@ -3303,7 +3303,7 @@ module Gori::Tui
     # Open the space action menu scoped to the CURRENT focus area. current_scope is
     # read BEFORE flipping @space_menu_open (which is orthogonal to @overlay) so the
     # scope reflects where space was pressed — the History list → Body, an open
-    # detail → HistoryDetail, the Replay response → Replay, the tab bar → Sidebar.
+    # detail → HistoryDetail, the Repeater response → Repeater, the tab bar → Sidebar.
     def open_space_menu : Nil
       scope, section = space_menu_context
       @space_menu.open(scope, section, self) # captures the scope+section + populates entries
@@ -3351,7 +3351,7 @@ module Gori::Tui
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
-    # --- Replay sub-tab rename (bottom prompt, like ^G/^F) -------------------
+    # --- Repeater sub-tab rename (bottom prompt, like ^G/^F) -------------------
 
     private def handle_rename_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
@@ -3375,10 +3375,10 @@ module Gori::Tui
       renameable_subtabs? && ev.key.lower_r? && !ev.ctrl? && !ev.alt?
     end
 
-    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer + Decoder + Miner + Comparer).
+    # The tabs whose sub-tab chips carry a custom name (Repeater + Fuzzer + Decoder + Miner + Comparer).
     # Notes derives its label from the body text, so it has no rename.
     private def renameable_subtabs? : Bool
-      @active_tab == :replay || @active_tab == :fuzzer || @active_tab == :decoder ||
+      @active_tab == :repeater || @active_tab == :fuzzer || @active_tab == :decoder ||
         @active_tab == :miner || @active_tab == :comparer
     end
 
@@ -3388,7 +3388,7 @@ module Gori::Tui
     # redirect it.
     private def open_rename(idx : Int32) : Nil
       view = case @active_tab
-             when :replay   then replay_controller.view_at(idx)
+             when :repeater   then repeater_controller.view_at(idx)
              when :fuzzer   then fuzzer_controller.view_at(idx)
              when :decoder  then decoder_controller.view_at(idx)
              when :miner    then miner_controller.view_at(idx)
@@ -3413,7 +3413,7 @@ module Gori::Tui
     # (the chip reverts to the request/template-derived summary).
     private def apply_rename(name : String) : Nil
       case v = @rename_view
-      when ReplayView   then replay_controller.apply_rename(v, name)
+      when RepeaterView   then repeater_controller.apply_rename(v, name)
       when FuzzerView   then fuzzer_controller.apply_rename(v, name)
       when DecoderView  then decoder_controller.apply_rename(v, name)
       when MinerView    then miner_controller.apply_rename(v, name)
@@ -3433,14 +3433,14 @@ module Gori::Tui
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
-    # --- Replay sub-tab TAG editor (issue #121) ---------------------------------
-    # A bottom prompt mirroring rename: space-separated flat tags for the active Replay
+    # --- Repeater sub-tab TAG editor (issue #121) ---------------------------------
+    # A bottom prompt mirroring rename: space-separated flat tags for the active Repeater
     # sub-tab. The target is held by VIEW identity (the reconcile may reorder/remove
     # tabs while the prompt is open) — apply_tags re-finds it, never a shifted neighbour.
 
     private def open_tag_edit(idx : Int32) : Nil
-      return unless @active_tab == :replay
-      return unless view = replay_controller.view_at(idx)
+      return unless @active_tab == :repeater
+      return unless view = repeater_controller.view_at(idx)
       @tag_view = view
       @tag_buffer = view.tags.join(" ")
       @tag_preedit = ""
@@ -3471,7 +3471,7 @@ module Gori::Tui
 
     private def apply_tag_edit(raw : String) : Nil
       if v = @tag_view
-        replay_controller.apply_tags(v, raw)
+        repeater_controller.apply_tags(v, raw)
       end
     end
 
@@ -3612,9 +3612,9 @@ module Gori::Tui
 
     def focus_pane(pane : Symbol) : Nil
       pane = :menu if pane == :subtabs && !subtabs_shown? # never strand focus on an absent strip
-      # Leaving the Replay editor for the tab bar (esc / ↑-to-bar) — persist edits,
+      # Leaving the Repeater editor for the tab bar (esc / ↑-to-bar) — persist edits,
       # mirroring how Notes saves on leave. Cheap no-op when the tab is clean.
-      replay_controller.save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
+      repeater_controller.save_current_repeater if @active_tab == :repeater && @focus == :body && pane != :body
       fuzzer_controller.save_current if @active_tab == :fuzzer && @focus == :body && pane != :body
       decoder_controller.commit if @active_tab == :decoder && @focus == :body && pane != :body
       notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
@@ -3626,7 +3626,7 @@ module Gori::Tui
 
     # Descend from the tab menu (↓/↵/j on the tab bar). When focus is on the far-right
     # ⋯ "more" affordance, ↓/↵ EXPANDS the hidden-tabs dropdown instead. Otherwise: tabs
-    # with a navigable sub-tab strip (Replay/Notes/Decoder) land on the STRIP first so
+    # with a navigable sub-tab strip (Repeater/Notes/Decoder) land on the STRIP first so
     # ←/→ can switch sub-tabs; ↓/↵ again drops into the editor. Other tabs go straight to
     # the body. (`focus_pane`'s guard would otherwise route an absent strip to the menu,
     # so the active tab is checked here.)
@@ -3643,7 +3643,7 @@ module Gori::Tui
     # lost on an abnormal exit). Every dirty-holding tab is dirty-guarded in its own commit.
     private def flush_active_tab_edits : Nil
       project_controller.commit if @active_tab == :project
-      replay_controller.save_current_replay if @active_tab == :replay
+      repeater_controller.save_current_repeater if @active_tab == :repeater
       fuzzer_controller.save_current if @active_tab == :fuzzer
       miner_controller.save_current if @active_tab == :miner
       decoder_controller.commit if @active_tab == :decoder
@@ -3923,13 +3923,13 @@ module Gori::Tui
       end
     end
 
-    # Send a finding's linked flow to the Replay tab to re-test the evidence. CROSS-TAB
-    # mediator: reads the Findings controller, opens a Replay tab.
-    def finding_replay_flow : Nil
+    # Send a finding's linked flow to the Repeater tab to re-test the evidence. CROSS-TAB
+    # mediator: reads the Findings controller, opens a Repeater tab.
+    def finding_repeater_flow : Nil
       return unless f = findings_controller.view.detail_finding
       return (@toast = "this finding has no linked flow") unless fid = f.flow_id
       if @session.store.get_flow(fid)
-        replay_flow(fid)
+        repeater_flow(fid)
       else
         @toast = "evidence no longer captured (pruned)"
       end
@@ -3970,14 +3970,14 @@ module Gori::Tui
 
     # The flow a History action targets: the one pinned in the OPEN detail overlay, else the
     # list selection. Live capture can advance the list cursor (`@selected = 0` on a new flow)
-    # while the detail overlay stays on its flow, so detail.* verbs (replay/finding/fuzz/mine/
+    # while the detail overlay stays on its flow, so detail.* verbs (repeater/finding/fuzz/mine/
     # comparer/copy/scope) must read the detail, not the cursor — or they act on the wrong flow.
     def history_target_flow_id : Int64?
       @overlay == :detail ? history_controller.view.detail_flow_id : history_controller.selected_flow_id
     end
 
-    def link_replay_id : Int64?
-      replay_controller.current_session_db_id if @active_tab == :replay
+    def link_repeater_id : Int64?
+      repeater_controller.current_session_db_id if @active_tab == :repeater
     end
 
     def link_fuzz_id : Int64?
@@ -4020,8 +4020,8 @@ module Gori::Tui
     private def current_link_ref : {Store::LinkRefKind, Int64}?
       if fid = link_flow_id
         {Store::LinkRefKind::Flow, fid}
-      elsif rid = link_replay_id
-        {Store::LinkRefKind::Replay, rid}
+      elsif rid = link_repeater_id
+        {Store::LinkRefKind::Repeater, rid}
       elsif zid = link_fuzz_id
         {Store::LinkRefKind::Fuzz, zid}
       elsif mid = link_miner_id
@@ -4082,7 +4082,7 @@ module Gori::Tui
     end
 
     # Jump from an issue to its sample evidence: History flow when present, else the
-    # Replay tab that first produced the hit (Replay-sourced passive issues).
+    # Repeater tab that first produced the hit (Repeater-sourced passive issues).
     def prism_open_flow : Nil
       return unless i = prism_controller.view.target_issue
       if fid = i.sample_flow_id
@@ -4095,27 +4095,27 @@ module Gori::Tui
         end
         return
       end
-      if rid = i.sample_replay_id
-        navigate_link_ref(Store::LinkRefKind::Replay, rid)
+      if rid = i.sample_repeater_id
+        navigate_link_ref(Store::LinkRefKind::Repeater, rid)
         return
       end
       @toast = "this issue has no sample evidence"
     end
 
-    # Send an issue's sample flow to Replay to re-test it (mirrors finding_replay_flow).
-    # When the only evidence is a Replay tab, jump there instead of re-spawning.
-    def prism_replay_flow : Nil
+    # Send an issue's sample flow to Repeater to re-test it (mirrors finding_repeater_flow).
+    # When the only evidence is a Repeater tab, jump there instead of re-spawning.
+    def prism_repeater_flow : Nil
       return unless i = prism_controller.view.target_issue
       if fid = i.sample_flow_id
         if @session.store.get_flow(fid)
-          replay_flow(fid)
+          repeater_flow(fid)
         else
           @toast = "evidence no longer captured (pruned)"
         end
         return
       end
-      if rid = i.sample_replay_id
-        navigate_link_ref(Store::LinkRefKind::Replay, rid)
+      if rid = i.sample_repeater_id
+        navigate_link_ref(Store::LinkRefKind::Repeater, rid)
         return
       end
       @toast = "this issue has no sample evidence"
@@ -4132,11 +4132,11 @@ module Gori::Tui
         return
       end
       fid = @session.store.insert_finding(i.title, i.severity, i.host, i.sample_flow_id)
-      # Preserve Replay-only evidence: with no source flow, link the Finding to the Replay tab
+      # Preserve Repeater-only evidence: with no source flow, link the Finding to the Repeater tab
       # that produced the issue so the evidence pointer survives promotion (insert_finding only
       # carries a flow id).
-      if i.sample_flow_id.nil? && (rid = i.sample_replay_id)
-        @session.store.add_link(Store::LinkOwnerKind::Finding, fid, Store::LinkRefKind::Replay, rid)
+      if i.sample_flow_id.nil? && (rid = i.sample_repeater_id)
+        @session.store.add_link(Store::LinkOwnerKind::Finding, fid, Store::LinkRefKind::Repeater, rid)
       end
       # Mark the source confirmed (= "promoted to a Finding") so it leaves the default
       # open-only lens instead of lingering as unreviewed noise; still reachable via `a`.
@@ -4319,157 +4319,157 @@ module Gori::Tui
       history_controller.toggle_detail_hex
     end
 
-    # --- Replay ExecContext --- (delegated to ReplayController; cross-tab mediators kept)
-    # CROSS-TAB mediator: load History's selection into a new Replay tab.
-    def replay_selected : Nil
+    # --- Repeater ExecContext --- (delegated to RepeaterController; cross-tab mediators kept)
+    # CROSS-TAB mediator: load History's selection into a new Repeater tab.
+    def repeater_selected : Nil
       id = history_target_flow_id
-      replay_controller.replay_flow(id) if id
+      repeater_controller.repeater_flow(id) if id
     end
 
-    # Open flow `id` as a new Replay tab. Shared by History's ^R + Findings' "send to
-    # Replay" mediator. Public so those mediators can drive it.
-    def replay_flow(id : Int64) : Nil
-      replay_controller.replay_flow(id)
+    # Open flow `id` as a new Repeater tab. Shared by History's ^R + Findings' "send to
+    # Repeater" mediator. Public so those mediators can drive it.
+    def repeater_flow(id : Int64) : Nil
+      repeater_controller.repeater_flow(id)
     end
 
-    def replay_new : Nil
-      replay_controller.replay_new
+    def repeater_new : Nil
+      repeater_controller.repeater_new
     end
 
-    def replay_send : Nil
-      replay_controller.replay_send
+    def repeater_send : Nil
+      repeater_controller.repeater_send
     end
 
-    def replay_send_group : Nil
-      replay_controller.replay_send_group
+    def repeater_send_group : Nil
+      repeater_controller.repeater_send_group
     end
 
-    # Open the Replay sub-tab search picker (space → s). Snapshots the open
+    # Open the Repeater sub-tab search picker (space → s). Snapshots the open
     # sessions; the picker filters them in memory and jumps on ↵.
-    def replay_find_subtab : Nil
+    def repeater_find_subtab : Nil
       subtab_search_open
     end
 
     # Generic sub-tab search — opens the fuzzy picker over the ACTIVE tab's sub-tabs
-    # (Replay/Fuzzer/Notes/Decoder). commit_subtab_picker jumps on the active controller,
+    # (Repeater/Fuzzer/Notes/Decoder). commit_subtab_picker jumps on the active controller,
     # so one path serves every strip. Gives Fuzzer/Notes/Decoder a search-and-jump that
     # doesn't rely on Ctrl+digit (undeliverable on many terminals).
     def subtab_search_open : Nil
       rows = @tabs[@active_tab]?.try(&.subtab_search_rows) || [] of SubtabPicker::Row
       return @toast = "no other sub-tab to search" if rows.size < 2
       @subtab_picker = SubtabPicker.new("FIND SUB-TAB", rows)
-      @overlay = :replay_subtab
+      @overlay = :repeater_subtab
     end
 
     def subtab_search_count : Int32
       @tabs[@active_tab]?.try(&.subtab_count) || 0
     end
 
-    def replay_subtab_count : Int32
-      replay_controller.count
+    def repeater_subtab_count : Int32
+      repeater_controller.count
     end
 
     # Space-menu (:subtab) counterparts of the strip's `r` rename chord / ^W close —
     # reuse the SAME shell-owned rename prompt / confirm-gated close, not a new path.
-    def replay_rename_subtab : Nil
+    def repeater_rename_subtab : Nil
       open_rename(current_subtab_index)
     end
 
     # Space-menu counterparts of the strip's `t` tag chord / `/` filter chord (issue
     # #121) — reuse the SAME shell-owned tag prompt / controller-owned filter bar.
-    def replay_tag_subtab : Nil
+    def repeater_tag_subtab : Nil
       open_tag_edit(current_subtab_index)
     end
 
-    def replay_filter_subtabs : Nil
-      replay_controller.start_subtab_filter
+    def repeater_filter_subtabs : Nil
+      repeater_controller.start_subtab_filter
     end
 
-    def replay_close_subtab : Nil
-      replay_controller.request_close
+    def repeater_close_subtab : Nil
+      repeater_controller.request_close
     end
 
-    def replay_duplicate_subtab : Nil
-      replay_controller.replay_duplicate
+    def repeater_duplicate_subtab : Nil
+      repeater_controller.repeater_duplicate
     end
 
-    def replay_toggle_hex : Nil
-      replay_controller.replay_toggle_hex
+    def repeater_toggle_hex : Nil
+      repeater_controller.repeater_toggle_hex
     end
 
-    def replay_toggle_decoded : Nil
-      replay_controller.replay_toggle_decoded
+    def repeater_toggle_decoded : Nil
+      repeater_controller.repeater_toggle_decoded
     end
 
-    def replay_toggle_sni : Nil
-      replay_controller.replay_toggle_sni
+    def repeater_toggle_sni : Nil
+      repeater_controller.repeater_toggle_sni
     end
 
-    def replay_toggle_auto_content_length : Nil
-      replay_controller.replay_toggle_auto_content_length
+    def repeater_toggle_auto_content_length : Nil
+      repeater_controller.repeater_toggle_auto_content_length
     end
 
-    def replay_toggle_http2 : Nil
-      replay_controller.replay_toggle_http2
+    def repeater_toggle_http2 : Nil
+      repeater_controller.repeater_toggle_http2
     end
 
     # Space-menu (:response) counterparts of the response pane's raw `d`/`x` keys —
-    # same ReplayView toggles, just reachable without memorizing the key.
-    def replay_toggle_resp_diff : Nil
+    # same RepeaterView toggles, just reachable without memorizing the key.
+    def repeater_toggle_resp_diff : Nil
       # Pane-gated: plain `d` is a response-only tool (request has other uses).
-      return unless (v = replay_controller.current_view) && v.focus == :response
+      return unless (v = repeater_controller.current_view) && v.focus == :response
       v.toggle_resp_mode
     end
 
-    def replay_toggle_resp_hex : Nil
-      return unless (v = replay_controller.current_view) && v.focus == :response
+    def repeater_toggle_resp_hex : Nil
+      return unless (v = repeater_controller.current_view) && v.focus == :response
       v.toggle_resp_hex
     end
 
-    def replay_toggle_mark_transform : Nil
-      replay_controller.replay_toggle_mark_transform
+    def repeater_toggle_mark_transform : Nil
+      repeater_controller.repeater_toggle_mark_transform
     end
 
-    def replay_pretty_request : Nil
-      replay_controller.replay_pretty_request
+    def repeater_pretty_request : Nil
+      repeater_controller.repeater_pretty_request
     end
 
-    def replay_auto_mark : Nil
-      replay_controller.replay_auto_mark
+    def repeater_auto_mark : Nil
+      repeater_controller.repeater_auto_mark
     end
 
-    def replay_mark_word : Nil
-      replay_controller.replay_mark_word
+    def repeater_mark_word : Nil
+      repeater_controller.repeater_mark_word
     end
 
-    def replay_insert_marker : Nil
-      replay_controller.replay_insert_marker
+    def repeater_insert_marker : Nil
+      repeater_controller.repeater_insert_marker
     end
 
-    def replay_clear_marks : Nil
-      replay_controller.replay_clear_marks
+    def repeater_clear_marks : Nil
+      repeater_controller.repeater_clear_marks
     end
 
     # ^Y: jump focus DOWN into the visible CHAIN pane (the marker under the cursor). The
     # controller gates on MARK mode + cursor-in-marker and toasts otherwise.
-    def replay_attach_chain : Nil
-      replay_controller.replay_focus_chain_pane
+    def repeater_attach_chain : Nil
+      repeater_controller.repeater_focus_chain_pane
     end
 
-    def replay_copy : Nil
-      replay_controller.replay_copy
+    def repeater_copy : Nil
+      repeater_controller.repeater_copy
     end
 
-    def replay_copy_all : Nil
-      replay_controller.replay_copy_all
+    def repeater_copy_all : Nil
+      repeater_controller.repeater_copy_all
     end
 
-    def replay_read_mode? : Bool
-      replay_controller.replay_read_mode?
+    def repeater_read_mode? : Bool
+      repeater_controller.repeater_read_mode?
     end
 
-    def close_replay_tab : Nil
-      replay_controller.close_replay_tab
+    def close_repeater_tab : Nil
+      repeater_controller.close_repeater_tab
     end
 
     # --- Fuzzer ExecContext / cross-tab mediators ---
@@ -4479,9 +4479,9 @@ module Gori::Tui
       fuzzer_controller.fuzz_flow(id) if id
     end
 
-    # CROSS-TAB: turn the current Replay request into a Fuzzer template.
-    def fuzz_from_replay : Nil
-      return unless v = replay_controller.current_view
+    # CROSS-TAB: turn the current Repeater request into a Fuzzer template.
+    def fuzz_from_repeater : Nil
+      return unless v = repeater_controller.current_view
       v.flush_decoded_edits # a split-decode tab: fold a pending payload edit into the envelope first
       fuzzer_controller.fuzz_from_request(v.target, v.request_text, v.http2?, v.sni_override)
     end
@@ -4559,9 +4559,9 @@ module Gori::Tui
       open_mine_config(miner_controller.build_seed_from_flow(id))
     end
 
-    # CROSS-TAB: open the config popup for the current Replay request.
-    def mine_from_replay : Nil
-      return unless v = replay_controller.current_view
+    # CROSS-TAB: open the config popup for the current Repeater request.
+    def mine_from_repeater : Nil
+      return unless v = repeater_controller.current_view
       v.flush_decoded_edits # fold a pending split-decode payload edit into the envelope first
       open_mine_config(miner_controller.build_seed_from_request(v.target, v.request_text, v.http2?, v.sni_override))
     end
@@ -4582,13 +4582,13 @@ module Gori::Tui
       miner_controller.finding_selected?
     end
 
-    # CROSS-TAB: inject the selected Miner finding into the session request and open Replay.
-    def mine_replay_selected : Nil
-      seed = miner_controller.selected_replay_seed
+    # CROSS-TAB: inject the selected Miner finding into the session request and open Repeater.
+    def mine_repeater_selected : Nil
+      seed = miner_controller.selected_repeater_seed
       return (@toast = "select a finding first") unless seed
-      replay_controller.replay_from_request(seed.target, seed.request_text, seed.http2, seed.sni,
+      repeater_controller.repeater_from_request(seed.target, seed.request_text, seed.http2, seed.sni,
         name: seed.label)
-      @toast = "replay ← miner: #{seed.label}"
+      @toast = "repeater ← miner: #{seed.label}"
     end
 
     private def open_mine_config(seed : MineSeed?) : Nil
@@ -4817,7 +4817,7 @@ module Gori::Tui
     end
 
     # Space-menu (:subtab) counterpart of the strip's `r` rename chord — reuses the
-    # SAME shell-owned rename prompt as Replay/Fuzzer (open_rename already handles
+    # SAME shell-owned rename prompt as Repeater/Fuzzer (open_rename already handles
     # Decoder generically via view_at).
     def decoder_rename_subtab : Nil
       open_rename(current_subtab_index)
@@ -4908,7 +4908,7 @@ module Gori::Tui
     # flipping it here would be a no-op at best and misleading at worst (no
     # selection ⇒ it still only copies the current line, not "the whole pane").
     READ_COPY_VERBS = %w(
-      notes.copy replay.copy decoder.copy finding.copy project.copy fuzzer.copy
+      notes.copy repeater.copy decoder.copy finding.copy project.copy fuzzer.copy
     )
 
     def space_menu_title(verb_id : String) : String?
@@ -4919,7 +4919,7 @@ module Gori::Tui
     def read_selection_active? : Bool
       case @active_tab
       when :notes    then notes_controller.view.selection?
-      when :replay   then replay_controller.replay_selection_active?
+      when :repeater   then repeater_controller.repeater_selection_active?
       when :fuzzer   then fuzzer_controller.fuzzer_selection_active?
       when :decoder  then decoder_controller.decoder_selection_active?
       when :findings then findings_controller.findings_notes_selection_active?
@@ -4934,7 +4934,7 @@ module Gori::Tui
     def read_select_line : Nil
       case @active_tab
       when :notes    then notes_controller.view.select_line
-      when :replay   then replay_controller.replay_select_line
+      when :repeater   then repeater_controller.repeater_select_line
       when :fuzzer   then fuzzer_controller.fuzzer_select_line
       when :decoder  then decoder_controller.decoder_select_line
       when :findings then findings_controller.findings_notes_select_line
@@ -4947,7 +4947,7 @@ module Gori::Tui
     def read_clear_selection : Nil
       case @active_tab
       when :notes    then notes_controller.view.clear_selection
-      when :replay   then replay_controller.replay_clear_selection
+      when :repeater   then repeater_controller.repeater_clear_selection
       when :fuzzer   then fuzzer_controller.fuzzer_clear_selection
       when :decoder  then decoder_controller.decoder_clear_selection
       when :findings then findings_controller.findings_notes_clear_selection
@@ -4964,7 +4964,7 @@ module Gori::Tui
     def read_copy : Nil
       case @active_tab
       when :notes    then read_selection_active? ? notes_copy : notes_copy_all
-      when :replay   then read_selection_active? ? replay_copy : replay_copy_all
+      when :repeater   then read_selection_active? ? repeater_copy : repeater_copy_all
       when :fuzzer   then read_selection_active? ? fuzzer_copy : fuzzer_copy_all
       when :decoder  then read_selection_active? ? decoder_copy_selection : decoder_copy_all
       when :findings then read_selection_active? ? findings_copy : findings_copy_all

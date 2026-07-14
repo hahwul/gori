@@ -194,7 +194,7 @@ module Gori::Tui
     def body_hint(focus : Symbol) : String
       reg = @host.session.registry
       y = Hotkeys.binding_label(reg, "history.copy", "y")
-      replay = Hotkeys.binding_label(reg, "history.replay", "^R")
+      repeater = Hotkeys.binding_label(reg, "history.repeater", "^R")
       finding = Hotkeys.binding_label(reg, "finding.create", "⇧F")
       follow = Hotkeys.binding_label(reg, "history.toggle-follow", "f")
       filter = Hotkeys.binding_label(reg, "history.query", "/")
@@ -207,9 +207,9 @@ module Gori::Tui
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       if @history.preview_enabled?
         return "↑/↓ scroll preview · ↹ list · ↵ open full · space cmds · esc tabs" if @history.preview_focus != :list
-        return "↑/↓ move · ↵ open · ↹ preview · #{replay} replay · #{filter} filter · space cmds · esc tabs"
+        return "↑/↓ move · ↵ open · ↹ preview · #{repeater} repeater · #{filter} filter · space cmds · esc tabs"
       end
-      "↑/↓ move · ↵ open · #{replay} replay · #{finding} finding · #{follow} follow · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
+      "↑/↓ move · ↵ open · #{repeater} repeater · #{finding} finding · #{follow} follow · #{filter} filter · #{intercept} hold-mode · space cmds · esc tabs"
     end
 
     # Live IME composition only flows to the QL filter bar (the one text field).

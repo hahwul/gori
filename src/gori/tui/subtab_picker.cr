@@ -8,7 +8,7 @@ module Gori::Tui
   # structural twin of FlowPicker (in-memory substring filter, IME preedit,
   # selection-follow scroll, mouse hit-test) but lists sub-tabs instead of flows.
   # Pure state + rendering; the Runner owns the @overlay lifecycle and applies the
-  # pick. Generic over any sub-tab strip (only Replay wires it today).
+  # pick. Generic over any sub-tab strip (only Repeater wires it today).
   class SubtabPicker
     # `index` is the sub-tab's absolute position — the value handed back on commit;
     # `label` is the chip text, `detail` the dim searchable request line.

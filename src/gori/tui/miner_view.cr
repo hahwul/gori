@@ -5,7 +5,7 @@ require "./frame"
 require "../store"
 require "../miner"
 require "../fuzz"
-require "../replay/flow_request"
+require "../repeater/flow_request"
 require "./subtab_clone"
 
 module Gori::Tui
@@ -160,16 +160,16 @@ module Gori::Tui
     end
 
     def target_origin : String
-      scheme, host, port = Replay::FlowRequest.parse_target(@target)
+      scheme, host, port = Repeater::FlowRequest.parse_target(@target)
       "#{scheme}://#{host}:#{port}"
     end
 
-    # The session target as stored (scheme://host[:port]) — feeds Replay seeds.
+    # The session target as stored (scheme://host[:port]) — feeds Repeater seeds.
     def target : String
       @target
     end
 
-    # Build a Replay-ready request with the selected finding's parameter injected at
+    # Build a Repeater-ready request with the selected finding's parameter injected at
     # its discovered location. Uses the discovery canary when present (so a reflection
     # finding still echoes on re-send); otherwise a short non-empty probe value.
     def request_with_finding(f : Miner::Finding) : Bytes
@@ -277,7 +277,7 @@ module Gori::Tui
 
     # --- engine ---
     def build_engine(verify : Bool) : {Miner::Engine?, String?}
-      scheme, host, port = Replay::FlowRequest.parse_target(@target)
+      scheme, host, port = Repeater::FlowRequest.parse_target(@target)
       return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       return {nil, "no locations selected"} if @config.locations.empty?
       names = Miner::Wordlist.load(@config.user_wordlist)

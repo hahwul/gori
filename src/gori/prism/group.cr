@@ -19,10 +19,10 @@ module Gori
       getter affected : Array(String) # distinct affected URLs, capped at Store::PRISM_AFFECTED_CAP
       getter evidence : String?       # first non-nil short snippet — NEVER a secret value
       getter sample_flow_id : Int64?  # the flow that first triggered this group
-      getter sample_replay_id : Int64? # Replay tab that first triggered this group (when no flow)
+      getter sample_repeater_id : Int64? # Repeater tab that first triggered this group (when no flow)
 
       def initialize(@code, @category, @host, @title, @severity, @hit_count, @affected,
-                     @evidence, @sample_flow_id, @sample_replay_id = nil)
+                     @evidence, @sample_flow_id, @sample_repeater_id = nil)
       end
     end
 
@@ -51,10 +51,10 @@ module Gori
           # the first representative sample. Mirrors Store#upsert_prism_issue.
           evidence = accumulate_evidence?(d.code) ? merge_evidence(g.evidence, d.evidence) : (g.evidence || d.evidence)
           acc[key] = Group.new(g.code, g.category, g.host, title, sev, g.hit_count + 1,
-            urls, evidence, g.sample_flow_id, g.sample_replay_id)
+            urls, evidence, g.sample_flow_id, g.sample_repeater_id)
         else
           acc[key] = Group.new(d.code, d.category, d.host, d.title, d.severity, 1,
-            [d.url], d.evidence, d.flow_id, d.replay_id)
+            [d.url], d.evidence, d.flow_id, d.repeater_id)
         end
       end
       finish_group_sort(acc)

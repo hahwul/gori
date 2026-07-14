@@ -2,7 +2,7 @@ module Gori
   # The fuzzer / intruder engine: takes a base HTTP request with marked positions,
   # substitutes payloads into them, and sends the variations concurrently while
   # collecting per-response metrics. Headless and self-contained — it depends only on
-  # the Replay send engines and the body decoder, never on Store or the TUI, so the
+  # the Repeater send engines and the body decoder, never on Store or the TUI, so the
   # same engine drives the TUI Fuzzer tab, `gori run fuzz`, and the MCP fuzz tools.
   module Fuzz
     # The four classic Intruder / Automate attack shapes. With P marked positions and

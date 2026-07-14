@@ -11,7 +11,7 @@ module Gori::Tui
       {:sitemap, "Sitemap"},
       {:history, "History"},
       {:intercept, "Intercept"},
-      {:replay, "Replay"},
+      {:repeater, "Repeater"},
       {:fuzzer, "Fuzzer"},
       {:miner, "Miner"},
       {:decoder, "Decoder"},
@@ -206,7 +206,7 @@ module Gori::Tui
     end
 
     # A horizontal tab menu (row 2) styled as a segmented control. The active tab
-    # is a solid FOCUS_GOLD pill when the menu holds focus (mirroring the Replay/
+    # is a solid FOCUS_GOLD pill when the menu holds focus (mirroring the Repeater/
     # Notes sub-tab strip, so "gold = focus is here" reads the same one level up);
     # at rest it settles to a dim SELECTION_DIM band. Inactive tabs are muted. The
     # held-intercept count rides inline as a `(N)` badge.
@@ -297,7 +297,7 @@ module Gori::Tui
 
     # Leftmost visible segment index that keeps `active_idx` on-screen, given each
     # segment's `widths` and `avail` drawable columns (segments separated by `gap`).
-    # Shared by the top tab menu + the Replay/Notes sub-tab strips so the active tab
+    # Shared by the top tab menu + the Repeater/Notes sub-tab strips so the active tab
     # is never scrolled off into the hidden overflow.
     def self.scroll_start(widths : Array(Int32), active_idx : Int32, avail : Int32, prev_start : Int32 = 0, gap : Int32 = 1) : Int32
       start = prev_start.clamp(0, active_idx)
@@ -309,11 +309,11 @@ module Gori::Tui
       start
     end
 
-    # A windowed horizontal sub-tab strip (Replay / Notes / Fuzzer / …). Mirrors the
+    # A windowed horizontal sub-tab strip (Repeater / Notes / Fuzzer / …). Mirrors the
     # top tab menu: no row fill — inactive labels are muted on the canvas, the active
     # chip is FOCUS_GOLD when the strip holds focus else a dim SELECTION_DIM band.
     # `‹` / `›` flag overflow.
-    # `hidden` (Replay's tag filter) drops those absolute chip indices from the strip —
+    # `hidden` (Repeater's tag filter) drops those absolute chip indices from the strip —
     # they keep their absolute number, so the visible chips read with gaps (2, 5, 7).
     def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
                               active : Int32, focused : Bool, prev_start : Int32 = 0,
@@ -338,7 +338,7 @@ module Gori::Tui
 
     # Pure: the visible sub-tab chips — {index, cell rect} — computed IDENTICALLY to
     # render_tab_strip (shares strip_layout) so a click hit-test can't drift. Used by
-    # the Replay/Notes sub-tab strips. Each `index` is the ABSOLUTE chip index, even
+    # the Repeater/Notes sub-tab strips. Each `index` is the ABSOLUTE chip index, even
     # when `hidden` filters intervening chips out.
     def self.strip_segments(rect : Rect, labels : Array(String), active : Int32,
                             prev_start : Int32 = 0, hidden : Set(Int32)? = nil) : Array({Int32, Rect})

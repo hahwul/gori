@@ -4,7 +4,7 @@ require "../help_view"
 module Gori::Tui
   # The Help tab: two read-only sub-tabs sharing one strip — Shortcuts (the
   # scrollable cheat-sheet) and About (brand art, version, author, GitHub).
-  # Unlike Replay/Notes the set is FIXED: no create/close/rename. The strip, focus
+  # Unlike Repeater/Notes the set is FIXED: no create/close/rename. The strip, focus
   # routing, ←/→, ^1-9 and click hit-testing all come free from the runner's shared
   # sub-tab machinery once we expose subtab_labels; we add only the page renderers.
   class HelpController < TabController

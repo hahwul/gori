@@ -62,7 +62,7 @@ module Gori
 
     # The display text for a parsed op: an operationName header, the query, and the
     # variables block (each present only when set). This is the editable form shown in
-    # the Replay DECODED pane; parse_display is its inverse.
+    # the Repeater DECODED pane; parse_display is its inverse.
     def display(op : Op) : String
       String.build do |io|
         if name = op.operation
@@ -154,7 +154,7 @@ module Gori
     end
 
     # Where a flow carries its op: :body (a POST JSON body that parses as GraphQL) or
-    # :query (a GET `?query=…`). Drives which side the Replay re-encode targets. Decided
+    # :query (a GET `?query=…`). Drives which side the Repeater re-encode targets. Decided
     # solely by whether the request body is a GraphQL JSON document.
     def location(req_body : Bytes?) : Symbol
       if (b = req_body) && !b.empty? && b.size <= MAX_BODY && from_json(String.new(b))

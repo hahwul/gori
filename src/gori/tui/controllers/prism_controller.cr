@@ -47,7 +47,7 @@ module Gori::Tui
       mode = Hotkeys.binding_label(reg, "prism.mode", "m")
       filt = Hotkeys.binding_label(reg, "prism.filter", "/")
       if @prism.detail_open?
-        "o flow · r replay · p promote · c dismiss · d delete · space cmds · ←/esc back"
+        "o flow · r repeater · p promote · c dismiss · d delete · space cmds · ←/esc back"
       elsif @prism.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
       elsif @prism.mode.off?
@@ -57,7 +57,7 @@ module Gori::Tui
       elsif @prism.preview_enabled?
         "↑/↓ move · ↵ open · ↹ preview · #{mode} mode · #{filt} filter · space cmds"
       else
-        "o flow · r replay · p promote · c dismiss · d delete · #{mode} mode · #{filt} filter · space cmds"
+        "o flow · r repeater · p promote · c dismiss · d delete · #{mode} mode · #{filt} filter · space cmds"
       end
     end
 

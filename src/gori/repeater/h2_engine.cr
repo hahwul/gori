@@ -5,18 +5,18 @@ require "../proxy/codec/http1"
 require "./engine"
 
 module Gori
-  module Replay
-    # Replays an h2 flow as real HTTP/2: opens a connection (TLS+ALPN "h2" for
+  module Repeater
+    # Repeaters an h2 flow as real HTTP/2: opens a connection (TLS+ALPN "h2" for
     # https, or h2c prior-knowledge for http), HPACK-encodes the edited request,
     # exchanges frames on stream 1, and reassembles the response into the same
-    # `Replay::Result` the h1 engine produces (so the diff/view path is shared).
+    # `Repeater::Result` the h1 engine produces (so the diff/view path is shared).
     #
     # One-shot and intentionally minimal: empty client SETTINGS (ACK on receipt),
     # PING answered. The RESPONSE side is flow-controlled — each DATA frame is
     # credited straight back with a WINDOW_UPDATE on the connection + stream, so
     # responses past the 65535-byte default window stream fine. The REQUEST side is
     # not flow-controlled (a >64 KiB request body could stall — fine for the
-    # workbench; replay bodies are typically small).
+    # workbench; repeater bodies are typically small).
     module H2Engine
       MAX_FRAME = 16384
       # Caps for the one-shot response read, mirroring the live assembler. Without
@@ -24,7 +24,7 @@ module Gori
       # are NOT flow-controlled, so a CONTINUATION flood grows the header block
       # unboundedly, and a streaming/over-large body has no aggregate ceiling.
       MAX_HEADER_BLOCK = 1 << 20         # 1 MiB
-      MAX_BODY         = 8 * 1024 * 1024 # 8 MiB (replay response read ceiling; independent of the proxy-capture cap)
+      MAX_BODY         = 8 * 1024 * 1024 # 8 MiB (repeater response read ceiling; independent of the proxy-capture cap)
       # Hard ceiling on frames processed for one response. HEADERS/DATA are byte-capped
       # above, but non-terminal frames (PING/PRIORITY/WINDOW_UPDATE/SETTINGS on any stream)
       # are neither — a hostile origin can stream them forever without END_STREAM, and the
@@ -54,7 +54,7 @@ module Gori
           resp = Proxy::Codec::Http1.parse_response_head(head)
           Result.new(head, resp_body, resp, elapsed(started), incomplete: !complete)
         rescue ex
-          failure(ex.message || "h2 replay error", started)
+          failure(ex.message || "h2 repeater error", started)
         ensure
           upstream.close rescue nil
         end
@@ -81,7 +81,7 @@ module Gori
 
       private def self.write_request(io : IO, headers : Array({String, String}), body : Bytes?) : Nil
         io.write(Frame::PREFACE)
-        # SETTINGS_ENABLE_PUSH=0 (id 0x2): a one-shot replay never wants server push, and
+        # SETTINGS_ENABLE_PUSH=0 (id 0x2): a one-shot repeater never wants server push, and
         # pushed DATA on a non-1 stream would consume the connection flow-control window
         # without being credited back (the DATA loop only credits stream 1), stalling a
         # large response. Disabling push at the source avoids the whole class.
@@ -128,7 +128,7 @@ module Gori
           # treat it like a clean EOF and return what arrived, flagged incomplete
           # (mirrors the h1 engine). A Gori::Error from Frame.read (oversized/corrupt
           # frame — a real protocol violation) is NOT swallowed: it propagates to the
-          # outer rescue and surfaces as a failed replay, since the workbench exists to
+          # outer rescue and surfaces as a failed repeater, since the workbench exists to
           # reveal exactly that.
           frame = begin
             Frame.read(io)
@@ -263,7 +263,7 @@ module Gori
         # An explicit `Host:` header maps to `:authority` (RFC 9113 §8.3.1 — h2 has no
         # Host field). Honor its value so editing the request's host (a vhost /
         # host-header-confusion probe, in the TUI editor, MCP `headers`, or `gori run
-        # replay -H "Host: …"`) actually reaches the wire — matching the h1 engine, which
+        # repeater -H "Host: …"`) actually reaches the wire — matching the h1 engine, which
         # sends the edited Host verbatim. Without this the edited Host was silently
         # dropped and `:authority` always came from the dialed target. The connection
         # target is unchanged: you still connect to `host`, but can CLAIM a different

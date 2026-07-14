@@ -5,16 +5,16 @@ require "./url"
 require "./flow_status"
 require "./subtab_clone"
 require "../store"
-require "../replay/diff"
-require "../replay/side_by_side"
-require "../replay/message_lines"
+require "../repeater/diff"
+require "../repeater/side_by_side"
+require "../repeater/message_lines"
 
 module Gori::Tui
   # The Comparer body: two flow "slots" (A, B) and a side-by-side line diff of
   # their requests or responses. Slots are filled by the FlowPicker overlay (a/b)
   # or the History "Send to Comparer" handoff; this view is pure state + rendering.
-  # The diff reuses Replay's LCS engine (Replay::Diff) mapped to aligned columns
-  # (Replay::SideBySide), memoized so a held tab isn't re-diffed every frame.
+  # The diff reuses Repeater's LCS engine (Repeater::Diff) mapped to aligned columns
+  # (Repeater::SideBySide), memoized so a held tab isn't re-diffed every frame.
   # Multiple views are held as session sub-tabs by ComparerController (in-memory;
   # no project DB) so History handoffs don't clobber prior pairs.
   class ComparerView
@@ -30,12 +30,12 @@ module Gori::Tui
       @pane = :response
       @scroll = 0
       @fill_next = :a # the slot the next "Send to Comparer" fills (rings A → B → A …)
-      @rows_cache = nil.as(Array(Replay::SideBySide::Row)?)
+      @rows_cache = nil.as(Array(Repeater::SideBySide::Row)?)
       @truncated = false
       @change_count = 0 # cached with @rows_cache so the footer doesn't recount each frame
     end
 
-    # Chip label (custom name, or a compact A ⇄ B summary). Capped like Replay/Decoder.
+    # Chip label (custom name, or a compact A ⇄ B summary). Capped like Repeater/Decoder.
     def label(max : Int32 = 18) : String
       raw = if (n = @name) && !n.strip.empty?
               n.strip
@@ -45,7 +45,7 @@ module Gori::Tui
       raw.size > max ? raw[0, max - 1] + "…" : raw
     end
 
-    # Identity for rename/apply (view object, not content) — mirrors MinerView/ReplayView.
+    # Identity for rename/apply (view object, not content) — mirrors MinerView/RepeaterView.
     def same?(other : ComparerView) : Bool
       object_id == other.object_id
     end
@@ -171,27 +171,27 @@ module Gori::Tui
       @rows_cache = nil
     end
 
-    private def rows : Array(Replay::SideBySide::Row)
+    private def rows : Array(Repeater::SideBySide::Row)
       @rows_cache ||= build_rows
     end
 
-    private def build_rows : Array(Replay::SideBySide::Row)
+    private def build_rows : Array(Repeater::SideBySide::Row)
       a = @slot_a
       b = @slot_b
-      return [] of Replay::SideBySide::Row unless a && b
+      return [] of Repeater::SideBySide::Row unless a && b
       al = lines_for(a)
       bl = lines_for(b)
-      @truncated = al.size > Replay::Diff::MAX_LINES || bl.size > Replay::Diff::MAX_LINES
-      result = Replay::SideBySide.rows(Replay::Diff.lines(al, bl))
-      @change_count = Replay::SideBySide.change_count(result)
+      @truncated = al.size > Repeater::Diff::MAX_LINES || bl.size > Repeater::Diff::MAX_LINES
+      result = Repeater::SideBySide.rows(Repeater::Diff.lines(al, bl))
+      @change_count = Repeater::SideBySide.change_count(result)
       result
     end
 
     private def lines_for(d : Store::FlowDetail) : Array(String)
       if @pane == :request
-        Replay::MessageLines.of(d.request_head, d.request_body, decode: false)
+        Repeater::MessageLines.of(d.request_head, d.request_body, decode: false)
       else
-        Replay::MessageLines.of(d.response_head, d.response_body, decode: true)
+        Repeater::MessageLines.of(d.response_head, d.response_body, decode: true)
       end
     end
 
@@ -248,7 +248,7 @@ module Gori::Tui
       sx, _ = geom
       x = screen.text(sx, rect.y + 1, "←/→ ", Theme.muted, Theme.bg)
       # `+ 1` after each chip matches Frame.left_chip_hit's 1-col gap contract (as
-      # Replay/History/Intercept do) so pane_chip_at lands on the drawn cells.
+      # Repeater/History/Intercept do) so pane_chip_at lands on the drawn cells.
       x = Frame.chip(screen, x, rect.y + 1, " REQ ", @pane == :request) + 1
       Frame.chip(screen, x, rect.y + 1, " RES ", @pane == :response)
     end
@@ -275,7 +275,7 @@ module Gori::Tui
 
     private def draw_diff_row(screen : Screen, x : Int32, y : Int32, left_w : Int32,
                               sep_x : Int32, right_x : Int32, right_w : Int32,
-                              r : Replay::SideBySide::Row) : Nil
+                              r : Repeater::SideBySide::Row) : Nil
       lcolor, rcolor, glyph, gcolor = case r.kind
                                       when .same?     then {Theme.text, Theme.text, '│', Theme.border}
                                       when .changed?  then {Theme.red, Theme.green, '~', Theme.yellow}
@@ -291,7 +291,7 @@ module Gori::Tui
       return if y <= rect.y + 1 # no room: header + divider already fill the frame
       changed = @change_count
       note = changed == 0 ? "identical" : "#{changed} changed line#{changed == 1 ? "" : "s"}"
-      note += " · truncated to #{Replay::Diff::MAX_LINES}/side" if @truncated
+      note += " · truncated to #{Repeater::Diff::MAX_LINES}/side" if @truncated
       screen.text(rect.x + 1, y, note, Theme.muted, width: {rect.w - 2, 1}.max) # pane + ←/→ moved to the divider selector
     end
 

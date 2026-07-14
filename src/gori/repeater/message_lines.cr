@@ -1,8 +1,8 @@
 require "../proxy/codec/content_decode"
 
 module Gori
-  module Replay
-    # head + body → plain display lines, shared by the Replay response diff and the
+  module Repeater
+    # head + body → plain display lines, shared by the Repeater response diff and the
     # Comparer tab so neither duplicates the decode/split logic. `decode` de-gzips/
     # de-chunks the body for a readable diff (responses only); request bytes are
     # passed through raw so a request comparison stays byte-faithful.
@@ -15,7 +15,7 @@ module Gori
 
       # The head, a blank separator, then the body — each split into rstripped lines.
       # A BINARY body (NUL in its prefix) is shown as a one-line placeholder, never as
-      # text: rendering raw non-UTF-8 bytes here (Comparer + the Replay response diff)
+      # text: rendering raw non-UTF-8 bytes here (Comparer + the Repeater response diff)
       # reintroduced PR#86's terminal corruption — accidental wide/emoji graphemes among
       # the bytes desync the terminal's cursor tracking. Text lines are scrubbed too.
       def of(head : Bytes?, body : Bytes?, *, decode : Bool) : Array(String)

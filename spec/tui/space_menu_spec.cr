@@ -14,7 +14,7 @@ describe Gori::Tui::SpaceMenu do
     menu.entries.size.should be > 0
     menu.entries.all?(&.scope.body?).should be_true         # strictly scope-local
     menu.entries.all?(&.menu_key).should be_true            # every shown entry has a key
-    menu.entries.map(&.id).should contain("history.replay") # an area action
+    menu.entries.map(&.id).should contain("history.repeater") # an area action
     menu.entries.map(&.id).should_not contain("app.quit")   # NOT the app-control (palette) surface
   end
 
@@ -25,7 +25,7 @@ describe Gori::Tui::SpaceMenu do
     menu.open(Gori::Verb::Scope::Body, :common, ctx)
 
     menu.verb_for('y').try(&.id).should eq("history.copy")
-    menu.verb_for('r').try(&.id).should eq("history.replay")
+    menu.verb_for('r').try(&.id).should eq("history.repeater")
     menu.verb_for('Q').should be_nil # no entry bound to this key
   end
 
@@ -50,9 +50,9 @@ describe Gori::Tui::SpaceMenu do
     menu.entries.size.should be > 0
     menu.entries.all?(&.scope.history_detail?).should be_true # strictly scope-local
     ids = menu.entries.map(&.id)
-    ids.should contain("detail.replay")     # flow action carried over from the list
+    ids.should contain("detail.repeater")     # flow action carried over from the list
     ids.should contain("detail.toggle-hex") # a detail-only view toggle
-    menu.verb_for('r').try(&.id).should eq("detail.replay")
+    menu.verb_for('r').try(&.id).should eq("detail.repeater")
     menu.verb_for('x').try(&.id).should eq("detail.toggle-hex")
   end
 
@@ -129,11 +129,11 @@ describe Gori::Tui::SpaceMenu do
     ids = menu.entries.map(&.id)
     ids.should contain("prism.promote-selected")
     ids.should contain("prism.open-evidence")
-    ids.should contain("prism.replay-evidence")
+    ids.should contain("prism.repeater-evidence")
     ids.should contain("prism.delete-selected")
     menu.verb_for('p').try(&.id).should eq("prism.promote-selected")
     menu.verb_for('o').try(&.id).should eq("prism.open-evidence")
-    menu.verb_for('r').try(&.id).should eq("prism.replay-evidence")
+    menu.verb_for('r').try(&.id).should eq("prism.repeater-evidence")
     menu.verb_for('d').try(&.id).should eq("prism.delete-selected")
     menu.verb_for('v').try(&.id).should eq("prism.open")
     menu.verb_for('g').try(&.id).should eq("prism.dismiss-code")
@@ -175,7 +175,7 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('o').try(&.id).should eq("decoder.load")
 
     # Sub-tab strip focus (@focus == :subtabs): Decoder now has its OWN :subtab verbs
-    # (rename + duplicate, mirroring Replay/Fuzzer) — COMMON + SUBTAB, New/Close/Copy/
+    # (rename + duplicate, mirroring Repeater/Fuzzer) — COMMON + SUBTAB, New/Close/Copy/
     # Rename/Duplicate all reachable from the strip.
     menu.open(Gori::Verb::Scope::Decoder, :subtab, ctx)
     ids = menu.entries.map(&.id)
@@ -208,17 +208,17 @@ describe Gori::Tui::SpaceMenu do
     ids.should_not contain("decoder.mode")
   end
 
-  it "yields COMMON + the focus-area's own group when opened with a non-common section (Replay), and a single flat group for :common" do
+  it "yields COMMON + the focus-area's own group when opened with a non-common section (Repeater), and a single flat group for :common" do
     ctx = FakeExecContext.new
-    ctx.current_tab = :replay
+    ctx.current_tab = :repeater
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
-    menu.open(Gori::Verb::Scope::Replay, :request, ctx)
+    menu.open(Gori::Verb::Scope::Repeater, :request, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("replay.send")           # COMMON
-    ids.should contain("replay.insert-marker")  # :request
-    ids.should_not contain("replay.toggle-sni") # a DIFFERENT section (:target) — no bleed
-    menu.verb_for('i').try(&.id).should eq("replay.insert-marker")
+    ids.should contain("repeater.send")           # COMMON
+    ids.should contain("repeater.insert-marker")  # :request
+    ids.should_not contain("repeater.toggle-sni") # a DIFFERENT section (:target) — no bleed
+    menu.verb_for('i').try(&.id).should eq("repeater.insert-marker")
 
     backend = MemoryBackend.new(100, 30)
     menu.render(Screen.new(backend), Rect.new(0, 0, 100, 28))
@@ -227,10 +227,10 @@ describe Gori::Tui::SpaceMenu do
     backend.contains?("REQUEST").should be_true
 
     # :common alone → single flat group: no header, no :request bleed.
-    menu.open(Gori::Verb::Scope::Replay, :common, ctx)
+    menu.open(Gori::Verb::Scope::Repeater, :common, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("replay.send")
-    ids.should_not contain("replay.insert-marker")
+    ids.should contain("repeater.send")
+    ids.should_not contain("repeater.insert-marker")
 
     backend2 = MemoryBackend.new(100, 30)
     menu.render(Screen.new(backend2), Rect.new(0, 0, 100, 28))
@@ -260,38 +260,38 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('n').try(&.id).should eq("fuzz.new")
   end
 
-  it "populates Replay's :subtab group with rename/close/duplicate (Round 4 — was raw key-dispatch)" do
+  it "populates Repeater's :subtab group with rename/close/duplicate (Round 4 — was raw key-dispatch)" do
     ctx = FakeExecContext.new
-    ctx.current_tab = :replay
-    ctx.replay_tab_count = 1 # gate duplicate availability
+    ctx.current_tab = :repeater
+    ctx.repeater_tab_count = 1 # gate duplicate availability
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
-    menu.open(Gori::Verb::Scope::Replay, :subtab, ctx)
+    menu.open(Gori::Verb::Scope::Repeater, :subtab, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("replay.send")              # COMMON
-    ids.should contain("replay.rename-subtab")     # :subtab
-    ids.should contain("replay.close-subtab")      # :subtab
-    ids.should contain("replay.duplicate-subtab")  # :subtab
-    ids.should_not contain("replay.insert-marker") # a DIFFERENT section (:request) — no bleed
-    menu.verb_for('e').try(&.id).should eq("replay.rename-subtab")
-    menu.verb_for('w').try(&.id).should eq("replay.close-subtab")
-    menu.verb_for('d').try(&.id).should eq("replay.duplicate-subtab")
+    ids.should contain("repeater.send")              # COMMON
+    ids.should contain("repeater.rename-subtab")     # :subtab
+    ids.should contain("repeater.close-subtab")      # :subtab
+    ids.should contain("repeater.duplicate-subtab")  # :subtab
+    ids.should_not contain("repeater.insert-marker") # a DIFFERENT section (:request) — no bleed
+    menu.verb_for('e').try(&.id).should eq("repeater.rename-subtab")
+    menu.verb_for('w').try(&.id).should eq("repeater.close-subtab")
+    menu.verb_for('d').try(&.id).should eq("repeater.duplicate-subtab")
   end
 
-  it "populates Replay's :response group with diff/hex alongside pretty (Round 4 — was raw key-dispatch)" do
+  it "populates Repeater's :response group with diff/hex alongside pretty (Round 4 — was raw key-dispatch)" do
     ctx = FakeExecContext.new
-    ctx.current_tab = :replay
+    ctx.current_tab = :repeater
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
-    menu.open(Gori::Verb::Scope::Replay, :response, ctx)
+    menu.open(Gori::Verb::Scope::Repeater, :response, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("replay.send")            # COMMON
-    ids.should contain("replay.toggle-pretty")   # :response
-    ids.should contain("replay.toggle-diff")     # :response
-    ids.should contain("replay.toggle-resp-hex") # :response
-    menu.verb_for('p').try(&.id).should eq("replay.toggle-pretty")
-    menu.verb_for('d').try(&.id).should eq("replay.toggle-diff")
-    menu.verb_for('x').try(&.id).should eq("replay.toggle-resp-hex")
+    ids.should contain("repeater.send")            # COMMON
+    ids.should contain("repeater.toggle-pretty")   # :response
+    ids.should contain("repeater.toggle-diff")     # :response
+    ids.should contain("repeater.toggle-resp-hex") # :response
+    menu.verb_for('p').try(&.id).should eq("repeater.toggle-pretty")
+    menu.verb_for('d').try(&.id).should eq("repeater.toggle-diff")
+    menu.verb_for('x').try(&.id).should eq("repeater.toggle-resp-hex")
   end
 
   it "populates Fuzzer's :subtab group with rename/close/duplicate (Round 4 — was raw key-dispatch)" do
@@ -351,18 +351,18 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('d').try(&.id).should eq("mine.duplicate-subtab")
   end
 
-  it "offers Send to Replay on Miner when a finding is selected" do
+  it "offers Send to Repeater on Miner when a finding is selected" do
     ctx = FakeExecContext.new
     ctx.current_tab = :miner
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     menu.open(Gori::Verb::Scope::Miner, :common, ctx)
-    menu.entries.map(&.id).should_not contain("mine.replay") # no finding yet
+    menu.entries.map(&.id).should_not contain("mine.repeater") # no finding yet
 
     ctx.miner_has_finding = true
     menu.open(Gori::Verb::Scope::Miner, :common, ctx)
-    menu.entries.map(&.id).should contain("mine.replay")
-    menu.verb_for('p').try(&.id).should eq("mine.replay")
+    menu.entries.map(&.id).should contain("mine.repeater")
+    menu.verb_for('p').try(&.id).should eq("mine.repeater")
   end
 
   it "hides the scope rule edit/delete entries when no rule is selected" do
@@ -475,7 +475,7 @@ describe Gori::Tui::SpaceMenu do
 
   # Per menu scope, any verb with NO chord at all must carry a mnemonic (else it's
   # unreachable by ANY single key — the oversight this guards). A verb whose only
-  # chord is ctrl/shift (e.g. Replay's ^X/^S/^L toggles, rebindable since the
+  # chord is ctrl/shift (e.g. Repeater's ^X/^S/^L toggles, rebindable since the
   # hotkeys feature) legitimately has no single-key handle and is just excluded
   # from the menu. Reads the registry directly to bypass the ctx-gated available?,
   # so coverage is exhaustive.
@@ -483,13 +483,13 @@ describe Gori::Tui::SpaceMenu do
   # Key collisions are checked PER DISPLAYABLE VIEW (COMMON ∪ one section) rather
   # than scope-wide: sections never render together (SpaceMenu#open shows at most
   # COMMON + one context group), so two DIFFERENT sections may legitimately reuse a
-  # key (e.g. Replay's :target 's' and :tab 's') — only a clash WITHIN a view is a
+  # key (e.g. Repeater's :target 's' and :tab 's') — only a clash WITHIN a view is a
   # real collision. Mirrors Registry#validate_menu_keys! (registry.cr) as an
   # independent spec-level check.
   it "gives every chordless menu verb a mnemonic, and never collides keys within a displayable view (COMMON ∪ one section)" do
     registry = Gori::Verbs.registry
     menu_scopes = [
-      Gori::Verb::Scope::Body, Gori::Verb::Scope::Replay, Gori::Verb::Scope::Findings,
+      Gori::Verb::Scope::Body, Gori::Verb::Scope::Repeater, Gori::Verb::Scope::Findings,
       Gori::Verb::Scope::Comparer, Gori::Verb::Scope::Fuzzer, Gori::Verb::Scope::Intercept,
       Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::FindingsDetail,
       Gori::Verb::Scope::Project, Gori::Verb::Scope::Decoder, Gori::Verb::Scope::Notes,
@@ -533,7 +533,7 @@ describe Gori::Tui::SpaceMenu do
       reg.register(Gori::Verb::Definition.new("demo.a", "demo:a", "first",
         Gori::Verb::Scope::Body, [Gori::Verb::Chord.new("z")]) { |_| nil })
       reg.register(Gori::Verb::Definition.new("demo.b", "demo:b", "second",
-        Gori::Verb::Scope::Replay, [Gori::Verb::Chord.new("z")]) { |_| nil })
+        Gori::Verb::Scope::Repeater, [Gori::Verb::Chord.new("z")]) { |_| nil })
       reg.validate_menu_keys! # cross-scope reuse must not raise
     end
 
