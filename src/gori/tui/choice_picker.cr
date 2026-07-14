@@ -43,14 +43,14 @@ module Gori::Tui
       ], current, :status)
     end
 
-    # Prism scan MODE picker (kind :prism_mode — the Runner applies it to the analyzer).
-    # Values match Prism::Mode (Off=0, Passive=1, Active=2).
-    def self.for_prism_mode(current : Int32) : ChoicePicker
-      new("SET PRISM MODE", [
+    # Probe scan MODE picker (kind :probe_mode — the Runner applies it to the analyzer).
+    # Values match Probe::Mode (Off=0, Passive=1, Active=2).
+    def self.for_probe_mode(current : Int32) : ChoicePicker
+      new("SET PROBE MODE", [
         Choice.new("OFF — no scanning", 'o', Theme.muted, 0),
         Choice.new("PASSIVE — observe only", 'p', Theme.accent, 1),
         Choice.new("ACTIVE — passive + light-touch probes (in-scope)", 'a', Theme.orange, 2),
-      ], current, :prism_mode)
+      ], current, :probe_mode)
     end
 
     def move(delta : Int32) : Nil

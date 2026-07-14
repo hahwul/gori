@@ -556,60 +556,60 @@ private class FakeContext < ExecContext
     @calls << :findings_export
   end
 
-  def prism_move(delta : Int32) : Nil
-    @calls << :prism_move
+  def probe_move(delta : Int32) : Nil
+    @calls << :probe_move
   end
 
-  def prism_open : Nil
-    @calls << :prism_open
+  def probe_open : Nil
+    @calls << :probe_open
   end
 
-  def prism_close : Nil
-    @calls << :prism_close
+  def probe_close : Nil
+    @calls << :probe_close
   end
 
-  def prism_query : Nil
-    @calls << :prism_query
+  def probe_query : Nil
+    @calls << :probe_query
   end
 
-  def prism_set_mode : Nil
-    @calls << :prism_set_mode
+  def probe_set_mode : Nil
+    @calls << :probe_set_mode
   end
 
-  def prism_clear : Nil
-    @calls << :prism_clear
+  def probe_clear : Nil
+    @calls << :probe_clear
   end
 
-  def prism_delete : Nil
-    @calls << :prism_delete
+  def probe_delete : Nil
+    @calls << :probe_delete
   end
 
-  def prism_dismiss : Nil
-    @calls << :prism_dismiss
+  def probe_dismiss : Nil
+    @calls << :probe_dismiss
   end
 
-  def prism_toggle_closed : Nil
-    @calls << :prism_toggle_closed
+  def probe_toggle_closed : Nil
+    @calls << :probe_toggle_closed
   end
 
-  def prism_dismiss_code : Nil
-    @calls << :prism_dismiss_code
+  def probe_dismiss_code : Nil
+    @calls << :probe_dismiss_code
   end
 
-  def prism_dismiss_host : Nil
-    @calls << :prism_dismiss_host
+  def probe_dismiss_host : Nil
+    @calls << :probe_dismiss_host
   end
 
-  def prism_open_flow : Nil
-    @calls << :prism_open_flow
+  def probe_open_flow : Nil
+    @calls << :probe_open_flow
   end
 
-  def prism_repeater_flow : Nil
-    @calls << :prism_repeater_flow
+  def probe_repeater_flow : Nil
+    @calls << :probe_repeater_flow
   end
 
-  def prism_promote : Nil
-    @calls << :prism_promote
+  def probe_promote : Nil
+    @calls << :probe_promote
   end
 
   def toggle_capture : Nil

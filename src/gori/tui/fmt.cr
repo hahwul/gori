@@ -24,7 +24,7 @@ module Gori::Tui
     end
 
     # Compact occurrence count (1.2k / 3.4M / 5.0B) for tallies that can grow
-    # unbounded (e.g. Prism hit_count). Plain integer below 1000; same rounding
+    # unbounded (e.g. Probe hit_count). Plain integer below 1000; same rounding
     # convention as `size` so a value just under a boundary rolls up to the next
     # unit instead of showing a misleading "1000k".
     def self.count(n : Int64) : String

@@ -43,14 +43,14 @@ describe Gori::Store do
       store = Gori::Store.open(path)
       store.@db.exec("DROP TABLE sitemap_tags")                        # V18
       store.@db.exec("DROP TABLE miner_sessions")                      # V19
-      store.@db.exec("DROP TABLE prism_issues")                        # V20
+      store.@db.exec("DROP TABLE probe_issues")                        # V20
       store.@db.exec("DROP TABLE entity_links")                        # V21
       store.@db.exec("ALTER TABLE repeaters DROP COLUMN mark_transform") # V22 (added a column to a pre-V17 table)
       store.@db.exec("DROP INDEX idx_flows_sizes")                     # V23
       store.@db.exec("DROP INDEX idx_ws_messages_replay")               # V26 (index keeps its historical name)
       store.@db.exec("ALTER TABLE ws_messages DROP COLUMN repeater_id")  # V26
       store.@db.exec("DROP INDEX idx_h2_frames_created")               # V27
-      store.@db.exec("DROP TABLE prism_suppressions")                  # V29
+      store.@db.exec("DROP TABLE probe_suppressions")                  # V29
       store.@db.exec("ALTER TABLE match_rules DROP COLUMN part")       # V30
       store.@db.exec("ALTER TABLE repeaters DROP COLUMN tags")           # V31
       store.@db.exec("ALTER TABLE repeaters RENAME TO replays")          # undo V32 so historical <V32 migrations replay against the old table name

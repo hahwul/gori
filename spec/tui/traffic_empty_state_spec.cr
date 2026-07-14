@@ -100,24 +100,24 @@ describe Gori::Tui::TrafficEmptyState do
     backend.contains?("^R").should be_true
   end
 
-  it "renders the prism scan card when scanning is on" do
+  it "renders the probe scan card when scanning is on" do
     backend = MemoryBackend.new(60, 12)
     rect = Rect.new(0, 0, 60, 12)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :prism, listen: "127.0.0.1:8070", capturing: true, scan_on: true)
+      variant: :probe, listen: "127.0.0.1:8070", capturing: true, scan_on: true)
     backend.contains?("no issues yet").should be_true
-    backend.contains?("PRISM").should be_true
+    backend.contains?("PROBE").should be_true
     backend.contains?("scan").should be_true
     backend.contains?("m:MODE").should be_true
   end
 
-  it "renders the prism off card when scanning is disabled" do
+  it "renders the probe off card when scanning is disabled" do
     backend = MemoryBackend.new(60, 12)
     rect = Rect.new(0, 0, 60, 12)
     TrafficEmptyState.render(Screen.new(backend), rect,
-      variant: :prism, scan_on: false, title: "scanning is OFF")
+      variant: :probe, scan_on: false, title: "scanning is OFF")
     backend.contains?("scanning is OFF").should be_true
-    backend.contains?("PRISM").should be_true
+    backend.contains?("PROBE").should be_true
     backend.contains?("turn scanning on").should be_true
     backend.contains?("m:MODE").should be_true
   end

@@ -278,10 +278,10 @@ describe Gori::CLI::Output do
     Gori::CLI::Output.human_size(2_199_023_255_552_i64).should eq("2.0TB") # 2 TiB
   end
 
-  it "serialises a prism group to JSON with the documented fields (incl. remediation)" do
-    g = Gori::Prism::Group.new("secret_in_url", "infoleak", "api.test", "Secret in URL",
+  it "serialises a probe group to JSON with the documented fields (incl. remediation)" do
+    g = Gori::Probe::Group.new("secret_in_url", "infoleak", "api.test", "Secret in URL",
       Gori::Store::Severity::High, 3, ["https://api.test/a", "https://api.test/b"], "token", 7_i64)
-    parsed = JSON.parse(Gori::CLI::Output.prism_group_json(g))
+    parsed = JSON.parse(Gori::CLI::Output.probe_group_json(g))
     parsed["code"].as_s.should eq("secret_in_url")
     parsed["category"].as_s.should eq("infoleak")
     parsed["severity"].as_s.should eq("high")
@@ -293,11 +293,11 @@ describe Gori::CLI::Output do
     parsed["remediation"].as_s.should_not be_empty
   end
 
-  it "renders prism text with the severity tag, ×hit_count, and a representative affected URL" do
-    g = Gori::Prism::Group.new("missing_csp", "headers", "api.test", "Missing CSP",
+  it "renders probe text with the severity tag, ×hit_count, and a representative affected URL" do
+    g = Gori::Probe::Group.new("missing_csp", "headers", "api.test", "Missing CSP",
       Gori::Store::Severity::Medium, 4,
       ["https://api.test/a", "https://api.test/b", "https://api.test/c"], nil, nil)
-    txt = Gori::CLI::Output.prism_group_text(g)
+    txt = Gori::CLI::Output.probe_group_text(g)
     txt.should contain("[medium]")
     txt.should contain("missing_csp")
     txt.should contain("×4")

@@ -121,22 +121,22 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('w').try(&.id).should eq("notes.close")
   end
 
-  it "lists the Prism list's detail-parity actions (promote, evidence, delete)" do
+  it "lists the Probe list's detail-parity actions (promote, evidence, delete)" do
     ctx = FakeExecContext.new
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Prism, :common, ctx)
+    menu.open(Gori::Verb::Scope::Probe, :common, ctx)
 
     ids = menu.entries.map(&.id)
-    ids.should contain("prism.promote-selected")
-    ids.should contain("prism.open-evidence")
-    ids.should contain("prism.repeater-evidence")
-    ids.should contain("prism.delete-selected")
-    menu.verb_for('p').try(&.id).should eq("prism.promote-selected")
-    menu.verb_for('o').try(&.id).should eq("prism.open-evidence")
-    menu.verb_for('r').try(&.id).should eq("prism.repeater-evidence")
-    menu.verb_for('d').try(&.id).should eq("prism.delete-selected")
-    menu.verb_for('v').try(&.id).should eq("prism.open")
-    menu.verb_for('g').try(&.id).should eq("prism.dismiss-code")
+    ids.should contain("probe.promote-selected")
+    ids.should contain("probe.open-evidence")
+    ids.should contain("probe.repeater-evidence")
+    ids.should contain("probe.delete-selected")
+    menu.verb_for('p').try(&.id).should eq("probe.promote-selected")
+    menu.verb_for('o').try(&.id).should eq("probe.open-evidence")
+    menu.verb_for('r').try(&.id).should eq("probe.repeater-evidence")
+    menu.verb_for('d').try(&.id).should eq("probe.delete-selected")
+    menu.verb_for('v').try(&.id).should eq("probe.open")
+    menu.verb_for('g').try(&.id).should eq("probe.dismiss-code")
   end
 
   it "lists the Decoder tab's actions in the Decoder scope (reachable from the sub-tab strip)" do
@@ -494,7 +494,7 @@ describe Gori::Tui::SpaceMenu do
       Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::FindingsDetail,
       Gori::Verb::Scope::Project, Gori::Verb::Scope::Decoder, Gori::Verb::Scope::Notes,
       Gori::Verb::Scope::Sitemap,
-      Gori::Verb::Scope::Miner, Gori::Verb::Scope::Prism, Gori::Verb::Scope::PrismDetail,
+      Gori::Verb::Scope::Miner, Gori::Verb::Scope::Probe, Gori::Verb::Scope::ProbeDetail,
     ]
     no_collision = ->(view : Array(Gori::Verb::Definition)) {
       keys = view.compact_map(&.menu_key)

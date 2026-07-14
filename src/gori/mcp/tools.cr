@@ -13,7 +13,7 @@ require "../decoder"
 require "../env"
 require "../miner"
 require "../notes"
-require "../prism"
+require "../probe"
 require "./serialize"
 require "./request_builder"
 
@@ -1013,7 +1013,7 @@ module Gori
         @store.update_repeater_response(repeater_id, result.head, result.body,
           result.error, result.duration_us)
         if result.response
-          prism_scan_saved_repeater(repeater_id, masked_target, masked_req, http2, flow_id,
+          probe_scan_saved_repeater(repeater_id, masked_target, masked_req, http2, flow_id,
             result.head, result.body, result.duration_us)
         end
         repeater_id
@@ -2410,21 +2410,21 @@ module Gori
         JSON.parse(%({"type":"array","description":#{desc.to_json},"items":{"type":"string"}}))
       end
 
-      # Passive-scan a just-saved Repeater send into prism_issues when mode is Passive/Active.
-      private def prism_scan_saved_repeater(repeater_id : Int64, target : String, request : String,
+      # Passive-scan a just-saved Repeater send into probe_issues when mode is Passive/Active.
+      private def probe_scan_saved_repeater(repeater_id : Int64, target : String, request : String,
                                           http2 : Bool, flow_id : Int64?, head : Bytes, body : Bytes?,
                                           duration_us : Int64) : Nil
-        return unless @store.prism_mode.scanning?
+        return unless @store.probe_mode.scanning?
         return if head.empty?
         rec = Store::RepeaterRecord.new(
           repeater_id, target, request, http2, true, flow_id, 0,
           head, body, nil, duration_us, nil, nil, false)
-        return unless detail = Prism.detail_from_repeater(rec)
-        Prism::Passive.analyze(detail).each do |d|
-          @store.upsert_prism_issue(Prism.with_source(d, flow_id: flow_id, repeater_id: repeater_id))
+        return unless detail = Probe.detail_from_repeater(rec)
+        Probe::Passive.analyze(detail).each do |d|
+          @store.upsert_probe_issue(Probe.with_source(d, flow_id: flow_id, repeater_id: repeater_id))
         end
       rescue
-        # Prism must never break send_request
+        # Probe must never break send_request
       end
 
       # Accepts a JSON array directly or a JSON-encoded string, or a string.

@@ -112,18 +112,18 @@ module Gori
     FTS_INDEX_MAX = 64 * 1024
 
     @events : Channel(FlowEvent)?
-    # Second post-commit notification channel feeding the Prism analyzer. Separate from
+    # Second post-commit notification channel feeding the Probe analyzer. Separate from
     # `@events` because a Crystal Channel is single-consumer — the TUI history refresh and
-    # Prism can't share one. Same best-effort drop-on-full semantics (see #publish).
-    @prism_events : Channel(FlowEvent)?
+    # Probe can't share one. Same best-effort drop-on-full semantics (see #publish).
+    @probe_events : Channel(FlowEvent)?
 
     # Opens (and migrates) the database. `events`, when given, receives
     # best-effort post-commit notifications for the live TUI; pass nil in
-    # headless mode (no consumer => nothing to publish). `prism_events` is the parallel
-    # feed for the Prism analyzer (nil when Prism isn't running). `retention_flows` caps
+    # headless mode (no consumer => nothing to publish). `probe_events` is the parallel
+    # feed for the Probe analyzer (nil when Probe isn't running). `retention_flows` caps
     # the kept history (0 = unlimited).
     def self.open(path : String, events : Channel(FlowEvent)? = nil,
-                  prism_events : Channel(FlowEvent)? = nil,
+                  probe_events : Channel(FlowEvent)? = nil,
                   retention_flows : Int32 = RETENTION_DEFAULT) : Store
       url = "sqlite3:#{path}?journal_mode=wal&synchronous=normal&busy_timeout=5000"
       db = DB.open(url)
@@ -138,7 +138,7 @@ module Gori
       # just crossed into the reclaim version. A fresh db (0) has nothing to reclaim; a db
       # already at/after it won't re-run.
       reclaim_to_disk(db) if pre_version >= 1 && pre_version < Schema::RECLAIM_VERSION
-      new(db, events, prism_events, retention_flows)
+      new(db, events, probe_events, retention_flows)
     end
 
     # The db (and its WAL/SHM sidecars) hold captured request/response bytes — cookies,
@@ -187,7 +187,7 @@ module Gori
     end
 
     def initialize(@db : DB::Database, @events : Channel(FlowEvent)? = nil,
-                   @prism_events : Channel(FlowEvent)? = nil,
+                   @probe_events : Channel(FlowEvent)? = nil,
                    @retention_flows : Int32 = RETENTION_DEFAULT,
                    @prune_interval : Int32 = PRUNE_INTERVAL)
       @writes = Channel(WriteOp).new(1024) # widened: h2 frames now queue fire-and-forget
@@ -202,20 +202,20 @@ module Gori
       # (a request whose response never arrives) can't grow it without limit — an evicted id
       # simply falls back to the readback. Single writer fiber ⇒ no lock.
       @pending_req_fts = {} of Int64 => String
-      # Bumped after every committed prism_issues mutation (upsert/delete/status).
+      # Bumped after every committed probe_issues mutation (upsert/delete/status).
       # The TUI polls this every main-loop tick — more reliable than PRAGMA data_version
-      # (same-process writer visibility is flaky) or the droppable Prism event channel.
-      @prism_generation = 0_i64
+      # (same-process writer visibility is flaky) or the droppable Probe event channel.
+      @probe_generation = 0_i64
       spawn(name: "gori-store-writer") do
         writer_loop
         @done.send(nil)
       end
     end
 
-    # Monotonic counter of committed prism_issues writes. Single-threaded fiber
+    # Monotonic counter of committed probe_issues writes. Single-threaded fiber
     # scheduler: plain Int64 is enough (no -Dpreview_mt).
-    def prism_generation : Int64
-      @prism_generation
+    def probe_generation : Int64
+      @probe_generation
     end
 
     # --- write API (called from proxy fibers) --------------------------------
@@ -507,36 +507,36 @@ module Gori
       }
     end
 
-    # --- prism scan issues (V20) ---------------------------------------------
+    # --- probe scan issues (V20) ---------------------------------------------
 
     # Cap on distinct affected URLs kept per grouped issue (newest accumulate; once full,
     # further hits still bump hit_count but the URL list stops growing).
-    PRISM_AFFECTED_CAP = 50
+    PROBE_AFFECTED_CAP = 50
     # Cap on distinct evidence labels accumulated per issue group (see merge_evidence).
-    PRISM_EVIDENCE_CAP = 12
+    PROBE_EVIDENCE_CAP = 12
 
-    PRISM_COLS = "id, code, category, host, title, severity, status, hit_count, affected, " \
+    PROBE_COLS = "id, code, category, host, title, severity, status, hit_count, affected, " \
                  "sample_flow_id, evidence, first_seen, last_seen, sample_repeater_id"
 
     # Group-merge upsert keyed by (code, host): a read-modify-write run INSIDE the writer
     # closure (atomic — the writer is the only writer), which a plain ON CONFLICT can't do
     # because it must dedup+cap the affected-URL JSON and raise severity to the max seen.
-    # No-op when (code, host) is in prism_suppressions (hard-deleted this project).
-    def upsert_prism_issue(d : Prism::Detection) : Nil
+    # No-op when (code, host) is in probe_suppressions (hard-deleted this project).
+    def upsert_probe_issue(d : Probe::Detection) : Nil
       ts = now_us
       wrote = false
       exec_task ->(c : DB::Connection) {
-        if c.query_one?("SELECT 1 FROM prism_suppressions WHERE code = ? AND host = ?",
+        if c.query_one?("SELECT 1 FROM probe_suppressions WHERE code = ? AND host = ?",
              d.code, d.host, as: Int64)
           return nil
         end
         existing = c.query_one?(
-          "SELECT id, affected, severity, evidence, title FROM prism_issues WHERE code = ? AND host = ?",
+          "SELECT id, affected, severity, evidence, title FROM probe_issues WHERE code = ? AND host = ?",
           d.code, d.host, as: {Int64, String, Int32, String?, String})
         if existing
           id, aff_json, sev, prev_evidence, prev_title = existing
           urls = parse_affected(aff_json)
-          urls << d.url if !urls.includes?(d.url) && urls.size < PRISM_AFFECTED_CAP
+          urls << d.url if !urls.includes?(d.url) && urls.size < PROBE_AFFECTED_CAP
           new_sev = sev > d.severity.value ? sev : d.severity.value
           # Keep the title in sync with the highest-severity observation: a code whose title
           # is severity-dependent (reflected_param: HTML ⇒ Medium "Reflected parameter" vs
@@ -549,11 +549,11 @@ module Gori
           # isn't masked by the first-wins COALESCE. Other codes keep their first
           # representative sample.
           new_evidence = accumulate_evidence?(d.code) ? merge_evidence(prev_evidence, d.evidence) : (prev_evidence || d.evidence)
-          c.exec("UPDATE prism_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
+          c.exec("UPDATE probe_issues SET hit_count = hit_count + 1, affected = ?, severity = ?, " \
                  "title = ?, evidence = ?, last_seen = ? WHERE id = ?",
             urls.to_json, new_sev, new_title, new_evidence, ts, id)
         else
-          c.exec("INSERT INTO prism_issues (code, category, host, title, severity, status, hit_count, " \
+          c.exec("INSERT INTO probe_issues (code, category, host, title, severity, status, hit_count, " \
                  "affected, sample_flow_id, evidence, first_seen, last_seen, sample_repeater_id) " \
                  "VALUES (?,?,?,?,?,0,1,?,?,?,?,?,?)",
             d.code, d.category, d.host, d.title, d.severity.value,
@@ -562,7 +562,7 @@ module Gori
         wrote = true
         nil
       }
-      bump_prism_generation if wrote # after commit (exec_task blocks until writer replies)
+      bump_probe_generation if wrote # after commit (exec_task blocks until writer replies)
     end
 
     # Codes whose evidence is a TYPE label (not a one-off sample), so a (code, host)
@@ -576,12 +576,12 @@ module Gori
       return existing if incoming.nil? || incoming.empty?
       return incoming if existing.nil? || existing.empty?
       parts = existing.split(", ").map(&.strip).reject(&.empty?)
-      return existing if parts.includes?(incoming) || parts.size >= PRISM_EVIDENCE_CAP
+      return existing if parts.includes?(incoming) || parts.size >= PROBE_EVIDENCE_CAP
       (parts << incoming).join(", ")
     end
 
-    def prism_issues(category : String? = nil, host : String? = nil,
-                     min_severity : Severity? = nil) : Array(PrismIssue)
+    def probe_issues(category : String? = nil, host : String? = nil,
+                     min_severity : Severity? = nil) : Array(ProbeIssue)
       conds = [] of String
       args = [] of DB::Any
       if c = category
@@ -594,84 +594,84 @@ module Gori
         conds << "severity >= ?"; args << ms.value
       end
       where = conds.empty? ? "" : " WHERE #{conds.join(" AND ")}"
-      list = [] of PrismIssue
-      @db.query("SELECT #{PRISM_COLS} FROM prism_issues#{where} ORDER BY severity DESC, last_seen DESC",
+      list = [] of ProbeIssue
+      @db.query("SELECT #{PROBE_COLS} FROM probe_issues#{where} ORDER BY severity DESC, last_seen DESC",
         args: args) do |rs|
-        rs.each { list << read_prism_issue(rs) }
+        rs.each { list << read_probe_issue(rs) }
       end
       list
     rescue
-      [] of PrismIssue # never crash the run loop over a read
+      [] of ProbeIssue # never crash the run loop over a read
     end
 
-    def get_prism_issue(id : Int64) : PrismIssue?
-      @db.query("SELECT #{PRISM_COLS} FROM prism_issues WHERE id = ?", id) do |rs|
-        return read_prism_issue(rs) if rs.move_next
+    def get_probe_issue(id : Int64) : ProbeIssue?
+      @db.query("SELECT #{PROBE_COLS} FROM probe_issues WHERE id = ?", id) do |rs|
+        return read_probe_issue(rs) if rs.move_next
       end
       nil
     end
 
-    def update_prism_issue_status(id : Int64, status : Status) : Nil
+    def update_probe_issue_status(id : Int64, status : Status) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE prism_issues SET status = ?, last_seen = ? WHERE id = ?", status.value, now_us, id)
+        c.exec("UPDATE probe_issues SET status = ?, last_seen = ? WHERE id = ?", status.value, now_us, id)
         nil
       }
-      bump_prism_generation
+      bump_probe_generation
     end
 
     # Bulk-mute every OPEN issue sharing this code (or host) — mark false-positive so the
     # whole group leaves the default open-only view and stays muted across re-hits. A plain
-    # delete can't durably mute: `upsert_prism_issue` resurrects the row as `open` on the
+    # delete can't durably mute: `upsert_probe_issue` resurrects the row as `open` on the
     # next matching observation. Already-triaged rows (confirmed/fp/resolved) are left as-is.
-    def dismiss_prism_by_code(code : String) : Nil
-      bulk_dismiss_prism("code = ?", code)
+    def dismiss_probe_by_code(code : String) : Nil
+      bulk_dismiss_probe("code = ?", code)
     end
 
-    def dismiss_prism_by_host(host : String) : Nil
-      bulk_dismiss_prism("host = ?", host)
+    def dismiss_probe_by_host(host : String) : Nil
+      bulk_dismiss_probe("host = ?", host)
     end
 
     # `clause` is a fixed internal predicate ("code = ?" / "host = ?"), never user text.
-    private def bulk_dismiss_prism(clause : String, arg : DB::Any) : Nil
+    private def bulk_dismiss_probe(clause : String, arg : DB::Any) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE prism_issues SET status = ?, last_seen = ? WHERE #{clause} AND status = ?",
+        c.exec("UPDATE probe_issues SET status = ?, last_seen = ? WHERE #{clause} AND status = ?",
           Status::FalsePositive.value, now_us, arg, Status::Open.value)
         nil
       }
-      bump_prism_generation
+      bump_probe_generation
     end
 
     # Hard-delete one issue and durably suppress (code, host) so Active backfill / passive
     # re-hits cannot resurrect it after Project leave/re-open. Suppress + delete are one
     # writer transaction (no window where a concurrent upsert re-inserts mid-delete).
-    def delete_prism_issue(id : Int64) : Nil
+    def delete_probe_issue(id : Int64) : Nil
       ts = now_us
       exec_task ->(c : DB::Connection) {
-        if row = c.query_one?("SELECT code, host FROM prism_issues WHERE id = ?", id, as: {String, String})
+        if row = c.query_one?("SELECT code, host FROM probe_issues WHERE id = ?", id, as: {String, String})
           code, host = row
-          c.exec("INSERT OR IGNORE INTO prism_suppressions (code, host, created_at) VALUES (?,?,?)",
+          c.exec("INSERT OR IGNORE INTO probe_suppressions (code, host, created_at) VALUES (?,?,?)",
             code, host, ts)
-          c.exec("DELETE FROM prism_issues WHERE id = ?", id)
+          c.exec("DELETE FROM probe_issues WHERE id = ?", id)
         end
         nil
       }
-      bump_prism_generation
+      bump_probe_generation
     end
 
     # Wipe every issue AND every hard-delete suppression so a full rescan can re-discover.
-    def clear_prism_issues : Nil
+    def clear_probe_issues : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("DELETE FROM prism_issues")
-        c.exec("DELETE FROM prism_suppressions")
+        c.exec("DELETE FROM probe_issues")
+        c.exec("DELETE FROM probe_suppressions")
         nil
       }
-      bump_prism_generation
+      bump_probe_generation
     end
 
     # (code, host) pairs hard-deleted this project — Analyzer reloads these on start.
-    def prism_suppressions : Array({String, String})
+    def probe_suppressions : Array({String, String})
       list = [] of {String, String}
-      @db.query("SELECT code, host FROM prism_suppressions") do |rs|
+      @db.query("SELECT code, host FROM probe_suppressions") do |rs|
         rs.each { list << {rs.read(String), rs.read(String)} }
       end
       list
@@ -679,27 +679,27 @@ module Gori
       [] of {String, String}
     end
 
-    def prism_suppressed?(code : String, host : String) : Bool
-      !@db.query_one?("SELECT 1 FROM prism_suppressions WHERE code = ? AND host = ?",
+    def probe_suppressed?(code : String, host : String) : Bool
+      !@db.query_one?("SELECT 1 FROM probe_suppressions WHERE code = ? AND host = ?",
         code, host, as: Int64).nil?
     rescue
       false
     end
 
-    private def bump_prism_generation : Nil
-      @prism_generation += 1
+    private def bump_probe_generation : Nil
+      @probe_generation += 1
     end
 
-    def count_prism_issues : Int32
-      @db.scalar("SELECT COUNT(*) FROM prism_issues").as(Int64).to_i
+    def count_probe_issues : Int32
+      @db.scalar("SELECT COUNT(*) FROM probe_issues").as(Int64).to_i
     rescue
       0
     end
 
-    # Prism-issue count per Severity value (index 0=Info … 4=Critical). Small table — a
+    # Probe-issue count per Severity value (index 0=Info … 4=Critical). Small table — a
     # plain scan, GROUP BY on the severity column.
-    def prism_severity_counts : StaticArray(Int64, 5)
-      severity_tally("SELECT severity, COUNT(*) FROM prism_issues GROUP BY severity")
+    def probe_severity_counts : StaticArray(Int64, 5)
+      severity_tally("SELECT severity, COUNT(*) FROM probe_issues GROUP BY severity")
     end
 
     # Shared fold for the severity-tally queries: a 5-slot array keyed by the Severity
@@ -719,22 +719,22 @@ module Gori
       StaticArray(Int64, 5).new(0_i64)
     end
 
-    # Per-project Prism MODE, stored in the generic settings table (key "prism_mode").
-    def prism_mode : Prism::Mode
-      Prism::Mode.from_setting(setting(Prism::MODE_SETTING_KEY))
+    # Per-project Probe MODE, stored in the generic settings table (key "probe_mode").
+    def probe_mode : Probe::Mode
+      Probe::Mode.from_setting(setting(Probe::MODE_SETTING_KEY))
     end
 
-    def set_prism_mode(mode : Prism::Mode) : Nil
-      set_setting(Prism::MODE_SETTING_KEY, mode.label)
+    def set_probe_mode(mode : Probe::Mode) : Nil
+      set_setting(Probe::MODE_SETTING_KEY, mode.label)
     end
 
     # Distinct (tech code, host, evidence) rows — the raw material for the project's
-    # "representative technologies" summary (Prism.tech_summary maps them to labels).
-    # The host is kept so scope-aware callers (Prism tab, Project AT A GLANCE) can drop
+    # "representative technologies" summary (Probe.tech_summary maps them to labels).
+    # The host is kept so scope-aware callers (Probe tab, Project AT A GLANCE) can drop
     # rows fingerprinted on out-of-scope hosts before summarizing.
-    def prism_tech_rows : Array({String, String, String?})
+    def probe_tech_rows : Array({String, String, String?})
       rows = [] of {String, String, String?}
-      @db.query("SELECT DISTINCT code, host, evidence FROM prism_issues WHERE category = 'tech' ORDER BY code") do |rs|
+      @db.query("SELECT DISTINCT code, host, evidence FROM probe_issues WHERE category = 'tech' ORDER BY code") do |rs|
         rs.each { rows << {rs.read(String), rs.read(String), rs.read(String?)} }
       end
       rows
@@ -742,12 +742,12 @@ module Gori
       [] of {String, String, String?}
     end
 
-    def prism_tech_summary : Array(String)
-      Prism.tech_summary(prism_tech_rows.map { |(code, _, ev)| {code, ev} })
+    def probe_tech_summary : Array(String)
+      Probe.tech_summary(probe_tech_rows.map { |(code, _, ev)| {code, ev} })
     end
 
-    private def read_prism_issue(rs : DB::ResultSet) : PrismIssue
-      PrismIssue.new(
+    private def read_probe_issue(rs : DB::ResultSet) : ProbeIssue
+      ProbeIssue.new(
         rs.read(Int64), rs.read(String), rs.read(String), rs.read(String), rs.read(String),
         Severity.new(rs.read(Int32)), Status.new(rs.read(Int32)), rs.read(Int64),
         parse_affected(rs.read(String)), rs.read(Int64?), rs.read(String?),
@@ -1218,7 +1218,7 @@ module Gori
       msgs
     end
 
-    # Frames on a flow with id AFTER `after_id`, OLDEST-first, up to `limit`. Lets the Prism WS
+    # Frames on a flow with id AFTER `after_id`, OLDEST-first, up to `limit`. Lets the Probe WS
     # rescan page forward from its per-flow high-water-mark and cover every frame exactly once,
     # even when more than a full window accumulated unscanned (a dropped-event burst) or the flow
     # was evicted from the analyzed-set and re-scanned.
@@ -1636,7 +1636,7 @@ module Gori
         c = tx.connection
         # NOTE (known limitation): a WebSocket flow still streaming frames after `retention_flows`
         # newer flows push its id below the cutoff is reaped here mid-stream, which also stops
-        # Prism WS scanning on it. A liveness guard like the h2 one below is the fix, but it must
+        # Probe WS scanning on it. A liveness guard like the h2 one below is the fix, but it must
         # compare ws_message.created_at against a WS-relative recency floor (flows.created_at and
         # ws_messages.created_at are set from different sources), so it is left for a focused
         # retention change rather than bundled here.
@@ -1962,15 +1962,15 @@ module Gori
           # dropped; authoritative state still in SQLite
         end
       end
-      if prism = @prism_events
+      if probe = @probe_events
         select
-        when prism.send(event)
+        when probe.send(event)
         else
-          # Prism analyzer behind / not running — drop (it re-reads via get_flow anyway)
+          # Probe analyzer behind / not running — drop (it re-reads via get_flow anyway)
         end
       end
     rescue Channel::ClosedError
-      # a consumer (TUI / Prism) closed during shutdown — the writer must not die over it
+      # a consumer (TUI / Probe) closed during shutdown — the writer must not die over it
     end
   end
 end

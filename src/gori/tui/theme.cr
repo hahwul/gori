@@ -608,7 +608,7 @@ module Gori::Tui
 
     # Colour for a Store::Severity value (0=Info … 4=Critical). Takes a plain Int so
     # Theme stays decoupled from Store (like status_color/method_color). The finding
-    # and Prism triage views keep their own private copies of this mapping.
+    # and Probe triage views keep their own private copies of this mapping.
     def self.severity_color(value : Int32) : Color
       case value
       when 4 then red    # Critical

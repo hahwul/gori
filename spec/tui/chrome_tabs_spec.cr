@@ -26,14 +26,14 @@ describe "Chrome.reconcile" do
     out.find { |(s, _, _)| s == :history }.not_nil![2].should be_true # inserted visible
   end
 
-  it "slots a newly-added catalog tab at its catalog-relative position (Prism left of Findings)" do
-    # An older config saved before Prism existed: the catalog order minus :prism. Reconcile
-    # must place Prism where the catalog puts it (immediately left of Findings), not at the end.
-    prefs = Chrome::TABS.reject { |(s, _)| s == :prism }
+  it "slots a newly-added catalog tab at its catalog-relative position (Probe left of Findings)" do
+    # An older config saved before Probe existed: the catalog order minus :probe. Reconcile
+    # must place Probe where the catalog puts it (immediately left of Findings), not at the end.
+    prefs = Chrome::TABS.reject { |(s, _)| s == :probe }
       .map { |(s, _)| {s.to_s, !Chrome::DEFAULT_HIDDEN.includes?(s)} }
     order = Chrome.reconcile(prefs).map(&.first)
-    order.index(:prism).not_nil!.should eq(order.index(:findings).not_nil! - 1)
-    order.index(:prism).not_nil!.should be > order.index(:comparer).not_nil!
+    order.index(:probe).not_nil!.should eq(order.index(:findings).not_nil! - 1)
+    order.index(:probe).not_nil!.should be > order.index(:comparer).not_nil!
   end
 
   it "drops unknown ids and collapses duplicates to the first occurrence" do

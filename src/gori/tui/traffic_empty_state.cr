@@ -46,7 +46,7 @@ module Gori::Tui
       when :repeater         then "no repeater open"
       when :fuzzer         then "no fuzz session open"
       when :fuzzer_results then running ? "running…" : "no results yet"
-      when :prism          then scan_on ? "no issues yet" : "scanning is OFF"
+      when :probe          then scan_on ? "no issues yet" : "scanning is OFF"
       when :findings       then "no findings yet"
       when :notes          then "empty note"
       else                      "nothing here yet"
@@ -63,7 +63,7 @@ module Gori::Tui
       when :repeater         then render_repeater_full(screen, rect, headline)
       when :fuzzer         then render_fuzzer_full(screen, rect, headline)
       when :fuzzer_results then render_fuzzer_results_full(screen, rect, headline, running)
-      when :prism          then render_prism_full(screen, rect, headline, addr, capturing, scan_on)
+      when :probe          then render_probe_full(screen, rect, headline, addr, capturing, scan_on)
       when :findings       then render_findings_full(screen, rect, headline)
       when :notes          then render_notes_full(screen, rect)
       end
@@ -85,8 +85,8 @@ module Gori::Tui
                 medium_fuzzer(headline)
               when :fuzzer_results
                 medium_fuzzer_results(headline, running)
-              when :prism
-                medium_prism(headline, scan_on)
+              when :probe
+                medium_probe(headline, scan_on)
               when :findings
                 medium_findings(headline)
               when :notes
@@ -113,7 +113,7 @@ module Gori::Tui
                "^N new · ⇧I from History"
              when :fuzzer_results
                running ? "sampling…" : "^R run · ^O sets"
-             when :prism
+             when :probe
                scan_on ? "traffic ──► scan · press m" : "press m to enable scanning"
              when :findings
                "⇧F from History · n create"
@@ -275,10 +275,10 @@ module Gori::Tui
       draw_chord_hint(screen, ix, y, iw, " ^R ", running ? "running…" : "run fuzzer", bullet: "▸ ") unless running
     end
 
-    private def render_prism_full(screen : Screen, rect : Rect, headline : String,
+    private def render_probe_full(screen : Screen, rect : Rect, headline : String,
                                   addr : String, capturing : Bool, scan_on : Bool) : Nil
       inner_h = scan_on ? 6 + (capturing ? 0 : 1) + 2 : 4
-      _, inner, ix, iw = begin_card(screen, rect, headline, "PRISM", inner_h)
+      _, inner, ix, iw = begin_card(screen, rect, headline, "PROBE", inner_h)
       y = inner.y
 
       if scan_on
@@ -295,7 +295,7 @@ module Gori::Tui
         y = draw_chord_hint(screen, ix, y, iw, " m:MODE ", "cycle scan mode", bullet: "◇ ")
         draw_palette_hint(screen, ix, y, iw, bullet: "▸ ")
       else
-        screen.text(ix, y, "Prism is not analyzing traffic while scanning is OFF.", Theme.text, Theme.bg, width: iw)
+        screen.text(ix, y, "Probe is not analyzing traffic while scanning is OFF.", Theme.text, Theme.bg, width: iw)
         y += 2
         screen.text(ix, y, "enable PASSIVE (safe) or ACTIVE to detect issues", Theme.muted, Theme.bg, width: iw)
         y += 2
@@ -370,7 +370,7 @@ module Gori::Tui
       running ? [headline, "sampling probes…"] : [headline, "^O payload sets · ^R run"]
     end
 
-    private def medium_prism(headline, scan_on) : Array(String)
+    private def medium_probe(headline, scan_on) : Array(String)
       if scan_on
         [headline, "traffic ──► scan ──► issues", "m:MODE · capture in-scope traffic"]
       else

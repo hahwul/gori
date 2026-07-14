@@ -20,7 +20,7 @@ module Gori::Proxy::Codec
     # br — decode unsupported").
     #
     # `max_out` caps the decoded output (bomb ceiling by default). A caller that only
-    # scans a prefix (Prism scans the first 64 KiB) can pass a small cap so a large
+    # scans a prefix (Probe scans the first 64 KiB) can pass a small cap so a large
     # compressed body stops inflating early instead of expanding megabytes only to be
     # truncated — the single-Content-Encoding case (virtually all traffic) yields exactly
     # that prefix; a rare multi-coding body yields a valid, decode-tolerant prefix.

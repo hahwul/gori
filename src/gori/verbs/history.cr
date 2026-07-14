@@ -480,7 +480,7 @@ module Gori
       register_sitemap(r)
       register_links(r)
       register_findings(r)
-      register_prism(r)
+      register_probe(r)
       register_fuzz(r)
       register_miner(r)
       register_comparer(r)

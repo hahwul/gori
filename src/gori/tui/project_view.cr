@@ -10,7 +10,7 @@ require "./gutter"
 require "../project"
 require "../store"
 require "../scope"
-require "../prism"
+require "../probe"
 require "../host_overrides"
 require "../settings"
 require "../env"
@@ -46,7 +46,7 @@ module Gori::Tui
       @project = nil
       @flow_count = 0
       @findings_count = 0
-      @prism_tech = [] of String # Prism-detected representative technologies (project facts)
+      @probe_tech = [] of String # Probe-detected representative technologies (project facts)
       @db_size = 0
       @total_captured = 0
       @created = nil
@@ -100,13 +100,13 @@ module Gori::Tui
       @project = project
       @flow_count = store.count
       @findings_count = store.count_findings
-      @prism_tech = scoped_tech(store.prism_tech_rows)
+      @probe_tech = scoped_tech(store.probe_tech_rows)
       @db_size = project.db_size
       @total_captured = store.total_size
-      # AT A GLANCE aggregates: status mix + combined finding/Prism severity tally.
+      # AT A GLANCE aggregates: status mix + combined finding/Probe severity tally.
       @status_counts = store.flow_status_counts
       f = store.findings_severity_counts
-      p = store.prism_severity_counts
+      p = store.probe_severity_counts
       @sev_tally = StaticArray(Int64, 5).new { |i| f[i] + p[i] }
       earliest = store.earliest_created_at
       # earliest_created_at is unix MICROSECONDS (the flows.created_at unit) — decoder
@@ -139,10 +139,10 @@ module Gori::Tui
 
     # Drop tech fingerprints seen only on out-of-scope hosts before summarizing — with
     # the scope lens ON, "representative technologies" should describe the in-scope
-    # target, not every host the proxy happened to see traffic for (mirrors PrismView).
+    # target, not every host the proxy happened to see traffic for (mirrors ProbeView).
     private def scoped_tech(rows : Array({String, String, String?})) : Array(String)
       rows = rows.select { |(_, host, _)| @scope.host_in_scope?(host) } if @scope.active?
-      Prism.tech_summary(rows.map { |(code, _, ev)| {code, ev} })
+      Probe.tech_summary(rows.map { |(code, _, ev)| {code, ev} })
     end
 
     # IME preedit routes to whichever pane is composing (SCOPE uses a popup overlay).
@@ -899,7 +899,7 @@ module Gori::Tui
         {"Flows", @flow_count.to_s},
         {"Captured", human_size(@total_captured)},
         {"Findings", @findings_count.to_s},
-        {"Technologies", @prism_tech.empty? ? "—" : @prism_tech.join(", ")},
+        {"Technologies", @probe_tech.empty? ? "—" : @probe_tech.join(", ")},
       ]
       lines.each do |(label, value)|
         break if y > max_y
@@ -911,7 +911,7 @@ module Gori::Tui
 
     # AT A GLANCE viz pane riding the right of the OVERVIEW band (read-only, like OVERVIEW
     # — no focus/keys). Two stacked micro-charts an analyst wants without leaving the tab:
-    # the captured traffic's HTTP status mix, then the finding/Prism severity breakdown.
+    # the captured traffic's HTTP status mix, then the finding/Probe severity breakdown.
     # Degrades top-down by height (mirrors the Fuzzer DIST pane).
     private def render_analytics(screen : Screen, rect : Rect) : Nil
       return if rect.w < 2 || rect.h < 2
@@ -953,7 +953,7 @@ module Gori::Tui
       out
     end
 
-    # Severity rows (Critical first) with nonzero counts, from the combined finding+Prism
+    # Severity rows (Critical first) with nonzero counts, from the combined finding+Probe
     # tally. The Int value feeds Theme.severity_color.
     private def severity_rows : Array({String, Int64, Int32})
       labels = { {4, "CRIT"}, {3, "HIGH"}, {2, "MED"}, {1, "LOW"}, {0, "INFO"} }

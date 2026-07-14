@@ -178,7 +178,7 @@ describe Gori::Tui::SitemapView do
       "host:acme".each_char { |c| view.query_insert(c) }
       b1 = MemoryBackend.new(70, 20)
       view.render(Screen.new(b1), Rect.new(0, 0, 70, 20))
-      b1.contains?("filter ›").should be_true # active editing prompt (unified with Findings/Prism)
+      b1.contains?("filter ›").should be_true # active editing prompt (unified with Findings/Probe)
       b1.contains?("host:acme").should be_true
     end
   end

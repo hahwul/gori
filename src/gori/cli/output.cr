@@ -3,7 +3,7 @@ require "../store"
 require "../fuzz"
 require "../miner"
 require "../sitemap"
-require "../prism/group"
+require "../probe/group"
 require "../notes"
 
 module Gori
@@ -135,17 +135,17 @@ module Gori
         end
       end
 
-      # --- prism scan issues --------------------------------------------------
+      # --- probe scan issues --------------------------------------------------
 
-      def self.prism_group_json(g : Prism::Group) : String
-        JSON.build { |j| prism_group_fields(j, g) }
+      def self.probe_group_json(g : Probe::Group) : String
+        JSON.build { |j| probe_group_fields(j, g) }
       end
 
-      def self.prism_array_json(groups : Array(Prism::Group)) : String
-        JSON.build { |j| j.array { groups.each { |g| prism_group_fields(j, g) } } }
+      def self.probe_array_json(groups : Array(Probe::Group)) : String
+        JSON.build { |j| j.array { groups.each { |g| probe_group_fields(j, g) } } }
       end
 
-      def self.prism_group_fields(j : JSON::Builder, g : Prism::Group) : Nil
+      def self.probe_group_fields(j : JSON::Builder, g : Probe::Group) : Nil
         j.object do
           j.field "code", g.code
           j.field "category", g.category
@@ -158,13 +158,13 @@ module Gori
           j.field "evidence", g.evidence
           j.field "sample_flow_id", g.sample_flow_id
           j.field "sample_repeater_id", g.sample_repeater_id
-          j.field "remediation", Prism.remediation(g.code)
+          j.field "remediation", Probe.remediation(g.code)
         end
       end
 
       # "[high]      secret_in_url             api.test   ×3   token"
       # plus an indented representative affected URL ("(+N more)" when capped).
-      def self.prism_group_text(g : Prism::Group) : String
+      def self.probe_group_text(g : Probe::Group) : String
         String.build do |io|
           io << "[#{g.severity.label}]".ljust(11)
           io << g.code.ljust(28)

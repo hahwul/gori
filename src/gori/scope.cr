@@ -177,7 +177,7 @@ module Gori
     end
 
     # Evaluate include/exclude rules against a URL REGARDLESS of the ⇧S display lens.
-    # Used by Prism Active probes. Differs from the Burp display filter in one safety
+    # Used by Probe Active probes. Differs from the Burp display filter in one safety
     # way: at least one INCLUDE rule is required (excludes-only would otherwise mean
     # "probe the whole internet minus a few hosts" — too aggressive for an automatic
     # outbound scanner). False when no includes exist or the URL is excluded.

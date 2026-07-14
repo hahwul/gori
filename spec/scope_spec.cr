@@ -69,7 +69,7 @@ describe Gori::Scope do
     end
   end
 
-  # matches_url? is the Prism Active gate: include rules define the probe target set
+  # matches_url? is the Probe Active gate: include rules define the probe target set
   # even when the ⇧S display lens is off (in_scope_url? is permissive when inactive).
   it "matches_url? evaluates include rules with the lens off; false without includes" do
     with_store do |store|

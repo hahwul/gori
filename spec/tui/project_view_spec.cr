@@ -191,10 +191,10 @@ end
 describe "ProjectView AT A GLANCE Technologies" do
   it "drops tech facts fingerprinted only on out-of-scope hosts once the scope lens is ON" do
     tmp_store do |store|
-      store.upsert_prism_issue(
-        Gori::Prism::Detection.new("tech_grpc", "tech", "a.test", "https://a.test/", "gRPC detected", Gori::Store::Severity::Info))
-      store.upsert_prism_issue(
-        Gori::Prism::Detection.new("tech_websocket", "tech", "b.test", "https://b.test/", "WebSocket detected", Gori::Store::Severity::Info))
+      store.upsert_probe_issue(
+        Gori::Probe::Detection.new("tech_grpc", "tech", "a.test", "https://a.test/", "gRPC detected", Gori::Store::Severity::Info))
+      store.upsert_probe_issue(
+        Gori::Probe::Detection.new("tech_websocket", "tech", "b.test", "https://b.test/", "WebSocket detected", Gori::Store::Severity::Info))
       project = Gori::Project.new("t", File.tempname("gori-projview-p"))
 
       scope = Gori::Scope.load(store)

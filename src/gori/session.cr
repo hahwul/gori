@@ -8,7 +8,7 @@ require "./scope"
 require "./host_overrides"
 require "./env"
 require "./interceptor"
-require "./prism"
+require "./probe"
 require "./proxy/server"
 require "./proxy/tls/cert_authority"
 require "./proxy/tls/tunnel"
@@ -27,9 +27,9 @@ module Gori
     getter store : Store
     getter proxy : Proxy::Server
     getter flow_events : Channel(Store::FlowEvent)
-    # The passive/active scanner. Subscribes to the store's parallel prism_events feed and
+    # The passive/active scanner. Subscribes to the store's parallel probe_events feed and
     # writes grouped issues; runs for both the TUI and headless capture.
-    getter prism : Prism::Analyzer
+    getter probe : Probe::Analyzer
     getter rules : Rules
     getter scope : Scope
     getter host_overrides : HostOverrides
@@ -43,9 +43,9 @@ module Gori
                   registry : Verb::Registry, project : Project,
                   bind_fallback : Bool = false) : Session
       events = Channel(Store::FlowEvent).new(1024)
-      prism_events = Channel(Store::FlowEvent).new(256)
-      store = Store.open(project.db_path, events, prism_events)
-      prism = nil.as(Prism::Analyzer?)
+      probe_events = Channel(Store::FlowEvent).new(256)
+      store = Store.open(project.db_path, events, probe_events)
+      probe = nil.as(Probe::Analyzer?)
       begin
         # Per-project network overrides: pull this project's pinned bind/upstream (if any) into
         # the Settings runtime layer BEFORE binding, so the proxy listens on the project's address
@@ -65,11 +65,11 @@ module Gori
         scope = Scope.load(store)                  # shared by the TUI lens AND intercept gating
         host_overrides = HostOverrides.load(store) # per-project /etc/hosts; proxy reads, TUI edits (Mutex-guarded)
         interceptor = Interceptor.new(scope)       # shared: proxy fibers hold, TUI decides
-        # Passive/active scanner: reads the parallel prism_events feed, gates active probes on
+        # Passive/active scanner: reads the parallel probe_events feed, gates active probes on
         # the shared Scope. Runs headless too — but ONLY on the capture-lock holder (started
         # below), never on a view-only 2nd instance (which would send duplicate active probes to
         # targets and race issue-writes on the shared DB against the real capturer).
-        prism = Prism::Analyzer.new(store, scope, prism_events, store.prism_mode, !config.insecure_upstream?)
+        probe = Probe::Analyzer.new(store, scope, probe_events, store.probe_mode, !config.insecure_upstream?)
         tunnel = Proxy::Tls::Tunnel.new(ca, verify_upstream: !config.insecure_upstream?,
           rewriter: rules, interceptor: interceptor, host_overrides: host_overrides)
         proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
@@ -110,25 +110,25 @@ module Gori
           # run the scanner. Both are gated on the lock so a view-only 2nd instance touches
           # neither the shared Pending rows nor the shared issue set.
           store.abandon_pending!("orphaned by a previous session")
-          prism.start
+          probe.start
         end
-        session = new(config, ca, registry, project, store, proxy, events, prism, rules, scope, host_overrides, interceptor, bind_error, lock)
+        session = new(config, ca, registry, project, store, proxy, events, probe, rules, scope, host_overrides, interceptor, bind_error, lock)
         session.sync_capture_status!
         session
       rescue ex
         # A store/rules/scope failure (NOT the bind, which is handled above) would
-        # otherwise leak the store's writer fiber + db fd, the events channels, the Prism
+        # otherwise leak the store's writer fiber + db fd, the events channels, the Probe
         # fibers, and the lock fd. Tear them down, then re-raise for the caller.
         lock.try(&.close) rescue nil
-        prism.try(&.stop) rescue nil
+        probe.try(&.stop) rescue nil
         store.close rescue nil
         events.close rescue nil
-        prism_events.close rescue nil
+        probe_events.close rescue nil
         raise ex
       end
     end
 
-    def initialize(@config, @ca, @registry, @project, @store, @proxy, @flow_events, @prism,
+    def initialize(@config, @ca, @registry, @project, @store, @proxy, @flow_events, @probe,
                    @rules, @scope, @host_overrides, @interceptor, @bind_error : String? = nil,
                    @capture_lock : CaptureLock? = nil)
     end
@@ -158,7 +158,7 @@ module Gori
         else
           @capture_lock ||= CaptureLock.try(@project.dir) # reuse if held, else try to take over
           return false unless @capture_lock               # still held by another instance
-          @prism.start                                    # we now hold the lock → run the scanner (idempotent if already running)
+          @probe.start                                    # we now hold the lock → run the scanner (idempotent if already running)
           @proxy.start(fallback: true)                    # cover a DIFFERENT project's port on resume
           true
         end
@@ -180,23 +180,23 @@ module Gori
       @interceptor.release_all # unblock held fibers FIRST so they can write final rows
       @proxy.stop
       @store.abandon_pending!("proxy stopped before response")
-      # Best-effort: a delete failure here must not skip the lock/prism/store teardown below
+      # Best-effort: a delete failure here must not skip the lock/probe/store teardown below
       # (which would leak the flock + writer fiber + fibers) or, via a caller's `ensure`,
       # replace the real exception being unwound.
       (CaptureStatus.clear(@project.dir) if capturing_lock_held?) rescue nil
-      # Stop Prism FIRST so its active workers wind down and its passive fiber stops issuing
-      # get_flow against a live DB; this also closes the prism_events channel it consumes.
-      @prism.stop
+      # Stop Probe FIRST so its active workers wind down and its passive fiber stops issuing
+      # get_flow against a live DB; this also closes the probe_events channel it consumes.
+      @probe.stop
       # Second sweep: proxy/intercept fibers released above may still enqueue
       # InsertFlow after the first abandon (right after proxy.stop).
       @store.abandon_pending!("proxy stopped before response")
       # Drain + stop the store BEFORE closing the events channel: the writer
       # publishes post-commit events while draining, and a closed channel would
       # otherwise make it raise mid-drain. (publish() also tolerates a closed
-      # channel as defense-in-depth — incl. the now-closed prism_events.)
+      # channel as defense-in-depth — incl. the now-closed probe_events.)
       @store.close
       @flow_events.close
-      # Release the capture flock LAST — only after this session's store + prism have torn
+      # Release the capture flock LAST — only after this session's store + probe have torn
       # down — so a second instance racing to reopen the same project can't become
       # concurrently live (its own analyzer/store touching shared state) while ours winds down.
       @capture_lock.try(&.close)

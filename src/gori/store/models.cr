@@ -250,13 +250,13 @@ module Gori
       end
     end
 
-    # A grouped Prism scan issue (V20): one row per distinct (code, host). Machine-found
+    # A grouped Probe scan issue (V20): one row per distinct (code, host). Machine-found
     # (by the passive/active analyzer), as opposed to the human-confirmed `Finding`. The
     # affected URLs accumulate in `affected` (capped) while `hit_count` counts every
     # observation; `severity` rises to the max seen. Reuses the shared Severity/Status
     # enums; `status` lets a group be triaged (confirmed / false-positive / resolved) or
     # promoted to a Finding. `category` drives the filter lens and the project tech summary.
-    struct PrismIssue
+    struct ProbeIssue
       getter id : Int64
       getter code : String
       getter category : String

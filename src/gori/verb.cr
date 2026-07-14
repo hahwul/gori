@@ -18,8 +18,8 @@ module Gori
       Sitemap        # the Sitemap tab has focus
       Findings       # the Findings list has focus
       FindingsDetail # a finding's detail is open
-      Prism          # the Prism scan-issue list has focus
-      PrismDetail    # a Prism issue's detail is open
+      Probe          # the Probe scan-issue list has focus
+      ProbeDetail    # a Probe issue's detail is open
       Intercept      # the Intercept queue tab has focus
       Comparer       # the Comparer tab has focus
       Decoder        # the Decoder tab has focus

@@ -1056,7 +1056,7 @@ module Gori::Tui
       ensure_visible(list_h)
 
       if @rows.empty?
-        # Mirror Findings/Prism: a recovery hint under the message. The QL-clear
+        # Mirror Findings/Probe: a recovery hint under the message. The QL-clear
         # cue only applies to a real query (not a Scope-lens-only empty set, which
         # ⇧S toggles off), so branch on @querying / @query before filtering?.
         # Branch on a real `/` query FIRST (querying-aware hint): a blank-query empty

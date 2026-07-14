@@ -732,7 +732,7 @@ module Gori::Tui
         @detail_flow = @detail.try { |f| f.flow_id.try { |fid| store.flow_row(fid) } }
         reload_detail_links(store)
         # get_finding returns nil when the row was deleted by a peer session (supported
-        # cross-session scenario) — guard the deref, mirroring PrismView#refresh_detail.
+        # cross-session scenario) — guard the deref, mirroring ProbeView#refresh_detail.
         # When @detail is nil the render path already falls back to the list view.
         if !notes_insert_mode? && (d = @detail)
           @notes.set_text(d.notes)

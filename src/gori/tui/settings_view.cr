@@ -47,7 +47,7 @@ module Gori::Tui
       Field.new("History Req/Res preview",
         "list page: bottom pane shows selected flow request + response — ←/→/space toggles",
         bool: true),
-      Field.new("Prism issue preview",
+      Field.new("Probe issue preview",
         "list page: bottom pane shows selected issue summary — ←/→/space toggles",
         bool: true),
       Field.new("Findings preview",
@@ -129,7 +129,7 @@ module Gori::Tui
                 when :theme  then [Theme.canonical(Settings::DEFAULT_THEME)]
                 when :layout then [
                   Settings::DEFAULT_HISTORY_PREVIEW ? "on" : "off",
-                  Settings::DEFAULT_PRISM_PREVIEW ? "on" : "off",
+                  Settings::DEFAULT_PROBE_PREVIEW ? "on" : "off",
                   Settings::DEFAULT_FINDINGS_PREVIEW ? "on" : "off",
                   order_label(Settings::DEFAULT_HISTORY_LIST_ORDER),
                   depth_label(Settings::DEFAULT_SITEMAP_EXPAND_DEPTH),
@@ -150,7 +150,7 @@ module Gori::Tui
     private def layout_values : Array(String)
       [
         Settings.history_preview ? "on" : "off",
-        Settings.prism_preview ? "on" : "off",
+        Settings.probe_preview ? "on" : "off",
         Settings.findings_preview ? "on" : "off",
         order_label(Settings.history_list_order),
         depth_label(Settings.sitemap_expand_depth),
@@ -303,7 +303,7 @@ module Gori::Tui
       end
       if @section == :layout
         Settings.history_preview = @values[0] == "on"
-        Settings.prism_preview = @values[1] == "on"
+        Settings.probe_preview = @values[1] == "on"
         Settings.findings_preview = @values[2] == "on"
         Settings.history_list_order = Settings.normalize_history_list_order(order_from_label(@values[3]))
         Settings.sitemap_expand_depth = Settings.normalize_sitemap_depth(depth_from_label(@values[4]))

@@ -6,7 +6,7 @@ require "../copy_menu"
 require "../subtab_picker"
 require "../../env"
 require "../../store"
-require "../../prism"
+require "../../probe"
 require "../../hotkeys"
 require "../../repeater/engine"
 require "../../repeater/h2_engine"
@@ -921,7 +921,7 @@ module Gori::Tui
         # reopen. Only on success: a later failed resend must not wipe a good response.
         if (id = tab.db_id) && result.ok?
           @host.session.store.update_repeater_response(id, result.head, result.body, result.error, result.duration_us)
-          prism_scan_repeater(id, result.head, result.body, result.duration_us, tab.flow_id, view)
+          probe_scan_repeater(id, result.head, result.body, result.duration_us, tab.flow_id, view)
         end
         @host.status(result.ok? ? "replayed → #{result.response.try(&.status)} in #{result.duration_us // 1000}ms#{result.incomplete? ? " (incomplete)" : ""}" : "repeater error: #{result.error}")
         applied = true
@@ -933,10 +933,10 @@ module Gori::Tui
         if result.ok?
           recv = result.messages.count(&.direction.==("in"))
           @host.status("ws replayed: #{recv} received#{result.close_code ? " · closed #{result.close_code}" : ""}")
-          # Feed the handshake + captured frames into Prism (WS payload secrets, tech).
+          # Feed the handshake + captured frames into Probe (WS payload secrets, tech).
           if id = tab.db_id
             @host.session.store.update_repeater_response(id, result.handshake_head, Bytes.empty, result.error, result.duration_us)
-            prism_scan_ws_repeater(id, result, tab.flow_id, view)
+            probe_scan_ws_repeater(id, result, tab.flow_id, view)
           end
         else
           @host.status("ws repeater error: #{result.error}")
@@ -954,21 +954,21 @@ module Gori::Tui
       applied
     end
 
-    # Passive-scan a successful HTTP Repeater send into Prism (mode-gated by the analyzer).
-    private def prism_scan_repeater(repeater_id : Int64, head : Bytes, body : Bytes?,
+    # Passive-scan a successful HTTP Repeater send into Probe (mode-gated by the analyzer).
+    private def probe_scan_repeater(repeater_id : Int64, head : Bytes, body : Bytes?,
                                   duration_us : Int64, flow_id : Int64?, view : RepeaterView) : Nil
       return if head.empty?
       rec = Store::RepeaterRecord.new(
         repeater_id, view.target, view.request_text, view.http2?, view.auto_content_length?,
         flow_id, 0, head, body, nil, duration_us, view.name, view.sni_override, view.mark_transform?)
-      return unless detail = Prism.detail_from_repeater(rec)
-      @host.session.prism.scan_detail(detail, repeater_id: repeater_id)
+      return unless detail = Probe.detail_from_repeater(rec)
+      @host.session.probe.scan_detail(detail, repeater_id: repeater_id)
     rescue
-      # Prism must never break the Repeater UX
+      # Probe must never break the Repeater UX
     end
 
     # Passive-scan a successful WebSocket Repeater transcript (handshake + text frames).
-    private def prism_scan_ws_repeater(repeater_id : Int64, result : Repeater::WsEngine::Result,
+    private def probe_scan_ws_repeater(repeater_id : Int64, result : Repeater::WsEngine::Result,
                                      flow_id : Int64?, view : RepeaterView) : Nil
       head = result.handshake_head
       return if head.empty?
@@ -977,7 +977,7 @@ module Gori::Tui
       rec = Store::RepeaterRecord.new(
         repeater_id, view.target, req_text, false, false,
         flow_id, 0, head, Bytes.empty, nil, result.duration_us, view.name, view.sni_override, false)
-      return unless detail = Prism.detail_from_repeater(rec)
+      return unless detail = Probe.detail_from_repeater(rec)
       # Synthetic WsMessage rows (id unused by the rule; opcode 1 = text).
       now = Time.utc.to_unix_ms * 1000
       msgs = result.messages.compact_map do |m|
@@ -985,7 +985,7 @@ module Gori::Tui
         next if m.payload.empty?
         Store::WsMessage.new(0_i64, flow_id || 0_i64, repeater_id, now, m.direction, 1, m.payload)
       end
-      @host.session.prism.scan_detail(detail, repeater_id: repeater_id, ws_messages: msgs)
+      @host.session.probe.scan_detail(detail, repeater_id: repeater_id, ws_messages: msgs)
     rescue
     end
 

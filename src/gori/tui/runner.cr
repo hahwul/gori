@@ -13,7 +13,7 @@ require "./controllers/intercept_controller"
 require "./controllers/notes_controller"
 require "./controllers/history_controller"
 require "./controllers/findings_controller"
-require "./controllers/prism_controller"
+require "./controllers/probe_controller"
 require "./controllers/project_controller"
 require "./controllers/repeater_controller"
 require "./controllers/fuzzer_controller"
@@ -220,7 +220,7 @@ module Gori::Tui
         NotesController.new(self),
         HistoryController.new(self),
         FindingsController.new(self),
-        PrismController.new(self),
+        ProbeController.new(self),
         ProjectController.new(self),
         RepeaterController.new(self),
         FuzzerController.new(self),
@@ -259,8 +259,8 @@ module Gori::Tui
       @tabs[:findings].as(FindingsController)
     end
 
-    private def prism_controller : PrismController
-      @tabs[:prism].as(PrismController)
+    private def probe_controller : ProbeController
+      @tabs[:probe].as(ProbeController)
     end
 
     private def project_controller : ProjectController
@@ -330,7 +330,7 @@ module Gori::Tui
       last_wf = @session.store.write_failures
       last_dv = @session.store.data_version # SQLite change counter for cross-process refresh
       last_dv_poll = Time.instant
-      last_prism_gen = @session.store.prism_generation # committed prism_issues mutations
+      last_probe_gen = @session.store.probe_generation # committed probe_issues mutations
       last_spin = Time.instant                         # advances the background-job spinner frame
       last_clock = clock_label                         # top-bar wall clock; re-render only when the minute rolls over
       last_ui_ident = nil.as(String?)                  # last-written ui-state identity (see UI_STATE_THROTTLE)
@@ -367,19 +367,19 @@ module Gori::Tui
           last_wf = wf
           dirty = true
         end
-        # Prism list live refresh: Store#prism_generation increments after every
-        # committed prism_issues write (upsert/delete/status). Poll every tick —
+        # Probe list live refresh: Store#probe_generation increments after every
+        # committed probe_issues write (upsert/delete/status). Poll every tick —
         # do NOT rely on the droppable analyzer event channel or PRAGMA data_version.
-        # Reload the (full-table SELECT + filter) list ONLY when Prism is the active tab:
+        # Reload the (full-table SELECT + filter) list ONLY when Probe is the active tab:
         # nothing in the always-visible chrome reads it (toasts arrive via drain_events),
         # and on_enter reloads on tab switch, so an off-tab bump is caught up on return.
-        # `last_prism_gen` still advances so returning to Prism doesn't reload redundantly.
-        # When Prism is visible, force a full terminal sync (not just cell-diff) so a
+        # `last_probe_gen` still advances so returning to Probe doesn't reload redundantly.
+        # When Probe is visible, force a full terminal sync (not just cell-diff) so a
         # new/removed row cannot stick as a stale paint.
-        if (pgen = @session.store.prism_generation) != last_prism_gen
-          last_prism_gen = pgen
-          if @active_tab == :prism
-            prism_controller.refresh_from_store
+        if (pgen = @session.store.probe_generation) != last_probe_gen
+          last_probe_gen = pgen
+          if @active_tab == :probe
+            probe_controller.refresh_from_store
             dirty = true
             @resized = true
           end
@@ -523,9 +523,9 @@ module Gori::Tui
         history_controller.view.on_event(event, @session.store)
         drained = true
       end
-      # Prism analyzer events (issues persisted / reflections found) — coalesced to one
+      # Probe analyzer events (issues persisted / reflections found) — coalesced to one
       # list reload per tick inside the controller; drives a redraw when anything landed.
-      drained = true if prism_controller.drain_events
+      drained = true if probe_controller.drain_events
       # Coalesce a filtered-view reload to once per drain (on_event only flagged it). A
       # filtered / Scope-lens History can't update incrementally, so flush_filter re-runs
       # the FULL-table search; do it only while History is the ACTIVE tab. In the
@@ -723,8 +723,8 @@ module Gori::Tui
       if @active_tab == :findings && @overlay == :none && @focus == :body && findings_controller.view.querying?
         return if findings_controller.handle_query_key(ev)
       end
-      if @active_tab == :prism && @overlay == :none && @focus == :body && prism_controller.view.querying?
-        return if prism_controller.handle_query_key(ev)
+      if @active_tab == :probe && @overlay == :none && @focus == :body && probe_controller.view.querying?
+        return if probe_controller.handle_query_key(ev)
       end
       # Repeater sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc.
       # Opened from the strip (not the body), so it's not gated on @focus.
@@ -1575,14 +1575,14 @@ module Gori::Tui
       return close_choice_picker unless p
       case p.kind
       when :severity, :status then apply_finding_choice(p)
-      when :prism_mode
-        @session.prism.set_mode(Prism::Mode.new(p.selected_value))
-        prism_controller.view.reload(@session.store)
-        mode = @session.prism.mode
+      when :probe_mode
+        @session.probe.set_mode(Probe::Mode.new(p.selected_value))
+        probe_controller.view.reload(@session.store)
+        mode = @session.probe.mode
         @toast = if mode.active?
-                   "Prism mode: ACTIVE — light-touch probes over recent in-scope traffic"
+                   "Probe mode: ACTIVE — light-touch probes over recent in-scope traffic"
                  else
-                   "Prism mode: #{mode.title}"
+                   "Probe mode: #{mode.title}"
                  end
       end
       close_choice_picker
@@ -4033,58 +4033,58 @@ module Gori::Tui
       findings_controller.findings_export(format)
     end
 
-    # --- prism ExecContext ---
+    # --- probe ExecContext ---
 
-    def prism_move(delta : Int32) : Nil
-      prism_controller.prism_move(delta)
+    def probe_move(delta : Int32) : Nil
+      probe_controller.probe_move(delta)
     end
 
-    def prism_open : Nil
-      prism_controller.prism_open
+    def probe_open : Nil
+      probe_controller.probe_open
     end
 
-    def prism_close : Nil
-      prism_controller.prism_close
+    def probe_close : Nil
+      probe_controller.probe_close
     end
 
-    def prism_query : Nil
-      prism_controller.view.start_query
+    def probe_query : Nil
+      probe_controller.view.start_query
     end
 
-    def prism_clear : Nil
-      prism_controller.prism_clear
+    def probe_clear : Nil
+      probe_controller.probe_clear
     end
 
-    def prism_delete : Nil
-      prism_controller.prism_delete
+    def probe_delete : Nil
+      probe_controller.probe_delete
     end
 
     # Open the MODE picker (a shell overlay); apply_choice applies it to the analyzer.
-    def prism_set_mode : Nil
-      @choice_picker = ChoicePicker.for_prism_mode(@session.prism.mode.value)
+    def probe_set_mode : Nil
+      @choice_picker = ChoicePicker.for_probe_mode(@session.probe.mode.value)
       @overlay = :choice
     end
 
-    def prism_dismiss : Nil
-      prism_controller.prism_dismiss
+    def probe_dismiss : Nil
+      probe_controller.probe_dismiss
     end
 
-    def prism_toggle_closed : Nil
-      prism_controller.prism_toggle_closed
+    def probe_toggle_closed : Nil
+      probe_controller.probe_toggle_closed
     end
 
-    def prism_dismiss_code : Nil
-      prism_controller.prism_dismiss_code
+    def probe_dismiss_code : Nil
+      probe_controller.probe_dismiss_code
     end
 
-    def prism_dismiss_host : Nil
-      prism_controller.prism_dismiss_host
+    def probe_dismiss_host : Nil
+      probe_controller.probe_dismiss_host
     end
 
     # Jump from an issue to its sample evidence: History flow when present, else the
     # Repeater tab that first produced the hit (Repeater-sourced passive issues).
-    def prism_open_flow : Nil
-      return unless i = prism_controller.view.target_issue
+    def probe_open_flow : Nil
+      return unless i = probe_controller.view.target_issue
       if fid = i.sample_flow_id
         if history_controller.view.open_detail_id(fid, @session.store)
           @active_tab = :history
@@ -4104,8 +4104,8 @@ module Gori::Tui
 
     # Send an issue's sample flow to Repeater to re-test it (mirrors finding_repeater_flow).
     # When the only evidence is a Repeater tab, jump there instead of re-spawning.
-    def prism_repeater_flow : Nil
-      return unless i = prism_controller.view.target_issue
+    def probe_repeater_flow : Nil
+      return unless i = probe_controller.view.target_issue
       if fid = i.sample_flow_id
         if @session.store.get_flow(fid)
           repeater_flow(fid)
@@ -4121,10 +4121,10 @@ module Gori::Tui
       @toast = "this issue has no sample evidence"
     end
 
-    # Promote a machine-found Prism issue to a human-confirmed Finding (the bridge to the
+    # Promote a machine-found Probe issue to a human-confirmed Finding (the bridge to the
     # Findings report). Reuses Store#insert_finding; the issue's severity/host/sample flow carry over.
-    def prism_promote : Nil
-      return unless i = prism_controller.view.target_issue
+    def probe_promote : Nil
+      return unless i = probe_controller.view.target_issue
       # Promotion marks the source issue Confirmed; a second press would otherwise mint a
       # duplicate Finding for the same issue. Already-Confirmed ⇒ already promoted.
       if i.status.confirmed?
@@ -4140,8 +4140,8 @@ module Gori::Tui
       end
       # Mark the source confirmed (= "promoted to a Finding") so it leaves the default
       # open-only lens instead of lingering as unreviewed noise; still reachable via `a`.
-      @session.store.update_prism_issue_status(i.id, Store::Status::Confirmed)
-      prism_controller.view.reload(@session.store)
+      @session.store.update_probe_issue_status(i.id, Store::Status::Confirmed)
+      probe_controller.view.reload(@session.store)
       @toast = "promoted to finding — see the Findings tab"
     end
 
@@ -4174,7 +4174,7 @@ module Gori::Tui
       @scope.toggle
       history_controller.view.reload(@session.store)
       sitemap_controller.reload if @active_tab == :sitemap
-      prism_controller.view.reload(@session.store) if @active_tab == :prism
+      probe_controller.view.reload(@session.store) if @active_tab == :probe
       project_controller.toast_scope_state
     end
 
