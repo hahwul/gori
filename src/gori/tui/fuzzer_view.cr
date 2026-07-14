@@ -14,7 +14,7 @@ require "./spark"
 require "./chain_pane"
 require "../store"
 require "../fuzz"
-require "../convert"
+require "../decoder"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
 require "../replay/flow_request"
@@ -116,7 +116,7 @@ module Gori::Tui
       @chain_rev = -1
       @chain_cursor = -1
       @chain_cache = nil.as(String?)
-      # The CHAIN sub-pane: a visible editor for the Convert chain of the §…§ marker under
+      # The CHAIN sub-pane: a visible editor for the Decoder chain of the §…§ marker under
       # the TEMPLATE cursor (transform applied to each payload on send). @chain_focused =
       # editing it; @chain_marker_cursor remembers which marker to commit back to.
       @chain_pane = ChainPane.new
@@ -879,7 +879,7 @@ module Gori::Tui
       return {nil, "invalid target — use scheme://host[:port]/path"} if host.empty?
       sets = @sets.map { |s| Fuzz::PayloadSet.new(build_source(s)) }
       gen_sets = @config.mode.per_position? ? sets : [sets.first]
-      generator = Fuzz::Generator.new(template, gen_sets, @config, registry: Convert.shared_registry)
+      generator = Fuzz::Generator.new(template, gen_sets, @config, registry: Decoder.shared_registry)
       sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
         http2: @http2, verify: verify, sni: sni_override, timeout: @config.timeout)
       @matcher.auto_calibrate = @config.auto_calibrate?
@@ -1471,7 +1471,7 @@ module Gori::Tui
       screen.text({pretty_x - badge.size, min_x}.max, rect.y, badge,
         pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg)
       # Marker i ↔ position i ↔ generator.set_for(i). The value gets the position hue; a
-      # trailing ¦chain (Convert transform-on-send) is over-painted with a neutral band so
+      # trailing ¦chain (Decoder transform-on-send) is over-painted with a neutral band so
       # it reads as metadata, not payload. Colours resolved fresh each frame (offsets are
       # colour-free); marker_regions is 1:1 with `spans`, so the config chips stay in sync.
       bg = [] of {Int32, Int32, Color}

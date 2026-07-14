@@ -339,106 +339,106 @@ describe Gori::Settings do
     end
   end
 
-  it "round-trips the legacy Convert scratch state (input + chain + named chains)" do
-    dir = File.tempname("gori-settings-convert")
+  it "round-trips the legacy Decoder scratch state (input + chain + named chains)" do
+    dir = File.tempname("gori-settings-decoder")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
     begin
       ENV["GORI_HOME"] = dir
-      Gori::Settings.convert_sessions = [] of {String, String, String} # empty ⇒ legacy scalars are written
-      Gori::Settings.convert_input = "hello world"
-      Gori::Settings.convert_chain = "base64 > sha256"
-      Gori::Settings.convert_chains = [{"hash", "base64 > sha256"}, {"enc", "url-encode"}]
+      Gori::Settings.decoder_sessions = [] of {String, String, String} # empty ⇒ legacy scalars are written
+      Gori::Settings.decoder_input = "hello world"
+      Gori::Settings.decoder_chain = "base64 > sha256"
+      Gori::Settings.decoder_chains = [{"hash", "base64 > sha256"}, {"enc", "url-encode"}]
       Gori::Settings.save.should be_true
-      Gori::Settings.convert_input = ""
-      Gori::Settings.convert_chain = ""
-      Gori::Settings.convert_chains = [] of {String, String}
+      Gori::Settings.decoder_input = ""
+      Gori::Settings.decoder_chain = ""
+      Gori::Settings.decoder_chains = [] of {String, String}
       Gori::Settings.load
-      Gori::Settings.convert_input.should eq("hello world")
-      Gori::Settings.convert_chain.should eq("base64 > sha256")
-      Gori::Settings.convert_chains.should eq([{"hash", "base64 > sha256"}, {"enc", "url-encode"}])
+      Gori::Settings.decoder_input.should eq("hello world")
+      Gori::Settings.decoder_chain.should eq("base64 > sha256")
+      Gori::Settings.decoder_chains.should eq([{"hash", "base64 > sha256"}, {"enc", "url-encode"}])
 
-      # an older file with no "convert" key keeps the current in-memory defaults
+      # an older file with no "decoder" key keeps the current in-memory defaults
       File.write(Gori::Settings.path, %({"theme":"goridark"}))
-      Gori::Settings.convert_input = "kept"
-      Gori::Settings.convert_chains = [{"x", "hex"}]
+      Gori::Settings.decoder_input = "kept"
+      Gori::Settings.decoder_chains = [{"x", "hex"}]
       Gori::Settings.load
-      Gori::Settings.convert_input.should eq("kept")
-      Gori::Settings.convert_chains.should eq([{"x", "hex"}])
+      Gori::Settings.decoder_input.should eq("kept")
+      Gori::Settings.decoder_chains.should eq([{"x", "hex"}])
 
       # malformed named chains tolerated: entries missing name/spec are dropped
-      File.write(Gori::Settings.path, %({"convert":{"chains":[{"name":"ok","spec":"hex"},{"name":""},{"spec":"md5"}]}}))
+      File.write(Gori::Settings.path, %({"decoder":{"chains":[{"name":"ok","spec":"hex"},{"name":""},{"spec":"md5"}]}}))
       Gori::Settings.load
-      Gori::Settings.convert_chains.should eq([{"ok", "hex"}])
+      Gori::Settings.decoder_chains.should eq([{"ok", "hex"}])
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.convert_input = ""
-      Gori::Settings.convert_chain = ""
-      Gori::Settings.convert_chains = [] of {String, String}
-      Gori::Settings.convert_sessions = [] of {String, String, String}
+      Gori::Settings.decoder_input = ""
+      Gori::Settings.decoder_chain = ""
+      Gori::Settings.decoder_chains = [] of {String, String}
+      Gori::Settings.decoder_sessions = [] of {String, String, String}
     end
   end
 
-  it "round-trips open Convert sub-tabs (sessions) and reads a legacy file for migration" do
-    dir = File.tempname("gori-settings-convert-sessions")
+  it "round-trips open Decoder sub-tabs (sessions) and reads a legacy file for migration" do
+    dir = File.tempname("gori-settings-decoder-sessions")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
     begin
       ENV["GORI_HOME"] = dir
-      Gori::Settings.convert_input = ""
-      Gori::Settings.convert_chain = ""
-      Gori::Settings.convert_chains = [] of {String, String}
-      Gori::Settings.convert_sessions = [{"in1", "base64", "first"}, {"in2", "hex > upper", ""}]
+      Gori::Settings.decoder_input = ""
+      Gori::Settings.decoder_chain = ""
+      Gori::Settings.decoder_chains = [] of {String, String}
+      Gori::Settings.decoder_sessions = [{"in1", "base64", "first"}, {"in2", "hex > upper", ""}]
       Gori::Settings.save.should be_true
       # sessions are the source of truth once present; the legacy scalars are not written
       raw = File.read(Gori::Settings.path)
       raw.includes?(%("sessions")).should be_true
 
-      Gori::Settings.convert_sessions = [] of {String, String, String}
+      Gori::Settings.decoder_sessions = [] of {String, String, String}
       Gori::Settings.load
-      Gori::Settings.convert_sessions.should eq([{"in1", "base64", "first"}, {"in2", "hex > upper", ""}])
+      Gori::Settings.decoder_sessions.should eq([{"in1", "base64", "first"}, {"in2", "hex > upper", ""}])
 
       # a legacy file (only input/chain, no "sessions" array) loads with sessions empty,
       # so the controller migrates the scalars into a single session
-      File.write(Gori::Settings.path, %({"convert":{"input":"legacy","chain":"md5"}}))
-      Gori::Settings.convert_sessions = [] of {String, String, String}
+      File.write(Gori::Settings.path, %({"decoder":{"input":"legacy","chain":"md5"}}))
+      Gori::Settings.decoder_sessions = [] of {String, String, String}
       Gori::Settings.load
-      Gori::Settings.convert_sessions.empty?.should be_true
-      Gori::Settings.convert_input.should eq("legacy")
-      Gori::Settings.convert_chain.should eq("md5")
+      Gori::Settings.decoder_sessions.empty?.should be_true
+      Gori::Settings.decoder_input.should eq("legacy")
+      Gori::Settings.decoder_chain.should eq("md5")
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.convert_input = ""
-      Gori::Settings.convert_chain = ""
-      Gori::Settings.convert_chains = [] of {String, String}
-      Gori::Settings.convert_sessions = [] of {String, String, String}
+      Gori::Settings.decoder_input = ""
+      Gori::Settings.decoder_chain = ""
+      Gori::Settings.decoder_chains = [] of {String, String}
+      Gori::Settings.decoder_sessions = [] of {String, String, String}
     end
   end
 
-  it "omits the convert key entirely when the Convert state is empty" do
-    dir = File.tempname("gori-settings-noconvert")
+  it "omits the decoder key entirely when the Decoder state is empty" do
+    dir = File.tempname("gori-settings-nodecoder")
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
     begin
       ENV["GORI_HOME"] = dir
-      Gori::Settings.convert_input = ""
-      Gori::Settings.convert_chain = ""
-      Gori::Settings.convert_chains = [] of {String, String}
-      Gori::Settings.convert_sessions = [] of {String, String, String}
+      Gori::Settings.decoder_input = ""
+      Gori::Settings.decoder_chain = ""
+      Gori::Settings.decoder_chains = [] of {String, String}
+      Gori::Settings.decoder_sessions = [] of {String, String, String}
       Gori::Settings.save.should be_true
-      File.read(Gori::Settings.path).includes?("convert").should be_false
+      File.read(Gori::Settings.path).includes?("decoder").should be_false
 
       # a single blank+unnamed open session is still "nothing to persist" — a cleared or
-      # dirtied-but-empty workbench must not write a stub "convert" block either
-      Gori::Settings.convert_sessions = [{"", "", ""}]
+      # dirtied-but-empty workbench must not write a stub "decoder" block either
+      Gori::Settings.decoder_sessions = [{"", "", ""}]
       Gori::Settings.save.should be_true
-      File.read(Gori::Settings.path).includes?("convert").should be_false
+      File.read(Gori::Settings.path).includes?("decoder").should be_false
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.convert_sessions = [] of {String, String, String}
+      Gori::Settings.decoder_sessions = [] of {String, String, String}
     end
   end
 

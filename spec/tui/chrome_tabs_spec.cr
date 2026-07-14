@@ -13,7 +13,7 @@ describe "Chrome.reconcile" do
     Chrome::DEFAULT_HIDDEN.each { |sym| visible.includes?(sym).should be_false } # only :miner hidden
     out.find { |(s, _, _)| s == :miner }.not_nil![2].should be_false
     out.find { |(s, _, _)| s == :comparer }.not_nil![2].should be_true # now a default-visible tab
-    out.find { |(s, _, _)| s == :convert }.not_nil![2].should be_true  # now a default-visible tab
+    out.find { |(s, _, _)| s == :decoder }.not_nil![2].should be_true  # now a default-visible tab
     out.find { |(s, _, _)| s == :project }.not_nil![2].should be_true
   end
 
@@ -56,26 +56,26 @@ describe "Chrome.visible_tabs" do
     vis = Chrome.visible_tabs([] of {String, Bool}).map(&.first)
     vis.includes?(:miner).should be_false # only Miner is hidden by default now
     vis.includes?(:comparer).should be_true
-    vis.includes?(:convert).should be_true
+    vis.includes?(:decoder).should be_true
     vis.first.should eq(:project)
     vis.size.should eq(Chrome::TABS.size - Chrome::DEFAULT_HIDDEN.size)
   end
 
   it "force-includes a hidden active tab at its catalog-relative position" do
     # Miner hidden by default; forcing it must slot it where it sits in the catalog
-    # (between Fuzzer and Convert).
+    # (between Fuzzer and Decoder).
     vis = Chrome.visible_tabs([] of {String, Bool}, force: :miner).map(&.first)
     vis.includes?(:miner).should be_true
     vis.index(:miner).not_nil!.should be > vis.index(:fuzzer).not_nil!
-    vis.index(:miner).not_nil!.should be < vis.index(:convert).not_nil!
+    vis.index(:miner).not_nil!.should be < vis.index(:decoder).not_nil!
   end
 
-  it "places the default-visible Convert tab between Fuzzer and Comparer" do
-    # Convert is visible by default and sits mid-strip; force: is a no-op for it.
-    vis = Chrome.visible_tabs([] of {String, Bool}, force: :convert).map(&.first)
-    vis.includes?(:convert).should be_true
-    vis.index(:convert).not_nil!.should be > vis.index(:fuzzer).not_nil!
-    vis.index(:convert).not_nil!.should be < vis.index(:comparer).not_nil!
+  it "places the default-visible Decoder tab between Fuzzer and Comparer" do
+    # Decoder is visible by default and sits mid-strip; force: is a no-op for it.
+    vis = Chrome.visible_tabs([] of {String, Bool}, force: :decoder).map(&.first)
+    vis.includes?(:decoder).should be_true
+    vis.index(:decoder).not_nil!.should be > vis.index(:fuzzer).not_nil!
+    vis.index(:decoder).not_nil!.should be < vis.index(:comparer).not_nil!
   end
 
   it "is a no-op for force: when the active tab is already visible" do
@@ -96,12 +96,12 @@ describe "Chrome.hidden_tabs" do
   end
 
   it "lists a user-hidden tab and preserves catalog order" do
-    prefs = [{"replay", false}, {"convert", false}]
+    prefs = [{"replay", false}, {"decoder", false}]
     hid = Chrome.hidden_tabs(prefs).map(&.first)
     hid.includes?(:replay).should be_true
-    hid.includes?(:convert).should be_true
+    hid.includes?(:decoder).should be_true
     hid.includes?(:miner).should be_true                                 # still default-hidden
-    hid.index(:replay).not_nil!.should be < hid.index(:convert).not_nil! # catalog order
+    hid.index(:replay).not_nil!.should be < hid.index(:decoder).not_nil! # catalog order
   end
 end
 

@@ -7,7 +7,7 @@ require "digest/sha1"
 require "digest/sha256"
 require "digest/sha512"
 
-module Gori::Convert
+module Gori::Decoder
   # Builds the default registry — every v1 converter, in autocomplete display
   # order. Each implementation uses a stdlib API verified against Crystal 1.20
   # (e.g. Base64.strict_encode, NOT Base64.encode which MIME-wraps with newlines;

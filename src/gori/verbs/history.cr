@@ -126,12 +126,12 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :replay && ctx.replay_subtab_count >= 1 },
         mnemonic: 'd', section: :subtab) { |ctx| ctx.replay_duplicate_subtab; nil }
 
-      # --- REQUEST pane, mark-transform (mark request values, attach Convert chains
+      # --- REQUEST pane, mark-transform (mark request values, attach Decoder chains
       # applied on send) — Round 5 order: the marker actions the user reaches for
       # most (toggle the mode, then insert/mark/auto/clear/attach), THEN the view
       # toggles (hex/decoded/pretty) below.
       r.register Verb::Definition.new(
-        "replay.toggle-mark-transform", "Toggle MARK transform", "Mark request values (§…§) and apply Convert chains on send",
+        "replay.toggle-mark-transform", "Toggle MARK transform", "Mark request values (§…§) and apply Decoder chains on send",
         Verb::Scope::Replay, [Verb::Chord.new("k", ctrl: true)],
         available: in_replay, mnemonic: 't', section: :request) { |ctx| ctx.replay_toggle_mark_transform; nil }
       r.register Verb::Definition.new(
@@ -148,7 +148,7 @@ module Gori
         "replay.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain)",
         Verb::Scope::Replay, available: in_replay, mnemonic: 'c', section: :request) { |ctx| ctx.replay_clear_marks; nil }
       r.register Verb::Definition.new(
-        "replay.attach-chain", "Edit convert chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
+        "replay.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied on send)",
         Verb::Scope::Replay, [Verb::Chord.new("y", ctrl: true)],
         available: in_replay, mnemonic: 'e', section: :request) { |ctx| ctx.replay_attach_chain; nil }
 
@@ -340,7 +340,7 @@ module Gori
         [Verb::Chord.new("x", ctrl: true)], available: in_fuzzer, mnemonic: 's') { |ctx| ctx.fuzz_stop; nil }
       # COMMON (Round 5), not :tab: New-session is a top action the user reaches for
       # from anywhere in the Fuzzer tab, not just the tab bar — mirrors replay.new
-      # (Replay) and convert.new (Convert, Round 4a), both :common. Fuzzer's COMMON
+      # (Replay) and decoder.new (Decoder, Round 4a), both :common. Fuzzer's COMMON
       # is now curated most-used-first: Run, Stop, New, Copy, Link-finding, Link-note.
       r.register Verb::Definition.new(
         "fuzz.new", "New fuzz session", "Open a blank fuzz template", Verb::Scope::Fuzzer,
@@ -375,7 +375,7 @@ module Gori
         "fuzz.automark", "Auto-mark params", "Mark every request parameter value", Verb::Scope::Fuzzer,
         [Verb::Chord.new("a", ctrl: true)], available: in_fuzzer, mnemonic: 'm', section: :template) { |ctx| ctx.fuzz_automark; nil }
       r.register Verb::Definition.new(
-        "fuzz.attach-chain", "Edit convert chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied to each payload on send)",
+        "fuzz.attach-chain", "Edit decoder chain", "Focus the CHAIN pane to edit the encode/decode chain of the marker at the cursor (applied to each payload on send)",
         Verb::Scope::Fuzzer, [Verb::Chord.new("y", ctrl: true)],
         available: in_fuzzer, mnemonic: 'c', section: :template) { |ctx| ctx.fuzz_attach_chain; nil }
       r.register Verb::Definition.new(
@@ -484,7 +484,7 @@ module Gori
       register_fuzz(r)
       register_miner(r)
       register_comparer(r)
-      register_convert(r)
+      register_decoder(r)
       register_notes(r)
       register_host_overrides(r)
       register_env(r)

@@ -232,7 +232,7 @@ module Gori::Tui
     end
 
     # Rows for the "find sub-tab" search picker (space → search). Default: one row per
-    # strip label — good enough for Fuzzer/Notes/Convert. Replay overrides to add a
+    # strip label — good enough for Fuzzer/Notes/Decoder. Replay overrides to add a
     # summary/URL detail line. Only meaningful when there are ≥2 sub-tabs (the verb gates
     # on subtab_count), so jumping to a sub-tab never needs the Ctrl+digit chord.
     def subtab_search_rows : Array(SubtabPicker::Row)

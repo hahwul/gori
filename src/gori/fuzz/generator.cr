@@ -6,11 +6,11 @@ module Gori::Fuzz
   #   Pitchfork / ClusterBomb → one set per position (set[i] → position i).
   # (the frontend builds that mapping; out-of-range positions fall back to set 0.)
   class Generator
-    # `registry` (when given) applies each marked position's inline Convert chain to
+    # `registry` (when given) applies each marked position's inline Decoder chain to
     # its payload at render time — see Template#apply_chains. nil = no transforms
     # (keeps bare 3-arg callers and specs compiling).
     def initialize(@template : Template, @sets : Array(PayloadSet), @config : Config,
-                   @registry : Convert::Registry? = nil)
+                   @registry : Decoder::Registry? = nil)
     end
 
     def mode : Mode
@@ -132,7 +132,7 @@ module Gori::Fuzz
       Job.new(idx, payloads, pos, bytes) # keep the ORIGINAL payloads for reporting; only the wire bytes are transformed
     end
 
-    # Apply each position's inline Convert chain to its payload (identity when no
+    # Apply each position's inline Decoder chain to its payload (identity when no
     # registry was supplied). Kept separate so `render` stays a byte-verbatim splice.
     private def chained(payloads : Array(String)) : Array(String)
       (reg = @registry) ? @template.apply_chains(payloads, reg) : payloads

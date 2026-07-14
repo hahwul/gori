@@ -5,7 +5,7 @@ require "../paths"
 
 module Gori::Tui
   # Inline filesystem path completion for the wordlist payload field. Mirrors the
-  # Convert tab's ChainComplete (scroll-window dropdown) but with path-aware accept:
+  # Decoder tab's ChainComplete (scroll-window dropdown) but with path-aware accept:
   # it keeps the typed directory prefix, replaces only the basename, and appends "/"
   # to directories so the user can keep drilling. Bare names (no "/") complete from
   # BOTH the current working dir and ~/.gori/wordlists. Per-directory child caching

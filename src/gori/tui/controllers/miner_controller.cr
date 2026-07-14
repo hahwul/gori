@@ -156,7 +156,7 @@ module Gori::Tui
     end
 
     # esc focus ring: detail → results/summary area; else sub-tab strip (when shown)
-    # then tab bar — same body → subtabs → menu ladder as Replay/Fuzzer/Convert.
+    # then tab bar — same body → subtabs → menu ladder as Replay/Fuzzer/Decoder.
     private def handle_escape(v : MinerView) : Nil
       if v.focus == :detail
         v.close_detail

@@ -483,10 +483,10 @@ describe Gori::MCP::Server do
     end
   end
 
-  describe "convert" do
+  describe "decoder" do
     it "runs a converter chain and returns the decoded output" do
       with_store do |store|
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"convert","arguments":{"input":"aGVsbG8=","spec":"base64-decode"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"decode","arguments":{"input":"aGVsbG8=","spec":"base64-decode"}}})
         payload = tool_payload(drive(store, call)[0])
         payload["output"].as_s.should eq("hello")
         payload["output_encoding"].as_s.should eq("text")
@@ -496,7 +496,7 @@ describe Gori::MCP::Server do
 
     it "reports an unknown converter as an error and enumerates the registry" do
       with_store do |store|
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"convert","arguments":{"input":"x","spec":"nope-bogus"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"decode","arguments":{"input":"x","spec":"nope-bogus"}}})
         resp = drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
         text = resp["result"]["content"][0]["text"].as_s
@@ -507,7 +507,7 @@ describe Gori::MCP::Server do
 
     it "is available in read-only mode (pure transform, no gating)" do
       with_store do |store|
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"convert","arguments":{"input":"hi","spec":"sha256"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"decode","arguments":{"input":"hi","spec":"sha256"}}})
         resp = drive(store, call, allow_actions: false)[0]
         resp["result"]["isError"]?.should_not eq(true)
         tool_payload(resp)["output"].as_s.size.should eq(64)
@@ -516,7 +516,7 @@ describe Gori::MCP::Server do
 
     it "rejects a separator-only spec instead of echoing the input as a phantom success" do
       with_store do |store|
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"convert","arguments":{"input":"hello","spec":">"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"decode","arguments":{"input":"hello","spec":">"}}})
         resp = drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
         resp["result"]["content"][0]["text"].as_s.should contain("no converter tokens")

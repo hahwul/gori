@@ -19,7 +19,7 @@ require "./controllers/replay_controller"
 require "./controllers/fuzzer_controller"
 require "./controllers/miner_controller"
 require "./controllers/comparer_controller"
-require "./controllers/convert_controller"
+require "./controllers/decoder_controller"
 require "./controllers/statusline_controller"
 require "./history_view"
 require "./replay_view"
@@ -104,7 +104,7 @@ module Gori::Tui
       @search_target = :none
       @search_hits = [] of Int32
       @search_idx = 0
-      # The sub-tab rename prompt (Replay + Fuzzer + Convert + Miner) — orthogonal to
+      # The sub-tab rename prompt (Replay + Fuzzer + Decoder + Miner) — orthogonal to
       # @overlay (floats over the bottom status row, like ^G/^F).
       @rename_open = false
       @rename_buffer = ""
@@ -112,7 +112,7 @@ module Gori::Tui
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove replay tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
-      @rename_view = nil.as(ReplayView | FuzzerView | ConvertView | MinerView | ComparerView | Nil)
+      @rename_view = nil.as(ReplayView | FuzzerView | DecoderView | MinerView | ComparerView | Nil)
       # The Replay sub-tab TAG editor (issue #121) — a bottom prompt mirroring rename,
       # space-separated tags. Held by VIEW identity for the same reconcile-race reason.
       @tag_edit_open = false
@@ -226,7 +226,7 @@ module Gori::Tui
         FuzzerController.new(self),
         MinerController.new(self),
         ComparerController.new(self),
-        ConvertController.new(self),
+        DecoderController.new(self),
       ].each { |c| @tabs[c.tab] = c }
     end
 
@@ -283,8 +283,8 @@ module Gori::Tui
       @tabs[:comparer].as(ComparerController)
     end
 
-    private def convert_controller : ConvertController
-      @tabs[:convert].as(ConvertController)
+    private def decoder_controller : DecoderController
+      @tabs[:decoder].as(DecoderController)
     end
 
     def run : Symbol
@@ -745,10 +745,10 @@ module Gori::Tui
           return
         end
       end
-      # The Convert chain autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
+      # The Decoder chain autocomplete owns Tab/↵/↑/↓/Esc while its popup is up —
       # before the focus ring claims Tab. Non-popup keys fall through (return false).
-      if @active_tab == :convert && @overlay == :none && @focus == :body && convert_controller.completing?
-        return if convert_controller.handle_complete_key(ev)
+      if @active_tab == :decoder && @overlay == :none && @focus == :body && decoder_controller.completing?
+        return if decoder_controller.handle_complete_key(ev)
       end
       # The $ENV autocomplete popup in an editor (Replay request, Fuzzer template) owns
       # Tab/↵/↑/↓/Esc while open — before the focus ring claims Tab, so Tab accepts the
@@ -876,7 +876,7 @@ module Gori::Tui
     end
 
     # --- mouse dispatch ------------------------------------------------------
-    # Mouse coords are 1-based; Rect is 0-based → convert once (mx/my). We recompute
+    # Mouse coords are 1-based; Rect is 0-based → decoder once (mx/my). We recompute
     # Layout.compute from the LIVE size (identical to render), so the click geometry
     # can't drift from what was drawn. The click path mirrors handle_key's precedence:
     # the space menu → centered modal overlays → tab bar → sub-tab strip →
@@ -901,7 +901,7 @@ module Gori::Tui
       end
     end
 
-    # Right-click: rename a Replay/Fuzzer/Convert/Miner sub-tab chip (the one context menu we have).
+    # Right-click: rename a Replay/Fuzzer/Decoder/Miner sub-tab chip (the one context menu we have).
     # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
       if @goto_open || @search_open || @rename_open || @tag_edit_open || @import_open
@@ -1800,7 +1800,7 @@ module Gori::Tui
         return
       end
       if idx = sp.selected_index
-        @tabs[@active_tab]?.try(&.jump_subtab(idx)) # active tab owns the strip (Replay/Fuzzer/Notes/Convert)
+        @tabs[@active_tab]?.try(&.jump_subtab(idx)) # active tab owns the strip (Replay/Fuzzer/Notes/Decoder)
         @focus = :body                              # land on the chosen session's content
       end
       close_subtab_picker
@@ -2236,7 +2236,7 @@ module Gori::Tui
       unless vis.any? { |(s, _)| s == @active_tab }
         # Persist the outgoing tab's dirty buffer before snapping off — @active_tab still
         # names the tab being hidden here. flush_active_tab_edits covers all hideable tabs
-        # (Notes/Fuzzer/Findings/Miner included), unlike the old project/replay/convert-only
+        # (Notes/Fuzzer/Findings/Miner included), unlike the old project/replay/decoder-only
         # flush which silently dropped the others at hide-time.
         flush_active_tab_edits
         @active_tab = vis.first[0]
@@ -2487,7 +2487,7 @@ module Gori::Tui
 
     # A navigable sub-tab strip is showing — gates entry into :subtabs (and the strip
     # click/rename paths). Each controller decides its own threshold (Replay/Fuzzer/
-    # Notes/Convert ≥1 so a single session is still labelled + space-menu reachable).
+    # Notes/Decoder ≥1 so a single session is still labelled + space-menu reachable).
     private def subtabs_shown? : Bool
       @tabs[@active_tab]?.try(&.subtab_strip_shown?) || false
     end
@@ -2502,7 +2502,7 @@ module Gori::Tui
       end
     end
 
-    # The focusable sub-tab strip for Replay/Fuzzer/Notes/Convert (@focus == :subtabs). Mirrors the
+    # The focusable sub-tab strip for Replay/Fuzzer/Notes/Decoder (@focus == :subtabs). Mirrors the
     # tab bar's idiom one level down: ←/→ switch sub-tabs, ↓/↵/Tab enter the editor,
     # ↑/esc pop to the tab bar. ^1-9 jumps and stays on the strip; ^N/^W create/close.
     private def handle_subtabs_key(ev : Termisu::Event::Key) : Nil
@@ -2520,7 +2520,7 @@ module Gori::Tui
       when ev.ctrl? && c && '1' <= c <= '9'
         jump_subtab(c.to_i - 1) # switch + stay on the strip
       when rename_chord?(ev)
-        open_rename(current_subtab_index) # rename the active sub-tab (Replay/Fuzzer/Convert/Miner)
+        open_rename(current_subtab_index) # rename the active sub-tab (Replay/Fuzzer/Decoder/Miner)
       when @active_tab == :replay && ev.ctrl? && key.lower_r?
         replay_controller.replay_send # send from the strip too — not just :body focus
       when @active_tab == :replay && !ev.ctrl? && !ev.alt? && key.lower_t?
@@ -2553,7 +2553,7 @@ module Gori::Tui
       case @active_tab
       when :replay   then replay_controller.replay_new
       when :fuzzer   then fuzzer_controller.fuzz_new
-      when :convert  then convert_controller.convert_new
+      when :decoder  then decoder_controller.decoder_new
       when :notes    then notes_controller.notes_new
       when :comparer then comparer_controller.comparer_new
       end
@@ -2563,7 +2563,7 @@ module Gori::Tui
     # — its sessions are seeded by a background job, not ^N — so the strip hint omits ^N new.
     private def subtab_new_supported? : Bool
       case @active_tab
-      when :replay, :fuzzer, :convert, :notes, :comparer then true
+      when :replay, :fuzzer, :decoder, :notes, :comparer then true
       else                                                    false
       end
     end
@@ -2573,7 +2573,7 @@ module Gori::Tui
       when :replay   then replay_controller.request_close
       when :fuzzer   then fuzzer_controller.request_close
       when :miner    then miner_controller.request_close
-      when :convert  then convert_controller.convert_close
+      when :decoder  then decoder_controller.decoder_close
       when :notes    then notes_controller.notes_close
       when :comparer then comparer_controller.comparer_close
       end
@@ -2584,7 +2584,7 @@ module Gori::Tui
       when :replay  then replay_controller.save_current_replay
       when :fuzzer  then fuzzer_controller.save_current
       when :miner   then miner_controller.save_current
-      when :convert then convert_controller.commit
+      when :decoder then decoder_controller.commit
       when :notes   then notes_controller.save_notes
       end
     end
@@ -2611,7 +2611,7 @@ module Gori::Tui
         focus_pane(:menu) if fuzzer_controller.empty?
         focus_pane(:body) if !fuzzer_controller.empty? && !subtabs_shown?
       else
-        focus_pane(:body) unless subtabs_shown? # Notes/Convert always keep ≥1 session
+        focus_pane(:body) unless subtabs_shown? # Notes/Decoder always keep ≥1 session
       end
     end
 
@@ -3186,7 +3186,7 @@ module Gori::Tui
       fuzzer_controller.save_current
       miner_controller.save_current
       findings_controller.commit
-      convert_controller.commit
+      decoder_controller.commit
     end
 
     def status(message : String) : Nil
@@ -3375,10 +3375,10 @@ module Gori::Tui
       renameable_subtabs? && ev.key.lower_r? && !ev.ctrl? && !ev.alt?
     end
 
-    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer + Convert + Miner + Comparer).
+    # The tabs whose sub-tab chips carry a custom name (Replay + Fuzzer + Decoder + Miner + Comparer).
     # Notes derives its label from the body text, so it has no rename.
     private def renameable_subtabs? : Bool
-      @active_tab == :replay || @active_tab == :fuzzer || @active_tab == :convert ||
+      @active_tab == :replay || @active_tab == :fuzzer || @active_tab == :decoder ||
         @active_tab == :miner || @active_tab == :comparer
     end
 
@@ -3390,7 +3390,7 @@ module Gori::Tui
       view = case @active_tab
              when :replay   then replay_controller.view_at(idx)
              when :fuzzer   then fuzzer_controller.view_at(idx)
-             when :convert  then convert_controller.view_at(idx)
+             when :decoder  then decoder_controller.view_at(idx)
              when :miner    then miner_controller.view_at(idx)
              when :comparer then comparer_controller.view_at(idx)
              end
@@ -3415,7 +3415,7 @@ module Gori::Tui
       case v = @rename_view
       when ReplayView   then replay_controller.apply_rename(v, name)
       when FuzzerView   then fuzzer_controller.apply_rename(v, name)
-      when ConvertView  then convert_controller.apply_rename(v, name)
+      when DecoderView  then decoder_controller.apply_rename(v, name)
       when MinerView    then miner_controller.apply_rename(v, name)
       when ComparerView then comparer_controller.apply_rename(v, name)
       end
@@ -3616,7 +3616,7 @@ module Gori::Tui
       # mirroring how Notes saves on leave. Cheap no-op when the tab is clean.
       replay_controller.save_current_replay if @active_tab == :replay && @focus == :body && pane != :body
       fuzzer_controller.save_current if @active_tab == :fuzzer && @focus == :body && pane != :body
-      convert_controller.commit if @active_tab == :convert && @focus == :body && pane != :body
+      decoder_controller.commit if @active_tab == :decoder && @focus == :body && pane != :body
       notes_controller.save_notes if @active_tab == :notes && @focus == :body && pane != :body
       @focus = pane
       @menu_more = false # any focus change lands on a real tab, not the ⋯ affordance
@@ -3626,7 +3626,7 @@ module Gori::Tui
 
     # Descend from the tab menu (↓/↵/j on the tab bar). When focus is on the far-right
     # ⋯ "more" affordance, ↓/↵ EXPANDS the hidden-tabs dropdown instead. Otherwise: tabs
-    # with a navigable sub-tab strip (Replay/Notes/Convert) land on the STRIP first so
+    # with a navigable sub-tab strip (Replay/Notes/Decoder) land on the STRIP first so
     # ←/→ can switch sub-tabs; ↓/↵ again drops into the editor. Other tabs go straight to
     # the body. (`focus_pane`'s guard would otherwise route an absent strip to the menu,
     # so the active tab is checked here.)
@@ -3646,7 +3646,7 @@ module Gori::Tui
       replay_controller.save_current_replay if @active_tab == :replay
       fuzzer_controller.save_current if @active_tab == :fuzzer
       miner_controller.save_current if @active_tab == :miner
-      convert_controller.commit if @active_tab == :convert
+      decoder_controller.commit if @active_tab == :decoder
       notes_controller.save_notes if @active_tab == :notes
       findings_controller.commit if @active_tab == :findings
     end
@@ -4351,8 +4351,8 @@ module Gori::Tui
     end
 
     # Generic sub-tab search — opens the fuzzy picker over the ACTIVE tab's sub-tabs
-    # (Replay/Fuzzer/Notes/Convert). commit_subtab_picker jumps on the active controller,
-    # so one path serves every strip. Gives Fuzzer/Notes/Convert a search-and-jump that
+    # (Replay/Fuzzer/Notes/Decoder). commit_subtab_picker jumps on the active controller,
+    # so one path serves every strip. Gives Fuzzer/Notes/Decoder a search-and-jump that
     # doesn't rely on Ctrl+digit (undeliverable on many terminals).
     def subtab_search_open : Nil
       rows = @tabs[@active_tab]?.try(&.subtab_search_rows) || [] of SubtabPicker::Row
@@ -4803,62 +4803,62 @@ module Gori::Tui
       @toast = "comparer: set #{slot.to_s.upcase} — open Comparer (^P) to view the diff"
     end
 
-    # --- convert workbench (sub-tab + output actions). The body's text editing +
-    # focus nav stay inline in ConvertController; these power the space menu (reachable
-    # from the sub-tab strip) + the palette. convert_new already drops to the body; the
+    # --- decoder workbench (sub-tab + output actions). The body's text editing +
+    # focus nav stay inline in DecoderController; these power the space menu (reachable
+    # from the sub-tab strip) + the palette. decoder_new already drops to the body; the
     # save/load prompts are serviced by the body editor, so focus there first. ---
-    def convert_new : Nil
-      convert_controller.convert_new
+    def decoder_new : Nil
+      decoder_controller.decoder_new
     end
 
-    def convert_close : Nil
-      convert_controller.convert_close
+    def decoder_close : Nil
+      decoder_controller.decoder_close
       resolve_subtab_focus_after_close # don't strand on a now-hidden strip
     end
 
     # Space-menu (:subtab) counterpart of the strip's `r` rename chord — reuses the
     # SAME shell-owned rename prompt as Replay/Fuzzer (open_rename already handles
-    # Convert generically via view_at).
-    def convert_rename_subtab : Nil
+    # Decoder generically via view_at).
+    def decoder_rename_subtab : Nil
       open_rename(current_subtab_index)
     end
 
-    def convert_duplicate_subtab : Nil
-      convert_controller.convert_duplicate
+    def decoder_duplicate_subtab : Nil
+      decoder_controller.decoder_duplicate
     end
 
-    def convert_clear : Nil
-      convert_controller.clear_all
+    def decoder_clear : Nil
+      decoder_controller.clear_all
     end
 
-    def convert_copy : Nil
-      convert_controller.copy_output
+    def decoder_copy : Nil
+      decoder_controller.copy_output
     end
 
-    def convert_copy_selection : Nil
-      convert_controller.convert_copy_selection
+    def decoder_copy_selection : Nil
+      decoder_controller.decoder_copy_selection
     end
 
-    def convert_copy_all : Nil
-      convert_controller.convert_copy_all
+    def decoder_copy_all : Nil
+      decoder_controller.decoder_copy_all
     end
 
-    def convert_read_mode? : Bool
-      convert_controller.convert_read_mode?
+    def decoder_read_mode? : Bool
+      decoder_controller.decoder_read_mode?
     end
 
-    def convert_cycle_mode : Nil
-      convert_controller.cycle_output_mode
+    def decoder_cycle_mode : Nil
+      decoder_controller.cycle_output_mode
     end
 
-    def convert_save : Nil
+    def decoder_save : Nil
       focus_pane(:body)
-      convert_controller.open_prompt(:save_as)
+      decoder_controller.open_prompt(:save_as)
     end
 
-    def convert_load : Nil
+    def decoder_load : Nil
       focus_pane(:body)
-      convert_controller.open_prompt(:load)
+      decoder_controller.open_prompt(:load)
     end
 
     # --- notes scratchpad (sub-tab actions). The body's text editing stays inline
@@ -4908,7 +4908,7 @@ module Gori::Tui
     # flipping it here would be a no-op at best and misleading at worst (no
     # selection ⇒ it still only copies the current line, not "the whole pane").
     READ_COPY_VERBS = %w(
-      notes.copy replay.copy convert.copy finding.copy project.copy fuzzer.copy
+      notes.copy replay.copy decoder.copy finding.copy project.copy fuzzer.copy
     )
 
     def space_menu_title(verb_id : String) : String?
@@ -4921,7 +4921,7 @@ module Gori::Tui
       when :notes    then notes_controller.view.selection?
       when :replay   then replay_controller.replay_selection_active?
       when :fuzzer   then fuzzer_controller.fuzzer_selection_active?
-      when :convert  then convert_controller.convert_selection_active?
+      when :decoder  then decoder_controller.decoder_selection_active?
       when :findings then findings_controller.findings_notes_selection_active?
       when :project  then project_controller.project_desc_selection_active?
       when :history
@@ -4936,7 +4936,7 @@ module Gori::Tui
       when :notes    then notes_controller.view.select_line
       when :replay   then replay_controller.replay_select_line
       when :fuzzer   then fuzzer_controller.fuzzer_select_line
-      when :convert  then convert_controller.convert_select_line
+      when :decoder  then decoder_controller.decoder_select_line
       when :findings then findings_controller.findings_notes_select_line
       when :project  then project_controller.project_desc_select_line
       when :history
@@ -4949,7 +4949,7 @@ module Gori::Tui
       when :notes    then notes_controller.view.clear_selection
       when :replay   then replay_controller.replay_clear_selection
       when :fuzzer   then fuzzer_controller.fuzzer_clear_selection
-      when :convert  then convert_controller.convert_clear_selection
+      when :decoder  then decoder_controller.decoder_clear_selection
       when :findings then findings_controller.findings_notes_clear_selection
       when :project  then project_controller.project_desc_clear_selection
       when :history
@@ -4966,7 +4966,7 @@ module Gori::Tui
       when :notes    then read_selection_active? ? notes_copy : notes_copy_all
       when :replay   then read_selection_active? ? replay_copy : replay_copy_all
       when :fuzzer   then read_selection_active? ? fuzzer_copy : fuzzer_copy_all
-      when :convert  then read_selection_active? ? convert_copy_selection : convert_copy_all
+      when :decoder  then read_selection_active? ? decoder_copy_selection : decoder_copy_all
       when :findings then read_selection_active? ? findings_copy : findings_copy_all
       when :project  then read_selection_active? ? project_copy : project_copy_all
       when :history

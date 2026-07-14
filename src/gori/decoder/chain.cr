@@ -1,4 +1,4 @@
-module Gori::Convert
+module Gori::Decoder
   enum StepState
     Ok      # ran, produced output
     Failed  # converter raised, or its output exceeded MAX_OUT
@@ -89,7 +89,7 @@ module Gori::Convert
           steps << StepResult.new(tok, conv, StepState::Ok, output: produced)
           current = produced
         end
-      rescue ex : ConvertError
+      rescue ex : DecoderError
         steps << StepResult.new(tok, conv, StepState::Failed, error: ex.message)
         stopped = true
       rescue ex

@@ -692,52 +692,52 @@ private class FakeContext < ExecContext
     @calls << :comparer_duplicate_subtab
   end
 
-  def convert_new : Nil
-    @calls << :convert_new
+  def decoder_new : Nil
+    @calls << :decoder_new
   end
 
-  def convert_close : Nil
-    @calls << :convert_close
+  def decoder_close : Nil
+    @calls << :decoder_close
   end
 
-  def convert_rename_subtab : Nil
-    @calls << :convert_rename_subtab
+  def decoder_rename_subtab : Nil
+    @calls << :decoder_rename_subtab
   end
 
-  def convert_duplicate_subtab : Nil
-    @calls << :convert_duplicate_subtab
+  def decoder_duplicate_subtab : Nil
+    @calls << :decoder_duplicate_subtab
   end
 
-  def convert_clear : Nil
-    @calls << :convert_clear
+  def decoder_clear : Nil
+    @calls << :decoder_clear
   end
 
-  def convert_copy : Nil
-    @calls << :convert_copy
+  def decoder_copy : Nil
+    @calls << :decoder_copy
   end
 
-  def convert_copy_selection : Nil
-    @calls << :convert_copy_selection
+  def decoder_copy_selection : Nil
+    @calls << :decoder_copy_selection
   end
 
-  def convert_copy_all : Nil
-    @calls << :convert_copy_all
+  def decoder_copy_all : Nil
+    @calls << :decoder_copy_all
   end
 
-  def convert_read_mode? : Bool
+  def decoder_read_mode? : Bool
     false
   end
 
-  def convert_cycle_mode : Nil
-    @calls << :convert_cycle_mode
+  def decoder_cycle_mode : Nil
+    @calls << :decoder_cycle_mode
   end
 
-  def convert_save : Nil
-    @calls << :convert_save
+  def decoder_save : Nil
+    @calls << :decoder_save
   end
 
-  def convert_load : Nil
-    @calls << :convert_load
+  def decoder_load : Nil
+    @calls << :decoder_load
   end
 
   def notes_new : Nil

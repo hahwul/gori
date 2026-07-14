@@ -35,7 +35,7 @@ module Gori::Tui
       @change_count = 0 # cached with @rows_cache so the footer doesn't recount each frame
     end
 
-    # Chip label (custom name, or a compact A ⇄ B summary). Capped like Replay/Convert.
+    # Chip label (custom name, or a compact A ⇄ B summary). Capped like Replay/Decoder.
     def label(max : Int32 = 18) : String
       raw = if (n = @name) && !n.strip.empty?
               n.strip

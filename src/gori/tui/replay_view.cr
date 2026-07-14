@@ -21,7 +21,7 @@ require "../replay/diff"
 require "../replay/flow_request"
 require "../replay/subtab_filter"
 require "../fuzz"
-require "../convert"
+require "../decoder"
 require "./chain_pane"
 require "./input_mode"
 require "./read_cursor"
@@ -141,7 +141,7 @@ module Gori::Tui
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
       # Mark-transform mode (V22, opt-in, default off): when on, `§…§` markers in the
-      # request carry inline Convert chains applied on send (mark a value, attach
+      # request carry inline Decoder chains applied on send (mark a value, attach
       # base64-encode → it's encoded on the wire). Off = byte-identical to a plain send,
       # so a captured `§` is never reinterpreted unless the user turns this on.
       @mark_transform = false
@@ -1168,7 +1168,7 @@ module Gori::Tui
       return grpc_request_bytes if @grpc_mode                 # edited head + reframed body (owns its own hex buffer)
       return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit # byte-exact; NO auto-CL in hex mode
       return decoded_request_bytes if @decode_kind            # envelope + re-encoded decoded payload
-      return marked_request_bytes if @mark_transform          # §…§ inline Convert chains applied on send
+      return marked_request_bytes if @mark_transform          # §…§ inline Decoder chains applied on send
       raw = expanded_editor_bytes
       @auto_content_length ? sync_content_length(raw) : raw
     end
@@ -1187,7 +1187,7 @@ module Gori::Tui
     end
 
     # MARK-transform mode: parse the CRLF wire form as a Fuzz template and render each
-    # marked position's default through its inline Convert chain (Template#apply_chains),
+    # marked position's default through its inline Decoder chain (Template#apply_chains),
     # then resync Content-Length as usual. Parsing the CRLF form (not @editor.text, which
     # is LF) keeps render's output in wire form so the existing CRLF-based
     # sync_content_length works unchanged. A chain-less `§v§` renders `v`; a failing chain
@@ -1197,14 +1197,14 @@ module Gori::Tui
       @auto_content_length ? sync_content_length(raw) : raw
     end
 
-    # Render the §…§ template in `raw` (each marked default through its inline Convert
+    # Render the §…§ template in `raw` (each marked default through its inline Decoder
     # chain), returning wire-form bytes with the markers stripped. Shared by the
     # MARK-transform send AND the CL reflection so both derive Content-Length from the
     # SAME rendered body — otherwise the visible header showed a CL for the raw marked
     # text while ^R sent one for the rendered body.
     private def render_marked(raw : Bytes) : Bytes
       tmpl = Fuzz::Template.parse(String.new(raw))
-      tmpl.render(tmpl.apply_chains(tmpl.default_payloads, Convert.shared_registry))
+      tmpl.render(tmpl.apply_chains(tmpl.default_payloads, Decoder.shared_registry))
     end
 
     # A replay round-trip is outstanding (set/cleared by the Runner around the

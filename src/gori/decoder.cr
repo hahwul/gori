@@ -1,11 +1,11 @@
 require "base64"
-require "./convert/converter"
-require "./convert/registry"
-require "./convert/codecs"
-require "./convert/catalog"
-require "./convert/chain"
+require "./decoder/converter"
+require "./decoder/registry"
+require "./decoder/codecs"
+require "./decoder/catalog"
+require "./decoder/chain"
 
-module Gori::Convert
+module Gori::Decoder
   # Output ceiling for any single step / decompression drain — lifted from
   # Proxy::Codec::ContentDecode::MAX_OUT (32 MiB) so a chained decompress can't bomb.
   MAX_OUT = 32 * 1024 * 1024

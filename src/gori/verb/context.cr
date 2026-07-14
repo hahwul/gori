@@ -76,7 +76,7 @@ module Gori
       abstract def replay_send_group : Nil     # pipeline %%%-split requests on one connection
       abstract def replay_find_subtab : Nil    # open the sub-tab search picker (filter + jump)
       abstract def replay_subtab_count : Int32 # open replay session count (gates the search menu entry)
-      # Generic sub-tab search — the Replay picker generalised to Fuzzer/Notes/Convert so
+      # Generic sub-tab search — the Replay picker generalised to Fuzzer/Notes/Decoder so
       # jumping to a sub-tab never depends on the fragile Ctrl+digit chord (which many
       # terminals can't deliver). Operate on the active tab; count gates the menu entry.
       abstract def subtab_search_open : Nil                # open the sub-tab search picker for the active tab
@@ -93,7 +93,7 @@ module Gori
       abstract def replay_toggle_http2 : Nil               # flip the request transport h1↔h2 (override captured protocol)
       abstract def replay_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
       abstract def replay_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
-      # mark-transform mode: mark request values (§…§) and attach Convert chains applied on send
+      # mark-transform mode: mark request values (§…§) and attach Decoder chains applied on send
       abstract def replay_toggle_mark_transform : Nil # toggle MARK mode on/off
       abstract def replay_pretty_request : Nil
       abstract def fuzz_pretty_template : Nil
@@ -252,20 +252,20 @@ module Gori
       abstract def comparer_rename_subtab : Nil       # rename the active comparison chip
       abstract def comparer_duplicate_subtab : Nil    # clone the active A/B pair
 
-      # convert: the encode/decode/hash workbench (sub-tab + output actions; the body's
+      # decoder: the encode/decode/hash workbench (sub-tab + output actions; the body's
       # text editing + focus nav stay inline, these power the space menu + palette)
-      abstract def convert_new : Nil              # open a fresh blank conversion sub-tab
-      abstract def convert_close : Nil            # close the active conversion sub-tab (keeps ≥1)
-      abstract def convert_rename_subtab : Nil    # open the rename prompt for the active sub-tab
-      abstract def convert_duplicate_subtab : Nil # clone the active conversion into a new sibling
-      abstract def convert_clear : Nil            # clear the current input + chain
-      abstract def convert_copy : Nil             # copy the entire current output to the clipboard
-      abstract def convert_copy_selection : Nil   # copy selection from INPUT/OUTPUT (READ)
-      abstract def convert_copy_all : Nil         # copy the whole focused pane text (space menu / palette fallback)
-      abstract def convert_read_mode? : Bool      # INPUT READ or OUTPUT pane (gates y/copy)
-      abstract def convert_cycle_mode : Nil       # cycle the output display (text/hex/base64)
-      abstract def convert_save : Nil             # save the current chain by name (in-body prompt)
-      abstract def convert_load : Nil             # load a saved chain by name (in-body prompt)
+      abstract def decoder_new : Nil              # open a fresh blank conversion sub-tab
+      abstract def decoder_close : Nil            # close the active conversion sub-tab (keeps ≥1)
+      abstract def decoder_rename_subtab : Nil    # open the rename prompt for the active sub-tab
+      abstract def decoder_duplicate_subtab : Nil # clone the active conversion into a new sibling
+      abstract def decoder_clear : Nil            # clear the current input + chain
+      abstract def decoder_copy : Nil             # copy the entire current output to the clipboard
+      abstract def decoder_copy_selection : Nil   # copy selection from INPUT/OUTPUT (READ)
+      abstract def decoder_copy_all : Nil         # copy the whole focused pane text (space menu / palette fallback)
+      abstract def decoder_read_mode? : Bool      # INPUT READ or OUTPUT pane (gates y/copy)
+      abstract def decoder_cycle_mode : Nil       # cycle the output display (text/hex/base64)
+      abstract def decoder_save : Nil             # save the current chain by name (in-body prompt)
+      abstract def decoder_load : Nil             # load a saved chain by name (in-body prompt)
 
       # notes: the multi-note scratchpad (sub-tab actions; the body's text editing
       # stays inline, these power the space menu reachable from the sub-tab strip)

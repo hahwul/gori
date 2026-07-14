@@ -221,7 +221,7 @@ module Gori
       # default-hidden one (Miner) — stays reachable from the command palette.
       {
         :project => "Project", :sitemap => "Sitemap", :history => "History", :intercept => "Intercept",
-        :replay => "Replay", :fuzzer => "Fuzzer", :miner => "Miner", :convert => "Convert",
+        :replay => "Replay", :fuzzer => "Fuzzer", :miner => "Miner", :decoder => "Decoder",
         :comparer => "Comparer", :prism => "Prism", :findings => "Findings", :notes => "Notes",
       }.each do |tab, label|
         r.register Verb::Definition.new(

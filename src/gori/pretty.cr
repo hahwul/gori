@@ -123,7 +123,7 @@ module Gori
       nil
     end
 
-    # ---- JWT (reuses Convert::Codecs.jwt_decode) ---------------------------
+    # ---- JWT (reuses Decoder::Codecs.jwt_decode) ---------------------------
 
     private def try_jwt(str : String) : Result?
       t = str.strip
@@ -131,7 +131,7 @@ module Gori
       # Strong signal: a JWT header always base64url-decodes to a JSON object.
       header = Base64.decode(t.split('.').first)
       return nil unless JSON.parse(String.new(header)).as_h?
-      decoded = Convert::Codecs.jwt_decode(t.to_slice)
+      decoded = Decoder::Codecs.jwt_decode(t.to_slice)
       slice = decoded.to_slice
       return nil if slice.size > MAX_OUT_PRETTY
       Result.new(slice, "pretty: jwt (decoded · signature not verified)", :text)

@@ -6,25 +6,25 @@ require "./input_mode"
 require "./read_cursor"
 require "./text_read_state"
 require "./gutter"
-require "../convert"
+require "../decoder"
 
 module Gori::Tui
-  # The Convert tab's "Pipeline notebook": INPUT editor (top) → CHAIN spec line →
+  # The Decoder tab's "Pipeline notebook": INPUT editor (top) → CHAIN spec line →
   # PIPELINE (one row per converter, showing its intermediate output) → OUTPUT
   # (final, scrollable, with a hex/base64 toggle for binary). A pure renderer +
   # layout math + an output scroll/display-mode; the controller owns the editable
   # state and the cached ChainResult. The recompute lives in the controller (edits
   # only) — render is a pure read, per the render-hot-path discipline.
-  class ConvertView
+  class DecoderView
     record Regions, input : Rect, chain : Rect, pipeline : Rect, output : Rect
 
     # The ^X display cycle: auto (text, base64 fallback for binary) → hex → base64.
-    PREFER_CYCLE = [nil, Convert::RenderAs::Hex, Convert::RenderAs::Base64] of Convert::RenderAs?
+    PREFER_CYCLE = [nil, Decoder::RenderAs::Hex, Decoder::RenderAs::Base64] of Decoder::RenderAs?
 
     # Custom sub-tab chip label (nil = derive from the chain spec); set by rename.
     property name : String? = nil
 
-    @prefer : Convert::RenderAs? = nil # nil = auto
+    @prefer : Decoder::RenderAs? = nil # nil = auto
     @prefer_idx : Int32 = 0
     @out_scroll : Int32 = 0
     @out_xscroll : Int32 = 0 # horizontal scroll offset for the OUTPUT card (shift+←/→)
@@ -82,7 +82,7 @@ module Gori::Tui
     end
 
     def render(screen : Screen, rect : Rect, *, input : TextArea, chain : String,
-               chain_cx : Int32, chain_pre : String, result : Convert::ChainResult,
+               chain_cx : Int32, chain_pre : String, result : Decoder::ChainResult,
                pane : Symbol, focused : Bool, popup : ChainComplete, prompt : Symbol?,
                prompt_buf : String, input_mode : InputMode = InputMode::Read,
                input_read : TextReadState? = nil) : Nil
@@ -166,14 +166,14 @@ module Gori::Tui
     end
 
     # PIPELINE — a read-only card (never focusable), one row per step.
-    private def render_pipeline(screen : Screen, card : Rect, result : Convert::ChainResult) : Nil
+    private def render_pipeline(screen : Screen, card : Rect, result : Decoder::ChainResult) : Nil
       Frame.card(screen, card, "PIPELINE", bg: Theme.bg, border: Theme.border)
       render_steps(screen, card.inset(1, 1), result)
     end
 
     # OUTPUT — read-only but navigable (↑/↓ scroll); the title names the active
     # display mode + byte count, and the border gilds when the pane holds focus.
-    private def render_output_card(screen : Screen, card : Rect, result : Convert::ChainResult, active : Bool) : Nil
+    private def render_output_card(screen : Screen, card : Rect, result : Decoder::ChainResult, active : Bool) : Nil
       header = output_header(result)
       Frame.card(screen, card, header, bg: Theme.bg, border: Frame.pane_border(active))
       # ^X cycles the display mode; ride it on the border as ` ^X:MODE ` — lit when a mode
@@ -184,7 +184,7 @@ module Gori::Tui
       render_output(screen, card.inset(1, 1), result, focused: active)
     end
 
-    private def render_steps(screen : Screen, rect : Rect, result : Convert::ChainResult) : Nil
+    private def render_steps(screen : Screen, rect : Rect, result : Decoder::ChainResult) : Nil
       if result.steps.empty?
         screen.text(rect.x, rect.y, "(no chain — output mirrors input · type e.g. base64 > sha256)",
           Theme.muted, Theme.bg, width: rect.w) if rect.h > 0
@@ -209,7 +209,7 @@ module Gori::Tui
       end
     end
 
-    private def render_output(screen : Screen, rect : Rect, result : Convert::ChainResult, focused : Bool = false) : Nil
+    private def render_output(screen : Screen, rect : Rect, result : Decoder::ChainResult, focused : Bool = false) : Nil
       return if rect.h <= 0
       lines = output_lines(result)
       @out_last_h = rect.h
@@ -229,14 +229,14 @@ module Gori::Tui
       end
     end
 
-    def output_move(dr : Int32, dc : Int32, result : Convert::ChainResult, selecting : Bool = false) : Nil
+    def output_move(dr : Int32, dc : Int32, result : Decoder::ChainResult, selecting : Bool = false) : Nil
       lines = output_lines(result)
       return if lines.empty?
       @out_read.move(dr, dc, lines, selecting: selecting)
       ensure_out_visible(@out_last_h) if @out_last_h > 0
     end
 
-    def output_scroll_view(step : Int32, result : Convert::ChainResult) : Nil
+    def output_scroll_view(step : Int32, result : Decoder::ChainResult) : Nil
       lines = output_lines(result)
       return if @out_last_h <= 0 || lines.size <= @out_last_h
       max = lines.size - @out_last_h
@@ -248,7 +248,7 @@ module Gori::Tui
         @out_read.cx.clamp(0, lines[@out_read.cy].size))
     end
 
-    def output_click_to_cursor(rect : Rect, mx : Int32, my : Int32, result : Convert::ChainResult) : Nil
+    def output_click_to_cursor(rect : Rect, mx : Int32, my : Int32, result : Decoder::ChainResult) : Nil
       lines = output_lines(result)
       return if rect.empty? || lines.empty?
       gw = {Gutter.width(lines.size), rect.w}.min
@@ -256,7 +256,7 @@ module Gori::Tui
       ensure_out_visible(rect.h)
     end
 
-    def output_copy_text(result : Convert::ChainResult) : String
+    def output_copy_text(result : Decoder::ChainResult) : String
       lines = output_lines(result)
       return "" if lines.empty?
       @out_read.selection_text(lines) || @out_read.current_line(lines)
@@ -266,7 +266,7 @@ module Gori::Tui
       @out_read.selection?
     end
 
-    def output_select_line(result : Convert::ChainResult) : Nil
+    def output_select_line(result : Decoder::ChainResult) : Nil
       lines = output_lines(result)
       return if lines.empty?
       @out_read.select_line(lines)
@@ -316,7 +316,7 @@ module Gori::Tui
 
     # The displayed OUTPUT split into lines, cached until the next recompute / mode
     # change (so an idle frame never re-encodes + re-splits a large output).
-    private def output_lines(result : Convert::ChainResult) : Array(String)
+    private def output_lines(result : Decoder::ChainResult) : Array(String)
       if @out_dirty
         @out_lines = output_text(result).split('\n')
         @out_dirty = false
@@ -326,7 +326,7 @@ module Gori::Tui
 
     # The OUTPUT divider label: byte count, or a failure marker. The display mode moved
     # to the ` ^X:MODE ` border badge (render_output_card).
-    private def output_header(result : Convert::ChainResult) : String
+    private def output_header(result : Decoder::ChainResult) : String
       if bytes = result.output
         "OUTPUT · #{bytes.size} B"
       else
@@ -339,16 +339,16 @@ module Gori::Tui
     # intentionally not spelled out on the badge.
     private def out_mode_badge : {String, Bool}
       case @prefer
-      when Convert::RenderAs::Hex    then {"HEX", true}
-      when Convert::RenderAs::Base64 then {"B64", true}
+      when Decoder::RenderAs::Hex    then {"HEX", true}
+      when Decoder::RenderAs::Base64 then {"B64", true}
       else                                {"AUTO", false}
       end
     end
 
     # Final output as display text (honoring the ^X mode), or the failure message.
-    def output_text(result : Convert::ChainResult) : String
+    def output_text(result : Decoder::ChainResult) : String
       if bytes = result.output
-        text, _ = Convert.display(bytes, @prefer)
+        text, _ = Decoder.display(bytes, @prefer)
         text
       elsif fa = result.failed_at
         s = result.steps[fa]
@@ -359,13 +359,13 @@ module Gori::Tui
     end
 
     # The OUTPUT bytes for clipboard copy (empty string when the chain failed).
-    def output_copy(result : Convert::ChainResult) : String
-      (b = result.output) ? Convert.display(b, @prefer)[0] : ""
+    def output_copy(result : Decoder::ChainResult) : String
+      (b = result.output) ? Decoder.display(b, @prefer)[0] : ""
     end
 
     # A single-line, control-char-sanitized preview of one step's bytes.
     private def preview(bytes : Bytes) : String
-      s, _ = Convert.display(bytes)
+      s, _ = Decoder.display(bytes)
       String.build { |io| s.each_char { |ch| io << (ch.control? ? '·' : ch) } }
     end
 
@@ -384,7 +384,7 @@ module Gori::Tui
     end
 
     # Hit-test the OUTPUT card's ` ^X:MODE ` badge (same geometry as render_output_card).
-    def output_mode_hit(card : Rect, mx : Int32, my : Int32, result : Convert::ChainResult) : Bool
+    def output_mode_hit(card : Rect, mx : Int32, my : Int32, result : Decoder::ChainResult) : Bool
       return false if card.w < 2 || my != card.y
       name, _ = out_mode_badge
       min_x = card.x + output_header(result).size + 4

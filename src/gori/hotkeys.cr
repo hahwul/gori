@@ -161,7 +161,7 @@ module Gori
       Verb::Conflicts.detect(registry, Verb::OsProfile.resolve(profile), overrides, id, chord)
     end
 
-    # Convert the editor's working copy (verb-id → Chord? where nil = unbound) into the
+    # Decoder the editor's working copy (verb-id → Chord? where nil = unbound) into the
     # engine's override shape (verb-id → Array(Chord) where [] = unbind).
     def self.as_chord_overrides(working : Hash(String, Verb::Chord?)) : Hash(String, Array(Verb::Chord))
       out = {} of String => Array(Verb::Chord)

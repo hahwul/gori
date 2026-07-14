@@ -621,7 +621,7 @@ module Gori::Tui
       end
     end
 
-    # MARK transform mode: mark request values (§…§) and attach Convert chains applied on
+    # MARK transform mode: mark request values (§…§) and attach Decoder chains applied on
     # send. Off by default so a plain request is byte-identical (a captured § is literal).
     def replay_toggle_mark_transform : Nil
       return unless view = current_view

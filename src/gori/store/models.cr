@@ -345,7 +345,7 @@ module Gori
       getter response_duration_us : Int64?
       getter name : String?         # custom sub-tab label (nil = derive from the request)
       getter sni : String?          # custom TLS SNI host (nil = present the target host)
-      getter? mark_transform : Bool # V22: apply §…§ inline Convert chains on send
+      getter? mark_transform : Bool # V22: apply §…§ inline Decoder chains on send
       getter tags : String?         # V31: space-joined flat tags (nil = untagged)
 
       def initialize(@id, @target, @request, @http2, @auto_content_length, @flow_id, @position,

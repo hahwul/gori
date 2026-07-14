@@ -1,4 +1,4 @@
-require "../convert"
+require "../decoder"
 
 module Gori::Fuzz
   # A base request with marked payload positions. The marked TEXT is the single
@@ -14,7 +14,7 @@ module Gori::Fuzz
   # the byte-exact path remains `gori run replay` / export.
   struct Template
     MARKER = '§'
-    # Value|chain delimiter inside a marker: `§value¦chain§`. NOT '|' — the Convert
+    # Value|chain delimiter inside a marker: `§value¦chain§`. NOT '|' — the Decoder
     # chain syntax already uses '|'/','/'>'  as step separators, so the boundary must
     # be a char the chain never contains. `¦¦` escapes a literal `¦`, mirroring `§§`.
     CHAIN_SEP = '¦'
@@ -169,19 +169,19 @@ module Gori::Fuzz
       io.to_slice
     end
 
-    # Map each payload through its position's Convert chain (empty chain = identity),
+    # Map each payload through its position's Decoder chain (empty chain = identity),
     # returning a new payload array to feed `render`. A chain that fails — an unknown
     # token, a step that raised, or output over MAX_OUT — leaves that value
-    # UNTRANSFORMED: Convert.run never raises, and a streaming fuzz run has nowhere to
-    # surface a per-position error (validate chains in the Convert tab). Convert works
+    # UNTRANSFORMED: Decoder.run never raises, and a streaming fuzz run has nowhere to
+    # surface a per-position error (validate chains in the Decoder tab). Decoder works
     # on Bytes but the template splices Strings, so the transformed bytes are rewrapped
     # with String.new — encoders (base64/url/hex/hash/escape) stay ASCII; a decoder that
     # produces raw bytes may lose fidelity, the same limit binary bodies already have.
-    def apply_chains(payloads : Array(String), registry : Convert::Registry) : Array(String)
+    def apply_chains(payloads : Array(String), registry : Decoder::Registry) : Array(String)
       payloads.map_with_index do |p, k|
         spec = @positions[k]?.try(&.chain)
         next p if spec.nil? || spec.empty?
-        res = Convert.run(registry, p.to_slice, spec)
+        res = Decoder.run(registry, p.to_slice, spec)
         (res.ok? && (o = res.output)) ? String.new(o) : p
       end
     end
@@ -252,7 +252,7 @@ module Gori::Fuzz
       String.new(tmpl.render(tmpl.default_payloads))
     end
 
-    # The Convert-chain string of the `§…§` marker enclosing char index `cursor`, or
+    # The Decoder-chain string of the `§…§` marker enclosing char index `cursor`, or
     # nil when the cursor isn't inside a closed marker. Seeds the chain-edit overlay.
     def self.chain_at(text : String, cursor : Int32) : String?
       idx = marked_spans(text).index { |(a, b)| a <= cursor && cursor <= b }

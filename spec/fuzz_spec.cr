@@ -132,7 +132,7 @@ describe F::Template do
     end
   end
 
-  # --- inline Convert chains (§value¦chain§) ---
+  # --- inline Decoder chains (§value¦chain§) ---
   it "splits a marker's interior on the first unescaped ¦ into {default, chain}" do
     t = F::Template.parse("tok=§secret¦base64-encode > url-encode§")
     t.position_count.should eq(1)
@@ -151,7 +151,7 @@ describe F::Template do
   end
 
   it "renders defaults through their chains via apply_chains (failure → untransformed)" do
-    reg = Gori::Convert.default_registry
+    reg = Gori::Decoder.default_registry
     t = F::Template.parse("a=§hi¦base64-encode§&b=§keep¦nope-unknown§&c=§plain§")
     out = String.new(t.render(t.apply_chains(t.default_payloads, reg)))
     out.should eq("a=aGk=&b=keep&c=plain") # base64(hi)=aGk=; unknown chain passes through; no chain untouched
@@ -303,8 +303,8 @@ describe F::Generator do
     seen.should eq(9)
   end
 
-  it "applies a position's inline Convert chain to the payload on the wire" do
-    reg = Gori::Convert.default_registry
+  it "applies a position's inline Decoder chain to the payload on the wire" do
+    reg = Gori::Decoder.default_registry
     chained = F::Template.parse("GET /?a=§1¦base64-encode§&b=§2§ HTTP/1.1\r\nHost: h\r\n\r\n")
     s1 = F::PayloadSet.new(F::InlineList.new(["hi"]))
     g = F::Generator.new(chained, [s1], F::Config.new(mode: F::Mode::BatteringRam), registry: reg)

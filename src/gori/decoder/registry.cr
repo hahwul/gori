@@ -1,4 +1,4 @@
-module Gori::Convert
+module Gori::Decoder
   # An ordered, case-insensitive registry of converters — modelled on
   # Gori::Verb::Registry (a `@by_*` hash + an `@order` array; register dedups;
   # Enumerable). Keyed by canonical name AND every alias (normalized), so "url",

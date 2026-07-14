@@ -48,7 +48,7 @@ module Gori::Tui
         Item.new("click tab", "switch to it"),
         Item.new("click row", "select · click again opens"),
         Item.new("click pane", "focus · in an editor, place the caret"),
-        Item.new("sub-tab chip", "switch · right-click renames (Replay/Fuzzer/Convert)"),
+        Item.new("sub-tab chip", "switch · right-click renames (Replay/Fuzzer/Decoder)"),
         Item.new("wheel", "scroll / move the selection"),
         Item.new("click outside", "close a popup"),
       ]},
@@ -125,7 +125,7 @@ module Gori::Tui
         Item.new("Project", "desc: i/↵ edit · x line · ⇧arrows select · y copy · space cmds"),
         Item.new("Intercept", "↵/e edit · f fwd · d drop · ⇧F all · c catch · / condition · i on/off · ⇧←/→ h-scroll"),
       ]},
-      {"CONVERT", [
+      {"DECODER", [
         Item.new("i / ↵", "enter INS on INPUT · esc back to READ"),
         Item.new("INPUT READ", "⇧arrows select · y copy · space cmds"),
         Item.new("chain", "always editable — base64 > url-encode > sha256 ( > | , )"),

@@ -3,7 +3,7 @@ require "../../src/gori"
 # A no-op ExecContext for exercising registry/palette logic in specs.
 class FakeExecContext < Gori::Verb::ExecContext
   property selected : Int64? = nil
-  property current_tab : Symbol = :history # settable so tab-gated verbs (Convert, …) can be exercised
+  property current_tab : Symbol = :history # settable so tab-gated verbs (Decoder, …) can be exercised
 
   def quit! : Nil; end
 
@@ -353,33 +353,33 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def comparer_duplicate_subtab : Nil; end
 
-  def convert_new : Nil; end
+  def decoder_new : Nil; end
 
-  def convert_close : Nil; end
+  def decoder_close : Nil; end
 
-  def convert_rename_subtab : Nil; end
+  def decoder_rename_subtab : Nil; end
 
-  def convert_duplicate_subtab : Nil; end
+  def decoder_duplicate_subtab : Nil; end
 
-  def convert_clear : Nil; end
+  def decoder_clear : Nil; end
 
-  def convert_copy : Nil; end
+  def decoder_copy : Nil; end
 
-  def convert_copy_selection : Nil; end
+  def decoder_copy_selection : Nil; end
 
-  def convert_copy_all : Nil; end
+  def decoder_copy_all : Nil; end
 
-  property convert_read_mode : Bool = false # settable so grouped-menu specs can exercise COMMON's Copy
+  property decoder_read_mode : Bool = false # settable so grouped-menu specs can exercise COMMON's Copy
 
-  def convert_read_mode? : Bool
-    @convert_read_mode
+  def decoder_read_mode? : Bool
+    @decoder_read_mode
   end
 
-  def convert_cycle_mode : Nil; end
+  def decoder_cycle_mode : Nil; end
 
-  def convert_save : Nil; end
+  def decoder_save : Nil; end
 
-  def convert_load : Nil; end
+  def decoder_load : Nil; end
 
   def notes_new : Nil; end
 

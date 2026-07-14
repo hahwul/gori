@@ -1,7 +1,7 @@
 require "base64"
 require "json"
 require "uri"
-require "./convert/codecs"
+require "./decoder/codecs"
 
 module Gori
   # Finds and decodes the JSON Web Tokens a flow carries. Unlike Pretty's whole-body
@@ -25,7 +25,7 @@ module Gori
       location : String, # human label: "Authorization", "Cookie sid", "request body", …
       token : String,
       brief : String?, # short claims line (alg / exp) for the pane header, if parseable
-      decoded : String # Convert::Codecs.jwt_decode output (header / payload / signature)
+      decoded : String # Decoder::Codecs.jwt_decode output (header / payload / signature)
 
     # Every distinct JWT in a flow's heads, query, and bodies — deduped by token,
     # capped at MAX_TOKENS. Empty when the flow carries none.
@@ -61,7 +61,7 @@ module Gori
     # --- internals ----------------------------------------------------------
 
     private def decode(tok : String) : String
-      Convert::Codecs.jwt_decode(tok.to_slice)
+      Decoder::Codecs.jwt_decode(tok.to_slice)
     rescue
       tok
     end

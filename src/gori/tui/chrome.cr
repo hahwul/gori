@@ -14,7 +14,7 @@ module Gori::Tui
       {:replay, "Replay"},
       {:fuzzer, "Fuzzer"},
       {:miner, "Miner"},
-      {:convert, "Convert"},
+      {:decoder, "Decoder"},
       {:comparer, "Comparer"},
       {:prism, "Prism"},
       {:findings, "Findings"},

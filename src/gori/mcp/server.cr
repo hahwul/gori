@@ -128,7 +128,7 @@ module Gori
                    end
         base = "gori MCP exposes the selected project's captured HTTP traffic " \
                "(history, flows, sitemap, scope, findings, notes, match&replace rules), plus a " \
-               "pure `convert` encode/decode/hash tool. Call ql_reference before " \
+               "pure `decoder` encode/decode/hash tool. Call ql_reference before " \
                "writing list_history/list_sitemap queries. Timestamps include unix " \
                "microseconds plus *_iso RFC3339 fields where available.#{selected}"
         if @allow_actions

@@ -1,15 +1,15 @@
 require "./screen"
 require "./theme"
 require "./frame"
-require "./convert_view" # ChainComplete lives here
-require "../convert"
+require "./decoder_view" # ChainComplete lives here
+require "../decoder"
 
 module Gori::Tui
-  # A single-line editor for a Convert chain spec (`base64-encode > url-encode`) with
+  # A single-line editor for a Decoder chain spec (`base64-encode > url-encode`) with
   # converter-name autocomplete. Embedded below the marker editor in Replay/Fuzzer MARK
   # mode; the owning view BINDS it to the §…§ marker at the cursor — `load` on focus-in,
   # `value` on focus-out (the view writes it back via Fuzz::Template.set_chain). Modelled
-  # on the Convert tab's chain field (String + caret + ChainComplete), not a TextArea.
+  # on the Decoder tab's chain field (String + caret + ChainComplete), not a TextArea.
   class ChainPane
     getter chain : String = ""
     @caret : Int32 = 0
@@ -72,7 +72,7 @@ module Gori::Tui
         screen.input_line(inner.x, inner.y, @chain, @caret, @pre, fg, Theme.bg, width: {inner.w, 1}.max)
       end
       # Dropdown renders DOWNWARD from the input row into the pane body — the pane is
-      # enlarged while focused, so there's room (mirrors the Convert tab).
+      # enlarged while focused, so there's room (mirrors the Decoder tab).
       @complete.render(screen, inner, rect) if focused && @complete.open?
     end
 
@@ -123,7 +123,7 @@ module Gori::Tui
       if tok.empty?
         @complete.close
       else
-        matches = Convert.shared_registry.match(tok).map(&.name).uniq!
+        matches = Decoder.shared_registry.match(tok).map(&.name).uniq!
         @complete.set(matches.first(40), ts, te)
       end
     end

@@ -642,7 +642,7 @@ module Gori::Tui
           screen.text(row_x, list_y + i, res.line, fg, width: w - (row_x - rect.x - 1))
         end
       end
-      # NOTES — a real Frame.card (like Convert INPUT) so INS/READ borders are rounded
+      # NOTES — a real Frame.card (like Decoder INPUT) so INS/READ borders are rounded
       # and the editor body is inset, never colliding with the outline.
       card = notes_card_rect(rect)
       return if card.h < 2

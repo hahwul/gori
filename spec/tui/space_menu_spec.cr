@@ -139,73 +139,73 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('g').try(&.id).should eq("prism.dismiss-code")
   end
 
-  it "lists the Convert tab's actions in the Convert scope (reachable from the sub-tab strip)" do
+  it "lists the Decoder tab's actions in the Decoder scope (reachable from the sub-tab strip)" do
     ctx = FakeExecContext.new
-    ctx.current_tab = :convert   # the Convert verbs gate on the active tab
-    ctx.convert_read_mode = true # so COMMON's Copy is available too
+    ctx.current_tab = :decoder   # the Decoder verbs gate on the active tab
+    ctx.decoder_read_mode = true # so COMMON's Copy is available too
     menu = SpaceMenu.new(Gori::Verbs.registry)
-    menu.open(Gori::Verb::Scope::Convert, :common, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :common, ctx)
 
     menu.entries.size.should be > 0
-    menu.entries.all?(&.scope.convert?).should be_true # strictly scope-local
+    menu.entries.all?(&.scope.decoder?).should be_true # strictly scope-local
     menu.entries.all?(&.menu_key).should be_true       # every shown entry has a key
     ids = menu.entries.map(&.id)
-    ids.should contain("convert.copy") # the single smart Copy (copy-all is gone)
-    menu.verb_for('y').try(&.id).should eq("convert.copy")
+    ids.should contain("decoder.copy") # the single smart Copy (copy-all is gone)
+    menu.verb_for('y').try(&.id).should eq("decoder.copy")
   end
 
-  it "keeps Convert's New/Close in COMMON (Round 4) so they show from every context, not just the tab bar/strip" do
+  it "keeps Decoder's New/Close in COMMON (Round 4) so they show from every context, not just the tab bar/strip" do
     ctx = FakeExecContext.new
-    ctx.current_tab = :convert
-    ctx.convert_read_mode = true # so COMMON's Copy shows too, for a fuller COMMON+CONTEXT picture
+    ctx.current_tab = :decoder
+    ctx.decoder_read_mode = true # so COMMON's Copy shows too, for a fuller COMMON+CONTEXT picture
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     # Tab-bar focus (@focus == :menu): Round 5 moved Save/Load to :tab (session-level),
     # so this is now COMMON + a real TAB group — New/Close/Copy/Save/Load all present.
-    menu.open(Gori::Verb::Scope::Convert, :tab, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :tab, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("convert.copy")
-    ids.should contain("convert.new")
-    ids.should contain("convert.close")
-    ids.should contain("convert.save")
-    ids.should contain("convert.load")
-    menu.verb_for('n').try(&.id).should eq("convert.new")
-    menu.verb_for('w').try(&.id).should eq("convert.close")
-    menu.verb_for('s').try(&.id).should eq("convert.save")
-    menu.verb_for('o').try(&.id).should eq("convert.load")
+    ids.should contain("decoder.copy")
+    ids.should contain("decoder.new")
+    ids.should contain("decoder.close")
+    ids.should contain("decoder.save")
+    ids.should contain("decoder.load")
+    menu.verb_for('n').try(&.id).should eq("decoder.new")
+    menu.verb_for('w').try(&.id).should eq("decoder.close")
+    menu.verb_for('s').try(&.id).should eq("decoder.save")
+    menu.verb_for('o').try(&.id).should eq("decoder.load")
 
-    # Sub-tab strip focus (@focus == :subtabs): Convert now has its OWN :subtab verbs
+    # Sub-tab strip focus (@focus == :subtabs): Decoder now has its OWN :subtab verbs
     # (rename + duplicate, mirroring Replay/Fuzzer) — COMMON + SUBTAB, New/Close/Copy/
     # Rename/Duplicate all reachable from the strip.
-    menu.open(Gori::Verb::Scope::Convert, :subtab, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :subtab, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("convert.copy")
-    ids.should contain("convert.new")
-    ids.should contain("convert.close")
-    ids.should contain("convert.rename-subtab")
-    ids.should contain("convert.duplicate-subtab")
-    menu.verb_for('e').try(&.id).should eq("convert.rename-subtab")
-    menu.verb_for('d').try(&.id).should eq("convert.duplicate-subtab")
-    ids.should_not contain("convert.save") # :tab-only, not :subtab — no bleed
+    ids.should contain("decoder.copy")
+    ids.should contain("decoder.new")
+    ids.should contain("decoder.close")
+    ids.should contain("decoder.rename-subtab")
+    ids.should contain("decoder.duplicate-subtab")
+    menu.verb_for('e').try(&.id).should eq("decoder.rename-subtab")
+    menu.verb_for('d').try(&.id).should eq("decoder.duplicate-subtab")
+    ids.should_not contain("decoder.save") # :tab-only, not :subtab — no bleed
 
     # Body-pane focus: OUTPUT gets Cycle output mode + COMMON's New/Close/Copy —
     # the whole point of Round 4 is New/Close now show INSIDE the body panes too.
-    menu.open(Gori::Verb::Scope::Convert, :output, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :output, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("convert.mode")
-    ids.should contain("convert.new")
-    ids.should contain("convert.close")
-    ids.should_not contain("convert.save") # a DIFFERENT group (:tab) — no bleed
+    ids.should contain("decoder.mode")
+    ids.should contain("decoder.new")
+    ids.should contain("decoder.close")
+    ids.should_not contain("decoder.save") # a DIFFERENT group (:tab) — no bleed
 
     # CHAIN pane: Round 5 moved Save/Load OUT of :chain (into :tab), so CHAIN has no
     # actions of its own left — falls back to a flat COMMON-only render (the
     # single-group-omits-header rule), same as a single-region tab.
-    menu.open(Gori::Verb::Scope::Convert, :chain, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :chain, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("convert.new")
-    ids.should contain("convert.close")
-    ids.should_not contain("convert.save")
-    ids.should_not contain("convert.mode")
+    ids.should contain("decoder.new")
+    ids.should contain("decoder.close")
+    ids.should_not contain("decoder.save")
+    ids.should_not contain("decoder.mode")
   end
 
   it "yields COMMON + the focus-area's own group when opened with a non-common section (Replay), and a single flat group for :common" do
@@ -251,7 +251,7 @@ describe Gori::Tui::SpaceMenu do
 
     # Round 5: fuzz.new moved :tab → :common, so Fuzzer no longer has any :tab-only
     # verbs — the tab bar now falls back to a flat COMMON-only render (same rule that
-    # already covered Convert's tab bar pre-Round-5), New/Run/Stop/Copy all present.
+    # already covered Decoder's tab bar pre-Round-5), New/Run/Stop/Copy all present.
     menu.open(Gori::Verb::Scope::Fuzzer, :tab, ctx)
     ids = menu.entries.map(&.id)
     ids.should contain("fuzz.run")
@@ -311,20 +311,20 @@ describe Gori::Tui::SpaceMenu do
     menu.verb_for('d').try(&.id).should eq("fuzz.duplicate-subtab")
   end
 
-  it "populates Convert's :subtab group with rename/duplicate (asymmetry fix — was flat COMMON, no way to rename from the strip)" do
+  it "populates Decoder's :subtab group with rename/duplicate (asymmetry fix — was flat COMMON, no way to rename from the strip)" do
     ctx = FakeExecContext.new
-    ctx.current_tab = :convert
+    ctx.current_tab = :decoder
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
-    menu.open(Gori::Verb::Scope::Convert, :subtab, ctx)
+    menu.open(Gori::Verb::Scope::Decoder, :subtab, ctx)
     ids = menu.entries.map(&.id)
-    ids.should contain("convert.new")              # COMMON
-    ids.should contain("convert.rename-subtab")    # :subtab
-    ids.should contain("convert.duplicate-subtab") # :subtab
-    ids.should_not contain("convert.save")         # a DIFFERENT section (:tab) — no bleed
-    ids.should_not contain("convert.mode")         # a DIFFERENT section (:output) — no bleed
-    menu.verb_for('e').try(&.id).should eq("convert.rename-subtab")
-    menu.verb_for('d').try(&.id).should eq("convert.duplicate-subtab")
+    ids.should contain("decoder.new")              # COMMON
+    ids.should contain("decoder.rename-subtab")    # :subtab
+    ids.should contain("decoder.duplicate-subtab") # :subtab
+    ids.should_not contain("decoder.save")         # a DIFFERENT section (:tab) — no bleed
+    ids.should_not contain("decoder.mode")         # a DIFFERENT section (:output) — no bleed
+    menu.verb_for('e').try(&.id).should eq("decoder.rename-subtab")
+    menu.verb_for('d').try(&.id).should eq("decoder.duplicate-subtab")
   end
 
   it "populates Notes' :subtab group with duplicate (content-only clone from the strip)" do
@@ -492,7 +492,7 @@ describe Gori::Tui::SpaceMenu do
       Gori::Verb::Scope::Body, Gori::Verb::Scope::Replay, Gori::Verb::Scope::Findings,
       Gori::Verb::Scope::Comparer, Gori::Verb::Scope::Fuzzer, Gori::Verb::Scope::Intercept,
       Gori::Verb::Scope::HistoryDetail, Gori::Verb::Scope::FindingsDetail,
-      Gori::Verb::Scope::Project, Gori::Verb::Scope::Convert, Gori::Verb::Scope::Notes,
+      Gori::Verb::Scope::Project, Gori::Verb::Scope::Decoder, Gori::Verb::Scope::Notes,
       Gori::Verb::Scope::Sitemap,
       Gori::Verb::Scope::Miner, Gori::Verb::Scope::Prism, Gori::Verb::Scope::PrismDetail,
     ]

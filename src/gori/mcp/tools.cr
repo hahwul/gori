@@ -9,7 +9,7 @@ require "../replay/flow_request"
 require "../flow_mapper"
 require "../proxy/codec/http1"
 require "../fuzz"
-require "../convert"
+require "../decoder"
 require "../env"
 require "../miner"
 require "../notes"
@@ -50,10 +50,10 @@ module Gori
 
       MCP_REPLAY_REQUEST_MAX = 16 * 1024
 
-      # Ceiling on the `convert` tool's returned output string. A Convert step can
-      # produce up to 32 MiB (Convert::MAX_OUT); returning that inline would swamp
+      # Ceiling on the `decoder` tool's returned output string. A Decoder step can
+      # produce up to 32 MiB (Decoder::MAX_OUT); returning that inline would swamp
       # the JSON-RPC channel, so truncate the display string and flag it.
-      CONVERT_MAX_OUTPUT = 256 * 1024
+      DECODER_MAX_OUTPUT = 256 * 1024
 
       def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool,
                      @project_name : String? = nil, @project_slug : String? = nil,
@@ -209,9 +209,9 @@ module Gori
             s.field "id", intprop("database note ID"), required: true
           end
 
-          tool j, "convert",
-            "Run a gori Convert chain (encode/decode/hash/compress) over `input` and return the " \
-            "result — the same engine as the TUI Convert tab. Pure transform: no network, no state. " \
+          tool j, "decode",
+            "Run a gori Decoder chain (encode/decode/hash/compress) over `input` and return the " \
+            "result — the same engine as the TUI Decoder tab. Pure transform: no network, no state. " \
             "`spec` is converter tokens separated by '>', '|' or ',' applied left-to-right, e.g. " \
             "'base64-decode > gunzip', 'url-encode', 'sha256'. Common converters: base64, " \
             "base64-decode, url-encode, url-decode, hex, hex-decode, gzip, gunzip, deflate, inflate, " \
@@ -451,7 +451,7 @@ module Gori
         when "ql_reference"            then ql_reference
         when "list_notes"              then list_notes
         when "get_note"                then get_note(h)
-        when "convert"                 then convert(h)
+        when "decode"                  then decoder(h)
         when "list_rules"              then list_rules
         end
       end
@@ -1401,16 +1401,16 @@ module Gori
         end)
       end
 
-      # Run a Convert chain over caller-supplied bytes. Pure: no store, no network,
+      # Run a Decoder chain over caller-supplied bytes. Pure: no store, no network,
       # so it's a read tool (always exposed). A failed/unknown step is a tool-level
       # error; an unknown token also enumerates the registry so the model can retry.
-      private def convert(h) : Result
+      private def decoder(h) : Result
         spec = str(h, "spec")
         return Result.new("missing required 'spec'", is_error: true) if spec.nil? || spec.strip.empty?
         # A spec that is only separators (">", ",", "|") parses to zero tokens, which
         # Chain.run treats as identity — reject it rather than reporting a phantom
         # "success" that echoes the input back unchanged.
-        return Result.new("'spec' has no converter tokens (e.g. 'base64-decode > gunzip')", is_error: true) if Convert.parse_spec(spec).empty?
+        return Result.new("'spec' has no converter tokens (e.g. 'base64-decode > gunzip')", is_error: true) if Decoder.parse_spec(spec).empty?
         raw = str(h, "input")
         return Result.new("missing required 'input'", is_error: true) if raw.nil?
 
@@ -1425,23 +1425,23 @@ module Gori
             raw.to_slice
           end
 
-        reg = Convert.shared_registry
-        result = Convert.run(reg, input, spec)
+        reg = Decoder.shared_registry
+        result = Decoder.run(reg, input, spec)
 
         if (idx = result.failed_at)
           step = result.steps[idx]
-          msg = "convert failed at step #{idx + 1} '#{step.token}': #{step.error || "failed"}"
+          msg = "decoder failed at step #{idx + 1} '#{step.token}': #{step.error || "failed"}"
           msg += " — available converters: #{reg.names.join(", ")}" if step.state.unknown?
           return Result.new(msg, is_error: true)
         end
 
         out_bytes = result.output || Bytes.empty
-        text, mode = Convert.display(out_bytes)
+        text, mode = Decoder.display(out_bytes)
         # Bound the channel: Chain.run caps a step at 32 MiB, far too large to return
         # inline. Truncate on a byte budget and scrub so a split multibyte char can't
         # emit invalid UTF-8 into the JSON string; `output_bytes` keeps the true size.
-        truncated = text.bytesize > CONVERT_MAX_OUTPUT
-        text = text.byte_slice(0, CONVERT_MAX_OUTPUT).scrub if truncated
+        truncated = text.bytesize > DECODER_MAX_OUTPUT
+        text = text.byte_slice(0, DECODER_MAX_OUTPUT).scrub if truncated
 
         Result.new(JSON.build do |j|
           j.object do
@@ -2049,7 +2049,7 @@ module Gori
         matcher = fuzz_matcher(h)
         config = fuzz_config(h, mode)
         gen_sets = mode.per_position? ? sets : [sets.first]
-        generator = Fuzz::Generator.new(template, gen_sets, config, registry: Convert.shared_registry)
+        generator = Fuzz::Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
         sender = Fuzz::Sender.new(origin, http2: use_h2,
           verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
         engine = Fuzz::Engine.new(generator, matcher, sender, config)

@@ -7,7 +7,7 @@ module Gori::Tui
   # The Comparer tab: multi-session (sub-tabs) workspace for side-by-side flow diffs.
   # Each session is an independent ComparerView (A/B slots + pane + scroll). Session-
   # only (no project DB) — switching sub-tabs keeps prior pairs so History "Send to
-  # Comparer" no longer clobbers earlier work. Strip chrome mirrors Convert/Replay.
+  # Comparer" no longer clobbers earlier work. Strip chrome mirrors Decoder/Replay.
   class ComparerController < TabController
     def initialize(host : Host)
       super(host)
@@ -131,7 +131,7 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      # Carve the sub-tab strip too (like Convert/Notes), not just the border — the view
+      # Carve the sub-tab strip too (like Decoder/Notes), not just the border — the view
       # renders the REQ/RES chips inside the strip-carved content rect, so a plain
       # inset(1,1) would hit-test STRIP_H rows too high and never match the chips.
       inner = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)

@@ -115,18 +115,18 @@ module Gori
     class_property keymap_os : String = "auto"
     class_property keymap_overrides : Hash(String, Array(String)) = {} of String => Array(String)
 
-    # Convert tab scratch state (a global scratch tool, not project data). Each open
+    # Decoder tab scratch state (a global scratch tool, not project data). Each open
     # sub-tab (an independent conversion session) is restored on restart as a
-    # {input, chain, name} tuple; convert_chains are named, saved chain specs
+    # {input, chain, name} tuple; decoder_chains are named, saved chain specs
     # (name -> spec) the user can re-load. Written only on commit (Esc/quit),
-    # dirty-guarded, so an untouched Convert tab never rewrites the file.
-    # convert_input/convert_chain are the LEGACY single-session fields — read for
-    # back-compat migration (see ConvertController), no longer written once
-    # convert_sessions exists.
-    class_property convert_input : String = ""
-    class_property convert_chain : String = ""
-    class_property convert_sessions : Array({String, String, String}) = [] of {String, String, String}
-    class_property convert_chains : Array({String, String}) = [] of {String, String}
+    # dirty-guarded, so an untouched Decoder tab never rewrites the file.
+    # decoder_input/decoder_chain are the LEGACY single-session fields — read for
+    # back-compat migration (see DecoderController), no longer written once
+    # decoder_sessions exists.
+    class_property decoder_input : String = ""
+    class_property decoder_chain : String = ""
+    class_property decoder_sessions : Array({String, String, String}) = [] of {String, String, String}
+    class_property decoder_chains : Array({String, String}) = [] of {String, String}
     # Last Mine-parameters overlay choices (global scratch — not project data).
     # locations: checked location labels; concurrency/notify mirror the overlay.
     class_property mine_locations : Array(String) = [] of String
@@ -166,11 +166,11 @@ module Gori
       self.hostname_overrides = parse_hostname_overrides(root["hostname_overrides"]?)
       parse_env(root["env"]?)
       parse_hotkeys(root["hotkeys"]?)
-      if cv = root["convert"]?
-        self.convert_input = cv["input"]?.try(&.as_s?) || convert_input
-        self.convert_chain = cv["chain"]?.try(&.as_s?) || convert_chain
-        self.convert_sessions = parse_convert_sessions(cv["sessions"]?)
-        self.convert_chains = parse_convert_chains(cv["chains"]?)
+      if cv = root["decoder"]?
+        self.decoder_input = cv["input"]?.try(&.as_s?) || decoder_input
+        self.decoder_chain = cv["chain"]?.try(&.as_s?) || decoder_chain
+        self.decoder_sessions = parse_decoder_sessions(cv["sessions"]?)
+        self.decoder_chains = parse_decoder_chains(cv["chains"]?)
       end
       parse_mine_prefs(root["mine"]?)
       parse_layout(root["layout"]?)
@@ -219,11 +219,11 @@ module Gori
 
     # Tolerant sub-tab session parse: a non-array (or absent) node keeps the current
     # value (older configs without a "sessions" array fall back to the legacy
-    # input/chain scalars in ConvertController). Missing fields default to "" (a blank
-    # session is valid — an empty sub-tab). Mirrors parse_convert_chains.
-    private def self.parse_convert_sessions(node : JSON::Any?) : Array({String, String, String})
+    # input/chain scalars in DecoderController). Missing fields default to "" (a blank
+    # session is valid — an empty sub-tab). Mirrors parse_decoder_chains.
+    private def self.parse_decoder_sessions(node : JSON::Any?) : Array({String, String, String})
       arr = node.try(&.as_a?)
-      return convert_sessions unless arr
+      return decoder_sessions unless arr
       out = [] of {String, String, String}
       arr.each do |e|
         next unless o = e.as_h?
@@ -238,9 +238,9 @@ module Gori
     # Tolerant named-chain parse: a non-array (or absent) node keeps the current
     # value (older configs are safe); entries missing/blank "name" or "spec" are
     # dropped. Mirrors parse_tab_prefs.
-    private def self.parse_convert_chains(node : JSON::Any?) : Array({String, String})
+    private def self.parse_decoder_chains(node : JSON::Any?) : Array({String, String})
       arr = node.try(&.as_a?)
-      return convert_chains unless arr
+      return decoder_chains unless arr
       out = [] of {String, String}
       arr.each do |e|
         next unless o = e.as_h?
@@ -282,7 +282,7 @@ module Gori
     # Tolerant hostname-override parse: a non-array (or absent) node keeps the current
     # value; entries missing/blank "host" or "ip" are dropped. The host is lowercased so
     # the live lookup (host_override_ip) and the project store stay consistent. Mirrors
-    # parse_convert_chains' robustness.
+    # parse_decoder_chains' robustness.
     private def self.parse_hostname_overrides(node : JSON::Any?) : Array({String, String})
       arr = node.try(&.as_a?)
       return hostname_overrides unless arr
@@ -391,7 +391,7 @@ module Gori
       Paths.ensure_dirs
       # Atomic write: a torn File.write (crash / two instances / disk-full) would leave a
       # half-written settings.json that load()'s blanket rescue silently resets to factory
-      # defaults — losing theme, hotkeys, hostname overrides, tab prefs, convert sessions.
+      # defaults — losing theme, hotkeys, hostname overrides, tab prefs, decoder sessions.
       # Stage to a sibling temp then rename (atomic on POSIX), mirroring cert_authority.
       tmp = "#{path}.tmp"
       File.write(tmp, merge_with_disk(serialize))
@@ -530,11 +530,11 @@ module Gori
           end
           # Omit the whole block when there's nothing worth persisting — no saved chains,
           # no legacy scalars, and every open session blank+unnamed — so an untouched OR
-          # cleared Convert workbench never writes a "convert" section. Once any session
+          # cleared Decoder workbench never writes a "decoder" section. Once any session
           # has content we write the "sessions" array (the source of truth); until then we
-          # preserve the legacy input/chain scalars so an un-opened Convert tab never loses
+          # preserve the legacy input/chain scalars so an un-opened Decoder tab never loses
           # them. (`all?` is vacuously true for an empty array.)
-          sessions_blank = convert_sessions.all? { |(i, c, n)| i.empty? && c.empty? && n.empty? }
+          sessions_blank = decoder_sessions.all? { |(i, c, n)| i.empty? && c.empty? && n.empty? }
           if mine_prefs_saved?
             j.field "mine" do
               j.object do
@@ -546,16 +546,16 @@ module Gori
               end
             end
           end
-          unless sessions_blank && convert_chains.empty? && convert_input.empty? && convert_chain.empty?
-            j.field "convert" do
+          unless sessions_blank && decoder_chains.empty? && decoder_input.empty? && decoder_chain.empty?
+            j.field "decoder" do
               j.object do
-                if convert_sessions.empty?
-                  j.field "input", convert_input
-                  j.field "chain", convert_chain
+                if decoder_sessions.empty?
+                  j.field "input", decoder_input
+                  j.field "chain", decoder_chain
                 else
                   j.field "sessions" do
                     j.array do
-                      convert_sessions.each do |(input, chain, name)|
+                      decoder_sessions.each do |(input, chain, name)|
                         j.object do
                           j.field "input", input
                           j.field "chain", chain
@@ -565,10 +565,10 @@ module Gori
                     end
                   end
                 end
-                unless convert_chains.empty?
+                unless decoder_chains.empty?
                   j.field "chains" do
                     j.array do
-                      convert_chains.each { |(name, spec)| j.object { j.field "name", name; j.field "spec", spec } }
+                      decoder_chains.each { |(name, spec)| j.object { j.field "name", name; j.field "spec", spec } }
                     end
                   end
                 end

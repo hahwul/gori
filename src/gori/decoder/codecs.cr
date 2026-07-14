@@ -4,10 +4,10 @@ require "compress/gzip"
 require "compress/zlib"
 require "big"
 
-module Gori::Convert
+module Gori::Decoder
   # The implementations that have no (or no convenient) stdlib equivalent, plus the
   # thin wrappers that turn stdlib raises (Base64::Error, JSON::ParseException,
-  # String#hexbytes? nil) into a ConvertError carrying a human message. Kept apart
+  # String#hexbytes? nil) into a DecoderError carrying a human message. Kept apart
   # from the catalog (pure data) so the engine is small and testable.
   module Codecs
     extend self
@@ -19,12 +19,12 @@ module Gori::Convert
     def base64_decode(s : String) : Bytes
       Base64.decode(s.gsub(/\s/, ""))
     rescue ex : Base64::Error
-      raise ConvertError.new("invalid base64: #{ex.message}")
+      raise DecoderError.new("invalid base64: #{ex.message}")
     end
 
     def hex_decode(s : String) : Bytes
       cleaned = s.gsub(/0x/i, "").gsub(/[\s:]/, "")
-      cleaned.hexbytes? || raise ConvertError.new("invalid hex (odd length or non-hex char)")
+      cleaned.hexbytes? || raise DecoderError.new("invalid hex (odd length or non-hex char)")
     end
 
     # ---- base32 (RFC 4648, padded) ----
@@ -53,7 +53,7 @@ module Gori::Convert
       bits = 0
       s.upcase.each_char do |c|
         next if c == '=' || c.whitespace?
-        v = B32.index(c) || raise ConvertError.new("invalid base32 char: #{c}")
+        v = B32.index(c) || raise DecoderError.new("invalid base32 char: #{c}")
         acc = (acc << 5) | v.to_u32
         bits += 5
         if bits >= 8
@@ -99,7 +99,7 @@ module Gori::Convert
         if c == 'z' && group.empty?
           4.times { sink.write_byte(0_u8) }
         else
-          raise ConvertError.new("invalid ascii85 char: #{c}") unless 33 <= c.ord <= 117
+          raise DecoderError.new("invalid ascii85 char: #{c}") unless 33 <= c.ord <= 117
           group << (c.ord - 33).to_u8
           if group.size == 5
             flush_ascii85(sink, group)
@@ -118,7 +118,7 @@ module Gori::Convert
       return if group.empty?
       # A 1-char trailing group is structurally impossible (a partial group is ≥2 chars → ≥1
       # byte); silently emitting 0 bytes would drop data — surface it like other malformed input.
-      raise ConvertError.new("truncated ascii85 group (1 leftover char is not decodable)") if group.size == 1
+      raise DecoderError.new("truncated ascii85 group (1 leftover char is not decodable)") if group.size == 1
       v = 0_u32
       5.times { |k| v = v &* 85_u32 &+ (k < group.size ? group[k] : 84_u8).to_u32 }
       bytes = StaticArray(UInt8, 4).new(0_u8)
@@ -134,7 +134,7 @@ module Gori::Convert
     B58_MAX_IN = 4 * 1024 # base58 is for keys/hashes, not blobs
 
     def base58_encode(data : Bytes) : String
-      raise ConvertError.new("input too large for base58 (max #{B58_MAX_IN}B)") if data.size > B58_MAX_IN
+      raise DecoderError.new("input too large for base58 (max #{B58_MAX_IN}B)") if data.size > B58_MAX_IN
       zeros = 0
       while zeros < data.size && data[zeros] == 0
         zeros += 1
@@ -154,7 +154,7 @@ module Gori::Convert
 
     def base58_decode(s : String) : Bytes
       s = s.strip
-      raise ConvertError.new("input too large for base58") if s.size > B58_MAX_IN * 2
+      raise DecoderError.new("input too large for base58") if s.size > B58_MAX_IN * 2
       num = BigInt.new(0)
       # Count leading '1' (zero) chars over the SAME whitespace-skipping pass as the value
       # accumulation — a stray space inside the leading run would otherwise desync the two.
@@ -162,7 +162,7 @@ module Gori::Convert
       seen_nonzero = false
       s.each_char do |c|
         next if c.whitespace?
-        v = B58.index(c) || raise ConvertError.new("invalid base58 char: #{c}")
+        v = B58.index(c) || raise DecoderError.new("invalid base58 char: #{c}")
         if seen_nonzero || v != 0
           seen_nonzero = true
         else
@@ -223,8 +223,8 @@ module Gori::Convert
               next
             elsif hi
               # A lone/unpaired surrogate (0xD800..0xDFFF) is not a scalar value; Int#chr
-              # would raise a raw ArgumentError, so surface a clean ConvertError instead.
-              raise ConvertError.new("invalid unicode escape: unpaired surrogate \\u#{hi.to_s(16)}") if 0xD800 <= hi <= 0xDFFF
+              # would raise a raw ArgumentError, so surface a clean DecoderError instead.
+              raise DecoderError.new("invalid unicode escape: unpaired surrogate \\u#{hi.to_s(16)}") if 0xD800 <= hi <= 0xDFFF
               io << hi.chr
               i += 6
               next
@@ -255,13 +255,13 @@ module Gori::Convert
       quoted = t.size >= 2 && t.starts_with?('"') && t.ends_with?('"')
       String.from_json(quoted ? t : %("#{t}"))
     rescue ex : JSON::ParseException
-      raise ConvertError.new("invalid JSON string: #{ex.message}")
+      raise DecoderError.new("invalid JSON string: #{ex.message}")
     end
 
     # ---- JWT (header.payload[.signature]) — decode only, no signature verify ----
     def jwt_decode(data : Bytes) : String
       parts = String.new(data).strip.split('.')
-      raise ConvertError.new("not a JWT (need 2-3 dot-separated parts)") unless parts.size >= 2
+      raise DecoderError.new("not a JWT (need 2-3 dot-separated parts)") unless parts.size >= 2
       String.build do |io|
         io << "// header\n" << pretty_json_segment(parts[0]) << "\n\n"
         io << "// payload\n" << pretty_json_segment(parts[1])
@@ -300,17 +300,17 @@ module Gori::Convert
 
     # Drain a decompression reader into memory, capped at MAX_OUT (no zip-bombs).
     # Tolerant: a mid-stream error keeps whatever was decoded; an immediate failure
-    # (nothing decoded) raises a ConvertError. Mirrors content_decode.cr's read_all.
+    # (nothing decoded) raises a DecoderError. Mirrors content_decode.cr's read_all.
     private def drain(reader : IO) : Bytes
       sink = IO::Memory.new
       buf = Bytes.new(64 * 1024)
       begin
         while (n = reader.read(buf)) > 0
           sink.write(buf[0, n])
-          break if sink.bytesize >= Gori::Convert::MAX_OUT
+          break if sink.bytesize >= Gori::Decoder::MAX_OUT
         end
       rescue ex
-        raise ConvertError.new("decompress failed: #{ex.message}") if sink.bytesize == 0
+        raise DecoderError.new("decompress failed: #{ex.message}") if sink.bytesize == 0
       end
       sink.to_slice
     end

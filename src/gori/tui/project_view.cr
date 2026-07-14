@@ -109,7 +109,7 @@ module Gori::Tui
       p = store.prism_severity_counts
       @sev_tally = StaticArray(Int64, 5).new { |i| f[i] + p[i] }
       earliest = store.earliest_created_at
-      # earliest_created_at is unix MICROSECONDS (the flows.created_at unit) — convert
+      # earliest_created_at is unix MICROSECONDS (the flows.created_at unit) — decoder
       # to seconds for Time.unix, like History's fmt_time does. (Passing micros makes
       # Time.unix raise "seconds out of range".)
       @created = earliest ? Time.unix(earliest // 1_000_000) : project.created

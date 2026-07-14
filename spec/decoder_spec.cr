@@ -1,6 +1,6 @@
 require "./spec_helper"
 
-private REG = Gori::Convert.default_registry
+private REG = Gori::Decoder.default_registry
 
 private def conv(name : String, input : String) : String
   c = REG[name].not_nil!
@@ -11,7 +11,7 @@ private def conv_bytes(name : String, input : Bytes) : Bytes
   REG[name].not_nil!.apply(input)
 end
 
-describe Gori::Convert do
+describe Gori::Decoder do
   describe "registry" do
     it "resolves canonical names, aliases, and is case/separator insensitive" do
       REG["base64-encode"].should_not be_nil
@@ -65,7 +65,7 @@ describe Gori::Convert do
     it "base58-decode counts leading zeros consistently across embedded whitespace" do
       # "11 1abc" and "111abc" are numerically identical to the value parser (whitespace
       # skipped); the leading-zero byte count must agree too.
-      Gori::Convert::Codecs.base58_decode("11 1abc").should eq Gori::Convert::Codecs.base58_decode("111abc")
+      Gori::Decoder::Codecs.base58_decode("11 1abc").should eq Gori::Decoder::Codecs.base58_decode("111abc")
     end
 
     it "base32 round-trips and matches the RFC 4648 vector" do
@@ -143,9 +143,9 @@ describe Gori::Convert do
       conv("unicode-unescape", "\\u00e9x").should eq "éx" # a full 4-digit escape still decodes
     end
 
-    it "unicode-unescape reports a lone/unpaired surrogate as a ConvertError (not a raw ArgumentError)" do
-      expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\ud800") }
-      expect_raises(Gori::Convert::ConvertError) { conv("unicode-unescape", "\\udc00") }
+    it "unicode-unescape reports a lone/unpaired surrogate as a DecoderError (not a raw ArgumentError)" do
+      expect_raises(Gori::Decoder::DecoderError) { conv("unicode-unescape", "\\ud800") }
+      expect_raises(Gori::Decoder::DecoderError) { conv("unicode-unescape", "\\udc00") }
     end
 
     it "unicode-unescape treats a \\u run with a sign/space (not 4 hex digits) as literal" do
@@ -181,13 +181,13 @@ describe Gori::Convert do
     end
 
     it "raises a clean error on junk" do
-      expect_raises(Gori::Convert::ConvertError) { conv("jwt-decode", "not-a-jwt") }
+      expect_raises(Gori::Decoder::DecoderError) { conv("jwt-decode", "not-a-jwt") }
     end
   end
 
   describe ".run (chain executor)" do
     it "produces one Ok step per token with intermediates" do
-      res = Gori::Convert.run(REG, "hi".to_slice, "base64 > hex")
+      res = Gori::Decoder.run(REG, "hi".to_slice, "base64 > hex")
       res.steps.size.should eq 2
       res.steps.all?(&.ok?).should be_true
       String.new(res.steps[0].output.not_nil!).should eq "aGk="
@@ -195,29 +195,29 @@ describe Gori::Convert do
     end
 
     it "an empty/whitespace chain is the identity" do
-      res = Gori::Convert.run(REG, "hi".to_slice, "   ")
+      res = Gori::Decoder.run(REG, "hi".to_slice, "   ")
       res.steps.should be_empty
       String.new(res.output.not_nil!).should eq "hi"
     end
 
     it "halts on an unknown converter and marks the rest Skipped" do
-      res = Gori::Convert.run(REG, "hi".to_slice, "base64 > bogus > sha256")
-      res.steps[0].state.should eq Gori::Convert::StepState::Ok
-      res.steps[1].state.should eq Gori::Convert::StepState::Unknown
-      res.steps[2].state.should eq Gori::Convert::StepState::Skipped
+      res = Gori::Decoder.run(REG, "hi".to_slice, "base64 > bogus > sha256")
+      res.steps[0].state.should eq Gori::Decoder::StepState::Ok
+      res.steps[1].state.should eq Gori::Decoder::StepState::Unknown
+      res.steps[2].state.should eq Gori::Decoder::StepState::Skipped
       res.failed_at.should eq 1
       res.ok?.should be_false
     end
 
     it "surfaces a mid-chain decode failure without raising" do
-      res = Gori::Convert.run(REG, "!!!not base64!!!".to_slice, "base64-decode > sha256")
-      res.steps[0].state.should eq Gori::Convert::StepState::Failed
+      res = Gori::Decoder.run(REG, "!!!not base64!!!".to_slice, "base64-decode > sha256")
+      res.steps[0].state.should eq Gori::Decoder::StepState::Failed
       res.steps[0].error.should_not be_nil
-      res.steps[1].state.should eq Gori::Convert::StepState::Skipped
+      res.steps[1].state.should eq Gori::Decoder::StepState::Skipped
     end
 
     it "carries binary intermediates through without corruption" do
-      res = Gori::Convert.run(REG, "hello".to_slice, "gzip > base64")
+      res = Gori::Decoder.run(REG, "hello".to_slice, "gzip > base64")
       res.ok?.should be_true
       String.new(conv_bytes("base64-decode", res.steps[1].output.not_nil!)
         .dup).should_not be_empty
@@ -227,28 +227,28 @@ describe Gori::Convert do
       # hex-decode of 80ff412042 → raw bytes incl. invalid-UTF-8 0x80/0xff; rot13 is
       # char-oriented and can't process binary — it must FAIL cleanly, not silently
       # substitute U+FFFD (which corrupted AND inflated the bytes).
-      res = Gori::Convert.run(REG, "80ff412042".to_slice, "hex-decode > rot13")
-      res.steps[0].state.should eq Gori::Convert::StepState::Ok
-      res.steps[1].state.should eq Gori::Convert::StepState::Failed
+      res = Gori::Decoder.run(REG, "80ff412042".to_slice, "hex-decode > rot13")
+      res.steps[0].state.should eq Gori::Decoder::StepState::Ok
+      res.steps[1].state.should eq Gori::Decoder::StepState::Failed
       res.steps[1].error.not_nil!.should contain("UTF-8")
       res.ok?.should be_false
     end
 
     it "fails a decoder on a binary intermediate with a clean message, not a raw UTF-8 error" do
-      res = Gori::Convert.run(REG, "hello".to_slice, "gzip > hex-decode")
-      res.steps[0].state.should eq Gori::Convert::StepState::Ok # gzip → binary
-      res.steps[1].state.should eq Gori::Convert::StepState::Failed
+      res = Gori::Decoder.run(REG, "hello".to_slice, "gzip > hex-decode")
+      res.steps[0].state.should eq Gori::Decoder::StepState::Ok # gzip → binary
+      res.steps[1].state.should eq Gori::Decoder::StepState::Failed
       res.steps[1].error.not_nil!.should contain("not valid text") # was "Regex match error: UTF-8 error…"
     end
   end
 
   describe ".display" do
     it "renders valid UTF-8 as text and binary as base64" do
-      Gori::Convert.display("hi".to_slice).should eq({"hi", Gori::Convert::RenderAs::Text})
-      txt, mode = Gori::Convert.display(Bytes[0xff, 0xfe])
-      mode.should eq Gori::Convert::RenderAs::Base64
+      Gori::Decoder.display("hi".to_slice).should eq({"hi", Gori::Decoder::RenderAs::Text})
+      txt, mode = Gori::Decoder.display(Bytes[0xff, 0xfe])
+      mode.should eq Gori::Decoder::RenderAs::Base64
       txt.should eq "//4="
-      Gori::Convert.display(Bytes[0xff], Gori::Convert::RenderAs::Hex).should eq({"ff", Gori::Convert::RenderAs::Hex})
+      Gori::Decoder.display(Bytes[0xff], Gori::Decoder::RenderAs::Hex).should eq({"ff", Gori::Decoder::RenderAs::Hex})
     end
   end
 end

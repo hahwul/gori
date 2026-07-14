@@ -422,7 +422,7 @@ module Gori
       ]
 
       # Replay tabs gain a per-tab MARK-transform toggle: when on, `§…§` markers in the
-      # request carry inline Convert chains applied on send. Off (0) = byte-identical to
+      # request carry inline Decoder chains applied on send. Off (0) = byte-identical to
       # today, so existing rows backfill to disabled.
       V22 = [
         "ALTER TABLE replays ADD COLUMN mark_transform INTEGER NOT NULL DEFAULT 0",

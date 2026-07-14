@@ -1,55 +1,55 @@
 require "../tab_controller"
-require "../convert_view"
+require "../decoder_view"
 require "../text_area"
 require "../input_mode"
 require "../text_read_state"
 require "../clipboard"
-require "../../convert"
+require "../../decoder"
 require "../../settings"
 require "../../hotkeys"
 require "../subtab_clone"
 
 module Gori::Tui
-  # One open conversion — a "sub-tab" under the Convert tab. Each carries its own
+  # One open conversion — a "sub-tab" under the Decoder tab. Each carries its own
   # INPUT editor, CHAIN spec (+ caret), derived result, focus pane, and output view
-  # (scroll + display mode + the custom strip label, ConvertView#name, set by rename).
+  # (scroll + display mode + the custom strip label, DecoderView#name, set by rename).
   # The controller holds an array of these; the transient overlays (the autocomplete
   # popup, the save/load mini-prompt, the in-flight IME preedit) stay controller-level
   # and act on the CURRENT session. `chain`/`chain_cx`/`result`/`pane` get reassigned,
   # so this is a mutable class, not a record.
-  class ConvertSession
-    property view : ConvertView
+  class DecoderSession
+    property view : DecoderView
     property input : TextArea
     property input_mode : InputMode
     property input_read : TextReadState
     property chain : String
     property chain_cx : Int32
     property pane : Symbol # internal focus ring: :input <-> :chain
-    property result : Convert::ChainResult
+    property result : Decoder::ChainResult
 
     def initialize(@view, @input, @chain, @chain_cx, @pane, @result,
                    @input_mode = InputMode::Read, @input_read = TextReadState.new)
     end
   end
 
-  # The Convert tab: a scratch encode/decode/hash workbench with eoyc-style
+  # The Decoder tab: a scratch encode/decode/hash workbench with eoyc-style
   # left-to-right chaining. Each sub-tab is an independent conversion session — two
   # text-capturing panes (the INPUT editor + the CHAIN spec line "base64 > sha256")
-  # plus a read-only PIPELINE notebook + OUTPUT, drawn by ConvertView. The body
-  # consumes EVERY printable key (like Notes), so command_scope is the Convert scope
-  # and handle_body_key always returns true: the Convert verbs' single-letter
+  # plus a read-only PIPELINE notebook + OUTPUT, drawn by DecoderView. The body
+  # consumes EVERY printable key (like Notes), so command_scope is the Decoder scope
+  # and handle_body_key always returns true: the Decoder verbs' single-letter
   # mnemonics never collide with literal text (`:` stays literal) — they're reached
   # only from the space menu + palette. A runner-owned sub-tab strip appears from the
   # first session (^N new · ^W close · ^1-9/←→ switch · r rename); open sessions persist
   # to the global settings.json.
-  class ConvertController < TabController
+  class DecoderController < TabController
     SEPS = {'>', '|', ','}
 
-    @sessions : Array(ConvertSession)
+    @sessions : Array(DecoderSession)
 
     def initialize(host : Host)
       super(host)
-      @registry = Convert.default_registry
+      @registry = Decoder.default_registry
       @popup = ChainComplete.new
       @prompt = nil # :save_as | :load inline mini-prompt (else nil)
       @prompt_buf = ""
@@ -57,18 +57,18 @@ module Gori::Tui
       @dirty = false  # session set changed since the last persist
       # Restore open sub-tabs; fall back to the legacy single input/chain (migration)
       # when no "sessions" array was persisted. Always ≥1 (blank when all empty).
-      src = Settings.convert_sessions
-      src = [{Settings.convert_input, Settings.convert_chain, ""}] if src.empty?
+      src = Settings.decoder_sessions
+      src = [{Settings.decoder_input, Settings.decoder_chain, ""}] if src.empty?
       @sessions = src.map { |(input, chain, name)| make_session(input, chain, name.empty? ? nil : name) }
       @idx = 0
     end
 
     def tab : Symbol
-      :convert
+      :decoder
     end
 
     def command_scope : Verb::Scope
-      Verb::Scope::Convert
+      Verb::Scope::Decoder
     end
 
     # The space menu's CONTEXT section: the current session's focused pane.
@@ -83,18 +83,18 @@ module Gori::Tui
     end
 
     # The current session (always valid: ≥1 session, @idx kept in range).
-    private def cur : ConvertSession
+    private def cur : DecoderSession
       @sessions[@idx]
     end
 
     # Build a fresh session from persisted/blank text, running the initial chain.
-    private def make_session(input_text : String, chain : String, name : String?) : ConvertSession
+    private def make_session(input_text : String, chain : String, name : String?) : DecoderSession
       input = TextArea.new(input_text)
       input.follow_x = true # long input lines scroll horizontally to keep the cursor visible
-      result = Convert.run(@registry, input.text.to_slice, chain)
-      view = ConvertView.new
+      result = Decoder.run(@registry, input.text.to_slice, chain)
+      view = DecoderView.new
       view.name = name
-      ConvertSession.new(view, input, chain, chain.size, :input, result)
+      DecoderSession.new(view, input, chain, chain.size, :input, result)
     end
 
     # --- sub-tab strip (runner-owned chrome; shown from the first session) ---
@@ -114,7 +114,7 @@ module Gori::Tui
 
     # The chip label: the custom name if set, else a compact preview of the chain
     # spec (or "empty" when blank), capped to ~18 cols like Replay/Notes.
-    private def session_label(s : ConvertSession) : String
+    private def session_label(s : DecoderSession) : String
       raw = (n = s.view.name) ? n : (s.chain.strip.empty? ? "empty" : s.chain.strip)
       raw.size > 18 ? raw[0, 17] + "…" : raw
     end
@@ -138,7 +138,7 @@ module Gori::Tui
     end
 
     # Open a fresh blank conversion (^N / space menu) and drop into its editor.
-    def convert_new : Nil
+    def decoder_new : Nil
       @sessions << make_session("", "", nil)
       @idx = @sessions.size - 1
       @popup.close
@@ -149,7 +149,7 @@ module Gori::Tui
     end
 
     # Content-only clone of the active conversion (input + chain + chip name).
-    def convert_duplicate : Nil
+    def decoder_duplicate : Nil
       s = cur
       name = SubtabClone.copy_name(s.view.name)
       @sessions << make_session(s.input.text, s.chain, name)
@@ -163,7 +163,7 @@ module Gori::Tui
 
     # Close the active conversion (^W / space menu). Keeps ≥1 — closing the last just
     # resets it to a blank session (like Notes). The runner re-resolves focus after.
-    def convert_close : Nil
+    def decoder_close : Nil
       if @sessions.size <= 1
         @sessions[0] = make_session("", "", nil)
         @idx = 0
@@ -178,14 +178,14 @@ module Gori::Tui
     end
 
     # The session's output view, for the rename prompt (re-found by view identity).
-    def view_at(idx : Int32) : ConvertView?
+    def view_at(idx : Int32) : DecoderView?
       (0 <= idx < @sessions.size) ? @sessions[idx].view : nil
     end
 
     # Apply a typed name to the captured sub-tab's view (the prompt held it by identity,
     # so mutating it is inherently the right session). Blank clears it (chip reverts to
     # the auto label).
-    def apply_rename(view : ConvertView, name : String) : Nil
+    def apply_rename(view : DecoderView, name : String) : Nil
       clean = name.strip
       view.name = clean.empty? ? nil : clean
       @dirty = true
@@ -219,9 +219,9 @@ module Gori::Tui
       elsif ev.ctrl? && c && '1' <= c <= '9'
         jump_subtab(c.to_i - 1) # switch sub-tab mid-edit (works because of the ctrl check)
       elsif ev.ctrl? && key.lower_n?
-        convert_new
+        decoder_new
       elsif ev.ctrl? && key.lower_w?
-        convert_close
+        decoder_close
       elsif ev.ctrl? && key.lower_l?
         clear_all
       elsif ev.ctrl? && key.lower_y?
@@ -364,7 +364,7 @@ module Gori::Tui
       return "type a name · ↵ save · esc cancel" if @prompt == :save_as
       return "type a name · ↵ load · esc cancel" if @prompt == :load
       s = cur
-      y = Hotkeys.binding_label(@host.session.registry, "convert.copy", "y")
+      y = Hotkeys.binding_label(@host.session.registry, "decoder.copy", "y")
       case s.pane
       when :chain
         return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if @popup.open?
@@ -388,7 +388,7 @@ module Gori::Tui
 
     def commit : Nil
       return unless @dirty
-      Settings.convert_sessions = session_tuples
+      Settings.decoder_sessions = session_tuples
       Settings.save
       @dirty = false
     end
@@ -424,7 +424,7 @@ module Gori::Tui
       end
     end
 
-    def convert_copy_selection : Nil
+    def decoder_copy_selection : Nil
       s = cur
       text = case s.pane
              when :output then s.view.output_copy_text(s.result)
@@ -439,11 +439,11 @@ module Gori::Tui
       end
     end
 
-    # The no-selection fallback for the space-menu/palette "Copy" verb (convert.copy):
-    # routes on the FOCUSED pane like convert_copy_selection, but copies the WHOLE pane
+    # The no-selection fallback for the space-menu/palette "Copy" verb (decoder.copy):
+    # routes on the FOCUSED pane like decoder_copy_selection, but copies the WHOLE pane
     # content rather than always OUTPUT (that was the bug — copy_output ignored focus
     # entirely). Mirrors Replay/Fuzzer's pane_copy_all_text pattern.
-    def convert_copy_all : Nil
+    def decoder_copy_all : Nil
       s = cur
       text = case s.pane
              when :output then s.view.output_copy(s.result)
@@ -460,12 +460,12 @@ module Gori::Tui
       end
     end
 
-    def convert_read_mode? : Bool
+    def decoder_read_mode? : Bool
       s = cur
       s.pane == :output || (s.pane == :input && s.input_mode == InputMode::Read)
     end
 
-    def convert_selection_active? : Bool
+    def decoder_selection_active? : Bool
       s = cur
       case s.pane
       when :input  then s.input_mode == InputMode::Read && s.input_read.selection?
@@ -474,7 +474,7 @@ module Gori::Tui
       end
     end
 
-    def convert_select_line : Nil
+    def decoder_select_line : Nil
       s = cur
       case s.pane
       when :input  then s.input_read.select_line(s.input) unless s.input_mode == InputMode::Insert
@@ -482,7 +482,7 @@ module Gori::Tui
       end
     end
 
-    def convert_clear_selection : Nil
+    def decoder_clear_selection : Nil
       s = cur
       case s.pane
       when :input  then s.input_read.clear_selection
@@ -635,7 +635,7 @@ module Gori::Tui
       end
     end
 
-    private def out_nav_step(s : ConvertSession, dr : Int32, dc : Int32, selecting : Bool) : Nil
+    private def out_nav_step(s : DecoderSession, dr : Int32, dc : Int32, selecting : Bool) : Nil
       s.view.output_move(dr, dc, s.result, selecting: selecting)
     end
 
@@ -679,7 +679,7 @@ module Gori::Tui
 
     private def recompute : Nil
       s = cur
-      s.result = Convert.run(@registry, s.input.text.to_slice, s.chain)
+      s.result = Decoder.run(@registry, s.input.text.to_slice, s.chain)
       s.view.reset_output_scroll
     end
 
@@ -712,14 +712,14 @@ module Gori::Tui
         @host.status("chain name required")
         return
       end
-      existing = Settings.convert_chains.any? { |(n, _)| n == name }
-      chains = Settings.convert_chains.reject { |(n, _)| n == name }
+      existing = Settings.decoder_chains.any? { |(n, _)| n == name }
+      chains = Settings.decoder_chains.reject { |(n, _)| n == name }
       chains << {name, cur.chain}
-      Settings.convert_chains = chains
+      Settings.decoder_chains = chains
       # ^S writes settings.json now (before the next commit), so flush the live sessions
       # too — otherwise this save persists a stale/empty `sessions` block and an
       # in-progress conversion is lost if the process dies before a normal leave/quit.
-      Settings.convert_sessions = session_tuples
+      Settings.decoder_sessions = session_tuples
       if Settings.save
         @dirty = false
         @host.status(existing ? "updated chain \"#{name}\"" : "saved chain \"#{name}\"")
@@ -729,7 +729,7 @@ module Gori::Tui
     end
 
     private def load_chain(name : String) : Nil
-      if entry = Settings.convert_chains.find { |(n, _)| n == name }
+      if entry = Settings.decoder_chains.find { |(n, _)| n == name }
         s = cur
         s.chain = entry[1]
         s.chain_cx = s.chain.size

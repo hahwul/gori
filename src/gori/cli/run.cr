@@ -19,7 +19,7 @@ require "../replay/ws_engine"
 require "../replay/flow_request"
 require "../replay/diff"
 require "../fuzz"
-require "../convert"
+require "../decoder"
 require "../miner"
 require "../prism/passive"
 require "../prism/group"
@@ -963,7 +963,7 @@ module Gori
         config = Fuzz::Config.new(mode: mode, concurrency: concurrency, rps: rate, throttle_ms: throttle,
           retries: retries, timeout: timeout, follow_redirects: follow, auto_calibrate: auto_cal, keep_bodies: :none)
         gen_sets = mode.per_position? ? sets : [sets.first]
-        generator = Fuzz::Generator.new(template, gen_sets, config, registry: Convert.shared_registry)
+        generator = Fuzz::Generator.new(template, gen_sets, config, registry: Decoder.shared_registry)
         sender = Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port),
           http2: force_h2 || src_h2, verify: !insecure, sni: sni, timeout: timeout)
         engine = Fuzz::Engine.new(generator, matcher, sender, config)

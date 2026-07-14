@@ -8,7 +8,7 @@ module Gori
     # strictly local to the focused pane.
     #
     # Round 5: these are low-frequency next to Send/Copy/New/etc., so on the
-    # multi-section tabs (Replay/Fuzzer/Convert) they're tagged into the single most
+    # multi-section tabs (Replay/Fuzzer/Decoder) they're tagged into the single most
     # relevant focus-area section instead of :common — available? still gates them by
     # read-mode across ALL of that tab's read-mode panes, so the keybinding (mostly
     # plain 'x'/'v') keeps working everywhere; only the SPACE-MENU listing is scoped to
@@ -42,16 +42,16 @@ module Gori
         "replay.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Replay, available: in_sel, mnemonic: 'v', section: :response) { |ctx| ctx.read_clear_selection; nil }
 
-      # Tagged :input (Convert's read-mode panes are INPUT-read and OUTPUT; :input is
+      # Tagged :input (Decoder's read-mode panes are INPUT-read and OUTPUT; :input is
       # the more relevant "editing" pane — OUTPUT keeps 'x' reachable by keybinding).
-      in_convert_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :convert && ctx.convert_read_mode? }
+      in_decoder_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.decoder_read_mode? }
       r.register Verb::Definition.new(
-        "convert.select-line", "Select line", "Select the entire current line",
-        Verb::Scope::Convert, [Verb::Chord.new("x")],
-        available: in_convert_read, mnemonic: 'x', section: :input) { |ctx| ctx.read_select_line; nil }
+        "decoder.select-line", "Select line", "Select the entire current line",
+        Verb::Scope::Decoder, [Verb::Chord.new("x")],
+        available: in_decoder_read, mnemonic: 'x', section: :input) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
-        "convert.clear-selection", "Clear selection", "Clear the text selection",
-        Verb::Scope::Convert, available: in_sel, mnemonic: 'v', section: :input) { |ctx| ctx.read_clear_selection; nil }
+        "decoder.clear-selection", "Clear selection", "Clear the text selection",
+        Verb::Scope::Decoder, available: in_sel, mnemonic: 'v', section: :input) { |ctx| ctx.read_clear_selection; nil }
 
       # Tagged :template (Fuzzer's only section named for this in Round 5's spec —
       # :target/:results/:detail are also read-mode-gated, but :template is the one

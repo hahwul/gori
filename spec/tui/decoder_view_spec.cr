@@ -3,15 +3,15 @@ require "../support/memory_backend"
 
 include Gori::Tui
 
-private REG = Gori::Convert.default_registry
+private REG = Gori::Decoder.default_registry
 
-private def render_convert(*, input : String, chain : String, pane : Symbol = :input,
+private def render_decoder(*, input : String, chain : String, pane : Symbol = :input,
                            popup : ChainComplete = ChainComplete.new,
                            prompt : Symbol? = nil, prompt_buf : String = "",
                            w : Int32 = 80, h : Int32 = 30) : MemoryBackend
-  view = ConvertView.new
+  view = DecoderView.new
   ta = TextArea.new(input)
-  result = Gori::Convert.run(REG, input.to_slice, chain)
+  result = Gori::Decoder.run(REG, input.to_slice, chain)
   backend = MemoryBackend.new(w, h)
   view.render(Screen.new(backend), Rect.new(0, 0, w, h),
     input: ta, chain: chain, chain_cx: chain.size, chain_pre: "",
@@ -19,9 +19,9 @@ private def render_convert(*, input : String, chain : String, pane : Symbol = :i
   backend
 end
 
-describe Gori::Tui::ConvertView do
+describe Gori::Tui::DecoderView do
   it "renders the pipeline notebook sections + per-step intermediates + output" do
-    b = render_convert(input: "hello", chain: "base64 > sha256")
+    b = render_decoder(input: "hello", chain: "base64 > sha256")
     b.contains?("INPUT").should be_true
     b.contains?("hello").should be_true
     b.contains?("CHAIN").should be_true
@@ -32,18 +32,18 @@ describe Gori::Tui::ConvertView do
     b.contains?("sha256").should be_true   # step 2 name
     b.contains?("OUTPUT").should be_true
 
-    expected = String.new(Gori::Convert.run(REG, "hello".to_slice, "base64 > sha256").output.not_nil!)
+    expected = String.new(Gori::Decoder.run(REG, "hello".to_slice, "base64 > sha256").output.not_nil!)
     b.contains?(expected[0, 24]).should be_true # the final sha256 hex
   end
 
   it "shows the identity hint and mirrors input when the chain is empty" do
-    b = render_convert(input: "plain text", chain: "")
+    b = render_decoder(input: "plain text", chain: "")
     b.contains?("no chain").should be_true
     b.contains?("plain text").should be_true
   end
 
   it "renders a failed step in the pipeline without crashing" do
-    b = render_convert(input: "!!notbase64!!", chain: "base64-decode > sha256")
+    b = render_decoder(input: "!!notbase64!!", chain: "base64-decode > sha256")
     b.contains?("✗").should be_true
     b.contains?("chain failed").should be_true # OUTPUT header marks the failure
   end
@@ -51,24 +51,24 @@ describe Gori::Tui::ConvertView do
   it "draws the autocomplete dropdown when the chain pane has an open popup" do
     popup = ChainComplete.new
     popup.set(["base64-encode", "base64url-encode"], 0, 3)
-    b = render_convert(input: "x", chain: "bas", pane: :chain, popup: popup)
+    b = render_decoder(input: "x", chain: "bas", pane: :chain, popup: popup)
     b.contains?("base64-encode").should be_true
     b.contains?("base64url-encode").should be_true
   end
 
   it "renders the save/load mini-prompt over the output region" do
-    b = render_convert(input: "x", chain: "hex", prompt: :save_as, prompt_buf: "myhash")
+    b = render_decoder(input: "x", chain: "hex", prompt: :save_as, prompt_buf: "myhash")
     b.contains?("save chain as:").should be_true
     b.contains?("myhash").should be_true
   end
 
   it "hscroll_output scrolls a long OUTPUT line sideways into view (shift+←/→)" do
-    view = ConvertView.new
+    view = DecoderView.new
     long_line = "HEAD" + ("." * 150) + "TAIL"
     # `result` (the OUTPUT content) is independent of the `input:` TextArea (the INPUT
     # card's own display) — keep INPUT short/unrelated so its unscrolled echo of the
     # long line's head can't be mistaken for the OUTPUT card's (scrollable) content.
-    result = Gori::Convert.run(REG, long_line.to_slice, "")
+    result = Gori::Decoder.run(REG, long_line.to_slice, "")
     rect = Rect.new(0, 0, 80, 30)
     render_args = {
       input: TextArea.new("unrelated"), chain: "", chain_cx: 0, chain_pre: "",
@@ -92,10 +92,10 @@ describe Gori::Tui::ConvertView do
     # Each section is its own card now (not a divided single frame), so focusing
     # INPUT must gild only the INPUT card — the read-only PIPELINE/OUTPUT cards
     # stay hairline grey. The card's top-left corner '╭' carries the border colour.
-    view = ConvertView.new
+    view = DecoderView.new
     backend = MemoryBackend.new(80, 30)
     rect = Rect.new(0, 0, 80, 30)
-    result = Gori::Convert.run(REG, "x".to_slice, "hex")
+    result = Gori::Decoder.run(REG, "x".to_slice, "hex")
     view.render(Screen.new(backend), rect,
       input: TextArea.new("x"), chain: "hex", chain_cx: 3, chain_pre: "",
       result: result, pane: :input, focused: true, popup: ChainComplete.new, prompt: nil, prompt_buf: "")
@@ -110,9 +110,9 @@ describe Gori::Tui::ConvertView do
   end
 
   it "gilds the CHAIN card border when the chain pane holds focus" do
-    view = ConvertView.new
+    view = DecoderView.new
     backend = MemoryBackend.new(80, 30)
-    result = Gori::Convert.run(REG, "x".to_slice, "hex")
+    result = Gori::Decoder.run(REG, "x".to_slice, "hex")
     view.render(Screen.new(backend), Rect.new(0, 0, 80, 30),
       input: TextArea.new("x"), chain: "hex", chain_cx: 3, chain_pre: "",
       result: result, pane: :chain, focused: true, popup: ChainComplete.new, prompt: nil, prompt_buf: "")
@@ -122,9 +122,9 @@ describe Gori::Tui::ConvertView do
   end
 
   it "gilds the OUTPUT card border when the (read-only but navigable) output pane holds focus" do
-    view = ConvertView.new
+    view = DecoderView.new
     backend = MemoryBackend.new(80, 30)
-    result = Gori::Convert.run(REG, "x".to_slice, "hex")
+    result = Gori::Decoder.run(REG, "x".to_slice, "hex")
     view.render(Screen.new(backend), Rect.new(0, 0, 80, 30),
       input: TextArea.new("x"), chain: "hex", chain_cx: 3, chain_pre: "",
       result: result, pane: :output, focused: true, popup: ChainComplete.new, prompt: nil, prompt_buf: "")
