@@ -61,8 +61,8 @@ module Gori::Tui
         Item.new("/", "filter (query language)", "history.query"),
         Item.new("y", "copy flow", "history.copy"),
         Item.new("i", "toggle intercept hold-mode", "intercept.toggle"),
-        Item.new("detail", "↑/↓ move · ⇧arrows select · y copy · space cmds · ⇧←/→ h-scroll"),
-        Item.new("x · b · p", "in detail: hex · whitespace · pretty bodies"),
+        Item.new("detail", "↑/↓ move · x line · ⇧arrows select · y copy · space cmds · ⇧←/→ h-scroll"),
+        Item.new("^X · b · p", "in detail: hex · whitespace · pretty bodies"),
       ]},
       {"REPEATER", [
         Item.new("^R", "send the request", "repeater.send"),
@@ -74,7 +74,7 @@ module Gori::Tui
         Item.new("i / ↵", "enter INS (edit) on request/target · esc back to READ"),
         Item.new("space", "command menu (READ mode on request/target/response)"),
         Item.new("y", "copy selection/line (READ)", "repeater.copy"),
-        Item.new("⇧arrows", "select text (line or char)"),
+        Item.new("x · ⇧arrows", "select the current line · extend selection"),
         Item.new("^X", "hex-edit the request", "repeater.toggle-hex"),
         Item.new("^S", "SNI override (on the target)", "repeater.toggle-sni"),
         Item.new("^L", "toggle auto Content-Length", "repeater.toggle-auto-content-length"),
@@ -83,7 +83,7 @@ module Gori::Tui
         Item.new("↹", "cycle target → request → response"),
         Item.new("d", "response: toggle diff", "repeater.toggle-diff"),
         Item.new("p", "response: pretty bodies", "repeater.toggle-pretty"),
-        Item.new("x", "response: hex dump (pane-local)"),
+        Item.new("^X", "response: hex dump (pane-local)"),
         Item.new("⇧←/→", "response: scroll a long line sideways"),
       ]},
       {"FUZZER", [

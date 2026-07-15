@@ -278,7 +278,7 @@ describe "RepeaterView#chrome_hit" do
     # RESPONSE chips start at resp.x + 12
     view.chrome_hit(rect, resp.x + 12, resp.y).should eq(:diff)
     view.chrome_hit(rect, resp.x + 12 + 9, resp.y).should eq(:hex) # past " d:diff " + gap
-    view.chrome_hit(rect, resp.x + 12 + 9 + 8, resp.y).should eq(:pretty)
+    view.chrome_hit(rect, resp.x + 12 + 9 + 9, resp.y).should eq(:pretty)
 
     # REQUEST right-chain: rightmost is SEND, then CL, MARK, PRETTY
     send_label = " ^R:SEND "

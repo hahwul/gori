@@ -1279,14 +1279,14 @@ module Gori::Tui
     # Mode toggle chips for the detail strip: {id, label, lit}.
     private def detail_mode_chips(hex : Bool, ws : Bool, dv : DetailView) : Array({Symbol, String, Bool})
       if hex
-        [{:hex, " x:text ", true}] of {Symbol, String, Bool}
+        [{:hex, " ^X:text ", true}] of {Symbol, String, Bool}
       elsif ws
         [{:ws, " b:raw ", true}] of {Symbol, String, Bool}
       elsif dv.binary
-        [{:hex, " x:hex ", false}] of {Symbol, String, Bool}
+        [{:hex, " ^X:hex ", false}] of {Symbol, String, Bool}
       else
         [
-          {:hex, " x:hex ", false},
+          {:hex, " ^X:hex ", false},
           {:ws, " b:ws ", false},
           {:pretty, dv.pretty ? " p:raw " : " p:pretty ", dv.pretty},
         ] of {Symbol, String, Bool}

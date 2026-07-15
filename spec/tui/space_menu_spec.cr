@@ -44,6 +44,7 @@ describe Gori::Tui::SpaceMenu do
   it "lists the open flow's actions in the History detail scope (mirrors the list menu)" do
     ctx = FakeExecContext.new
     ctx.selected = 5_i64
+    ctx.detail_navigable = true # so detail.select-line ('x') is available in the menu
     menu = SpaceMenu.new(Gori::Verbs.registry)
     menu.open(Gori::Verb::Scope::HistoryDetail, :common, ctx) # detail drill-in is navigable now
 
@@ -53,7 +54,8 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("detail.repeater")     # flow action carried over from the list
     ids.should contain("detail.toggle-hex") # a detail-only view toggle
     menu.verb_for('r').try(&.id).should eq("detail.repeater")
-    menu.verb_for('x').try(&.id).should eq("detail.toggle-hex")
+    menu.verb_for('x').try(&.id).should eq("detail.select-line")
+    menu.verb_for('e').try(&.id).should eq("detail.toggle-hex")
   end
 
   it "lists the scope-rule actions in the Project scope pane (space replaced the lens toggle)" do
@@ -281,6 +283,7 @@ describe Gori::Tui::SpaceMenu do
   it "populates Repeater's :response group with diff/hex alongside pretty (Round 4 — was raw key-dispatch)" do
     ctx = FakeExecContext.new
     ctx.current_tab = :repeater
+    ctx.repeater_read_mode = true # so repeater.select-line ('x') is available in the menu
     menu = SpaceMenu.new(Gori::Verbs.registry)
 
     menu.open(Gori::Verb::Scope::Repeater, :response, ctx)
@@ -291,7 +294,8 @@ describe Gori::Tui::SpaceMenu do
     ids.should contain("repeater.toggle-resp-hex") # :response
     menu.verb_for('p').try(&.id).should eq("repeater.toggle-pretty")
     menu.verb_for('d').try(&.id).should eq("repeater.toggle-diff")
-    menu.verb_for('x').try(&.id).should eq("repeater.toggle-resp-hex")
+    menu.verb_for('x').try(&.id).should eq("repeater.select-line")
+    menu.verb_for('h').try(&.id).should eq("repeater.toggle-resp-hex")
   end
 
   it "populates Fuzzer's :subtab group with rename/close/duplicate (Round 4 — was raw key-dispatch)" do

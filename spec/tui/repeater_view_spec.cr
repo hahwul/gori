@@ -21,6 +21,29 @@ describe Gori::Tui::RepeaterView do
   # off so a (future) valid-JSON/XML fixture can't silently reflow and shift assertions.
   before_each { Gori::Settings.pretty_bodies_default = false }
 
+  # The response pane's ^X hex dump: repeater_toggle_hex routes response-focus to
+  # exactly this view toggle (the `x` key selects a line now — hex moved to ^X).
+  it "toggle_resp_hex flips resp_hex? and renders a raw byte dump of the response" do
+    view = RepeaterView.new
+    view.load_blank
+    view.apply(Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64))
+    view.focus_pane(:response)
+    view.resp_hex?.should be_false # plain response mode by default
+
+    view.toggle_resp_hex
+    view.resp_hex?.should be_true
+    hexb = MemoryBackend.new(120, 20)
+    view.render(Screen.new(hexb), Rect.new(0, 0, 120, 20))
+    hexb.contains?("00000000").should be_true    # hex dump offset column
+    hexb.contains?("50 4f 4e 47").should be_true # "PONG" as raw bytes
+
+    view.toggle_resp_hex # ^X again exits back to the decoded body
+    view.resp_hex?.should be_false
+    plain = MemoryBackend.new(120, 20)
+    view.render(Screen.new(plain), Rect.new(0, 0, 120, 20))
+    plain.contains?("PONG").should be_true
+  end
+
   it "load_blank seeds an editable, sendable scaffold (no source flow)" do
     view = RepeaterView.new
     view.load_blank

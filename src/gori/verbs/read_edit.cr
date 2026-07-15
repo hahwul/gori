@@ -27,17 +27,16 @@ module Gori
         "notes.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Notes, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
 
-      # Tagged :response (not :common): select/clear are equally available in the
-      # REQUEST/TARGET panes (in_repeater_read covers all three), but :response is
-      # where reading-then-copying a snippet is the natural flow, and :request is
-      # already the busiest section (9 marker/view-toggle actions) — keeping these
-      # out of it (and out of COMMON) keeps both lean. The plain 'x' keybinding still
-      # works in every read-mode pane regardless of where the menu lists it.
+      # Plain 'x' = select-line in every Repeater read-mode pane (request/target/response),
+      # now that hex is ^X everywhere (the old x=resp-hex collision is gone). Tagged
+      # :response (not :common) so the busy :request section and lean COMMON stay
+      # uncluttered — and so 'x' never surfaces in the tab-bar/:subtab menus; the 'x'
+      # keybinding still works in all three read panes regardless of where it's listed.
       in_repeater_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_read_mode? }
       r.register Verb::Definition.new(
         "repeater.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Repeater, [Verb::Chord.new("x")],
-        available: in_repeater_read, mnemonic: 'l', section: :response) { |ctx| ctx.read_select_line; nil }
+        available: in_repeater_read, mnemonic: 'x', section: :response) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "repeater.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Repeater, available: in_sel, mnemonic: 'v', section: :response) { |ctx| ctx.read_clear_selection; nil }
@@ -60,7 +59,7 @@ module Gori
       r.register Verb::Definition.new(
         "fuzzer.select-line", "Select line", "Select the entire current line",
         Verb::Scope::Fuzzer, [Verb::Chord.new("x")],
-        available: in_fuzzer_read, mnemonic: 'S', section: :template) { |ctx| ctx.read_select_line; nil }
+        available: in_fuzzer_read, mnemonic: 'x', section: :template) { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "fuzzer.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Fuzzer, available: in_sel, mnemonic: 'v', section: :template) { |ctx| ctx.read_clear_selection; nil }
@@ -86,8 +85,8 @@ module Gori
       in_detail_nav = ->(ctx : Verb::ExecContext) { ctx.detail_navigable? }
       r.register Verb::Definition.new(
         "detail.select-line", "Select line", "Select the entire current line",
-        Verb::Scope::HistoryDetail,
-        available: in_detail_nav, mnemonic: 'L') { |ctx| ctx.read_select_line; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("x")],
+        available: in_detail_nav, mnemonic: 'x') { |ctx| ctx.read_select_line; nil }
       r.register Verb::Definition.new(
         "detail.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::HistoryDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }

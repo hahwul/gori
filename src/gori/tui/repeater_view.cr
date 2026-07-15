@@ -1532,7 +1532,7 @@ module Gori::Tui
         if right.w >= 2 && my == right.y
           if hit = Frame.left_chip_hit(mx, my, right.y, right.x + 12, [
                {:diff, " d:diff "},
-               {:hex, " x:hex "},
+               {:hex, " ^X:hex "},
                {:pretty, " p:pretty "},
              ] of {Symbol, String})
             return hit
@@ -2375,7 +2375,7 @@ module Gori::Tui
       diff_lit = !@resp_hex && @resp_mode == :diff
       pretty_lit = resp_plain && !@reveal && resp_pretty_applied?
       x = Frame.chip(screen, rect.x + 12, rect.y, " d:diff ", diff_lit) + 1
-      x = Frame.chip(screen, x, rect.y, " x:hex ", @resp_hex) + 1
+      x = Frame.chip(screen, x, rect.y, " ^X:hex ", @resp_hex) + 1
       chips_end = Frame.chip(screen, x, rect.y, " p:pretty ", pretty_lit)
       if result = @result
         meta = result.ok? ? "#{Fmt.dur(result.duration_us)} · #{Fmt.size((result.head.size + (result.body.try(&.size) || 0)).to_i64)}" : Fmt.dur(result.duration_us)

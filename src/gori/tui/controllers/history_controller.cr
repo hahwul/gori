@@ -156,8 +156,6 @@ module Gori::Tui
         @history.detail_move(-1, 0, selecting: true) if nav
       when key.down? && selecting, key.lower_j? && selecting
         @history.detail_move(1, 0, selecting: true) if nav
-      when ev.key.lower_x? && nav
-        @history.detail_select_line
       when ev.char == 'y' || ev.key.lower_y?
         detail_copy_selection
       else
