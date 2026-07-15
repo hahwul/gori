@@ -549,6 +549,38 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "QL strict mode + ql_explain" do
+    it "strict:true rejects a query with a silently-dropped term" do
+      with_store do |store|
+        seed_flow(store, "ex.test", "GET", "/", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"host:ex.test status:>=foo","strict":true}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("QUERY_SYNTAX")
+      end
+    end
+
+    it "lenient (default) drops the bad term and still runs the good one" do
+      with_store do |store|
+        seed_flow(store, "ex.test", "GET", "/", 200)
+        seed_flow(store, "other.test", "GET", "/", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"host:ex.test status:>=foo"}}})
+        rows = tool_payload(drive(store, call)[0]).as_a
+        rows.size.should eq(1) # host:ex.test applied, bad status term dropped
+      end
+    end
+
+    it "ql_explain reports applied vs ignored terms without running" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ql_explain","arguments":{"query":"host:ex.test status:>=foo"}}})
+        p = tool_payload(drive(store, call)[0])
+        p["applied_terms"].as_a.map(&.as_s).should contain("host:ex.test")
+        p["ignored_terms"].as_a.map(&.as_s).should contain("status:>=foo")
+        p["warnings"].as_a.size.should be > 0
+      end
+    end
+  end
+
   describe "decoder" do
     it "runs a converter chain and returns the decoded output" do
       with_store do |store|

@@ -125,6 +125,26 @@ module Gori
       bad
     end
 
+    # Per-term diagnosis of a query for the MCP `ql_explain` tool and strict mode.
+    # `applied` compiled to a real clause; `ignored` compiled to nothing and was
+    # silently DROPPED (bad numeric/proto/empty → broadens the result); `invalid_regex`
+    # compiled to a never-match clause (narrows to empty). Mirrors parse's tokenization.
+    record TermAnalysis, applied : Array(String), ignored : Array(String), invalid_regex : Array(String) do
+      def clean? : Bool
+        ignored.empty? && invalid_regex.empty?
+      end
+    end
+
+    def self.analyze(query : String) : TermAnalysis
+      applied = [] of String
+      ignored = [] of String
+      query.split.each do |tok|
+        next if tok == "OR"
+        (term_to_sql(tok) ? applied : ignored) << tok
+      end
+      TermAnalysis.new(applied, ignored, invalid_regex_terms(query))
+    end
+
     private def self.term_to_sql(term : String) : {String, Array(DB::Any)}?
       negate = term.starts_with?('-')
       term = term[1..] if negate
