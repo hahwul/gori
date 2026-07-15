@@ -3,7 +3,7 @@ title = "MCP Server"
 description = "Drive gori from an AI agent or script over the Model Context Protocol."
 +++
 
-gori ships a built-in **MCP (Model Context Protocol) server**. Instead of embedding a chat window in the TUI, gori exposes its project over a clean tool interface so any MCP-capable agent — Claude, Codex, Grok, and others — can read your traffic and drive the tools.
+gori ships a built-in **MCP (Model Context Protocol) server**. Instead of embedding a chat window in the TUI, gori exposes its project over a clean tool interface so any MCP-capable agent (Claude, Codex, Grok, and others) can read your traffic and drive the tools.
 
 <figure class="agent-session" aria-label="Example agent session: an agent finds an IDOR over MCP and logs an issue">
   <div class="agent-session-bar">
@@ -13,9 +13,9 @@ gori ships a built-in **MCP (Model Context Protocol) server**. Instead of embedd
   <div class="agent-session-body">
     <p class="as-user"><span class="as-who">you</span>Find an IDOR on the users API and log it.</p>
     <p class="as-call"><span class="as-arrow">→</span> <code>list_history</code> <span class="as-args">path~/v1/users status:200</span></p>
-    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-args">14 flows — customer and admin tokens</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-args">14 flows, customer and admin tokens</span></p>
     <p class="as-call"><span class="as-arrow">→</span> <code>send_request</code> <span class="as-args">GET /v1/users/2 · customer token</span></p>
-    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-warn">200</span> <span class="as-args">{"id":2,"email":"other-tenant@example.com"} — not the caller's row</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-warn">200</span> <span class="as-args">{"id":2,"email":"other-tenant@example.com"}, not the caller's row</span></p>
     <p class="as-call"><span class="as-arrow">→</span> <code>create_issue</code> <span class="as-args">"IDOR on /v1/users/{id}" severity:high</span></p>
     <p class="as-done"><span class="as-check">✓</span> Issue logged; the request is saved as a Repeater session for repro.</p>
   </div>
@@ -42,7 +42,7 @@ Call `project_info` before using data. It reports the selected project, database
 
 ## Read-Only Mode
 
-By default the server also exposes action tools that send live requests and write issues. To expose only the read tools — safe for handing a project to an untrusted agent — start it read-only:
+By default the server also exposes action tools that send live requests and write issues. To expose only the read tools (safe for handing a project to an untrusted agent), start it read-only:
 
 ```bash
 gori mcp --read-only
@@ -104,11 +104,11 @@ If a client starts MCP outside your repository directory, pin the installation t
 
 > Action tools are capped for safety: fuzz and mine jobs are limited in total requests, concurrency, and stored results. A rule created via `create_rule` is picked up by `gori run` and newly opened TUIs; an already-running TUI applies it only after its rules reload.
 
-## Why a Seam, Not a Chatbox
+## Why an MCP Seam
 
-gori deliberately has no in-tool AI chat. Keeping the intelligence *outside* the tool — reachable through MCP — means you choose the model, your traffic isn't shipped anywhere you didn't intend, and the same interface serves scripts and agents alike. `gori run` covers the non-interactive path; MCP covers the interactive-agent path.
+gori deliberately has no in-tool AI chat. The intelligence lives outside the tool, reachable through MCP. That means you choose the model, your traffic isn't shipped anywhere you didn't intend, and the same interface serves scripts and agents alike. `gori run` covers the non-interactive path; MCP covers the interactive-agent path.
 
 ## Next Steps
 
-- [CLI Reference](/reference/cli/) — full `gori mcp` flags
-- [Query Language](/reference/query-language/) — the syntax agents use to filter
+- [CLI Reference](/reference/cli/): full `gori mcp` flags
+- [Query Language](/reference/query-language/): the syntax agents use to filter

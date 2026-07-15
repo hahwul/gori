@@ -1,19 +1,19 @@
 +++
 title = "Guide"
-description = "In-depth guides to the gori workbench — proxy, repeater, fuzzing, scanning, and MCP."
+description = "In-depth guides to the gori workbench: proxy, repeater, fuzzing, scanning, and MCP."
 +++
 
 In-depth guides to working with gori. Each tab in the TUI is a focused tool; together they cover a full assessment from capture to report.
 
 ## Topics
 
-- **[Proxy & History](/guide/proxy/)** — capture, intercept, scope, import, match & replace, host overrides.
-- **[Repeater & Fuzzer](/guide/repeater-and-fuzzer/)** — the request workbench, env tokens, and the Intruder-style fuzzer.
-- **[Decoder](/guide/decoder/)** — encode / decode / hash pipeline in the TUI.
-- **[Scanning & Issues](/guide/scanning/)** — Probe, Param Miner, Issues, Notes, Comparer.
-- **[MCP Server](/guide/mcp/)** — drive gori from an AI agent or script.
-- **[Themes](/guide/themes/)** — switch between built-in colour themes or create your own.
-- **[Hotkeys](/guide/hotkeys/)** — rebind gori's keyboard shortcuts.
+- **[Proxy & History](/guide/proxy/)**: capture, intercept, scope, import, match & replace, host overrides.
+- **[Repeater & Fuzzer](/guide/repeater-and-fuzzer/)**: the request workbench, env tokens, and the Intruder-style fuzzer.
+- **[Decoder](/guide/decoder/)**: encode / decode / hash pipeline in the TUI.
+- **[Scanning & Issues](/guide/scanning/)**: Probe, Param Miner, Issues, Notes, Comparer.
+- **[MCP Server](/guide/mcp/)**: drive gori from an AI agent or script.
+- **[Themes](/guide/themes/)**: switch between built-in colour themes or create your own.
+- **[Hotkeys](/guide/hotkeys/)**: rebind gori's keyboard shortcuts.
 
 ## The Interface at a Glance
 
@@ -21,7 +21,7 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 
 | Tab | Purpose |
 |-----|---------|
-| **Project** | Home — scope, host overrides, env vars, description, network |
+| **Project** | Home: scope, host overrides, env vars, description, network |
 | **Sitemap** | Deduplicated host → path endpoint tree |
 | **History** | Captured (and imported) flows with full request/response detail |
 | **Intercept** | Hold requests/responses for a manual decision |

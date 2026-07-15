@@ -50,7 +50,7 @@ dur:<2s             faster than 2 s (s / ms suffixes allowed)
 
 ## Regular Expressions
 
-Use `~` for a regex match on `host`, `path`, `url`, `header`, or `body`. The `~` is its own field/value separator — do **not** put a colon before it. Matching is case-sensitive; prefix `(?i)` for case-insensitive.
+Use `~` for a regex match on `host`, `path`, `url`, `header`, or `body`. The `~` is its own field/value separator. Do **not** put a colon before it. Matching is case-sensitive; prefix `(?i)` for case-insensitive.
 
 ```text
 path~/admin/

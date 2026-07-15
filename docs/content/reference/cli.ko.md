@@ -34,13 +34,13 @@ gori tui --listen 0.0.0.0 --port 8080
 | Option | Description |
 |--------|-------------|
 | `-l`, `--listen=HOST` | 이 프로세스의 전역 바인드 주소 (`settings.json` 기본값, 없으면 `127.0.0.1`). 저장되지 않음. 프로젝트 자체 바인드가 설정되어 있으면 그쪽이 우선 |
-| `-p`, `--port=PORT` | 이 프로세스의 전역 바인드 포트, `0`–`65535` (`settings.json` 기본값, 없으면 `8070`). 저장되지 않음. 프로젝트 `net.bind_port`가 설정되어 있으면 그쪽이 우선 |
+| `-p`, `--port=PORT` | 이 프로세스의 전역 바인드 포트, `0`-`65535` (`settings.json` 기본값, 없으면 `8070`). 저장되지 않음. 프로젝트 `net.bind_port`가 설정되어 있으면 그쪽이 우선 |
 | `--db=PATH` | SQLite 데이터베이스 경로 |
 | `--ca-dir=PATH` | 루트 CA 디렉터리 |
 | `--headless` | TUI 없이 실행 (STDOUT으로 캡처) |
 | `--insecure-upstream` | 업스트림 TLS 인증서를 검증하지 않음 |
 
-> `GORI_HOME`은 플래그가 아니라 환경 변수입니다. TUI에서는 프로젝트 피커로 프로젝트를 고릅니다. 바인드 플래그는 이번 실행에 한해 **전역** 계층만 설정합니다 — [설정](/ko/getting-started/configuration/#network)을 참고하세요. 루트 CA 경로는 [`gori ca`](#gori-ca)를 사용하세요.
+> `GORI_HOME`은 플래그가 아니라 환경 변수입니다. TUI에서는 프로젝트 피커로 프로젝트를 고릅니다. 바인드 플래그는 이번 실행에 한해 전역 계층만 설정합니다. [설정](/ko/getting-started/configuration/#network)을 참고하세요. 루트 CA 경로는 [`gori ca`](#gori-ca)를 사용하세요.
 
 ## gori run {#gori-run}
 
@@ -123,9 +123,9 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--diff` | 원본 응답과 비교 |
 | `--format=FMT` | `text` (기본값) 또는 `json` |
 
-**`repeater list`** — 저장된 Repeater 세션 목록 (`--format text|json`).
+**`repeater list`**: 저장된 Repeater 세션 목록 (`--format text|json`).
 
-**`repeater create`** — Repeater 세션 생성:
+**`repeater create`**: Repeater 세션 생성:
 
 ```bash
 gori run repeater create --target https://api.example.com --request-file req.txt --name "login probe"
@@ -176,7 +176,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 gori run probe --severity high --category cors
 ```
 
-`--severity`는 `info`\|`low`\|`medium`\|`high`\|`critical` 중 하나입니다. `--category`는 `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`이며, 여기서는 패시브 검사만 다룹니다 — `active` 프로브는 TUI에서 실행합니다. `-q`/`--query`로 QL 필터를 겁니다.
+`--severity`는 `info`\|`low`\|`medium`\|`high`\|`critical` 중 하나입니다. `--category`는 `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`이며, 여기서는 패시브 검사만 다룹니다. `active` 프로브는 TUI에서 실행합니다. `-q`/`--query`로 QL 필터를 겁니다.
 
 ### run sitemap {#run-sitemap}
 
@@ -290,7 +290,7 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 
 ### gori ca regenerate {#gori-ca-regenerate}
 
-디스크의 루트 CA를 새로 발급한 것으로 교체합니다. **파괴적** — 이전 CA를 신뢰하던 모든 클라이언트는 새 인증서를 다시 신뢰해야 합니다. 이미 실행 중인 gori 프로세스는 재시작 전까지 이전 CA를 메모리에 유지합니다.
+디스크의 루트 CA를 새로 발급한 것으로 교체합니다. **파괴적**: 이전 CA를 신뢰하던 모든 클라이언트는 새 인증서를 다시 신뢰해야 합니다. 이미 실행 중인 gori 프로세스는 재시작 전까지 이전 CA를 메모리에 유지합니다.
 
 | Option | Description |
 |--------|-------------|
@@ -301,7 +301,7 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 
 ### gori ca import {#gori-ca-import}
 
-**외부에서 생성한** 루트 CA(인증서 + 일치하는 개인 키, 둘 다 PEM)를 gori 자체 CA 대신 채택합니다 — 팀이나 여러 머신에서 하나의 CA를 공유하거나, 조직 CA를 재사용하기 위해서입니다. gori는 호스트별 리프 인증서를 즉석에서 서명하므로 두 파일이 모두 필요합니다. 클라이언트는 인증서만 신뢰합니다. `regenerate`처럼 **파괴적**이며, 디스크의 루트를 교체하고 기존 신뢰를 무효화합니다.
+외부에서 생성한 루트 CA(인증서 + 일치하는 개인 키, 둘 다 PEM)를 gori 자체 CA 대신 채택합니다. 팀이나 여러 머신에서 하나의 CA를 공유하거나, 조직 CA를 재사용하기 위해서입니다. gori는 호스트별 리프 인증서를 즉석에서 서명하므로 두 파일이 모두 필요합니다. 클라이언트는 인증서만 신뢰합니다. `regenerate`처럼 **파괴적**이며, 디스크의 루트를 교체하고 기존 신뢰를 무효화합니다.
 
 | Option | Description |
 |--------|-------------|
@@ -310,7 +310,7 @@ gori 루트 CA 인증서의 경로를 출력합니다(최초 사용 시 생성).
 | `--yes`, `-y` | 대화형 확인 생략 (stdin이 tty가 아닐 때 필수) |
 | `--ca-dir=DIR` | 설치할 CA 디렉터리 |
 
-무엇이든 디스크에 기록하기 전에 쌍을 먼저 검증합니다: 키는 인증서와 일치해야 하고 인증서는 CA여야 합니다(`basicConstraints CA:TRUE`) — 쌍이 맞지 않으면 현재 CA를 건드리지 않고 중단합니다. 만료되었거나 아직 유효하지 않은 인증서는 경고만 남기고 그대로 가져옵니다. tty에서 `import`를 입력하여 확인하거나 `--yes`를 전달하세요. 같은 동작을 TUI 팔레트(**Import CA certificate**)에서도 사용할 수 있습니다.
+무엇이든 디스크에 기록하기 전에 쌍을 먼저 검증합니다: 키는 인증서와 일치해야 하고 인증서는 CA여야 합니다(`basicConstraints CA:TRUE`). 쌍이 맞지 않으면 현재 CA를 건드리지 않고 중단합니다. 만료되었거나 아직 유효하지 않은 인증서는 경고만 남기고 그대로 가져옵니다. tty에서 `import`를 입력하여 확인하거나 `--yes`를 전달하세요. 같은 동작을 TUI 팔레트(**Import CA certificate**)에서도 사용할 수 있습니다.
 
 OpenSSL로 루트를 생성한 뒤 가져옵니다:
 
@@ -320,7 +320,7 @@ openssl req -x509 -new -key root.key.pem -days 3650 -subj "/CN=my ca" -out root.
 gori ca import --cert root.crt.pem --key root.key.pem --yes
 ```
 
-클라이언트에서는 `root.crt.pem`만 신뢰하세요 — 개인 키는 절대 배포하지 마세요.
+클라이언트에서는 `root.crt.pem`만 신뢰하세요. 개인 키는 절대 배포하지 마세요.
 
 ## gori settings {#gori-settings}
 
@@ -335,7 +335,7 @@ gori settings --edit   # open it in $EDITOR
 gori wizard
 ```
 
-대화형 설정(전역 프록시 바인드 기본값, 그다음 테마)을 실행합니다. 최초 실행 시에도 자동으로 실행됩니다. 바인드 단계는 공유 `settings.json` 기본값을 기록합니다 — 프로젝트는 Project 탭에서 자체 주소를 고정할 수 있으며, `--listen` / `--port`는 이번 실행에 한해서만 오버라이드합니다.
+대화형 설정(전역 프록시 바인드 기본값, 그다음 테마)을 실행합니다. 최초 실행 시에도 자동으로 실행됩니다. 바인드 단계는 공유 `settings.json` 기본값을 기록합니다. 프로젝트는 Project 탭에서 자체 주소를 고정할 수 있으며, `--listen` / `--port`는 이번 실행에 한해서만 오버라이드합니다.
 
 ## gori tutorial {#gori-tutorial}
 
@@ -356,13 +356,13 @@ gori update --exec   # Homebrew/Snap: run the package-manager command
 
 | Install channel | Behavior |
 |-----------------|----------|
-| 독립 실행 바이너리 (curl 설치, 수동 다운로드, 워크스페이스 빌드, 또는 어떤 패키지 관리자도 소유하지 않은 `/usr/bin`으로의 **수동** 복사) | 이 OS/arch에 맞는 최신 GitHub 릴리스 자산을 내려받아 바이너리를 교체 (macOS는 전용 디렉터리의 형제 `lib/`도 갱신) |
+| 독립 실행 바이너리 (curl 설치, 수동 다운로드, 워크스페이스 빌드, 또는 어떤 패키지 관리자도 소유하지 않은 `/usr/bin`으로의 수동 복사) | 이 OS/arch에 맞는 최신 GitHub 릴리스 자산을 내려받아 바이너리를 교체 (macOS는 전용 디렉터리의 형제 `lib/`도 갱신) |
 | Homebrew | `brew upgrade gori` 출력 (`--exec`로 실행; brew 관리 경로는 절대 덮어쓰지 않음) |
 | Snap | `snap refresh gori` 출력 (`--exec`로 실행) |
 | pacman / AUR | `yay` / `paru` / `pacman` 안내 출력 |
 | deb (dpkg) | `apt` 업그레이드 안내 출력 |
 | rpm | `dnf` / `yum` / `zypper` 안내 출력 |
 
-`/usr/bin` 또는 `/bin` 아래 경로는 **패키지 소유권**(`pacman -Qo`, `dpkg-query -S`, `rpm -qf`)으로 분류됩니다. 관리자가 파일을 소유하면 gori는 절대 덮어쓰지 않습니다. 프로브가 소유자를 찾지 못하면 바이너리 채널이 자체 업데이트합니다. 패키지 도구가 전혀 없으면 `/etc/os-release`(`ID` / `ID_LIKE`)로 Arch 계열 / Debian 계열 / RHEL 계열 안내를 폴백으로 고릅니다.
+`/usr/bin` 또는 `/bin` 아래 경로는 패키지 소유권(`pacman -Qo`, `dpkg-query -S`, `rpm -qf`)으로 분류됩니다. 관리자가 파일을 소유하면 gori는 절대 덮어쓰지 않습니다. 프로브가 소유자를 찾지 못하면 바이너리 채널이 자체 업데이트합니다. 패키지 도구가 전혀 없으면 `/etc/os-release`(`ID` / `ID_LIKE`)로 Arch 계열 / Debian 계열 / RHEL 계열 안내를 폴백으로 고릅니다.
 
-릴리스 자산 이름은 [설치 가이드](/ko/getting-started/installation/)와 일치합니다(`gori-v*-linux-*` 순수 바이너리, `gori-v*-osx-*.tar.gz` 아카이브). macOS 아카이브 업데이트는 전용 레이아웃(예: curl 설치 프로그램의 `PREFIX/opt/gori`)을 요구하여 번들된 `lib/`가 `/usr/local/lib` 같은 공유 루트 아래에 절대 기록되지 않도록 합니다. 아직 릴리스 자산이 없으면 명령은 릴리스 페이지를 가리키는 명확한 오류로 종료합니다 — 조용히 아무 동작도 하지 않는 것이 아닙니다.
+릴리스 자산 이름은 [설치 가이드](/ko/getting-started/installation/)와 일치합니다(`gori-v*-linux-*` 순수 바이너리, `gori-v*-osx-*.tar.gz` 아카이브). macOS 아카이브 업데이트는 전용 레이아웃(예: curl 설치 프로그램의 `PREFIX/opt/gori`)을 요구하여 번들된 `lib/`가 `/usr/local/lib` 같은 공유 루트 아래에 절대 기록되지 않도록 합니다. 아직 릴리스 자산이 없으면 명령은 릴리스 페이지를 가리키는 명확한 오류로 종료합니다. 조용히 아무 동작도 하지 않는 것이 아닙니다.

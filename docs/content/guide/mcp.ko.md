@@ -3,7 +3,7 @@ title = "MCP 서버"
 description = "Model Context Protocol을 통해 AI 에이전트나 스크립트로 gori를 구동합니다."
 +++
 
-gori는 내장 **MCP(Model Context Protocol) 서버**를 제공합니다. TUI에 채팅 창을 넣는 대신, gori는 프로젝트를 깔끔한 도구 인터페이스로 노출합니다. 덕분에 MCP를 지원하는 어떤 에이전트든 — Claude, Codex, Grok 등 — 트래픽을 읽고 도구를 구동할 수 있습니다.
+gori는 내장 **MCP(Model Context Protocol) 서버**를 제공합니다. TUI에 채팅 창을 넣는 대신, gori는 프로젝트를 깔끔한 도구 인터페이스로 노출합니다. 덕분에 MCP를 지원하는 어떤 에이전트든(Claude, Codex, Grok 등) 트래픽을 읽고 도구를 구동할 수 있습니다.
 
 <figure class="agent-session" aria-label="에이전트 세션 예시: 에이전트가 MCP로 IDOR를 찾아 이슈를 기록한다">
   <div class="agent-session-bar">
@@ -13,9 +13,9 @@ gori는 내장 **MCP(Model Context Protocol) 서버**를 제공합니다. TUI에
   <div class="agent-session-body">
     <p class="as-user"><span class="as-who">나</span>users API에서 IDOR를 찾아 기록해줘.</p>
     <p class="as-call"><span class="as-arrow">→</span> <code>list_history</code> <span class="as-args">path~/v1/users status:200</span></p>
-    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-args">플로우 14개 — customer 및 admin 토큰</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-args">플로우 14개, customer 및 admin 토큰</span></p>
     <p class="as-call"><span class="as-arrow">→</span> <code>send_request</code> <span class="as-args">GET /v1/users/2 · customer 토큰</span></p>
-    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-warn">200</span> <span class="as-args">{"id":2,"email":"other-tenant@example.com"} — 호출자의 행이 아님</span></p>
+    <p class="as-ret"><span class="as-arrow">←</span> <span class="as-warn">200</span> <span class="as-args">{"id":2,"email":"other-tenant@example.com"}, 호출자의 행이 아님</span></p>
     <p class="as-call"><span class="as-arrow">→</span> <code>create_issue</code> <span class="as-args">"IDOR on /v1/users/{id}" severity:high</span></p>
     <p class="as-done"><span class="as-check">✓</span> 이슈 기록됨; 재현을 위해 요청이 Repeater 세션으로 저장됨.</p>
   </div>
@@ -42,7 +42,7 @@ gori mcp --use-active-project      # explicitly serve the active TUI/MRU project
 
 ## 읽기 전용 모드 {#read-only-mode}
 
-기본적으로 서버는 실시간 요청을 보내고 이슈를 기록하는 액션 도구도 노출합니다. 읽기 도구만 노출하려면 — 신뢰할 수 없는 에이전트에게 프로젝트를 넘길 때 안전합니다 — 읽기 전용으로 시작하세요.
+기본적으로 서버는 실시간 요청을 보내고 이슈를 기록하는 액션 도구도 노출합니다. 읽기 도구만 노출하려면(신뢰할 수 없는 에이전트에게 프로젝트를 넘길 때 안전합니다) 읽기 전용으로 시작하세요.
 
 ```bash
 gori mcp --read-only
@@ -104,11 +104,11 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 
 > 액션 도구는 안전을 위해 상한이 있습니다: fuzz와 mine 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 TUI는 규칙을 다시 로드한 뒤에만 적용합니다.
 
-## 챗박스가 아니라 이음새인 이유 {#why-a-seam-not-a-chatbox}
+## MCP 이음새인 이유 {#why-an-mcp-seam}
 
-gori는 의도적으로 도구 내 AI 챗을 두지 않습니다. 지능을 도구 *바깥*, 곧 MCP로 접근할 수 있는 곳에 두면, 모델을 직접 고를 수 있고, 트래픽이 의도치 않은 곳으로 흘러가지 않으며, 동일한 인터페이스가 스크립트와 에이전트 양쪽을 모두 지원합니다. `gori run`은 비대화형 경로를, MCP는 대화형 에이전트 경로를 담당합니다.
+gori는 의도적으로 도구 내 AI 챗을 두지 않습니다. 지능은 도구 바깥, 곧 MCP로 접근할 수 있는 곳에 있습니다. 덕분에 모델을 직접 고를 수 있고, 트래픽이 의도치 않은 곳으로 흘러가지 않으며, 동일한 인터페이스가 스크립트와 에이전트 양쪽을 모두 지원합니다. `gori run`은 비대화형 경로를, MCP는 대화형 에이전트 경로를 담당합니다.
 
 ## 다음 단계 {#next-steps}
 
-- [CLI Reference](/ko/reference/cli/) — 전체 `gori mcp` 플래그
-- [Query Language](/ko/reference/query-language/) — 에이전트가 필터링에 사용하는 문법
+- [CLI Reference](/ko/reference/cli/): 전체 `gori mcp` 플래그
+- [Query Language](/ko/reference/query-language/): 에이전트가 필터링에 사용하는 문법

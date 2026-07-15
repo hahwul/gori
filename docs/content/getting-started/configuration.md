@@ -39,7 +39,7 @@ Persisted sections include `network`, `theme` (default `goridark`), `mouse`, `ed
 
 ### Network
 
-The `network` section is the **global default** for how the proxy binds and whether traffic is forwarded through an upstream proxy. Projects without their own network overrides inherit these values:
+The `network` section is the global default for how the proxy binds and whether traffic is forwarded through an upstream proxy. Projects without their own network overrides inherit these values:
 
 ```json
 {
@@ -59,26 +59,26 @@ The `network` section is the **global default** for how the proxy binds and whet
 
 **Precedence** (highest first):
 
-1. **Per-project overrides** (`net.bind_*` in the project DB) — when set, they win for that project only.
-2. **CLI flags** (`--listen` / `--port`) — override `settings.json` for the current process only; not written to disk.
-3. **`settings.json` `network`** — the shared default (what the first-run wizard and Settings: Network edit).
-4. **Factory defaults** — `127.0.0.1:8070` when nothing else is set.
+1. **Per-project overrides** (`net.bind_*` in the project DB): when set, they win for that project only.
+2. **CLI flags** (`--listen` / `--port`): override `settings.json` for the current process only; not written to disk.
+3. **`settings.json` `network`**: the shared default (what the first-run wizard and Settings: Network edit).
+4. **Factory defaults**: `127.0.0.1:8070` when nothing else is set.
 
 ### Theme
 
-gori ships thirteen built-in colour themes (`goridark` is the default) and supports your own JSON themes. Switch it from the command palette (`Ctrl-P` → `settings:theme`) or set `theme` in `settings.json` — see the [Themes guide](/guide/themes/).
+gori ships thirteen built-in colour themes (`goridark` is the default) and supports your own JSON themes. Switch it from the command palette (`Ctrl-P` → `settings:theme`) or set `theme` in `settings.json`. See the [Themes guide](/guide/themes/).
 
 ### Hotkeys
 
-Every keyboard shortcut is rebindable from the command palette (`Ctrl-P` → `settings:hotkeys`) and persisted under the `hotkeys` key — see the [Hotkeys guide](/guide/hotkeys/).
+Every keyboard shortcut is rebindable from the command palette (`Ctrl-P` → `settings:hotkeys`) and persisted under the `hotkeys` key. See the [Hotkeys guide](/guide/hotkeys/).
 
 ### Statusline
 
-An opt-in extra row at the bottom of the TUI (command palette → **Settings: Statusline**, or the `statusline` key). When enabled, gori runs a shell command on an interval and shows its (ANSI-coloured) stdout — a customizable status bar inspired by Claude Code's status line. The command receives a JSON snapshot of the live session (project, capture state, flow count, proxy address) on stdin. Disabled by default; see the [Configuration Reference](/reference/config/#statusline) for the keys and the stdin contract.
+An opt-in extra row at the bottom of the TUI (command palette → **Settings: Statusline**, or the `statusline` key). When enabled, gori runs a shell command on an interval and shows its (ANSI-coloured) stdout, a customizable status bar inspired by Claude Code's status line. The command receives a JSON snapshot of the live session (project, capture state, flow count, proxy address) on stdin. Disabled by default; see the [Configuration Reference](/reference/config/#statusline) for the keys and the stdin contract.
 
 ## Per-Project Network Overrides
 
-A project can pin its own bind address, port, and upstream without touching the global file. These live in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`) and are edited from the **Project** tab's settings pane — useful when different engagements need different ports or upstream proxies.
+A project can pin its own bind address, port, and upstream without touching the global file. These live in the project database (keys `net.bind_host`, `net.bind_port`, `net.upstream_proxy`) and are edited from the **Project** tab's settings pane, useful when different engagements need different ports or upstream proxies.
 
 When a field matches the current global value, gori drops that override so the project keeps inheriting later global changes. Clearing a pin therefore means “use Settings / CLI again,” not “leave the last value frozen forever.”
 
@@ -97,7 +97,7 @@ You can also rotate the CA from the TUI command palette (**Regenerate CA certifi
 
 ### Bring your own CA
 
-To reuse one CA across a team or machines, generate a root externally and import it (cert **and** key — gori signs leaf certificates with the key; clients trust only the cert):
+To reuse one CA across a team or machines, generate a root externally and import it (cert **and** key: gori signs leaf certificates with the key; clients trust only the cert):
 
 ```bash
 openssl ecparam -genkey -name prime256v1 -out root.key.pem
@@ -107,7 +107,7 @@ gori ca import --cert root.crt.pem --key root.key.pem --yes
 
 The same action is available from the palette (**Import CA certificate**). gori checks the key matches the cert and that it is a CA before adopting it. Distribute only `root.crt.pem` to trust; keep `root.key.pem` secret. See [`gori ca import`](/reference/cli/#gori-ca-import).
 
-The palette's **Open browser** action launches an installed browser with an isolated profile that already trusts the CA and routes through the proxy — the fastest path on a fresh machine (see the [Quick Start](/getting-started/quick-start/)).
+The palette's **Open browser** action launches an installed browser with an isolated profile that already trusts the CA and routes through the proxy (see the [Quick Start](/getting-started/quick-start/)).
 
 ## Full Reference
 

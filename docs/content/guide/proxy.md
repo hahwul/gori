@@ -3,11 +3,11 @@ title = "Proxy & History"
 description = "Capture traffic, intercept requests, scope your target, and inspect every protocol."
 +++
 
-The proxy is the heart of gori. It sits between your client and the upstream server, records each exchange as a *flow*, and stores it in the current project. **History** is where you read those flows back.
+The proxy sits between your client and the upstream server, records each exchange as a *flow*, and stores it in the current project. **History** is where you read those flows back.
 
 ## Capturing Traffic
 
-Start gori and point your client at `127.0.0.1:8070` (see the [Quick Start](/getting-started/quick-start/)). Toggle capture at any time with `c` — turning it off lets traffic pass through without being recorded, which is handy while you set up.
+Start gori and point your client at `127.0.0.1:8070` (see the [Quick Start](/getting-started/quick-start/)). Toggle capture at any time with `c`. Turning it off lets traffic pass through without being recorded, which is handy while you set up.
 
 Each flow records the full request and response: start line, headers, and body (the stored body is capped at 2 MiB; larger bodies still forward byte-exact and report their true size). Bodies compressed with gzip, deflate, Brotli, or Zstd are decoded for display.
 
@@ -31,24 +31,24 @@ Scope keeps a large session focused on your target. In the **Project** tab you d
 
 ### Sandbox
 
-The **Sandbox** is a hard containment gate for staying strictly in-bounds during a test. Toggle it in the **Project** tab's **NETWORK** pane (default: **off**). While it's **on**, the capture proxy forwards **only** the requests your scope *allows* — everything else is **blocked before it ever reaches the origin** (the client gets a `403` with an `X-Gori-Sandbox: blocked` header) and recorded as an aborted flow so the attempt stays visible. "Allowed" is the scope evaluated as an **allowlist**: at least one **include** rule must match and no **exclude** rule may match.
+The **Sandbox** is a hard containment gate for staying strictly in-bounds during a test. Toggle it in the **Project** tab's **NETWORK** pane (default: off). While it's on, the capture proxy forwards only the requests your scope *allows*. Everything else is blocked before it reaches the origin (the client gets a `403` with an `X-Gori-Sandbox: blocked` header) and recorded as an aborted flow so the attempt stays visible. "Allowed" means the scope evaluated as an allowlist: at least one include rule must match, and no exclude rule may match.
 
-Because it is an allowlist, a scope with **no include rules blocks *all* traffic** — add an include for your target first (enabling the sandbox with an empty scope asks you to confirm exactly this). A red `sandbox` chip in the top bar stays lit whenever it's on, and the NETWORK row spells out the current effect right next to the toggle.
+Because it is an allowlist, a scope with no include rules blocks all traffic, so add an include for your target first (enabling the sandbox with an empty scope asks you to confirm exactly this). A red `sandbox` chip in the top bar stays lit whenever it's on, and the NETWORK row spells out the current effect right next to the toggle.
 
-The sandbox governs **proxied/captured traffic only**. Repeater, Fuzzer, Miner, and the MCP `send_request` tool enforce scope on their own (they refuse an out-of-scope target with `SCOPE_BLOCKED`). For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the `CONNECT` step, and interceptable connections are kept on HTTP/1.1 so every request is checked individually.
+The sandbox governs proxied and captured traffic only. Repeater, Fuzzer, Miner, and the MCP `send_request` tool enforce scope on their own (they refuse an out-of-scope target with `SCOPE_BLOCKED`). For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the `CONNECT` step, and interceptable connections are kept on HTTP/1.1 so every request is checked individually.
 
 ## Sitemap
 
-The **Sitemap** tab collapses History into a deduplicated tree of `host → path` endpoints, with method chips and scope markers. It's the fastest way to see the shape of a target's attack surface. Numeric path segments can be folded together so `/user/1` and `/user/2` share one node.
+The **Sitemap** tab collapses History into a deduplicated tree of `host → path` endpoints, with method chips and scope markers. It's a quick way to see the shape of a target's attack surface. Numeric path segments can be folded together so `/user/1` and `/user/2` share one node.
 
 <figure class="tui-shot">
   <img src="/images/tui/sitemap.svg" alt="gori Sitemap tab showing captured hosts expanded into a tree of paths with method chips and per-host path counts">
-  <figcaption>The <strong>Sitemap</strong> folds History into a <code>host → path</code> tree with method chips, so a target's surface is one glance.</figcaption>
+  <figcaption>The <strong>Sitemap</strong> folds History into a <code>host → path</code> tree with method chips, so you can read a target's surface at a glance.</figcaption>
 </figure>
 
 ## Protocol Support
 
-gori is protocol-aware, not just a byte pipe:
+gori understands the protocols it carries:
 
 | Protocol | Support |
 |----------|---------|
@@ -58,12 +58,12 @@ gori is protocol-aware, not just a byte pipe:
 | **gRPC** | Framed over HTTP/2 with status trailers; protobuf shown as raw bytes (no `.proto` schema) |
 | **Server-Sent Events** | Parsed into discrete events at display time |
 
-On top of the wire protocols, gori decodes common payloads inline so you don't have to reach for another tool:
+On top of the wire protocols, gori decodes common payloads inline:
 
-- **JWT** — header and payload decoded from `Authorization`, cookies, URLs, and bodies (signatures are shown but never verified).
-- **SAML** — base64 (and DEFLATE for the redirect binding) decoded for `SAMLRequest` / `SAMLResponse`.
-- **GraphQL** — `query`, `operationName`, and `variables` parsed from POST bodies and `?query=` parameters.
-- **Form params** — `application/x-www-form-urlencoded` and `multipart/form-data` request bodies, plus the URL query string, decoded into a flat key=value list in the PARAMS pane (multipart file parts are summarised).
+- **JWT**: header and payload decoded from `Authorization`, cookies, URLs, and bodies (signatures are shown but never verified).
+- **SAML**: base64 (and DEFLATE for the redirect binding) decoded for `SAMLRequest` / `SAMLResponse`.
+- **GraphQL**: `query`, `operationName`, and `variables` parsed from POST bodies and `?query=` parameters.
+- **Form params**: `application/x-www-form-urlencoded` and `multipart/form-data` request bodies, plus the URL query string, decoded into a flat key=value list in the PARAMS pane (multipart file parts are summarised).
 
 ## Filtering History
 
@@ -85,7 +85,7 @@ gori run history -q 'status:5xx host:api.example.com'
 
 ## Match & Replace
 
-Open **Match & Replace** from the command palette (`Ctrl-P` → **Match & Replace**; rebind it in `settings:hotkeys` if you want a Global chord). Rules rewrite the **head** (request line + headers) or the **body** of a request/response in flight — a literal substring swap applied to live traffic.
+Open **Match & Replace** from the command palette (`Ctrl-P` → **Match & Replace**; rebind it in `settings:hotkeys` if you want a Global chord). Rules rewrite the **head** (request line + headers) or the **body** of a request/response in flight. Each rule is a literal substring swap applied to live traffic.
 
 Syntax is one line per rule:
 
@@ -103,7 +103,7 @@ respbody: "debug":false => "debug":true
 | `reqbody:` | Request body |
 | `respbody:` | Response body |
 
-An empty replacement deletes the matched text. A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. Body rewriting works on the decoded transfer form — a compressed (`Content-Encoding: gzip`/`br`/…) body isn't decompressed, so a literal pattern simply won't match it — and streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. Rules are per-project, can be toggled on/off individually, and apply as soon as you add them — no restart. Use them to strip cookies, inject headers, or rewrite body values before traffic hits History or the scanners.
+An empty replacement deletes the matched text. A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. Body rewriting works on the decoded transfer form. A compressed (`Content-Encoding: gzip`/`br`/…) body isn't decompressed, so a literal pattern simply won't match it, and streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. Rules are per-project, can be toggled on and off individually, and apply as soon as you add them, with no restart. Use them to strip cookies, inject headers, or rewrite body values before traffic hits History or the scanners.
 
 ## Import
 
@@ -141,15 +141,15 @@ The **Project** home tab is more than a summary. Focusable panes (cycle with `Ta
 |------|---------|
 | **SCOPE** | Include/exclude rules (host, string, or regex) |
 | **HOST OVERRIDES** | Per-project dial map |
-| **ENV** | Per-project `$KEY` variables for outbound requests — see [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
+| **ENV** | Per-project `$KEY` variables for outbound requests. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
 | **DESCRIPTION** | Free-form project notes |
 | **NETWORK** | Scope-lens + **sandbox** toggles, plus per-project network pins (bind / upstream) that override the global Settings default |
 
-Scope rules are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com` — full flags in the [CLI Reference](/reference/cli/#run-project).
+Scope rules are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com`. Full flags are in the [CLI Reference](/reference/cli/#run-project).
 
 ## Next Steps
 
-- [Repeater & Fuzzer](/guide/repeater-and-fuzzer/) — act on the flows you capture
-- [Decoder](/guide/decoder/) — encode / decode / hash without leaving the TUI
-- [Scanning & Issues](/guide/scanning/) — automated and manual analysis
-- [Query Language](/reference/query-language/) — the full filter syntax
+- [Repeater & Fuzzer](/guide/repeater-and-fuzzer/): act on the flows you capture
+- [Decoder](/guide/decoder/): encode, decode, and hash without leaving the TUI
+- [Scanning & Issues](/guide/scanning/): automated and manual analysis
+- [Query Language](/reference/query-language/): the full filter syntax

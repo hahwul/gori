@@ -7,7 +7,7 @@ Once you've captured an interesting flow, **Repeater** and the **Fuzzer** are wh
 
 ## Repeater
 
-Repeater is a request workbench, like a repeater. Send a flow to it, edit any part of the request, and re-send — the response, timing, and a diff against the previous response are shown side by side. Sessions persist with the project, so you can come back to them later.
+Repeater is a request workbench, like a repeater. Send a flow to it, edit any part of the request, and re-send. The response, timing, and a diff against the previous response are shown side by side. Sessions persist with the project, so you can come back to them later.
 
 <figure class="tui-shot">
   <img src="/images/tui/repeater.svg" alt="gori Repeater tab with an editable HTTP/2 request pane, a response pane showing headers and a JSON body, and a replayed 200 in 1152ms status line">
@@ -21,7 +21,7 @@ Repeater handles more than HTTP/1:
 - **gRPC** repeater reuses the HTTP/2 engine for framed messages.
 - A **decode** mode re-encodes edited SAML / GraphQL payloads on send. (To decode or edit a JWT, use the [Decoder](/guide/decoder/) tab's `jwt-decode`.)
 
-Repeater from the command line, optionally against a new target:
+Replay from the command line, optionally against a new target:
 
 ```bash
 gori run repeater <flow-id> --target https://staging.example.com --diff
@@ -29,7 +29,7 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 
 ## Environment Variables
 
-Outbound requests support `$KEY`-style substitution. Tokens stay as literal text in the editor and expand **only at send time** — in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
+Outbound requests support `$KEY`-style substitution. Tokens stay as literal text in the editor and expand only at send time: in Repeater, the Fuzzer, the Miner, Intercept forwards, `gori run`, and MCP `send_request`.
 
 Define variables in two places (project wins on a key collision):
 
@@ -38,7 +38,7 @@ Define variables in two places (project wins on a key collision):
 | **Global** | `Ctrl-P` → **Settings: Env**, or the `env` section of `settings.json` |
 | **Project** | **Project** tab → **ENV** pane (`a` add, `e` edit, `d` delete) |
 
-Default prefix is `$` (changeable via **Change prefix** in the ENV space menu, or `env.prefix` in settings). Keys are `A–Z a–z _` followed by `A–Z a–z 0–9 _`. Unknown tokens are left unchanged.
+Default prefix is `$` (changeable via **Change prefix** in the ENV space menu, or `env.prefix` in settings). Keys are `A-Z a-z _` followed by `A-Z a-z 0-9 _`. Unknown tokens are left unchanged.
 
 ```http
 GET /api/me HTTP/1.1
@@ -63,16 +63,16 @@ The Fuzzer is an Intruder-style engine: mark positions in a request, attach payl
 |------|----------|
 | `sniper` | One position at a time, cycling a single payload set (default) |
 | `batteringram` | The same payload in every marked position |
-| `pitchfork` | Parallel sets — payload *n* from each set together |
+| `pitchfork` | Parallel sets: payload *n* from each set together |
 | `clusterbomb` | Every combination across all sets |
 
 ### Positions and Payloads
 
-Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a wordlist, an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. Processors let you transform each payload on the way out — prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
+Mark positions with `§…§` markers in the request, or let gori place them automatically. Payload sets can be a wordlist, an explicit list, a numeric range, N empty (null) payloads, or brute-force character sets. Processors let you transform each payload on the way out: prefix/suffix, URL/base64/hex encoding, case folding, hashing, or a regex replace.
 
 ### Matching
 
-Filter results with ffuf-style matchers and filters on status, size, words, lines, and body regex — plus auto-calibration to drop noisy baselines. Matched responses are highlighted and can be extracted with a capture regex.
+Filter results with ffuf-style matchers and filters on status, size, words, lines, and body regex, plus auto-calibration to drop noisy baselines. Matched responses are highlighted and can be extracted with a capture regex.
 
 ### Running Headless
 
@@ -89,7 +89,7 @@ Sources can be a captured flow (`--flow`), a raw request file (`--request`), or 
 
 ## Next Steps
 
-- [Decoder](/guide/decoder/) — local encode/decode/hash chains
-- [Scanning & Issues](/guide/scanning/) — Probe and the Param Miner
-- [CLI Reference](/reference/cli/) — every `run` flag
-- [MCP Server](/guide/mcp/) — drive fuzzing from an agent
+- [Decoder](/guide/decoder/): local encode/decode/hash chains
+- [Scanning & Issues](/guide/scanning/): Probe and the Param Miner
+- [CLI Reference](/reference/cli/): every `run` flag
+- [MCP Server](/guide/mcp/): drive fuzzing from an agent
