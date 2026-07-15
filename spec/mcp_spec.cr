@@ -587,6 +587,38 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "creates a rule already disabled (atomic) with enabled:false" do
+      with_store do |store|
+        create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"x","enabled":false}}})
+        tool_payload(drive(store, create)[0])["enabled"].as_bool.should be_false
+        store.match_rules[0].enabled?.should be_false # never live between create and disable
+      end
+    end
+
+    it "updates an existing rule's pattern/part in place" do
+      with_store do |store|
+        id = store.insert_rule(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "old", "")
+        upd = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"update_rule","arguments":{"id":#{id},"pattern":"new","part":"body"}}})
+        tool_payload(drive(store, upd)[0])["updated"].as_bool.should be_true
+        r = store.match_rules[0]
+        r.pattern.should eq("new")
+        r.part.body?.should be_true
+        r.target.request?.should be_true # unchanged field preserved
+      end
+    end
+
+    it "previews a rule's match count without creating it" do
+      with_store do |store|
+        seed_flow(store, "auth.test", "GET", "/x", 200)          # request head has "auth.test"
+        seed_flow(store, "other.test", "GET", "/y", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"preview_rule","arguments":{"pattern":"auth.test","target":"request","part":"head"}}})
+        p = tool_payload(drive(store, call)[0])
+        p["would_match"].as_i.should eq(1)
+        p["scanned"].as_i.should eq(2)
+        store.match_rules.should be_empty # preview creates nothing
+      end
+    end
+
     it "reports an error for delete/toggle of an unknown rule id" do
       with_store do |store|
         del = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"delete_rule","arguments":{"id":999}}})

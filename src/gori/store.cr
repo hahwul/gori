@@ -775,16 +775,27 @@ module Gori
       list
     end
 
-    def insert_rule(target : RuleTarget, part : RulePart, pattern : String, replacement : String) : Int64
+    def insert_rule(target : RuleTarget, part : RulePart, pattern : String, replacement : String,
+                    enabled : Bool = true) : Int64
       exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO match_rules (enabled, target, part, pattern, replacement) VALUES (1, ?, ?, ?, ?)",
-          target.label, part.label, pattern, replacement)
+        c.exec("INSERT INTO match_rules (enabled, target, part, pattern, replacement) VALUES (?, ?, ?, ?, ?)",
+          enabled ? 1 : 0, target.label, part.label, pattern, replacement)
         nil
       }
     end
 
     def set_rule_enabled(id : Int64, enabled : Bool) : Nil
       exec_task ->(c : DB::Connection) { c.exec("UPDATE match_rules SET enabled = ? WHERE id = ?", enabled ? 1 : 0, id); nil }
+    end
+
+    # Update a rule's target/part/pattern/replacement in place (enabled/position
+    # unchanged). No-op when the id doesn't exist.
+    def update_rule(id : Int64, target : RuleTarget, part : RulePart, pattern : String, replacement : String) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE match_rules SET target = ?, part = ?, pattern = ?, replacement = ? WHERE id = ?",
+          target.label, part.label, pattern, replacement, id)
+        nil
+      }
     end
 
     def delete_rule(id : Int64) : Nil

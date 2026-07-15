@@ -305,6 +305,27 @@ module Gori
               s.field "replacement", strprop("literal replacement (empty = delete the pattern; default empty)")
               s.field "target", strprop("request|response (default request)")
               s.field "part", strprop("head|body — head = request/status line + headers, body = entity body (default head)")
+              s.field "enabled", boolprop("create the rule already enabled (default true); pass false for an atomic disabled creation (no live window before you can preview/adjust it)")
+            end
+
+            tool j, "update_rule",
+              "Update an existing Match & Replace rule's target/part/pattern/replacement/enabled by id. " \
+              "Omitted fields are left unchanged." do |s|
+              s.field "id", intprop("rule id from list_rules"), required: true
+              s.field "pattern", strprop("new literal substring to match")
+              s.field "replacement", strprop("new literal replacement")
+              s.field "target", strprop("request|response")
+              s.field "part", strprop("head|body")
+              s.field "enabled", boolprop("enable/disable the rule")
+            end
+
+            tool j, "preview_rule",
+              "Estimate how many captured flows a rule WOULD match (literal-substring scan of the " \
+              "relevant part over recent flows) WITHOUT creating it. Use before create_rule to size a rule. " \
+              "Approximate: response bodies are scanned as stored wire bytes." do |s|
+              s.field "pattern", strprop("literal substring to match"), required: true
+              s.field "target", strprop("request|response (default request)")
+              s.field "part", strprop("head|body (default head)")
             end
 
             tool j, "set_rule_enabled", "Enable or disable a Match & Replace rule by id." do |s|
@@ -621,6 +642,8 @@ module Gori
         when "update_note"      then gated { update_note(h) }
         when "delete_note"      then gated { delete_note(h) }
         when "create_rule"      then gated { create_rule(h) }
+        when "update_rule"      then gated { update_rule(h) }
+        when "preview_rule"     then gated { preview_rule(h) }
         when "set_rule_enabled" then gated { set_rule_enabled(h) }
         when "delete_rule"      then gated { delete_rule(h) }
         when "create_project"   then gated { create_project(h) }
@@ -1909,26 +1932,110 @@ module Gori
 
       private def create_rule(h) : Result
         pattern = str(h, "pattern")
-        return Result.new("missing required 'pattern'", is_error: true) if pattern.nil? || pattern.empty?
-
-        tgt_s = str(h, "target").try(&.strip)
-        target = tgt_s.nil? || tgt_s.empty? ? Store::RuleTarget::Request : Store::RuleTarget.parse?(tgt_s)
-        return Result.new("invalid 'target' (expected request|response)", is_error: true) unless target
-
-        part_s = str(h, "part").try(&.strip)
-        part = part_s.nil? || part_s.empty? ? Store::RulePart::Head : Store::RulePart.parse?(part_s)
-        return Result.new("invalid 'part' (expected head|body)", is_error: true) unless part
-
+        return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
+        tp = rule_target_part(h, Store::RuleTarget::Request, Store::RulePart::Head)
+        return tp if tp.is_a?(Result)
+        target, part = tp
         replacement = str(h, "replacement") || ""
-        id = @store.insert_rule(target, part, pattern, replacement)
+        # Atomic disabled creation: insert already-disabled so there is no window
+        # where a just-created rule is live before a follow-up disable call.
+        enabled = bool_arg(h, "enabled", true)
+        id = @store.insert_rule(target, part, pattern, replacement, enabled)
         return busy("failed to persist rule (store busy or unwritable)") if id == 0
         Result.new(JSON.build do |j|
           j.object do
             j.field "id", id
             j.field "target", target.label
             j.field "part", part.label
+            j.field "enabled", enabled
           end
         end)
+      rescue ex : Gori::Error
+        err(ex.message || "invalid rule arguments", "INVALID_ARGUMENT")
+      end
+
+      private def update_rule(h) : Result
+        id = int(h, "id")
+        return err(id_error(h, "id"), "INVALID_ARGUMENT", field: "id") unless id
+        existing = @store.match_rules.find { |r| r.id == id }
+        return not_found("no rule with id #{id}") unless existing
+        tp = rule_target_part(h, existing.target, existing.part)
+        return tp if tp.is_a?(Result)
+        target, part = tp
+        pattern = present?(h, "pattern") ? str(h, "pattern") : existing.pattern
+        return err("pattern must not be empty", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
+        replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : existing.replacement
+        @store.update_rule(id, target, part, pattern, replacement)
+        if present?(h, "enabled")
+          en = bool_arg(h, "enabled", existing.enabled?)
+          @store.set_rule_enabled(id, en)
+        end
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "id", id
+            j.field "updated", true
+            j.field "target", target.label
+            j.field "part", part.label
+          end
+        end)
+      rescue ex : Gori::Error
+        err(ex.message || "invalid rule arguments", "INVALID_ARGUMENT")
+      end
+
+      RULE_PREVIEW_SCAN = 500
+
+      # Estimate how many captured flows a rule WOULD match, by literal-substring
+      # scanning the relevant part of up to RULE_PREVIEW_SCAN recent flows. Nothing
+      # is written. Approximate: response bodies are scanned as STORED (possibly
+      # compressed) wire bytes, so a text pattern mainly reflects head/text matches.
+      private def preview_rule(h) : Result
+        pattern = str(h, "pattern")
+        return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
+        tp = rule_target_part(h, Store::RuleTarget::Request, Store::RulePart::Head)
+        return tp if tp.is_a?(Result)
+        target, part = tp
+        scanned = 0
+        matched = 0
+        @store.recent_flows(RULE_PREVIEW_SCAN, nil).each do |row|
+          detail = @store.get_flow(row.id)
+          next unless detail
+          scanned += 1
+          bytes = rule_part_bytes(detail, target, part)
+          matched += 1 if bytes && String.new(bytes).scrub.includes?(pattern)
+        end
+        total = @store.count
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "target", target.label
+            j.field "part", part.label
+            j.field "pattern", pattern
+            j.field "would_match", matched
+            j.field "scanned", scanned
+            j.field "total_flows", total
+            j.field "scan_capped", total > scanned
+            j.field "note", "Literal substring over stored flows (bounded to #{RULE_PREVIEW_SCAN}); response bodies are matched as stored wire bytes."
+          end
+        end)
+      end
+
+      # Parse target/part from args, defaulting to the given fallbacks. Returns the
+      # pair or an error Result. Shared by create/update/preview_rule.
+      private def rule_target_part(h, dft_target : Store::RuleTarget, dft_part : Store::RulePart) : {Store::RuleTarget, Store::RulePart} | Result
+        tgt_s = str(h, "target").try(&.strip)
+        target = tgt_s.nil? || tgt_s.empty? ? dft_target : Store::RuleTarget.parse?(tgt_s)
+        return err("invalid 'target' (expected request|response)", "INVALID_ARGUMENT", field: "target") unless target
+        part_s = str(h, "part").try(&.strip)
+        part = part_s.nil? || part_s.empty? ? dft_part : Store::RulePart.parse?(part_s)
+        return err("invalid 'part' (expected head|body)", "INVALID_ARGUMENT", field: "part") unless part
+        {target, part}
+      end
+
+      private def rule_part_bytes(detail : Store::FlowDetail, target : Store::RuleTarget, part : Store::RulePart) : Bytes?
+        if target.request?
+          part.head? ? detail.request_head : detail.request_body
+        else
+          part.head? ? detail.response_head : detail.response_body
+        end
       end
 
       private def set_rule_enabled(h) : Result
