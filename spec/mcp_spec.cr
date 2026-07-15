@@ -380,6 +380,17 @@ describe Gori::MCP::Server do
         body["truncated"].as_bool.should be_false
       end
     end
+
+    it "treats max_body_bytes:0 as the mode default, not a zero-byte cap" do
+      with_store do |store|
+        id = seed_flow(store, "h.test", "GET", "/b", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", resp_body: "hello".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id},"max_body_bytes":0}}})
+        body = tool_payload(drive(store, call)[0])["response_body"]
+        body["text"].as_s.should eq("hello") # full body — not clamped to 0 bytes
+        body["truncated"].as_bool.should be_false
+      end
+    end
   end
 
   describe "get_response_body_chunk offset validation" do
@@ -1220,6 +1231,22 @@ describe Gori::MCP::Server do
         payload["repeater_id"].as_i64.should eq(repeater_id)
         payload["upgraded"].as_bool.should be_false
         payload["error"].as_s.should contain("connect failed")
+      end
+    end
+
+    it "does not link the issue when a WebSocket send is scope-blocked" do
+      with_store do |store|
+        store.add_scope_rule("include", "host", "example.com") # blocks 127.0.0.1
+        issue_id = store.insert_issue("ev", Gori::Store::Severity::Low, nil, nil)
+        rid = store.insert_repeater("ws://127.0.0.1:1",
+          "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n",
+          false, true, nil, 0)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{rid},"issue_id":#{issue_id}}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("SCOPE_BLOCKED")
+        # the refused send must NOT have persisted the issue→repeater link
+        store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id).empty?.should be_true
       end
     end
   end

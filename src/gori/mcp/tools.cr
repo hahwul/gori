@@ -756,7 +756,11 @@ module Gori
       # (default) → the full MAX_TEXT cap. max_body_bytes tunes the cap (clamped to
       # MAX_TEXT — larger bodies are paged with get_response_body_chunk).
       private def body_return_opts(h) : {Int32, Bool}
-        max = int(h, "max_body_bytes").try(&.clamp(0_i64, Serialize::MAX_TEXT.to_i64).to_i)
+        # Only a POSITIVE max_body_bytes overrides the cap; 0/negative falls back to
+        # the mode default (Crystal treats 0 as truthy, so `max || default` alone
+        # wouldn't). Use body_mode:none for a zero-byte, shape-only body.
+        raw = int(h, "max_body_bytes").try(&.clamp(0_i64, Serialize::MAX_TEXT.to_i64).to_i)
+        max = (raw && raw > 0) ? raw : nil
         case str(h, "body_mode").try(&.strip.downcase)
         when "none"    then {0, true}
         when "preview" then {max || BODY_PREVIEW_BYTES, false}
@@ -1717,11 +1721,9 @@ module Gori
 
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
-        if issue_id
-          return not_found("no issue with id #{issue_id}") unless @store.get_issue(issue_id)
-          @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
-            Store::LinkRefKind::Repeater, repeater_id)
-        end
+        # Validate the issue now, but DON'T create the link yet — it must not persist
+        # if the scope gate below refuses the send. The link is created after the gate.
+        return not_found("no issue with id #{issue_id}") if issue_id && !@store.get_issue(issue_id)
 
         idle_ms = int(h, "idle_ms")
         return Result.new(id_error(h, "idle_ms"), is_error: true) if idle_ms.nil? && present?(h, "idle_ms")
@@ -1751,6 +1753,11 @@ module Gori
         # Scope gate before the outbound handshake (same policy as send_request).
         sc = scope_check("#{scheme}://#{host}/", host, bool(h, "allow_unscoped") || false)
         return scope_blocked(sc) if sc.blocked
+        # Scope passed — now it's safe to persist the issue link.
+        if issue_id
+          @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
+            Store::LinkRefKind::Repeater, repeater_id)
+        end
         verify = @verify_upstream && !(bool(h, "insecure") || false)
         request = Env.expand_wire(repeater.request)
         sni = repeater.sni.try { |value| Env.expand(value) }
