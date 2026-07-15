@@ -255,6 +255,25 @@ describe Gori::Tui::Highlight do
       b.row(0)[0, 1].should eq("h")
     end
 
+    it "matches Screen#text across a MIXED ascii+wide multi-span line at every width" do
+      # draw's ASCII fast path (width-1 char draw) and its grapheme path must compose:
+      # width accumulates continuously across a span boundary where the branch flips, so a
+      # line split into an ASCII prefix span + a wide (CJK) suffix span renders and advances
+      # exactly like Screen#text over the concatenated string — truncation/ellipsis included.
+      full = "id=42 값" # "id=42 " is printable ASCII (fast path), "값" is width-2 (grapheme path)
+      {["id=42 ", "값"], ["id", "=42 값"], ["id=42", " 값"]}.each do |parts|
+        line = parts.map { |p| Highlight::Span.new(p, Theme.text) }
+        (0..10).each do |w|
+          plain = MemoryBackend.new(12, 1)
+          px = Screen.new(plain).text(0, 0, full, Theme.text, width: w)
+          hl = MemoryBackend.new(12, 1)
+          hx = Highlight.draw(Screen.new(hl), 0, 0, line, width: w)
+          hl.row(0).should eq(plain.row(0)) # same glyphs (parts=#{parts.inspect}, w=#{w})
+          hx.should eq(px)                  # same advance
+        end
+      end
+    end
+
     it "draws nothing for a zero/negative width" do
       b = MemoryBackend.new(10, 1)
       Highlight.draw(Screen.new(b), 0, 0, [Highlight::Span.new("hi", Theme.text)], width: 0)

@@ -46,12 +46,23 @@ module Gori::Tui
     # Display width in terminal columns for `str`, using full Unicode East-Asian
     # + emoji rules (Hangul syllables, CJK, etc. are 2 columns).
     def self.display_width(str : String) : Int32
-      return 0 if str.empty?
+      # Printable-ASCII fast path (the common case — labels, host/path, header lines):
+      # every 0x20..0x7e byte is exactly one width-1 cell, so the column count IS the byte
+      # count. Skips grapheme clustering + the per-glyph `g.to_s` String each call. A control
+      # byte (width 0, e.g. \t/\r) or any >=0x80 byte (a multibyte lead/continuation) falls
+      # through to the exact grapheme walk. Empty string → bytesize 0 (old early return).
+      return str.bytesize if printable_ascii?(str)
       w = 0
       str.each_grapheme do |g|
         w += Termisu::UnicodeWidth.grapheme_width(g.to_s)
       end
       w
+    end
+
+    # Whether every byte is printable ASCII (0x20..0x7e) — one byte, one width-1 cell.
+    # Lets display_width skip grapheme walking on the common label/header string.
+    private def self.printable_ascii?(str : String) : Bool
+      str.to_slice.all? { |b| b >= 0x20_u8 && b <= 0x7e_u8 }
     end
 
     # As `display_width`, but stops as soon as the running width reaches `limit`
@@ -91,6 +102,12 @@ module Gori::Tui
     # cursor / Reveal count it as ≥1, so cursor placement must too or it lands one
     # column short and overwrites a glyph.
     def self.column_width(str : String) : Int32
+      # ASCII fast path: every ASCII char counts as exactly 1 column here — a printable is
+      # width 1, and a control char (width 0) is floored to 1 by the max below — so the span
+      # is just the char count. Skips the per-char `display_width(ch.to_s)` grapheme walk +
+      # String on the common case (all-ASCII fields). Non-ASCII keeps the exact per-char loop
+      # (wide glyphs via display_width, combining marks floored to 1).
+      return str.size if str.ascii_only?
       w = 0
       str.each_char { |ch| w += {display_width(ch.to_s), 1}.max }
       w
