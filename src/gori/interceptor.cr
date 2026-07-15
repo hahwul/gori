@@ -151,6 +151,30 @@ module Gori
       @scope.active? ? @scope.may_match_host?(host) : true
     end
 
+    # --- Sandbox (proxy containment gate) ------------------------------------
+    # Delegates to the shared Scope (which the Interceptor already owns for hold-gating), so
+    # the proxy path reaches the sandbox policy through the object it already threads. FULLY
+    # INDEPENDENT of the interceptor's own `@enabled`: the sandbox blocks whether or not
+    # intercept is on.
+
+    # Is the sandbox on? Drives the Tunnel's force-to-h1 (so every MITM'd request reaches the
+    # per-request block below) and the CONNECT h2c refusal.
+    def sandbox_enabled? : Bool
+      @scope.sandbox?
+    end
+
+    # Precise per-request block (ClientConn). Builds the scope URL only when the sandbox is on
+    # — an off sandbox never inspects the URL — mirroring scope_allows?.
+    def sandbox_blocks?(scheme : String, host : String, target : String) : Bool
+      return false unless @scope.sandbox?
+      @scope.sandbox_blocks?("#{scheme}://#{host}#{target}", host)
+    end
+
+    # Coarse HOST-level block for the CONNECT gate, made before any request exists.
+    def sandbox_blocks_host?(host : String) : Bool
+      @scope.sandbox_blocks_host?(host)
+    end
+
     # Precise per-REQUEST gate, used by ClientConn (which has the full request): hold
     # this exact request? The scope URL (`scheme://host/target` — the same value the
     # Scope SQL filter builds, so a held request is exactly an in-scope History row) is

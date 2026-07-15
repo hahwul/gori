@@ -29,6 +29,14 @@ Press `i` to enable **Intercept**. When on, matching requests (and optionally re
 
 Scope keeps a large session focused on your target. In the **Project** tab you define include/exclude rules by host, string, or regular expression. Toggle the **scope lens** with `s` to filter the views down to in-scope traffic, and use scope to gate what Intercept and the scanners act on.
 
+### Sandbox
+
+The **Sandbox** is a hard containment gate for staying strictly in-bounds during a test. Toggle it in the **Project** tab's **NETWORK** pane (default: **off**). While it's **on**, the capture proxy forwards **only** the requests your scope *allows* — everything else is **blocked before it ever reaches the origin** (the client gets a `403` with an `X-Gori-Sandbox: blocked` header) and recorded as an aborted flow so the attempt stays visible. "Allowed" is the scope evaluated as an **allowlist**: at least one **include** rule must match and no **exclude** rule may match.
+
+Because it is an allowlist, a scope with **no include rules blocks *all* traffic** — add an include for your target first (enabling the sandbox with an empty scope asks you to confirm exactly this). A red `sandbox` chip in the top bar stays lit whenever it's on, and the NETWORK row spells out the current effect right next to the toggle.
+
+The sandbox governs **proxied/captured traffic only**. Repeater, Fuzzer, Miner, and the MCP `send_request` tool enforce scope on their own (they refuse an out-of-scope target with `SCOPE_BLOCKED`). For HTTPS the sandbox relies on TLS interception to read request URLs: a host that can't be in scope is refused at the `CONNECT` step, and interceptable connections are kept on HTTP/1.1 so every request is checked individually.
+
 ## Sitemap
 
 The **Sitemap** tab collapses History into a deduplicated tree of `host → path` endpoints, with method chips and scope markers. It's the fastest way to see the shape of a target's attack surface. Numeric path segments can be folded together so `/user/1` and `/user/2` share one node.
@@ -135,7 +143,7 @@ The **Project** home tab is more than a summary. Focusable panes (cycle with `Ta
 | **HOST OVERRIDES** | Per-project dial map |
 | **ENV** | Per-project `$KEY` variables for outbound requests — see [Repeater & Fuzzer](/guide/repeater-and-fuzzer/#environment-variables) |
 | **DESCRIPTION** | Free-form project notes |
-| **SETTINGS** | Per-project network pins (bind / upstream) — override the global Settings default when set |
+| **NETWORK** | Scope-lens + **sandbox** toggles, plus per-project network pins (bind / upstream) that override the global Settings default |
 
 Scope rules are also scriptable: `gori run scope add --kind=include --type=host --pattern=api.example.com` — full flags in the [CLI Reference](/reference/cli/#run-scope).
 

@@ -81,8 +81,8 @@ module Gori::Tui
       @env_preedit = ""
       @env_pane_enabled = false
 
-      # NETWORK pane: scope-lens toggle (row 0) + inline-editable network fields
-      # (rows 1-3: bind IP / bind port / upstream proxy). @set_values holds the three text
+      # NETWORK pane: two toggle rows (scope lens, sandbox) + inline-editable network fields
+      # (bind IP / bind port / upstream proxy). @set_values holds the three text
       # fields; @set_overridden tracks whether each is a project override (vs inheriting global).
       @set_sel = 0
       @set_values = ["", "", ""]
@@ -134,7 +134,7 @@ module Gori::Tui
     end
 
     private def current_set_value : String
-      @set_sel >= 1 ? @set_values[@set_sel - 1] : ""
+      settings_text_row? ? @set_values[@set_sel - SETTINGS_FIELD_BASE] : ""
     end
 
     # Drop tech fingerprints seen only on out-of-scope hosts before summarizing — with
@@ -212,9 +212,14 @@ module Gori::Tui
     PANES          = [:scope, :overrides, :env, :desc, :settings]
     ENV_MIN_BODY_H = 11
 
-    # PROJECT SETTINGS pane rows: row 0 is the scope-lens toggle, rows 1-3 the network fields.
-    SETTINGS_LABELS  = ["Scope lens", "Bind IP", "Bind Port", "Upstream proxy"]
-    SETTINGS_LABEL_W = 14 # value column starts past the widest label ("Upstream proxy")
+    # NETWORK pane rows: two toggles (scope-lens, sandbox) over the three inline network
+    # fields. The toggle/field boundary is FIELD_BASE — every field access is @set_sel minus
+    # it (the fields still live in the 3-slot @set_values, indexed @set_sel - FIELD_BASE).
+    SETTINGS_LABELS       = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Upstream proxy"]
+    SETTINGS_SCOPE_ROW    = 0
+    SETTINGS_SANDBOX_ROW  = 1
+    SETTINGS_FIELD_BASE   = 2 # first inline-editable network-field row
+    SETTINGS_LABEL_W      = 14 # value column starts past the widest label ("Upstream proxy")
 
     def focus_first : Nil
       @pane = :scope
@@ -277,7 +282,7 @@ module Gori::Tui
       vw < VIZ_MIN_W ? 0 : vw
     end
 
-    SETTINGS_H = 6
+    SETTINGS_H = 7 # 2 toggle rows + 3 network fields + the card's top/bottom border
     MIN_DESC_H = 3
 
     private def env_pane_enabled?(content_h : Int32) : Bool
@@ -386,11 +391,20 @@ module Gori::Tui
     end
 
     def settings_scope_row? : Bool
-      @set_sel == 0
+      @set_sel == SETTINGS_SCOPE_ROW
+    end
+
+    def settings_sandbox_row? : Bool
+      @set_sel == SETTINGS_SANDBOX_ROW
+    end
+
+    # A toggle row (scope lens or sandbox) — space/↵ flips it; no text capture.
+    def settings_toggle_row? : Bool
+      @set_sel < SETTINGS_FIELD_BASE
     end
 
     def settings_text_row? : Bool
-      @set_sel >= 1
+      @set_sel >= SETTINGS_FIELD_BASE
     end
 
     def set_at_top? : Bool
@@ -435,9 +449,10 @@ module Gori::Tui
 
     def set_input(ch : Char) : Nil
       return unless settings_text_row?
-      v = @set_values[@set_sel - 1]
+      fi = @set_sel - SETTINGS_FIELD_BASE
+      v = @set_values[fi]
       c = @set_cursor.clamp(0, v.size)
-      @set_values[@set_sel - 1] = "#{v[0, c]}#{ch}#{v[c..]}"
+      @set_values[fi] = "#{v[0, c]}#{ch}#{v[c..]}"
       @set_cursor = c + 1
       @set_preedit = ""
     end
@@ -446,15 +461,16 @@ module Gori::Tui
     # treat ⌫ as a no-op there (the text rows never auto-leave the pane, unlike the add-rows).
     def set_backspace : Bool
       return false unless settings_text_row? && @set_cursor > 0
-      v = @set_values[@set_sel - 1]
-      @set_values[@set_sel - 1] = "#{v[0, @set_cursor - 1]}#{v[@set_cursor..]}"
+      fi = @set_sel - SETTINGS_FIELD_BASE
+      v = @set_values[fi]
+      @set_values[fi] = "#{v[0, @set_cursor - 1]}#{v[@set_cursor..]}"
       @set_cursor -= 1
       true
     end
 
     def set_move_cursor(delta : Int32) : Nil
       return unless settings_text_row?
-      @set_cursor = (@set_cursor + delta).clamp(0, @set_values[@set_sel - 1].size)
+      @set_cursor = (@set_cursor + delta).clamp(0, @set_values[@set_sel - SETTINGS_FIELD_BASE].size)
     end
 
     # Re-read the network fields after an apply (Settings.project_* / effective values changed).
@@ -478,7 +494,7 @@ module Gori::Tui
       return unless panes = body_panes(rect)
       inner = panes[4].inset(1, 1)
       vx = inner.x + 1 + SETTINGS_LABEL_W + 1
-      @set_cursor = (mx - vx).clamp(0, @set_values[@set_sel - 1].size)
+      @set_cursor = (mx - vx).clamp(0, @set_values[@set_sel - SETTINGS_FIELD_BASE].size)
     end
 
     # --- SCOPE pane (list navigation; add/edit is ScopeRuleOverlay via the controller) ---
@@ -1292,7 +1308,7 @@ module Gori::Tui
       end
     end
 
-    # PROJECT SETTINGS card: the scope-lens toggle (row 0) over the three inline-editable network
+    # NETWORK card: the scope-lens + sandbox toggles over the three inline-editable network
     # fields (bind IP / bind port / upstream proxy). Each network row carries a "· project" /
     # "· global" marker so a pinned override reads distinct from an inherited global value.
     private def render_settings_card(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -1317,13 +1333,35 @@ module Gori::Tui
       screen.text(lx, y, label, selected ? Theme.text_bright : Theme.text, bg, width: SETTINGS_LABEL_W)
       vx = lx + SETTINGS_LABEL_W + 1
       return if vx >= inner.right
-      if i == 0
+      case i
+      when SETTINGS_SCOPE_ROW
         # Scope-lens toggle — ON (accent) / OFF (muted), reading the shared session Scope.
         on = @scope.enabled?
         screen.text(vx, y, on ? "ON" : "OFF", on ? Theme.accent : Theme.muted, bg, Attribute::Bold)
+      when SETTINGS_SANDBOX_ROW
+        render_sandbox_toggle(screen, inner, y, vx, bg)
       else
-        render_settings_field(screen, inner, y, vx, i - 1, selected, bg)
+        render_settings_field(screen, inner, y, vx, i - SETTINGS_FIELD_BASE, selected, bg)
       end
+    end
+
+    # The Sandbox toggle value + an ALWAYS-VISIBLE, state-aware guidance note. This is a
+    # BLOCKING mode, so the note must make the consequence obvious next to the switch — and
+    # SCREAM when the scope has no include rules, the state where ON silently drops ALL
+    # traffic. ON draws in red (danger), matching the top-bar sandbox chip + the intercept chip.
+    private def render_sandbox_toggle(screen : Screen, inner : Rect, y : Int32, vx : Int32, bg : Color) : Nil
+      on = @scope.sandbox?
+      x = screen.text(vx, y, on ? "ON" : "OFF", on ? Theme.red : Theme.muted, bg, Attribute::Bold)
+      note, nc =
+        if !on
+          {"· off — all traffic passes", Theme.muted}
+        elsif @scope.include_count == 0
+          {"⚠ no scope → ALL blocked", Theme.red}
+        else
+          {"⚠ blocks out-of-scope", Theme.red}
+        end
+      nx = x + 1
+      screen.text(nx, y, note, nc, bg, width: {inner.right - nx, 0}.max) if nx < inner.right
     end
 
     # One network text field: the value (editable input_line when the row is focused) plus a

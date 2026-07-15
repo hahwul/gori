@@ -149,6 +149,19 @@ module Gori::Proxy
         end
       end
 
+      # Sandbox: the hard scope gate. When enabled, ONLY requests the scope ALLOWS reach
+      # upstream — everything else, including ALL traffic when no include rule is set, is
+      # blocked HERE, before we touch (or even dial) the origin. Keyed on the ACTUALLY-SENT
+      # target (post Match&Replace), matching the intercept gate + the captured History row.
+      # We record the attempt as an aborted flow (visible in History) and answer the client
+      # a distinct 403 so a sandbox block never reads like an upstream failure. The scope
+      # URL is built lazily inside the interceptor, only while the sandbox is on.
+      if (ic = @interceptor) && ic.sandbox_blocks?(scheme, host, sent_req.target)
+        record_blocked_request(sent_req, scheme, host, port, created_at)
+        write_sandbox_block
+        return false
+      end
+
       # Ambiguous/illegal request framing (CL+TE, non-final chunked, bad
       # Content-Length) means we can't determine the body boundary to forward it
       # faithfully — the codec raises to force a close. But the attempt must stay
@@ -751,6 +764,16 @@ module Gori::Proxy
         return false
       end
 
+      # Sandbox: refuse to even open a tunnel to a host that CAN'T be in scope (safe-testing:
+      # don't handshake with an out-of-scope origin at all). A host that MIGHT be in scope —
+      # e.g. only url/path rules narrow it — IS tunnelled and MITM'd; the Tunnel forces it to
+      # h1 so ClientConn can block the out-of-scope requests precisely, per request. Answered
+      # before the 200 so the client sees the CONNECT itself refused.
+      if (ic = @interceptor) && ic.sandbox_blocks_host?(host)
+        write_sandbox_block
+        return false
+      end
+
       if tls = @tls
         @io.write("HTTP/1.1 200 Connection Established\r\n\r\n".to_slice)
         @io.flush
@@ -760,6 +783,11 @@ module Gori::Proxy
         return false if first.nil?
         stream = PrefixIO.new(Bytes[first], @io)
         if first == 0x50_u8
+          # Cleartext h2 (h2c) tunnelled inside CONNECT runs the raw h2 relay, which bypasses
+          # ClientConn's per-request block. Under the sandbox we can't gate it per request, so
+          # (the host having already cleared the coarse gate above) refuse the whole tunnel —
+          # h2c-in-CONNECT is rare, and a blocking mode must not leave an ungated path open.
+          return false if (ic = @interceptor) && ic.sandbox_enabled?
           intercept_h2c(host, port, stream)
         else
           tls.intercept(host, port, stream, @sink)
@@ -864,6 +892,24 @@ module Gori::Proxy
 
     private def write_intercept_drop : Nil
       @io.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nX-Gori-Intercept: dropped\r\n\r\n".to_slice)
+      @io.flush
+    rescue
+    end
+
+    # A request the sandbox refused never reaches upstream; record it as an Aborted flow
+    # (like an intercept drop) so the operator still sees the blocked attempt (P4/P7). Body
+    # is nil — we block before reading it and close the connection right after.
+    private def record_blocked_request(req, scheme, host, port, created_at) : Nil
+      flow_id = @sink.on_request(FlowMapper.request(req,
+        scheme: scheme, host: host, port: port, created_at: created_at, body: nil))
+      @sink.on_response(FlowMapper.aborted_response(flow_id, "blocked by sandbox (out of scope)"))
+    end
+
+    # Tell the client the sandbox refused this request — a distinct 403 + marker header so a
+    # blocked flow reads differently from an upstream 502. The caller returns false, so @io
+    # closes right after: no keep-alive on a blocked connection.
+    private def write_sandbox_block : Nil
+      @io.write("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\nX-Gori-Sandbox: blocked\r\n\r\n".to_slice)
       @io.flush
     rescue
     end

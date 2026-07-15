@@ -60,7 +60,13 @@ module Gori::Tui
           "↑/↓ move · ↑ overrides · → desc · a add · ↵/e edit · d del · space cmds · esc"
         end
       when :settings
-        @project_view.settings_text_row? ? "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc" : "space/↵ toggle lens · ↑/↓ move · ← overrides · ↑ desc · esc"
+        if @project_view.settings_text_row?
+          "type to edit · ↵ apply · ←/→ cursor · ↑/↓ move · esc"
+        elsif @project_view.settings_sandbox_row?
+          "space/↵ sandbox — ON blocks ALL out-of-scope traffic · ↑/↓ move · esc"
+        else
+          "space/↵ toggle lens · ↑/↓ move · ← overrides · ↑ desc · esc"
+        end
       else
         if @project_view.desc_insert_mode?
           "type to edit · esc read · ↑/↓/↔ move · ← scope · ↓ settings · ^G goto · ^F find · ^E $EDITOR"
@@ -125,7 +131,11 @@ module Gori::Tui
         @project_view.focus_pane(:settings)
         if idx = @project_view.set_row_at(rect, mx, my)
           @project_view.select_setting(idx)
-          idx == 0 ? @host.toggle_scope_lens : @project_view.setting_click_to_cursor(rect, mx, my)
+          case idx
+          when ProjectView::SETTINGS_SCOPE_ROW   then @host.toggle_scope_lens
+          when ProjectView::SETTINGS_SANDBOX_ROW then @host.toggle_sandbox
+          else                                        @project_view.setting_click_to_cursor(rect, mx, my)
+          end
         end
       end # :overview band → just take body focus
       true
@@ -444,6 +454,22 @@ module Gori::Tui
       )
     end
 
+    # Feedback after a sandbox change — a BLOCKING toggle must never be silent, and the
+    # empty-scope case (ON blocks EVERYTHING) has to be called out loudly. Public so the
+    # Runner's toggle_sandbox reuses it after both the plain flip and the danger-confirm path.
+    def toast_sandbox_state : Nil
+      scope = @host.session.scope
+      @host.status(
+        if !scope.sandbox?
+          "sandbox OFF — all captured traffic passes through"
+        elsif scope.include_count == 0
+          "⚠ sandbox ON but NO scope include rules — ALL traffic is blocked (add an include here, a)"
+        else
+          "sandbox ON — only in-scope traffic passes; everything else is blocked"
+        end
+      )
+    end
+
     # --- HOST OVERRIDES pane: browse the override list (or route to the add/edit row) ---
     # Returns true when consumed; false defers to the keymap — a/e/d fire the
     # hostoverride.*-entry verbs, space opens the action menu, and Global chords work too.
@@ -693,14 +719,16 @@ module Gori::Tui
     end
 
     private def handle_project_settings_action(ev : Termisu::Event::Key) : Nil
-      @project_view.settings_scope_row? ? handle_project_settings_scope_key(ev) : handle_project_settings_field_key(ev)
+      @project_view.settings_text_row? ? handle_project_settings_field_key(ev) : handle_project_settings_toggle_key(ev)
     end
 
     # Row 0 (scope lens): space/↵ toggles it; ← crosses to the left column.
-    private def handle_project_settings_scope_key(ev : Termisu::Event::Key) : Nil
+    # The two toggle rows (scope lens, sandbox): space/↵ flips whichever is selected, ← crosses
+    # left. ↑/↓ are handled by settings_move before we get here.
+    private def handle_project_settings_toggle_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       if key.enter? || key.space?
-        @host.toggle_scope_lens
+        @project_view.settings_sandbox_row? ? @host.toggle_sandbox : @host.toggle_scope_lens
       elsif key.left?
         @project_view.focus_pane(@project_view.env_pane_enabled? ? :env : :overrides)
       end

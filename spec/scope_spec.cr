@@ -271,6 +271,118 @@ describe Gori::Scope do
         .should eq([{"include", "host", "legacy.test"}])
     end
   end
+
+  describe "sandbox (hard block gate)" do
+    it "is off by default and never blocks while off" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.sandbox?.should be_false
+        scope.add("include", "host", "acme.test")
+        # Off ⇒ even an out-of-scope url is NOT blocked (the sandbox does nothing).
+        scope.sandbox_blocks?(url_of("https", "evil.test", "/"), "evil.test").should be_false
+        scope.sandbox_blocks_host?("evil.test").should be_false
+      end
+    end
+
+    it "on with NO include rules blocks EVERYTHING (empty allowlist is not allow-all)" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.enable_sandbox
+        scope.sandbox_blocks?(url_of("https", "anything.test", "/"), "anything.test").should be_true
+        scope.sandbox_blocks_host?("anything.test").should be_true
+        # An EXCLUDES-only scope is still not an allowlist ⇒ still blocks all (unlike the Burp lens).
+        scope.add("exclude", "host", "ads.test")
+        scope.sandbox_blocks?(url_of("https", "acme.test", "/"), "acme.test").should be_true
+      end
+    end
+
+    it "on allows only what the scope includes and blocks the rest" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "acme.test")
+        scope.enable_sandbox
+        scope.sandbox_blocks?(url_of("https", "api.acme.test", "/x"), "api.acme.test").should be_false
+        scope.sandbox_blocks?(url_of("https", "evil.test", "/x"), "evil.test").should be_true
+      end
+    end
+
+    it "on honours excludes (an included host with an excluded path is blocked)" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "acme.test")
+        scope.add("exclude", "string", "/logout")
+        scope.enable_sandbox
+        scope.sandbox_blocks?(url_of("https", "acme.test", "/home"), "acme.test").should be_false
+        scope.sandbox_blocks?(url_of("https", "acme.test", "/logout"), "acme.test").should be_true
+      end
+    end
+
+    it "is INDEPENDENT of the display lens (blocks with lens off; off never blocks with lens on)" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "acme.test")
+        # Sandbox on, lens OFF ⇒ still blocks out-of-scope.
+        scope.enable_sandbox
+        scope.enabled?.should be_false
+        scope.sandbox_blocks?(url_of("https", "evil.test", "/"), "evil.test").should be_true
+        # Sandbox off, lens ON ⇒ never blocks.
+        scope.disable_sandbox
+        scope.enable
+        scope.sandbox_blocks?(url_of("https", "evil.test", "/"), "evil.test").should be_false
+      end
+    end
+
+    it "host-gate is conservative: a url-level include keeps every host tunnellable" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "string", "/admin") # url-level: path unknown at CONNECT
+        scope.enable_sandbox
+        # Can't rule out ANY host at the host level (some path might match), so don't block the tunnel.
+        scope.sandbox_blocks_host?("evil.test").should be_false
+        # But the precise per-request gate still blocks the non-matching path.
+        scope.sandbox_blocks?(url_of("https", "evil.test", "/public"), "evil.test").should be_true
+        scope.sandbox_blocks?(url_of("https", "evil.test", "/admin"), "evil.test").should be_false
+      end
+    end
+
+    it "host-gate blocks a host that host-includes rule out, and a host-excluded one" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.add("include", "host", "acme.test")
+        scope.enable_sandbox
+        scope.sandbox_blocks_host?("acme.test").should be_false      # included
+        scope.sandbox_blocks_host?("api.acme.test").should be_false  # subdomain of an include
+        scope.sandbox_blocks_host?("evil.test").should be_true       # no include covers it
+        scope.add("exclude", "host", "cdn.acme.test")
+        scope.sandbox_blocks_host?("cdn.acme.test").should be_true   # host-level exclude
+      end
+    end
+
+    it "persists the sandbox flag across reload, independently of the lens flag" do
+      with_store do |store|
+        s1 = Gori::Scope.load(store)
+        s1.enable_sandbox
+        s1.enabled?.should be_false
+        Gori::Scope.load(store).sandbox?.should be_true
+        # toggle back off
+        s2 = Gori::Scope.load(store)
+        s2.toggle_sandbox
+        s2.sandbox?.should be_false
+        Gori::Scope.load(store).sandbox?.should be_false
+      end
+    end
+
+    it "include_count reflects only include rules (drives the guidance note)" do
+      with_store do |store|
+        scope = Gori::Scope.load(store)
+        scope.include_count.should eq(0)
+        scope.add("include", "host", "acme.test")
+        scope.add("exclude", "host", "ads.test")
+        scope.add("include", "string", "/api")
+        scope.include_count.should eq(2)
+      end
+    end
+  end
 end
 
 describe Gori::QL do
