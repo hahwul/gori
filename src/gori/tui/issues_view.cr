@@ -583,6 +583,8 @@ module Gori::Tui
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
       issue = @detail.not_nil!
+      # Back-to-list affordance on the top border (←/esc → the issue list).
+      Frame.list_back_hint(screen, rect)
       w = {rect.w - 2, 0}.max
 
       # y0 — title row: a severity-coloured bullet + the bright title; #id at the right.

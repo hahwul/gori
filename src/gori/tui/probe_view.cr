@@ -557,6 +557,8 @@ module Gori::Tui
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
       issue = @detail || return
+      # Back-to-list affordance on the top border (←/esc → the issue list).
+      Frame.list_back_hint(screen, rect)
       w = {rect.w - 2, 0}.max
       code_label = "##{issue.code}"
       screen.text(rect.right - code_label.size - 1, rect.y, code_label, Theme.muted)

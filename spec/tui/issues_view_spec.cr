@@ -37,6 +37,22 @@ describe Gori::Tui::IssuesView do
     end
   end
 
+  it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
+    tmp_store do |store|
+      store.insert_issue("SQL injection", Gori::Store::Severity::Critical, "acme.test", nil)
+      view = IssuesView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      backend = MemoryBackend.new(80, 16)
+      screen = Screen.new(backend)
+      BodyChrome.framed(screen, Rect.new(0, 0, 80, 16), true) do |inner|
+        view.render(screen, inner, focused: true)
+      end
+      backend.row(0).includes?("‹ list").should be_true
+    end
+  end
+
   it "renders an empty-state when there are no issues" do
     tmp_store do |store|
       view = IssuesView.new

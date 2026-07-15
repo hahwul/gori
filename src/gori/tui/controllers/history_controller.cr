@@ -333,6 +333,12 @@ module Gori::Tui
       @history.scroll_detail(delta)
     end
 
+    # The open detail is scrolled/caret'd to its very top — the boundary where a further
+    # ↑ escapes up to the tab bar (Runner#scroll_detail reads this).
+    def detail_at_top? : Bool
+      @history.detail_at_top?
+    end
+
     def detail_copy_selection : Nil
       text = @history.detail_copy_text
       if text.empty?

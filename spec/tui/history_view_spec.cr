@@ -255,6 +255,39 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/api", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      backend = MemoryBackend.new(80, 16)
+      screen = Screen.new(backend)
+      # Render via the real framed path so inner.y - 1 lands on the drawn top border
+      # (existing detail specs render at rect.y == 0, where the marker is correctly skipped).
+      BodyChrome.framed(screen, Rect.new(0, 0, 80, 16), true) do |inner|
+        view.render_detail(screen, inner, focused: true)
+      end
+      backend.row(0).includes?("‹ list").should be_true
+    end
+  end
+
+  it "detail_at_top? tracks the caret so ↑ escapes to the tab bar only at the very top" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/api", 200) # multi-line request head → caret can move
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      view.detail_at_top?.should be_true  # fresh open → caret on row 0
+      view.scroll_detail(1)               # caret down one line
+      view.detail_at_top?.should be_false
+      view.scroll_detail(-1)              # back to row 0
+      view.detail_at_top?.should be_true
+    end
+  end
+
   it "hscroll_detail scrolls a long response body line sideways into view (shift+←/→)" do
     tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(

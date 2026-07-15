@@ -3709,7 +3709,15 @@ module Gori::Tui
     end
 
     def menu_left : Nil
-      @menu_more ? (@menu_more = false) : cycle_tab(-1)
+      # ← off the ⋯ affordance steps back onto the bar; otherwise cycle left. The
+      # LEFTMOST tab is a hard stop — no wrap to the far end (mirrors menu_right's
+      # no-wrap at the right edge). A stray ← on Project used to jump to the last tab,
+      # which was almost always accidental, so the left edge is now inert.
+      if @menu_more
+        @menu_more = false
+      elsif !first_visible_tab?
+        cycle_tab(-1)
+      end
     end
 
     # The tabs hidden from the bar right now — the ⋯ dropdown's contents. The active tab
@@ -3724,6 +3732,10 @@ module Gori::Tui
 
     private def last_visible_tab? : Bool
       effective_tabs.last?.try(&.first) == @active_tab
+    end
+
+    private def first_visible_tab? : Bool
+      effective_tabs.first?.try(&.first) == @active_tab
     end
 
     # The anchor the dropdown drops down from — the ⋯ button's cell rect, or (defensively,
@@ -4298,6 +4310,18 @@ module Gori::Tui
     end
 
     def scroll_detail(delta : Int32) : Nil
+      # ↑ at the very top of the open detail pops focus up to the tab bar, mirroring
+      # the list's ↑-at-top → TABS. current_scope keys off @overlay before @focus, so
+      # the menu isn't reachable while :detail is open — close the detail first, then
+      # land on the bar. ↑ and ↓ aren't inverses here: ↵/↓ from the bar re-enters the
+      # LIST (not the detail), but the row selection is kept so re-opening is one key.
+      # Only the single-step detail.up/down verbs route here; PageUp (Runner) and the
+      # wheel (controller/view) bypass this, so paging/scrolling never ejects to TABS.
+      if delta < 0 && @overlay == :detail && history_controller.detail_at_top?
+        history_controller.close_detail
+        focus_pane(:menu)
+        return
+      end
       history_controller.scroll_detail(delta)
     end
 

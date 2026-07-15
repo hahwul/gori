@@ -668,6 +668,13 @@ module Gori::Tui
       end
     end
 
+    # True when the detail is at its very top: caret on row 0 (navigable text) or the
+    # scroll offset pinned to 0 (hex dump). Mirrors the list's at_top? so a ↑ here pops
+    # focus to the tab bar exactly as it does from the list's first row.
+    def detail_at_top? : Bool
+      detail_navigable? ? @detail_read.cy == 0 : @detail_scroll == 0
+    end
+
     # READ-mode caret move (+ optional shift selection). Arrow keys / detail.up/down
     # route here when the pane is navigable text (not a raw hex dump).
     # Lazy (size + line_at): a vertical step only materialises the destination line —
@@ -1300,6 +1307,8 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y, "no flow selected", Theme.muted)
         return
       end
+      # Back-to-list affordance on the top border (← past REQUEST / esc → the list).
+      Frame.list_back_hint(screen, rect)
       # Pane strip: show ALL panes as chips with the active one highlighted, so it's
       # obvious there's more behind (←/→ walk REQUEST → RESPONSE → FRAMES).
       x = rect.x + 1

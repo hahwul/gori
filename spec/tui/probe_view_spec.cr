@@ -54,6 +54,22 @@ describe Gori::Tui::ProbeView do
     end
   end
 
+  it "renders the '‹ list' back marker on the detail's top frame border (framed path)" do
+    view_store do |store|
+      seed(store, "missing_hsts", "a.test")
+      view = Gori::Tui::ProbeView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      backend = MemoryBackend.new(80, 16)
+      screen = Gori::Tui::Screen.new(backend)
+      Gori::Tui::BodyChrome.framed(screen, Gori::Tui::Rect.new(0, 0, 80, 16), true) do |inner|
+        view.render(screen, inner)
+      end
+      backend.row(0).includes?("‹ list").should be_true
+    end
+  end
+
   it "honours an explicit status: filter even with the open-only lens (bypasses the default)" do
     view_store do |store|
       seed(store, "missing_hsts", "a.test")
