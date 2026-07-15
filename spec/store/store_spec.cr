@@ -55,6 +55,9 @@ describe Gori::Store do
       store.@db.exec("ALTER TABLE repeaters DROP COLUMN tags")           # V31
       store.@db.exec("ALTER TABLE repeaters RENAME TO replays")          # undo V32 so historical <V32 migrations replay against the old table name
       store.@db.exec("ALTER TABLE issues RENAME TO findings")            # undo V34 (findings table predates V17, so it must carry the old name back)
+      store.@db.exec("DROP TABLE events")                                # V35
+      store.@db.exec("DROP TABLE intercept_held")                        # V36
+      store.@db.exec("DROP TABLE intercept_commands")                    # V36
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 
@@ -95,6 +98,9 @@ describe Gori::Store do
               "VALUES (1, 1, 1, 'legacy', 2, 'x.test', NULL, '', 0)")
       db.exec("INSERT INTO entity_links (owner_kind, owner_id, ref_kind, ref_id, created_at) VALUES ('finding', 1, 'replay', ?, 1)", rid)
       db.exec("INSERT INTO settings (key, value) VALUES ('prism_mode', 'active')")
+      db.exec("DROP TABLE events")             # V35
+      db.exec("DROP TABLE intercept_held")     # V36
+      db.exec("DROP TABLE intercept_commands") # V36
       db.exec("PRAGMA user_version = 31")
       store.close
 
@@ -127,6 +133,84 @@ describe Gori::Store do
       rows[0].target.should eq("/second")
       rows[0].status.should be_nil
       rows[0].state.should eq(Gori::Store::FlowState::Pending)
+    end
+  end
+
+  it "appends events and tails them with a forward id cursor (list_events backing)" do
+    with_store do |store|
+      a = store.insert_event("miner", "job_done", "success", "found 3", goto_tab: "miner", goto_session_id: 7_i64)
+      b = store.insert_event("agent", "agent_action", "info", "send_request ok", payload: "send_request")
+      c = store.insert_event("fuzzer", "job_done", "error", "boom")
+      a.should be > 0
+      (b > a && c > b).should be_true # monotonic ids
+
+      all = store.events_after(0, 100)
+      all.map(&.id).should eq([a, b, c])                    # oldest-first
+      all.map(&.source).should eq(["miner", "agent", "fuzzer"])
+      all[0].goto_session_id.should eq(7_i64)
+      all[1].payload.should eq("send_request")
+
+      store.events_after(a, 100).map(&.id).should eq([b, c]) # strictly after the cursor
+      store.events_after(c, 100).should be_empty             # nothing past the newest
+    end
+  end
+
+  it "never reuses an event id after the newest row is deleted (AUTOINCREMENT)" do
+    with_store do |store|
+      x = store.insert_event("probe", "issue_found", "success", "one")
+      store.@db.exec("DELETE FROM events WHERE id = ?", x)
+      y = store.insert_event("probe", "issue_found", "success", "two")
+      y.should be > x # a since_id watermark can never silently skip a new row
+    end
+  end
+
+  it "mirrors held intercept items and round-trips the command queue (#123 bridge)" do
+    with_store do |store|
+      tok = "sess-abc"
+      raw = "GET /a HTTP/1.1\r\nHost: x.test\r\n\r\n".to_slice
+      store.publish_intercept_held(tok, [Gori::Store::HeldRow.new(tok, 1_i64, "request", "GET", "x.test", 80, "http", "/a", raw, 1_000_i64, nil, false)])
+      held = store.intercept_held(tok)
+      held.size.should eq(1)
+      held[0].item_id.should eq(1)
+      held[0].host.should eq("x.test")
+      held[0].raw.should eq(raw)
+      store.intercept_held("other-token").should be_empty
+
+      # A fresh session (different token) wipes the prior session's mirror on publish.
+      store.publish_intercept_held("sess-two", [Gori::Store::HeldRow.new("sess-two", 1_i64, "request", "GET", "y.test", 80, "http", "/b", raw, 2_000_i64, nil, false)])
+      store.intercept_held(tok).should be_empty
+      store.intercept_held("sess-two").size.should eq(1)
+
+      # Command queue: enqueue -> forward-cursor drain -> ack -> status.
+      cid = store.enqueue_intercept_command("sess-two", "forward", item_id: 1_i64)
+      cid.should be > 0
+      store.latest_intercept_command_id.should eq(cid)
+      cmds = store.intercept_commands_after(0_i64, 10)
+      cmds.size.should eq(1)
+      cmds[0].verb.should eq("forward")
+      cmds[0].item_id.should eq(1)
+      cmds[0].session_token.should eq("sess-two")
+      store.intercept_commands_after(cid, 10).should be_empty # forward cursor: nothing past it
+      store.command_status(cid).not_nil![0].should eq("pending")
+      store.ack_intercept_command(cid, "forwarded", "GET y.test/b")
+      st = store.command_status(cid).not_nil!
+      st[0].should eq("forwarded")
+      st[1].should eq("GET y.test/b")
+
+      # Empty publish clears the mirror; clear_intercept_state! wipes both tables.
+      store.publish_intercept_held("sess-two", [] of Gori::Store::HeldRow)
+      store.intercept_held("sess-two").should be_empty
+      store.clear_intercept_state!
+      store.intercept_commands_after(0_i64, 10).should be_empty
+    end
+  end
+
+  it "never reuses an intercept_commands id after a delete (AUTOINCREMENT watermark safety)" do
+    with_store do |store|
+      a = store.enqueue_intercept_command("t", "forward", item_id: 1_i64)
+      store.@db.exec("DELETE FROM intercept_commands WHERE id = ?", a)
+      b = store.enqueue_intercept_command("t", "drop", item_id: 2_i64)
+      b.should be > a # the TUI drain watermark can never silently skip a command
     end
   end
 

@@ -90,6 +90,9 @@ describe "entity_links (V21)" do
       store.@db.exec("ALTER TABLE repeaters RENAME TO replays")                 # undo V32 so historical <V32 migrations replay against the old table name
       store.@db.exec("ALTER TABLE probe_issues RENAME TO prism_issues")         # undo V33 so historical <V33 migrations replay against the old table name
       store.@db.exec("ALTER TABLE issues RENAME TO findings")                   # undo V34 so historical <V34 migrations replay against the old table name
+      store.@db.exec("DROP TABLE events")                                       # V35
+      store.@db.exec("DROP TABLE intercept_held")                               # V36
+      store.@db.exec("DROP TABLE intercept_commands")                           # V36
       store.@db.exec("PRAGMA user_version = 20")
       store.close
 

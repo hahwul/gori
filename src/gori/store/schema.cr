@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 34
+      VERSION = 36
 
       # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
       # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
@@ -569,7 +569,75 @@ module Gori
         "UPDATE entity_links SET owner_kind = 'issue' WHERE owner_kind = 'finding'",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34]
+      # #124 — the AI-facing event feed. An append-only log of job lifecycle (miner/fuzzer/
+      # probe) and agent actions that the MCP process tails via a forward `id > cursor`
+      # cursor (list_events). Flows stay the flow firehose (list_history since:) — this table
+      # NEVER duplicates flow rows; `flow_id` is only an optional cross-ref. AUTOINCREMENT is
+      # mandatory (not a bare rowid): a never-reused id guarantees a since_id watermark
+      # consumer can't silently skip a row even if a future retention sweep deletes rows.
+      # created_at is unix micros for display only — the cursor key is always `id`.
+      V35 = [
+        <<-SQL,
+        CREATE TABLE events (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at      INTEGER NOT NULL,
+          source          TEXT    NOT NULL,
+          kind            TEXT    NOT NULL,
+          level           TEXT    NOT NULL,
+          message         TEXT    NOT NULL,
+          goto_tab        TEXT,
+          goto_session_id INTEGER,
+          flow_id         INTEGER,
+          payload         TEXT
+        )
+        SQL
+      ]
+
+      # #123 — the cross-process live-intercept bridge. The MCP process (Store only, no live
+      # Interceptor) drives hold/forward/drop/edit through the DB: the capturing TUI publishes a
+      # MIRROR of the currently-held queue into intercept_held, and the MCP process appends
+      # decisions to the intercept_commands queue which the TUI drains + applies. intercept_held
+      # is keyed by (session_token, item_id) — a snapshot mirror, NOT a cursor log, so the id-reuse
+      # hazard doesn't apply. intercept_commands IS a forward-cursored queue, so its id MUST be
+      # AUTOINCREMENT (a recycled rowid would let the TUI's drain watermark silently skip a row).
+      # session_token defeats cross-session reuse of the interceptor's per-session item ids.
+      V36 = [
+        <<-SQL,
+        CREATE TABLE intercept_held (
+          session_token TEXT    NOT NULL,
+          item_id       INTEGER NOT NULL,
+          kind          TEXT    NOT NULL,
+          method        TEXT    NOT NULL,
+          host          TEXT    NOT NULL,
+          port          INTEGER NOT NULL,
+          scheme        TEXT    NOT NULL,
+          target        TEXT    NOT NULL,
+          flow_id       INTEGER,
+          raw           BLOB    NOT NULL,
+          held_at_ms    INTEGER NOT NULL,
+          edited        INTEGER NOT NULL DEFAULT 0,
+          viewed_ms     INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (session_token, item_id)
+        )
+        SQL
+        <<-SQL,
+        CREATE TABLE intercept_commands (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at    INTEGER NOT NULL,
+          session_token TEXT,
+          verb          TEXT    NOT NULL,
+          item_id       INTEGER,
+          bytes         BLOB,
+          arg           TEXT,
+          status        TEXT    NOT NULL DEFAULT 'pending',
+          applied_at    INTEGER,
+          result        TEXT,
+          origin        TEXT
+        )
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34, V35, V36]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

@@ -470,5 +470,66 @@ module Gori
 
     # Best-effort notification that a flow row changed. Published AFTER commit.
     record FlowEvent, id : Int64, kind : Symbol # :inserted | :updated
+
+    # One row of the #124 append-only event feed (the AI firehose the MCP process tails).
+    # `id` is the forward cursor key (monotonic AUTOINCREMENT); `created_at` is unix micros
+    # for display. `goto_tab`/`goto_session_id` mirror Jobs::Goto so a promoted event can
+    # jump to its result; `flow_id` is an optional cross-ref to a captured flow.
+    struct EventRow
+      getter id : Int64
+      getter created_at : Int64
+      getter source : String
+      getter kind : String
+      getter level : String
+      getter message : String
+      getter goto_tab : String?
+      getter goto_session_id : Int64?
+      getter flow_id : Int64?
+      getter payload : String?
+
+      def initialize(@id, @created_at, @source, @kind, @level, @message,
+                     @goto_tab = nil, @goto_session_id = nil, @flow_id = nil, @payload = nil)
+      end
+    end
+
+    # One currently-held intercept item, MIRRORED into intercept_held by the capturing
+    # process so the MCP process can list/get it (#123). `item_id` is the Interceptor's
+    # per-session id; `held_at_ms` is a WALL-CLOCK stamp captured once at hold time (the
+    # in-memory Item.held_at is a monotonic Instant, meaningless across processes).
+    struct HeldRow
+      getter session_token : String
+      getter item_id : Int64
+      getter kind : String
+      getter method : String
+      getter host : String
+      getter port : Int32
+      getter scheme : String
+      getter target : String
+      getter flow_id : Int64?
+      getter raw : Bytes
+      getter held_at_ms : Int64
+      getter edited : Bool
+      # Wall-clock of the last MCP intercept_list/get that returned this item — the agent's
+      # "I'm still watching" signal for the auto-forward reaper (0 = never viewed by an agent).
+      getter viewed_ms : Int64
+
+      def initialize(@session_token, @item_id, @kind, @method, @host, @port, @scheme,
+                     @target, @raw, @held_at_ms, @flow_id = nil, @edited = false, @viewed_ms = 0_i64)
+      end
+    end
+
+    # One row of the intercept_commands queue (MCP -> TUI). Drained forward-cursored and
+    # applied by the lock-holding TUI (#123).
+    struct CommandRow
+      getter id : Int64
+      getter session_token : String?
+      getter verb : String
+      getter item_id : Int64?
+      getter bytes : Bytes?
+      getter arg : String?
+
+      def initialize(@id, @session_token, @verb, @item_id = nil, @bytes = nil, @arg = nil)
+      end
+    end
   end
 end

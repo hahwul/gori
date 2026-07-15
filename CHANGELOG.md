@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Added — MCP live intercept + event feed (#123, #124)
+
+Agents can sit in the intercept loop and tail job/agent activity without
+busy-polling History alone:
+
+- **`list_events`** — forward-cursor tail over an append-only `events` table
+  (V35) for miner/fuzzer/probe lifecycle and agent actions. Flows stay the
+  firehose via `list_history since:`; this table never duplicates flow rows.
+- **Live intercept bridge** — capture-lock holder mirrors held items into
+  `intercept_held` and drains agent commands from `intercept_commands` (V36).
+  New MCP verbs: `intercept_list` / `intercept_get` / `intercept_forward` /
+  `intercept_drop` / `intercept_forward_edit` / `intercept_toggle` /
+  `intercept_set_filter` / `intercept_set_direction` (mutating verbs gated
+  behind non-`--read-only`; refuse when no live capture holder).
+- **Human visibility** — agent intercept actions surface as notification notes
+  with `source: agent` (distinct overlay rendering); engine controllers tag
+  notes with miner/fuzzer/probe sources. Unwatched holds auto-forward only when
+  an agent has attached (pure-human sessions keep indefinite hold).
+
 ### Added — Param Miner covers more body types
 
 The Miner now injects candidate parameters into two body shapes it previously
