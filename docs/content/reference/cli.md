@@ -164,7 +164,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | Option | Description |
 |--------|-------------|
 | `--flow`, `--request`, `--target`, `--sni`, `--http2`, `-k` | Request source and transport |
-| `--locations=LIST` | `query`, `form`, `json`, `headers`, `cookies` |
+| `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies` (multipart off by default — pass it explicitly) |
 | `--wordlist`, `--bucket=N` | Candidate names and bucket size |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | Rate control |
 | `--format` | `text`, `json`, or `jsonl` |

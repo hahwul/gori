@@ -20,6 +20,12 @@ module Gori::Miner
   class Engine
     MAX_CONCURRENCY = 100
 
+    # Per-request growth ceiling for the Json location. A JSON candidate is injected into EVERY
+    # object node, so a deeply-nested body could otherwise balloon one request to megabytes; this
+    # shrinks Json buckets (in initial_buckets) instead. A single-object body (node count 1) is
+    # unaffected and buckets exactly as before.
+    MAX_JSON_INJECT_BYTES = 128 * 1024
+
     enum State : UInt8
       Running
       Paused
@@ -276,15 +282,26 @@ module Gori::Miner
     private def initial_buckets(loc : Location, names : Array(String)) : Array(Task)
       cap = @config.bucket_for(loc)
       url_loc = loc.query? || loc.form?
-      byte_budget = url_loc ? Inject::MAX_URL_BYTES : Int32::MAX
+      # JSON injects each candidate into EVERY object node, so a name's real byte cost is the
+      # per-name cost × node count. Derive the count ONCE from @base (fixed → the node set never
+      # varies with bucket size, so bisection/confirm stay valid) and bound per-request growth.
+      json_nodes = loc.json? ? {Inject.json_object_node_count(Inject.split(@base)[1], Inject::MAX_JSON_NODES), 1}.max : 1
+      byte_budget = if url_loc
+                      Inject::MAX_URL_BYTES
+                    elsif loc.json?
+                      MAX_JSON_INJECT_BYTES
+                    else
+                      Int32::MAX
+                    end
       buckets = [] of Task
       cur = [] of String
       cur_bytes = 0
       names.each do |n|
         # Count the ENCODED size for query/form — a name with reserved chars (e.g. "v2/x")
         # expands under URI.encode_www_form, so the raw bytesize would under-budget the URL
-        # and a bucket could overflow MAX_URL_BYTES → 414. (One-time cost during bucketing.)
-        nb = (url_loc ? URI.encode_www_form(n).bytesize : n.bytesize) + Canary::LEN + 2
+        # and a bucket could overflow MAX_URL_BYTES → 414. For Json, multiply by the node count.
+        # (One-time cost during bucketing.)
+        nb = ((url_loc ? URI.encode_www_form(n).bytesize : n.bytesize) + Canary::LEN + 2) * (loc.json? ? json_nodes : 1)
         if !cur.empty? && (cur.size >= cap || cur_bytes + nb > byte_budget)
           buckets << Task.new(loc, cur)
           cur = [] of String
@@ -299,9 +316,10 @@ module Gori::Miner
 
     private def valid_names_for(loc : Location) : Array(String)
       case loc
-      when Location::Headers then @names.select { |n| Inject.valid_header_name?(n) }
-      when Location::Cookies then @names.select { |n| Inject.valid_cookie_name?(n) }
-      else                        @names
+      when Location::Headers   then @names.select { |n| Inject.valid_header_name?(n) }
+      when Location::Cookies   then @names.select { |n| Inject.valid_cookie_name?(n) }
+      when Location::Multipart then @names.select { |n| Inject.valid_multipart_name?(n) }
+      else                          @names
       end
     end
 

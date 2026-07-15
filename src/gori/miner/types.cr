@@ -15,17 +15,19 @@ module Gori
     enum Location
       Query
       Form
+      Multipart
       Json
       Headers
       Cookies
 
       def label : String
         case self
-        in Query   then "query"
-        in Form    then "form"
-        in Json    then "json"
-        in Headers then "headers"
-        in Cookies then "cookies"
+        in Query     then "query"
+        in Form      then "form"
+        in Multipart then "multipart"
+        in Json      then "json"
+        in Headers   then "headers"
+        in Cookies   then "cookies"
         end
       end
 
@@ -34,6 +36,7 @@ module Gori
         case token.downcase.strip
         when "query", "q"             then Query
         when "form", "body", "f"      then Form
+        when "multipart", "mp"        then Multipart
         when "json", "j"              then Json
         when "header", "headers", "h" then Headers
         when "cookie", "cookies", "c" then Cookies
@@ -181,11 +184,12 @@ module Gori
       # Per-Burp ceilings; query/form are additionally clamped by the URL byte budget
       # in Inject so a stuffed line can't exceed common request-line limits.
       DEFAULT_BUCKETS = Hash(Location, Int32){
-        Location::Json    => 256,
-        Location::Query   => 128,
-        Location::Form    => 128,
-        Location::Headers => 64,
-        Location::Cookies => 64,
+        Location::Json      => 256,
+        Location::Query     => 128,
+        Location::Form      => 128,
+        Location::Multipart => 128,
+        Location::Headers   => 64,
+        Location::Cookies   => 64,
       }
 
       def initialize(@locations = [Location::Query],

@@ -1,4 +1,5 @@
 require "json"
+require "mime/multipart"
 require "./types"
 require "./inject"
 
@@ -21,7 +22,12 @@ module Gori::Miner
         applicable << Location::Form
         default << Location::Form
       end
-      if has_body && json_object?(ct, body)
+      # Multipart is applicable but default OFF: a captured file-upload re-sends its (possibly
+      # multi-MB) file part on every bucket/bisect/confirm request. Opt in — as with Headers/Cookies.
+      if has_body && multipart_form?(request, ct)
+        applicable << Location::Multipart
+      end
+      if has_body && json_injectable?(ct, body)
         applicable << Location::Json
         default << Location::Json
       end
@@ -34,17 +40,27 @@ module Gori::Miner
       Applicability.new(applicable, default)
     end
 
-    # JSON location only when the ROOT is an object (named keys are injectable).
-    private def self.json_object?(ct : String, body : Bytes) : Bool
-      looks = ct.includes?("json") || body_looks_object?(body)
-      return false unless looks
-      !JSON.parse(String.new(body).scrub).as_h?.nil?
-    rescue JSON::ParseException
-      false
+    # JSON location when the body carries at least one injectable object node — a root object,
+    # an object inside a root array, or a nested object. Shares Inject's node counter so Detect
+    # and the injector never disagree about whether Json is applicable.
+    private def self.json_injectable?(ct : String, body : Bytes) : Bool
+      return false unless ct.includes?("json") || body_looks_json?(body)
+      Inject.json_object_node_count(body, Inject::MAX_JSON_NODES) > 0
     end
 
-    private def self.body_looks_object?(body : Bytes) : Bool
-      String.new(body[0, {body.size, 64}.min]).scrub.lstrip.starts_with?('{')
+    private def self.body_looks_json?(body : Bytes) : Bool
+      head = String.new(body[0, {body.size, 64}.min]).scrub.lstrip
+      head.starts_with?('{') || head.starts_with?('[')
+    end
+
+    # Multipart location when the body is multipart/form-data AND a boundary is extractable.
+    # `ct_lower` is already down-cased; the boundary is re-read from the ORIGINAL-case header.
+    private def self.multipart_form?(request : Bytes, ct_lower : String) : Bool
+      return false unless ct_lower.lstrip.starts_with?("multipart/form-data")
+      raw = Inject.header_value(request, "content-type")
+      return false unless raw
+      b = MIME::Multipart.parse_boundary(raw)
+      !b.nil? && !b.empty?
     end
   end
 end

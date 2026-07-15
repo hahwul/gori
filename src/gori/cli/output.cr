@@ -130,7 +130,7 @@ module Gori
         String.build do |io|
           io << (f.confidence.confirmed? ? "[+] " : "[?] ")
           io << f.name.ljust(24)
-          io << "  " << f.location.label.ljust(8)
+          io << "  " << f.location.label.ljust(9)
           io << "· " << f.evidence.label
         end
       end
