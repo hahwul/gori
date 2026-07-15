@@ -538,6 +538,30 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "pagination transparency" do
+    it "reports has_more and does not flag an in-range limit in list_issues" do
+      with_store do |store|
+        3.times { |i| store.insert_issue("issue #{i}", Gori::Store::Severity::Low, nil, nil) }
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_issues","arguments":{"limit":2}}})
+        p = tool_payload(drive(store, call)[0])
+        p["returned"].as_i.should eq(2)
+        p["has_more"].as_bool.should be_true
+        p.as_h.has_key?("requested_limit").should be_false # 2 is valid → not clamped
+      end
+    end
+
+    it "echoes requested_limit + a warning when a limit is clamped (0 -> 1)" do
+      with_store do |store|
+        store.insert_issue("x", Gori::Store::Severity::Low, nil, nil)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_issues","arguments":{"limit":0}}})
+        p = tool_payload(drive(store, call)[0])
+        p["requested_limit"].as_i.should eq(0)
+        p["limit"].as_i.should eq(1)
+        p["pagination_warning"].as_s.should contain("clamped")
+      end
+    end
+  end
+
   describe "ql_reference" do
     it "returns the QL syntax reference" do
       with_store do |store|

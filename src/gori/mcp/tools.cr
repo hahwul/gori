@@ -882,8 +882,10 @@ module Gori
       end
 
       private def list_issues(h) : Result
-        offset = clamp_nonneg(int(h, "offset"))
-        limit = clamp(int(h, "limit"), 100, 500)
+        req_off = int(h, "offset")
+        req_lim = int(h, "limit")
+        offset = clamp_nonneg(req_off)
+        limit = clamp(req_lim, 100, 500)
         all = @store.issues
         page = all[offset, limit]? || [] of Store::Issue
         Result.new(JSON.build do |j|
@@ -891,9 +893,27 @@ module Gori
             j.field("issues") { j.array { page.each { |f| Serialize.issue(j, f, @store) } } }
             j.field "returned", page.size
             j.field "offset", offset
+            j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
             j.field "total", all.size
+            j.field "has_more", offset + page.size < all.size
           end
         end)
+      end
+
+      # Surface a silently-clamped pagination value: echo the requested offset/limit
+      # only when it differed from the effective one, with a warning — so a caller
+      # sees that e.g. limit:0 or a negative offset was coerced, not honored. Shared
+      # by the object-returning list tools for a consistent pagination contract.
+      private def emit_clamp(j : JSON::Builder, req_off : Int64?, offset : Int32,
+                             req_lim : Int64?, limit : Int32) : Nil
+        off_clamped = !req_off.nil? && req_off != offset.to_i64
+        lim_clamped = !req_lim.nil? && req_lim != limit.to_i64
+        j.field "requested_offset", req_off if off_clamped
+        j.field "requested_limit", req_lim if lim_clamped
+        if off_clamped || lim_clamped
+          j.field "pagination_warning", "requested pagination was out of range and clamped to valid bounds"
+        end
       end
 
       private def get_issue(h) : Result
@@ -1005,8 +1025,10 @@ module Gori
         end
         include_content = include_content || false
         include_sensitive = bool(h, "include_sensitive") || false
-        limit = clamp(int(h, "limit"), 50, 500)
-        offset = clamp_nonneg(int(h, "offset"))
+        req_lim = int(h, "limit")
+        req_off = int(h, "offset")
+        limit = clamp(req_lim, 50, 500)
+        offset = clamp_nonneg(req_off)
         query_str = str(h, "query").try(&.strip)
         query_rx = query_str.try { |q| q.empty? ? nil : Regex.new(Regex.escape(q), Regex::Options::IGNORE_CASE) }
 
@@ -1064,6 +1086,8 @@ module Gori
             j.field "total_count", total_count
             j.field "offset", offset
             j.field "limit", limit
+            emit_clamp(j, req_off, offset, req_lim, limit)
+            j.field "has_more", offset + paginated_repeaters.size < total_count
             j.field "sessions" do
               j.array do
                 paginated_repeaters.each do |r|
