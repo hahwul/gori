@@ -1134,6 +1134,8 @@ module Gori
                   j.object do
                     j.field "direction", m.direction
                     j.field "opcode", m.opcode
+                    j.field "type", Serialize.ws_frame_type(m.opcode)
+                    j.field "at", m.created_at
                     if m.text?
                       j.field "payload", String.new(m.payload).scrub
                     else
@@ -1772,6 +1774,7 @@ module Gori
                   j.object do
                     j.field "direction", message.direction
                     j.field "opcode", message.opcode
+                    j.field "type", Serialize.ws_frame_type(message.opcode)
                     if message.opcode == 1
                       j.field "payload", Env.mask_secrets(String.new(message.payload).scrub)
                     else

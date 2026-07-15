@@ -307,9 +307,12 @@ describe Gori::MCP::Server do
         msgs = ws["messages"].as_a
         msgs[0]["direction"].as_s.should eq("out")
         msgs[0]["text"].as_s.should eq("hello")
+        msgs[0]["type"].as_s.should eq("text")     # RFC 6455 opcode name
+        msgs[0].as_h.has_key?("at").should be_true # per-frame timestamp
         msgs[1]["direction"].as_s.should eq("in")
         msgs[1]["text"].as_s.should eq("world")
         msgs[2]["binary"].as_bool.should be_true
+        msgs[2]["type"].as_s.should eq("binary")
         msgs[2]["size"].as_i.should eq(3)
         msgs[2].as_h.has_key?("text").should be_false # binary frames never inline a payload
       end
