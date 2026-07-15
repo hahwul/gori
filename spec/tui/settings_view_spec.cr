@@ -45,6 +45,33 @@ describe SettingsView do
     end
   end
 
+  it "toggles Verify upstream TLS off, then resets it to the default on save" do
+    dir = File.tempname("gori-settings-verify")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.verify_upstream?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.verify_upstream = true
+      v = SettingsView.new
+      v.reload(:network)
+      v.move_field(1)      # Bind IP → Bind Port
+      v.move_field(1)      # → Upstream proxy
+      v.move_field(1)      # → Verify upstream TLS (index 3, the bool)
+      v.toggle_or_move(-1) # flip the bool off
+      v.save               # persists the working copy back to the live Settings
+      Gori::Settings.verify_upstream?.should be_false
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.verify_upstream?.should eq(Gori::Settings::DEFAULT_VERIFY_UPSTREAM)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.verify_upstream = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "reverts the EDITOR section toggles to their defaults on save" do
     dir = File.tempname("gori-settings-reset-ed")
     Dir.mkdir_p(dir)

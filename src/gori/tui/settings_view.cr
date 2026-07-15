@@ -25,6 +25,7 @@ module Gori::Tui
       Field.new("Bind IP", "global default listen address — projects may pin their own"),
       Field.new("Bind Port", "global default port (0-65535) — project overrides win when set"),
       Field.new("Upstream proxy", "host:port — blank = connect directly; projects may override"),
+      Field.new("Verify upstream TLS", "check the upstream server's certificate — off accepts any cert (MITM/testing); ←/→/space toggles", bool: true),
       Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
     EDITOR_FIELDS = [
@@ -109,7 +110,7 @@ module Gori::Tui
                 when :theme      then [Theme.canonical(Settings.theme)]
                 when :layout     then layout_values
                 when :statusline then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
-                else                  [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, hostnames_summary]
+                else                  [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -139,7 +140,7 @@ module Gori::Tui
                   Settings::DEFAULT_STATUSLINE_COMMAND,
                   Settings::DEFAULT_STATUSLINE_INTERVAL.to_s,
                 ]
-                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, hostnames_summary]
+                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -335,7 +336,8 @@ module Gori::Tui
       Settings.bind_host = @values[0].strip
       Settings.bind_port = port
       Settings.upstream_proxy = up
-      @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, hostnames_summary]
+      Settings.verify_upstream = @values[3] == "on"
+      @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", hostnames_summary]
       persist
     end
 

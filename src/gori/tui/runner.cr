@@ -2142,7 +2142,7 @@ module Gori::Tui
         # rest just persist (the value is read live or only matters next session).
         msg = @settings_view.save
         @toast = case @settings_view.section
-                 when :network then apply_settings(msg).tap { project_controller.refresh_network } # re-sync the Project pane's inherited fields to the new global
+                 when :network then apply_settings(msg).tap { @session.set_verify_upstream(Settings.verify_upstream?); project_controller.refresh_network } # push the verify toggle to the live proxy/probe, then re-sync the Project pane's inherited fields to the new global
                  when :theme   then apply_theme(msg)
                  when :layout  then apply_layout(msg)
                  else               msg
@@ -2939,7 +2939,6 @@ module Gori::Tui
         hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
-        insecure_upstream: @session.config.insecure_upstream?,
         activity: activity_chip)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay == :palette

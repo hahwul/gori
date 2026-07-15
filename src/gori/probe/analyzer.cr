@@ -29,6 +29,10 @@ module Gori
       CATCHUP_SCAN     =    500     # recent flows the catch-up sweep re-checks each tick
 
       getter events : Channel(Event)
+      # Live-mutable so the TUI's settings:network toggle (Session#set_verify_upstream) can
+      # flip upstream TLS verification without a restart; read when each active probe builds
+      # its Fuzz::Sender, so the next probe picks up the change.
+      property? verify_upstream : Bool
 
       private record ActiveTask, rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail
 

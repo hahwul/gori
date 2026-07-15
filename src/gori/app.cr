@@ -115,10 +115,11 @@ module Gori
     end
 
     private def open_and_run(project : Project, term : Termisu) : Symbol
-      # Pick up any bind address changed via Settings since startup (the previous
-      # session kept its bind; this one opens on the new one).
+      # Pick up any bind address / verify-upstream toggle changed via Settings since startup
+      # (the previous session kept its values; this one opens on the new ones).
       @config.listen = Settings.bind_host
       @config.port = Settings.bind_port
+      @config.insecure_upstream = !Settings.verify_upstream?
       session =
         begin
           # Interactive: auto-fall-back to a free port if the configured one is

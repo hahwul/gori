@@ -16,6 +16,11 @@ module Gori::Proxy::Tls
   # loop with the upstream pinned to the CONNECT target over a TLS client
   # connection — so the same codec/capture path serves decrypted traffic.
   class Tunnel < Proxy::TlsMitm
+    # Live-mutable so the TUI's settings:network toggle (Session#set_verify_upstream) can
+    # flip upstream TLS verification without a restart; read per-CONNECT in `intercept`, so
+    # the next tunnelled connection picks up the change.
+    property? verify_upstream : Bool
+
     def initialize(@ca : CertAuthority, @verify_upstream : Bool = true,
                    @rewriter : Proxy::HeadRewriter? = nil,
                    @interceptor : Gori::Interceptor? = nil,
