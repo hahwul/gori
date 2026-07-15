@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed — upstream TLS verification moved to Settings: Network
+
+The bottom status bar no longer carries the `upstream:verify` / `upstream:insecure`
+chip. Upstream TLS certificate verification is now a live toggle in **Settings:
+Network** (command palette → `settings:network` → "Verify upstream TLS"). Toggling
+it re-syncs the running capture proxy, the active-probe sender, and the Repeater/
+Fuzzer/Miner senders without a restart, and the choice persists globally in
+`settings.json` (`network.verify_upstream`). The `--insecure-upstream` launch flag
+still works: it seeds the toggle off for that session (and the editor reflects it).
+`gori run` / MCP keep their own `--insecure-upstream` flag.
+
 ### Performance — behavior-preserving hot-path optimizations
 
 A measured pass over the render / fuzz / decoder hot paths (micro-benchmarks in

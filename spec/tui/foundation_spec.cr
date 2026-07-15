@@ -123,22 +123,25 @@ describe Gori::Tui::Chrome do
   it "renders the focus-area badge at the far left of the status bar" do
     backend = MemoryBackend.new(90, 1)
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
-      focus: "BODY", hints: "↹ pane · esc tabs", insecure_upstream: false)
+      focus: "BODY", hints: "↹ pane · esc tabs", activity: {"scanning", Theme.accent})
     backend.contains?("BODY").should be_true
-    backend.fg_at(1, 0).should eq(Theme.text_bright)    # badge text is bright (col 0 is the leading pad)
-    backend.contains?("↹ pane").should be_true          # hints still render to the right of the badge
-    backend.contains?("upstream:verify").should be_true # chips still on the right
+    backend.fg_at(1, 0).should eq(Theme.text_bright) # badge text is bright (col 0 is the leading pad)
+    backend.contains?("↹ pane").should be_true       # hints still render to the right of the badge
+    backend.contains?("scanning").should be_true     # the activity chip renders on the right
   end
 
-  it "keeps the focus badge intact when chips would otherwise overflow a narrow bar" do
-    # 36-col status rect ≈ a 40-col terminal (the minimum supported size). The
-    # widest chip pair must not clobber the persistent focus badge.
+  it "keeps the focus badge intact when a chip would otherwise overflow a narrow bar" do
+    # 36-col status rect ≈ a 40-col terminal (the minimum supported size). The activity
+    # label here is wide enough (>27 cols) that its natural right-aligned x falls left of
+    # the hint start, so the min_x floor MUST clamp it — proving the clamp protects the
+    # persistent focus badge rather than the chip merely happening to fit.
     backend = MemoryBackend.new(36, 1)
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 36, 1),
-      focus: "ISSUE", hints: "type title · esc cancel", insecure_upstream: true)
-    backend.row(0)[0, 7].should eq(" ISSUE ") # badge survives, no chip bled into it
+      focus: "ISSUE", hints: "type title · esc cancel",
+      activity: {"scanning a very long-running background job", Theme.accent})
+    backend.row(0)[0, 7].should eq(" ISSUE ")     # badge survives, no chip bled into it
     backend.fg_at(1, 0).should eq(Theme.text_bright)
-    backend.contains?("upstream:insecure").should be_true # chips still present (truncated at the right edge)
+    backend.contains?("scanning").should be_true # chip still present (floored at the hint start, truncated at the right edge)
   end
 
   it "gilds the shell only for single-pane body focus" do
@@ -224,7 +227,7 @@ describe Gori::Tui::Chrome do
   it "omits the notify badge from the bottom status bar (it moved to the top bar)" do
     backend = MemoryBackend.new(90, 1)
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
-      focus: "BODY", hints: "↹ pane · esc tabs", insecure_upstream: false)
+      focus: "BODY", hints: "↹ pane · esc tabs")
     backend.contains?("notify").should be_false
   end
 

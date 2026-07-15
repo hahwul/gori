@@ -20,6 +20,7 @@ module Gori
     DEFAULT_BIND_HOST       = "127.0.0.1"
     DEFAULT_BIND_PORT       = 8070
     DEFAULT_UPSTREAM_PROXY  = ""
+    DEFAULT_VERIFY_UPSTREAM = true
     DEFAULT_EDITOR          = ""
     DEFAULT_EDITOR_MARKDOWN = true
     DEFAULT_THEME           = "goridark"
@@ -41,6 +42,11 @@ module Gori
     class_property bind_host : String = DEFAULT_BIND_HOST
     class_property bind_port : Int32 = DEFAULT_BIND_PORT
     class_property upstream_proxy : String = DEFAULT_UPSTREAM_PROXY # "host:port" HTTP proxy; "" = connect directly
+    # Whether the proxy/probe/repeater verify the UPSTREAM TLS certificate. The launch
+    # flag --insecure-upstream seeds this false for the session (see CLI.run_tui); the
+    # settings:network editor toggles it live via Session#set_verify_upstream. Global-only
+    # (no per-project override). CLI `run`/MCP paths keep their own --insecure-upstream flag.
+    class_property? verify_upstream : Bool = DEFAULT_VERIFY_UPSTREAM
 
     # Per-project network overrides — a RUNTIME layer set by Session.open from the OPEN
     # project's DB and NEVER persisted to settings.json (the project's own DB is the source
@@ -154,6 +160,7 @@ module Gori
         self.bind_host = net["bind_host"]?.try(&.as_s?) || bind_host
         self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
         self.upstream_proxy = net["upstream_proxy"]?.try(&.as_s?) || upstream_proxy
+        self.verify_upstream = load_bool(net, "verify_upstream", verify_upstream?)
       end
       self.theme = root["theme"]?.try(&.as_s?) || theme # validated against the known themes by Theme.apply
       self.mouse = load_bool(root, "mouse", mouse)
@@ -488,6 +495,7 @@ module Gori
               j.field "bind_host", bind_host
               j.field "bind_port", bind_port
               j.field "upstream_proxy", upstream_proxy
+              j.field "verify_upstream", verify_upstream?
             end
           end
           j.field "editor" do

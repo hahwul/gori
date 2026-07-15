@@ -132,6 +132,35 @@ describe Gori::Session do
     end
   end
 
+  it "flips upstream TLS verification live across config, tunnel, and probe" do
+    with_root do |root|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))
+      registry = Gori::Verbs.registry
+      config = Gori::Config.new(listen: "127.0.0.1", port: 0) # insecure_upstream defaults false → verify on
+      project = Gori::ProjectRegistry.new(root).temp("verify")
+
+      session = Gori::Session.open(config, ca, registry, project)
+      begin
+        # Baseline: verify on everywhere the toggle reaches.
+        session.config.insecure_upstream?.should be_false
+        session.tunnel.verify_upstream?.should be_true
+        session.probe.verify_upstream?.should be_true
+
+        session.set_verify_upstream(false)
+        session.config.insecure_upstream?.should be_true # repeater/fuzzer/miner read this per send
+        session.tunnel.verify_upstream?.should be_false  # next CONNECT skips verification
+        session.probe.verify_upstream?.should be_false   # next active probe skips verification
+
+        session.set_verify_upstream(true) # and back on
+        session.config.insecure_upstream?.should be_false
+        session.tunnel.verify_upstream?.should be_true
+        session.probe.verify_upstream?.should be_true
+      ensure
+        session.close
+      end
+    end
+  end
+
   it "opens in capture-off mode (non-fatal) when the bind port is already taken" do
     with_root do |root|
       ca = Gori::Proxy::Tls::CertAuthority.load_or_create(File.join(root, "ca"))

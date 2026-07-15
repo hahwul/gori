@@ -26,6 +26,7 @@ module Gori
     getter project : Project
     getter store : Store
     getter proxy : Proxy::Server
+    getter tunnel : Proxy::Tls::Tunnel
     getter flow_events : Channel(Store::FlowEvent)
     # The passive/active scanner. Subscribes to the store's parallel probe_events feed and
     # writes grouped issues; runs for both the TUI and headless capture.
@@ -112,7 +113,7 @@ module Gori
           store.abandon_pending!("orphaned by a previous session")
           probe.start
         end
-        session = new(config, ca, registry, project, store, proxy, events, probe, rules, scope, host_overrides, interceptor, bind_error, lock)
+        session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, scope, host_overrides, interceptor, bind_error, lock)
         session.sync_capture_status!
         session
       rescue ex
@@ -128,9 +129,19 @@ module Gori
       end
     end
 
-    def initialize(@config, @ca, @registry, @project, @store, @proxy, @flow_events, @probe,
+    def initialize(@config, @ca, @registry, @project, @store, @proxy, @tunnel, @flow_events, @probe,
                    @rules, @scope, @host_overrides, @interceptor, @bind_error : String? = nil,
                    @capture_lock : CaptureLock? = nil)
+    end
+
+    # Flip upstream TLS verification live (settings:network toggle). Updates the runtime
+    # config (repeater/fuzzer/miner read config.insecure_upstream? per send), the capture
+    # proxy's TLS tunnel (next CONNECT), and the active-probe sender (next probe). Global —
+    # the persisted Settings.verify_upstream is the source of truth across restarts.
+    def set_verify_upstream(verify : Bool) : Nil
+      @config.insecure_upstream = !verify
+      @tunnel.verify_upstream = verify
+      @probe.verify_upstream = verify
     end
 
     def capturing? : Bool

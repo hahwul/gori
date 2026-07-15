@@ -117,7 +117,11 @@ module Gori
       # upstream proxy was already loaded by Settings.load.
       Settings.bind_host = listen
       Settings.bind_port = port
-      config = Config.new(listen, port, db_path, ca_dir, headless, insecure)
+      # --insecure-upstream is a launch override of the persisted verify toggle (mirrors the
+      # bind override above): force verify off for this session so the settings:network editor
+      # reflects the active state; toggling it there re-syncs the live proxy + persists.
+      Settings.verify_upstream = false if insecure
+      config = Config.new(listen, port, db_path, ca_dir, headless, !Settings.verify_upstream?)
       app = App.new(config)
 
       if config.headless?
