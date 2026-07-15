@@ -69,6 +69,9 @@ module Gori
 
       MCP_REPEATER_REQUEST_MAX = 16 * 1024
 
+      # Default inlined-body cap for body_mode:preview (full uses Serialize::MAX_TEXT).
+      BODY_PREVIEW_BYTES = 2048
+
       # Ceiling on the `decoder` tool's returned output string. A Decoder step can
       # produce up to 32 MiB (Decoder::MAX_OUT); returning that inline would swamp
       # the JSON-RPC channel, so truncate the display string and flag it.
@@ -207,6 +210,8 @@ module Gori
             "unless include_sensitive=true." do |s|
             s.field "id", intprop("flow id from list_history"), required: true
             s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED] (default false)")
+            s.field "body_mode", strprop("none | preview | full (default full) — none returns body shape only (encoding/size, omitted:true); preview inlines a small head; page more with get_response_body_chunk")
+            s.field "max_body_bytes", intprop("cap inlined body bytes (clamped to 65536; page the rest with get_response_body_chunk)")
           end
 
           tool j, "get_response_body_chunk",
@@ -397,6 +402,8 @@ module Gori
               s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
               s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
               s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false)")
+              s.field "body_mode", strprop("none | preview | full (default full) — control how much response body is inlined")
+              s.field "max_body_bytes", intprop("cap inlined response-body bytes (clamped to 65536)")
               s.field "allow_unscoped", boolprop("send even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
               s.field "name", strprop("optional custom name for the saved repeater tab (only when save_as_repeater=true)")
               s.field "issue_id", intprop("optional issue to link to the saved repeater; requires save_as_repeater=true")
@@ -678,7 +685,21 @@ module Gori
         # surfaces the frames (parity with `gori run show`). Non-WS flows skip the query.
         ws_msgs = detail.row.status == 101 ? @store.ws_messages(id) : [] of Store::WsMessage
         include_sensitive = bool(h, "include_sensitive") || false
-        Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive))
+        cap, omit = body_return_opts(h)
+        Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive, cap, omit))
+      end
+
+      # Resolve body_mode (none|preview|full) + max_body_bytes into an inlined-body
+      # {cap_bytes, omit} pair. none → metadata only; preview → small cap; full
+      # (default) → the full MAX_TEXT cap. max_body_bytes tunes the cap (clamped to
+      # MAX_TEXT — larger bodies are paged with get_response_body_chunk).
+      private def body_return_opts(h) : {Int32, Bool}
+        max = int(h, "max_body_bytes").try(&.clamp(0_i64, Serialize::MAX_TEXT.to_i64).to_i)
+        case str(h, "body_mode").try(&.strip.downcase)
+        when "none"    then {0, true}
+        when "preview" then {max || BODY_PREVIEW_BYTES, false}
+        else                {max || Serialize::MAX_TEXT, false}
+        end
       end
 
       private def get_response_body_chunk(h) : Result
@@ -1330,8 +1351,9 @@ module Gori
         repeater_id = persist_send_repeater(h, save, built, http2, result,
           issue_id, recorded_flow_id)
 
+        body_cap, body_omit = body_return_opts(h)
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
-          include_sensitive_headers, sc, built, http2, flow_precedence_ignored(h)),
+          include_sensitive_headers, sc, built, http2, flow_precedence_ignored(h), body_cap, body_omit),
           is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
@@ -1495,7 +1517,7 @@ module Gori
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
                                    repeater_id : Int64?, include_sensitive_headers : Bool,
                                    sc : ScopeCheck, built : RequestBuilder::Built, http2 : Bool,
-                                   ignored : Array(String)) : String
+                                   ignored : Array(String), body_cap : Int32, body_omit : Bool) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
@@ -1529,7 +1551,7 @@ module Gori
             end
             j.field "duration_us", result.duration_us
             j.field "incomplete", true if result.incomplete?
-            Serialize.emit_body(j, "body", result.head, result.body, false)
+            Serialize.emit_body(j, "body", result.head, result.body, false, body_cap, body_omit)
           end
         end
       end

@@ -342,6 +342,43 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "body_mode / max_body_bytes" do
+    it "returns body shape only with body_mode:none" do
+      with_store do |store|
+        id = seed_flow(store, "h.test", "GET", "/b", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", resp_body: "hello".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id},"body_mode":"none"}}})
+        body = tool_payload(drive(store, call)[0])["response_body"]
+        body["omitted"].as_bool.should be_true
+        body["size"].as_i.should eq(5)
+        body.as_h.has_key?("text").should be_false
+      end
+    end
+
+    it "caps the inlined body with max_body_bytes and flags truncation" do
+      with_store do |store|
+        id = seed_flow(store, "h.test", "GET", "/b", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n", resp_body: "0123456789".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id},"max_body_bytes":4}}})
+        body = tool_payload(drive(store, call)[0])["response_body"]
+        body["text"].as_s.should eq("0123")
+        body["truncated"].as_bool.should be_true
+        body["size"].as_i.should eq(10)
+      end
+    end
+
+    it "defaults to full body when unspecified" do
+      with_store do |store|
+        id = seed_flow(store, "h.test", "GET", "/b", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", resp_body: "hello".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        body = tool_payload(drive(store, call)[0])["response_body"]
+        body["text"].as_s.should eq("hello")
+        body["truncated"].as_bool.should be_false
+      end
+    end
+  end
+
   describe "get_response_body_chunk offset validation" do
     it "flags an out-of-range offset instead of silently clamping" do
       with_store do |store|

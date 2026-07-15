@@ -99,13 +99,15 @@ module Gori
       # --- full detail incl. heads + decoded bodies ---------------------------
       def self.flow_detail_json(detail : Store::FlowDetail,
                                 ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
-                                include_sensitive : Bool = false) : String
-        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive) }
+                                include_sensitive : Bool = false,
+                                body_cap : Int32 = MAX_TEXT, body_omit : Bool = false) : String
+        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive, body_cap, body_omit) }
       end
 
       def self.flow_detail(j : JSON::Builder, detail : Store::FlowDetail,
                            ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
-                           include_sensitive : Bool = false) : Nil
+                           include_sensitive : Bool = false,
+                           body_cap : Int32 = MAX_TEXT, body_omit : Bool = false) : Nil
         row = detail.row
         j.object do
           j.field "id", row.id
@@ -123,10 +125,10 @@ module Gori
           j.field "content_type", row.content_type
           j.field "error", detail.error
           j.field "request_head", redact_head_opt(head_text(detail.request_head), include_sensitive)
-          emit_body(j, "request_body", detail.request_head, detail.request_body, detail.request_body_truncated?)
+          emit_body(j, "request_body", detail.request_head, detail.request_body, detail.request_body_truncated?, body_cap, body_omit)
           j.field "response_head", redact_head_opt(head_text(detail.response_head), include_sensitive)
           j.field "sensitive_headers_redacted", true unless include_sensitive
-          emit_body(j, "response_body", detail.response_head, detail.response_body, detail.response_body_truncated?)
+          emit_body(j, "response_body", detail.response_head, detail.response_body, detail.response_body_truncated?, body_cap, body_omit)
           emit_sse_events(j, detail)
           emit_ws_messages(j, ws_msgs)
           emit_decoded(j, detail)
@@ -283,7 +285,12 @@ module Gori
       # text|base64, note?}. `truncated` is true when the returned text/base64 was cut
       # (display cap OR capture cap); `wire_truncated` is emitted only when the stored
       # bytes themselves were cut at gori's capture cap (so the data is gone at source).
-      def self.emit_body(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?, wire_truncated : Bool) : Nil
+      # `cap` bounds the inlined text/base64 (default MAX_TEXT); `omit` returns
+      # metadata only (encoding/size, omitted:true) with NO body bytes — for a
+      # caller that wants just the shape and will page bytes via
+      # get_response_body_chunk. Both default to today's behavior.
+      def self.emit_body(j : JSON::Builder, field_name : String, head : Bytes?, body : Bytes?,
+                         wire_truncated : Bool, cap : Int32 = MAX_TEXT, omit : Bool = false) : Nil
         if body.nil? || body.empty?
           j.field field_name, nil
           return
@@ -291,24 +298,18 @@ module Gori
         decoded, note = Proxy::Codec::ContentDecode.decode(head, body)
         bytes = decoded || body
         s = String.new(bytes)
+        valid = s.valid_encoding?
         j.field field_name do
           j.object do
-            if s.valid_encoding?
-              cut = bytes.size > MAX_TEXT
-              j.field "encoding", "text"
-              j.field "size", bytes.size
-              j.field "truncated", cut || wire_truncated
-              # byte_slice can sever a multi-byte codepoint at the cap → scrub the
-              # partial tail so the JSON line stays valid UTF-8.
-              j.field "text", cut ? s.byte_slice(0, MAX_TEXT).scrub : s
+            j.field "encoding", valid ? "text" : "base64"
+            j.field "binary", true unless valid
+            j.field "size", bytes.size
+            if omit
+              # body_mode:none — the caller asked for shape only.
+              j.field "omitted", true
+              j.field "truncated", wire_truncated
             else
-              cut = bytes.size > MAX_B64
-              slice = cut ? bytes[0, MAX_B64] : bytes
-              j.field "encoding", "base64"
-              j.field "binary", true
-              j.field "size", bytes.size
-              j.field "truncated", cut || wire_truncated
-              j.field "base64", Base64.strict_encode(slice)
+              emit_body_payload(j, s, bytes, valid, cap, wire_truncated)
             end
             # `truncated` (above) is true for either cause (back-compat); `wire_truncated`
             # disambiguates a capture-time cut (data gone at source, not just the display
@@ -316,6 +317,20 @@ module Gori
             j.field "wire_truncated", true if wire_truncated
             j.field "note", note if note
           end
+        end
+      end
+
+      # Emit the (possibly capped) body bytes as text or base64. byte_slice can
+      # sever a multi-byte codepoint at the cap → scrub the partial tail so the
+      # JSON line stays valid UTF-8.
+      private def self.emit_body_payload(j : JSON::Builder, s : String, bytes : Bytes,
+                                         valid : Bool, cap : Int32, wire_truncated : Bool) : Nil
+        cut = bytes.size > cap
+        j.field "truncated", cut || wire_truncated
+        if valid
+          j.field "text", cut ? s.byte_slice(0, cap).scrub : s
+        else
+          j.field "base64", Base64.strict_encode(cut ? bytes[0, cap] : bytes)
         end
       end
     end
