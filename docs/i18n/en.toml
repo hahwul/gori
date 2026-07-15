@@ -77,7 +77,7 @@ flow_3_desc = "Triage results into Issues, take notes, and export, or hand the w
 flow_3_alt = "gori Probe scanner listing passive security issues grouped by severity and category"
 
 agent_title = "Or hand it to an agent."
-agent_intro = "gori has no chat window baked in. It exposes your project over <strong>MCP</strong>, so any agent — Claude, Codex, Grok — reads your captured traffic and drives the tools through one clean seam. You pick the model; your traffic stays where you put it."
+agent_intro = "gori has no chat window baked in. It exposes your project over <strong>MCP</strong>, so any agent (Claude, Codex, Grok) reads your captured traffic and drives the tools through one clean seam. You pick the model; your traffic stays where you put it."
 agent_seam_aria = "An AI agent connects to a gori project through the MCP server: the agent calls tools like list_history and send_request, and gori returns flows and issues"
 agent_seam_1_kicker = "AI agent"
 agent_seam_1_title = "Claude · Codex · Grok"

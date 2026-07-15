@@ -7,14 +7,14 @@ gori stores global preferences in `settings.json` and each project as its own SQ
 
 ## Storage Layout
 
-Everything lives under `GORI_HOME` — `$GORI_HOME` if set and non-empty, otherwise `~/.gori`:
+Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise `~/.gori`):
 
 | Path | Contents |
 |------|----------|
 | `settings.json` | Global preferences |
 | `gori.db` | Default project database |
 | `projects/` | One subdirectory per named project, each with its own DB |
-| `ca/` | Root CA — `root.crt.pem` and `root.key.pem` |
+| `ca/` | Root CA: `root.crt.pem` and `root.key.pem` |
 | `themes/` | User themes |
 | `wordlists/` | Fuzzer / miner wordlists |
 | `active_project` | Marker for the most-recently-used project |
@@ -65,11 +65,11 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 | `probe_preview` | bool | `false` | Probe list page shows a bottom summary of the selected issue |
 | `issues_preview` | bool | `false` | Issues list page shows a bottom summary of the selected issue |
 | `history_list_order` | string | `"newest"` | List sort: `"newest"` (newest at top) or `"oldest"` (oldest at top) |
-| `sitemap_expand_depth` | integer | `-1` | How deep the Sitemap tree opens after reload: `-1` = all expanded; `0`–`3` = expand only nodes shallower than this depth |
+| `sitemap_expand_depth` | integer | `-1` | How deep the Sitemap tree opens after reload: `-1` = all expanded; `0`-`3` = expand only nodes shallower than this depth |
 
 ### statusline
 
-An opt-in extra row at the very bottom of the TUI (command palette → **Settings: Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row — think of it as a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from `settings.json` until you change it.
+An opt-in extra row at the very bottom of the TUI (command palette → **Settings: Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row. Think of it as a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from `settings.json` until you change it.
 
 ```json
 {
@@ -84,12 +84,12 @@ An opt-in extra row at the very bottom of the TUI (command palette → **Setting
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | bool | `false` | Whether the statusline row is shown |
-| `command` | string | `""` | Shell command, run via `/bin/sh -c`. Its **first line** of stdout becomes the row |
+| `command` | string | `""` | Shell command, run via `/bin/sh -c`. Its first line of stdout becomes the row |
 | `interval` | integer | `3` | Seconds between runs (minimum `1`) |
 
-The command's **stdout is parsed for ANSI/SGR colour escapes** (16-colour, 256-colour, and truecolor, plus bold/underline/etc.), so you can produce coloured segments. Only the first line is used; output is truncated to the terminal width. A run that exceeds `interval` seconds is terminated, and a failing command simply leaves the row blank — it never blocks the UI.
+The command's stdout is parsed for ANSI/SGR colour escapes (16-colour, 256-colour, and truecolor, plus bold/underline/etc.), so you can produce coloured segments. Only the first line is used; output is truncated to the terminal width. A run that exceeds `interval` seconds is terminated, and a failing command simply leaves the row blank. It never blocks the UI.
 
-Each run receives a **JSON context on stdin** describing the live session, so scripts can display proxy state without querying gori:
+Each run receives a JSON context on stdin describing the live session, so scripts can display proxy state without querying gori:
 
 ```json
 {
@@ -151,17 +151,17 @@ See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables).
 
 | Section | Description |
 |---------|-------------|
-| `theme` | Active theme name (default `goridark`) — see the [Themes guide](/guide/themes/) |
+| `theme` | Active theme name (default `goridark`). See the [Themes guide](/guide/themes/) |
 | `mouse` | Mouse support toggle |
 | `pretty_bodies` | Pretty-print JSON/XML/etc. bodies in the detail view |
 | `editor` | External editor `command` and Markdown handling |
 | `tabs` | Which TUI tabs are shown/hidden |
-| `hostname_overrides` | Global host → IP dial map — see [hostname_overrides](#hostname_overrides) above |
-| `env` | Env-token prefix and global values — see [env](#env) above |
-| `hotkeys` | Keybinding overrides (`os` layer + `bindings`) — see the [Hotkeys guide](/guide/hotkeys/) |
+| `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname_overrides) above |
+| `env` | Env-token prefix and global values. See [env](#env) above |
+| `hotkeys` | Keybinding overrides (`os` layer + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
 | `decoder` / `mine` | Saved defaults for the Decoder tool and Param Miner |
-| `layout` | History / Probe / Issues previews + Sitemap expand depth — see [layout](#layout) above |
-| `statusline` | Bottom status row that runs a command on an interval — see [statusline](#statusline) above |
+| `layout` | History / Probe / Issues previews + Sitemap expand depth. See [layout](#layout) above |
+| `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
 
 ## Per-Project Overrides
 

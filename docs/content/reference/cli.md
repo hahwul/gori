@@ -34,13 +34,13 @@ gori tui --listen 0.0.0.0 --port 8080
 | Option | Description |
 |--------|-------------|
 | `-l`, `--listen=HOST` | Global bind address for this process (defaults to `settings.json`, else `127.0.0.1`). Not persisted. A project's own bind still wins when set. |
-| `-p`, `--port=PORT` | Global bind port for this process, `0`–`65535` (defaults to `settings.json`, else `8070`). Not persisted. Project `net.bind_port` still wins when set. |
+| `-p`, `--port=PORT` | Global bind port for this process, `0`-`65535` (defaults to `settings.json`, else `8070`). Not persisted. Project `net.bind_port` still wins when set. |
 | `--db=PATH` | SQLite database path |
 | `--ca-dir=PATH` | Directory for the root CA |
 | `--headless` | Run without the TUI (capture to STDOUT) |
 | `--insecure-upstream` | Do not verify upstream TLS certificates |
 
-> `GORI_HOME` is an environment variable, not a flag. Project selection in the TUI is done through the project picker. Bind flags only set the **global** layer for this run — see [Configuration](/getting-started/configuration/#network). For the root CA path, use [`gori ca`](#gori-ca).
+> `GORI_HOME` is an environment variable, not a flag. Project selection in the TUI is done through the project picker. Bind flags only set the global layer for this run. See [Configuration](/getting-started/configuration/#network). For the root CA path, use [`gori ca`](#gori-ca).
 
 ## gori run
 
@@ -123,9 +123,9 @@ gori run repeater <flow-id> --target https://staging.example.com --http2 --diff
 | `--diff` | Diff against the original response |
 | `--format=FMT` | `text` (default) or `json` |
 
-**`repeater list`** — list saved Repeater sessions (`--format text|json`).
+**`repeater list`**: list saved Repeater sessions (`--format text|json`).
 
-**`repeater create`** — create a Repeater session:
+**`repeater create`**: create a Repeater session:
 
 ```bash
 gori run repeater create --target https://api.example.com --request-file req.txt --name "login probe"
@@ -165,7 +165,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | Option | Description |
 |--------|-------------|
 | `--flow`, `--request`, `--target`, `--sni`, `--http2`, `-k` | Request source and transport |
-| `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies` (multipart off by default — pass it explicitly) |
+| `--locations=LIST` | `query`, `form`, `multipart`, `json`, `headers`, `cookies` (multipart off by default, pass it explicitly) |
 | `--wordlist`, `--bucket=N` | Candidate names and bucket size |
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | Rate control |
 | `--format` | `text`, `json`, or `jsonl` |
@@ -176,7 +176,7 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 gori run probe --severity high --category cors
 ```
 
-`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors` (passive only — `active` probes run in the TUI); `-q`/`--query` filters with QL.
+`--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors` (passive only, `active` probes run in the TUI); `-q`/`--query` filters with QL.
 
 ### run sitemap
 
@@ -237,7 +237,7 @@ gori run project scope disable
 
 #### project env
 
-Manage **project** env vars used for `$KEY` substitution in outbound requests (Repeater, Fuzzer, Miner, CLI, MCP). Global vars live in `settings.json` / the TUI Settings — this command only touches the per-project layer.
+Manage **project** env vars used for `$KEY` substitution in outbound requests (Repeater, Fuzzer, Miner, CLI, MCP). Global vars live in `settings.json` / the TUI Settings. This command only touches the per-project layer.
 
 ```bash
 gori run project env                              # list KEY=value
@@ -290,7 +290,7 @@ Prints the path to gori's root CA certificate (creates it on first use). Use thi
 
 ### gori ca regenerate
 
-Replaces the on-disk root CA with a freshly minted one. **Destructive** — every client that trusted the old CA must re-trust the new certificate. Any already-running gori process keeps the old CA in memory until restarted.
+Replaces the on-disk root CA with a freshly minted one. **Destructive**: every client that trusted the old CA must re-trust the new certificate. Any already-running gori process keeps the old CA in memory until restarted.
 
 | Option | Description |
 |--------|-------------|
@@ -301,7 +301,7 @@ Without `--yes`, the command prompts on a tty and expects you to type `regenerat
 
 ### gori ca import
 
-Adopts an **externally-created** root CA (a certificate + matching private key, both PEM) in place of gori's own — for sharing one CA across a team or machines, or reusing an organization CA. gori needs both files because it signs per-host leaf certificates on the fly; clients trust only the certificate. **Destructive**, like `regenerate` — it replaces the on-disk root and voids prior trust.
+Adopts an externally-created root CA (a certificate + matching private key, both PEM) in place of gori's own, for sharing one CA across a team or machines, or reusing an organization CA. gori needs both files because it signs per-host leaf certificates on the fly; clients trust only the certificate. **Destructive**, like `regenerate`: it replaces the on-disk root and voids prior trust.
 
 | Option | Description |
 |--------|-------------|
@@ -310,7 +310,7 @@ Adopts an **externally-created** root CA (a certificate + matching private key, 
 | `--yes`, `-y` | Skip the interactive confirm (required when stdin is not a tty) |
 | `--ca-dir=DIR` | CA directory to install into |
 
-The pair is validated before anything is written: the key must match the certificate and the certificate must be a CA (`basicConstraints CA:TRUE`) — a bad pair aborts without touching the current CA. An expired or not-yet-valid certificate imports with a warning. Confirm by typing `import` on a tty, or pass `--yes`. The same action is available from the TUI palette (**Import CA certificate**).
+The pair is validated before anything is written: the key must match the certificate and the certificate must be a CA (`basicConstraints CA:TRUE`). A bad pair aborts without touching the current CA. An expired or not-yet-valid certificate imports with a warning. Confirm by typing `import` on a tty, or pass `--yes`. The same action is available from the TUI palette (**Import CA certificate**).
 
 Generate a root with OpenSSL, then import it:
 
@@ -320,7 +320,7 @@ openssl req -x509 -new -key root.key.pem -days 3650 -subj "/CN=my ca" -out root.
 gori ca import --cert root.crt.pem --key root.key.pem --yes
 ```
 
-Trust only `root.crt.pem` in your clients — never distribute the private key.
+Trust only `root.crt.pem` in your clients. Never distribute the private key.
 
 ## gori settings
 
@@ -335,7 +335,7 @@ gori settings --edit   # open it in $EDITOR
 gori wizard
 ```
 
-Runs the interactive setup (global proxy bind default, then theme). Also runs automatically on first launch. The bind step writes the shared `settings.json` defaults — projects can still pin their own address in the Project tab; `--listen` / `--port` override for one run only.
+Runs the interactive setup (global proxy bind default, then theme). Also runs automatically on first launch. The bind step writes the shared `settings.json` defaults. Projects can still pin their own address in the Project tab; `--listen` / `--port` override for one run only.
 
 ## gori tutorial
 
@@ -356,13 +356,13 @@ Detects how this `gori` binary was installed and updates accordingly:
 
 | Install channel | Behavior |
 |-----------------|----------|
-| Standalone binary (curl install, manual download, workspace build, or a **manual** copy into `/usr/bin` that no package manager owns) | Downloads the latest GitHub release asset for this OS/arch and replaces the binary (macOS also refreshes sibling `lib/` in a dedicated dir) |
+| Standalone binary (curl install, manual download, workspace build, or a manual copy into `/usr/bin` that no package manager owns) | Downloads the latest GitHub release asset for this OS/arch and replaces the binary (macOS also refreshes sibling `lib/` in a dedicated dir) |
 | Homebrew | Prints `brew upgrade gori` (use `--exec` to run it; never overwrites the brew-managed path) |
 | Snap | Prints `snap refresh gori` (use `--exec` to run it) |
 | pacman / AUR | Prints `yay` / `paru` / `pacman` guidance |
 | deb (dpkg) | Prints `apt` upgrade guidance |
 | rpm | Prints `dnf` / `yum` / `zypper` guidance |
 
-Paths under `/usr/bin` or `/bin` are classified by **package ownership** (`pacman -Qo`, `dpkg-query -S`, `rpm -qf`). If a manager owns the file, gori never overwrites it. If probes find no owner, the binary channel self-updates. When no package tools are available, `/etc/os-release` (`ID` / `ID_LIKE`) picks Arch-like / Debian-like / RHEL-like guidance as a fallback.
+Paths under `/usr/bin` or `/bin` are classified by package ownership (`pacman -Qo`, `dpkg-query -S`, `rpm -qf`). If a manager owns the file, gori never overwrites it. If probes find no owner, the binary channel self-updates. When no package tools are available, `/etc/os-release` (`ID` / `ID_LIKE`) picks Arch-like / Debian-like / RHEL-like guidance as a fallback.
 
-Release asset names match the [installation guide](/getting-started/installation/) (`gori-v*-linux-*` plain binaries, `gori-v*-osx-*.tar.gz` archives). macOS archive updates require a dedicated layout (e.g. `PREFIX/opt/gori` from the curl installer) so bundled `lib/` is never written under shared roots like `/usr/local/lib`. If no release assets exist yet, the command exits with a clear error pointing at the releases page — it does not silently no-op.
+Release asset names match the [installation guide](/getting-started/installation/) (`gori-v*-linux-*` plain binaries, `gori-v*-osx-*.tar.gz` archives). macOS archive updates require a dedicated layout (e.g. `PREFIX/opt/gori` from the curl installer) so bundled `lib/` is never written under shared roots like `/usr/local/lib`. If no release assets exist yet, the command exits with a clear error pointing at the releases page. It does not silently no-op.
