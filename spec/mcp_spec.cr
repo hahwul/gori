@@ -879,6 +879,32 @@ describe Gori::MCP::Server do
         p["precedence_warning"].as_s.should contain("flow_id")
       end
     end
+
+    it "executes a saved HTTP repeater by repeater_id" do
+      with_store do |store|
+        port = start_mcp_http_origin("repeater-ok")
+        rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
+          request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil, mark_transform: false)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid}}}})
+        p = tool_payload(drive(store, call, verify_upstream: false)[0])
+        p["status"].as_i.should eq(200)
+        p["effective_request"]["target"].as_s.should eq("/rep")
+        p["effective_request"]["host"].as_s.should eq("127.0.0.1")
+      end
+    end
+
+    it "rejects send_request on a WebSocket repeater and points to send_websocket" do
+      with_store do |store|
+        rid = store.insert_repeater(target: "http://127.0.0.1:9",
+          request: "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:9\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x\r\nSec-WebSocket-Version: 13\r\n\r\n",
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil, mark_transform: false)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid}}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["content"][0]["text"].as_s.should contain("send_websocket")
+      end
+    end
   end
 
   describe "scope enforcement (active tools)" do
