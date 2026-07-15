@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added — Param Miner covers more body types
+
+The Miner now injects candidate parameters into two body shapes it previously
+ignored:
+
+- **multipart/form-data** — a new `multipart` location splices candidate fields
+  into an existing multipart body (reusing the request's boundary, byte-exact
+  otherwise), instead of silently falling back to query-only mining. It's
+  *applicable but off by default* (a captured file part would be re-sent on every
+  request); enable it with `--locations multipart`, the MCP `locations` field, or
+  its overlay checkbox.
+- **Nested & array JSON** — JSON mining previously probed only the top-level
+  object's keys. It now injects candidate keys into every object node — nested
+  objects and objects inside a root array included — capped BFS shallow-first, so
+  `{"data":{…}}` and `[{…},{…}]` bodies are covered. Single-object bodies mine
+  exactly as before.
+
 ### Changed — upstream TLS verification moved to Settings: Network
 
 The bottom status bar no longer carries the `upstream:verify` / `upstream:insecure`

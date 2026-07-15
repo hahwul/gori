@@ -38,7 +38,7 @@ gori run probe -q 'host:example.com' # filter History with QL (Repeater still sc
 
 ## Param Miner
 
-The **Miner** discovers parameters a server accepts but doesn't advertise. Point it at a flow and it probes candidate names across locations — query string, form body, JSON, headers, and cookies — bucketing guesses efficiently and reporting the ones that change the response.
+The **Miner** discovers parameters a server accepts but doesn't advertise. Point it at a flow and it probes candidate names across locations — query string, form body, multipart/form-data, JSON (including nested objects and array roots), headers, and cookies — bucketing guesses efficiently and reporting the ones that change the response. Multipart is applicable but off by default (a captured file part would be re-sent on every request); enable it with `--locations multipart` or its checkbox.
 
 ```bash
 gori run mine <flow-id> \

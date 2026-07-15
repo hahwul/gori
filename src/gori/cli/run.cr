@@ -97,7 +97,7 @@ module Gori
           show <id>          Print a flow's request/response (text, json, or raw bytes)
           repeater             Re-send a captured flow, or list/create repeater sessions
           fuzz [<id>]        Fuzz/intrude a request: mark §…§ positions, sweep payloads
-          mine [<id>]        Discover hidden parameters (query/body/json/header/cookie)
+          mine [<id>]        Discover hidden parameters (query/form/multipart/json/header/cookie)
           sitemap            Print the host → path endpoint tree (text, json, paths)
           probe [QL]         Passively scan captured flows for issues (zero requests)
           notes [<n>]        Read the project's notes (list, show one, or --all)
@@ -1134,7 +1134,7 @@ module Gori
           p.on("--http2", "Force HTTP/2") { force_h2 = true }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
-          p.on("--locations=LIST", "Where to mine: query,form,json,headers,cookies (default: auto-detect)") { |v| locations = parse_mine_locations(v) }
+          p.on("--locations=LIST", "Where to mine: query,form,multipart,json,headers,cookies (default: auto-detect)") { |v| locations = parse_mine_locations(v) }
           p.on("--wordlist=PATH", "Extra param-name wordlist (merged with the built-in list)") { |v| wordlist = v }
           p.on("--bucket=N", "Names stuffed per request before bisection (per location)") { |v| bucket = parse_count(v, "--bucket") }
           p.on("--concurrency=N", "Parallel requests (default 10)") { |v| concurrency = parse_count(v, "--concurrency") }
@@ -1217,7 +1217,7 @@ module Gori
       private def self.parse_mine_locations(v : String) : Array(Miner::Location)
         v.split(',').compact_map do |tok|
           next if tok.strip.empty?
-          Miner::Location.parse?(tok) || abort("gori run mine: unknown location '#{tok}' (query|form|json|headers|cookies)")
+          Miner::Location.parse?(tok) || abort("gori run mine: unknown location '#{tok}' (query|form|multipart|json|headers|cookies)")
         end
       end
 
