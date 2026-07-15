@@ -394,17 +394,30 @@ module Gori::Tui
 
       # Does the line exceed `limit`? Stop measuring as soon as it does — never walk a
       # huge (e.g. minified-JSON, multi-KB header) line in full just to set a boolean.
+      # A printable-ASCII span (the common case — HTTP heads/bodies) is all width-1
+      # glyphs, so its width is its char count: skip the grapheme walk (and its per-glyph
+      # `g.to_s` String) entirely, mirroring Screen#text's ASCII fast path. Mixed lines
+      # stay correct — width accumulates across spans regardless of which branch each takes.
       overflow = false
       acc = 0
       line.each do |span|
-        span.text.each_grapheme do |g|
-          acc += Termisu::UnicodeWidth.grapheme_width(g.to_s)
-          if acc > limit
+        t = span.text
+        if printable_ascii?(t)
+          if acc + t.size > limit
             overflow = true
             break
           end
+          acc += t.size
+        else
+          t.each_grapheme do |g|
+            acc += Termisu::UnicodeWidth.grapheme_width(g.to_s)
+            if acc > limit
+              overflow = true
+              break
+            end
+          end
+          break if overflow
         end
-        break if overflow
       end
       ellipsis = overflow && limit > 1
 
@@ -413,17 +426,31 @@ module Gori::Tui
       done = false
       line.each do |span|
         break if done
-        span.text.each_grapheme do |g|
-          gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
-          # The FIRST grapheme that doesn't fit terminates ALL rendering — a single
-          # continuous walk, so a later span can't resume into the leftover room and draw
-          # a narrower glyph in place of the skipped wide one (Screen#fit glyph parity).
-          if visual_col + gw > room
-            done = true
-            break
+        t = span.text
+        if printable_ascii?(t)
+          # Each printable-ASCII char is one width-1 cell; pass the Char to `cell` (interned
+          # via Screen::ASCII_CELL — zero allocation) instead of a fresh `g.to_s` String.
+          t.each_char do |ch|
+            if visual_col + 1 > room
+              done = true
+              break
+            end
+            screen.cell(x + visual_col, y, ch, span.fg, bg, span.attr)
+            visual_col += 1
           end
-          screen.cell(x + visual_col, y, g.to_s, span.fg, bg, span.attr)
-          visual_col += gw
+        else
+          t.each_grapheme do |g|
+            gw = Termisu::UnicodeWidth.grapheme_width(g.to_s)
+            # The FIRST grapheme that doesn't fit terminates ALL rendering — a single
+            # continuous walk, so a later span can't resume into the leftover room and draw
+            # a narrower glyph in place of the skipped wide one (Screen#fit glyph parity).
+            if visual_col + gw > room
+              done = true
+              break
+            end
+            screen.cell(x + visual_col, y, g.to_s, span.fg, bg, span.attr)
+            visual_col += gw
+          end
         end
         break if done || visual_col >= limit
       end
@@ -768,6 +795,16 @@ module Gori::Tui
     end
 
     # --- helpers -------------------------------------------------------------
+
+    # Whether every byte is printable ASCII (0x20..0x7e), so the string is all width-1
+    # glyphs with one byte per displayed cell. Lets `draw` skip grapheme clustering +
+    # `grapheme_width` + per-glyph `g.to_s` on the common HTTP-text span. A control byte
+    # (< 0x20 / 0x7f) or any byte >= 0x80 (a multibyte lead/continuation, or a codepoint
+    # whose display width may be 0/2) falls through to the exact grapheme-walk path. Empty
+    # string is trivially true (the fast path then draws nothing, matching each_grapheme).
+    private def self.printable_ascii?(s : String) : Bool
+      s.to_slice.all? { |b| b >= 0x20_u8 && b <= 0x7e_u8 }
+    end
 
     private def self.plain(raw : String) : Line
       [Span.new(raw, Theme.text)]

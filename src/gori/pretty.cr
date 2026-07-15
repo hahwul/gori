@@ -52,10 +52,7 @@ module Gori
         return r
       end
       if ctl && ctl.includes?("json")
-        if r = try_graphql(str)
-          return r
-        end
-        return try_json(str)
+        return try_json_or_graphql(str)
       end
       return try_form(str) if ctl && ctl.includes?("x-www-form-urlencoded")
       return try_multipart(body, ct) if ctl && ct && ctl.starts_with?("multipart/")
@@ -82,22 +79,36 @@ module Gori
 
     # ---- JSON --------------------------------------------------------------
 
-    private def try_json(str : String) : Result?
+    # A JSON body is EITHER a GraphQL envelope (operationName + query + variables) or plain
+    # JSON to pretty-print. Both used to JSON.parse the SAME body independently (try_graphql
+    # then try_json), so a non-GraphQL REST-JSON response — the dominant shape — built the
+    # whole JSON tree TWICE per detail-view cache rebuild. Parse ONCE, sniff GraphQL off the
+    # tree, else pretty-print the tree. Byte-identical to the old two-call dispatch on every
+    # input: invalid/empty JSON → nil via the parse rescue (as both did); a GraphQL shape →
+    # the graphql result; anything else → the pretty result (or nil for already-pretty/scalar).
+    private def try_json_or_graphql(str : String) : Result?
       s = strip_bom(str).strip
-      return nil if s.empty?
-      pretty = JSON.parse(s).to_pretty_json
+      json = JSON.parse(s)
+      # GraphQL sniff in its OWN rescue so a shape-check failure falls through to pretty-print
+      # exactly as the old try_graphql(rescue→nil)-then-try_json path did.
+      if r = (graphql_from(json) rescue nil)
+        return r
+      end
+      pretty = json.to_pretty_json
       return nil if pretty == s # already pretty / scalar → no-op, show raw
       slice = pretty.to_slice
       return nil if slice.size > MAX_OUT_PRETTY
       Result.new(slice, "pretty: json")
     rescue
-      nil
+      nil # invalid JSON (both try_graphql and try_json returned nil here before)
     end
 
     # ---- GraphQL (operationName + un-escaped query + pretty variables) ------
 
-    private def try_graphql(str : String) : Result?
-      json = JSON.parse(strip_bom(str).strip)
+    # GraphQL envelope over an ALREADY-PARSED body (no second parse). Same guards as the old
+    # try_graphql minus the JSON.parse; nil for any non-GraphQL object/array/scalar so the
+    # caller falls through to plain JSON pretty-printing.
+    private def graphql_from(json : JSON::Any) : Result?
       h = json.as_h?
       return nil unless h
       q = h["query"]?.try(&.as_s?)
@@ -119,8 +130,6 @@ module Gori
       ob = text.to_slice
       return nil if ob.size > MAX_OUT_PRETTY
       Result.new(ob, "pretty: graphql", :text)
-    rescue
-      nil
     end
 
     # ---- JWT (reuses Decoder::Codecs.jwt_decode) ---------------------------

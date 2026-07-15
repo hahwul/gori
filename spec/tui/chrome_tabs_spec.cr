@@ -153,3 +153,26 @@ describe "Chrome.scroll_start" do
     Chrome.scroll_start(widths, active_idx: 4, avail: 25, prev_start: 1).should eq(3)
   end
 end
+
+# split_tabs folds visible_tabs + hidden_tabs into ONE reconcile pass (the render path needs
+# both every frame). It MUST return exactly what calling the two separately returns — this
+# locks that hand-merged equivalence across the force/all-hidden edge cases.
+describe "Chrome.split_tabs" do
+  user_hidden = [{"repeater", false}, {"decoder", false}]
+  all_hidden = Chrome::TABS.map { |(sym, _)| {sym.to_s, false} }
+  configs = {
+    "empty"                => {[] of {String, Bool}, nil.as(Symbol?)},
+    "force visible active" => {[] of {String, Bool}, :project.as(Symbol?)},
+    "force hidden active"  => {[] of {String, Bool}, :miner.as(Symbol?)},
+    "user-hidden"          => {user_hidden, nil.as(Symbol?)},
+    "user-hidden + force"  => {user_hidden, :repeater.as(Symbol?)},
+    "all-hidden"           => {all_hidden, nil.as(Symbol?)},
+    "all-hidden + force"   => {all_hidden, :issues.as(Symbol?)},
+  }
+  configs.each do |name, (prefs, force)|
+    it "equals {visible_tabs, hidden_tabs} for #{name}" do
+      Chrome.split_tabs(prefs, force: force).should eq(
+        {Chrome.visible_tabs(prefs, force: force), Chrome.hidden_tabs(prefs, force: force)})
+    end
+  end
+end

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Performance — behavior-preserving hot-path optimizations
+
+A measured pass over the render / fuzz / decoder hot paths (micro-benchmarks in
+`bench/`, gated on a benchmark delta + the full spec suite staying green). No
+observable behavior changes — byte-exact forwarding, identical rendered glyphs,
+identical query/pretty output. Highlights:
+
+- **TUI render primitives** — `Highlight.draw` (the styled-line primitive behind
+  the History detail, Repeater, Intercept, Fuzzer, and Decoder panes) and
+  `Screen.display_width`/`column_width` gained the printable-ASCII fast path
+  `Screen#text` already had: an ASCII line (the common HTTP head/body) is drawn
+  by char at width 1 with interned cells instead of grapheme-clustering and
+  allocating a `String` per glyph. `Highlight.draw` over a styled viewport drops
+  ~21× (123 kB/op → 640 B/op); `display_width` on a frame's worth of labels drops
+  ~115× (0 B/op). Non-ASCII (CJK/emoji/combining) keeps the exact grapheme path.
+- **Tab bar** — the menu strip and the ⋯ hidden-count now come from ONE
+  `Chrome.split_tabs` reconcile per frame instead of two.
+- **Fuzzer** — `Template#render` pre-sizes its output buffer to the exact length,
+  dropping the default-64 B realloc chain on every emitted request.
+- **Pretty-print** — a JSON body is parsed ONCE (shared between the GraphQL sniff
+  and the pretty-print) instead of twice per detail-view rebuild.
+
+New benches: `highlight_draw_bench`, `display_width_bench`, `fuzz_render_bench`,
+`pretty_bench`. New parity/equivalence specs lock the behavior of each change.
+
 ### Changed — MCP server hardening & new tools
 
 A broad pass over the MCP surface based on an external assessment. Highlights:

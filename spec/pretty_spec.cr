@@ -42,6 +42,14 @@ describe Gori::Pretty do
     it "guards deep-nesting DoS via JSON max_nesting" do
       pretty("application/json", "[" * 1000 + "]" * 1000).should be_nil
     end
+
+    it "reflows a top-level array and no-ops a scalar (shared-parse path, non-object roots)" do
+      arr = pretty("application/json", "[1,2,3]").not_nil!
+      arr.kind.should be_nil
+      text(arr).lines.size.should be > 1                # array pretty-printed, not GraphQL-hijacked
+      pretty("application/json", "42").should be_nil    # scalar → already-"pretty" → nil
+      pretty("application/json", %("hi")).should be_nil # string scalar → nil
+    end
   end
 
   describe "GraphQL" do

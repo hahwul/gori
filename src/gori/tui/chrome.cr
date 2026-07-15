@@ -106,6 +106,24 @@ module Gori::Tui
       reconcile(prefs).reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
     end
 
+    # The visible strip AND the hidden list from ONE reconcile pass — {visible, hidden},
+    # each identical to what visible_tabs / hidden_tabs return alone. The render path needs
+    # both every frame (the menu strip + the ⋯ hidden count); calling visible_tabs and
+    # hidden_tabs separately rebuilt reconcile's catalog hashes twice per frame for the same
+    # output. Pure function of prefs, so folding the two into one pass is byte-identical.
+    def self.split_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : {Array({Symbol, String}), Array({Symbol, String})}
+      ann = reconcile(prefs)
+      vis = ann.select { |(_, _, v)| v }.map { |(s, l, _)| {s, l} }
+      if force && vis.none? { |(s, _)| s == force }
+        if idx = ann.index { |(s, _, _)| s == force }
+          at = ann[0...idx].count { |(_, _, v)| v }
+          vis.insert(at, {ann[idx][0], ann[idx][1]})
+        end
+      end
+      hidden = ann.reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
+      {vis, hidden}
+    end
+
     # The "more" affordance label — a ⋯ ellipsis plus the hidden-tab count, so the bar
     # reads "there are N tabs tucked away here" at a glance.
     def self.more_label(hidden_count : Int32) : String
