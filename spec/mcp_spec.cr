@@ -848,6 +848,50 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "scope enforcement (active tools)" do
+    it "flags an unscoped send but still sends when no scope is configured" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/"}}})
+        p = tool_payload(drive(store, call, verify_upstream: false)[0])
+        p["scope_decision"].as_s.should eq("unscoped")
+        p["effective_host"].as_s.should eq("127.0.0.1")
+      end
+    end
+
+    it "reports in_scope with the matched rule id when the host is included" do
+      with_store do |store|
+        store.add_scope_rule("include", "host", "127.0.0.1")
+        port = start_mcp_http_origin("ok")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/"}}})
+        p = tool_payload(drive(store, call, verify_upstream: false)[0])
+        p["scope_decision"].as_s.should eq("in_scope")
+        p["scope_rule_id"].as_i64.should be > 0
+      end
+    end
+
+    it "blocks an out-of-scope send without sending or recording" do
+      with_store do |store|
+        store.add_scope_rule("include", "host", "example.com")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("SCOPE_BLOCKED")
+        store.count.should eq(0) # refused before any History write
+      end
+    end
+
+    it "allows an out-of-scope send with allow_unscoped:true" do
+      with_store do |store|
+        store.add_scope_rule("include", "host", "example.com")
+        port = start_mcp_http_origin("ok")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","allow_unscoped":true}}})
+        p = tool_payload(drive(store, call, verify_upstream: false)[0])
+        p["scope_decision"].as_s.should eq("out_of_scope")
+      end
+    end
+  end
+
   describe "send_websocket" do
     it "performs the upgrade and returns the inbound frame transcript" do
       with_store do |store|

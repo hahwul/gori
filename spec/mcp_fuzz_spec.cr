@@ -122,4 +122,28 @@ describe "MCP fuzz tools" do
       capped.should be_true
     end
   end
+
+  it "blocks fuzz_start when the origin host is out of the configured scope" do
+    with_store do |store|
+      store.add_scope_rule("include", "host", "example.com")
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      text, err = call_raw(tools, "fuzz_start",
+        {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "url" => "http://127.0.0.1:1",
+         "payloads" => %([{"list":["a"]}])}.to_json)
+      err.should be_true
+      text.should contain("out of the project's configured scope")
+    end
+  end
+
+  it "runs fuzz_start when the origin host is in the configured scope" do
+    port = start_origin
+    with_store do |store|
+      store.add_scope_rule("include", "host", "127.0.0.1")
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "url" => "http://127.0.0.1:#{port}",
+         "payloads" => %([{"list":["a"]}])}.to_json)
+      start["scope_decision"].as_s.should eq("in_scope")
+    end
+  end
 end

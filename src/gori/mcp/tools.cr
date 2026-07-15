@@ -3,6 +3,7 @@ require "base64"
 require "log"
 require "../store"
 require "../ql"
+require "../scope"
 require "../repeater/engine"
 require "../repeater/h2_engine"
 require "../repeater/flow_request"
@@ -39,6 +40,13 @@ module Gori
         retryable : Bool = false, details : JSON::Any? = nil
       record BodyChunkOptions, flow_id : Int64?, repeater_id : Int64?, offset : Int64,
         limit : Int32, raw : Bool
+
+      # Outcome of the active-tool scope gate. `decision` is "in_scope",
+      # "out_of_scope", or "unscoped" (no scope rules configured). `blocked` is
+      # true only for an out-of-scope target that the caller did not override with
+      # allow_unscoped — an UNCONFIGURED scope never blocks (preserves the
+      # historical send-anywhere behavior; the send is merely flagged unscoped).
+      record ScopeCheck, decision : String, host : String, rule_id : Int64?, blocked : Bool
 
       EMPTY_HASH = {} of String => JSON::Any
 
@@ -286,6 +294,7 @@ module Gori
               s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
               s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
               s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false)")
+              s.field "allow_unscoped", boolprop("send even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
               s.field "name", strprop("optional custom name for the saved repeater tab (only when save_as_repeater=true)")
               s.field "issue_id", intprop("optional issue to link to the saved repeater; requires save_as_repeater=true")
             end
@@ -374,6 +383,7 @@ module Gori
               s.field "http2", boolprop("use real HTTP/2 (default false)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "max_requests", intprop("caller cap on total requests")
+              s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
             end
 
             tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|stopped|error)." do |s|
@@ -413,6 +423,7 @@ module Gori
               s.field "http2", boolprop("use real HTTP/2 (default false)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "max_requests", intprop("caller cap on total requests")
+              s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
             end
 
             tool j, "mine_status", "Counts + state of a mine job (running|done|stopped|error)." do |s|
@@ -967,31 +978,44 @@ module Gori
         save = bool_arg(h, "save_as_repeater", false)
         record_history = bool_arg(h, "record_history", true)
         include_sensitive_headers = bool_arg(h, "include_sensitive_headers", false)
-        issue_id = int(h, "issue_id")
-        return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
-        if issue_id
-          return Result.new("issue_id requires save_as_repeater=true", is_error: true) unless save
-          return not_found("no issue with id #{issue_id}") unless @store.get_issue(issue_id)
-        end
+        issue_id = send_issue_id(h, save)
+        return issue_id if issue_id.is_a?(Result)
 
         built, http2, sni = build_send_request(h)
+        # Scope gate BEFORE any outbound byte / History write: an out-of-scope
+        # target is refused (nothing sent, nothing recorded) unless allow_unscoped.
+        sc = scope_check("#{built.scheme}://#{built.host}#{request_target(built.bytes)}",
+          built.host, bool(h, "allow_unscoped") || false)
+        return scope_blocked(sc) if sc.blocked
         recorded_flow_id = record_history ? record_outbound_request(built, http2) : nil
         verify = @verify_upstream && !(bool(h, "insecure") || false)
         result = send_built_request(built, http2, verify, sni)
         record_outbound_response(recorded_flow_id, result) if recorded_flow_id
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
-        Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
+        Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
 
         repeater_id = persist_send_repeater(h, save, built, http2, result,
           issue_id, recorded_flow_id)
 
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
-          include_sensitive_headers), is_error: !result.ok?)
+          include_sensitive_headers, sc), is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
         # actionable message instead of letting call()'s generic "tool error:"
         # wrapper swallow it, matching fuzz_start's FuzzArgError handling.
         Result.new(ex.message || "invalid request arguments", is_error: true)
+      end
+
+      # Resolve + validate the optional issue_id for a save-linked send. Returns
+      # the id (or nil when absent), or an error Result the caller returns as-is.
+      private def send_issue_id(h, save : Bool) : Int64? | Result
+        issue_id = int(h, "issue_id")
+        return err(id_error(h, "issue_id"), "INVALID_ARGUMENT", field: "issue_id") if issue_id.nil? && present?(h, "issue_id")
+        if issue_id
+          return err("issue_id requires save_as_repeater=true", "INVALID_ARGUMENT", field: "issue_id") unless save
+          return not_found("no issue with id #{issue_id}") unless @store.get_issue(issue_id)
+        end
+        issue_id
       end
 
       private def send_built_request(built : RequestBuilder::Built, http2 : Bool,
@@ -1109,9 +1133,11 @@ module Gori
       end
 
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
-                                   repeater_id : Int64?, include_sensitive_headers : Bool) : String
+                                   repeater_id : Int64?, include_sensitive_headers : Bool,
+                                   sc : ScopeCheck) : String
         JSON.build do |j|
           j.object do
+            emit_scope(j, sc)
             j.field "recorded_flow_id", recorded_flow_id
             j.field "saved_repeater_id", repeater_id if repeater_id && repeater_id > 0
             j.field "error", result.error unless result.ok?
@@ -1797,6 +1823,10 @@ module Gori
 
       private def fuzz_start(h) : Result
         engine, origin, total = build_fuzz_job(h)
+        # Scope gate before launching any real send (host-level: fuzz sweeps many
+        # paths against one origin, so evaluate the origin host).
+        sc = scope_check("#{origin.scheme}://#{origin.host}/", origin.host, bool(h, "allow_unscoped") || false)
+        return scope_blocked(sc) if sc.blocked
         if total && total > FUZZ_MAX_REQUESTS
           return err("too many requests (#{total} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads", "BUDGET_EXHAUSTED")
         end
@@ -1805,9 +1835,9 @@ module Gori
         fjob = FuzzJob.new(id, total, engine)
         @jobs[id] = fjob
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
-        Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} total=#{total || "?"}" }
+        Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} total=#{total || "?"}" }
         spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
-        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running" } })
+        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running"; emit_scope(j, sc) } })
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       end
@@ -1899,13 +1929,15 @@ module Gori
 
       private def mine_start(h) : Result
         engine, origin, total = build_mine_job(h)
+        sc = scope_check("#{origin.scheme}://#{origin.host}/", origin.host, bool(h, "allow_unscoped") || false)
+        return scope_blocked(sc) if sc.blocked
         @job_seq += 1
         id = "mn_#{@job_seq}"
         mjob = MineJob.new(id, total, engine)
         @mine_jobs[id] = mjob
-        Log.info { "mine_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} names=#{total}" }
+        Log.info { "mine_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} names=#{total}" }
         spawn(name: "mcp-mine-#{id}") { run_mine_job(mjob, engine) }
-        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "names", total; j.field "status", "running" } })
+        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "names", total; j.field "status", "running"; emit_scope(j, sc) } })
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid mine arguments", is_error: true)
       end
@@ -2306,6 +2338,48 @@ module Gori
       # a capturing TUI, or an unwritable disk) — transient, so retryable.
       private def busy(message : String) : Result
         err(message, "PROJECT_BUSY", retryable: true)
+      end
+
+      # Evaluate the project scope against an active request's target. When scope
+      # is configured this is the same include/exclude test Probe Active uses
+      # (`matches_url?`: at least one INCLUDE must match and no exclude may, and
+      # the display-lens flag is ignored) — so declaring a scope actually gates
+      # outbound tools. An unconfigured scope never blocks; the send proceeds and
+      # is flagged unscoped so the caller/model can see nothing was enforced.
+      private def scope_check(url : String, host : String, allow_unscoped : Bool) : ScopeCheck
+        scope = Scope.load(@store)
+        return ScopeCheck.new("unscoped", host, nil, false) unless scope.configured?
+        if scope.matches_url?(url, host)
+          rid = scope.rules.find { |r| r.include? && r.matches?(url, host) }.try(&.id)
+          ScopeCheck.new("in_scope", host, rid, false)
+        else
+          ScopeCheck.new("out_of_scope", host, nil, !allow_unscoped)
+        end
+      end
+
+      # A refusal to send an out-of-scope active request. SCOPE_BLOCKED is not
+      # retryable (the same target stays out of scope) — the caller must add a
+      # scope include rule or pass allow_unscoped:true.
+      private def scope_blocked(sc : ScopeCheck) : Result
+        err("target host #{sc.host} is out of the project's configured scope; " \
+            "add a matching scope include rule or pass allow_unscoped:true to override",
+          "SCOPE_BLOCKED", field: "url",
+          details: JSON.parse({"scope_decision" => sc.decision, "host" => sc.host}.to_json))
+      end
+
+      # Emits scope_decision / matched scope_rule_id / effective_host onto an
+      # active tool's result object so the send's scope evidence is self-contained.
+      private def emit_scope(j : JSON::Builder, sc : ScopeCheck) : Nil
+        j.field "scope_decision", sc.decision
+        j.field "scope_rule_id", sc.rule_id if sc.rule_id
+        j.field "effective_host", sc.host
+      end
+
+      # The request-target (path) from the first line of a raw request, for
+      # building the scheme://host/target URL the scope string/regex rules see.
+      private def request_target(bytes : Bytes) : String
+        line = String.new(bytes).each_line.first? || ""
+        line.split(' ')[1]? || "/"
       end
 
       private def str(h, key : String) : String?
