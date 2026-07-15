@@ -48,6 +48,20 @@ module Gori::Tui
       end
     end
 
+    # A "‹ list" back affordance riding the top-left border of a detail drill-in, where
+    # `inner` is the framed interior (the frame sits one column outside it, as produced
+    # by BodyChrome.framed / rect.inset(1, 1)). Advertises that ←/esc return to the list
+    # behind the detail — the whole point being discoverability, since users miss the
+    # status-bar "esc back". Rides the border at Frame.card's title column so it reads as
+    # a control on the frame; call it AFTER the frame so it overwrites the hairline cleanly.
+    def self.list_back_hint(screen : Screen, inner : Rect, bg : Color = Theme.bg) : Nil
+      y = inner.y - 1
+      # ` ‹ list ` is 8 cells from inner.x + 1; require inner.w > 8 so its trailing cell
+      # stays left of the frame's top-right ╮ (at inner.x + inner.w) — never clobber it.
+      return if y < 0 || inner.w <= 8
+      screen.text(inner.x + 1, y, " ‹ list ", Theme.accent, bg, Attribute::Bold)
+    end
+
     # A `├───┤` divider across a card's interior at absolute row `y` — the seam
     # between an input/header band and the list below it.
     def self.tee_divider(screen : Screen, rect : Rect, y : Int32, bg : Color = Theme.panel) : Nil

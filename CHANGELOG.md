@@ -13,6 +13,22 @@ Fuzzer/Miner senders without a restart, and the choice persists globally in
 still works: it seeds the toggle off for that session (and the editor reflects it).
 `gori run` / MCP keep their own `--insecure-upstream` flag.
 
+### Fixed — TUI navigation & detail affordances
+
+- **Tab bar left edge no longer wraps** — `←` (or `h`) on the leftmost tab
+  (Project) is now inert instead of jumping to the far-right tab, mirroring
+  `→`'s existing no-wrap at the right edge. A stray `←` on Project was almost
+  always accidental. `[`/`]` keep their from-anywhere wrap.
+- **History detail: `↑` at the top escapes to the tab bar** — matching the
+  list's `↑`-at-top → TABS. The detail closes (the scope model can't focus the
+  bar with the detail open) and the row selection is kept, so re-opening is one
+  keypress. Paging (PageUp) and the wheel are unaffected — only a single `↑` at
+  the very top pops focus up.
+- **Detail drill-ins advertise the way back** — a `‹ list` marker now rides the
+  top-left frame border of the History, Probe, and Issues detail views, making
+  the `←`/`esc` return-to-list gesture discoverable instead of buried in the
+  status hint.
+
 ### Performance — behavior-preserving hot-path optimizations
 
 A measured pass over the render / fuzz / decoder hot paths (micro-benchmarks in
