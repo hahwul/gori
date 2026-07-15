@@ -549,6 +549,36 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "list_sitemap transport" do
+    it "keys endpoints by transport and reports status set + counts; collapse_transport merges" do
+      with_store do |store|
+        mk = ->(scheme : String, ver : String, status : Int32) do
+          id = store.insert_flow(Gori::Store::CapturedRequest.new(
+            created_at: 1_i64, scheme: scheme, host: "api.test", port: scheme == "https" ? 443 : 80,
+            method: "GET", target: "/x", http_version: ver,
+            head: "GET /x HTTP/1.1\r\nHost: api.test\r\n\r\n".to_slice, body: nil))
+          store.update_response(Gori::Store::CapturedResponse.new(
+            flow_id: id, status: status, head: "HTTP/1.1 #{status}\r\n\r\n".to_slice, body: nil))
+        end
+        mk.call("http", "HTTP/1.1", 200)
+        mk.call("https", "HTTP/1.1", 500)
+        mk.call("https", "HTTP/2", 500)
+
+        entries = tool_payload(drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_sitemap","arguments":{}}}))[0]).as_a
+        entries.size.should eq(3) # http/1.1, https/1.1, https/h2 kept separate
+        http = entries.find { |e| e["scheme"].as_s == "http" }.not_nil!
+        http["success_count"].as_i.should eq(1)
+        http["error_count"].as_i.should eq(0)
+        h2 = entries.find { |e| e["http_version"].as_s == "HTTP/2" }.not_nil!
+        h2["error_count"].as_i.should eq(1)
+
+        collapsed = tool_payload(drive(store, %({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_sitemap","arguments":{"collapse_transport":true}}}))[0]).as_a
+        collapsed.size.should eq(1) # merged to one host/method/target
+        collapsed[0].as_h.has_key?("scheme").should be_false
+      end
+    end
+  end
+
   describe "QL strict mode + ql_explain" do
     it "strict:true rejects a query with a silently-dropped term" do
       with_store do |store|

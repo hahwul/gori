@@ -1455,6 +1455,45 @@ module Gori
     # with thousands of endpoints is already past human-scannable).
     SITEMAP_MAX = 10_000
 
+    # A distinct sitemap endpoint keyed by TRANSPORT (scheme/port/http_version), not
+    # just host/method/target — so the same path over http vs https vs h2 stays
+    # separate instead of collapsing into one row. Carries the observed status set +
+    # success/error counts + first/last-seen so the transport's health is visible.
+    record SitemapEntry,
+      scheme : String, host : String, port : Int32, http_version : String,
+      method : String, target : String,
+      statuses : String?, count : Int64, ok : Int64, errors : Int64,
+      first_seen : Int64, last_seen : Int64
+
+    def sitemap_entries_detailed(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
+                                 raise_on_error : Bool = false) : Array(SitemapEntry)
+      rows = [] of SitemapEntry
+      args = filter.args.dup
+      args << limit
+      sql = "SELECT scheme, host, port, http_version, method, target, " \
+            "GROUP_CONCAT(DISTINCT status), COUNT(*), " \
+            "SUM(CASE WHEN status BETWEEN 200 AND 399 THEN 1 ELSE 0 END), " \
+            "SUM(CASE WHEN status = 0 OR status >= 400 THEN 1 ELSE 0 END), " \
+            "MIN(created_at), MAX(created_at) " \
+            "FROM flows WHERE #{filter.sql} " \
+            "GROUP BY scheme, host, port, http_version, method, target " \
+            "ORDER BY host, target LIMIT ?"
+      @db.query(sql, args: args) do |rs|
+        rs.each do
+          rows << SitemapEntry.new(
+            rs.read(String), rs.read(String), rs.read(Int32), rs.read(String),
+            rs.read(String), rs.read(String),
+            rs.read(String?), rs.read(Int64), rs.read(Int64), rs.read(Int64),
+            rs.read(Int64), rs.read(Int64))
+        end
+      end
+      rows
+    rescue ex
+      raise ex if raise_on_error
+      STDERR.puts "gori: sitemap query failed (#{ex.message})"
+      [] of SitemapEntry
+    end
+
     def sitemap_entries(filter : QL::Filter = QL::EMPTY, limit : Int32 = SITEMAP_MAX, *,
                         raise_on_error : Bool = false) : Array({String, String, String})
       rows = [] of {String, String, String}

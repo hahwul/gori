@@ -237,10 +237,14 @@ module Gori
           end
 
           tool j, "list_sitemap",
-            "Distinct endpoints (host, method, target) discovered in capture. " \
-            "Optional QL `query` filter." do |s|
+            "Distinct endpoints discovered in capture, keyed by TRANSPORT " \
+            "(scheme, host, port, http_version, method, target) so the same path over " \
+            "http vs https vs HTTP/2 stays separate — each with its observed status set, " \
+            "success/error counts, and first/last-seen. Pass collapse_transport:true for " \
+            "the legacy host/method/target-only view. Optional QL `query` filter." do |s|
             s.field "query", strprop("gori QL filter")
             s.field "limit", intprop("max entries (default 200, max 5000)")
+            s.field "collapse_transport", boolprop("collapse to distinct host/method/target only (legacy shape), dropping scheme/port/version + counts (default false)")
             s.field "strict", boolprop("reject the query if any term is unrecognized/invalid instead of silently dropping it (default false)")
           end
 
@@ -838,6 +842,35 @@ module Gori
         query = str(h, "query")
         filter = ql_filter_or_error(h, query)
         return filter if filter.is_a?(Result)
+        return collapsed_sitemap(filter, limit) if bool(h, "collapse_transport") || false
+        entries = @store.sitemap_entries_detailed(filter, limit)
+        Result.new(JSON.build do |j|
+          j.array do
+            entries.each do |e|
+              j.object do
+                j.field "scheme", e.scheme
+                j.field "host", e.host
+                j.field "port", e.port
+                j.field "http_version", e.http_version
+                j.field "method", e.method
+                j.field "target", e.target
+                j.field "statuses", e.statuses
+                j.field "count", e.count
+                j.field "success_count", e.ok
+                j.field "error_count", e.errors
+                j.field "first_seen", e.first_seen
+                j.field "first_seen_iso", Serialize.unix_micros_iso(e.first_seen)
+                j.field "last_seen", e.last_seen
+                j.field "last_seen_iso", Serialize.unix_micros_iso(e.last_seen)
+              end
+            end
+          end
+        end)
+      end
+
+      # The legacy collapsed sitemap (distinct host/method/target only), for
+      # collapse_transport:true.
+      private def collapsed_sitemap(filter : QL::Filter, limit : Int32) : Result
         entries = @store.sitemap_entries(filter, limit)
         Result.new(JSON.build do |j|
           j.array do
