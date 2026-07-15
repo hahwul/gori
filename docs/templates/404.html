@@ -4,9 +4,9 @@
 <div class="docs-container">
 {% include "partials/sidebar.html" %}
   <main id="main" class="docs-main">
-    <h1>404 Not Found</h1>
-    <p>The page you are looking for does not exist.</p>
-    <p><a href="{{ base_url }}{{ lang_prefix }}/">Return to home</a></p>
+    <h1>{{ "notfound.title" | t }}</h1>
+    <p>{{ "notfound.body" | t }}</p>
+    <p><a href="{{ base_url }}{{ lang_prefix }}/">{{ "notfound.home_link" | t }}</a></p>
   </main>
 </div>
 {% include "footer.html" %}

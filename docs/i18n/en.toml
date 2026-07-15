@@ -1,0 +1,95 @@
+# UI strings for the English (default) locale.
+# Referenced from templates via the `t` filter, e.g. {{ "nav.start" | t }}.
+# HTML in a value is emitted as-is (the `t` filter does not escape).
+
+[nav]
+start = "Start"
+guide = "Guide"
+reference = "Reference"
+search = "Search"
+github = "View on GitHub"
+
+[a11y]
+skip_to_content = "Skip to content"
+primary_nav = "Primary"
+language = "Language"
+home = "home"
+search_docs = "Search documentation"
+search = "Search"
+toggle_theme_aria = "Toggle color theme"
+toggle_theme_title = "Toggle theme"
+
+[search]
+placeholder = "Search the docs…"
+
+[sidebar]
+overview = "Overview"
+
+[section]
+in_this_section = "In This Section"
+
+[notfound]
+title = "404 Not Found"
+body = "The page you are looking for does not exist."
+home_link = "Return to home"
+
+[home]
+kicker = "HTTP intercepting proxy · TUI"
+title = "Intercept the web from your terminal."
+lede = "A fast, keyboard-driven HTTP/HTTPS proxy and security toolkit. Capture, repeater, fuzz, scan, or drive it all from an AI agent."
+cta_start = "Get started"
+cta_github = "View on GitHub"
+
+hero_art_alt = "Gori wallpaper"
+showcase_alt = "gori History tab in the terminal, listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration"
+showcase_note = "Every request your client makes lands in <strong>History</strong> as a flow, one keystroke from Repeater, the Fuzzer, or an issue."
+
+path_start_kicker = "Start"
+path_start_title = "Capture your first request"
+path_start_desc = "Install, trust the CA, and watch flows land."
+path_guide_kicker = "Guide"
+path_guide_title = "Proxy, Repeater &amp; Fuzzer"
+path_guide_desc = "Intercept, scope, repeater, fuzz, and scan."
+path_ref_kicker = "Reference"
+path_ref_title = "CLI &amp; query language"
+path_ref_desc = "Every subcommand, config key, and filter."
+
+structure_alt = "gori History tab with the Space menu open, listing context actions like add host to scope, repeater flow, and mine parameters"
+structure_title = "One tool, the whole assessment."
+structure_lede = "History, Intercept, Repeater, Fuzzer, the Probe scanner, Param Miner, and Issues live in a single project, every flow one keystroke away."
+structure_grid_aria = "What makes gori fast"
+structure_1_title = "Keyboard-native"
+structure_1_desc = "A palette-driven TUI built with Crystal. No mouse required, no browser tab to babysit."
+structure_2_title = "Fast"
+structure_2_desc = "A compiled proxy with SQLite-backed projects that stay responsive under load."
+structure_3_title = "Scriptable and AI"
+structure_3_desc = "Everything reachable headless via <code>gori run</code>, and open to AI agents through the built-in MCP server."
+
+flow_title = "From capture to issue."
+flow_1_label = "Capture"
+flow_1_desc = "Run the proxy, trust the CA once, and every request flows into History with full HTTP/2, WebSocket, and gRPC detail."
+flow_1_alt = "gori flow detail on the response tab, showing an HTTP/2 200 status and syntax-highlighted response headers"
+flow_2_label = "Test"
+flow_2_desc = "Send interesting flows to Repeater or the Fuzzer, mine hidden parameters, and let Probe flag issues as you browse."
+flow_2_alt = "gori Fuzzer tab with marked payload positions in the request, a results table, and a status distribution sidebar"
+flow_3_label = "Report"
+flow_3_desc = "Triage results into Issues, take notes, and export, or hand the whole project to an agent over MCP."
+flow_3_alt = "gori Probe scanner listing passive security issues grouped by severity and category"
+
+agent_title = "Or hand it to an agent."
+agent_intro = "gori has no chat window baked in. It exposes your project over <strong>MCP</strong>, so any agent — Claude, Codex, Grok — reads your captured traffic and drives the tools through one clean seam. You pick the model; your traffic stays where you put it."
+agent_seam_aria = "An AI agent connects to a gori project through the MCP server: the agent calls tools like list_history and send_request, and gori returns flows and issues"
+agent_seam_1_kicker = "AI agent"
+agent_seam_1_title = "Claude · Codex · Grok"
+agent_seam_1_sub = "any MCP-capable client"
+agent_seam_link = "MCP · JSON-RPC / stdio"
+agent_seam_mcp = "gori mcp"
+agent_seam_2_kicker = "gori project"
+agent_seam_2_title = "History · Repeater · Fuzzer · Issues"
+agent_seam_2_sub = "list_history · get_flow · send_request · create_issue · fuzz_start"
+agent_link = "Read the MCP guide →"
+
+meaning_word = "고리"
+meaning_pron = "/go·ri/ · noun, Korean"
+meaning_def_1 = "In English it needs three words. Ring, link, and loop all name the same thing, a piece that holds two separate things together."
+meaning_def_2 = "Traffic you captured, a request you replayed, a bug you filed: gori keeps them on one chain."

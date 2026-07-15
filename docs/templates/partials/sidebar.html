@@ -3,7 +3,7 @@
   <div class="sidebar-section">
     <div class="sidebar-title">{{ sec.title | e }}</div>
     <ul class="sidebar-links">
-      <li><a href="{{ base_url }}{{ sec.url }}"{% if page.url == sec.url %} class="active" aria-current="page"{% endif %}>Overview</a></li>
+      <li><a href="{{ base_url }}{{ sec.url }}"{% if page.url == sec.url %} class="active" aria-current="page"{% endif %}>{{ "sidebar.overview" | t }}</a></li>
       {% for p in sec.pages | sort(attribute="path") %}{% if not p.is_index %}
       <li><a href="{{ base_url }}{{ p.url }}"{% if page.url == p.url %} class="active" aria-current="page"{% endif %}>{{ p.title | e }}</a></li>
       {% endif %}{% endfor %}

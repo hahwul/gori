@@ -46,6 +46,19 @@
     }
     syncTuiShots();
   })();
+
+  /* Language dropdown: close on outside click or Escape (it closes on its own
+     when a language is chosen, since that navigates away). */
+  (function () {
+    var ls = document.getElementById("langSwitcher");
+    if (!ls) return;
+    document.addEventListener("click", function (e) {
+      if (ls.open && !ls.contains(e.target)) ls.removeAttribute("open");
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && ls.open) ls.removeAttribute("open");
+    });
+  })();
 </script>
 {{ highlight_js }}
 <script src="{{ base_url }}/js/search.js"></script>

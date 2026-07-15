@@ -1,26 +1,39 @@
 <header class="docs-header">
-  <a href="{{ base_url }}{{ lang_prefix }}/" class="logo" aria-label="{{ site.title | e }} home">
+  <a href="{{ base_url }}{{ lang_prefix }}/" class="logo" aria-label="{{ site.title | e }} {{ "a11y.home" | t }}">
     <span class="logo-mark" aria-hidden="true" style="--logo-src: url('{{ base_url }}/images/gori.png')"></span>
     <span class="logo-word" aria-hidden="true">𝓰𝓸𝓻𝓲</span>
   </a>
-  <nav class="top-nav" aria-label="Primary">
-    <a href="{{ base_url }}{{ lang_prefix }}/getting-started/"{% if page.section == "getting-started" %} class="active" aria-current="true"{% endif %}>Start</a>
-    <a href="{{ base_url }}{{ lang_prefix }}/guide/"{% if page.section == "guide" %} class="active" aria-current="true"{% endif %}>Guide</a>
-    <a href="{{ base_url }}{{ lang_prefix }}/reference/"{% if page.section == "reference" %} class="active" aria-current="true"{% endif %}>Reference</a>
+  <nav class="top-nav" aria-label="{{ "a11y.primary_nav" | t }}">
+    <a href="{{ base_url }}{{ lang_prefix }}/getting-started/"{% if page.section == "getting-started" %} class="active" aria-current="true"{% endif %}>{{ "nav.start" | t }}</a>
+    <a href="{{ base_url }}{{ lang_prefix }}/guide/"{% if page.section == "guide" %} class="active" aria-current="true"{% endif %}>{{ "nav.guide" | t }}</a>
+    <a href="{{ base_url }}{{ lang_prefix }}/reference/"{% if page.section == "reference" %} class="active" aria-current="true"{% endif %}>{{ "nav.reference" | t }}</a>
   </nav>
   <div class="header-right">
     {% if page.translations | length > 0 %}
-    <nav class="lang-switcher" aria-label="Language">
-      {% for t in page.translations %}
-      <a href="{{ base_url }}{{ t.url }}" hreflang="{{ t.code }}"{% if t.is_current %} aria-current="true"{% endif %}>{{ t.code | upper }}</a>
-      {% endfor %}
-    </nav>
+    {% set lang_names = {"en": "English", "ko": "한국어"} %}
+    <details class="lang-switcher" id="langSwitcher">
+      <summary class="lang-trigger" aria-label="{{ "a11y.language" | t }}" title="{{ "a11y.language" | t }}">
+        <svg class="lang-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z"/></svg>
+        <span class="lang-trigger-label">{{ lang_names[page_language] | default(page_language, true) }}</span>
+        <svg class="lang-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </summary>
+      <ul class="lang-menu" role="menu">
+        {% for t in page.translations %}
+        <li role="none">
+          <a role="menuitem" href="{{ base_url }}{{ t.url }}" hreflang="{{ t.code }}" lang="{{ t.code }}"{% if t.is_current %} class="is-current" aria-current="true"{% endif %}>
+            <span class="lang-menu-name">{{ lang_names[t.code] | default(t.code, true) }}</span>
+            {% if t.is_current %}<svg class="lang-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-11"/></svg>{% else %}<span class="lang-menu-code">{{ t.code | upper }}</span>{% endif %}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
     {% endif %}
-    <button class="search-trigger" onclick="openSearch()" title="Search documentation">
-      <span>Search</span>
+    <button class="search-trigger" onclick="openSearch()" title="{{ "a11y.search_docs" | t }}">
+      <span>{{ "nav.search" | t }}</span>
       <kbd>&#8984;K</kbd>
     </button>
-    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="{{ "a11y.toggle_theme_aria" | t }}" title="{{ "a11y.toggle_theme_title" | t }}">
       <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
       </svg>
