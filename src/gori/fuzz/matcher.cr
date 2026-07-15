@@ -63,7 +63,8 @@ module Gori::Fuzz
         status: status, length: length, words: words, lines: lines,
         duration_us: raw.duration_us, error: raw.error, matched: matched,
         incomplete: raw.incomplete?, extracted: extracted,
-        head: keep ? present(raw.head) : nil, body: keep ? raw.body : nil)
+        head: keep ? present(raw.head) : nil, body: keep ? raw.body : nil,
+        request: keep ? present(job.bytes) : nil)
     end
 
     private def decide(raw : Repeater::Result, status : Int32?, length : Int64,

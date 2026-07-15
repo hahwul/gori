@@ -78,7 +78,7 @@ module Gori
 
       # --- fuzz result (metrics only — no raw bodies; full detail stays behind
       # get_flow/send_request, shrinking the injected-content surface) -----------
-      def self.fuzz_result(j : JSON::Builder, r : Fuzz::Result) : Nil
+      def self.fuzz_result(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil) : Nil
         j.object do
           j.field "index", r.index
           j.field("payloads") { j.array { r.payloads.each { |p| j.string p } } }
@@ -90,6 +90,9 @@ module Gori
           j.field "duration_us", r.duration_us
           j.field "error", r.error
           j.field "extracted", r.extracted
+          # Present when record_history recorded this result as a History flow —
+          # fetch its full request/response with get_flow (headers redacted).
+          j.field "flow_id", flow_id if flow_id
         end
       end
 

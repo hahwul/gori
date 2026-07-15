@@ -147,6 +147,41 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "records matched results to History with a redacted flow_id when record_history:matched" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer sekret\r\n\r\n",
+         "url"            => "http://127.0.0.1:#{port}",
+         "payloads"       => %([{"list":["a","b"]}]),
+         "match"          => {"status" => "200"},
+         "record_history" => "matched"}.to_json)
+      start["record_history"].as_s.should eq("matched")
+      job_id = start["job_id"].as_s
+
+      done = false
+      60.times do
+        sleep 0.02.seconds
+        status = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+        next if status["status"].as_s == "running"
+        status["recorded_flows"].as_i.should be > 0
+        status["audit"]["target"].as_s.should contain("127.0.0.1")
+        done = true
+        break
+      end
+      done.should be_true
+
+      results = call_json(tools, "fuzz_results", %({"job_id":#{job_id.to_json}}))
+      fid = results["results"][0]["flow_id"].as_i64
+      fid.should be > 0
+      # The recorded flow is a real History flow; get_flow redacts its auth header.
+      flow = call_json(tools, "get_flow", %({"id":#{fid}}))
+      flow["request_head"].as_s.should contain("Authorization: [REDACTED]")
+      flow["request_head"].as_s.should_not contain("sekret")
+    end
+  end
+
   it "ends budget_exhausted (not done) when max_requests halts before all candidates" do
     port = start_origin
     with_store do |store|

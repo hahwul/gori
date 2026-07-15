@@ -53,8 +53,10 @@ module Gori
       bytes : Bytes
 
     # One emitted result row. `length`/`words`/`lines` are computed over the DECODED
-    # response body (gzip/deflate/br/zstd inflated). `head`/`body` are retained only
-    # per the run's keep_bodies policy (a billion-row cluster bomb can't keep them all).
+    # response body (gzip/deflate/br/zstd inflated). `head`/`body`/`request` are
+    # retained only per the run's keep_bodies policy (a billion-row cluster bomb
+    # can't keep them all). `request` is the exact rendered request bytes sent, for
+    # audit/evidence (MCP records these as History flows when asked).
     struct Result
       getter index : Int64
       getter payloads : Array(String)
@@ -70,10 +72,11 @@ module Gori
       getter extracted : String?
       getter head : Bytes?
       getter body : Bytes?
+      getter request : Bytes?
 
       def initialize(@index, @payloads, @position, @status, @length, @words, @lines,
                      @duration_us, @error, @matched, @incomplete, @extracted,
-                     @head = nil, @body = nil)
+                     @head = nil, @body = nil, @request = nil)
       end
     end
 

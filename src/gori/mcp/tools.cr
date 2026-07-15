@@ -55,6 +55,9 @@ module Gori
       FUZZ_MAX_REQUESTS    = 100_000_i64
       FUZZ_MAX_CONCURRENCY =         100
       FUZZ_MAX_STORED      =      10_000
+      # Ceiling on History flows recorded per run (record_history), so `all` on a
+      # huge run can't unboundedly grow the project database.
+      FUZZ_HISTORY_MAX = 5_000
 
       # Param-miner safety rails (same intent as the fuzz caps).
       MINE_MAX_REQUESTS    = 100_000_i64
@@ -85,6 +88,15 @@ module Gori
       class FuzzArgError < Exception
       end
 
+      # Immutable audit metadata for a fuzz/mine run — the target and the pacing/
+      # budget knobs plus start time, so a result set is self-describing evidence.
+      record JobAudit,
+        target : String,
+        rate : Float64?,
+        concurrency : Int32,
+        max_requests : Int64?,
+        started_at_ms : Int64
+
       # A background fuzz run, polled by fuzz_status / fuzz_results. The runner fiber
       # only mutates these fields (single-threaded scheduler → no lock needed); the
       # stored results are matched-only and capped at FUZZ_MAX_STORED.
@@ -100,9 +112,21 @@ module Gori
         property errors = 0_i64
         property error_msg : String? = nil
         getter results = [] of Fuzz::Result
+        # History flow ids for the stored (matched) results, index-aligned with
+        # `results`; nil when record_history was off or the record failed.
+        getter result_flow_ids = [] of Int64?
         property? truncated = false
+        property? history_truncated = false
+        property recorded_flows = 0
+        property ended_at_ms : Int64? = nil
+        getter record_history : Symbol
+        getter origin : Fuzz::Origin
+        getter? http2 : Bool
+        getter audit : JobAudit
 
-        def initialize(@id : String, @total : Int64?, @engine : Fuzz::Engine)
+        def initialize(@id : String, @total : Int64?, @engine : Fuzz::Engine,
+                       @record_history : Symbol, @origin : Fuzz::Origin, @http2 : Bool,
+                       @audit : JobAudit)
         end
 
         def stop : Nil
@@ -126,8 +150,10 @@ module Gori
         property error_msg : String? = nil
         getter results = [] of Miner::Finding
         property? truncated = false
+        property ended_at_ms : Int64? = nil
+        getter audit : JobAudit
 
-        def initialize(@id : String, @total : Int64, @engine : Miner::Engine)
+        def initialize(@id : String, @total : Int64, @engine : Miner::Engine, @audit : JobAudit)
         end
 
         def stop : Nil
@@ -391,6 +417,7 @@ module Gori
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "max_requests", intprop("caller cap on total requests")
               s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
+              s.field "record_history", strprop("none (default) | matched | all — record each sent request+response as a History flow for audit/evidence; matched results carry the flow_id in fuzz_results (fetch full detail with get_flow). 'all' is capped at #{FUZZ_HISTORY_MAX} flows.")
             end
 
             tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|stopped|error). " \
@@ -1865,7 +1892,7 @@ module Gori
       # --- fuzz tools (gated, async job model) --------------------------------
 
       private def fuzz_start(h) : Result
-        engine, origin, total = build_fuzz_job(h)
+        engine, origin, total, http2 = build_fuzz_job(h)
         # Scope gate before launching any real send (host-level: fuzz sweeps many
         # paths against one origin, so evaluate the origin host).
         sc = scope_check("#{origin.scheme}://#{origin.host}/", origin.host, bool(h, "allow_unscoped") || false)
@@ -1875,13 +1902,16 @@ module Gori
         end
         @job_seq += 1
         id = "fz_#{@job_seq}"
-        fjob = FuzzJob.new(id, total, engine)
+        audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
+          int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 20, FUZZ_MAX_CONCURRENCY),
+          int(h, "max_requests"), Time.utc.to_unix_ms)
+        fjob = FuzzJob.new(id, total, engine, fuzz_record_policy(h), origin, http2, audit)
         @jobs[id] = fjob
         warn = budget_warning(total, int(h, "max_requests"))
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
-        Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} total=#{total || "?"}" }
+        Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} record=#{fjob.record_history} total=#{total || "?"}" }
         spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
-        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running"; j.field("budget_warning", warn) if warn; emit_scope(j, sc) } })
+        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running"; j.field "record_history", fjob.record_history.to_s; j.field("budget_warning", warn) if warn; emit_scope(j, sc) } })
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       end
@@ -1892,15 +1922,63 @@ module Gori
         engine.run do |ev|
           case ev
           when Fuzz::ProgressEvent then apply_fuzz_progress(fjob, ev.progress)
-          when Fuzz::ResultEvent   then store_fuzz_result(fjob, ev.result)
+          when Fuzz::ResultEvent
+            flow_id = maybe_record_fuzz_flow(fjob, ev.result)
+            store_fuzz_result(fjob, ev.result, flow_id)
           when Fuzz::DoneEvent
             apply_fuzz_progress(fjob, ev.progress)
             fjob.status = terminal_status(fjob.status, ev.stopped, fjob.sent, fjob.total)
+            fjob.ended_at_ms = Time.utc.to_unix_ms
           when Fuzz::ErrorEvent
             fjob.status = :error
             fjob.error_msg = ev.message
           end
         end
+      end
+
+      # Record a fuzz result's rendered request + response as a History flow when
+      # record_history asks (matched → matched results, all → every sent request),
+      # returning the new flow id. Bounded by FUZZ_HISTORY_MAX to cap DB growth for
+      # `all`. Recording must never break the run — a failure just yields nil.
+      private def maybe_record_fuzz_flow(fjob : FuzzJob, r : Fuzz::Result) : Int64?
+        return nil if fjob.record_history == :none
+        return nil unless fjob.record_history == :all || r.matched?
+        req = r.request
+        return nil unless req
+        if fjob.recorded_flows >= FUZZ_HISTORY_MAX
+          fjob.history_truncated = true
+          return nil
+        end
+        fid = record_fuzz_flow(req, fjob.origin, fjob.http2?, r)
+        fjob.recorded_flows += 1 if fid
+        fid
+      end
+
+      # Reconstruct a History flow (request head/body + response head/body) from a
+      # fuzz Result. Stored raw; get_flow redacts sensitive headers on read.
+      private def record_fuzz_flow(request : Bytes, origin : Fuzz::Origin, http2 : Bool, r : Fuzz::Result) : Int64?
+        head, body = split_wire_request(request)
+        parsed = Proxy::Codec::Http1.parse_request_head(head)
+        fid = @store.insert_flow(Store::CapturedRequest.new(
+          created_at: Time.utc.to_unix_ms * 1000_i64,
+          scheme: origin.scheme, host: origin.host, port: origin.port,
+          method: parsed.method, target: parsed.target,
+          http_version: http2 ? "HTTP/2" : parsed.version,
+          head: head, body: body, body_size: body.try(&.size.to_i64)))
+        return nil if fid <= 0
+        rhead = r.head
+        if rhead && !rhead.empty? && (resp = (Proxy::Codec::Http1.parse_response_head(rhead) rescue nil))
+          @store.update_response(FlowMapper.response(resp, flow_id: fid, body: r.body,
+            duration_us: r.duration_us,
+            state: r.error ? Store::FlowState::Error : Store::FlowState::Complete,
+            error: r.error, body_size: r.body.try(&.size.to_i64)))
+        else
+          @store.update_response(FlowMapper.error_response(fid, r.error || "no response recorded"))
+        end
+        fid
+      rescue ex
+        Log.warn(exception: ex) { "fuzz history record failed" }
+        nil
       end
 
       # Terminal status for a finished fuzz/mine job. A non-stopped Done whose
@@ -1924,6 +2002,26 @@ module Gori
         end
       end
 
+      # The run's immutable audit metadata (target + pacing/budget + start/end times)
+      # so a fuzz/mine result set is self-describing evidence.
+      private def emit_audit(j : JSON::Builder, a : JobAudit, ended_at_ms : Int64?) : Nil
+        j.field "audit" do
+          j.object do
+            j.field "target", a.target
+            j.field "rate", a.rate
+            j.field "concurrency", a.concurrency
+            j.field "max_requests", a.max_requests
+            j.field "started_at", a.started_at_ms
+            j.field "started_at_iso", Serialize.unix_micros_iso(a.started_at_ms * 1000)
+            j.field "ended_at", ended_at_ms
+            if e = ended_at_ms
+              j.field "ended_at_iso", Serialize.unix_micros_iso(e * 1000)
+              j.field "elapsed_ms", e - a.started_at_ms
+            end
+          end
+        end
+      end
+
       # Up-front warning when a caller's max_requests can't cover the known
       # candidate total, so the run will end :budget_exhausted rather than :done.
       private def budget_warning(total : Int64?, caller_cap : Int64?) : String?
@@ -1938,10 +2036,11 @@ module Gori
         fjob.errors = p.errors
       end
 
-      private def store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result) : Nil
+      private def store_fuzz_result(fjob : FuzzJob, r : Fuzz::Result, flow_id : Int64?) : Nil
         return unless r.matched?
         if fjob.results.size < FUZZ_MAX_STORED
           fjob.results << r
+          fjob.result_flow_ids << flow_id
         else
           fjob.truncated = true
         end
@@ -1961,9 +2060,13 @@ module Gori
             j.field "errors", fjob.errors
             j.field "stored_results", fjob.results.size
             j.field "results_truncated", fjob.truncated?
+            j.field "record_history", fjob.record_history.to_s
+            j.field "recorded_flows", fjob.recorded_flows
+            j.field "history_truncated", fjob.history_truncated?
             j.field "job_complete", fjob.status != :running
             j.field "incomplete_reason", incomplete_reason(fjob.status)
             j.field "error", fjob.error_msg
+            emit_audit(j, fjob.audit, fjob.ended_at_ms)
           end
         end)
       end
@@ -1971,24 +2074,29 @@ module Gori
       private def fuzz_results(h) : Result
         fjob = lookup_fuzz_job(h)
         return fjob if fjob.is_a?(Result)
-        rows = (bool(h, "matched_only") || false) ? fjob.results.select(&.matched?) : fjob.results
+        # Stored results are matched-only, so matched_only is a no-op; iterate by
+        # index to keep each row aligned with its recorded History flow id.
+        rows = fjob.results
+        flow_ids = fjob.result_flow_ids
         offset = clamp_nonneg(int(h, "offset"))
         limit = clamp(int(h, "limit"), 100, 1000)
-        page = rows[offset, limit]? || [] of Fuzz::Result
+        last = offset < rows.size ? Math.min(offset + limit, rows.size) : offset
+        returned = last - offset
         Result.new(JSON.build do |j|
           j.object do
-            j.field("results") { j.array { page.each { |r| Serialize.fuzz_result(j, r) } } }
-            j.field "returned", page.size
+            j.field("results") { j.array { (offset...last).each { |i| Serialize.fuzz_result(j, rows[i], flow_ids[i]?) } } }
+            j.field "returned", returned
             j.field "offset", offset
             j.field "total_available", rows.size
             # `complete` (kept for back-compat) = the JOB finished. `page_complete`
             # is about THIS page: whether it reached the end of the stored rows.
             j.field "complete", fjob.status != :running
             j.field "job_complete", fjob.status != :running
-            j.field "page_complete", offset + page.size >= rows.size
-            j.field "has_more", offset + page.size < rows.size
+            j.field "page_complete", last >= rows.size
+            j.field "has_more", last < rows.size
             j.field "incomplete_reason", incomplete_reason(fjob.status)
             j.field "results_truncated", fjob.truncated?
+            j.field "history_truncated", fjob.history_truncated?
           end
         end)
       end
@@ -2015,7 +2123,10 @@ module Gori
         return scope_blocked(sc) if sc.blocked
         @job_seq += 1
         id = "mn_#{@job_seq}"
-        mjob = MineJob.new(id, total, engine)
+        audit = JobAudit.new("#{origin.scheme}://#{origin.host}:#{origin.port}",
+          int(h, "rate").try(&.to_f64), clamp(int(h, "concurrency"), 10, MINE_MAX_CONCURRENCY),
+          int(h, "max_requests"), Time.utc.to_unix_ms)
+        mjob = MineJob.new(id, total, engine, audit)
         @mine_jobs[id] = mjob
         Log.info { "mine_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} names=#{total}" }
         spawn(name: "mcp-mine-#{id}") { run_mine_job(mjob, engine) }
@@ -2033,6 +2144,7 @@ module Gori
           when Miner::DoneEvent
             apply_mine_progress(mjob, ev.progress)
             mjob.status = terminal_status(mjob.status, ev.stopped, mjob.names_done, mjob.total)
+            mjob.ended_at_ms = Time.utc.to_unix_ms
           when Miner::ErrorEvent
             mjob.status = :error
             mjob.error_msg = ev.message
@@ -2073,6 +2185,7 @@ module Gori
             j.field "job_complete", mjob.status != :running
             j.field "incomplete_reason", incomplete_reason(mjob.status)
             j.field "error", mjob.error_msg
+            emit_audit(j, mjob.audit, mjob.ended_at_ms)
           end
         end)
       end
@@ -2178,9 +2291,9 @@ module Gori
         end
       end
 
-      # Build a ready-to-run engine + its origin + total from the tool args. Raises
-      # FuzzArgError (clean message) on any malformed input.
-      private def build_fuzz_job(h) : {Fuzz::Engine, Fuzz::Origin, Int64?}
+      # Build a ready-to-run engine + its origin + total + effective http2 from the
+      # tool args. Raises FuzzArgError (clean message) on any malformed input.
+      private def build_fuzz_job(h) : {Fuzz::Engine, Fuzz::Origin, Int64?, Bool}
         text, default_target, src_h2 = fuzz_template_source(h)
         text = Env.expand(text)
         default_target = default_target.try { |t| Env.expand(t) }
@@ -2201,9 +2314,20 @@ module Gori
         sender = Fuzz::Sender.new(origin, http2: use_h2,
           verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: fuzz_timeout(h))
         engine = Fuzz::Engine.new(generator, matcher, sender, config)
-        {engine, origin, engine.total}
+        {engine, origin, engine.total, use_h2}
       rescue ex : File::Error
         raise FuzzArgError.new("wordlist error: #{ex.message}")
+      end
+
+      # The audit/evidence policy for a fuzz run: none (default) | matched | all.
+      # `matched` records each MATCHED result's rendered request + response as a
+      # History flow; `all` records every sent request (bounded by FUZZ_HISTORY_MAX).
+      private def fuzz_record_policy(h) : Symbol
+        case str(h, "record_history").try(&.strip.downcase)
+        when "matched" then :matched
+        when "all"     then :all
+        else                :none
+        end
       end
 
       private def fuzz_template_source(h) : {String, String?, Bool}
@@ -2314,7 +2438,9 @@ module Gori
       end
 
       private def fuzz_matcher(h) : Fuzz::Matcher
-        m = Fuzz::Matcher.new(keep_bodies: :none)
+        # keep_bodies drives whether each Result retains its rendered request +
+        # response bytes — needed only when record_history asks us to persist them.
+        m = Fuzz::Matcher.new(keep_bodies: fuzz_record_policy(h))
         if c = fuzz_conditions(h["match"]?, "match")
           m.match_status = c[:status]
           m.match_size = c[:size]
@@ -2372,7 +2498,7 @@ module Gori
           rps: (rate && rate > 0 ? rate : nil),
           retries: (int(h, "retries") || 0_i64).clamp(0_i64, 1000_i64).to_i,
           timeout: fuzz_timeout(h),
-          keep_bodies: :none,
+          keep_bodies: fuzz_record_policy(h),
           max_requests: cap)
       end
 
