@@ -111,6 +111,32 @@ describe Gori::ProjectRegistry do
       Dir.exists?(p.dir).should be_false
     end
   end
+
+  it "renames the display name without moving the project directory" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("old name")
+      Gori::Store.open(p.db_path).close
+      dir_before = p.dir
+      renamed = reg.rename(p, "New Label!")
+      renamed.name.should eq("New Label!")
+      renamed.dir.should eq(dir_before) # slug stays put
+      # Fresh registry (picker restart) must surface the new label, not the slug.
+      Gori::ProjectRegistry.new(root).list.map(&.name).should contain("New Label!")
+      Gori::ProjectRegistry.new(root).find("New Label!").try(&.dir).should eq(dir_before)
+      Gori::ProjectRegistry.new(root).find("old-name").try(&.dir).should eq(dir_before) # slug still resolves
+    end
+  end
+
+  it "rejects a blank rename" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("keep")
+      Gori::Store.open(p.db_path).close
+      expect_raises(Gori::Error, /invalid project name/) { reg.rename(p, "   ") }
+      reg.find("keep").should_not be_nil
+    end
+  end
 end
 
 describe Gori::Session do

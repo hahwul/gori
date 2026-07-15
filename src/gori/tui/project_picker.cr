@@ -17,8 +17,10 @@ module Gori::Tui
   # "enter" search, then typing does fuzzy filter (Gori::Fuzzy, best-first) on the
   # projects listed below the search row. Search is *not* live on every keystroke
   # from anywhere (avoids the previous always-on filter which felt inconvenient).
-  # Use arrows + ↵ , ctrl-n/ctrl-t/ctrl-d etc. Returns chosen Project or nil to quit.
-  # Monochrome, keyboard-first (Grok Build feel).
+  # On a project row, Space opens a small action menu (open / rename / delete) —
+  # same discovery surface as the in-session space menu, scoped to the picker.
+  # Use arrows + ↵ , Space, ctrl-n/ctrl-t/ctrl-d etc. Returns chosen Project or nil
+  # to quit. Monochrome, keyboard-first (Grok Build feel).
   class ProjectPicker
     # Throttle flock + status-file probes so the 50 ms poll loop doesn't hammer
     # the filesystem on every visible project row every frame.
@@ -26,13 +28,22 @@ module Gori::Tui
 
     record RunningProbe, at : Time::Instant, held : Bool, status : CaptureStatus::Status?
 
+    # One row in the project-list space menu (mnemonic key → action).
+    record SpaceEntry, key : Char, label : String, action : Symbol
+
+    SPACE_ENTRIES = [
+      SpaceEntry.new('o', "Open", :open),
+      SpaceEntry.new('r', "Rename", :rename),
+      SpaceEntry.new('d', "Delete", :delete),
+    ]
+
     def initialize(@term : Termisu, @registry : ProjectRegistry)
       @backend = TermisuBackend.new(@term)
       @projects = @registry.list
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
       @results_scroll = 0
-      @mode = :list # :list | :new | :confirm
+      @mode = :list # :list | :new | :confirm | :space | :rename | :settings
       @name = ""
       @desc = ""
       @new_field = :name # :name | :desc (only in :new mode)
@@ -41,6 +52,12 @@ module Gori::Tui
       # Delete confirmation (project deletion is irreversible — wipes its dir).
       @confirm = nil.as(ConfirmDialog?)
       @pending_delete = nil.as(Project?)
+      # Space menu over a project row (open/rename/delete).
+      @space_selected = 0
+      @space_project = nil.as(Project?)
+      # Rename prompt (display name only — directory slug stays put).
+      @pending_rename = nil.as(Project?)
+      @rename_name = ""
       @settings = SettingsView.new # the config editor (ctrl-, → :settings mode)
       @running_cache = {} of String => RunningProbe
       @art_frame = 0 # entrance-animation clock for the brand art; advances each frame until ART_ANIM_DONE
@@ -62,6 +79,8 @@ module Gori::Tui
                    when :new      then handle_new(ev)
                    when :confirm  then handle_confirm(ev)
                    when :settings then handle_settings(ev)
+                   when :space    then handle_space(ev)
+                   when :rename   then handle_rename(ev)
                    else                handle_list(ev)
                    end
           case result
@@ -112,12 +131,21 @@ module Gori::Tui
       # the Search row and filters — matching the "type to search" hint + the universal
       # picker expectation — so a user who lands on New/Temp and types a project name to
       # find it isn't met with silence. (↓ to the Search row also works.)
+      # Space on a project row opens the action menu (open/rename/delete); on the
+      # Search row it types a literal space into the query.
       if key.up?
         @selected = (@selected - 1).clamp(0, entry_count - 1)
       elsif key.down?
         @selected = (@selected + 1).clamp(0, entry_count - 1)
       elsif key.enter?
         return activate
+      elsif key.space? && !ev.ctrl? && !ev.alt?
+        if @selected >= 3
+          open_space_menu
+        elsif @selected == 2
+          @query += " "
+          @results_scroll = 0
+        end
       elsif key.backspace?
         if @selected == 2 && !@query.empty?
           @query = @query[0, @query.size - 1]
@@ -201,6 +229,44 @@ module Gori::Tui
       nil
     end
 
+    # Project-row space menu: ↑/↓ move, mnemonic key or ↵ run, esc dismiss.
+    private def handle_space(ev : Termisu::Event::Key) : Project | Symbol | Nil
+      key = ev.key
+      @preedit = ""
+      if key.escape? || ev.ctrl_c?
+        close_space_menu
+      elsif key.up?
+        @space_selected = (@space_selected - 1).clamp(0, SPACE_ENTRIES.size - 1)
+      elsif key.down?
+        @space_selected = (@space_selected + 1).clamp(0, SPACE_ENTRIES.size - 1)
+      elsif key.enter?
+        return activate_space_entry(SPACE_ENTRIES[@space_selected])
+      elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt?
+        if entry = SPACE_ENTRIES.find { |e| e.key == c.downcase }
+          return activate_space_entry(entry)
+        end
+      end
+      nil
+    end
+
+    # Rename prompt: type a new display name, ↵ commit, esc cancel.
+    private def handle_rename(ev : Termisu::Event::Key) : Project | Symbol | Nil
+      key = ev.key
+      @preedit = ""
+      if key.escape?
+        cancel_rename
+      elsif key.enter?
+        commit_rename
+      elsif key.backspace?
+        @rename_name = @rename_name[0, {@rename_name.size - 1, 0}.max]
+      elsif ev.ctrl_c?
+        return :quit
+      elsif (c = ev.char || key.to_char) && !ev.ctrl? && !ev.alt?
+        @rename_name += c
+      end
+      nil
+    end
+
     private def activate : Project?
       case @selected
       when 0
@@ -245,19 +311,23 @@ module Gori::Tui
 
     # Open the delete-confirmation modal for the selected project (project
     # deletion wipes its directory — irreversible, so it's always confirmed).
-    private def request_delete : Nil
-      return if @selected < 3
-      if project = filtered_projects[@selected - 3]?
-        # Don't offer to delete a project another live instance is capturing into —
-        # the green "● on" dot already flags it; deleting would silently orphan its
-        # capture. (registry.delete also refuses, as a TOCTOU backstop below.)
-        return if probe_running(project)[0]
-        @confirm = ConfirmDialog.new("DELETE PROJECT",
-          %(Delete "#{project.name}"?\nThis permanently removes all of its captured data.),
-          confirm_label: "delete", cancel_label: "cancel", danger: true)
-        @pending_delete = project
-        @mode = :confirm
+    # When `project` is passed (space menu), use that; otherwise the list selection.
+    private def request_delete(project : Project? = nil) : Nil
+      target = project
+      if target.nil?
+        return if @selected < 3
+        target = filtered_projects[@selected - 3]?
       end
+      return unless target
+      # Don't offer to delete a project another live instance is capturing into —
+      # the green "● on" dot already flags it; deleting would silently orphan its
+      # capture. (registry.delete also refuses, as a TOCTOU backstop below.)
+      return if probe_running(target)[0]
+      @confirm = ConfirmDialog.new("DELETE PROJECT",
+        %(Delete "#{target.name}"?\nThis permanently removes all of its captured data.),
+        confirm_label: "delete", cancel_label: "cancel", danger: true)
+      @pending_delete = target
+      @mode = :confirm
     end
 
     private def commit_delete : Nil
@@ -283,6 +353,79 @@ module Gori::Tui
       @mode = :list
       @confirm = nil
       @pending_delete = nil
+    end
+
+    # --- space menu (project row actions) ------------------------------------
+
+    private def selected_project : Project?
+      return nil if @selected < 3
+      filtered_projects[@selected - 3]?
+    end
+
+    private def open_space_menu : Nil
+      return unless project = selected_project
+      @space_project = project
+      @space_selected = 0
+      @mode = :space
+    end
+
+    private def close_space_menu : Nil
+      @mode = :list
+      @space_project = nil
+      @space_selected = 0
+    end
+
+    private def activate_space_entry(entry : SpaceEntry) : Project | Symbol | Nil
+      project = @space_project || selected_project
+      close_space_menu
+      return nil unless project
+      case entry.action
+      when :open
+        project
+      when :rename
+        start_rename(project)
+        nil
+      when :delete
+        request_delete(project)
+        nil
+      end
+    end
+
+    private def start_rename(project : Project) : Nil
+      @pending_rename = project
+      @rename_name = project.name
+      @preedit = ""
+      @mode = :rename
+    end
+
+    private def commit_rename : Nil
+      project = @pending_rename
+      name = @rename_name.strip
+      if project && !name.empty?
+        begin
+          renamed = @registry.rename(project, name)
+          @projects = @registry.list
+          invalidate_running_cache
+          # Keep the cursor on the renamed project when it still matches the filter;
+          # otherwise clamp so we don't land past the end of a shrunken list.
+          if idx = filtered_projects.index { |p| p.dir == renamed.dir }
+            @selected = idx + 3
+          else
+            @selected = @selected.clamp(0, {entry_count - 1, 0}.max)
+          end
+        rescue Gori::Error | IO::Error
+          # invalid name or write failure — stay in rename so the user can fix it
+          return
+        end
+      end
+      cancel_rename
+    end
+
+    private def cancel_rename : Nil
+      @mode = :list
+      @pending_rename = nil
+      @rename_name = ""
+      @preedit = ""
     end
 
     private def handle_new(ev : Termisu::Event::Key) : Project | Symbol | Nil
@@ -352,7 +495,8 @@ module Gori::Tui
       case @mode
       when :confirm  then handle_confirm_mouse(w, h, mx, my)
       when :settings then handle_settings_mouse(w, h, mx, my)
-      when :new      then nil # text form — keyboard only (cursor placement is Phase 2)
+      when :space    then handle_space_mouse(w, h, mx, my)
+      when :new, :rename then nil # text form — keyboard only (cursor placement is Phase 2)
       else                handle_list_mouse(mx, my)
       end
     end
@@ -372,9 +516,10 @@ module Gori::Tui
 
     private def picker_wheel(delta : Int32) : Nil
       case @mode
-      when :settings      then @settings.move_field(delta)
-      when :new, :confirm then nil # nothing to scroll
-      else                     @selected = (@selected + delta).clamp(0, entry_count - 1)
+      when :settings                then @settings.move_field(delta)
+      when :space                   then @space_selected = (@space_selected + delta.sign).clamp(0, SPACE_ENTRIES.size - 1)
+      when :new, :confirm, :rename then nil # nothing to scroll
+      else                              @selected = (@selected + delta).clamp(0, entry_count - 1)
       end
     end
 
@@ -399,6 +544,19 @@ module Gori::Tui
       else
         @mode = :list # click outside the settings card → back to the list
       end
+    end
+
+    private def handle_space_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Project | Symbol | Nil
+      box = space_menu_box(w, h)
+      return close_space_menu unless box.contains?(mx, my) # click away → dismiss
+      if idx = space_row_at(box, mx, my)
+        if idx == @space_selected
+          return activate_space_entry(SPACE_ENTRIES[idx])
+        else
+          @space_selected = idx
+        end
+      end
+      nil
     end
 
     # --- rendering -----------------------------------------------------------
@@ -476,12 +634,16 @@ module Gori::Tui
       screen.fill(Rect.new(0, 0, w, h), Theme.bg)
       cw = {w - 4, MENU_WIDTH}.min
       cx = {(w - cw) // 2, 0}.max
-      if @mode == :new
+      case @mode
+      when :new
         render_new(screen, cx, cw, w, h)
+      when :rename
+        render_rename(screen, cx, cw, w, h)
       else
         render_list(screen, cx, cw, w, h)
         @confirm.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :confirm
         @settings.render(screen, Rect.new(0, 0, w, h)) if @mode == :settings
+        render_space_menu(screen, w, h) if @mode == :space
       end
       # Sync the terminal hardware cursor to the focused caret so the terminal's
       # own IME composition UI (jamo/candidate popup) anchors at the right cell —
@@ -593,7 +755,63 @@ module Gori::Tui
         end
       end
 
-      centered(screen, h - 2, "↑/↓ select   ↵ open   type to search   ctrl-n new   ctrl-t temp   ctrl-d delete   ctrl-, settings   ctrl-c quit", Theme.muted, w)
+      hint = if @mode == :space
+               "↑/↓ select   ↵ run   o open   r rename   d delete   esc close"
+             elsif @selected >= 3
+               "↑/↓ select   ↵ open   space actions   type to search   ctrl-d delete   ctrl-, settings   ctrl-c quit"
+             else
+               "↑/↓ select   ↵ open   type to search   ctrl-n new   ctrl-t temp   ctrl-d delete   ctrl-, settings   ctrl-c quit"
+             end
+      centered(screen, h - 2, hint, Theme.muted, w)
+    end
+
+    # Bottom-right space menu over the project list — open / rename / delete.
+    # Mirrors the in-session SpaceMenu chrome (card + mnemonic + ▎ selection).
+    private def space_menu_box(w : Int32, h : Int32) : Rect
+      label_w = SPACE_ENTRIES.max_of(&.label.size)
+      mw = {label_w + 6, 16}.max # border + ▎ + key + gap + label + border
+      mh = SPACE_ENTRIES.size + 2
+      x = {w - mw - 2, 0}.max
+      y = {h - mh - 3, 1}.max # above the hint row
+      Rect.new(x, y, mw, mh)
+    end
+
+    private def space_row_at(box : Rect, mx : Int32, my : Int32) : Int32?
+      i = my - (box.y + 1)
+      return nil if i < 0 || i >= SPACE_ENTRIES.size
+      return nil if mx <= box.x || mx >= box.right - 1
+      i
+    end
+
+    private def render_space_menu(screen : Screen, w : Int32, h : Int32) : Nil
+      box = space_menu_box(w, h)
+      Frame.card(screen, box, "SPACE", border: Theme.border_focus)
+      SPACE_ENTRIES.each_with_index do |entry, i|
+        ry = box.y + 1 + i
+        active = i == @space_selected
+        bg = active ? Theme.accent_bg : Theme.panel
+        screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
+        screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+        screen.text(box.x + 2, ry, entry.key.to_s, Theme.accent, bg, Attribute::Bold)
+        screen.text(box.x + 4, ry, entry.label, active ? Theme.text_bright : Theme.text, bg,
+          width: {box.w - 5, 0}.max)
+      end
+    end
+
+    private def render_rename(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
+      top = {(h - 4) // 2, 1}.max
+      Chrome.render_wordmark(screen, 0, top, center_w: w, bg: Theme.bg)
+      proj = @pending_rename
+      subtitle = proj ? %(rename "#{proj.name}") : "rename project"
+      centered(screen, top + 2, subtitle, Theme.muted, w)
+      iy = top + 3
+      screen.fill(Rect.new(cx, iy, cw, 1), Theme.panel)
+      prefix = "name › "
+      screen.text(cx + 2, iy, prefix, Theme.text_bright, Theme.panel)
+      nbase = cx + 2 + Screen.display_width(prefix)
+      nwidth = {cw - Screen.display_width(prefix) - 2, 1}.max
+      screen.input_line(nbase, iy, @rename_name, @rename_name.size, @preedit, Theme.text_bright, Theme.panel, width: nwidth)
+      centered(screen, h - 2, "↵ save   esc cancel", Theme.muted, w)
     end
 
     # One action/result row inside the picker card: selection band + ▎ bar, label

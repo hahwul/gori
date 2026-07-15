@@ -207,6 +207,18 @@ module Gori
       FileUtils.rm_rf(project.dir)
     end
 
+    # Rename a project's display name (the `.name` sidecar). The on-disk directory
+    # slug is left alone so an open capture / MCP session keeps its path; only the
+    # label shown in the picker and `find` by display name changes. Empty / blank
+    # names are rejected the same way create() rejects an unslugifiable name.
+    def rename(project : Project, new_name : String) : Project
+      display = new_name.strip
+      raise Gori::Error.new("invalid project name") if display.empty?
+      raise Gori::Error.new("project directory missing") unless Dir.exists?(project.dir)
+      File.write(File.join(project.dir, NAME_FILE), display)
+      Project.new(display, project.db_path, project.ephemeral?)
+    end
+
     # Slugify a display name into a safe directory name. gsub removes path
     # separators; stripping leading/trailing '-' AND '.' means a dot-only name
     # ("." / ".." / "...") collapses to "" and is rejected by create() — otherwise
