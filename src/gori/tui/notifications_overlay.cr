@@ -81,8 +81,17 @@ module Gori::Tui
       bold = note.read ? Attribute::None : Attribute::Bold
       fg = sel ? Theme.text_bright : Theme.text
       stamp = ago(note.created_at)
-      msg_w = {box.right - 1 - (box.x + 5) - (stamp.size + 1), 1}.max
-      screen.text(box.x + 5, py, note.message, fg, bg, bold, width: msg_w)
+      # Agent-originated notes (an MCP co-pilot acting in the loop) get a distinct "ai"
+      # tag so the human can see at a glance which entries the AI produced. Other sources
+      # already name themselves in the message ("Miner: …", "Probe: …"), so no tag.
+      msg_x = box.x + 5
+      if note.agent?
+        tag = "ai"
+        screen.text(msg_x, py, tag, Theme.accent, bg, Attribute::Bold)
+        msg_x += tag.size + 1
+      end
+      msg_w = {box.right - 1 - msg_x - (stamp.size + 1), 1}.max
+      screen.text(msg_x, py, note.message, fg, bg, bold, width: msg_w)
       screen.text(box.right - 1 - stamp.size, py, stamp, Theme.muted, bg)
     end
 

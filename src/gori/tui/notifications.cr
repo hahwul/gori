@@ -15,11 +15,21 @@ module Gori::Tui
       getter message : String
       getter created_at : Time::Instant
       getter goto : Jobs::Goto?
+      # Who produced this note: "app" (default), "miner"/"fuzzer"/"probe" (background
+      # engines), or "agent"/"agent:<name>" (an MCP co-pilot — rendered distinctly so the
+      # human can see what the AI did). A String (not a Symbol like `level`) to carry the
+      # open-ended agent:<name> form. (#124)
+      getter source : String
       property read : Bool
 
-      def initialize(@id, @level, @message, @goto = nil)
+      def initialize(@id, @level, @message, @goto = nil, @source = "app")
         @created_at = Time.instant
         @read = false
+      end
+
+      # AI/agent-originated notes get a distinct marker in the overlay.
+      def agent? : Bool
+        @source.starts_with?("agent")
       end
     end
 
@@ -28,8 +38,8 @@ module Gori::Tui
       @next_id = 0
     end
 
-    def push(level : Symbol, message : String, goto : Jobs::Goto? = nil) : Note
-      n = Note.new((@next_id += 1), level, message, goto)
+    def push(level : Symbol, message : String, goto : Jobs::Goto? = nil, source : String = "app") : Note
+      n = Note.new((@next_id += 1), level, message, goto, source)
       @notes << n
       @notes.shift if @notes.size > CAP
       n

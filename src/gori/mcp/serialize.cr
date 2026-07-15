@@ -76,6 +76,102 @@ module Gori
         end
       end
 
+      # --- event feed row (#124) — the light projection list_events returns -----
+      def self.event_row(j : JSON::Builder, row : Store::EventRow) : Nil
+        j.object do
+          j.field "id", row.id
+          j.field "created_at", row.created_at
+          j.field "created_at_iso", unix_micros_iso(row.created_at)
+          j.field "source", row.source
+          j.field "kind", row.kind
+          j.field "level", row.level
+          j.field "message", row.message
+          j.field "goto_tab", row.goto_tab
+          j.field "goto_session_id", row.goto_session_id
+          j.field "flow_id", row.flow_id
+          j.field "payload", row.payload
+        end
+      end
+
+      # --- #123 held intercept item projections --------------------------------
+
+      # Offset of the CRLFCRLF head/body separator in a raw HTTP message, or nil.
+      def self.head_body_split(raw : Bytes) : Int32?
+        i = 0
+        while i + 3 < raw.size
+          return i if raw[i] == 13 && raw[i + 1] == 10 && raw[i + 2] == 13 && raw[i + 3] == 10
+          i += 1
+        end
+        nil
+      end
+
+      # {scrubbed head text, body bytes} for a held raw message; whole message as head
+      # (empty body) when there is no separator.
+      def self.head_and_body(raw : Bytes) : {String, Bytes}
+        if sep = head_body_split(raw)
+          {String.new(raw[0, sep]).scrub, raw[(sep + 4)..]}
+        else
+          {String.new(raw).scrub, Bytes.empty}
+        end
+      end
+
+      # List projection: metadata + a redacted, truncated head preview (no body). age_seconds
+      # is derived from the wall-clock held_at_ms (stable across snapshot republishes).
+      def self.intercept_item_row(j : JSON::Builder, row : Store::HeldRow, include_sensitive : Bool, now_ms : Int64) : Nil
+        head, body = head_and_body(row.raw)
+        preview = redact_head(head, include_sensitive)
+        preview = "#{preview[0, 1024]}…" if preview.size > 1024
+        j.object do
+          j.field "item_id", row.item_id
+          j.field "kind", row.kind
+          j.field "method", row.method
+          j.field "host", row.host
+          j.field "port", row.port
+          j.field "scheme", row.scheme
+          j.field "target", row.target
+          j.field "flow_id", row.flow_id if row.flow_id
+          j.field "held_at_ms", row.held_at_ms
+          j.field "held_at_iso", unix_micros_iso(row.held_at_ms * 1000)
+          j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
+          j.field "edited", row.edited
+          j.field "body_size", body.size
+          j.field "head_preview", preview
+        end
+      end
+
+      # Detail projection: full redacted head + body size. The FULL raw message base64 (for
+      # byte-exact edit → intercept_forward_edit) is emitted ONLY when include_sensitive:true —
+      # base64 is encoding, not redaction, so returning raw by default would leak Authorization/
+      # Cookie header bytes the `head` field carefully redacts. Redacting inside raw is NOT an
+      # option (it would corrupt the bytes the agent round-trips), so we gate instead.
+      def self.intercept_item_detail(j : JSON::Builder, row : Store::HeldRow, include_sensitive : Bool, now_ms : Int64) : Nil
+        head, body = head_and_body(row.raw)
+        j.object do
+          j.field "item_id", row.item_id
+          j.field "kind", row.kind
+          j.field "method", row.method
+          j.field "host", row.host
+          j.field "port", row.port
+          j.field "scheme", row.scheme
+          j.field "target", row.target
+          j.field "flow_id", row.flow_id if row.flow_id
+          j.field "held_at_ms", row.held_at_ms
+          j.field "age_seconds", ((now_ms - row.held_at_ms) // 1000)
+          j.field "edited", row.edited
+          j.field "head", redact_head(head, include_sensitive)
+          j.field "body_size", body.size
+          j.field "raw_size", row.raw.size
+          if include_sensitive
+            raw_sample = row.raw.size > MAX_B64 ? row.raw[0, MAX_B64] : row.raw
+            j.field "raw_base64", Base64.strict_encode(raw_sample)
+            j.field "raw_truncated", row.raw.size > MAX_B64
+          else
+            # raw carries UNREDACTED header bytes — opt in with include_sensitive to fetch it.
+            j.field "raw_redacted", true
+          end
+        end
+      end
+
       # --- fuzz result (metrics only — no raw bodies; full detail stays behind
       # get_flow/send_request, shrinking the injected-content surface) -----------
       def self.fuzz_result(j : JSON::Builder, r : Fuzz::Result, flow_id : Int64? = nil) : Nil

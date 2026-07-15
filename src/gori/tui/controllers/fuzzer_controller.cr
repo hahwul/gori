@@ -693,8 +693,10 @@ module Gori::Tui
         # The failure persists in the jobs center (survives the next keystroke) and shows
         # in the bottom bar. It is deliberately NOT pushed to the notification center: a
         # job error is an operational failure, not a result the human wants surfaced there
-        # (and it already had two other surfaces) — see #127.
+        # (and it already had two other surfaces) — see #127. It IS logged to the #124 event
+        # feed (the AI firehose logs freely; only the human center suppresses it).
         @host.jobs.finish(v.job_id, :error, ev.message)
+        log_event(v, :error, "Fuzzer: #{ev.message} on #{v.summary}")
         @host.status("fuzz error: #{ev.message}")
       end
     end
@@ -704,8 +706,17 @@ module Gori::Tui
       @host.jobs.finish(v.job_id, :done, "#{n} hit")
       level = n > 0 ? :success : :info
       msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent on #{v.summary}#{ev.stopped ? " (stopped)" : ""}"
-      @host.notifications.push(level, msg, goto_for(v))
+      log_event(v, level, msg)
+      @host.notifications.push(level, msg, goto_for(v), source: "fuzzer")
       @host.status(msg)
+    end
+
+    # #124: append every fuzz completion/error to the store event feed UNCONDITIONALLY
+    # (the AI firehose — see the ErrorEvent note above re: #127).
+    private def log_event(v : FuzzerView, level : Symbol, msg : String) : Nil
+      g = goto_for(v)
+      @host.session.store.insert_event("fuzzer", "job_done", level.to_s, msg,
+        goto_tab: g.try(&.tab.to_s), goto_session_id: g.try(&.session_id))
     end
 
     private def goto_for(v : FuzzerView) : Jobs::Goto?

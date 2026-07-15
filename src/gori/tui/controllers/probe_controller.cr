@@ -177,13 +177,17 @@ module Gori::Tui
         when Probe::IssueEvent
           refresh_from_store
           if summary = ev.summary
-            @host.notifications.push(:success, "Probe: #{summary}")
+            # #124: log to the AI event feed regardless of the human notification.
+            @host.session.store.insert_event("probe", "issue_found", "success", "Probe: #{summary}", goto_tab: "probe")
+            @host.notifications.push(:success, "Probe: #{summary}", source: "probe")
             # Status toast is visible on every tab and pairs with the list paint.
             @host.status("Probe: #{summary}")
           end
         when Probe::ErrorEvent
           # Bottom bar only — a scan error is operational noise, not a result to push
-          # into the notification center (#127).
+          # into the notification center (#127). Still logged to the #124 event feed
+          # (the AI firehose logs freely; only the human center suppresses it).
+          @host.session.store.insert_event("probe", "error", "error", "Probe: #{ev.message}", goto_tab: "probe")
           @host.status(ev.message)
         end
       end

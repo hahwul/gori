@@ -180,6 +180,18 @@ module Gori::Tui
       @jobs = Jobs.new
       @notifications = Notifications.new
       @notifications_overlay = NotificationsOverlay.new(@notifications)
+      # #123: high-water-mark of intercept_commands drained + applied to the live interceptor
+      # (agent forward/drop/edit/toggle). Seeded to the current max at run start so a fresh
+      # session never replays a prior command; advances monotonically as commands are consumed.
+      @intercept_cmd_watermark = 0_i64
+      # #123 safety net: auto-forward a held item nobody is watching after this many ms, so a
+      # dead MCP client (hold() has no timeout) can't wedge a connection forever. 0 disables it.
+      @intercept_max_hold_ms = 30_000_i64
+      # …but the reaper ONLY arms once an MCP/agent consumer has actually attached this session
+      # (drained a command or polled the queue). A pure-human intercept session must keep the
+      # base P4 contract — a held item waits INDEFINITELY for the human decision, never
+      # auto-forwarded just because the operator glanced at another tab.
+      @intercept_agent_seen = false
       # Optional bottom statusline: runs a user script on an interval and shows its
       # ANSI-coloured stdout. Disabled by default (no fiber, no reserved row until on).
       @statusline = StatuslineController.new(@session)
@@ -335,6 +347,9 @@ module Gori::Tui
       last_clock = clock_label                         # top-bar wall clock; re-render only when the minute rolls over
       last_ui_ident = nil.as(String?)                  # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
+      last_pub_rev = -1                                 # #123: last interceptor revision mirrored to the store (-1 = publish on first tick)
+      last_bridge_pub = Time.instant                    # #123: last bridge-heartbeat write (throttled so idle never churns the WAL)
+      @intercept_cmd_watermark = @session.store.latest_intercept_command_id # tail agent commands from now
       begin
       loop do
         ev = @term.poll_event(50)
@@ -395,6 +410,28 @@ module Gori::Tui
             apply_external_change
             dirty = true
           end
+          # #123: keep the store-backed intercept bridge fresh for the MCP process, but ONLY in
+          # the capture-lock holder (a view-only 2nd instance has an empty queue and must not
+          # clobber the real holder's snapshot). Re-mirror the held queue only when it actually
+          # changed (revision), but refresh the tiny bridge heartbeat every cadence so liveness
+          # stays current. The command drain (Phase 2) runs here too, before the republish.
+          if @session.capturing_lock_held?
+            ic = @session.interceptor
+            # Order (per plan): drain+apply agent commands, THEN re-mirror the (now-updated)
+            # queue, THEN refresh the heartbeat. forward/drop bump revision, so a drained
+            # command triggers the snapshot republish below in the same tick.
+            dirty = true if drain_intercept_commands
+            dirty = true if reap_stale_holds
+            if (prev = ic.revision) != last_pub_rev
+              last_pub_rev = prev
+              publish_intercept_snapshot(ic)   # queue changed → re-mirror held rows
+              publish_intercept_bridge(ic)     # and refresh config/heartbeat immediately
+              last_bridge_pub = now
+            elsif now - last_bridge_pub >= INTERCEPT_HEARTBEAT_INTERVAL
+              publish_intercept_bridge(ic)     # periodic liveness heartbeat (throttled)
+              last_bridge_pub = now
+            end
+          end
         end
         # Animate the bottom-bar background-job spinner: while any job runs, advance the
         # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
@@ -435,11 +472,182 @@ module Gori::Tui
       @outcome
     end
 
+    # --- #123 live-intercept bridge (capture-lock holder publishes for the MCP process) ------
+
+    # Mirror the currently-held intercept queue into the store so the separate `gori mcp`
+    # process can list/get held items. Called only when the queue changed (revision) and only
+    # in the lock holder. Maps each in-memory Item to a HeldRow (wall-clock held_at_ms so the
+    # MCP-side age is stable across republishes).
+    private def publish_intercept_snapshot(ic : Interceptor) : Nil
+      token = @session.intercept_token
+      rows = ic.pending.map do |it|
+        Store::HeldRow.new(token, it.id, it.kind.to_s.downcase, it.method, it.host, it.port,
+          it.scheme, it.target, it.raw, it.held_at_ms, it.flow_id, false)
+      end
+      @session.store.publish_intercept_held(token, rows)
+    end
+
+    # Drain agent-written intercept commands past the watermark and apply each to the live
+    # interceptor exactly once (ascending id). Runs ONLY in the lock holder (caller-gated).
+    # A command whose session_token != ours targets a prior session's item ids → acked stale,
+    # never applied. Returns true if any command was applied (forces a re-render). #123 Phase 2.
+    private def drain_intercept_commands : Bool
+      store = @session.store
+      cmds = store.intercept_commands_after(@intercept_cmd_watermark, 50)
+      return false if cmds.empty?
+      ic = @session.interceptor
+      applied = false
+      cmds.each do |cmd|
+        @intercept_cmd_watermark = cmd.id # exactly-once: advance even for stale/failed commands
+        if cmd.session_token != @session.intercept_token
+          store.ack_intercept_command(cmd.id, "stale", "command targeted a previous capture session")
+          next
+        end
+        @intercept_agent_seen = true # a command for OUR session ⇒ an agent is/was here
+        applied = true if apply_intercept_command(ic, store, cmd)
+      end
+      applied
+    end
+
+    # Apply one agent command to the live interceptor and ack the outcome. forward/drop
+    # self-guard (a no-longer-held id is a no-op), so we look the item up first to (a) ack
+    # no_such_item precisely and (b) describe the action in the visible agent Note.
+    private def apply_intercept_command(ic : Interceptor, store : Store, cmd : Store::CommandRow) : Bool
+      case cmd.verb
+      when "forward", "drop", "forward_edit"
+        item_id = cmd.item_id
+        unless item_id
+          store.ack_intercept_command(cmd.id, "error", "#{cmd.verb} missing item_id"); return false
+        end
+        item = ic.get(item_id)
+        unless item
+          store.ack_intercept_command(cmd.id, "no_such_item", "item #{item_id} is no longer held")
+          return false
+        end
+        desc = "#{item.method} #{item.host}#{item.target}"
+        case cmd.verb
+        when "forward"
+          ic.forward(item_id)
+          store.ack_intercept_command(cmd.id, "forwarded", desc)
+          push_agent_note(:success, "forwarded #{desc}", item)
+        when "drop"
+          ic.drop(item_id)
+          store.ack_intercept_command(cmd.id, "dropped", desc)
+          push_agent_note(:warn, "dropped #{desc}", item)
+        when "forward_edit"
+          bytes = cmd.bytes
+          unless bytes
+            store.ack_intercept_command(cmd.id, "error", "forward_edit missing bytes"); return false
+          end
+          # Forward the AGENT's edited bytes DIRECTLY — never through view.forward_bytes, which
+          # would pull the human editor buffer and re-expand $VARS (wrong bytes + secret leak).
+          ic.forward(item_id, bytes)
+          store.ack_intercept_command(cmd.id, "edited", desc)
+          push_agent_note(:success, "forwarded (edited) #{desc}", item)
+        end
+        true
+      when "toggle"
+        # Desired-state (idempotent): flip only if current != requested, so a re-applied command
+        # can't oscillate. NOTE: enabling only affects NEW connections (h2→h1 downgrade gate).
+        want = cmd.arg == "true"
+        ic.toggle if ic.enabled? != want
+        store.ack_intercept_command(cmd.id, "toggled", "enabled=#{ic.enabled?}")
+        push_config_note("agent #{ic.enabled? ? "enabled" : "disabled"} intercept")
+        true
+      when "set_filter"
+        q = cmd.arg || ""
+        ic.set_filter(q)
+        store.ack_intercept_command(cmd.id, "filter_set", q.empty? ? "(cleared)" : q)
+        push_config_note(q.empty? ? "agent cleared intercept filter" : "agent set intercept filter: #{q}")
+        true
+      when "set_direction"
+        dir = case cmd.arg
+              when "request"  then Interceptor::Direction::RequestOnly
+              when "response" then Interceptor::Direction::ResponseOnly
+              else                 Interceptor::Direction::Both
+              end
+        ic.set_direction(dir)
+        store.ack_intercept_command(cmd.id, "direction_set", dir.to_s.downcase)
+        push_config_note("agent set intercept direction: #{dir.to_s.downcase}")
+        true
+      else
+        store.ack_intercept_command(cmd.id, "error", "unknown verb #{cmd.verb}")
+        false
+      end
+    end
+
+    # An agent config action (toggle/filter/direction) has no held item, so it jumps to the
+    # intercept tab rather than a flow.
+    private def push_config_note(msg : String) : Nil
+      @notifications.push(:info, msg, Jobs::Goto.new(:intercept), source: "agent")
+    end
+
+    # #123 safety net: auto-forward (original bytes, fail-open) any item held past max_hold that
+    # NOBODY is watching — neither the human (not on the intercept tab) nor an agent (no recent
+    # MCP intercept_list/get, tracked via viewed_ms). hold() has no timeout, so this stops a dead
+    # MCP client from wedging a proxy connection forever. CRITICAL: only fires in a session where
+    # an agent has actually attached (@intercept_agent_seen) — a pure-human session keeps the base
+    # P4 contract (indefinite hold). Disabled when @intercept_max_hold_ms <= 0. Returns true if
+    # anything was released.
+    private def reap_stale_holds : Bool
+      return false if @intercept_max_hold_ms <= 0
+      return false if @active_tab == :intercept # human is watching the queue → never clobber
+      ic = @session.interceptor
+      pending = ic.pending
+      return false if pending.empty?
+      viewed = {} of Int64 => Int64
+      @session.store.intercept_held(@session.intercept_token).each { |r| viewed[r.item_id] = r.viewed_ms }
+      @intercept_agent_seen = true if viewed.each_value.any? { |v| v > 0 } # an agent polled the queue
+      return false unless @intercept_agent_seen # no agent ever attached → P4: hold indefinitely
+      now_ms = Time.utc.to_unix_ms
+      reaped = false
+      pending.each do |it|
+        watched = {it.held_at_ms, viewed[it.id]? || 0_i64}.max
+        next if now_ms - watched < @intercept_max_hold_ms
+        ic.forward(it.id) # original bytes (fail-open), same as toggle-off / release_all
+        secs = @intercept_max_hold_ms // 1000
+        goto = (fid = it.flow_id) ? Jobs::Goto.new(:history, fid) : nil
+        @notifications.push(:warn, "auto-forwarded held #{it.method} #{it.host}#{it.target} (no decision after #{secs}s)", goto, source: "app")
+        reaped = true
+      end
+      reaped
+    end
+
+    # Surface an agent intercept action in the human notification center (source :agent, so it
+    # renders distinctly). A held response jumps to its captured flow; a held request (no flow
+    # row yet) jumps to the intercept queue.
+    private def push_agent_note(level : Symbol, msg : String, item : Interceptor::Item) : Nil
+      goto = (fid = item.flow_id) ? Jobs::Goto.new(:history, fid) : Jobs::Goto.new(:intercept)
+      @notifications.push(level, msg, goto, source: "agent")
+    end
+
+    # Refresh the bridge blob (config mirror + liveness heartbeat). Tiny single-row upsert kept
+    # fresh every cross-process cadence so a mutating MCP verb can refuse when no live holder.
+    private def publish_intercept_bridge(ic : Interceptor) : Nil
+      json = JSON.build do |j|
+        j.object do
+          j.field "session_token", @session.intercept_token
+          j.field "capturing", true
+          j.field "enabled", ic.enabled?
+          j.field "direction", ic.direction.to_s.downcase
+          j.field "filter", ic.filter_source
+          j.field "pending_count", ic.pending_count
+          j.field "heartbeat_ms", Time.utc.to_unix_ms
+        end
+      end
+      @session.store.set_intercept_bridge(json)
+    end
+
     # --- main loop helpers ---------------------------------------------------
 
     # How often to poll SQLite's data_version (own writer commits + peer processes).
     # Cheap; ~sub-second freshness is plenty — not every 50ms tick.
     DV_POLL_INTERVAL = 750.milliseconds
+
+    # #123: how often the capture-lock holder refreshes the intercept bridge heartbeat when the
+    # queue is otherwise unchanged. Well inside the MCP-side liveness threshold (10s) while
+    # keeping idle WAL churn low; a real queue change publishes immediately regardless.
+    INTERCEPT_HEARTBEAT_INTERVAL = 3.seconds
 
     # Minimum spacing between ui-state writes (get_current_context). Coalesces a fast
     # focus/scroll burst into ≤1 write per window so the WAL never churns per frame.

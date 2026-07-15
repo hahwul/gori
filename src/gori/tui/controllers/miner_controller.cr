@@ -455,7 +455,9 @@ module Gori::Tui
       when Miner::ErrorEvent
         v.finish_run
         @host.jobs.finish(v.job_id, :error, ev.message)
-        push_mine_notification(v, :error, "Miner: #{ev.message} on #{v.summary}")
+        msg = "Miner: #{ev.message} on #{v.summary}"
+        log_event(v, :error, msg)
+        push_mine_notification(v, :error, msg)
         @host.status("miner error: #{ev.message}") if v.config.notify.posts_notification?(0, error: true)
       end
     end
@@ -465,13 +467,22 @@ module Gori::Tui
       @host.jobs.finish(v.job_id, :done, "#{n} found")
       msg = "Miner: #{n} param#{n == 1 ? "" : "s"} found on #{v.summary}#{ev.stopped ? " (stopped)" : ""}"
       level = n > 0 ? :success : :info
+      log_event(v, level, msg)
       push_mine_notification(v, level, msg, found: n)
       @host.status(msg) if v.config.notify.posts_notification?(n)
     end
 
     private def push_mine_notification(v : MinerView, level : Symbol, msg : String, found : Int32 = 0) : Nil
       return unless v.config.notify.posts_notification?(found, error: level == :error)
-      @host.notifications.push(level, msg, goto_for(v))
+      @host.notifications.push(level, msg, goto_for(v), source: "miner")
+    end
+
+    # #124: append every mine completion/error to the store event feed UNCONDITIONALLY —
+    # independent of the human NotifyMode gate above ("log freely, interrupt deliberately").
+    private def log_event(v : MinerView, level : Symbol, msg : String) : Nil
+      g = goto_for(v)
+      @host.session.store.insert_event("miner", "job_done", level.to_s, msg,
+        goto_tab: g.try(&.tab.to_s), goto_session_id: g.try(&.session_id))
     end
 
     private def goto_for(v : MinerView) : Jobs::Goto?

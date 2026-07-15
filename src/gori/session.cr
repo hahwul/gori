@@ -111,6 +111,9 @@ module Gori
           # run the scanner. Both are gated on the lock so a view-only 2nd instance touches
           # neither the shared Pending rows nor the shared issue set.
           store.abandon_pending!("orphaned by a previous session")
+          # #123: wipe any live-intercept snapshot / command rows a dead session left behind
+          # (their per-session item ids no longer mean anything) before we start publishing.
+          store.clear_intercept_state!
           probe.start
         end
         session = new(config, ca, registry, project, store, proxy, tunnel, events, probe, rules, scope, host_overrides, interceptor, bind_error, lock)
@@ -129,9 +132,15 @@ module Gori
       end
     end
 
+    # A random per-session token stamped on every #123 intercept snapshot/command row, so a
+    # stale command from a prior session (whose interceptor item ids reset to 0) can never be
+    # applied against a different new held item — the drain acks a token mismatch as stale.
+    getter intercept_token : String
+
     def initialize(@config, @ca, @registry, @project, @store, @proxy, @tunnel, @flow_events, @probe,
                    @rules, @scope, @host_overrides, @interceptor, @bind_error : String? = nil,
                    @capture_lock : CaptureLock? = nil)
+      @intercept_token = Random::Secure.hex(8)
     end
 
     # Flip upstream TLS verification live (settings:network toggle). Updates the runtime

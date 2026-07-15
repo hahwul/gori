@@ -82,6 +82,23 @@ describe Gori::Interceptor do
     end
   end
 
+  it "get(id) returns the held item; held_at_ms is a stable wall-clock (#123 snapshot)" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.toggle
+      result = Channel(Gori::Interceptor::Decision).new
+      spawn { result.send(req(ic, "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n")) }
+      Fiber.yield
+      item = ic.pending.first
+      ic.get(item.id).not_nil!.host.should eq("acme.test")
+      item.held_at_ms.should be > 0                       # wall-clock captured once at hold
+      ic.get(item.id).not_nil!.held_at_ms.should eq(item.held_at_ms) # never re-stamped
+      ic.forward(item.id)
+      result.receive
+      ic.get(item.id).should be_nil # gone after forward
+    end
+  end
+
   it "auto-forwards held items when toggled off" do
     with_store do |store|
       ic = Gori::Interceptor.new(Gori::Scope.load(store))
@@ -134,6 +151,20 @@ describe "Gori::Interceptor direction + condition gates" do
       ic.cycle_direction.should eq(Gori::Interceptor::Direction::RequestOnly)
       ic.cycle_direction.should eq(Gori::Interceptor::Direction::ResponseOnly)
       ic.cycle_direction.should eq(Gori::Interceptor::Direction::Both)
+    end
+  end
+
+  it "set_direction sets an explicit value idempotently, bumping revision only on change (#123)" do
+    with_store do |store|
+      ic = Gori::Interceptor.new(Gori::Scope.load(store))
+      ic.direction.should eq(Gori::Interceptor::Direction::Both)
+      r0 = ic.revision
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly)
+      ic.direction.should eq(Gori::Interceptor::Direction::ResponseOnly)
+      (ic.revision > r0).should be_true
+      r1 = ic.revision
+      ic.set_direction(Gori::Interceptor::Direction::ResponseOnly) # unchanged
+      ic.revision.should eq(r1)                                    # idempotent: no bump
     end
   end
 

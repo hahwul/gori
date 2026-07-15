@@ -1132,6 +1132,143 @@ module Gori
       }
     end
 
+    # Append one row to the #124 event feed (the AI firehose). Goes through the writer
+    # fiber like every other insert; returns last_insert_rowid (0 on a dropped/closed-store
+    # write — the caller decides whether a lost event matters). NEVER used for flow rows
+    # (flows are the firehose via list_history); this is job-lifecycle + agent-action events.
+    def insert_event(source : String, kind : String, level : String, message : String, *,
+                     goto_tab : String? = nil, goto_session_id : Int64? = nil,
+                     flow_id : Int64? = nil, payload : String? = nil) : Int64
+      exec_task ->(c : DB::Connection) {
+        c.exec("INSERT INTO events (created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload) VALUES (?,?,?,?,?,?,?,?,?)",
+          now_us, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload)
+        nil
+      }
+    end
+
+    # --- #123 live-intercept bridge (cross-process: MCP writes, the capturing TUI drains) ---
+
+    INTERCEPT_BRIDGE_KEY = "intercept_bridge"
+
+    # Mirror the currently-held intercept queue for `token` into intercept_held so the MCP
+    # process can list/get it. INSERT OR IGNORE writes each item's raw BLOB exactly ONCE (held
+    # bytes are immutable), DELETEs items no longer held, and DELETEs rows from any other
+    # (dead-session) token — all in one writer transaction, so a rapid hold/forward cycle
+    # doesn't re-write large bodies every publish.
+    def publish_intercept_held(token : String, rows : Array(HeldRow)) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM intercept_held WHERE session_token <> ?", token)
+        if rows.empty?
+          c.exec("DELETE FROM intercept_held WHERE session_token = ?", token)
+        else
+          keep = [token.as(DB::Any)]
+          rows.each { |r| keep << r.item_id }
+          placeholders = Array.new(rows.size, "?").join(",")
+          c.exec("DELETE FROM intercept_held WHERE session_token = ? AND item_id NOT IN (#{placeholders})", args: keep)
+          rows.each do |r|
+            c.exec("INSERT OR IGNORE INTO intercept_held (session_token, item_id, kind, method, host, port, scheme, target, flow_id, raw, held_at_ms, edited) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+              token, r.item_id, r.kind, r.method, r.host, r.port, r.scheme, r.target, r.flow_id, r.raw, r.held_at_ms, r.edited ? 1 : 0)
+          end
+        end
+        nil
+      }
+    end
+
+    def intercept_held(token : String) : Array(HeldRow)
+      rows = [] of HeldRow
+      @db.query("SELECT session_token, item_id, kind, method, host, port, scheme, target, flow_id, raw, held_at_ms, edited, viewed_ms FROM intercept_held WHERE session_token = ? ORDER BY item_id", token) do |rs|
+        rs.each { rows << read_held(rs) }
+      end
+      rows
+    end
+
+    # Stamp `viewed_ms` on held items an MCP intercept_list/get just returned — the agent's
+    # liveness signal for the auto-forward reaper. Best-effort (no-op if a row was released).
+    def touch_intercept_held(token : String, item_ids : Array(Int64), now_ms : Int64) : Nil
+      return if item_ids.empty?
+      exec_task ->(c : DB::Connection) {
+        args = [now_ms.as(DB::Any), token.as(DB::Any)]
+        item_ids.each { |i| args << i }
+        placeholders = Array.new(item_ids.size, "?").join(",")
+        c.exec("UPDATE intercept_held SET viewed_ms = ? WHERE session_token = ? AND item_id IN (#{placeholders})", args: args)
+        nil
+      }
+    end
+
+    private def read_held(rs : DB::ResultSet) : HeldRow
+      token = rs.read(String); item_id = rs.read(Int64); kind = rs.read(String)
+      method = rs.read(String); host = rs.read(String); port = rs.read(Int32)
+      scheme = rs.read(String); target = rs.read(String); flow_id = rs.read(Int64?)
+      raw = rs.read(Bytes); held_at_ms = rs.read(Int64); edited = rs.read(Int32) != 0
+      viewed_ms = rs.read(Int64)
+      HeldRow.new(token, item_id, kind, method, host, port, scheme, target, raw, held_at_ms, flow_id, edited, viewed_ms)
+    end
+
+    # Append one MCP->TUI intercept command. Returns last_insert_rowid (0 on a dropped write —
+    # the MCP verb treats 0 as retryable rather than assuming the command was queued).
+    def enqueue_intercept_command(token : String?, verb : String, *, item_id : Int64? = nil,
+                                  bytes : Bytes? = nil, arg : String? = nil) : Int64
+      exec_task ->(c : DB::Connection) {
+        c.exec("INSERT INTO intercept_commands (created_at, session_token, verb, item_id, bytes, arg) VALUES (?,?,?,?,?,?)",
+          now_us, token, verb, item_id, bytes, arg)
+        nil
+      }
+    end
+
+    # Forward cursor over the command queue (id > after_id, oldest-first) — the TUI drain
+    # watermark. AUTOINCREMENT ids are never reused, so this can't silently skip a row.
+    def intercept_commands_after(after_id : Int64, limit : Int32) : Array(CommandRow)
+      rows = [] of CommandRow
+      @db.query("SELECT id, session_token, verb, item_id, bytes, arg FROM intercept_commands WHERE id > ? ORDER BY id ASC LIMIT ?",
+        args: [after_id, limit.to_i64] of DB::Any) do |rs|
+        rs.each do
+          rows << CommandRow.new(rs.read(Int64), rs.read(String?), rs.read(String),
+            rs.read(Int64?), rs.read(Bytes?), rs.read(String?))
+        end
+      end
+      rows
+    end
+
+    def latest_intercept_command_id : Int64
+      @db.scalar("SELECT COALESCE(MAX(id), 0) FROM intercept_commands").as(Int64)
+    end
+
+    def ack_intercept_command(id : Int64, status : String, result : String? = nil) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE intercept_commands SET status = ?, applied_at = ?, result = ? WHERE id = ?", status, now_us, result, id)
+        nil
+      }
+    end
+
+    # {status, result} for one command — the MCP verb bounded-polls this to resolve
+    # forwarded/dropped/no_such_item/… instead of assuming success on a possibly-dropped write.
+    def command_status(id : Int64) : {String, String?}?
+      @db.query("SELECT status, result FROM intercept_commands WHERE id = ?", id) do |rs|
+        return {rs.read(String), rs.read(String?)} if rs.move_next
+      end
+      nil
+    end
+
+    # Wipe the bridge state a prior (now-dead) capture session left behind, so no stale snapshot
+    # or command can be acted on. Called by the fresh lock holder before it starts publishing.
+    def clear_intercept_state! : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("DELETE FROM intercept_held")
+        c.exec("DELETE FROM intercept_commands")
+        nil
+      }
+    end
+
+    # The bridge blob (enabled/direction/filter/session_token/pending_count/heartbeat_ms) — a
+    # single settings row the lock holder republishes; the config mirror + liveness heartbeat.
+    def set_intercept_bridge(json : String) : Nil
+      set_setting(INTERCEPT_BRIDGE_KEY, json)
+    end
+
+    def intercept_bridge : String?
+      setting(INTERCEPT_BRIDGE_KEY)
+    end
+
     def fuzz_results(run_id : Int64, limit : Int32 = 200, offset : Int32 = 0) : Array(FuzzResultRecord)
       list = [] of FuzzResultRecord
       @db.query("SELECT id, run_id, idx, payloads, status, length, words, lines, duration_us, error, matched, extracted, request, response_head, response_body FROM fuzz_results WHERE run_id = ? ORDER BY idx LIMIT ? OFFSET ?", run_id, limit, offset) do |rs|
@@ -1277,11 +1414,19 @@ module Gori
       SQL
 
     # Newest-first page of the History list. `before_id` is a cursor for paging
-    # into older rows (stable as new rows append, unlike OFFSET).
-    def recent_flows(limit : Int32, before_id : Int64? = nil) : Array(FlowRow)
+    # into older rows (stable as new rows append, unlike OFFSET). `since_id` is the
+    # opposite FORWARD cursor (id > since_id, OLDEST-first) so a caller — e.g. the #124
+    # MCP feed — can tail NEW flows exactly-once. The two are mutually exclusive; when
+    # both are given since_id wins (the MCP layer rejects the combination up front).
+    def recent_flows(limit : Int32, before_id : Int64? = nil, since_id : Int64? = nil) : Array(FlowRow)
       rows = [] of FlowRow
-      sql = before_id ? "#{SELECT_ROW} WHERE id < ? ORDER BY id DESC LIMIT ?" : "#{SELECT_ROW} ORDER BY id DESC LIMIT ?"
-      args = before_id ? [before_id, limit] of DB::Any : [limit] of DB::Any
+      sql, args = if since_id
+                    {"#{SELECT_ROW} WHERE id > ? ORDER BY id ASC LIMIT ?", [since_id, limit] of DB::Any}
+                  elsif before_id
+                    {"#{SELECT_ROW} WHERE id < ? ORDER BY id DESC LIMIT ?", [before_id, limit] of DB::Any}
+                  else
+                    {"#{SELECT_ROW} ORDER BY id DESC LIMIT ?", [limit] of DB::Any}
+                  end
       @db.query(sql, args: args) do |rs|
         rs.each { rows << read_row(rs) }
       end
@@ -1295,11 +1440,15 @@ module Gori
     # degrading to no matches. The TUI keeps the default (never crash the live run
     # loop); one-shot CLI callers pass true so a failed query is reported distinctly
     # from a genuinely empty result rather than as a clean "no flows match".
-    def search(filter : QL::Filter, limit : Int32, before_id : Int64? = nil, *,
+    def search(filter : QL::Filter, limit : Int32, before_id : Int64? = nil, since_id : Int64? = nil, *,
                raise_on_error : Bool = false) : Array(FlowRow)
       rows = [] of FlowRow
       args = filter.args.dup
-      if before_id
+      if since_id
+        args << since_id
+        args << limit
+        sql = "#{SELECT_ROW} WHERE (#{filter.sql}) AND id > ? ORDER BY id ASC LIMIT ?"
+      elsif before_id
         args << before_id
         args << limit
         sql = "#{SELECT_ROW} WHERE (#{filter.sql}) AND id < ? ORDER BY id DESC LIMIT ?"
@@ -1315,6 +1464,20 @@ module Gori
       raise ex if raise_on_error
       STDERR.puts "gori: search failed (#{ex.message})"
       [] of FlowRow
+    end
+
+    EVENT_COLS = "id, created_at, source, kind, level, message, goto_tab, goto_session_id, flow_id, payload"
+
+    # #124 forward cursor: events with id strictly AFTER `since_id`, OLDEST-first, up to
+    # `limit`. Mirrors ws_messages_after — the AI tails the feed exactly-once from a
+    # monotonic high-water-mark (id is the never-reused AUTOINCREMENT key).
+    def events_after(since_id : Int64, limit : Int32) : Array(EventRow)
+      rows = [] of EventRow
+      @db.query("SELECT #{EVENT_COLS} FROM events WHERE id > ? ORDER BY id ASC LIMIT ?",
+        args: [since_id, limit.to_i64] of DB::Any) do |rs|
+        rs.each { rows << read_event(rs) }
+      end
+      rows
     end
 
     # Single-row projection, e.g. to refresh a row after an :inserted/:updated
@@ -1999,6 +2162,14 @@ module Gori
       content_type = rs.read(String?)
       FlowRow.new(id, created_at, scheme, method, host, port, target,
         status, req_size + (resp_size || 0_i64), state, resp_size, duration_us, content_type)
+    end
+
+    # Column order MUST match EVENT_COLS.
+    private def read_event(rs : DB::ResultSet) : EventRow
+      EventRow.new(
+        rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(String),
+        rs.read(String), rs.read(String), rs.read(String?), rs.read(Int64?),
+        rs.read(Int64?), rs.read(String?))
     end
 
     # Non-blocking best-effort publish: if the TUI is behind and the channel is

@@ -54,10 +54,15 @@ module Gori
       getter flow_id : Int64?
       getter raw : Bytes
       getter held_at : Time::Instant
+      # Wall-clock (unix ms) captured ONCE at hold time. `held_at` is a monotonic Instant
+      # (meaningless across processes); the #123 store snapshot needs a stable wall-clock so
+      # the MCP process can render a correct age that does NOT reset on every republish.
+      getter held_at_ms : Int64
       getter reply : Channel(Decision)
 
       def initialize(@id, @kind, @method, @host, @target, @port, @scheme, @raw, @held_at, @flow_id = nil)
         @reply = Channel(Decision).new(1)
+        @held_at_ms = Time.utc.to_unix_ms
       end
     end
 
@@ -113,6 +118,21 @@ module Gori
       end
       @revision.add(1)
       now
+    end
+
+    # Set the catch direction to an explicit value (idempotent — no-op if already there).
+    # Unlike cycle_direction, this lets a remote MCP agent request a DESIRED state without
+    # blind-cycling; the #123 drain applies it exactly once via the command watermark.
+    def set_direction(dir : Direction) : Nil
+      changed = @mutex.synchronize do
+        if @direction != dir
+          @direction = dir
+          true
+        else
+          false
+        end
+      end
+      @revision.add(1) if changed
     end
 
     # Replace the conditional-intercept filter (parsed from a QL-like query). Cheap
@@ -244,6 +264,12 @@ module Gori
 
     def pending : Array(Item)
       @mutex.synchronize { @items.values }
+    end
+
+    # One held item by id (nil if already forwarded/dropped). Used by the #123 apply-loop to
+    # describe an agent action + touch recency before forwarding/dropping cross-process.
+    def get(id : Int64) : Item?
+      @mutex.synchronize { @items[id]? }
     end
 
     def pending_count : Int32
