@@ -1496,7 +1496,7 @@ module Gori
             body_size: result.body.try(&.size.to_i64)))
         else
           @store.update_response(FlowMapper.error_response(flow_id,
-            result.error || "request failed before a response was received"))
+            result.error || "request failed before a response was received", result.duration_us))
         end
       rescue ex
         # The request already left the host. Keep its result usable, but surface

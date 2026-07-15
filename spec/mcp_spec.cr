@@ -953,6 +953,16 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "preserves the attempt duration on a failed send's History flow" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/"}}})
+        payload = tool_payload(drive(store, call)[0])
+        detail = store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!
+        detail.row.state.error?.should be_true
+        detail.row.duration_us.should_not be_nil # was null before — the attempt time is kept
+      end
+    end
+
     it "links a saved repeater to an issue even when the origin is unavailable" do
       with_store do |store|
         issue_id = store.insert_issue("evidence", Gori::Store::Severity::Low, nil, nil)

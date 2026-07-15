@@ -71,13 +71,16 @@ module Gori
     end
 
     # No response was obtained (upstream failure, timeout). We still record the
-    # flow so the human sees the failure (P4/P7).
-    def self.error_response(flow_id : Int64, message : String) : Store::CapturedResponse
+    # flow so the human sees the failure (P4/P7). `duration_us` preserves the
+    # attempt time (how long before the failure) so an error Flow isn't left with
+    # a null duration in History.
+    def self.error_response(flow_id : Int64, message : String, duration_us : Int64? = nil) : Store::CapturedResponse
       Store::CapturedResponse.new(
         flow_id: flow_id,
         status: 0,
         head: Bytes.new(0),
         body: nil,
+        duration_us: duration_us,
         state: Store::FlowState::Error,
         error: message,
       )
