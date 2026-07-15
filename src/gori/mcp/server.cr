@@ -160,10 +160,29 @@ module Gori
                 j.object { j.field "type", "text"; j.field "text", result.text }
               end
             end
-            if structured = structured_content(result.text)
+            if result.is_error && (code = result.error_code)
+              # Machine-processable error alongside the human `text` (the tools
+              # layer guarantees a stable code on every plain-message error).
+              j.field("structuredContent") { emit_error_object(j, result, code) }
+            elsif structured = structured_content(result.text)
               j.field("structuredContent") { structured.to_json(j) }
             end
             j.field "isError", result.is_error
+          end
+        end
+      end
+
+      # The structured-error contract: {error_code, message, field?, retryable,
+      # details?}. `message` mirrors content[0].text so a caller reading only
+      # structuredContent still gets the human summary.
+      private def emit_error_object(j : JSON::Builder, result : Tools::Result, code : String) : Nil
+        j.object do
+          j.field "error_code", code
+          j.field "message", result.text
+          j.field "field", result.field if result.field
+          j.field "retryable", result.retryable
+          if d = result.details
+            j.field("details") { d.to_json(j) }
           end
         end
       end

@@ -941,6 +941,61 @@ describe Gori::MCP::Server do
       end
     end
   end
+
+  describe "structured error contract" do
+    it "codes an unknown tool UNKNOWN_TOOL with a structured error object" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"nope","arguments":{}}})
+        err = drive(store, call)[0]["result"]["structuredContent"]
+        err["error_code"].as_s.should eq("UNKNOWN_TOOL")
+        err["message"].as_s.should contain("nope")
+        err["retryable"].as_bool.should be_false
+      end
+    end
+
+    it "codes a missing/invalid id INVALID_ARGUMENT (the residual default)" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{}}})
+        err = drive(store, call)[0]["result"]["structuredContent"]
+        err["error_code"].as_s.should eq("INVALID_ARGUMENT")
+      end
+    end
+
+    it "codes a bad flow id NOT_FOUND" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":9999}}})
+        err = drive(store, call)[0]["result"]["structuredContent"]
+        err["error_code"].as_s.should eq("NOT_FOUND")
+      end
+    end
+
+    it "codes a query that compiles to nothing QUERY_SYNTAX with field:query" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{"query":"status:>=foo"}}})
+        err = drive(store, call)[0]["result"]["structuredContent"]
+        err["error_code"].as_s.should eq("QUERY_SYNTAX")
+        err["field"].as_s.should eq("query")
+      end
+    end
+
+    it "codes a disabled action tool TOOL_DISABLED in read-only mode" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue","arguments":{"title":"x"}}})
+        err = drive(store, call, allow_actions: false)[0]["result"]["structuredContent"]
+        err["error_code"].as_s.should eq("TOOL_DISABLED")
+      end
+    end
+
+    it "leaves a success payload's structuredContent unchanged (no error object)" do
+      with_store do |store|
+        seed_flow(store, "h.test", "GET", "/a", 200)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_history","arguments":{}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_false
+        resp["structuredContent"].as_h.has_key?("error_code").should be_false
+      end
+    end
+  end
 end
 
 describe Gori::MCP::Serialize do

@@ -30,8 +30,13 @@ module Gori
 
       # One tool outcome. `is_error` maps to the MCP `isError` flag — a tool-level
       # failure the model is meant to see and recover from, distinct from a
-      # JSON-RPC protocol error.
-      record Result, text : String, is_error : Bool = false
+      # JSON-RPC protocol error. Error results also carry a stable machine
+      # `error_code` (+ optional `field`, `retryable`, `details`) so a caller can
+      # apply policy / auto-recovery without parsing the human `text`. The `Server`
+      # surfaces these in `structuredContent`; see `err` and `classify`.
+      record Result, text : String, is_error : Bool = false,
+        error_code : String? = nil, field : String? = nil,
+        retryable : Bool = false, details : JSON::Any? = nil
       record BodyChunkOptions, flow_id : Int64?, repeater_id : Int64?, offset : Int64,
         limit : Int32, raw : Bool
 
@@ -428,11 +433,24 @@ module Gori
       # an is_error Result so one bad call never tears down the server loop.
       def call(name : String, args : JSON::Any) : Result
         h = args.as_h? || EMPTY_HASH
-        read_tool(name, h) || action_tool(name, h) ||
-          Result.new("unknown tool: #{name}", is_error: true)
+        result = read_tool(name, h) || action_tool(name, h) ||
+          err("unknown tool: #{name}", "UNKNOWN_TOOL")
+        classify(result)
       rescue ex
         Log.warn(exception: ex) { "tool #{name} failed" }
-        Result.new("tool error: #{ex.message}", is_error: true)
+        err("tool error: #{ex.message}", "INTERNAL")
+      end
+
+      # Guarantees every error Result carries a stable `error_code`. Explicitly
+      # coded errors (and all success results) pass through untouched; an uncoded
+      # plain-message error defaults to INVALID_ARGUMENT — the residual bucket is
+      # argument validation ("missing required 'x'", "invalid 'x'", …). A JSON
+      # object payload (send_request / send_websocket carry their own `error` /
+      # `error_kind`) is left uncoded so its envelope is surfaced verbatim.
+      private def classify(r : Result) : Result
+        return r unless r.is_error && r.error_code.nil?
+        return r if r.text.starts_with?('{')
+        r.copy_with(error_code: "INVALID_ARGUMENT")
       end
 
       # Read-only tools (always exposed). nil when `name` isn't one of them.
@@ -505,7 +523,7 @@ module Gori
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
         detail = @store.get_flow(id)
-        return Result.new("no flow with id #{id}", is_error: true) unless detail
+        return not_found("no flow with id #{id}") unless detail
         # A WebSocket flow (101) carries a separate message log; fetch it so get_flow
         # surfaces the frames (parity with `gori run show`). Non-WS flows skip the query.
         ws_msgs = detail.row.status == 101 ? @store.ws_messages(id) : [] of Store::WsMessage
@@ -566,11 +584,11 @@ module Gori
       private def load_response_body(flow_id : Int64?, repeater_id : Int64?) : {Bytes?, Bytes?} | Result
         if id = flow_id
           detail = @store.get_flow(id)
-          return Result.new("no flow with id #{id}", is_error: true) unless detail
+          return not_found("no flow with id #{id}") unless detail
           {detail.response_head, detail.response_body}
         elsif id = repeater_id
           repeater = @store.get_repeater_full(id)
-          return Result.new("no repeater with id #{id}", is_error: true) unless repeater
+          return not_found("no repeater with id #{id}") unless repeater
           {repeater.response_head, repeater.response_body}
         else
           Result.new("pass exactly one of flow_id or repeater_id", is_error: true)
@@ -617,7 +635,7 @@ module Gori
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
         f = @store.get_issue(id)
-        return Result.new("no issue with id #{id}", is_error: true) unless f
+        return not_found("no issue with id #{id}") unless f
         Result.new(JSON.build { |j| Serialize.issue(j, f, @store) })
       end
 
@@ -728,7 +746,7 @@ module Gori
 
         all_repeaters = @store.repeaters_mcp
         if repeater_id && !all_repeaters.any? { |r| r.id == repeater_id }
-          return Result.new("no repeater with id #{repeater_id}", is_error: true)
+          return not_found("no repeater with id #{repeater_id}")
         end
         all_repeaters = all_repeaters.select { |r| r.id == repeater_id } if repeater_id
 
@@ -890,10 +908,10 @@ module Gori
       end
 
       private def ql_error(query : String) : Result
-        Result.new(
+        err(
           "invalid query #{query.inspect}: did not match any field " \
           "(call ql_reference; e.g. host:example.com status:>=500 method:POST)",
-          is_error: true)
+          "QUERY_SYNTAX", field: "query")
       end
 
       private def list_notes : Result
@@ -922,7 +940,7 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) unless id
         doc = Notes.load(@store)
         entry = doc.notes.find { |n| n.id == id }
-        return Result.new("no note with id #{id}", is_error: true) unless entry
+        return not_found("no note with id #{id}") unless entry
         idx = doc.notes.index(entry).not_nil!
         Result.new(JSON.build do |j|
           j.object do
@@ -944,7 +962,7 @@ module Gori
         return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
         if issue_id
           return Result.new("issue_id requires save_as_repeater=true", is_error: true) unless save
-          return Result.new("no issue with id #{issue_id}", is_error: true) unless @store.get_issue(issue_id)
+          return not_found("no issue with id #{issue_id}") unless @store.get_issue(issue_id)
         end
 
         built, http2, sni = build_send_request(h)
@@ -1126,7 +1144,7 @@ module Gori
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) unless repeater_id
         repeater = @store.get_repeater(repeater_id)
-        return Result.new("no repeater with id #{repeater_id}", is_error: true) unless repeater
+        return not_found("no repeater with id #{repeater_id}") unless repeater
         unless Repeater::WsEngine.upgrade_request?(repeater.request)
           return Result.new("repeater #{repeater_id} is not a WebSocket upgrade request", is_error: true)
         end
@@ -1134,7 +1152,7 @@ module Gori
         issue_id = int(h, "issue_id")
         return Result.new(id_error(h, "issue_id"), is_error: true) if issue_id.nil? && present?(h, "issue_id")
         if issue_id
-          return Result.new("no issue with id #{issue_id}", is_error: true) unless @store.get_issue(issue_id)
+          return not_found("no issue with id #{issue_id}") unless @store.get_issue(issue_id)
           @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
             Store::LinkRefKind::Repeater, repeater_id)
         end
@@ -1263,7 +1281,7 @@ module Gori
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) if repeater_id.nil? && present?(h, "repeater_id")
         if repeater_id && !@store.get_repeater(repeater_id)
-          return Result.new("no repeater with id #{repeater_id}", is_error: true)
+          return not_found("no repeater with id #{repeater_id}")
         end
 
         host = str(h, "host").try { |hst| Env.mask_secrets(hst) }
@@ -1271,7 +1289,7 @@ module Gori
         # insert_issue returns 0 (never raises) when the write batch fails — e.g.
         # the cross-process SQLite lock couldn't be acquired (a TUI capturing into
         # the same project) or the disk is full. Don't report a phantom success.
-        return Result.new("failed to persist issue (store busy or unwritable)", is_error: true) if id == 0
+        return busy("failed to persist issue (store busy or unwritable)") if id == 0
         if repeater_id
           @store.add_link(Store::LinkOwnerKind::Issue, id,
             Store::LinkRefKind::Repeater, repeater_id)
@@ -1287,7 +1305,7 @@ module Gori
       private def update_issue(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        return Result.new("no issue with id #{id}", is_error: true) unless @store.get_issue(id)
+        return not_found("no issue with id #{id}") unless @store.get_issue(id)
         # A blank severity/status means "leave unchanged"; only a present,
         # non-blank, unrecognised value is an error.
         sev_s = str(h, "severity")
@@ -1307,7 +1325,7 @@ module Gori
         repeater_id = int(h, "repeater_id")
         return Result.new(id_error(h, "repeater_id"), is_error: true) if repeater_id.nil? && present?(h, "repeater_id")
         if repeater_id && !@store.get_repeater(repeater_id)
-          return Result.new("no repeater with id #{repeater_id}", is_error: true)
+          return not_found("no repeater with id #{repeater_id}")
         end
 
         # Don't claim updated:true on a no-op. With no resolvable field the store
@@ -1361,7 +1379,7 @@ module Gori
 
         doc = Notes.load(@store)
         entry_idx = doc.notes.index { |n| n.id == id }
-        return Result.new("no note with id #{id}", is_error: true) unless entry_idx
+        return not_found("no note with id #{id}") unless entry_idx
 
         updated_entry = Notes::NoteEntry.new(id, text)
         new_notes = doc.notes.dup
@@ -1384,7 +1402,7 @@ module Gori
 
         doc = Notes.load(@store)
         entry_idx = doc.notes.index { |n| n.id == id }
-        return Result.new("no note with id #{id}", is_error: true) unless entry_idx
+        return not_found("no note with id #{id}") unless entry_idx
 
         new_notes = doc.notes.dup
         new_notes.delete_at(entry_idx)
@@ -1501,7 +1519,7 @@ module Gori
 
         replacement = str(h, "replacement") || ""
         id = @store.insert_rule(target, part, pattern, replacement)
-        return Result.new("failed to persist rule (store busy or unwritable)", is_error: true) if id == 0
+        return busy("failed to persist rule (store busy or unwritable)") if id == 0
         Result.new(JSON.build do |j|
           j.object do
             j.field "id", id
@@ -1516,7 +1534,7 @@ module Gori
         return Result.new(id_error(h, "id"), is_error: true) unless id
         enabled = bool(h, "enabled")
         return Result.new("missing required 'enabled' (true|false)", is_error: true) if enabled.nil?
-        return Result.new("no rule with id #{id}", is_error: true) unless rule_exists?(id)
+        return not_found("no rule with id #{id}") unless rule_exists?(id)
         @store.set_rule_enabled(id, enabled)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "enabled", enabled } })
       end
@@ -1524,7 +1542,7 @@ module Gori
       private def delete_rule(h) : Result
         id = int(h, "id")
         return Result.new(id_error(h, "id"), is_error: true) unless id
-        return Result.new("no rule with id #{id}", is_error: true) unless rule_exists?(id)
+        return not_found("no rule with id #{id}") unless rule_exists?(id)
         @store.delete_rule(id)
         Result.new(JSON.build { |j| j.object { j.field "id", id; j.field "deleted", true } })
       end
@@ -1547,7 +1565,7 @@ module Gori
 
         if issue_id
           issue = @store.get_issue(issue_id)
-          return Result.new("no issue with id #{issue_id}", is_error: true) unless issue
+          return not_found("no issue with id #{issue_id}") unless issue
           if fid = issue.flow_id
             flow_id = fid
           elsif target.nil? || target.empty? || request.nil? || request.empty?
@@ -1563,7 +1581,7 @@ module Gori
 
         if flow_id
           flow = @store.get_flow(flow_id)
-          return Result.new("no flow with id #{flow_id}", is_error: true) unless flow
+          return not_found("no flow with id #{flow_id}") unless flow
 
           if target.nil? || target.empty?
             scheme = flow.row.scheme
@@ -1624,7 +1642,7 @@ module Gori
           mark_transform: mark_transform
         )
 
-        return Result.new("failed to persist repeater (store busy or unwritable)", is_error: true) if id == 0
+        return busy("failed to persist repeater (store busy or unwritable)") if id == 0
 
         if issue_id
           @store.add_link(Store::LinkOwnerKind::Issue, issue_id,
@@ -1677,7 +1695,7 @@ module Gori
         return Result.new("missing or invalid required 'id'", is_error: true) unless id
 
         existing = @store.get_repeater(id)
-        return Result.new("no repeater with id #{id}", is_error: true) unless existing
+        return not_found("no repeater with id #{id}") unless existing
 
         target = str(h, "target") || existing.target
         request = str(h, "request") || existing.request
@@ -1760,7 +1778,7 @@ module Gori
         return Result.new("missing or invalid required 'id'", is_error: true) unless id
 
         existing = @store.get_repeater(id)
-        return Result.new("no repeater with id #{id}", is_error: true) unless existing
+        return not_found("no repeater with id #{id}") unless existing
 
         @store.delete_repeater(id)
         Result.new(JSON.build { |j| j.object { j.field "success", true } })
@@ -1771,7 +1789,7 @@ module Gori
       private def fuzz_start(h) : Result
         engine, origin, total = build_fuzz_job(h)
         if total && total > FUZZ_MAX_REQUESTS
-          return Result.new("too many requests (#{total} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads", is_error: true)
+          return err("too many requests (#{total} > #{FUZZ_MAX_REQUESTS}); narrow positions/payloads", "BUDGET_EXHAUSTED")
         end
         @job_seq += 1
         id = "fz_#{@job_seq}"
@@ -1865,7 +1883,7 @@ module Gori
       private def lookup_fuzz_job(h) : FuzzJob | Result
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
-        @jobs[id]? || Result.new("no fuzz job #{id}", is_error: true)
+        @jobs[id]? || not_found("no fuzz job #{id}")
       end
 
       # --- mine tools (gated, async job model) --------------------------------
@@ -1961,7 +1979,7 @@ module Gori
       private def lookup_mine_job(h) : MineJob | Result
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
-        @mine_jobs[id]? || Result.new("no mine job #{id}", is_error: true)
+        @mine_jobs[id]? || not_found("no mine job #{id}")
       end
 
       private def mine_finding_json(j : JSON::Builder, f : Miner::Finding) : Nil
@@ -2255,8 +2273,30 @@ module Gori
       # --- helpers ------------------------------------------------------------
 
       private def gated(& : -> Result) : Result
-        return Result.new("tool disabled (gori mcp --read-only)", is_error: true) unless @allow_actions
+        return err("tool disabled (gori mcp --read-only)", "TOOL_DISABLED") unless @allow_actions
         yield
+      end
+
+      # Build a coded error Result (the structured-error contract). `code` is a
+      # stable machine token (NOT_FOUND, INVALID_ARGUMENT, QUERY_SYNTAX,
+      # NETWORK_ERROR, BUDGET_EXHAUSTED, PROJECT_BUSY, …); `retryable` tells a
+      # caller whether the same call may succeed later; `field` names the offending
+      # argument; `details` carries extra machine data. Human text stays in `text`.
+      private def err(message : String, code : String, *, field : String? = nil,
+                      retryable : Bool = false, details : JSON::Any? = nil) : Result
+        Result.new(message, is_error: true, error_code: code, field: field,
+          retryable: retryable, details: details)
+      end
+
+      # A resource-not-found error (bad flow/repeater/issue/note/rule/job id).
+      private def not_found(message : String) : Result
+        err(message, "NOT_FOUND")
+      end
+
+      # A store write that couldn't be persisted (cross-process SQLite lock held by
+      # a capturing TUI, or an unwritable disk) — transient, so retryable.
+      private def busy(message : String) : Result
+        err(message, "PROJECT_BUSY", retryable: true)
       end
 
       private def str(h, key : String) : String?
