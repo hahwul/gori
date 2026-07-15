@@ -160,7 +160,12 @@ module Gori::Fuzz
     # Splice payloads into the marked positions. `payloads.size` must equal
     # `position_count`. Bytes are returned BEFORE any Content-Length sync.
     def render(payloads : Array(String)) : Bytes
-      io = IO::Memory.new
+      # Pre-size to the exact output length (segments + payloads, both written once) so a
+      # KB-scale request doesn't regrow the default 64B buffer 64→128→…→N every emit on the
+      # fuzz build path. bytesize is O(1) and both arrays are tiny (position_count+1); on the
+      # parse contract (segments.size == positions.size + 1) the sum is exact, and off-contract
+      # it can only OVER-estimate (fewer segments written) — never under, so never a truncation.
+      io = IO::Memory.new(@segments.sum(&.bytesize) + payloads.sum(&.bytesize))
       io << @segments[0]
       payloads.each_with_index do |p, k|
         io << p
