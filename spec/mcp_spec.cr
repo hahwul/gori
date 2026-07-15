@@ -1298,3 +1298,63 @@ describe Gori::MCP::RequestBuilder do
     end
   end
 end
+
+# Project lifecycle drives Tools directly against an ISOLATED GORI_HOME so it
+# never touches the developer's real ~/.gori/projects (delete is destructive).
+describe "Gori::MCP::Tools project lifecycle" do
+  it "creates, lists, switches, and (dry-run → token) deletes projects in isolation" do
+    root = File.tempname("gori-projhome")
+    Dir.mkdir_p(root)
+    prev = ENV["GORI_HOME"]?
+    ENV["GORI_HOME"] = root
+    cur_db = File.join(root, "current.db")
+    store = Gori::Store.open(cur_db)
+    tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false, db_path: cur_db)
+    begin
+      # create two projects
+      doomed = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Doomed","description":"scratch"}))).text)
+      doomed["created"].as_bool.should be_true
+      doomed_slug = doomed["slug"].as_s
+      alt = JSON.parse(tools.call("create_project", JSON.parse(%({"name":"Alt"}))).text)["slug"].as_s
+
+      # list shows both (neither current — server serves current.db, not a registry project)
+      listed = JSON.parse(tools.call("list_projects", JSON.parse("{}")).text)["projects"].as_a.map { |p| p["slug"].as_s }
+      listed.should contain(doomed_slug)
+      listed.should contain(alt)
+
+      # switch to Alt → subsequent tools serve it
+      sw = JSON.parse(tools.call("switch_project", JSON.parse(%({"project":#{alt.to_json}}))).text)
+      sw["switched"].as_bool.should be_true
+      JSON.parse(tools.call("project_info", JSON.parse("{}")).text)["project_slug"].as_s.should eq(alt)
+
+      # delete Doomed: a real delete without a token is refused
+      no_token = tools.call("delete_project", JSON.parse(%({"project":#{doomed_slug.to_json},"dry_run":false})))
+      no_token.is_error.should be_true
+
+      # dry_run issues a confirmation token + preview
+      dry = JSON.parse(tools.call("delete_project", JSON.parse(%({"project":#{doomed_slug.to_json}}))).text)
+      dry["dry_run"].as_bool.should be_true
+      token = dry["confirmation_token"].as_s
+      dry["flows"].as_i.should eq(0)
+
+      # a wrong token is refused
+      tools.call("delete_project", JSON.parse(%({"project":#{doomed_slug.to_json},"dry_run":false,"confirmation_token":"del_bogus"}))).is_error.should be_true
+
+      # the real delete with the issued token succeeds
+      done = JSON.parse(tools.call("delete_project", JSON.parse(%({"project":#{doomed_slug.to_json},"dry_run":false,"confirmation_token":#{token.to_json}}))).text)
+      done["deleted"].as_bool.should be_true
+
+      # Doomed is gone, Alt remains
+      after = JSON.parse(tools.call("list_projects", JSON.parse("{}")).text)["projects"].as_a.map { |p| p["slug"].as_s }
+      after.should_not contain(doomed_slug)
+      after.should contain(alt)
+
+      # deleting the currently-served project (Alt) is refused
+      tools.call("delete_project", JSON.parse(%({"project":#{alt.to_json}}))).is_error.should be_true
+    ensure
+      store.close rescue nil
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(root)
+    end
+  end
+end
