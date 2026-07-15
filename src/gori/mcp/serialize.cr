@@ -18,6 +18,44 @@ module Gori
       MAX_TEXT = 64 * 1024 # cap on inlined decoded text
       MAX_B64  = 64 * 1024 # cap on raw bytes base64-encoded for binary bodies
 
+      # Header names whose VALUES carry credentials/session material. Redacted to
+      # [REDACTED] in read-tool output (get_flow, get_repeater_context content)
+      # unless the caller opts in with include_sensitive:true. One canonical list
+      # so Flow and Repeater views share a single policy (send_request reuses
+      # `sensitive_header?` too).
+      SENSITIVE_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cookie",
+                           "x-api-key", "api-key", "x-auth-token"}
+
+      def self.sensitive_header?(name : String) : Bool
+        SENSITIVE_HEADERS.includes?(name.strip.downcase)
+      end
+
+      # Replace the value of any sensitive header line in a raw HTTP head/request
+      # with [REDACTED], leaving names, the request/status line, and the body
+      # untouched. Line endings are preserved. Returns `text` verbatim when
+      # `include_sensitive` is set or the text has nothing header-shaped.
+      def self.redact_head(text : String, include_sensitive : Bool) : String
+        return text if include_sensitive || !text.includes?(':')
+        headers_done = false
+        text.split('\n').map_with_index do |line, i|
+          next line if i.zero? || headers_done # request/status line, then body
+          if line.chomp.empty?                 # blank line ends the header block
+            headers_done = true
+            next line
+          end
+          colon = line.index(':')
+          next line unless colon
+          name = line[0, colon]
+          next line unless sensitive_header?(name)
+          "#{name}: [REDACTED]#{"\r" if line.ends_with?('\r')}"
+        end.join('\n')
+      end
+
+      # nil-tolerant redact_head, for the optional heads of a Pending/errored flow.
+      def self.redact_head_opt(text : String?, include_sensitive : Bool) : String?
+        text ? redact_head(text, include_sensitive) : nil
+      end
+
       # --- list projection (History) ------------------------------------------
       def self.flow_row(j : JSON::Builder, row : Store::FlowRow) : Nil
         j.object do
@@ -57,12 +95,14 @@ module Gori
 
       # --- full detail incl. heads + decoded bodies ---------------------------
       def self.flow_detail_json(detail : Store::FlowDetail,
-                                ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : String
-        JSON.build { |j| flow_detail(j, detail, ws_msgs) }
+                                ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
+                                include_sensitive : Bool = false) : String
+        JSON.build { |j| flow_detail(j, detail, ws_msgs, include_sensitive) }
       end
 
       def self.flow_detail(j : JSON::Builder, detail : Store::FlowDetail,
-                           ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage) : Nil
+                           ws_msgs : Array(Store::WsMessage) = [] of Store::WsMessage,
+                           include_sensitive : Bool = false) : Nil
         row = detail.row
         j.object do
           j.field "id", row.id
@@ -79,9 +119,10 @@ module Gori
           j.field "duration_us", row.duration_us
           j.field "content_type", row.content_type
           j.field "error", detail.error
-          j.field "request_head", head_text(detail.request_head)
+          j.field "request_head", redact_head_opt(head_text(detail.request_head), include_sensitive)
           emit_body(j, "request_body", detail.request_head, detail.request_body, detail.request_body_truncated?)
-          j.field "response_head", head_text(detail.response_head)
+          j.field "response_head", redact_head_opt(head_text(detail.response_head), include_sensitive)
+          j.field "sensitive_headers_redacted", true unless include_sensitive
           emit_body(j, "response_body", detail.response_head, detail.response_body, detail.response_body_truncated?)
           emit_sse_events(j, detail)
           emit_ws_messages(j, ws_msgs)

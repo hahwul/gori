@@ -996,6 +996,56 @@ describe Gori::MCP::Server do
       end
     end
   end
+
+  describe "sensitive header redaction" do
+    it "redacts auth headers in get_flow, reveals them with include_sensitive" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+          method: "GET", target: "/", http_version: "HTTP/1.1",
+          head: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer topsecret\r\nCookie: sid=abc\r\n\r\n".to_slice,
+          body: nil))
+        store.update_response(Gori::Store::CapturedResponse.new(
+          flow_id: id, status: 200,
+          head: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=xyz\r\nContent-Type: text/plain\r\n\r\n".to_slice, body: nil))
+
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id}}}})
+        p = tool_payload(drive(store, call)[0])
+        p["request_head"].as_s.should contain("Authorization: [REDACTED]")
+        p["request_head"].as_s.should contain("Cookie: [REDACTED]")
+        p["request_head"].as_s.should_not contain("topsecret")
+        p["request_head"].as_s.should_not contain("sid=abc")
+        p["request_head"].as_s.should contain("Host: h.test") # non-sensitive kept
+        p["response_head"].as_s.should contain("Set-Cookie: [REDACTED]")
+        p["response_head"].as_s.should_not contain("sid=xyz")
+        p["sensitive_headers_redacted"].as_bool.should be_true
+
+        rawc = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flow","arguments":{"id":#{id},"include_sensitive":true}}})
+        raw = tool_payload(drive(store, rawc)[0])
+        raw["request_head"].as_s.should contain("Bearer topsecret")
+        raw["request_head"].as_s.should contain("sid=abc")
+        raw.as_h.has_key?("sensitive_headers_redacted").should be_false
+      end
+    end
+
+    it "redacts auth headers in get_repeater_context content" do
+      with_store do |store|
+        rid = store.insert_repeater(target: "https://h.test",
+          request: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer topsecret\r\n\r\n",
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil, mark_transform: false)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{"id":#{rid},"include_content":true}}})
+        p = tool_payload(drive(store, call)[0])
+        p["sensitive_headers_redacted"].as_bool.should be_true
+        sess = p["sessions"][0]
+        sess["request"].as_s.should contain("Authorization: [REDACTED]")
+        sess["request"].as_s.should_not contain("topsecret")
+
+        rawc = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{"id":#{rid},"include_content":true,"include_sensitive":true}}})
+        raw = tool_payload(drive(store, rawc)[0])
+        raw["sessions"][0]["request"].as_s.should contain("Bearer topsecret")
+      end
+    end
+  end
 end
 
 describe Gori::MCP::Serialize do

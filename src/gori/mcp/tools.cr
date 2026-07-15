@@ -147,8 +147,11 @@ module Gori
             "Full request+response for one flow id (heads + decoded bodies). " \
             "Bodies are de-chunked/decompressed and summarised: inline text when " \
             "UTF-8 (capped 64KB), else a base64 sample. Use get_response_body_chunk " \
-            "with the same flow id to retrieve exact continuation bytes." do |s|
+            "with the same flow id to retrieve exact continuation bytes. " \
+            "Authorization/Cookie/Set-Cookie/API-key header values are [REDACTED] " \
+            "unless include_sensitive=true." do |s|
             s.field "id", intprop("flow id from list_history"), required: true
+            s.field "include_sensitive", boolprop("return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED] (default false)")
           end
 
           tool j, "get_response_body_chunk",
@@ -206,6 +209,7 @@ module Gori
             s.field "offset", intprop("start row (default 0)")
             s.field "query", strprop("filter repeaters by name or target URL (case-insensitive substring match)")
             s.field "include_content", boolprop("include request text, WebSocket payloads, response head, and live TUI repeater snapshot (default false; may expose secrets)")
+            s.field "include_sensitive", boolprop("with include_content, return Authorization/Cookie/Set-Cookie/API-key header values instead of [REDACTED] (default false)")
           end
 
           tool j, "list_notes", "List all project notes (markdown/text documents) with metadata like title and line count." { }
@@ -527,7 +531,8 @@ module Gori
         # A WebSocket flow (101) carries a separate message log; fetch it so get_flow
         # surfaces the frames (parity with `gori run show`). Non-WS flows skip the query.
         ws_msgs = detail.row.status == 101 ? @store.ws_messages(id) : [] of Store::WsMessage
-        Result.new(Serialize.flow_detail_json(detail, ws_msgs))
+        include_sensitive = bool(h, "include_sensitive") || false
+        Result.new(Serialize.flow_detail_json(detail, ws_msgs, include_sensitive))
       end
 
       private def get_response_body_chunk(h) : Result
@@ -739,6 +744,7 @@ module Gori
           return Result.new("invalid 'include_content' (expected true or false)", is_error: true)
         end
         include_content = include_content || false
+        include_sensitive = bool(h, "include_sensitive") || false
         limit = clamp(int(h, "limit"), 50, 500)
         offset = clamp_nonneg(int(h, "offset"))
         query_str = str(h, "query").try(&.strip)
@@ -794,13 +800,14 @@ module Gori
               end
             end
             j.field "content_included", include_content
+            j.field "sensitive_headers_redacted", !include_sensitive if include_content
             j.field "total_count", total_count
             j.field "offset", offset
             j.field "limit", limit
             j.field "sessions" do
               j.array do
                 paginated_repeaters.each do |r|
-                  emit_repeater_session(j, r, include_content)
+                  emit_repeater_session(j, r, include_content, include_sensitive)
                 end
               end
             end
@@ -811,14 +818,16 @@ module Gori
         end)
       end
 
-      private def emit_repeater_sessions(j : JSON::Builder, include_content : Bool = false) : Nil
+      private def emit_repeater_sessions(j : JSON::Builder, include_content : Bool = false,
+                                       include_sensitive : Bool = false) : Nil
         @store.repeaters_mcp.each do |r|
-          emit_repeater_session(j, r, include_content)
+          emit_repeater_session(j, r, include_content, include_sensitive)
         end
       end
 
       private def emit_repeater_session(j : JSON::Builder, r : Store::RepeaterRecord,
-                                      include_content : Bool = false) : Nil
+                                      include_content : Bool = false,
+                                      include_sensitive : Bool = false) : Nil
         j.object do
           j.field "db_id", r.id
           j.field "position", r.position
@@ -829,7 +838,7 @@ module Gori
           j.field "flow_id", r.flow_id if r.flow_id
           j.field "name", r.name if r.name
           j.field "sni", r.sni if r.sni
-          emit_capped_text(j, "request", r.request) if include_content
+          emit_capped_text(j, "request", Serialize.redact_head(r.request, include_sensitive)) if include_content
 
           if Repeater::WsEngine.upgrade_request?(r.request)
             ws_msgs = @store.ws_messages_for_repeater(r.id)
@@ -872,7 +881,7 @@ module Gori
               j.field "last_status", resp.status
               j.field "last_reason", resp.reason
             end
-            j.field "last_response_head", Serialize.head_text(head) if include_content
+            j.field "last_response_head", Serialize.redact_head_opt(Serialize.head_text(head), include_sensitive) if include_content
           end
         end
       end
@@ -1132,9 +1141,9 @@ module Gori
         end
       end
 
+      # One redaction policy across Flow, Repeater, and send_request responses.
       private def sensitive_header?(name : String) : Bool
-        name.downcase.in?("authorization", "proxy-authorization", "cookie", "set-cookie",
-          "x-api-key", "api-key", "x-auth-token")
+        Serialize.sensitive_header?(name)
       end
 
       # Execute a stored WebSocket repeater from MCP. Unlike send_request, this uses
