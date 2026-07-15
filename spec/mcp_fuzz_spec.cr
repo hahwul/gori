@@ -146,4 +146,33 @@ describe "MCP fuzz tools" do
       start["scope_decision"].as_s.should eq("in_scope")
     end
   end
+
+  it "ends budget_exhausted (not done) when max_requests halts before all candidates" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template"     => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"          => "http://127.0.0.1:#{port}",
+         "payloads"     => %([{"list":["a","b","c","d","e"]}]),
+         "max_requests" => 2}.to_json)
+      start["total"].as_i.should eq(5)
+      start["budget_warning"].as_s.should contain("below the 5 candidate total")
+      job_id = start["job_id"].as_s
+
+      done = false
+      60.times do
+        sleep 0.02.seconds
+        status = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+        next if status["status"].as_s == "running"
+        status["status"].as_s.should eq("budget_exhausted")
+        status["incomplete_reason"].as_s.should eq("budget_exhausted")
+        status["sent"].as_i.should be < 5
+        status["candidates_remaining"].as_i.should be > 0
+        done = true
+        break
+      end
+      done.should be_true
+    end
+  end
 end

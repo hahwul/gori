@@ -91,7 +91,10 @@ module Gori
       class FuzzJob
         getter id : String
         getter total : Int64?
-        property status : Symbol = :running # :running | :done | :stopped | :error
+        # :running | :done | :budget_exhausted | :stopped | :error. :budget_exhausted
+        # is a DISTINCT terminal state from :done so a run that hit the request budget
+        # before checking every candidate is not read as an exhaustive "0 matches".
+        property status : Symbol = :running
         property sent = 0_i64
         property matched = 0_i64
         property errors = 0_i64
@@ -113,7 +116,8 @@ module Gori
       class MineJob
         getter id : String
         getter total : Int64
-        property status : Symbol = :running # :running | :done | :stopped | :error
+        # :running | :done | :budget_exhausted | :stopped | :error (see FuzzJob).
+        property status : Symbol = :running
         property names_done = 0_i64
         property sent = 0_i64
         property found = 0
@@ -386,7 +390,9 @@ module Gori
               s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
             end
 
-            tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|stopped|error)." do |s|
+            tool j, "fuzz_status", "Counts + state of a fuzz job (running|done|budget_exhausted|stopped|error). " \
+              "budget_exhausted means max_requests halted the run before every candidate was checked — " \
+              "a partial result, NOT an exhaustive one; see incomplete_reason and candidates_remaining." do |s|
               s.field "job_id", strprop("id from fuzz_start"), required: true
             end
 
@@ -426,7 +432,8 @@ module Gori
               s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
             end
 
-            tool j, "mine_status", "Counts + state of a mine job (running|done|stopped|error)." do |s|
+            tool j, "mine_status", "Counts + state of a mine job (running|done|budget_exhausted|stopped|error). " \
+              "budget_exhausted means max_requests halted the run before every name was tried; see incomplete_reason." do |s|
               s.field "job_id", strprop("id from mine_start"), required: true
             end
 
@@ -1834,10 +1841,11 @@ module Gori
         id = "fz_#{@job_seq}"
         fjob = FuzzJob.new(id, total, engine)
         @jobs[id] = fjob
+        warn = budget_warning(total, int(h, "max_requests"))
         # Audit on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "fuzz_start #{id} #{origin.scheme}://#{origin.host}:#{origin.port} scope=#{sc.decision} total=#{total || "?"}" }
         spawn(name: "mcp-fuzz-#{id}") { run_fuzz_job(fjob, engine) }
-        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running"; emit_scope(j, sc) } })
+        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "total", total; j.field "status", "running"; j.field("budget_warning", warn) if warn; emit_scope(j, sc) } })
       rescue ex : FuzzArgError
         Result.new(ex.message || "invalid fuzz arguments", is_error: true)
       end
@@ -1851,12 +1859,41 @@ module Gori
           when Fuzz::ResultEvent   then store_fuzz_result(fjob, ev.result)
           when Fuzz::DoneEvent
             apply_fuzz_progress(fjob, ev.progress)
-            fjob.status = ev.stopped ? :stopped : :done
+            fjob.status = terminal_status(fjob.status, ev.stopped, fjob.sent, fjob.total)
           when Fuzz::ErrorEvent
             fjob.status = :error
             fjob.error_msg = ev.message
           end
         end
+      end
+
+      # Terminal status for a finished fuzz/mine job. A non-stopped Done whose
+      # processed count fell short of the known candidate `total` means the request
+      # budget (max_requests) halted the run early — reported as :budget_exhausted
+      # so a partial "0 found" is not read as an exhaustive result. A prior :error
+      # is preserved (a generation ErrorEvent then a Done must stay failed).
+      private def terminal_status(current : Symbol, stopped : Bool, done_count : Int64, total : Int64?) : Symbol
+        return :error if current == :error
+        return :stopped if stopped
+        (total && done_count < total) ? :budget_exhausted : :done
+      end
+
+      # Machine reason a terminal job is not a clean :done, else nil.
+      private def incomplete_reason(status : Symbol) : String?
+        case status
+        when :budget_exhausted then "budget_exhausted"
+        when :stopped          then "stopped"
+        when :error            then "failed"
+        else                        nil
+        end
+      end
+
+      # Up-front warning when a caller's max_requests can't cover the known
+      # candidate total, so the run will end :budget_exhausted rather than :done.
+      private def budget_warning(total : Int64?, caller_cap : Int64?) : String?
+        return nil unless total && caller_cap && caller_cap > 0 && caller_cap < total
+        "max_requests (#{caller_cap}) is below the #{total} candidate total; " \
+        "the run will stop at the budget before checking every candidate"
       end
 
       private def apply_fuzz_progress(fjob : FuzzJob, p : Fuzz::Progress) : Nil
@@ -1883,10 +1920,13 @@ module Gori
             j.field "status", fjob.status.to_s
             j.field "total", fjob.total
             j.field "sent", fjob.sent
+            j.field "candidates_remaining", (t = fjob.total) ? {0_i64, t - fjob.sent}.max : nil
             j.field "matched", fjob.matched
             j.field "errors", fjob.errors
             j.field "stored_results", fjob.results.size
             j.field "results_truncated", fjob.truncated?
+            j.field "job_complete", fjob.status != :running
+            j.field "incomplete_reason", incomplete_reason(fjob.status)
             j.field "error", fjob.error_msg
           end
         end)
@@ -1905,7 +1945,13 @@ module Gori
             j.field "returned", page.size
             j.field "offset", offset
             j.field "total_available", rows.size
+            # `complete` (kept for back-compat) = the JOB finished. `page_complete`
+            # is about THIS page: whether it reached the end of the stored rows.
             j.field "complete", fjob.status != :running
+            j.field "job_complete", fjob.status != :running
+            j.field "page_complete", offset + page.size >= rows.size
+            j.field "has_more", offset + page.size < rows.size
+            j.field "incomplete_reason", incomplete_reason(fjob.status)
             j.field "results_truncated", fjob.truncated?
           end
         end)
@@ -1950,7 +1996,7 @@ module Gori
           when Miner::FindingEvent  then store_mine_finding(mjob, ev.finding)
           when Miner::DoneEvent
             apply_mine_progress(mjob, ev.progress)
-            mjob.status = ev.stopped ? :stopped : :done
+            mjob.status = terminal_status(mjob.status, ev.stopped, mjob.names_done, mjob.total)
           when Miner::ErrorEvent
             mjob.status = :error
             mjob.error_msg = ev.message
@@ -1982,11 +2028,14 @@ module Gori
             j.field "status", mjob.status.to_s
             j.field "names_total", mjob.total
             j.field "names_done", mjob.names_done
+            j.field "names_remaining", {0_i64, mjob.total - mjob.names_done}.max
             j.field "sent", mjob.sent
             j.field "found", mjob.found
             j.field "errors", mjob.errors
             j.field "baseline_stable", mjob.baseline_stable?
             j.field "results_truncated", mjob.truncated?
+            j.field "job_complete", mjob.status != :running
+            j.field "incomplete_reason", incomplete_reason(mjob.status)
             j.field "error", mjob.error_msg
           end
         end)
@@ -2005,6 +2054,10 @@ module Gori
             j.field "offset", offset
             j.field "total_available", mjob.results.size
             j.field "complete", mjob.status != :running
+            j.field "job_complete", mjob.status != :running
+            j.field "page_complete", offset + page.size >= mjob.results.size
+            j.field "has_more", offset + page.size < mjob.results.size
+            j.field "incomplete_reason", incomplete_reason(mjob.status)
             j.field "results_truncated", mjob.truncated?
           end
         end)
