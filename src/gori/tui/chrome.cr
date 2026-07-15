@@ -144,6 +144,7 @@ module Gori::Tui
     def self.render_top_bar(screen : Screen, rect : Rect, *, project : String,
                             listen : String, time : String,
                             scope : String, rules : String = "", intercept : String = "",
+                            sandbox : String = "",
                             unread : Int32 = 0, capturing : Bool = true,
                             write_failures : Int32 = 0) : Nil
       # Logo row sits flush on the canvas — no lifted panel band (tabs/status keep panel).
@@ -158,7 +159,7 @@ module Gori::Tui
       # affect. The listen chip's address text never changes — capture on/off/failing
       # rides as the leading dot + label colour (green/muted/red), so the one address
       # a user glances at doubles as the capture indicator instead of a separate chip.
-      tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept,
+      tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept, sandbox: sandbox,
         listen: listen, time: time, unread: unread, capturing: capturing,
         write_failures: write_failures)
       chips = tagged.map { |(_, l, c)| {l, c} }
@@ -175,11 +176,14 @@ module Gori::Tui
     # The right-aligned top-bar chips, TAGGED so render and the click hit-test share
     # one ordered source (the geometry can't drift). Mirrors `status_chips` below.
     private def self.top_bar_chips(*, scope : String, rules : String, intercept : String,
-                                   listen : String, time : String, unread : Int32,
+                                   sandbox : String, listen : String, time : String, unread : Int32,
                                    capturing : Bool, write_failures : Int32) : Array({Symbol, String, Color})
       chips = [] of {Symbol, String, Color}
       chips << {:notify, "notify:#{unread}", Theme.accent} if unread > 0
       chips << {:scope, scope, scope.ends_with?(":off") ? Theme.muted : Theme.text} unless scope.empty?
+      # Sandbox rides right of scope (they're the same lens' policy) and in RED — a block gate
+      # must read as hot, like intercept.
+      chips << {:sandbox, sandbox, Theme.red} unless sandbox.empty?
       chips << {:rules, rules, Theme.text} unless rules.empty?
       chips << {:intercept, intercept, Theme.red} unless intercept.empty?
       label, color = listen_chip(listen, capturing, write_failures)
@@ -211,10 +215,10 @@ module Gori::Tui
     # right one either way, so passing `name_x + 1` here matches the real render
     # exactly regardless of the actual project string or its truncation.
     def self.top_bar_chip_rect(rect : Rect, tag : Symbol, *, scope : String, rules : String = "",
-                               intercept : String = "", listen : String, time : String,
+                               intercept : String = "", sandbox : String = "", listen : String, time : String,
                                unread : Int32 = 0, capturing : Bool = true,
                                write_failures : Int32 = 0) : Rect?
-      tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept,
+      tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept, sandbox: sandbox,
         listen: listen, time: time, unread: unread, capturing: capturing,
         write_failures: write_failures)
       idx = tagged.index { |(t, _, _)| t == tag }

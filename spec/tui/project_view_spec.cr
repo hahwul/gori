@@ -254,7 +254,7 @@ describe "ProjectView#pane_at" do
 end
 
 describe "ProjectView NETWORK pane" do
-  it "renders the scope-lens toggle + the three network fields with an inherit marker" do
+  it "renders the scope-lens + sandbox toggles + the three network fields with an inherit marker" do
     tmp_store do |store|
       reset_projnet
       view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
@@ -264,6 +264,7 @@ describe "ProjectView NETWORK pane" do
       b.contains?("NETWORK").should be_true
       b.contains?("ENVIRONMENT").should be_true
       b.contains?("Scope lens").should be_true
+      b.contains?("Sandbox").should be_true
       b.contains?("Bind IP").should be_true
       b.contains?("Bind Port").should be_true
       b.contains?("Upstream proxy").should be_true
@@ -301,8 +302,9 @@ describe "ProjectView NETWORK pane" do
       view.set_row_at(rect, rect.right - 4, rect.y + 26).should_not be_nil # a row in the settings band
       view.settings_dirty?.should be_false                                 # fresh, inherited pane
 
-      view.select_setting(2) # Bind Port
+      view.select_setting(3) # Bind Port (row 0 lens, 1 sandbox, 2 bind IP, 3 bind port)
       view.settings_scope_row?.should be_false
+      view.settings_sandbox_row?.should be_false
       view.settings_text_row?.should be_true
       view.set_input('9')
       view.set_input('9')

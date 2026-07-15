@@ -904,6 +904,74 @@ describe Gori::Proxy::Server do
     got.receive.should eq("3:SMU")
   end
 
+  it "sandbox blocks an out-of-scope request before it reaches upstream (403 + recorded abort)" do
+    done = Channel(Nil).new(1)
+    store_path = File.tempname("gori-sbx", ".db")
+    store = Gori::Store.open(store_path)
+    scope = Gori::Scope.load(store)
+    scope.add("include", "host", "acme.test") # only acme.test is allowed
+    scope.enable_sandbox
+    interceptor = Gori::Interceptor.new(scope)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, interceptor: interceptor)
+    proxy.start
+
+    # No origin is started: an out-of-scope request must be refused before any dial.
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /secret HTTP/1.1\r\nHost: evil.test\r\n\r\n"
+    client.flush
+    resp = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    store.close
+    File.delete?(store_path)
+    File.delete?("#{store_path}-wal")
+    File.delete?("#{store_path}-shm")
+
+    resp.should contain("403 Forbidden")
+    resp.should contain("X-Gori-Sandbox: blocked")
+    # The blocked attempt is still recorded (visible in History) as an Aborted flow.
+    sink.requests.first.host.should eq("evil.test")
+    sink.responses.first.state.should eq(Gori::Store::FlowState::Aborted)
+    sink.responses.first.error.should eq("blocked by sandbox (out of scope)")
+  end
+
+  it "sandbox passes an in-scope request through to upstream" do
+    seen = Channel(String).new(1)
+    done = Channel(Nil).new(1)
+    origin_port = start_origin("ok", seen)
+
+    store_path = File.tempname("gori-sbx2", ".db")
+    store = Gori::Store.open(store_path)
+    scope = Gori::Scope.load(store)
+    scope.add("include", "host", "127.0.0.1") # the origin host — allowed
+    scope.enable_sandbox
+    interceptor = Gori::Interceptor.new(scope)
+
+    sink = RecordingSink.new(done)
+    proxy = Gori::Proxy::Server.new("127.0.0.1", 0, sink, interceptor: interceptor)
+    proxy.start
+
+    client = TCPSocket.new("127.0.0.1", proxy.port)
+    client << "GET /hello HTTP/1.1\r\nHost: 127.0.0.1:#{origin_port}\r\n\r\n"
+    client.flush
+    body = client.gets_to_end
+    client.close
+
+    done.receive
+    proxy.stop
+    store.close
+    File.delete?(store_path)
+    File.delete?("#{store_path}-wal")
+    File.delete?("#{store_path}-shm")
+
+    seen.receive.should eq("GET /hello HTTP/1.1") # the origin received it
+    body.should contain("200 OK")
+  end
+
   it "evaluates the response intercept condition against the REWRITTEN request line" do
     # Regression: a Match&Replace rule rewrites /hello → /hi. With a response-only
     # catch + condition `path:/hi`, the response gate must match the REWRITTEN path

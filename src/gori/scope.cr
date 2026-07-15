@@ -19,6 +19,10 @@ module Gori
   # AND (no exclude rule matches). So excludes-only ⇒ everything except the excludes.
   class Scope
     SETTING_ENABLED = "scope_enabled"
+    # Sandbox: a HARD containment gate (distinct from the display lens above). When on,
+    # the capture proxy forwards ONLY requests the scope allows and BLOCKS everything
+    # else — so a test can only ever touch the range the operator explicitly permitted.
+    SETTING_SANDBOX = "scope_sandbox"
 
     KINDS = ["include", "exclude"]
     TYPES = ["host", "string", "regex"]
@@ -104,8 +108,12 @@ module Gori
 
     getter rules : Array(Rule)
     getter? enabled : Bool
+    # The sandbox flag. Read on the PROXY hot path (sandbox_blocks?/sandbox_blocks_host?)
+    # under @mutex while the TUI toggles it; the bare `sandbox?` getter is read only on
+    # the TUI render fiber (the sole writer), matching `enabled?`'s discipline.
+    getter? sandbox : Bool
 
-    def initialize(@store : Store, @rules : Array(Rule), @enabled : Bool)
+    def initialize(@store : Store, @rules : Array(Rule), @enabled : Bool, @sandbox : Bool = false)
       # @rules/@enabled are read on the PROXY hot path (in_scope_url?/may_match_host?/
       # filter/active?) while the TUI fiber mutates them (add/remove/update/toggle).
       # Guard every cross-fiber access with a mutex — only the TUI mutates, so its own
@@ -114,7 +122,8 @@ module Gori
     end
 
     def self.load(store : Store) : Scope
-      new(store, load_rules(store), store.setting(SETTING_ENABLED) == "1")
+      new(store, load_rules(store), store.setting(SETTING_ENABLED) == "1",
+        store.setting(SETTING_SANDBOX) == "1")
     end
 
     protected def self.load_rules(store : Store) : Array(Rule)
@@ -124,6 +133,13 @@ module Gori
     # Rule count (chrome chip / scope_label) — read on the TUI fiber, the only writer.
     def size : Int32
       @rules.size
+    end
+
+    # Count of INCLUDE rules — the Sandbox guidance note distinguishes "blocks
+    # out-of-scope" (has includes) from "blocks EVERYTHING" (zero includes ⇒ nothing
+    # is allowlisted ⇒ the proxy drops all traffic). Read on the TUI fiber, like `size`.
+    def include_count : Int32
+      @rules.count(&.include?)
     end
 
     def active? : Bool
@@ -182,12 +198,21 @@ module Gori
     # "probe the whole internet minus a few hosts" — too aggressive for an automatic
     # outbound scanner). False when no includes exist or the URL is excluded.
     def matches_url?(url : String, host : String) : Bool
-      @mutex.synchronize do
-        includes = @rules.select(&.include?)
-        return false if includes.empty?
-        includes.any?(&.matches?(url, host)) &&
-          @rules.none? { |r| r.exclude? && r.matches?(url, host) }
-      end
+      @mutex.synchronize { allowlisted_unlocked?(url, host) }
+    end
+
+    # The ALLOWLIST evaluation (callers hold @mutex): true ⇔ at least one INCLUDE rule
+    # matches AND no EXCLUDE matches. Empty includes ⇒ false — "nothing is explicitly
+    # allowed". SHARED by the Probe Active gate (matches_url?) and the Sandbox block gate
+    # (sandbox_blocks?): both INTENTIONALLY reject a scope with no includes rather than
+    # treating it as allow-all (the Burp display filter's rule in matches_url_unlocked?),
+    # because an empty or excludes-only scope is not an "allowed range" to probe or let
+    # through — it's the whole internet minus a few hosts.
+    private def allowlisted_unlocked?(url : String, host : String) : Bool
+      includes = @rules.select(&.include?)
+      return false if includes.empty?
+      includes.any?(&.matches?(url, host)) &&
+        @rules.none? { |r| r.exclude? && r.matches?(url, host) }
     end
 
     # Pure Burp evaluation (includes empty ⇒ match all; then carve excludes). Shared by
@@ -209,6 +234,57 @@ module Gori
     # decides whether to keep the connection on h1 so a request CAN be held.
     def may_match_host?(host : String) : Bool
       @mutex.synchronize { active_unlocked? ? host_in_scope_unlocked?(host) : true }
+    end
+
+    # --- Sandbox: the hard containment gate (safe-testing) ---------------------------
+    # When ON, the capture proxy forwards ONLY the requests the scope ALLOWS
+    # (allowlisted_unlocked?: ≥1 include matches, no exclude) and BLOCKS everything else —
+    # including ALL traffic when no include rule exists. INDEPENDENT of the display lens
+    # (`enabled?`): a blocking policy, not a view filter. It reuses the ALLOWLIST eval, NOT
+    # the Burp display filter, so "no includes" means "block all" (the safe default), never
+    # "allow all". Read on the proxy hot path under @mutex; toggled by the TUI.
+
+    # Precise per-REQUEST block decision (ClientConn). `url` is `scheme://host/target` —
+    # the SAME value in_scope_url?/the SQL filter build, so a blocked request lines up
+    # exactly with the History row it would have been. Returns false when the sandbox is
+    # off (nothing is ever blocked). One lock covers both the flag and the rule eval.
+    def sandbox_blocks?(url : String, host : String) : Bool
+      @mutex.synchronize { @sandbox && !allowlisted_unlocked?(url, host) }
+    end
+
+    # Coarse HOST-level block for the CONNECT gate + the h2→h1 downgrade decision, made
+    # BEFORE any request exists (no path/URL yet). Blocks only when the host CAN'T be in
+    # scope, so a partially-in-scope host is still tunnelled and gated per request by
+    # ClientConn. Conservative like may_match_host?: a url-level include (whose path we
+    # can't know here) keeps the host allowed; only a host-level include set that excludes
+    # it — or an empty allowlist — blocks it outright. Returns false when the sandbox is off.
+    def sandbox_blocks_host?(host : String) : Bool
+      @mutex.synchronize { @sandbox && !host_allowlisted_unlocked?(host) }
+    end
+
+    # HOST-level ALLOWLIST membership (callers hold @mutex): the host CAN be in scope when
+    # includes aren't empty AND (a host-include matches OR any url-level include exists —
+    # its path might match on this host) AND no HOST-level exclude fully covers it. Mirrors
+    # host_in_scope_unlocked? but with the allowlist's empty-includes ⇒ false rule.
+    private def host_allowlisted_unlocked?(host : String) : Bool
+      includes = @rules.select(&.include?)
+      return false if includes.empty?
+      inc_ok = includes.any? { |r| r.host_type? && r.matches?("", host) } ||
+               includes.any? { |r| !r.host_type? }
+      excluded = @rules.any? { |r| r.exclude? && r.host_type? && r.matches?("", host) }
+      inc_ok && !excluded
+    end
+
+    def toggle_sandbox : Nil
+      @mutex.synchronize { set_sandbox_unlocked(!@sandbox) }
+    end
+
+    def enable_sandbox : Nil
+      @mutex.synchronize { set_sandbox_unlocked(true) }
+    end
+
+    def disable_sandbox : Nil
+      @mutex.synchronize { set_sandbox_unlocked(false) }
     end
 
     # A SQL filter selecting in-scope flows (QL::EMPTY when inactive). The URL the
@@ -297,6 +373,11 @@ module Gori
     private def set_enabled_unlocked(value : Bool) : Nil
       @enabled = value
       @store.set_setting(SETTING_ENABLED, value ? "1" : "0")
+    end
+
+    private def set_sandbox_unlocked(value : Bool) : Nil
+      @sandbox = value
+      @store.set_setting(SETTING_SANDBOX, value ? "1" : "0")
     end
 
     private URL_EXPR = "(scheme || '://' || host || target)"

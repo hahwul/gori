@@ -1075,16 +1075,16 @@ module Gori::Tui
       write_failures = @session.store.write_failures
 
       nrect = Chrome.top_bar_chip_rect(rect, :notify, scope: scope_label, rules: rules_label,
-        intercept: intercept_label, listen: listen, time: clock_label, unread: unread,
-        capturing: capturing, write_failures: write_failures)
+        intercept: intercept_label, sandbox: sandbox_label, listen: listen, time: clock_label,
+        unread: unread, capturing: capturing, write_failures: write_failures)
       if nrect && nrect.contains?(mx, my)
         open_notifications
         return true
       end
 
       srect = Chrome.top_bar_chip_rect(rect, :scope, scope: scope_label, rules: rules_label,
-        intercept: intercept_label, listen: listen, time: clock_label, unread: unread,
-        capturing: capturing, write_failures: write_failures)
+        intercept: intercept_label, sandbox: sandbox_label, listen: listen, time: clock_label,
+        unread: unread, capturing: capturing, write_failures: write_failures)
       if srect && srect.contains?(mx, my)
         scope_toggle_lens
         return true
@@ -2927,6 +2927,7 @@ module Gori::Tui
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
         listen: "#{@session.proxy.host}:#{@session.proxy.port}", time: clock_label,
         scope: scope_label, rules: rules_label, intercept: intercept_label,
+        sandbox: sandbox_label,
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures)
       Chrome.render_rule(screen, layout.rule)
@@ -3010,6 +3011,13 @@ module Gori::Tui
 
     private def scope_label : String
       @scope.active? ? "scope:#{@scope.size}" : "scope:off"
+    end
+
+    # A red top-bar chip whenever the sandbox is on — a hard block gate MUST stay visible
+    # everywhere, so an operator never wonders why traffic isn't being captured. Empty (no
+    # chip) when off. Display-only, unlike the clickable scope chip.
+    private def sandbox_label : String
+      @scope.sandbox? ? "sandbox" : ""
     end
 
     # The wall clock shown at the far right of the top bar. Minute granularity — the
@@ -4196,6 +4204,24 @@ module Gori::Tui
     # the lens through the same reload+toast path a keybind/menu uses.
     def toggle_scope_lens : Nil
       scope_toggle_lens
+    end
+
+    # Flip the scope SANDBOX — the hard block gate (Project NETWORK pane row/click). Unlike the
+    # lens, this changes future BLOCKING, not the display filter, so it does NOT reload History/
+    # Sitemap; it just persists + toasts. Enabling with an EMPTY allowlist turns the proxy into a
+    # black hole (every captured request blocked), so that one case gets a danger confirm first.
+    def toggle_sandbox : Nil
+      if !@scope.sandbox? && @scope.include_count == 0
+        confirm("ENABLE SANDBOX",
+          "The scope has no include rules yet, so the sandbox will BLOCK ALL captured traffic until you add one.\nEnable anyway?",
+          confirm_label: "enable", danger: true) do
+          @scope.enable_sandbox
+          project_controller.toast_sandbox_state
+        end
+      else
+        @scope.toggle_sandbox
+        project_controller.toast_sandbox_state
+      end
     end
 
     # Project SCOPE-pane rule editing (a/e/d + space menu → popup overlay).
