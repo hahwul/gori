@@ -398,6 +398,7 @@ module Gori
               s.field "body", strprop("request body, sent as-is")
               s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
               s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
+              s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result (1-600000)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
               s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
@@ -1343,7 +1344,7 @@ module Gori
         return scope_blocked(sc) if sc.blocked
         recorded_flow_id = record_history ? record_outbound_request(built, http2) : nil
         verify = @verify_upstream && !(bool(h, "insecure") || false)
-        result = send_built_request(built, http2, verify, sni)
+        result = send_built_request(built, http2, verify, sni, send_timeout(h))
         record_outbound_response(recorded_flow_id, result) if recorded_flow_id
         # Audit trail on STDERR — never STDOUT (reserved for JSON-RPC).
         Log.info { "send_request #{built.scheme}://#{built.host}:#{built.port} http2=#{http2} scope=#{sc.decision} flow_id=#{recorded_flow_id || "none"} -> #{result.ok? ? "ok" : result.error}" }
@@ -1401,14 +1402,21 @@ module Gori
       end
 
       private def send_built_request(built : RequestBuilder::Built, http2 : Bool,
-                                     verify_upstream : Bool, sni : String? = nil) : Repeater::Result
+                                     verify_upstream : Bool, sni : String? = nil,
+                                     timeout : Time::Span? = nil) : Repeater::Result
         if http2
           Repeater::H2Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream, sni: sni)
+            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout)
         else
           Repeater::Engine.send(built.bytes, scheme: built.scheme, host: built.host,
-            port: built.port, verify_upstream: verify_upstream, sni: sni)
+            port: built.port, verify_upstream: verify_upstream, sni: sni, timeout: timeout)
         end
+      end
+
+      # Per-operation (connect + idle read/write) timeout for a one-shot send, from
+      # timeout_ms; nil = the engine defaults. Mirrors fuzz_timeout's bounds.
+      private def send_timeout(h) : Time::Span?
+        int(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
       end
 
       private def persist_send_repeater(h, save : Bool, built : RequestBuilder::Built,

@@ -923,6 +923,25 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "bounds a hung read with timeout_ms and returns a network-error result" do
+      with_store do |store|
+        origin = TCPServer.new("127.0.0.1", 0)
+        port = origin.local_address.port
+        spawn do
+          if conn = origin.accept? # accept, then never respond so the read idles out
+            sleep 5.seconds
+            conn.close rescue nil
+          end
+        rescue
+        end
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","timeout_ms":200}}})
+        resp = drive(store, call, verify_upstream: false)[0]
+        resp["result"]["isError"].as_bool.should be_true
+        tool_payload(resp)["error"].as_s.empty?.should be_false
+        origin.close rescue nil
+      end
+    end
+
     it "returns isError on a connection failure (port 1)" do
       with_store do |store|
         call = %({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/"}}})
