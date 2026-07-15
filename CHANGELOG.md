@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Changed — MCP server hardening & new tools
+
+A broad pass over the MCP surface based on an external assessment. Highlights:
+
+- **Structured errors** — every tool error carries a stable `error_code`
+  (`NOT_FOUND`, `INVALID_ARGUMENT`, `QUERY_SYNTAX`, `NETWORK_ERROR`,
+  `BUDGET_EXHAUSTED`, `PROJECT_BUSY`, `SCOPE_BLOCKED`, `TOOL_DISABLED`, …) plus
+  `retryable`, surfaced in `structuredContent` alongside the human message.
+- **Secret redaction** — `get_flow` and `get_repeater_context` now `[REDACTED]`
+  Authorization/Cookie/Set-Cookie/API-key header values by default
+  (`include_sensitive:true` to reveal), matching `send_request`.
+- **Scope enforcement (BREAKING)** — active tools (`send_request`,
+  `send_websocket`, `fuzz`, `mine`) refuse a target outside — or without — a
+  configured scope (`SCOPE_BLOCKED`); pass `allow_unscoped:true` to override.
+- **Budget-exhausted state** — fuzz/mine distinguish `budget_exhausted` from
+  `done`, with `incomplete_reason` + remaining-candidate counts.
+- **fuzz/mine audit** — `record_history: none|matched|all` records sent
+  requests as History flows (per-result `flow_id`); status includes an audit
+  block (target/rate/concurrency/budget/times).
+- **Project lifecycle** — `list_projects`, `create_project`, `switch_project`,
+  `delete_project` (dry-run + short-lived confirmation token).
+- **New tools/params** — `ql_explain`, `preview_rule`/`update_rule`,
+  `list_jobs`/`get_job`/`stop_job`, `send_request(repeater_id)`, `timeout_ms`,
+  `body_mode`/`max_body_bytes`, QL `strict`, sitemap transport keying +
+  `collapse_transport`, `effective_request`/`ignored_fields`, typed WebSocket
+  frames, JWT `alg:none` warning, deterministic `gzip-compress`.
+
+Deferred (need store-schema migrations, a proxy-dialer change, a decoder
+converter-protocol change, or whole new subsystems, so out of scope for this
+MCP-surface pass): fine-grained network `error_kind` (DNS vs TLS-verify vs
+refused — the dialer collapses these); decoder `warning`/`partial` step states;
+HMAC/JWT signature *verification* via a key reference; WebSocket handshake flows
+in general History and subprotocol/extension negotiation; issue immutable
+evidence snapshots, CWE/CVSS/tags, duplicate/merge, and SARIF export; and the
+larger protocol/tooling backlog (gRPC/SSE first-class capture, crawler, passive
+scanner, HAR/OpenAPI import).
+
 ### Added — protocol filter in History
 
 WebSocket, gRPC, and SSE flows are now first-class in the History tab instead of
