@@ -132,6 +132,7 @@ module Gori
         property? history_truncated = false
         property recorded_flows = 0
         property ended_at_ms : Int64? = nil
+        property stop_requested_at_ms : Int64? = nil
         getter record_history : Symbol
         getter origin : Fuzz::Origin
         getter? http2 : Bool
@@ -143,6 +144,7 @@ module Gori
         end
 
         def stop : Nil
+          @stop_requested_at_ms ||= Time.utc.to_unix_ms
           @engine.stop
         end
       end
@@ -164,12 +166,14 @@ module Gori
         getter results = [] of Miner::Finding
         property? truncated = false
         property ended_at_ms : Int64? = nil
+        property stop_requested_at_ms : Int64? = nil
         getter audit : JobAudit
 
         def initialize(@id : String, @total : Int64, @engine : Miner::Engine, @audit : JobAudit)
         end
 
         def stop : Nil
+          @stop_requested_at_ms ||= Time.utc.to_unix_ms
           @engine.stop
         end
       end
@@ -519,6 +523,25 @@ module Gori
             tool j, "mine_stop", "Stop a running mine job (in-flight requests finish)." do |s|
               s.field "job_id", strprop("id from mine_start"), required: true
             end
+
+            tool j, "list_jobs",
+              "List all fuzz and mine jobs this session started (job_id, kind, status, " \
+              "counts, target) — one call to see everything in flight." { }
+
+            tool j, "get_job",
+              "Full status of a fuzz OR mine job by id (dispatches by the id prefix), " \
+              "so you can poll any job with one tool." do |s|
+              s.field "job_id", strprop("a fuzz (fz_*) or mine (mn_*) job id"), required: true
+            end
+
+            tool j, "stop_job",
+              "Stop a fuzz OR mine job. With wait:true, block until it reaches a terminal " \
+              "state (or wait_timeout_ms elapses) and report the final status + stopped_at, " \
+              "so stop-and-confirm is one call. Without wait, returns immediately (stop is async)." do |s|
+              s.field "job_id", strprop("a fuzz (fz_*) or mine (mn_*) job id"), required: true
+              s.field "wait", boolprop("block until the job actually stops (default false)")
+              s.field "wait_timeout_ms", intprop("max ms to wait when wait:true (default 10000, max 60000)")
+            end
           end
         end
       end
@@ -588,6 +611,9 @@ module Gori
         when "mine_status"      then gated { mine_status(h) }
         when "mine_results"     then gated { mine_results(h) }
         when "mine_stop"        then gated { mine_stop(h) }
+        when "list_jobs"        then gated { list_jobs }
+        when "get_job"          then gated { get_job(h) }
+        when "stop_job"         then gated { stop_job(h) }
         when "create_note"      then gated { create_note(h) }
         when "update_note"      then gated { update_note(h) }
         when "delete_note"      then gated { delete_note(h) }
@@ -2458,6 +2484,107 @@ module Gori
         id = str(h, "job_id")
         return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
         @mine_jobs[id]? || not_found("no mine job #{id}")
+      end
+
+      # --- unified async job management (list/get/stop across fuzz + mine) -----
+
+      private def list_jobs : Result
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "count", @jobs.size + @mine_jobs.size
+            j.field("jobs") do
+              j.array do
+                @jobs.each_value do |f|
+                  j.object do
+                    j.field "job_id", f.id
+                    j.field "kind", "fuzz"
+                    j.field "status", f.status.to_s
+                    j.field "sent", f.sent
+                    j.field "total", f.total
+                    j.field "matched", f.matched
+                    j.field "target", f.audit.target
+                  end
+                end
+                @mine_jobs.each_value do |m|
+                  j.object do
+                    j.field "job_id", m.id
+                    j.field "kind", "mine"
+                    j.field "status", m.status.to_s
+                    j.field "sent", m.sent
+                    j.field "names_total", m.total
+                    j.field "found", m.found
+                    j.field "target", m.audit.target
+                  end
+                end
+              end
+            end
+          end
+        end)
+      end
+
+      # Unified status for a fuzz OR mine job (dispatch by the id prefix), so a
+      # caller polling many jobs needs one tool. Delegates to the per-engine
+      # status serializers, which already carry counts/audit/incomplete_reason.
+      private def get_job(h) : Result
+        id = str(h, "job_id")
+        return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
+        if @jobs.has_key?(id)
+          fuzz_status(h)
+        elsif @mine_jobs.has_key?(id)
+          mine_status(h)
+        else
+          not_found("no job #{id}")
+        end
+      end
+
+      # Stop a fuzz OR mine job. With wait:true, blocks (yielding to the runner
+      # fiber via sleep) until the job reaches a terminal state or wait_timeout_ms
+      # elapses, so a caller can stop-and-confirm in one call instead of polling.
+      private def stop_job(h) : Result
+        id = str(h, "job_id")
+        return err("missing required 'job_id'", "INVALID_ARGUMENT", field: "job_id") if id.nil? || id.empty?
+        job = @jobs[id]? || @mine_jobs[id]?
+        return not_found("no job #{id}") unless job
+        job.stop
+        wait = bool(h, "wait") || false
+        waited_out = false
+        if wait
+          budget = int(h, "wait_timeout_ms").try(&.clamp(1_i64, 60_000_i64)) || 10_000_i64
+          deadline = Time.utc.to_unix_ms + budget
+          while job_running?(job)
+            if Time.utc.to_unix_ms >= deadline
+              waited_out = true
+              break
+            end
+            sleep 20.milliseconds
+          end
+        end
+        status, stopped_at = job_status_and_end(job)
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "job_id", id
+            j.field "status", status
+            j.field "stop_requested", true
+            j.field "stopped", status != "running"
+            j.field "timed_out", true if waited_out
+            if sr = job_stop_requested(job)
+              j.field "stop_requested_at", sr
+            end
+            j.field "stopped_at", stopped_at
+          end
+        end)
+      end
+
+      private def job_running?(job : FuzzJob | MineJob) : Bool
+        job.status == :running
+      end
+
+      private def job_status_and_end(job : FuzzJob | MineJob) : {String, Int64?}
+        {job.status.to_s, job.ended_at_ms}
+      end
+
+      private def job_stop_requested(job : FuzzJob | MineJob) : Int64?
+        job.stop_requested_at_ms
       end
 
       private def mine_finding_json(j : JSON::Builder, f : Miner::Finding) : Nil

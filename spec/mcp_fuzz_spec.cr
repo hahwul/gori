@@ -147,6 +147,28 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "lists jobs, gets one by id, and stop_job(wait:true) converges to terminal" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"      => "http://127.0.0.1:#{port}",
+         "payloads" => %([{"numbers":"1-500"}]),
+         "rate"     => 50}.to_json)
+      job_id = start["job_id"].as_s
+
+      jobs = call_json(tools, "list_jobs", "{}")["jobs"].as_a
+      jobs.any? { |jj| jj["job_id"].as_s == job_id && jj["kind"].as_s == "fuzz" }.should be_true
+      call_json(tools, "get_job", %({"job_id":#{job_id.to_json}}))["job_id"].as_s.should eq(job_id)
+
+      stopped = call_json(tools, "stop_job", %({"job_id":#{job_id.to_json},"wait":true,"wait_timeout_ms":5000}))
+      stopped["stopped"].as_bool.should be_true
+      stopped["status"].as_s.should_not eq("running")
+      stopped["stop_requested_at"].as_i64.should be > 0
+    end
+  end
+
   it "records matched results to History with a redacted flow_id when record_history:matched" do
     port = start_origin
     with_store do |store|
