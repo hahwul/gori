@@ -218,6 +218,17 @@ describe Gori::Tui::IssuesView do
       view.target_issue.not_nil!.title.should eq("low-row")
     end
   end
+
+  it "open_by_id reloads, selects, and opens detail for a known issue" do
+    tmp_store do |store|
+      id = store.insert_issue("target", Gori::Store::Severity::High, "acme.test", nil)
+      store.insert_issue("other", Gori::Store::Severity::Low, "acme.test", nil)
+      view = IssuesView.new
+      view.open_by_id(store, id).should be_true
+      view.detail_open?.should be_true
+      view.detail_issue.try(&.id).should eq(id)
+    end
+  end
 end
 
 describe "IssueForm" do

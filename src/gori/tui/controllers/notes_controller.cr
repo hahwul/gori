@@ -268,6 +268,15 @@ module Gori::Tui
       @host.status("new note (#{@notes.count}) — ^1-9 switch · ^W close · esc tabs")
     end
 
+    # Create a blank note without focusing the Notes tab (link-picker "create +
+    # link" path). Persists immediately and returns the new note's stable id.
+    def create_blank_note_id : Int64
+      save_notes
+      @notes.new_note
+      save_notes
+      @notes.current_note_id
+    end
+
     # Content-only clone of the active note (new id; entity_links not copied).
     def notes_duplicate : Nil
       save_notes

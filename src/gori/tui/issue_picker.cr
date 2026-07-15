@@ -5,8 +5,11 @@ require "../store"
 
 module Gori::Tui
   # Pick an issue to attach the current workbench ref to. Mirrors FlowPicker's
-  # in-memory filter; the Runner owns the overlay lifecycle.
+  # in-memory filter; the Runner owns the overlay lifecycle. A pinned
+  # "+ New issue…" row (always first) opens create-and-link via the issue form.
   class IssuePicker
+    CREATE_LABEL = "+ New issue…"
+
     getter selected : Int32
     @indexed : Array({Store::Issue, String})
 
@@ -15,7 +18,8 @@ module Gori::Tui
       @preedit = ""
       @indexed = @rows.map { |f| {f, haystack(f)} }
       @filtered = @rows
-      @selected = 0
+      # Prefer the first existing issue when present (create is always index 0).
+      @selected = @rows.empty? ? 0 : 1
       @scroll = 0
     end
 
@@ -23,18 +27,30 @@ module Gori::Tui
       @preedit = text
     end
 
+    # Total navigable rows: create action + filtered issues.
+    def entry_count : Int32
+      1 + @filtered.size
+    end
+
+    def selected_create? : Bool
+      @selected == 0
+    end
+
     def selected_issue : Store::Issue?
-      @filtered[@selected]?
+      return nil if selected_create?
+      @filtered[@selected - 1]?
     end
 
     def move(delta : Int32) : Nil
-      return if @filtered.empty?
-      @selected = (@selected + delta).clamp(0, @filtered.size - 1)
+      n = entry_count
+      return if n == 0
+      @selected = (@selected + delta).clamp(0, n - 1)
     end
 
     def set_selected(idx : Int32) : Nil
-      return if @filtered.empty?
-      @selected = idx.clamp(0, @filtered.size - 1)
+      n = entry_count
+      return if n == 0
+      @selected = idx.clamp(0, n - 1)
     end
 
     def query_char(ch : Char) : Nil
@@ -54,7 +70,8 @@ module Gori::Tui
     private def refilter : Nil
       terms = @query.downcase.split
       @filtered = terms.empty? ? @rows : @indexed.select { |(_, hay)| terms.all? { |t| hay.includes?(t) } }.map(&.first)
-      @selected = 0
+      # Keep create at 0; land on first match when any, else the create row.
+      @selected = @filtered.empty? ? 0 : 1
       @scroll = 0
     end
 
@@ -78,7 +95,7 @@ module Gori::Tui
       return nil if i < 0 || i >= list_h
       return nil if mx < box.x + 1 || mx >= box.right - 1
       ri = @scroll + i
-      ri < @filtered.size ? ri : nil
+      ri < entry_count ? ri : nil
     end
 
     def render(screen : Screen, area : Rect) : Nil
@@ -86,7 +103,7 @@ module Gori::Tui
       return unless box
       Frame.card(screen, box, "PICK ISSUE", border: Theme.border_focus)
       if @query.empty? && @preedit.empty?
-        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ link · esc cancel",
+        screen.text(box.x + 2, box.y + 1, "type to filter · ↑/↓ select · ↵ link / create · esc cancel",
           Theme.muted, Theme.panel, width: box.w - 4)
       else
         px = screen.text(box.x + 2, box.y + 1, "filter: ", Theme.muted, Theme.panel)
@@ -97,16 +114,23 @@ module Gori::Tui
       list_top = box.y + 3
       list_h = box.bottom - 1 - list_top
       ensure_visible(list_h)
-      if @filtered.empty?
-        msg = @rows.empty? ? "no issues yet" : "no issues match"
-        screen.text(box.x + 3, list_top, msg, Theme.muted, Theme.panel)
-        return
-      end
       (0...list_h).each do |i|
         ri = @scroll + i
-        break if ri >= @filtered.size
-        draw_row(screen, box, list_top + i, @filtered[ri], ri == @selected)
+        break if ri >= entry_count
+        if ri == 0
+          draw_create(screen, box, list_top + i, ri == @selected)
+        else
+          draw_row(screen, box, list_top + i, @filtered[ri - 1], ri == @selected)
+        end
       end
+    end
+
+    private def draw_create(screen : Screen, box : Rect, ry : Int32, active : Bool) : Nil
+      bg = active ? Theme.accent_bg : Theme.panel
+      fg = active ? Theme.text_bright : Theme.accent
+      screen.fill(Rect.new(box.x + 1, ry, box.w - 2, 1), bg)
+      screen.cell(box.x + 1, ry, active ? '▎' : ' ', Theme.accent, bg)
+      screen.text(box.x + 3, ry, CREATE_LABEL, fg, bg, width: box.w - 5)
     end
 
     private def draw_row(screen : Screen, box : Rect, ry : Int32, f : Store::Issue, active : Bool) : Nil
@@ -122,7 +146,7 @@ module Gori::Tui
       return if list_h <= 0
       @scroll = @selected if @selected < @scroll
       @scroll = @selected - list_h + 1 if @selected >= @scroll + list_h
-      @scroll = @scroll.clamp(0, {@filtered.size - list_h, 0}.max)
+      @scroll = @scroll.clamp(0, {entry_count - list_h, 0}.max)
     end
   end
 end

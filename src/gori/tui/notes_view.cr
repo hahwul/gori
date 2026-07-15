@@ -320,6 +320,14 @@ module Gori::Tui
       @dirty = true
     end
 
+    # Switch to the note with stable id `id` (create-and-link "open" path).
+    # Returns false when that note is not in this session's list.
+    def switch_note_by_id(id : Int64) : Bool
+      return false unless idx = @notes.index { |n| n.id == id }
+      switch_note(idx)
+      true
+    end
+
     # Persist iff edited (no-op otherwise — cheap to call on every exit path). Merges
     # against the currently-persisted set first, so a second TUI session on the same
     # project doesn't clobber this session's notes (and vice-versa): peer notes are

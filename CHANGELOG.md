@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added — Create issue/note while linking from History / Replay / …
+
+Space → **Link to issue** / **Link to note** (History, detail, Repeater, Fuzzer,
+Miner) no longer requires a pre-existing owner: each picker pins **+ New issue…**
+/ **+ New note…** at the top. New issue opens the usual title/severity form and
+links the pending workbench ref on ↵; new note creates a blank note and links
+immediately. Existing rows keep default selection when any are present. After
+create, a **open / stay** confirm asks whether to jump to the new issue/note or
+remain on the current tab (default: stay).
+
 ### Added — MCP live intercept + event feed (#123, #124)
 
 Agents can sit in the intercept loop and tail job/agent activity without
