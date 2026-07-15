@@ -160,7 +160,7 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.toggle-hex", "Toggle hex edit", "Edit the request as raw bytes — sends exactly what you type",
         Verb::Scope::Repeater, [Verb::Chord.new("x", ctrl: true)],
-        available: in_repeater, mnemonic: 'x', section: :request) { |ctx| ctx.repeater_toggle_hex; nil }
+        available: in_repeater, mnemonic: 'b', section: :request) { |ctx| ctx.repeater_toggle_hex; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-decoded", "Switch envelope/decoded", "SAML/GraphQL flow: switch envelope/decoded · in MARK mode: insert a § at the cursor",
         Verb::Scope::Repeater, [Verb::Chord.new("t", ctrl: true)],
@@ -201,7 +201,7 @@ module Gori
         available: in_repeater, mnemonic: 'd', section: :response) { |ctx| ctx.repeater_toggle_resp_diff; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-resp-hex", "Hex dump", "Toggle a raw hex dump of the response bytes",
-        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'x', section: :response) { |ctx| ctx.repeater_toggle_resp_hex; nil }
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'h', section: :response) { |ctx| ctx.repeater_toggle_resp_hex; nil }
       r.register Verb::Definition.new(
         "repeater.toggle-pretty", "Pretty bodies", "Pretty-print JSON/XML/form/… response bodies (display only)",
         Verb::Scope::Repeater, [Verb::Chord.new("p")],
@@ -249,11 +249,12 @@ module Gori
         Verb::Scope::HistoryDetail, [Verb::Chord.new("tab")], hidden: true) { |ctx| ctx.toggle_detail_pane; nil }
 
       # The view-toggles are NON-hidden so they front the detail's "space" action menu
-      # (the palette stays Global-only, so un-hiding doesn't leak there). The shown
-      # menu key derives from each plain chord — exactly the key you'd press directly.
+      # (the palette stays Global-only, so un-hiding doesn't leak there). ws/pretty take
+      # their menu key from their plain chord (b/p) — exactly the key you'd press. Hex is
+      # ^X (plain `x` = select-line), so it carries an explicit 'e' mnemonic for the menu.
       r.register Verb::Definition.new(
         "detail.toggle-hex", "Hex view", "Toggle a raw hex dump of the request/response bytes",
-        Verb::Scope::HistoryDetail, [Verb::Chord.new("x")]) { |ctx| ctx.toggle_detail_hex; nil }
+        Verb::Scope::HistoryDetail, [Verb::Chord.new("x", ctrl: true)], mnemonic: 'e') { |ctx| ctx.toggle_detail_hex; nil }
 
       r.register Verb::Definition.new(
         "detail.toggle-ws", "Reveal whitespace", "Show whitespace/CR/LF as glyphs (·→␍␊)",
@@ -392,7 +393,7 @@ module Gori
         available: in_fuzzer, mnemonic: 'h', section: :template) { |ctx| ctx.fuzz_toggle_http2; nil }
       r.register Verb::Definition.new(
         "fuzz.clear-marks", "Clear markers", "Strip every §…§ marker (and its attached chain) from the template",
-        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'x', section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
+        Verb::Scope::Fuzzer, available: in_fuzzer, mnemonic: 'e', section: :template) { |ctx| ctx.fuzz_clear_marks; nil }
       in_fuzzer_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.fuzzer_read_mode? }
       # The single smart Copy (see repeater.copy above) — copy-all is gone.
       r.register Verb::Definition.new(

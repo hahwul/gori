@@ -135,8 +135,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def repeater_copy_all : Nil; end
 
+  property repeater_read_mode : Bool = false # settable so grouped-menu specs can exercise the read-mode verbs
+
   def repeater_read_mode? : Bool
-    false
+    @repeater_read_mode
   end
 
   def fuzz_selected : Nil; end
@@ -425,8 +427,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def copy_as_open : Nil; end
 
+  property detail_navigable : Bool = false # settable so grouped-menu specs can exercise detail.select-line
+
   def detail_navigable? : Bool
-    false
+    @detail_navigable
   end
 
   def space_menu_title(verb_id : String) : String?

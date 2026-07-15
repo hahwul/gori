@@ -335,7 +335,7 @@ module Gori::Tui
         end
       when :response
         nav = v.resp_navigable? ? "↑/↓ move" : "↑/↓ scroll"
-        "#{nav} · #{read_common} · #{diff} diff · ⇧←/→ h-scroll · x hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · esc tabs"
+        "#{nav} · #{read_common} · #{diff} diff · ⇧←/→ h-scroll · #{hex} hex · #{pretty} pretty · ^F find · ↵/#{send} send · ↹ pane · esc tabs"
       when :request
         if v.request_insert?
           "type to edit · ^G goto · ^F find · #{hex} hex · esc read · ↹ pane"
@@ -601,8 +601,11 @@ module Gori::Tui
       elsif view.focus == :request
         on = view.toggle_request_hex
         @host.status(on ? "hex edit: on — sends exact bytes (^X/esc exit; not text-safe)" : "hex edit: off")
+      elsif view.focus == :response
+        view.toggle_resp_hex
+        @host.status(view.resp_hex? ? "response hex dump: on — raw bytes (^X exit)" : "response hex dump: off")
       else
-        @host.status("hex edit (^X) applies to the REQUEST pane — ↹ to it")
+        @host.status("hex edit (^X) applies to the REQUEST or RESPONSE pane — ↹ to one")
       end
     end
 
@@ -1577,7 +1580,7 @@ module Gori::Tui
       when transcript
         # Transcript: no d/x/p tools; still let Global breath / copy through.
         return false if c && !ev.ctrl? && !ev.alt? && !c.control?
-      when key.lower_x? then view.toggle_resp_hex # pane-local (select-line owns `x` on req/tgt)
+      when key.lower_x? then view.pane_select_line # 'x' selects the line everywhere (hex is ^X)
       when key.lower_b? then @host.toggle_reveal  # bare `b` (Global reveal is ^B)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # d diff, p pretty, y copy, Global c/i/s, …

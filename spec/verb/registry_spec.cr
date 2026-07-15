@@ -869,7 +869,8 @@ describe Gori::Verb do
       # ←/→ in HistoryDetail walk the panes (left no longer just closes)
       keymap.lookup(Chord.new("right"), Scope::HistoryDetail).should eq("detail.next-pane")
       keymap.lookup(Chord.new("left"), Scope::HistoryDetail).should eq("detail.prev-pane")
-      keymap.lookup(Chord.new("x"), Scope::HistoryDetail).should eq("detail.toggle-hex")
+      keymap.lookup(Chord.new("x"), Scope::HistoryDetail).should eq("detail.select-line")
+      keymap.lookup(Chord.new("x", ctrl: true), Scope::HistoryDetail).should eq("detail.toggle-hex")
       # ^U in the Fuzzer pretty-prints the template (must NOT be intercepted as clear-marks
       # anymore — clear-marks moved to the space menu as fuzz.clear-marks).
       keymap.lookup(Chord.new("u", ctrl: true), Scope::Fuzzer).should eq("fuzz.pretty-template")
