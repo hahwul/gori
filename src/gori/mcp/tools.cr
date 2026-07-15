@@ -398,7 +398,7 @@ module Gori
               s.field "body", strprop("request body, sent as-is")
               s.field "raw", strprop("verbatim raw HTTP/1.1 request; overrides method/headers/body (scheme/host/port still come from url)")
               s.field "http2", boolprop("use real HTTP/2; defaults to the flow's version when flow_id is set)")
-              s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result (1-600000)")
+              s.field "timeout_ms", intprop("per-operation connect + idle (read/write) timeout in milliseconds; a timeout surfaces as a network-error result with error_kind (1-600000)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "record_history", boolprop("record the outbound request and response in History for audit/evidence (default true)")
               s.field "save_as_repeater", boolprop("save this request and its response to the Repeater workbench (default false)")
@@ -1419,6 +1419,22 @@ module Gori
         int(h, "timeout_ms").try(&.clamp(1_i64, 600_000_i64).milliseconds)
       end
 
+      # Coarse category for a send's network error, from the engine's error text
+      # (gori's own controlled strings). "connect" (the dialer collapses DNS /
+      # refused / connect-timeout / TLS-verify into one failure — finer split would
+      # need dialer changes), "timeout" (idle read/write), "protocol" (framing /
+      # malformed response), "no_response", else "other". Advisory.
+      private def network_error_kind(message : String?) : String?
+        return nil unless message
+        m = message.downcase
+        return "connect" if m.starts_with?("connect failed")
+        return "timeout" if m.includes?("timed out") || m.includes?("timeout")
+        return "protocol" if m.includes?("malformed") || m.includes?("framing") ||
+                             m.includes?("interim") || m.includes?("chunk")
+        return "no_response" if m.includes?("no response") || m.includes?("closed")
+        "other"
+      end
+
       private def persist_send_repeater(h, save : Bool, built : RequestBuilder::Built,
                                       http2 : Bool, result : Repeater::Result,
                                       issue_id : Int64?, recorded_flow_id : Int64?) : Int64?
@@ -1537,7 +1553,10 @@ module Gori
             end
             j.field "recorded_flow_id", recorded_flow_id
             j.field "saved_repeater_id", repeater_id if repeater_id && repeater_id > 0
-            j.field "error", result.error unless result.ok?
+            unless result.ok?
+              j.field "error", result.error
+              j.field "error_kind", network_error_kind(result.error)
+            end
             if response = result.response
               j.field "status", response.status
               j.field "reason", response.reason

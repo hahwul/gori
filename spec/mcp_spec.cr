@@ -949,6 +949,7 @@ describe Gori::MCP::Server do
         resp["result"]["isError"].as_bool.should be_true
         payload = tool_payload(resp)
         payload["error"].as_s.downcase.should contain("fail")
+        payload["error_kind"].as_s.should eq("connect") # classified network error
         store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!.row.state.error?.should be_true
       end
     end
