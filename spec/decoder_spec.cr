@@ -106,6 +106,13 @@ describe Gori::Decoder do
       z = conv_bytes("zlib-compress", "hello world".to_slice)
       String.new(conv_bytes("zlib-decompress", z)).should eq "hello world"
     end
+
+    it "gzip-compress is deterministic (mtime pinned to epoch)" do
+      a = conv_bytes("gzip-compress", "hello world".to_slice)
+      b = conv_bytes("gzip-compress", "hello world".to_slice)
+      a.should eq(b) # same input → identical bytes (no wall-clock mtime)
+      String.new(conv_bytes("gzip-decompress", a)).should eq "hello world"
+    end
   end
 
   describe "hashes (known-answer vectors)" do
@@ -182,6 +189,15 @@ describe Gori::Decoder do
 
     it "raises a clean error on junk" do
       expect_raises(Gori::Decoder::DecoderError) { conv("jwt-decode", "not-a-jwt") }
+    end
+
+    it "warns on an alg:none (unsigned) token" do
+      h = Base64.urlsafe_encode(%({"alg":"none","typ":"JWT"}), padding: false)
+      p = Base64.urlsafe_encode(%({"sub":"admin"}), padding: false)
+      out = conv("jwt-decode", "#{h}.#{p}.")
+      out.should contain "alg=none"
+      out.should contain "UNSIGNED"
+      out.should contain "signature: absent"
     end
   end
 

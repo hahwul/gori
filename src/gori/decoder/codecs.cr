@@ -262,12 +262,28 @@ module Gori::Decoder
     def jwt_decode(data : Bytes) : String
       parts = String.new(data).strip.split('.')
       raise DecoderError.new("not a JWT (need 2-3 dot-separated parts)") unless parts.size >= 2
+      sig = parts[2]?
       String.build do |io|
         io << "// header\n" << pretty_json_segment(parts[0]) << "\n\n"
         io << "// payload\n" << pretty_json_segment(parts[1])
-        sig = parts[2]?
-        io << "\n\n// signature (not verified)\n" << sig if sig && !sig.empty?
+        if sig && !sig.empty?
+          io << "\n\n// signature (not verified)\n" << sig
+        else
+          io << "\n\n// signature: absent"
+        end
+        # alg:none is a classic auth-bypass — the token is unsigned and anyone can
+        # mint one. Surface it prominently rather than decoding it silently as "ok".
+        if (alg = jwt_alg(parts[0])) && alg.downcase == "none"
+          io << "\n\n// WARNING: alg=none — this token is UNSIGNED and can be forged by anyone; never trust it as authentication."
+        end
       end
+    end
+
+    # The `alg` from a JWT header segment (base64url JSON), or nil if unreadable.
+    private def jwt_alg(header_seg : String) : String?
+      JSON.parse(String.new(Base64.decode(header_seg)))["alg"]?.try(&.as_s?)
+    rescue
+      nil
     end
 
     private def pretty_json_segment(seg : String) : String
@@ -278,9 +294,15 @@ module Gori::Decoder
     end
 
     # ---- gzip / zlib compress + bounded, tolerant decompress drains ----
+    # Deterministic: the gzip header's modification-time is pinned to the epoch
+    # instead of the wall clock, so compressing the same bytes always yields the
+    # same output (reproducible fixtures / diffs). zlib has no mtime field.
     def gzip_compress(data : Bytes) : Bytes
       io = IO::Memory.new
-      Compress::Gzip::Writer.open(io, &.write(data))
+      writer = Compress::Gzip::Writer.new(io)
+      writer.header.modification_time = Time.unix(0)
+      writer.write(data)
+      writer.close
       io.to_slice
     end
 
