@@ -260,6 +260,18 @@ module Gori::Tui
       true
     end
 
+    # Jump to a specific issue (create-and-link "open" path). Reloads, clears a
+    # filter that would hide the id, selects the row, and opens detail.
+    def open_by_id(store : Store, id : Int64) : Bool
+      reload(store)
+      unless @issues.index { |f| f.id == id }
+        cancel_query # drop any filter that would hide the freshly created issue
+      end
+      return false unless idx = @issues.index { |f| f.id == id }
+      select_index(idx)
+      open_detail(store)
+    end
+
     # Nudge the notes viewport sideways (shift+←/→ in READ). Pans by moving the read
     # cursor so follow_x keeps the window aligned (TextArea ensure_visible_x otherwise
     # resets a bare @xscroll when the caret sits at column 0).

@@ -212,6 +212,24 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  it "switch_note_by_id selects the matching note" do
+    tmp_store do |store|
+      view = NotesView.new
+      view.reload(store)
+      type(view, "one")
+      view.new_note
+      type(view, "two")
+      id0 = view.current_note_id # still on "two" after new_note
+      view.switch_note(0)
+      id_one = view.current_note_id
+      view.switch_note_by_id(id0).should be_true
+      view.current_text.should eq("two")
+      view.switch_note_by_id(id_one).should be_true
+      view.current_text.should eq("one")
+      view.switch_note_by_id(999_999_i64).should be_false
+    end
+  end
+
   it "duplicate_current clones the active note's text into a new sibling (new id)" do
     tmp_store do |store|
       view = NotesView.new

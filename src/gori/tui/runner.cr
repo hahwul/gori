@@ -1665,7 +1665,11 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       case
-      when key.escape?    then @overlay = :none
+      when key.escape?
+        # Drop a pending link-from-picker ref so a later standalone create doesn't
+        # silently attach the stale workbench item.
+        @link_pending_ref = nil
+        @overlay = :none
       when key.enter?     then create_issue_from_form
       when key.tab?       then @issue_form.severity_cycle(1)
       when key.back_tab?  then @issue_form.severity_cycle(-1)
@@ -1695,14 +1699,17 @@ module Gori::Tui
       end
     end
 
-    # Open the confirmation modal for a destructive action; `action` runs only if
-    # the user accepts. Defaults to a red "danger" confirm button. `return_to` is the
-    # overlay restored on close — leave it :none for a palette-launched confirm, or pass
-    # the parent modal (e.g. :tabs) when raising the confirm from inside another overlay.
+    # Open the confirmation modal; `action` runs only if the user accepts.
+    # Defaults to a red "danger" confirm button (destructive deletes). Pass
+    # `danger: false` and custom labels for non-destructive choices (e.g. open
+    # vs stay after create-and-link). `return_to` is the overlay restored on
+    # close — leave it :none for a palette-launched confirm, or pass the parent
+    # modal (e.g. :tabs) when raising the confirm from inside another overlay.
     def confirm(title : String, message : String, *, confirm_label : String = "delete",
+                cancel_label : String = "cancel",
                 danger : Bool = true, return_to : Symbol = :none, &action : -> Nil) : Nil
       @confirm = ConfirmDialog.new(title, message, confirm_label: confirm_label,
-        cancel_label: "cancel", danger: danger)
+        cancel_label: cancel_label, danger: danger)
       @confirm_action = action
       @confirm_return = return_to
       @overlay = :confirm
@@ -2194,12 +2201,32 @@ module Gori::Tui
     private def commit_issue_picker : Nil
       fp = @issue_picker
       return close_issue_picker if fp.nil?
+      if fp.selected_create?
+        open_issue_form_for_link
+        return
+      end
       if f = fp.selected_issue
         if ref = @link_pending_ref
           commit_link_to_owner(Store::LinkOwnerKind::Issue, f.id, ref[0], ref[1])
         end
       end
       close_issue_picker
+    end
+
+    # Transition from the issue picker into NEW ISSUE form while keeping the
+    # pending workbench ref so form ↵ creates + links without leaving the tab.
+    private def open_issue_form_for_link : Nil
+      ref = @link_pending_ref
+      @issue_picker = nil
+      if ref && ref[0].flow?
+        if row = @session.store.flow_row(ref[1])
+          @issue_form = IssueForm.new("#{row.method} #{row.target}", row.host, ref[1])
+          @overlay = :issue_new
+          return
+        end
+      end
+      @issue_form = IssueForm.new
+      @overlay = :issue_new
     end
 
     private def click_issue_picker(area : Rect, mx : Int32, my : Int32) : Nil
@@ -2236,12 +2263,74 @@ module Gori::Tui
     private def commit_note_picker : Nil
       np = @note_picker
       return close_note_picker if np.nil?
+      if np.selected_create?
+        create_note_and_link
+        return
+      end
       if row = np.selected_row
         if ref = @link_pending_ref
           commit_link_to_owner(Store::LinkOwnerKind::Note, row.id, ref[0], ref[1])
         end
       end
       close_note_picker
+    end
+
+    # Blank note + link the pending workbench ref, then ask open vs stay.
+    private def create_note_and_link : Nil
+      ref = @link_pending_ref
+      return close_note_picker if ref.nil?
+      note_id = notes_controller.create_blank_note_id
+      commit_link_to_owner(Store::LinkOwnerKind::Note, note_id, ref[0], ref[1])
+      @toast = "note created and linked"
+      @note_picker = nil
+      @link_pending_ref = nil
+      offer_open_created(:note, note_id)
+    end
+
+    # After create-and-link from a workbench picker: offer to jump to the new
+    # owner, or stay on the caller tab. Default selection is stay (cancel) so a
+    # reflexive ↵ doesn't yank focus away mid-recon.
+    private def offer_open_created(kind : Symbol, id : Int64) : Nil
+      case kind
+      when :issue
+        confirm("ISSUE CREATED",
+          "issue ##{id} created and linked.\nOpen it now, or stay here?",
+          confirm_label: "open", cancel_label: "stay", danger: false) do
+          navigate_to_created_issue(id)
+        end
+      when :note
+        confirm("NOTE CREATED",
+          "note created and linked.\nOpen it now, or stay here?",
+          confirm_label: "open", cancel_label: "stay", danger: false) do
+          navigate_to_created_note(id)
+        end
+      else
+        @overlay = :none
+      end
+    end
+
+    private def navigate_to_created_issue(id : Int64) : Nil
+      @active_tab = :issues
+      @focus = :body
+      @overlay = :none
+      if issues_controller.view.open_by_id(@session.store, id)
+        @toast = "opened issue ##{id}"
+      else
+        issues_controller.view.reload(@session.store)
+        @toast = "issue ##{id} created"
+      end
+    end
+
+    private def navigate_to_created_note(id : Int64) : Nil
+      @active_tab = :notes
+      @focus = :body
+      @overlay = :none
+      if notes_controller.view.switch_note_by_id(id)
+        notes_controller.refresh_link_preview
+        @toast = "opened note"
+      else
+        @toast = "note created"
+      end
     end
 
     private def click_note_picker(area : Rect, mx : Int32, my : Int32) : Nil
@@ -2842,11 +2931,26 @@ module Gori::Tui
         issues_controller.view.resync(@session.store)
         @toast = "issue updated"
       else
-        @session.store.insert_issue(title, form.severity, form.host, form.flow_id)
-        @active_tab = :issues
-        @focus = :body
-        issues_controller.view.reload(@session.store)
-        @toast = "issue created"
+        new_id = @session.store.insert_issue(title, form.severity, form.host, form.flow_id)
+        if ref = @link_pending_ref
+          # insert_issue already entity-links flow when form.flow_id matches; other
+          # ref kinds (repeater/fuzz/miner) still need an explicit add_link.
+          already_flow = ref[0].flow? && form.flow_id == ref[1]
+          unless already_flow
+            commit_link_to_owner(Store::LinkOwnerKind::Issue, new_id, ref[0], ref[1])
+          end
+          @toast = "issue ##{new_id} created and linked"
+          @link_pending_ref = nil
+          # Ask open-vs-stay (default stay). Do not fall through to @overlay=:none —
+          # offer_open_created sets :confirm.
+          offer_open_created(:issue, new_id)
+          return
+        else
+          @active_tab = :issues
+          @focus = :body
+          issues_controller.view.reload(@session.store)
+          @toast = "issue created"
+        end
       end
       @overlay = :none
     end
