@@ -145,7 +145,7 @@ The **Project** home tab is more than a summary. Focusable panes (cycle with `Ta
 | **DESCRIPTION** | Free-form project notes |
 | **NETWORK** | Scope-lens + **sandbox** toggles, plus per-project network pins (bind / upstream) that override the global Settings default |
 
-Scope rules are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com`. Full flags are in the [CLI Reference](/reference/cli/#run-project).
+Scope rules and host overrides are also scriptable: `gori run project scope add --kind=include --type=host --pattern=api.example.com`, `gori run project host-override add --host=api.example.com --ip=10.0.0.1`. Full flags are in the [CLI Reference](/reference/cli/#run-project).
 
 ## Next Steps
 

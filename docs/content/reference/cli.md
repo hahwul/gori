@@ -207,7 +207,7 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 
 ### run project
 
-List known projects, or manage project-scoped config (scope rules, env vars):
+List known projects, or manage project-scoped config (scope rules, env vars, host overrides):
 
 ```bash
 gori run project --format json
@@ -252,6 +252,26 @@ gori run project env delete TOKEN
 | (default) | List project vars; `--format` is `text` or `json` |
 | `set KEY=value` · `set KEY value` | Upsert a project var (KEY must match `[A-Za-z_][A-Za-z0-9_]*`) |
 | `delete KEY` | Remove a project var |
+
+#### project host-override
+
+Manage **project** host overrides — `/etc/hosts`-style maps that change only the TCP dial target (SNI, certificate hostname, and `Host` header stay the original name). Project entries win over global `Settings: Hostnames` on collision. Alias: `host-overrides`.
+
+```bash
+gori run project host-override                              # list
+gori run project host-override --format json
+gori run project host-override add --host=api.example.com --ip=10.0.0.1
+gori run project host-override add 10.0.0.1 api.example.com   # /etc/hosts order
+gori run project host-override update 1 --host=api.example.com --ip=10.0.0.9
+gori run project host-override delete 1
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| (default) | List overrides; `--format` is `text` or `json` |
+| `add` | `--host=…` + `--ip=…`, or positional `IP HOST` |
+| `update <id>` | `--host=…` + `--ip=…` (both required) |
+| `delete <id>` | Remove an override by id |
 
 ## gori mcp
 

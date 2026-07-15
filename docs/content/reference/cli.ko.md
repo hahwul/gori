@@ -207,7 +207,7 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 
 ### run project {#run-project}
 
-알려진 프로젝트 목록, 또는 프로젝트 스코프 설정(스코프 규칙, env 변수) 관리:
+알려진 프로젝트 목록, 또는 프로젝트 스코프 설정(스코프 규칙, env 변수, 호스트 오버라이드) 관리:
 
 ```bash
 gori run project --format json
@@ -252,6 +252,26 @@ gori run project env delete TOKEN
 | (default) | 프로젝트 변수 목록; `--format`은 `text` 또는 `json` |
 | `set KEY=value` · `set KEY value` | 프로젝트 변수 upsert (KEY는 `[A-Za-z_][A-Za-z0-9_]*`) |
 | `delete KEY` | 프로젝트 변수 제거 |
+
+#### project host-override {#run-project-host-override}
+
+**프로젝트** 호스트 오버라이드를 관리합니다. `/etc/hosts`처럼 호스트명에 대해 dial할 IP만 바꾸고, SNI·인증서 호스트·`Host` 헤더는 원래 이름을 유지합니다. 충돌 시 프로젝트 항목이 전역 `Settings: Hostnames`보다 우선합니다. 별칭: `host-overrides`.
+
+```bash
+gori run project host-override                              # list
+gori run project host-override --format json
+gori run project host-override add --host=api.example.com --ip=10.0.0.1
+gori run project host-override add 10.0.0.1 api.example.com   # /etc/hosts 순서
+gori run project host-override update 1 --host=api.example.com --ip=10.0.0.9
+gori run project host-override delete 1
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| (default) | 오버라이드 목록; `--format`은 `text` 또는 `json` |
+| `add` | `--host=…` + `--ip=…`, 또는 positional `IP HOST` |
+| `update <id>` | `--host=…` + `--ip=…` (둘 다 필수) |
+| `delete <id>` | id로 오버라이드 제거 |
 
 ## gori mcp {#gori-mcp}
 
