@@ -342,6 +342,35 @@ describe Gori::MCP::Server do
     end
   end
 
+  describe "get_response_body_chunk offset validation" do
+    it "flags an out-of-range offset instead of silently clamping" do
+      with_store do |store|
+        id = seed_flow(store, "h.test", "GET", "/b", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", resp_body: "hello".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_response_body_chunk","arguments":{"flow_id":#{id},"offset":9999}}})
+        p = tool_payload(drive(store, call)[0])
+        p["requested_offset"].as_i.should eq(9999)
+        p["offset"].as_i.should eq(5) # clamped to the body end
+        p["offset_out_of_range"].as_bool.should be_true
+        p["warning"].as_s.should contain("past")
+        p["returned_bytes"].as_i.should eq(0)
+        p["complete"].as_bool.should be_true
+      end
+    end
+
+    it "does not flag a legitimate final read at the body end" do
+      with_store do |store|
+        id = seed_flow(store, "h.test", "GET", "/b", 200,
+          resp_head: "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n", resp_body: "hello".to_slice)
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_response_body_chunk","arguments":{"flow_id":#{id},"offset":5}}})
+        p = tool_payload(drive(store, call)[0])
+        p.as_h.has_key?("offset_out_of_range").should be_false
+        p.as_h.has_key?("warning").should be_false
+        p["complete"].as_bool.should be_true
+      end
+    end
+  end
+
   describe "arg coercion" do
     it "honours a limit passed as a JSON string or integral float" do
       with_store do |store|

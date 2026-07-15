@@ -213,7 +213,8 @@ module Gori
             "Read a byte range from a response body when get_flow/send_request reports truncation. " \
             "Pass exactly one of flow_id or repeater_id. Content encoding is decoded by default so " \
             "offsets continue the inline view; raw=true pages stored wire bytes. Returns UTF-8 text " \
-            "or base64 plus next_offset/complete." do |s|
+            "or base64 plus next_offset/complete. An offset past the body end is clamped and flagged " \
+            "(requested_offset, offset_out_of_range, warning) rather than silently returning empty." do |s|
             s.field "flow_id", intprop("History flow id")
             s.field "repeater_id", intprop("Repeater workbench database id")
             s.field "offset", intprop("zero-based byte offset (default 0)")
@@ -667,7 +668,13 @@ module Gori
         decoded, decode_note = options.raw ? {nil, nil} : Proxy::Codec::ContentDecode.decode(head, stored)
         bytes = decoded || stored
         total = bytes.size.to_i64
-        start = Math.min(options.offset, total).to_i
+        # An offset past the end used to silently clamp to the body end (0 bytes,
+        # complete:true) — indistinguishable from a legitimate final read. Surface
+        # both the requested and the effective offset plus a warning so the caller
+        # can tell a genuine end-of-body from a bad offset.
+        requested = options.offset
+        start = Math.min(requested, total).to_i
+        offset_out_of_range = requested > total
         count = Math.min(options.limit, bytes.size - start)
         chunk = count.zero? ? Bytes.new(0) : bytes[start, count]
         next_offset = start.to_i64 + count
@@ -677,7 +684,10 @@ module Gori
           j.object do
             j.field "flow_id", options.flow_id
             j.field "repeater_id", options.repeater_id
+            j.field "requested_offset", requested
             j.field "offset", start
+            j.field "offset_out_of_range", true if offset_out_of_range
+            j.field "warning", "requested offset #{requested} is past the #{total}-byte body; clamped to the end" if offset_out_of_range
             j.field "returned_bytes", count
             j.field "total_bytes", total
             j.field "representation", decoded ? "decoded" : "raw"
