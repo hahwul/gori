@@ -62,8 +62,9 @@ gori run <subcommand> [options]
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `notes [<n>]` | 프로젝트 노트 읽기 |
 | `issues` · `create` · `update` | 이슈 목록 / 내보내기, 또는 이슈 작성 |
-| `projects` | 알려진 프로젝트 목록 |
-| `scope` | 스코프 규칙 목록 / 추가 / 삭제 / 활성화 / 비활성화 |
+| `project [list]` | 알려진 프로젝트 목록 |
+| `project scope` | 스코프 규칙 목록 / 추가 / 삭제 / 활성화 / 비활성화 |
+| `project env` | 프로젝트 env 변수 목록 / 설정 / 삭제 (`$KEY` 치환) |
 
 읽기 서브커맨드에 공통인 플래그: `--project=NAME`, `--db=PATH`, `--format=FMT` (보통 `text` 또는 `json`).
 
@@ -185,12 +186,11 @@ gori run sitemap --in-scope --format paths
 
 `-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 `SITEMAP_MAX`). `--in-scope`는 스코프 내 호스트로 한정하고, `--no-group`은 숫자 경로 접기를 끕니다. `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다.
 
-### run issues / notes / projects {#run-issues-notes-projects}
+### run issues / notes {#run-issues-notes}
 
 ```bash
 gori run issues --format markdown --export report.md
 gori run notes --all
-gori run projects --format json
 ```
 
 스크립트에서 `create` / `update`로 이슈를 작성합니다:
@@ -205,18 +205,27 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 | `create` | `-t`/`--title` (필수), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
 | `update <id>` | `-t`/`--title`, `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
 
-### run scope {#run-scope}
+### run project {#run-project}
+
+알려진 프로젝트 목록, 또는 프로젝트 스코프 설정(스코프 규칙, env 변수) 관리:
+
+```bash
+gori run project --format json
+gori run project list
+```
+
+#### project scope {#run-project-scope}
 
 프로젝트의 include/exclude 스코프 규칙을 스크립트에서 관리합니다:
 
 ```bash
-gori run scope                                          # list rules + enabled state
-gori run scope --format json
-gori run scope add --kind=include --type=host --pattern=api.example.com
-gori run scope add --kind=exclude --type=regex --pattern='.*\.(css|js)$'
-gori run scope delete 3
-gori run scope enable
-gori run scope disable
+gori run project scope                                          # list rules + enabled state
+gori run project scope --format json
+gori run project scope add --kind=include --type=host --pattern=api.example.com
+gori run project scope add --kind=exclude --type=regex --pattern='.*\.(css|js)$'
+gori run project scope delete 3
+gori run project scope enable
+gori run project scope disable
 ```
 
 | Option / subcommand | Description |
@@ -225,6 +234,24 @@ gori run scope disable
 | `add` | `--kind=include\|exclude`, `--type=host\|string\|regex`, `--pattern=…` |
 | `delete <rule-id>` | id로 규칙 제거 |
 | `enable` / `disable` | 스코프 필터링 적용 여부 토글 |
+
+#### project env {#run-project-env}
+
+아웃바운드 요청의 `$KEY` 치환에 쓰이는 **프로젝트** env 변수를 관리합니다. 전역 변수는 `settings.json` / TUI Settings에 있고, 이 명령은 프로젝트 레이어만 다룹니다.
+
+```bash
+gori run project env                              # list KEY=value
+gori run project env --format json
+gori run project env set TOKEN=secret
+gori run project env set HOST api.example.com
+gori run project env delete TOKEN
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| (default) | 프로젝트 변수 목록; `--format`은 `text` 또는 `json` |
+| `set KEY=value` · `set KEY value` | 프로젝트 변수 upsert (KEY는 `[A-Za-z_][A-Za-z0-9_]*`) |
+| `delete KEY` | 프로젝트 변수 제거 |
 
 ## gori mcp {#gori-mcp}
 

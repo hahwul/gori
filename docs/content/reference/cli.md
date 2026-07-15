@@ -62,8 +62,9 @@ gori run <subcommand> [options]
 | `sitemap [QL]` | Host → path endpoint tree |
 | `notes [<n>]` | Read project notes |
 | `issues` · `create` · `update` | List / export issues, or write issues |
-| `projects` | List known projects |
-| `scope` | List / add / delete / enable / disable scope rules |
+| `project [list]` | List known projects |
+| `project scope` | List / add / delete / enable / disable scope rules |
+| `project env` | List / set / delete project env vars (`$KEY` substitution) |
 
 Common flags across read subcommands: `--project=NAME`, `--db=PATH`, `--format=FMT` (usually `text` or `json`).
 
@@ -185,12 +186,11 @@ gori run sitemap --in-scope --format paths
 
 `-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default `SITEMAP_MAX`), `--in-scope` limits to in-scope hosts, `--no-group` disables numeric path folding, `--format` is `text` (tree), `json`, or `paths`.
 
-### run issues / notes / projects
+### run issues / notes
 
 ```bash
 gori run issues --format markdown --export report.md
 gori run notes --all
-gori run projects --format json
 ```
 
 Write issues from scripts with `create` / `update`:
@@ -205,18 +205,27 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 | `create` | `-t`/`--title` (required), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
 | `update <id>` | `-t`/`--title`, `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
 
-### run scope
+### run project
+
+List known projects, or manage project-scoped config (scope rules, env vars):
+
+```bash
+gori run project --format json
+gori run project list
+```
+
+#### project scope
 
 Manage the project's include/exclude scope rules from scripts:
 
 ```bash
-gori run scope                                          # list rules + enabled state
-gori run scope --format json
-gori run scope add --kind=include --type=host --pattern=api.example.com
-gori run scope add --kind=exclude --type=regex --pattern='.*\.(css|js)$'
-gori run scope delete 3
-gori run scope enable
-gori run scope disable
+gori run project scope                                          # list rules + enabled state
+gori run project scope --format json
+gori run project scope add --kind=include --type=host --pattern=api.example.com
+gori run project scope add --kind=exclude --type=regex --pattern='.*\.(css|js)$'
+gori run project scope delete 3
+gori run project scope enable
+gori run project scope disable
 ```
 
 | Option / subcommand | Description |
@@ -225,6 +234,24 @@ gori run scope disable
 | `add` | `--kind=include\|exclude`, `--type=host\|string\|regex`, `--pattern=…` |
 | `delete <rule-id>` | Remove a rule by id |
 | `enable` / `disable` | Toggle whether scope filtering is applied |
+
+#### project env
+
+Manage **project** env vars used for `$KEY` substitution in outbound requests (Repeater, Fuzzer, Miner, CLI, MCP). Global vars live in `settings.json` / the TUI Settings — this command only touches the per-project layer.
+
+```bash
+gori run project env                              # list KEY=value
+gori run project env --format json
+gori run project env set TOKEN=secret
+gori run project env set HOST api.example.com
+gori run project env delete TOKEN
+```
+
+| Option / subcommand | Description |
+|---------------------|-------------|
+| (default) | List project vars; `--format` is `text` or `json` |
+| `set KEY=value` · `set KEY value` | Upsert a project var (KEY must match `[A-Za-z_][A-Za-z0-9_]*`) |
+| `delete KEY` | Remove a project var |
 
 ## gori mcp
 
