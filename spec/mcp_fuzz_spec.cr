@@ -53,9 +53,10 @@ describe "MCP fuzz tools" do
     with_store do |store|
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
       args = {
-        "template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
-        "url"      => "http://127.0.0.1:#{port}",
-        "payloads" => %([{"list":["a","b","c"]}]),
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => %([{"list":["a","b","c"]}]),
+        "allow_unscoped" => true,
       }.to_json
 
       start = call_json(tools, "fuzz_start", args)
@@ -87,9 +88,10 @@ describe "MCP fuzz tools" do
     with_store do |store|
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
       args = {
-        "template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
-        "url"      => "http://127.0.0.1:#{port}",
-        "payloads" => [{"list" => ["only"]}],
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "payloads"       => [{"list" => ["only"]}],
+        "allow_unscoped" => true,
       }.to_json
       start = call_json(tools, "fuzz_start", args)
       start["total"].as_i.should eq(1)
@@ -118,7 +120,7 @@ describe "MCP fuzz tools" do
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
       _, capped = call_raw(tools, "fuzz_start",
         {"template" => "GET /?q=§x§ HTTP/1.1\r\n\r\n", "url" => "http://127.0.0.1:1",
-         "payloads" => %([{"numbers":"1-200000"}])}.to_json)
+         "payloads" => %([{"numbers":"1-200000"}]), "allow_unscoped" => true}.to_json)
       capped.should be_true
     end
   end
@@ -131,7 +133,7 @@ describe "MCP fuzz tools" do
         {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "url" => "http://127.0.0.1:1",
          "payloads" => %([{"list":["a"]}])}.to_json)
       err.should be_true
-      text.should contain("out of the project's configured scope")
+      text.should contain("outside the project's configured scope")
     end
   end
 
@@ -155,7 +157,7 @@ describe "MCP fuzz tools" do
         {"template" => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url"      => "http://127.0.0.1:#{port}",
          "payloads" => %([{"numbers":"1-500"}]),
-         "rate"     => 50}.to_json)
+         "rate" => 50, "allow_unscoped" => true}.to_json)
       job_id = start["job_id"].as_s
 
       jobs = call_json(tools, "list_jobs", "{}")["jobs"].as_a
@@ -178,7 +180,8 @@ describe "MCP fuzz tools" do
          "url"            => "http://127.0.0.1:#{port}",
          "payloads"       => %([{"list":["a","b"]}]),
          "match"          => {"status" => "200"},
-         "record_history" => "matched"}.to_json)
+         "record_history" => "matched",
+         "allow_unscoped" => true}.to_json)
       start["record_history"].as_s.should eq("matched")
       job_id = start["job_id"].as_s
 
@@ -212,7 +215,7 @@ describe "MCP fuzz tools" do
         {"template"     => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
          "url"          => "http://127.0.0.1:#{port}",
          "payloads"     => %([{"list":["a","b","c","d","e"]}]),
-         "max_requests" => 2}.to_json)
+         "max_requests" => 2, "allow_unscoped" => true}.to_json)
       start["total"].as_i.should eq(5)
       start["budget_warning"].as_s.should contain("below the 5 candidate total")
       job_id = start["job_id"].as_s

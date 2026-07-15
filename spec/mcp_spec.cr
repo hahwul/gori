@@ -942,7 +942,7 @@ describe Gori::MCP::Server do
     it "records a successful request in History by default and redacts sensitive response headers" do
       with_store do |store|
         port = start_mcp_http_origin("hello", "Set-Cookie: session=top-secret\r\n")
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/audit"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/audit","allow_unscoped":true}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_false
         payload = tool_payload(resp)
@@ -959,7 +959,7 @@ describe Gori::MCP::Server do
     it "allows an explicit unaudited send and an explicit sensitive-header response" do
       with_store do |store|
         port = start_mcp_http_origin("ok", "Set-Cookie: session=visible\r\n")
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","record_history":false,"include_sensitive_headers":true}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","record_history":false,"include_sensitive_headers":true,"allow_unscoped":true}}})
         payload = tool_payload(drive(store, call, verify_upstream: false)[0])
         payload["recorded_flow_id"].raw.should be_nil
         payload["headers"].as_a.find { |header| header["name"].as_s == "Set-Cookie" }.not_nil!["value"].as_s.should eq("session=visible")
@@ -971,7 +971,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         body = "a" * (Gori::MCP::Serialize::MAX_TEXT + 4096)
         port = start_mcp_http_origin(body)
-        send = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/big"}}})
+        send = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/big","allow_unscoped":true}}})
         sent = tool_payload(drive(store, send, verify_upstream: false)[0])
         sent["body"]["truncated"].as_bool.should be_true
         flow_id = sent["recorded_flow_id"].as_i64
@@ -987,7 +987,7 @@ describe Gori::MCP::Server do
     it "repeaters a captured flow via flow_id without a url" do
       with_store do |store|
         id = seed_flow(store, "ex.test", "GET", "/repeater-me", 200)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id}}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"allow_unscoped":true}}})
         resp = drive(store, call, verify_upstream: false)[0]
         # May fail to connect in CI, but must NOT error with 'url is required'.
         resp["result"]["content"][0]["text"].as_s.should_not contain("'url' is required")
@@ -1005,7 +1005,7 @@ describe Gori::MCP::Server do
           created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: port,
           method: "GET", target: "/h2flow", http_version: "HTTP/2",
           head: "GET /h2flow HTTP/2\r\nHost: 127.0.0.1:#{port}\r\n\r\n".to_slice, body: nil))
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"http2":false}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"http2":false,"allow_unscoped":true}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_false
         tool_payload(resp)["status"].as_i.should eq(200)
@@ -1023,7 +1023,7 @@ describe Gori::MCP::Server do
           end
         rescue
         end
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","timeout_ms":200}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","timeout_ms":200,"allow_unscoped":true}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_true
         tool_payload(resp)["error"].as_s.empty?.should be_false
@@ -1033,19 +1033,21 @@ describe Gori::MCP::Server do
 
     it "returns isError on a connection failure (port 1)" do
       with_store do |store|
-        call = %({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/"}}})
+        call = %({"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","allow_unscoped":true}}})
         resp = drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
         payload = tool_payload(resp)
         payload["error"].as_s.downcase.should contain("fail")
-        payload["error_kind"].as_s.should eq("connect") # classified network error
+        payload["error_kind"].as_s.should eq("connect")     # classified network error
+        payload["error_code"].as_s.should eq("NETWORK_ERROR") # structured-error contract (criterion #4)
+        payload["retryable"].as_bool.should be_true
         store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!.row.state.error?.should be_true
       end
     end
 
     it "preserves the attempt duration on a failed send's History flow" do
       with_store do |store|
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","allow_unscoped":true}}})
         payload = tool_payload(drive(store, call)[0])
         detail = store.get_flow(payload["recorded_flow_id"].as_i64).not_nil!
         detail.row.state.error?.should be_true
@@ -1056,7 +1058,7 @@ describe Gori::MCP::Server do
     it "links a saved repeater to an issue even when the origin is unavailable" do
       with_store do |store|
         issue_id = store.insert_issue("evidence", Gori::Store::Severity::Low, nil, nil)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","save_as_repeater":true,"issue_id":#{issue_id}}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/","save_as_repeater":true,"issue_id":#{issue_id},"allow_unscoped":true}}})
         drive(store, call)[0]["result"]["isError"].as_bool.should be_true
         repeater_id = store.repeaters_meta.last.id
         links = store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
@@ -1067,7 +1069,7 @@ describe Gori::MCP::Server do
     it "includes effective_request on a url send (no ignored fields)" do
       with_store do |store|
         port = start_mcp_http_origin("ok")
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/path","method":"POST"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/path","method":"POST","allow_unscoped":true}}})
         p = tool_payload(drive(store, call, verify_upstream: false)[0])
         er = p["effective_request"]
         er["scheme"].as_s.should eq("http")
@@ -1085,7 +1087,7 @@ describe Gori::MCP::Server do
           created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 1,
           method: "GET", target: "/seed", http_version: "HTTP/1.1",
           head: "GET /seed HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice, body: nil))
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"url":"http://ignored.test/x","method":"POST"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"url":"http://ignored.test/x","method":"POST","allow_unscoped":true}}})
         p = tool_payload(drive(store, call)[0]) # send fails fast (127.0.0.1:1), payload still carries the fields
         p["effective_request"]["host"].as_s.should eq("127.0.0.1")
         p["effective_request"]["target"].as_s.should eq("/seed")
@@ -1103,7 +1105,7 @@ describe Gori::MCP::Server do
         rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
           request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
           http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil, mark_transform: false)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid}}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
         p = tool_payload(drive(store, call, verify_upstream: false)[0])
         p["status"].as_i.should eq(200)
         p["effective_request"]["target"].as_s.should eq("/rep")
@@ -1116,7 +1118,7 @@ describe Gori::MCP::Server do
         rid = store.insert_repeater(target: "http://127.0.0.1:9",
           request: "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:9\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x\r\nSec-WebSocket-Version: 13\r\n\r\n",
           http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil, mark_transform: false)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid}}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
         resp = drive(store, call)[0]["result"]
         resp["isError"].as_bool.should be_true
         resp["content"][0]["text"].as_s.should contain("send_websocket")
@@ -1125,10 +1127,21 @@ describe Gori::MCP::Server do
   end
 
   describe "scope enforcement (active tools)" do
-    it "flags an unscoped send but still sends when no scope is configured" do
+    it "blocks an unscoped send by default when no scope is configured" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:1/"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("SCOPE_BLOCKED")
+        resp["structuredContent"]["details"]["scope_decision"].as_s.should eq("unscoped")
+        store.count.should eq(0) # refused before any History write
+      end
+    end
+
+    it "allows an unscoped send with allow_unscoped:true, flagged unscoped" do
       with_store do |store|
         port = start_mcp_http_origin("ok")
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/"}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/","allow_unscoped":true}}})
         p = tool_payload(drive(store, call, verify_upstream: false)[0])
         p["scope_decision"].as_s.should eq("unscoped")
         p["effective_host"].as_s.should eq("127.0.0.1")
@@ -1174,7 +1187,7 @@ describe Gori::MCP::Server do
         port = start_mcp_ws_origin
         request = "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
         repeater_id = store.insert_repeater("ws://127.0.0.1:#{port}", request, false, true, nil, 0)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":["ping"],"idle_ms":100}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":["ping"],"idle_ms":100,"allow_unscoped":true}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_false
         payload = tool_payload(resp)
@@ -1190,7 +1203,7 @@ describe Gori::MCP::Server do
     it "rejects a non-WebSocket repeater before making a connection" do
       with_store do |store|
         repeater_id = store.insert_repeater("http://127.0.0.1:1", "GET / HTTP/1.1\r\nHost: x\r\n\r\n", false, true, nil, 0)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id}}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"allow_unscoped":true}}})
         resp = drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
         resp["result"]["content"][0]["text"].as_s.should contain("not a WebSocket")
@@ -1200,7 +1213,7 @@ describe Gori::MCP::Server do
     it "uses the WebSocket engine and returns a clean connection error" do
       with_store do |store|
         repeater_id = store.insert_repeater("ws://127.0.0.1:1", "GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n", false, true, nil, 0)
-        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":["ping"],"idle_ms":100}}})
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_websocket","arguments":{"repeater_id":#{repeater_id},"messages":["ping"],"idle_ms":100,"allow_unscoped":true}}})
         resp = drive(store, call, verify_upstream: false)[0]
         resp["result"]["isError"].as_bool.should be_true
         payload = tool_payload(resp)

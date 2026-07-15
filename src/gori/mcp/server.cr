@@ -132,10 +132,13 @@ module Gori
                "writing list_history/list_sitemap queries. Timestamps include unix " \
                "microseconds plus *_iso RFC3339 fields where available.#{selected}"
         if @allow_actions
-          "#{base} Action tools are enabled: send_request (supports flow_id repeater), " \
+          "#{base} Action tools are enabled: send_request (supports flow_id/repeater_id), " \
           "send_websocket (executes a persisted WS repeater), " \
           "fuzz_*, mine_*, create/update_issue, and create/delete_rule + set_rule_enabled " \
-          "make real outbound requests or mutate issues/rules."
+          "make real outbound requests or mutate issues/rules. Active requests " \
+          "(send_request, send_websocket, fuzz, mine) are gated by the project scope: a target " \
+          "outside — or without — a configured scope is refused (SCOPE_BLOCKED) unless you pass " \
+          "allow_unscoped:true. Projects can be managed via list/create/switch/delete_project."
         else
           "#{base} Read-only mode: action tools (send_request, send_websocket, fuzz_*, mine_*, " \
           "create/update_issue, create/delete_rule) are disabled — restart without --read-only to enable them."

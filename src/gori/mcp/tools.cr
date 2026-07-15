@@ -419,7 +419,7 @@ module Gori
               s.field "include_sensitive_headers", boolprop("return Cookie/Set-Cookie/Authorization/API-key response values instead of [REDACTED] (default false)")
               s.field "body_mode", strprop("none | preview | full (default full) — control how much response body is inlined")
               s.field "max_body_bytes", intprop("cap inlined response-body bytes (clamped to 65536)")
-              s.field "allow_unscoped", boolprop("send even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
+              s.field "allow_unscoped", boolprop("send even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
               s.field "name", strprop("optional custom name for the saved repeater tab (only when save_as_repeater=true)")
               s.field "issue_id", intprop("optional issue to link to the saved repeater; requires save_as_repeater=true")
             end
@@ -433,6 +433,7 @@ module Gori
               s.field "messages", strarrprop("optional outbound text-message override; stored repeater messages are used when absent")
               s.field "idle_ms", intprop("server-silence timeout after the first inbound frame (100-60000 ms; default 3000)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
+              s.field "allow_unscoped", boolprop("connect even when the target host is outside (or without) a configured scope (default false)")
               s.field "issue_id", intprop("optional issue to link to this repeater before sending")
             end
 
@@ -508,7 +509,7 @@ module Gori
               s.field "http2", boolprop("use real HTTP/2 (default false)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "max_requests", intprop("caller cap on total requests")
-              s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
+              s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
               s.field "record_history", strprop("none (default) | matched | all — record each sent request+response as a History flow for audit/evidence; matched results carry the flow_id in fuzz_results (fetch full detail with get_flow). 'all' is capped at #{FUZZ_HISTORY_MAX} flows.")
             end
 
@@ -551,7 +552,7 @@ module Gori
               s.field "http2", boolprop("use real HTTP/2 (default false)")
               s.field "insecure", boolprop("skip upstream TLS verification (default false)")
               s.field "max_requests", intprop("caller cap on total requests")
-              s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope (default false; no effect when no scope is configured)")
+              s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED to run against an out-of-scope target, or when no scope is configured at all (active requests are refused by default without a matching scope)")
             end
 
             tool j, "mine_status", "Counts + state of a mine job (running|done|budget_exhausted|stopped|error). " \
@@ -1665,6 +1666,11 @@ module Gori
             unless result.ok?
               j.field "error", result.error
               j.field "error_kind", network_error_kind(result.error)
+              # Structured-error contract inside the payload (the payload IS the
+              # structuredContent): a network failure is coded + retryable so a
+              # caller can apply policy without string-matching the message.
+              j.field "error_code", "NETWORK_ERROR"
+              j.field "retryable", true
             end
             if response = result.response
               j.field "status", response.status
@@ -1742,6 +1748,9 @@ module Gori
         target = Env.expand(repeater.target)
         scheme, host, port = Repeater::FlowRequest.parse_target(target)
         return Result.new("could not parse target for repeater #{repeater_id}", is_error: true) if host.empty? || port <= 0
+        # Scope gate before the outbound handshake (same policy as send_request).
+        sc = scope_check("#{scheme}://#{host}/", host, bool(h, "allow_unscoped") || false)
+        return scope_blocked(sc) if sc.blocked
         verify = @verify_upstream && !(bool(h, "insecure") || false)
         request = Env.expand_wire(repeater.request)
         sni = repeater.sni.try { |value| Env.expand(value) }
@@ -1754,12 +1763,18 @@ module Gori
 
         payload = JSON.build do |j|
           j.object do
+            emit_scope(j, sc)
             j.field "repeater_id", repeater_id
             j.field "upgraded", result.upgraded?
             j.field "duration_us", result.duration_us
             j.field "close_code", result.close_code if result.close_code
             j.field "note", Env.mask_secrets(result.note.not_nil!) if result.note
-            j.field "error", Env.mask_secrets(result.error.not_nil!) if result.error
+            if err = result.error
+              j.field "error", Env.mask_secrets(err)
+              j.field "error_kind", network_error_kind(err)
+              j.field "error_code", "NETWORK_ERROR"
+              j.field "retryable", true
+            end
             unless result.handshake_head.empty?
               response = begin
                 Proxy::Codec::Http1.parse_response_head(result.handshake_head)
@@ -3219,15 +3234,17 @@ module Gori
         err(message, "PROJECT_BUSY", retryable: true)
       end
 
-      # Evaluate the project scope against an active request's target. When scope
-      # is configured this is the same include/exclude test Probe Active uses
-      # (`matches_url?`: at least one INCLUDE must match and no exclude may, and
-      # the display-lens flag is ignored) — so declaring a scope actually gates
-      # outbound tools. An unconfigured scope never blocks; the send proceeds and
-      # is flagged unscoped so the caller/model can see nothing was enforced.
+      # Evaluate the project scope against an active request's target. Refused
+      # (blocked) unless the caller passes allow_unscoped, in two cases:
+      #   - out_of_scope: scope IS configured and the target doesn't match it
+      #     (the Probe-Active `matches_url?` test — an INCLUDE must match, no
+      #     exclude may, display-lens flag ignored).
+      #   - unscoped: NO scope is configured — the most dangerous case (no
+      #     guardrail at all), so an active request needs an explicit opt-in.
+      # in_scope requests always proceed and carry the matched rule id.
       private def scope_check(url : String, host : String, allow_unscoped : Bool) : ScopeCheck
         scope = Scope.load(@store)
-        return ScopeCheck.new("unscoped", host, nil, false) unless scope.configured?
+        return ScopeCheck.new("unscoped", host, nil, !allow_unscoped) unless scope.configured?
         if scope.matches_url?(url, host)
           rid = scope.rules.find { |r| r.include? && r.matches?(url, host) }.try(&.id)
           ScopeCheck.new("in_scope", host, rid, false)
@@ -3236,12 +3253,14 @@ module Gori
         end
       end
 
-      # A refusal to send an out-of-scope active request. SCOPE_BLOCKED is not
-      # retryable (the same target stays out of scope) — the caller must add a
-      # scope include rule or pass allow_unscoped:true.
+      # A refusal to send an active request outside (or without) scope.
+      # SCOPE_BLOCKED is not retryable — the caller must add a scope include rule
+      # or pass allow_unscoped:true.
       private def scope_blocked(sc : ScopeCheck) : Result
-        err("target host #{sc.host} is out of the project's configured scope; " \
-            "add a matching scope include rule or pass allow_unscoped:true to override",
+        reason = sc.decision == "unscoped" ?
+          "no scope is configured for this project, so active requests are refused by default" :
+          "target host #{sc.host} is outside the project's configured scope"
+        err("#{reason}; add a scope include rule or pass allow_unscoped:true to override",
           "SCOPE_BLOCKED", field: "url",
           details: JSON.parse({"scope_decision" => sc.decision, "host" => sc.host}.to_json))
       end
