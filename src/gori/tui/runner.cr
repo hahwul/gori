@@ -2930,10 +2930,13 @@ module Gori::Tui
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures)
       Chrome.render_rule(screen, layout.rule)
+      # One reconcile per frame: the menu strip AND the ⋯ hidden count both derive from the
+      # same tab reconcile — split_tabs computes both in a single pass (was two per frame).
+      vis_tabs, hid_tabs = Chrome.split_tabs(Settings.tab_prefs, force: @active_tab)
       Chrome.render_menu(screen, layout.menu, active_tab: @active_tab,
         focused: @focus == :menu && !@menu_more,
-        tabs: effective_tabs, intercept_count: @session.interceptor.pending_count,
-        hidden_count: hidden_tab_count, more_focused: @focus == :menu && @menu_more)
+        tabs: vis_tabs, intercept_count: @session.interceptor.pending_count,
+        hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
         insecure_upstream: @session.config.insecure_upstream?,
