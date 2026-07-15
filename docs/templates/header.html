@@ -36,4 +36,4 @@
   {{ auto_includes_css }}
 </head>
 <body class="{% if page.section == "" %}is-home{% else %}is-doc{% endif %}" data-section="{{ page.section }}">
-  <a class="skip-link" href="#main">Skip to content</a>
+  <a class="skip-link" href="#main">{{ "a11y.skip_to_content" | t }}</a>

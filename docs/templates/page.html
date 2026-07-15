@@ -5,134 +5,134 @@
 <main id="main" class="home-main">
   <section class="home-hero" aria-labelledby="home-title">
     <div class="hero-copy reveal">
-      <p class="home-kicker">HTTP intercepting proxy · TUI</p>
-      <h1 id="home-title">Intercept the web from your terminal.</h1>
-      <p class="hero-lede">A fast, keyboard-driven HTTP/HTTPS proxy and security toolkit. Capture, repeater, fuzz, scan, or drive it all from an AI agent.</p>
+      <p class="home-kicker">{{ "home.kicker" | t }}</p>
+      <h1 id="home-title">{{ "home.title" | t }}</h1>
+      <p class="hero-lede">{{ "home.lede" | t }}</p>
       <div class="home-actions" aria-label="Primary links">
-        <a class="button button-primary" href="{{ base_url }}{{ lang_prefix }}/getting-started/">Get started</a>
-        <a class="button button-secondary" href="https://github.com/hahwul/gori">View on GitHub</a>
+        <a class="button button-primary" href="{{ base_url }}{{ lang_prefix }}/getting-started/">{{ "home.cta_start" | t }}</a>
+        <a class="button button-secondary" href="https://github.com/hahwul/gori">{{ "home.cta_github" | t }}</a>
       </div>
     </div>
     <figure class="hero-art reveal">
       <span class="hero-disc">
-        <img src="{{ base_url }}/images/wallpaper.jpg" alt="Gori wallpaper">
+        <img src="{{ base_url }}/images/wallpaper.jpg" alt="{{ "home.hero_art_alt" | t }}">
       </span>
     </figure>
   </section>
 
   <section class="home-showcase reveal" aria-label="gori running in the terminal">
     <figure class="showcase-frame">
-      <img src="{{ base_url }}/images/tui/history.svg" alt="gori History tab in the terminal, listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration">
+      <img src="{{ base_url }}/images/tui/history.svg" alt="{{ "home.showcase_alt" | t }}">
     </figure>
-    <p class="showcase-note">Every request your client makes lands in <strong>History</strong> as a flow, one keystroke from Repeater, the Fuzzer, or an issue.</p>
+    <p class="showcase-note">{{ "home.showcase_note" | t }}</p>
   </section>
 
   <section class="home-paths" aria-label="Documentation paths">
     <div class="path-chain">
       <a class="path-ring path-ring-lead" href="{{ base_url }}{{ lang_prefix }}/getting-started/">
-        <span>Start</span>
-        <h2>Capture your first request</h2>
-        <p>Install, trust the CA, and watch flows land.</p>
+        <span>{{ "home.path_start_kicker" | t }}</span>
+        <h2>{{ "home.path_start_title" | t }}</h2>
+        <p>{{ "home.path_start_desc" | t }}</p>
       </a>
       <a class="path-ring path-ring-mid" href="{{ base_url }}{{ lang_prefix }}/guide/">
-        <span>Guide</span>
-        <h2>Proxy, Repeater &amp; Fuzzer</h2>
-        <p>Intercept, scope, repeater, fuzz, and scan.</p>
+        <span>{{ "home.path_guide_kicker" | t }}</span>
+        <h2>{{ "home.path_guide_title" | t }}</h2>
+        <p>{{ "home.path_guide_desc" | t }}</p>
       </a>
       <a class="path-ring path-ring-tail" href="{{ base_url }}{{ lang_prefix }}/reference/">
-        <span>Reference</span>
-        <h2>CLI &amp; query language</h2>
-        <p>Every subcommand, config key, and filter.</p>
+        <span>{{ "home.path_ref_kicker" | t }}</span>
+        <h2>{{ "home.path_ref_title" | t }}</h2>
+        <p>{{ "home.path_ref_desc" | t }}</p>
       </a>
     </div>
   </section>
 
   <section class="home-structure" aria-labelledby="structure-title">
     <figure class="structure-art">
-      <img src="{{ base_url }}/images/tui/space-menu.svg" alt="gori History tab with the Space menu open, listing context actions like add host to scope, repeater flow, and mine parameters">
+      <img src="{{ base_url }}/images/tui/space-menu.svg" alt="{{ "home.structure_alt" | t }}">
     </figure>
     <div class="structure-copy">
-      <h2 id="structure-title">One tool, the whole assessment.</h2>
-      <p>History, Intercept, Repeater, Fuzzer, the Probe scanner, Param Miner, and Issues live in a single project, every flow one keystroke away.</p>
-      <div class="structure-grid" aria-label="What makes gori fast">
+      <h2 id="structure-title">{{ "home.structure_title" | t }}</h2>
+      <p>{{ "home.structure_lede" | t }}</p>
+      <div class="structure-grid" aria-label="{{ "home.structure_grid_aria" | t }}">
         <div>
-          <strong>Keyboard-native</strong>
-          <span>A palette-driven TUI built with Crystal. No mouse required, no browser tab to babysit.</span>
+          <strong>{{ "home.structure_1_title" | t }}</strong>
+          <span>{{ "home.structure_1_desc" | t }}</span>
         </div>
         <div>
-          <strong>Fast</strong>
-          <span>A compiled proxy with SQLite-backed projects that stay responsive under load.</span>
+          <strong>{{ "home.structure_2_title" | t }}</strong>
+          <span>{{ "home.structure_2_desc" | t }}</span>
         </div>
         <div>
-          <strong>Scriptable and AI</strong>
-          <span>Everything reachable headless via <code>gori run</code>, and open to AI agents through the built-in MCP server.</span>
+          <strong>{{ "home.structure_3_title" | t }}</strong>
+          <span>{{ "home.structure_3_desc" | t }}</span>
         </div>
       </div>
     </div>
   </section>
 
   <section class="home-flow" aria-labelledby="flow-title">
-    <h2 id="flow-title">From capture to issue.</h2>
+    <h2 id="flow-title">{{ "home.flow_title" | t }}</h2>
     <div class="flow-list">
       <div>
         <div class="flow-copy">
-          <span>Capture</span>
-          <p>Run the proxy, trust the CA once, and every request flows into History with full HTTP/2, WebSocket, and gRPC detail.</p>
+          <span>{{ "home.flow_1_label" | t }}</span>
+          <p>{{ "home.flow_1_desc" | t }}</p>
         </div>
         <figure class="flow-shot">
-          <img src="{{ base_url }}/images/tui/response-detail.svg" alt="gori flow detail on the response tab, showing an HTTP/2 200 status and syntax-highlighted response headers">
+          <img src="{{ base_url }}/images/tui/response-detail.svg" alt="{{ "home.flow_1_alt" | t }}">
         </figure>
       </div>
       <div>
         <div class="flow-copy">
-          <span>Test</span>
-          <p>Send interesting flows to Repeater or the Fuzzer, mine hidden parameters, and let Probe flag issues as you browse.</p>
+          <span>{{ "home.flow_2_label" | t }}</span>
+          <p>{{ "home.flow_2_desc" | t }}</p>
         </div>
         <figure class="flow-shot">
-          <img src="{{ base_url }}/images/tui/fuzzer.svg" alt="gori Fuzzer tab with marked payload positions in the request, a results table, and a status distribution sidebar">
+          <img src="{{ base_url }}/images/tui/fuzzer.svg" alt="{{ "home.flow_2_alt" | t }}">
         </figure>
       </div>
       <div>
         <div class="flow-copy">
-          <span>Report</span>
-          <p>Triage results into Issues, take notes, and export, or hand the whole project to an agent over MCP.</p>
+          <span>{{ "home.flow_3_label" | t }}</span>
+          <p>{{ "home.flow_3_desc" | t }}</p>
         </div>
         <figure class="flow-shot">
-          <img src="{{ base_url }}/images/tui/probe.svg" alt="gori Probe scanner listing passive security issues grouped by severity and category">
+          <img src="{{ base_url }}/images/tui/probe.svg" alt="{{ "home.flow_3_alt" | t }}">
         </figure>
       </div>
     </div>
   </section>
 
   <section class="home-agent" aria-labelledby="agent-title">
-    <h2 id="agent-title">Or hand it to an agent.</h2>
-    <p class="agent-intro">gori has no chat window baked in. It exposes your project over <strong>MCP</strong>, so any agent — Claude, Codex, Grok — reads your captured traffic and drives the tools through one clean seam. You pick the model; your traffic stays where you put it.</p>
-    <figure class="agent-seam" aria-label="An AI agent connects to a gori project through the MCP server: the agent calls tools like list_history and send_request, and gori returns flows and issues">
+    <h2 id="agent-title">{{ "home.agent_title" | t }}</h2>
+    <p class="agent-intro">{{ "home.agent_intro" | t }}</p>
+    <figure class="agent-seam" aria-label="{{ "home.agent_seam_aria" | t }}">
       <div class="seam-node">
-        <span class="seam-kicker">AI agent</span>
-        <strong>Claude · Codex · Grok</strong>
-        <span class="seam-toollist">any MCP-capable client</span>
+        <span class="seam-kicker">{{ "home.agent_seam_1_kicker" | t }}</span>
+        <strong>{{ "home.agent_seam_1_title" | t }}</strong>
+        <span class="seam-toollist">{{ "home.agent_seam_1_sub" | t }}</span>
       </div>
       <div class="seam-link" aria-hidden="true">
-        <span class="seam-link-label">MCP · JSON-RPC / stdio</span>
+        <span class="seam-link-label">{{ "home.agent_seam_link" | t }}</span>
         <span class="seam-wire"></span>
-        <span class="seam-mcp">gori mcp</span>
+        <span class="seam-mcp">{{ "home.agent_seam_mcp" | t }}</span>
       </div>
       <div class="seam-node">
-        <span class="seam-kicker">gori project</span>
-        <strong>History · Repeater · Fuzzer · Issues</strong>
-        <span class="seam-toollist">list_history · get_flow · send_request · create_issue · fuzz_start</span>
+        <span class="seam-kicker">{{ "home.agent_seam_2_kicker" | t }}</span>
+        <strong>{{ "home.agent_seam_2_title" | t }}</strong>
+        <span class="seam-toollist">{{ "home.agent_seam_2_sub" | t }}</span>
       </div>
     </figure>
-    <a class="agent-link" href="{{ base_url }}{{ lang_prefix }}/guide/mcp/">Read the MCP guide →</a>
+    <a class="agent-link" href="{{ base_url }}{{ lang_prefix }}/guide/mcp/">{{ "home.agent_link" | t }}</a>
   </section>
 
   <section class="home-meaning" aria-labelledby="meaning-title">
     <div class="meaning-entry">
-      <h2 class="meaning-word" id="meaning-title" lang="ko">고리</h2>
-      <p class="meaning-pron">/go·ri/ · noun, Korean</p>
-      <p class="meaning-def">In English it needs three words. Ring, link, and loop all name the same thing, a piece that holds two separate things together.</p>
-      <p class="meaning-def">Traffic you captured, a request you replayed, a bug you filed: gori keeps them on one chain.</p>
+      <h2 class="meaning-word" id="meaning-title" lang="ko">{{ "home.meaning_word" | t }}</h2>
+      <p class="meaning-pron">{{ "home.meaning_pron" | t }}</p>
+      <p class="meaning-def">{{ "home.meaning_def_1" | t }}</p>
+      <p class="meaning-def">{{ "home.meaning_def_2" | t }}</p>
     </div>
     <div class="meaning-chain" aria-hidden="true">
       <span class="chain-ring chain-ring-side"></span>

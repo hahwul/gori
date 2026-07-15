@@ -1,6 +1,16 @@
 title = "gori"
 description = "Sit in the loop — a fast, keyboard-driven HTTP intercepting proxy and web-hacking toolkit for the terminal."
 base_url = "http://localhost:3000"
+default_language = "en"
+
+[languages.en]
+language_name = "English"
+weight = 1
+
+[languages.ko]
+language_name = "한국어"
+weight = 2
+
 [plugins]
 processors = ["markdown"]
 
