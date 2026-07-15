@@ -84,30 +84,39 @@ module Gori
         end
       end
 
+      # Left column width for `gori run -h` subcommand names (longest: "project [list]").
+      SUBCMD_COL_W = 20
+
+      SUBCOMMANDS = [
+        {"capture", "Start the proxy and stream captured flows to STDOUT"},
+        {"history (ls)", "List / QL-query captured flows"},
+        {"show <id>", "Print a flow's request/response (text, json, or raw bytes)"},
+        {"repeater", "Re-send a captured flow, or list/create repeater sessions"},
+        {"fuzz [<id>]", "Fuzz/intrude a request: mark §…§ positions, sweep payloads"},
+        {"mine [<id>]", "Discover hidden parameters (query/form/multipart/json/header/cookie)"},
+        {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
+        {"probe [QL]", "Passively scan captured flows for issues (zero requests)"},
+        {"notes [<n>]", "Read the project's notes (list, show one, or --all)"},
+        {"issues", "List, export, create, or update issues (text, json, markdown)"},
+        {"project [list]", "List known projects"},
+        {"project scope", "Manage scope rules (list, add, delete, enable/disable)"},
+        {"project env", "Manage project env vars ($KEY substitution)"},
+      ]
+
       private def self.print_help : Nil
-        puts <<-HELP
-        gori run — non-interactive CLI (script the proxy / history / repeater)
-
-        Usage: gori run <subcommand> [options]
-
-        Subcommands:
-          capture            Start the proxy and stream captured flows to STDOUT
-          history (ls)       List / QL-query captured flows
-          show <id>          Print a flow's request/response (text, json, or raw bytes)
-          repeater             Re-send a captured flow, or list/create repeater sessions
-          fuzz [<id>]        Fuzz/intrude a request: mark §…§ positions, sweep payloads
-          mine [<id>]        Discover hidden parameters (query/form/multipart/json/header/cookie)
-          sitemap            Print the host → path endpoint tree (text, json, paths)
-          probe [QL]         Passively scan captured flows for issues (zero requests)
-          notes [<n>]        Read the project's notes (list, show one, or --all)
-          issues             List, export, create, or update issues (text, json, markdown)
-          project [list]     List known projects
-          project scope      Manage scope rules (list, add, delete, enable/disable)
-          project env        Manage project env vars ($KEY substitution)
-
-        Most read subcommands accept --project NAME or --db PATH; with neither they
-        use the most-recently-active project. See 'gori run <subcommand> --help'.
-        HELP
+        puts "gori run — non-interactive CLI (script the proxy / history / repeater)"
+        puts ""
+        puts "Usage: gori run <subcommand> [options]"
+        puts ""
+        puts "Subcommands:"
+        SUBCOMMANDS.each do |name, desc|
+          gap = SUBCMD_COL_W - name.size
+          gap = 1 if gap < 1
+          puts "  #{name}#{" " * gap}#{desc}"
+        end
+        puts ""
+        puts "Most read subcommands accept --project NAME or --db PATH; with neither they"
+        puts "use the most-recently-active project. See 'gori run <subcommand> --help'."
       end
 
       # --- capture -----------------------------------------------------------
