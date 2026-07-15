@@ -846,6 +846,39 @@ describe Gori::MCP::Server do
         links.any? { |link| link.ref_kind.repeater? && link.ref_id == repeater_id }.should be_true
       end
     end
+
+    it "includes effective_request on a url send (no ignored fields)" do
+      with_store do |store|
+        port = start_mcp_http_origin("ok")
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"url":"http://127.0.0.1:#{port}/path","method":"POST"}}})
+        p = tool_payload(drive(store, call, verify_upstream: false)[0])
+        er = p["effective_request"]
+        er["scheme"].as_s.should eq("http")
+        er["host"].as_s.should eq("127.0.0.1")
+        er["port"].as_i.should eq(port)
+        er["method"].as_s.should eq("POST")
+        er["target"].as_s.should eq("/path")
+        p.as_h.has_key?("ignored_fields").should be_false
+      end
+    end
+
+    it "reports ignored_fields + effective_request when flow_id overrides url/method" do
+      with_store do |store|
+        id = store.insert_flow(Gori::Store::CapturedRequest.new(
+          created_at: 1_i64, scheme: "http", host: "127.0.0.1", port: 1,
+          method: "GET", target: "/seed", http_version: "HTTP/1.1",
+          head: "GET /seed HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_slice, body: nil))
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"flow_id":#{id},"url":"http://ignored.test/x","method":"POST"}}})
+        p = tool_payload(drive(store, call)[0]) # send fails fast (127.0.0.1:1), payload still carries the fields
+        p["effective_request"]["host"].as_s.should eq("127.0.0.1")
+        p["effective_request"]["target"].as_s.should eq("/seed")
+        p["effective_request"]["method"].as_s.should eq("GET") # from the flow, not the ignored POST
+        ignored = p["ignored_fields"].as_a.map(&.as_s)
+        ignored.should contain("url")
+        ignored.should contain("method")
+        p["precedence_warning"].as_s.should contain("flow_id")
+      end
+    end
   end
 
   describe "scope enforcement (active tools)" do

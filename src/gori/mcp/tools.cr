@@ -285,7 +285,10 @@ module Gori
               "ACTIVE: makes a real outbound request from this host. Either pass " \
               "`flow_id` to resend a captured flow byte-exact, OR give an absolute " \
               "`url` with optional method/headers/body, or a verbatim `raw` request. " \
-              "When `flow_id` is set, url/method/headers/body/raw are ignored. " \
+              "When `flow_id` is set, url/method/headers/body/raw are ignored (and " \
+              "reported in `ignored_fields` with a precedence_warning). The result " \
+              "always includes `effective_request` (the scheme/host/port/method/target/" \
+              "http_version actually sent). " \
               "Host + Content-Length are auto-added when omitted on the url path." do |s|
               s.field "flow_id", intprop("resend a captured flow by id (no url needed; like the TUI Repeater)")
               s.field "url", strprop("absolute URL incl. scheme+host, e.g. https://api.example.com/v1/x (required unless flow_id is given)")
@@ -1005,12 +1008,38 @@ module Gori
           issue_id, recorded_flow_id)
 
         Result.new(send_result_json(result, recorded_flow_id, repeater_id,
-          include_sensitive_headers, sc), is_error: !result.ok?)
+          include_sensitive_headers, sc, built, http2, flow_precedence_ignored(h)),
+          is_error: !result.ok?)
       rescue ex : Gori::Error
         # Bad input (missing/invalid url, illegal header, …) — return a clean
         # actionable message instead of letting call()'s generic "tool error:"
         # wrapper swallow it, matching fuzz_start's FuzzArgError handling.
         Result.new(ex.message || "invalid request arguments", is_error: true)
+      end
+
+      # The request-shaping fields that flow_id overrode (precedence: a flow_id
+      # resend ignores url/method/headers/body/raw). Empty unless flow_id is set
+      # alongside one of them — so the caller can SEE what was dropped.
+      private def flow_precedence_ignored(h) : Array(String)
+        return [] of String unless present?(h, "flow_id")
+        {"url", "method", "headers", "body", "raw"}.select { |f| present?(h, f) }.to_a
+      end
+
+      # The request actually put on the wire, parsed back from the built bytes, so
+      # a caller can confirm scheme/host/port/method/target/version independently
+      # of which inputs it supplied (flow_id vs url/raw).
+      private def emit_effective_request(j : JSON::Builder, built : RequestBuilder::Built, http2 : Bool) : Nil
+        parts = (String.new(built.bytes).each_line.first? || "").split(' ')
+        j.field "effective_request" do
+          j.object do
+            j.field "scheme", built.scheme
+            j.field "host", built.host
+            j.field "port", built.port
+            j.field "method", parts[0]? || ""
+            j.field "target", parts[1]? || "/"
+            j.field "http_version", http2 ? "HTTP/2" : (parts[2]? || "HTTP/1.1")
+          end
+        end
       end
 
       # Resolve + validate the optional issue_id for a save-linked send. Returns
@@ -1141,10 +1170,17 @@ module Gori
 
       private def send_result_json(result : Repeater::Result, recorded_flow_id : Int64?,
                                    repeater_id : Int64?, include_sensitive_headers : Bool,
-                                   sc : ScopeCheck) : String
+                                   sc : ScopeCheck, built : RequestBuilder::Built, http2 : Bool,
+                                   ignored : Array(String)) : String
         JSON.build do |j|
           j.object do
             emit_scope(j, sc)
+            emit_effective_request(j, built, http2)
+            unless ignored.empty?
+              j.field("ignored_fields") { j.array { ignored.each { |f| j.string f } } }
+              j.field "precedence_warning",
+                "flow_id takes precedence; #{ignored.join(", ")} #{ignored.size == 1 ? "was" : "were"} ignored"
+            end
             j.field "recorded_flow_id", recorded_flow_id
             j.field "saved_repeater_id", repeater_id if repeater_id && repeater_id > 0
             j.field "error", result.error unless result.ok?
