@@ -89,7 +89,7 @@ describe Gori::ProjectRegistry do
       reg = Gori::ProjectRegistry.new(root)
       p = reg.create("ACME Red Team!")
       Gori::Store.open(p.db_path).close
-      # A fresh registry (as on TUI restart / `gori run projects`) must still show the
+      # A fresh registry (as on TUI restart / `gori run project`) must still show the
       # verbatim name, not the lossy directory slug "acme-red-team".
       Gori::ProjectRegistry.new(root).list.map(&.name).should contain("ACME Red Team!")
     end

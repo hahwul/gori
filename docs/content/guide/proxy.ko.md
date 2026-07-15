@@ -145,7 +145,7 @@ respbody: "debug":false => "debug":true
 | **DESCRIPTION** | 자유 형식 프로젝트 노트 |
 | **NETWORK** | scope 렌즈 + **샌드박스** 토글, 그리고 전역 Settings 기본값을 재정의하는 프로젝트별 네트워크 고정(bind / upstream) |
 
-스코프 규칙은 스크립트로도 다룰 수 있습니다: `gori run scope add --kind=include --type=host --pattern=api.example.com` — 전체 플래그는 [CLI Reference](/ko/reference/cli/#run-scope)에 있습니다.
+스코프 규칙은 스크립트로도 다룰 수 있습니다: `gori run project scope add --kind=include --type=host --pattern=api.example.com` — 전체 플래그는 [CLI Reference](/ko/reference/cli/#run-project)에 있습니다.
 
 ## 다음 단계 {#next-steps}
 

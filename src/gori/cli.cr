@@ -73,7 +73,7 @@ module Gori
       puts "  tui       Start the interactive TUI (default when no command)"
       puts "  settings  Show the settings.json path (or --edit to open it)"
       puts "  ca        Print the root CA path, or regenerate it (see gori ca --help)"
-      puts "  run       Non-interactive CLI: capture, history, show, repeater, issues, projects"
+      puts "  run       Non-interactive CLI: capture, history, show, repeater, issues, project"
       puts "  wizard    Interactive setup wizard (bind, theme) — also runs on first launch"
       puts "  tutorial  Guided TUI tour with try-it steps (nav, palette, menu, edit)"
       puts "  mcp       Start an MCP server over stdio (AI/tool integration)"

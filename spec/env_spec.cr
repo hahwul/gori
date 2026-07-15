@@ -65,4 +65,34 @@ describe Gori::Env do
     Gori::Env.mask_secrets("x=secret_value", vars, "$").should eq("x=$LONG")
     Gori::Env.mask_secrets("x=secret!", vars, "$").should eq("x=$SHORT!")
   end
+
+  # Persistence path used by `gori run project env set|delete` (and the Project tab).
+  it "save_project / load_project round-trips and upserts by key" do
+    path = File.tempname("gori-env", ".db")
+    store = Gori::Store.open(path)
+    begin
+      Gori::Settings.project_env_vars = [] of {String, String}
+      Gori::Env.save_project(store, [{"TOKEN", "secret"}, {"HOST", "api.test"}])
+      Gori::Settings.project_env_vars = [] of {String, String}
+      Gori::Env.load_project(store)
+      Gori::Settings.project_env_vars.should eq([{"TOKEN", "secret"}, {"HOST", "api.test"}])
+
+      # Upsert TOKEN (CLI set) and drop HOST (CLI delete)
+      vars = Gori::Settings.project_env_vars.dup
+      if idx = vars.index { |(k, _)| k == "TOKEN" }
+        vars[idx] = {"TOKEN", "new"}
+      end
+      vars.reject! { |(k, _)| k == "HOST" }
+      Gori::Env.save_project(store, vars)
+      Gori::Settings.project_env_vars = [] of {String, String}
+      Gori::Env.load_project(store)
+      Gori::Settings.project_env_vars.should eq([{"TOKEN", "new"}])
+    ensure
+      store.close
+      File.delete?(path)
+      File.delete?("#{path}-wal")
+      File.delete?("#{path}-shm")
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+  end
 end
