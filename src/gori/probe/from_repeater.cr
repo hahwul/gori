@@ -14,7 +14,11 @@ module Gori
       scheme, host, port = Repeater::FlowRequest.parse_target(record.target)
       return nil if host.empty?
 
-      req_text = record.request
+      # scrub: record.request can carry invalid UTF-8 (the repeater editor seeds from a captured
+      # request head+body without scrubbing), which would make the PCRE gsub below raise. This
+      # builds a synthetic FlowDetail for PASSIVE ANALYSIS only (never re-sent), so scrub is
+      # lossless here. Cf. secret_in_url.cr / issues_export.one_line.
+      req_text = record.request.scrub
       # Take whichever blank-line boundary occurs FIRST — the editor uses bare-LF, so a
       # literal "\r\n\r\n" inside the body must not win over the true earlier "\n\n" head
       # boundary (the naive `crlf || lf` fallback would snap to the body's sequence).

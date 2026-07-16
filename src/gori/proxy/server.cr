@@ -92,8 +92,24 @@ module Gori::Proxy
 
     private def accept_loop(server : TCPServer) : Nil
       while @running
-        client = server.accept? || break
-        @slots.send(nil) # acquire a slot — blocks (pausing accept) when MAX_CONNECTIONS are in flight
+        client =
+          begin
+            server.accept?
+          rescue IO::Error
+            # A transient accept error must NOT kill the accept loop and wedge the whole proxy
+            # (an unrescued raise silently stops the only fiber that accepts new connections, and
+            # nothing restarts it — @running stays true but no connection is ever accepted again).
+            # Reachable without an attacker: EMFILE/ENFILE once open fds near the OS limit (gori
+            # sets no RLIMIT_NOFILE, and the @slots cap of MAX_CONNECTIONS sits far above the
+            # default ~256/1024), or a hostile connect-then-RST → ECONNABORTED. On persistent
+            # EMFILE the pending connection stays in the backlog and accept keeps raising at once,
+            # so back off briefly (else a bare retry busy-spins) then retry — the loop self-recovers
+            # once fds free / the flood subsides. A clean close (stop/rebind) still surfaces as nil.
+            sleep 10.milliseconds
+            next
+          end
+        break unless client # nil ⇒ listener closed (stop / rebind) ⇒ exit the loop cleanly
+        @slots.send(nil)    # acquire a slot — blocks (pausing accept) when MAX_CONNECTIONS are in flight
         # Hand the socket to a per-connection method so the spawned fiber closes
         # over that method's `client` PARAMETER (a fresh binding per call), NOT
         # the `client` loop variable. The loop variable is reassigned by the next

@@ -1276,6 +1276,11 @@ module Gori::Tui
       return unless active
       lines = @desc_area.lines_snapshot
       return if lines.empty?
+      # Re-sync the read cursor from the editor before painting: replace_desc (^E external editor)
+      # can shrink the description without touching @desc_read, leaving a stale cursor past the new
+      # end so the lines[cy] below would raise IndexError and crash the TUI render. Mirrors the
+      # notes_view / repeater_view / fuzzer_view read-chrome paint paths.
+      @desc_read.sync_from(@desc_area)
       scr = @desc_area.scroll
       sel_bg = Theme.accent_bg
       @desc_read.cursor.highlight_spans(lines).each do |(li, x0, x1)|

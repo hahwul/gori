@@ -94,8 +94,10 @@ module Gori
       out = [] of String
       rows.each do |(code, ev)|
         label = FIXED_TECH_LABELS[code]?
-        # Value names the product; keep the first token (drop version/URL suffixes).
-        label ||= ev.try(&.split(/[\/ ;(]/, 2)[0].strip) if VALUE_TECH_CODES.includes?(code)
+        # Value names the product; keep the first token (drop version/URL suffixes). scrub: a
+        # header value can carry a non-UTF-8 byte, which would make the PCRE split raise and
+        # crash the TUI render that calls tech_summary (project_view / probe_view). Cf. cors.cr.
+        label ||= ev.try(&.scrub.split(/[\/ ;(]/, 2)[0].strip) if VALUE_TECH_CODES.includes?(code)
         out << label if label && !label.empty? && !out.includes?(label)
       end
       out

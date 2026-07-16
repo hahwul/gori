@@ -41,6 +41,14 @@ describe Gori::Issues::Export do
       Gori::Issues::Export.one_line("a\r\n\tb").should eq("a b")
       Gori::Issues::Export.one_line("  clean  ").should eq("clean")
     end
+
+    it "does not raise on invalid UTF-8 (a captured target/host can carry a raw byte)" do
+      # The PCRE `gsub` inside one_line raises ArgumentError on invalid UTF-8; without the
+      # `.scrub` this crashed `gori run issues --format markdown/text`. Byte 0x80 → U+FFFD.
+      out = Gori::Issues::Export.one_line(String.new(Bytes[0x61, 0x80, 0x62]))
+      out.should_not be_empty
+      out.valid_encoding?.should be_true
+    end
   end
 
   describe ".markdown" do

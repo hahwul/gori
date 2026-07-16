@@ -49,7 +49,11 @@ module Gori
         end
 
         private def decode(name : String) : String
-          URI.decode_www_form(name)
+          # scrub: percent-decoding RE-introduces invalid UTF-8 (e.g. `%80`) even when the raw
+          # target was already scrubbed in query_pairs, so normalize's gsub(/[-_]/) would raise.
+          # A real secret/param name is ASCII, so scrubbing can't hide a match. (rescue → `name`,
+          # which query_pairs already scrubbed, so both branches yield valid UTF-8.)
+          URI.decode_www_form(name).scrub
         rescue
           name
         end

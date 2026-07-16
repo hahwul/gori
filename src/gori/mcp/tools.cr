@@ -1367,9 +1367,13 @@ module Gori
 
         filtered_repeaters = if rx = query_rx
                              all_repeaters.select do |r|
-                               r.target.matches?(rx) ||
-                                 r.name.try(&.matches?(rx)) ||
-                                 r.request.matches?(rx)
+                               # scrub: target/name/request can be invalid UTF-8 (seeded from a
+                               # captured request without scrubbing); an unscrubbed matches? raises
+                               # and fails the WHOLE list_repeaters response whenever a query filter
+                               # meets any such repeater. Scrub is lossless for a filter match.
+                               r.target.scrub.matches?(rx) ||
+                                 r.name.try(&.scrub.matches?(rx)) ||
+                                 r.request.scrub.matches?(rx)
                              end
                            else
                              all_repeaters

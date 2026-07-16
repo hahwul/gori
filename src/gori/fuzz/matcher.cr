@@ -105,6 +105,11 @@ module Gori::Fuzz
 
     private def regex_pass?(re : Regex?, text : String, default : Bool) : Bool
       re ? re.matches?(text) : default
+    rescue Regex::Error
+      # A catastrophic-backtracking user regex (--mr / --fr) raises "match limit exceeded" on a
+      # large response body instead of returning false; treat an un-evaluable pattern as no-match
+      # so one runaway regex can't kill the fuzz worker fiber on every response.
+      false
     end
 
     private def header_pass?(raw : Repeater::Result) : Bool
@@ -134,6 +139,8 @@ module Gori::Fuzz
       md = re.match(text)
       return nil unless md
       md[1]? || md[0]
+    rescue Regex::Error
+      nil # a runaway --extract regex yields no capture rather than a dead worker (see regex_pass?)
     end
 
     private def decode(raw : Repeater::Result) : Bytes

@@ -21,7 +21,7 @@ module Gori
         # HSTS with no max-age, or max-age=0 (RFC 6797: instructs the UA to DROP the policy), is
         # effectively disabled even though the header is present.
         private def hsts_disabled?(value : String) : Bool
-          m = value.downcase.match(/max-age\s*=\s*"?(\d+)/)
+          m = value.scrub.downcase.match(/max-age\s*=\s*"?(\d+)/) # scrub: a non-UTF-8 byte makes the PCRE match raise (cf. cors.cr)
           return true if m.nil?
           (m[1].to_i64? || 1_i64) == 0
         end
@@ -60,6 +60,7 @@ module Gori
         # ignored) — mirror what the browser enforces, so `script-src 'self'; script-src
         # 'unsafe-inline'` is judged on the first, safe `script-src` (not the last).
         private def parse_csp(csp : String) : Hash(String, Array(String))
+          csp = csp.scrub # a non-UTF-8 byte would make the PCRE split below raise (cf. cors.cr)
           dirs = {} of String => Array(String)
           csp.split(';').each do |segment|
             toks = segment.strip.downcase.split(/\s+/).reject(&.empty?)

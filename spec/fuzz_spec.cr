@@ -352,6 +352,23 @@ describe F::Matcher do
     m.match_words = ""
     m.build(job, ok_result(200, "abcdef")).matched?.should be_true
   end
+
+  it "survives a catastrophic-backtracking user regex instead of killing the worker" do
+    # A user --mr/--fr/--extract regex like /(a+)+$/ raises Regex::Error ('match limit
+    # exceeded') on a pathological body rather than returning false; unrescued it killed the
+    # fuzz worker fiber. build() must yield a Result (no match / no capture), not raise.
+    job = F::Job.new(0_i64, ["x"], nil, "".to_slice)
+    evil = "a" * 60 + "!"
+    m = F::Matcher.new
+    m.match_regex = /(a+)+$/
+    m.build(job, ok_result(200, evil)).matched?.should be_false
+    f = F::Matcher.new
+    f.filter_regex = /(a+)+$/
+    f.build(job, ok_result(200, evil)).matched?.should be_true # filter never fires → kept
+    e = F::Matcher.new
+    e.extract = /(a+)+$/
+    e.build(job, ok_result(200, evil)).extracted.should be_nil
+  end
 end
 
 describe F::Engine do
