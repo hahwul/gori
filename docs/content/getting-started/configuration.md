@@ -66,7 +66,7 @@ The `network` section is the global default for how the proxy binds and whether 
 
 ### Theme
 
-gori ships thirteen built-in colour themes (`goridark` is the default) and supports your own JSON themes. Switch it from the command palette (`Ctrl-P` → `settings:theme`) or set `theme` in `settings.json`. See the [Themes guide](/guide/themes/).
+gori ships twenty-one built-in colour themes (`goridark` is the default) and supports your own JSON themes. Switch it from the command palette (`Ctrl-P` → `settings:theme`) or set `theme` in `settings.json`. See the [Themes guide](/guide/themes/).
 
 ### Hotkeys
 

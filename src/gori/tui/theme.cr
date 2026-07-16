@@ -2,7 +2,7 @@ require "json"
 require "../paths"
 
 module Gori::Tui
-  # The TUI colour palette. gori ships thirteen themes — GORIDARK (the default; a
+  # The TUI colour palette. gori ships twenty-one themes — GORIDARK (the default; a
   # monochrome palette in the spirit of Grok Build: near-black canvas, white/grey
   # text, a white highlight, hairline dividers), GORIDAY (the same relationships
   # inverted onto an off-white canvas with dark ink), LATTE (a soft, cool light
@@ -13,8 +13,14 @@ module Gori::Tui
   # popular high-contrast purple palette), SOLARIZED_LIGHT (the iconic cream/beige
   # light palette), ROSEPINE_DAWN (a soft rosy light palette), CATPPUCCIN_MOCHA (the
   # popular dark lavender-tinted palette), MONOKAI (the classic olive-dark code-editor
-  # palette), and EVERFOREST (a muted, forest-green-toned dark palette). Only HTTP
-  # status keeps functional colour.
+  # palette), EVERFOREST (a muted, forest-green-toned dark palette), ONEDARK (the
+  # Atom/VS Code blue-grey dark palette), KANAGAWA (an ink-dark palette after
+  # Hokusai's Great Wave), GITHUB_DARK (GitHub's Primer dark palette), ZENBURN (the
+  # classic low-contrast grey-green dark palette), GITHUB_LIGHT (GitHub's Primer
+  # light palette on pure white), GRUVBOX_LIGHT (GRUVBOX's warm cream light
+  # counterpart), ONE_LIGHT (the Atom One Light grey-white palette), and AYU_LIGHT
+  # (a bright light palette with Ayu's orange accent). Only HTTP status keeps
+  # functional colour.
   #
   # `Termisu::Color` is a value struct, so colours can't be mutated in place to
   # re-theme. Instead one Palette is active at a time (`@@active`) and every colour
@@ -378,7 +384,217 @@ module Gori::Tui
       syn_literal: Color.from_hex("#d699b6"),   # true / false / null (purple)
     )
 
-    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN, "catppuccin_mocha" => CATPPUCCIN_MOCHA, "monokai" => MONOKAI, "everforest" => EVERFOREST}
+    # The Atom/VS Code One Dark palette: a blue-grey canvas with the recognizable
+    # soft red/green/purple accents. The signature red (#e06c75) is lifted a touch
+    # (#e2757e) so it clears AA on the canvas, and the comment grey is lifted for
+    # the muted tier — the same treatment other dark themes give dim upstream hues.
+    ONEDARK = Palette.new(
+      bg: Color.from_hex("#282c34"),            # one dark blue-grey canvas
+      panel: Color.from_hex("#2f343e"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#3a3f4b"),      # header band, active segment
+      border: Color.from_hex("#4b5263"),        # hairline dividers (resting, gutter grey)
+      border_focus: Color.from_hex("#5c6370"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#e5c07b"),    # focused body pane outline (one dark yellow, 8.1:1)
+      accent: Color.from_hex("#d7dae0"),        # the highlight (bright foreground)
+      accent_bg: Color.from_hex("#3e4451"),     # selection band (focused pane, one dark selection)
+      selection_dim: Color.from_hex("#31353f"), # selection band (unfocused pane)
+      text: Color.from_hex("#abb2bf"),          # body text (one dark foreground)
+      text_bright: Color.from_hex("#dcdfe4"),   # emphasis / active
+      muted: Color.from_hex("#7f8897"),         # secondary (lifted comment grey, 3.9:1)
+      green: Color.from_hex("#98c379"),         # 2xx
+      yellow: Color.from_hex("#e5c07b"),        # 4xx
+      red: Color.from_hex("#e2757e"),           # 5xx / error (lifted, 4.7:1)
+      orange: Color.from_hex("#d19a66"),
+      syn_header: Color.from_hex("#61afef"),    # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#98c379"),    # quoted strings (green)
+      syn_number: Color.from_hex("#d19a66"),    # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#c678dd"),   # true / false / null (purple)
+    )
+
+    # The Kanagawa (Wave) palette, after Hokusai's Great Wave: a sumi-ink canvas
+    # with warm fuji-white text and calm traditional-Japanese accents. The fuji
+    # grey is lifted for the muted tier so it clears the secondary contrast bar.
+    KANAGAWA = Palette.new(
+      bg: Color.from_hex("#1f1f28"),            # sumiInk3 — ink-dark canvas
+      panel: Color.from_hex("#2a2a37"),         # top bar / status / overlays (sumiInk4)
+      elevated: Color.from_hex("#363646"),      # header band, active segment (sumiInk5)
+      border: Color.from_hex("#45455f"),        # hairline dividers (resting)
+      border_focus: Color.from_hex("#54546d"),  # brighter hairline for an active modal card (sumiInk6)
+      focus_gold: Color.from_hex("#e6c384"),    # focused body pane outline (carp yellow, 9.7:1)
+      accent: Color.from_hex("#dcd7ba"),        # the highlight (fuji white)
+      accent_bg: Color.from_hex("#2d4f67"),     # selection band (focused pane, wave blue)
+      selection_dim: Color.from_hex("#252535"), # selection band (unfocused pane)
+      text: Color.from_hex("#dcd7ba"),          # body text (fuji white)
+      text_bright: Color.from_hex("#f2ecdc"),   # emphasis / active
+      muted: Color.from_hex("#8a8980"),         # secondary (lifted fuji grey, 4.7:1)
+      green: Color.from_hex("#98bb6c"),         # 2xx (spring green)
+      yellow: Color.from_hex("#e6c384"),        # 4xx (carp yellow)
+      red: Color.from_hex("#ff5d62"),           # 5xx / error (peach red)
+      orange: Color.from_hex("#ffa066"),        # surimi orange
+      syn_header: Color.from_hex("#7e9cd8"),    # header/field names, JSON keys, tag names (crystal blue)
+      syn_string: Color.from_hex("#98bb6c"),    # quoted strings (spring green)
+      syn_number: Color.from_hex("#d27e99"),    # numbers, tag attribute names (sakura pink)
+      syn_literal: Color.from_hex("#957fb8"),   # true / false / null (oni violet, 4.7:1)
+    )
+
+    # The GitHub (Primer) dark palette: the near-black canvas of github.com's dark
+    # mode with its bright blue/green/red accents and the light-blue string colour
+    # of GitHub's own syntax highlighting. The bright hues clear AA as-is.
+    GITHUB_DARK = Palette.new(
+      bg: Color.from_hex("#0d1117"),            # primer canvas
+      panel: Color.from_hex("#161b22"),         # top bar / status / overlays (canvas subtle)
+      elevated: Color.from_hex("#21262d"),      # header band, active segment
+      border: Color.from_hex("#30363d"),        # hairline dividers (resting, primer border)
+      border_focus: Color.from_hex("#444c56"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#d29922"),    # focused body pane outline (primer yellow, 7.5:1)
+      accent: Color.from_hex("#e6edf3"),        # the highlight (primer bright foreground)
+      accent_bg: Color.from_hex("#2d3644"),     # selection band (focused pane)
+      selection_dim: Color.from_hex("#1c2128"), # selection band (unfocused pane)
+      text: Color.from_hex("#c9d1d9"),          # body text
+      text_bright: Color.from_hex("#f0f6fc"),   # emphasis / active
+      muted: Color.from_hex("#8b949e"),         # secondary (primer fg muted, 6.2:1)
+      green: Color.from_hex("#3fb950"),         # 2xx
+      yellow: Color.from_hex("#d29922"),        # 4xx
+      red: Color.from_hex("#f85149"),           # 5xx / error
+      orange: Color.from_hex("#ffa657"),
+      syn_header: Color.from_hex("#79c0ff"),    # header/field names, JSON keys, tag names (constant blue)
+      syn_string: Color.from_hex("#a5d6ff"),    # quoted strings (GitHub's light-blue strings)
+      syn_number: Color.from_hex("#ffa657"),    # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#d2a8ff"),   # true / false / null (purple)
+    )
+
+    # The classic Zenburn palette: the famously easy-on-the-eyes mid-grey canvas
+    # with soft pastel accents. A mid-grey canvas makes 4.5:1 demanding, so the
+    # dimmer upstream hues step up one Zenburn tone (green+2, red+1) to clear AA.
+    ZENBURN = Palette.new(
+      bg: Color.from_hex("#3f3f3f"),            # zenburn mid-grey canvas
+      panel: Color.from_hex("#494949"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#4f4f4f"),      # header band, active segment
+      border: Color.from_hex("#5f5f5f"),        # hairline dividers (resting)
+      border_focus: Color.from_hex("#6f6f6f"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#f0dfaf"),    # focused body pane outline (zenburn yellow, 8.0:1)
+      accent: Color.from_hex("#ffffef"),        # the highlight (zenburn bright foreground)
+      accent_bg: Color.from_hex("#55554d"),     # selection band (focused pane, 1.40:1)
+      selection_dim: Color.from_hex("#494942"), # selection band (unfocused pane)
+      text: Color.from_hex("#dcdccc"),          # body text (zenburn foreground)
+      text_bright: Color.from_hex("#ffffef"),   # emphasis / active
+      muted: Color.from_hex("#9c9c8c"),         # secondary (3.8:1)
+      green: Color.from_hex("#9fc59f"),         # 2xx (green+2 — the base green sits below AA)
+      yellow: Color.from_hex("#f0dfaf"),        # 4xx
+      red: Color.from_hex("#dca3a3"),           # 5xx / error (red+1, 4.9:1 — the base rose is 4.1)
+      orange: Color.from_hex("#dfaf8f"),
+      syn_header: Color.from_hex("#93e0e3"),    # header/field names, JSON keys, tag names (function cyan)
+      syn_string: Color.from_hex("#dca3a3"),    # quoted strings (zenburn's rose strings)
+      syn_number: Color.from_hex("#dfaf8f"),    # numbers, tag attribute names (variable orange)
+      syn_literal: Color.from_hex("#e39ccd"),   # true / false / null (lifted magenta, 5.0:1)
+    )
+
+    # The GitHub (Primer) light palette: github.com's light mode on a pure-white
+    # canvas with its blue/green/red accents and dark-ink text. Primer's functional
+    # foregrounds already target AA on white, so they're used as-is.
+    GITHUB_LIGHT = Palette.new(
+      bg: Color.from_hex("#ffffff"),            # pure white canvas
+      panel: Color.from_hex("#f6f8fa"),         # top bar / status / overlays (canvas subtle)
+      elevated: Color.from_hex("#eaeef2"),      # header band, active segment
+      border: Color.from_hex("#9ea7b3"),        # hairline dividers (resting) — visible-but-subtle on white
+      border_focus: Color.from_hex("#848d97"),  # brighter hairline for an active modal card (~3:1)
+      focus_gold: Color.from_hex("#9a6700"),    # focused body pane outline (primer attention fg, 4.9:1)
+      accent: Color.from_hex("#24292f"),        # the highlight ink (primer fg default)
+      accent_bg: Color.from_hex("#d8dee4"),     # selection band (focused pane, 1.36:1)
+      selection_dim: Color.from_hex("#eff2f5"), # selection band (unfocused pane)
+      text: Color.from_hex("#24292f"),          # body text (ink)
+      text_bright: Color.from_hex("#1f2328"),   # emphasis / active
+      muted: Color.from_hex("#57606a"),         # secondary (primer fg muted, 6.4:1)
+      green: Color.from_hex("#1a7f37"),         # 2xx (5.1:1)
+      yellow: Color.from_hex("#9a6700"),        # 4xx (4.9:1)
+      red: Color.from_hex("#cf222e"),           # 5xx / error (5.4:1)
+      orange: Color.from_hex("#bc4c00"),        # (5.0:1)
+      syn_header: Color.from_hex("#0969da"),    # header/field names, JSON keys, tag names (accent blue, 5.2:1)
+      syn_string: Color.from_hex("#116329"),    # quoted strings (markup green)
+      syn_number: Color.from_hex("#953800"),    # numbers, tag attribute names (severe orange)
+      syn_literal: Color.from_hex("#8250df"),   # true / false / null (done purple, 5.1:1)
+    )
+
+    # The Gruvbox light palette — GRUVBOX's warm cream counterpart: bg0 paper with
+    # the retro earthy accents. The faded green/yellow target Gruvbox's own tone,
+    # not AA on cream, so they're darkened to clear it — the same treatment the
+    # other light themes give upstream hues (GORIDAY/LATTE/SOLARIZED_LIGHT).
+    GRUVBOX_LIGHT = Palette.new(
+      bg: Color.from_hex("#fbf1c7"),            # gruvbox bg0 — warm cream canvas
+      panel: Color.from_hex("#f2e5bc"),         # top bar / status / overlays (bg0_soft)
+      elevated: Color.from_hex("#ebdbb2"),      # header band, active segment (bg1)
+      border: Color.from_hex("#a89984"),        # hairline dividers (resting, bg4)
+      border_focus: Color.from_hex("#928374"),  # brighter hairline for an active modal card (gray)
+      focus_gold: Color.from_hex("#9c6a0a"),    # focused body pane outline (deepened faded yellow, 4.1:1)
+      accent: Color.from_hex("#3c3836"),        # the highlight ink (gruvbox fg1)
+      accent_bg: Color.from_hex("#d5c4a1"),     # selection band (focused pane, bg2 — 1.51:1)
+      selection_dim: Color.from_hex("#f0e4bb"), # selection band (unfocused pane)
+      text: Color.from_hex("#3c3836"),          # body text (fg1, 10.2:1)
+      text_bright: Color.from_hex("#282828"),   # emphasis / active (fg0)
+      muted: Color.from_hex("#7c6f64"),         # secondary (fg4, 4.3:1)
+      green: Color.from_hex("#6d680c"),         # 2xx (darkened faded green, 5.1:1)
+      yellow: Color.from_hex("#8a5c0a"),        # 4xx (darkened faded yellow, 5.1:1)
+      red: Color.from_hex("#9d0006"),           # 5xx / error (faded red, 7.6:1)
+      orange: Color.from_hex("#af3a03"),        # (faded orange, 5.4:1)
+      syn_header: Color.from_hex("#076678"),    # header/field names, JSON keys, tag names (faded blue)
+      syn_string: Color.from_hex("#6d680c"),    # quoted strings (green)
+      syn_number: Color.from_hex("#af3a03"),    # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#8f3f71"),   # true / false / null (faded purple, 5.9:1)
+    )
+
+    # The Atom One Light palette: a soft grey-white canvas with ONEDARK's accent
+    # family. The upstream accents target a fixed pastel tone, not AA on the light
+    # canvas, so they're darkened to clear it — the usual light-theme treatment.
+    ONE_LIGHT = Palette.new(
+      bg: Color.from_hex("#fafafa"),            # one light grey-white canvas
+      panel: Color.from_hex("#f0f0f1"),         # top bar / status / overlays
+      elevated: Color.from_hex("#e5e5e6"),      # header band, active segment
+      border: Color.from_hex("#a0a1a7"),        # hairline dividers (resting, gutter grey)
+      border_focus: Color.from_hex("#8e8f96"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#986801"),    # focused body pane outline (one light number gold, 4.7:1)
+      accent: Color.from_hex("#383a42"),        # the highlight ink (one light foreground)
+      accent_bg: Color.from_hex("#d9dadd"),     # selection band (focused pane, 1.34:1)
+      selection_dim: Color.from_hex("#ececed"), # selection band (unfocused pane)
+      text: Color.from_hex("#383a42"),          # body text (10.9:1)
+      text_bright: Color.from_hex("#24262d"),   # emphasis / active
+      muted: Color.from_hex("#696c77"),         # secondary (5.0:1)
+      green: Color.from_hex("#3f7d3e"),         # 2xx (darkened one light green, 4.8:1)
+      yellow: Color.from_hex("#8a6000"),        # 4xx (darkened amber, 5.4:1)
+      red: Color.from_hex("#c93c30"),           # 5xx / error (darkened, 4.8:1)
+      orange: Color.from_hex("#a24b04"),        # (5.7:1)
+      syn_header: Color.from_hex("#2f62d8"),    # header/field names, JSON keys, tag names (darkened blue, 5.2:1)
+      syn_string: Color.from_hex("#3f7d3e"),    # quoted strings (green)
+      syn_number: Color.from_hex("#986801"),    # numbers, tag attribute names (gold)
+      syn_literal: Color.from_hex("#a626a4"),   # true / false / null (magenta, 5.9:1)
+    )
+
+    # The Ayu Light palette: a bright near-white canvas with Ayu's signature warm
+    # orange accent. Ayu Light is deliberately low-contrast upstream, so the accent
+    # hues are darkened substantially to clear AA while keeping the orange identity.
+    AYU_LIGHT = Palette.new(
+      bg: Color.from_hex("#fcfcfc"),            # ayu light near-white canvas
+      panel: Color.from_hex("#f3f4f5"),         # top bar / status / overlays
+      elevated: Color.from_hex("#eceef0"),      # header band, active segment
+      border: Color.from_hex("#9da5ad"),        # hairline dividers (resting)
+      border_focus: Color.from_hex("#8a9199"),  # brighter hairline for an active modal card (ayu line grey)
+      focus_gold: Color.from_hex("#a85406"),    # focused body pane outline (deepened ayu orange, 5.2:1)
+      accent: Color.from_hex("#5c6166"),        # the highlight ink (ayu foreground)
+      accent_bg: Color.from_hex("#d5dce3"),     # selection band (focused pane, 1.35:1)
+      selection_dim: Color.from_hex("#eef1f3"), # selection band (unfocused pane)
+      text: Color.from_hex("#5c6166"),          # body text (ayu foreground, 6.1:1)
+      text_bright: Color.from_hex("#33383d"),   # emphasis / active (darker ink)
+      muted: Color.from_hex("#787f86"),         # secondary (darkened line grey, 4.0:1)
+      green: Color.from_hex("#547a00"),         # 2xx (darkened ayu lime, 4.9:1)
+      yellow: Color.from_hex("#97690c"),        # 4xx (darkened func gold, 4.7:1)
+      red: Color.from_hex("#cc4040"),           # 5xx / error (darkened, 4.7:1)
+      orange: Color.from_hex("#ab5510"),        # (darkened ayu orange, 5.1:1)
+      syn_header: Color.from_hex("#1a72be"),    # header/field names, JSON keys, tag names (darkened entity blue, 4.9:1)
+      syn_string: Color.from_hex("#547a00"),    # quoted strings (lime)
+      syn_number: Color.from_hex("#ab5510"),    # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#8054b8"),   # true / false / null (darkened constant purple, 5.3:1)
+    )
+
+    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN, "catppuccin_mocha" => CATPPUCCIN_MOCHA, "monokai" => MONOKAI, "everforest" => EVERFOREST, "onedark" => ONEDARK, "kanagawa" => KANAGAWA, "github_dark" => GITHUB_DARK, "zenburn" => ZENBURN, "github_light" => GITHUB_LIGHT, "gruvbox_light" => GRUVBOX_LIGHT, "one_light" => ONE_LIGHT, "ayu_light" => AYU_LIGHT}
     DEFAULT_THEME  = "goridark"
     # Pre-rename names so a settings.json from the first theme release still resolves.
     LEGACY_ALIASES = {"dark" => "goridark", "light" => "goriday"}
