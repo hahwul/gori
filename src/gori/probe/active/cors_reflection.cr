@@ -16,6 +16,12 @@ module Gori
       # GET/HEAD (no state mutation). A well-behaved allowlist rejects the probe origin, so it is
       # never flagged.
       class CorsReflection < Rule
+        def info : RuleInfo
+          RuleInfo.new("cors_reflection", "CORS arbitrary origin",
+            "Probes whether the server reflects an arbitrary Origin with Allow-Credentials: true.",
+            Category::CORS)
+        end
+
         # A synthetic origin that is obviously not a legitimate allowlisted one. `.example` is a
         # reserved TLD (RFC 2606) that never resolves — the value is only ever a header, never
         # dialed. If the server reflects THIS, it reflects anything.

@@ -32,6 +32,8 @@ module Gori::Tui
     # Open the Project SCOPE rule popup (nil edit_id = add; else edit that rule id).
     # Kind/type/pattern seed the form when editing (or defaults for add).
     abstract def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
+    # Open the Probe custom-rule popup (nil = add a new rule; else edit the given rule).
+    abstract def open_custom_rule_editor(rule : Probe::CustomRule?) : Nil
     # Destructive-action confirmation modal; `action` runs on confirm.
     abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, &action : -> Nil) : Nil
     abstract def session : Session             # store / scope / proxy / registry / interceptor

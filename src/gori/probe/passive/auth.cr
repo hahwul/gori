@@ -13,6 +13,12 @@ module Gori
       #     the browser will send credentials in the clear on the next request (Medium).
       # Digest/Bearer/Negotiate are out of scope: they don't ship the raw password like Basic does.
       class Auth < Rule
+        def info : RuleInfo
+          RuleInfo.new("auth", "Insecure authentication",
+            "Flags HTTP Basic authentication served over cleartext http://.",
+            Category::HEADERS)
+        end
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.scheme == "http" # over TLS the credentials are transport-protected
 

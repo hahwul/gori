@@ -327,6 +327,25 @@ module Gori
       end
     end
 
+    # A per-project user-defined Probe match rule (probe_custom_rules, V38). String/regex match
+    # over one region of a captured flow (side × region); `severity` stamps the emitted finding.
+    # The global-scope counterpart lives in settings.json (Settings::ScanRule); both fold into the
+    # runtime Probe::CustomRule via Probe.custom_rules.
+    struct ProbeCustomRule
+      getter id : Int64
+      getter title : String
+      getter description : String
+      getter side : String   # "request" | "response"
+      getter region : String # "whole" | "header" | "body"
+      getter kind : String   # "string" | "regex"
+      getter pattern : String
+      getter severity : Severity
+      getter? enabled : Bool
+
+      def initialize(@id, @title, @description, @side, @region, @kind, @pattern, @severity, @enabled)
+      end
+    end
+
     # A persisted Repeater workbench tab: the editable request plus the LAST send
     # response (V11 — head/body/error/duration; all nil until the first send).
     # Shared across sessions on the same project — the TUI reconciles local tabs

@@ -41,6 +41,10 @@ module Gori::Tui
       # settings:layout Probe issue preview (list page bottom pane)
       @preview_scroll = 0
       @preview_focus = :list # :list | :preview
+      # code → description for custom-rule findings, so the detail pane shows the rule's own
+      # description in place of the (absent) built-in remediation. Rebuilt on reload; a deleted
+      # rule falls back to a generic note.
+      @custom_desc = {} of String => String
     end
 
     def preview_enabled? : Bool
@@ -81,6 +85,7 @@ module Gori::Tui
       @all = store.probe_issues
       @mode = store.probe_mode
       @tech = scoped_tech(store.probe_tech_rows)
+      @custom_desc = Probe.custom_rules(store).to_h { |r| {r.code, r.description} }
       apply_filter
       refresh_detail(store)
     end
@@ -577,7 +582,7 @@ module Gori::Tui
       cx = chip(screen, cx + 1, rect.y + 1, " #{issue.status.label} ", status_color(issue.status))
       chip(screen, cx + 1, rect.y + 1, " #{issue.category} ", Theme.muted)
 
-      hint = Probe.remediation(issue.code)
+      hint = detail_hint(issue.code)
       screen.text(rect.x + 1, rect.y + 2, hint, Theme.muted, width: w) unless hint.empty?
       evidence = if issue.evidence
                    "detail   #{issue.evidence}"
@@ -614,6 +619,16 @@ module Gori::Tui
       screen.text(x, y, label, Theme.bg, color, Attribute::Bold)
     end
 
+    # Detail-pane one-liner: built-in remediation, or the custom rule's own description for a
+    # custom-rule finding (falls back to a generic note when the rule was since deleted).
+    private def detail_hint(code : String) : String
+      if code.starts_with?("custom_")
+        @custom_desc[code]? || "Custom rule (removed)"
+      else
+        Probe.remediation(code)
+      end
+    end
+
     private def cat_tag(category : String) : String
       case category
       when Probe::Category::HEADERS  then "header"
@@ -622,6 +637,7 @@ module Gori::Tui
       when Probe::Category::INFOLEAK then "leak"
       when Probe::Category::CORS     then "cors"
       when Probe::Category::ACTIVE   then "active"
+      when Probe::Category::CUSTOM   then "custom"
       else                                category
       end
     end

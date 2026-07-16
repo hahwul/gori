@@ -92,6 +92,7 @@ describe "entity_links (V21)" do
       store.@db.exec("DROP TABLE events")                                       # V35
       store.@db.exec("DROP TABLE intercept_held")                               # V36
       store.@db.exec("DROP TABLE intercept_commands")                           # V36
+      store.@db.exec("DROP TABLE probe_custom_rules")                           # V38
       store.@db.exec("PRAGMA user_version = 20")
       store.close
 

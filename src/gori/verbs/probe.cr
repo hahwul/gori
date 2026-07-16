@@ -110,6 +110,23 @@ module Gori
       r.register Verb::Definition.new(
         "probe.delete", "Delete issue", "Delete this issue", Verb::Scope::ProbeDetail,
         [Verb::Chord.new("d")]) { |ctx| ctx.probe_delete; nil }
+
+      # --- Rules sub-tab (Verb::Scope::ProbeRules) ---
+      # Nav (↑/↓, j/k) + Esc→strip are controller-claimed; these are the actions. edit/delete are
+      # gated to a selected CUSTOM rule (built-ins can't be edited/removed, only toggled).
+      probe_custom = ->(ctx : Verb::ExecContext) { ctx.probe_custom_rule_selected? }
+      r.register Verb::Definition.new(
+        "probe-rules.toggle", "Toggle rule", "Enable or disable the selected rule",
+        Verb::Scope::ProbeRules, [Verb::Chord.new("enter"), Verb::Chord.new("x")], mnemonic: 't') { |ctx| ctx.probe_rule_toggle; nil }
+      r.register Verb::Definition.new(
+        "probe-rules.add", "Add custom rule", "Open the popup to add a custom match rule",
+        Verb::Scope::ProbeRules, [Verb::Chord.new("a")]) { |ctx| ctx.probe_rule_add; nil }
+      r.register Verb::Definition.new(
+        "probe-rules.edit", "Edit custom rule", "Edit the selected custom rule",
+        Verb::Scope::ProbeRules, [Verb::Chord.new("e")], available: probe_custom) { |ctx| ctx.probe_rule_edit; nil }
+      r.register Verb::Definition.new(
+        "probe-rules.delete", "Delete custom rule", "Delete the selected custom rule",
+        Verb::Scope::ProbeRules, [Verb::Chord.new("d")], available: probe_custom) { |ctx| ctx.probe_rule_delete; nil }
     end
   end
 end

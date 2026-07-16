@@ -7,6 +7,12 @@ module Gori
       # CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy checks (gated on
       # text/html upstream). Response-gated.
       class SecurityHeaders < Rule
+        def info : RuleInfo
+          RuleInfo.new("security_headers", "Security headers",
+            "Checks for missing or weak HSTS, CSP, X-Frame-Options, X-Content-Type-Options, and Referrer-Policy.",
+            Category::HEADERS)
+        end
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
           if ctx.scheme == "https"

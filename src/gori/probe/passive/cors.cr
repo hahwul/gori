@@ -6,6 +6,12 @@ module Gori
       # CORS misconfigurations (category "cors"): wildcard, the null origin, and a credentialed
       # reflection of a CROSS-ORIGIN request Origin (the classic exploitable case). Response-gated.
       class Cors < Rule
+        def info : RuleInfo
+          RuleInfo.new("cors", "CORS misconfiguration",
+            "Flags wildcard, null-origin, and reflected-origin CORS responses.",
+            Category::CORS)
+        end
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
           # The CORS algorithm requires EXACTLY one ACAO header; with zero or several the

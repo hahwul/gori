@@ -9,6 +9,12 @@ module Gori
       # usually meant to be disabled in production. Detected passively from a captured response
       # that already carries an introspection result; zero-request, response-gated.
       class GraphqlIntrospection < Rule
+        def info : RuleInfo
+          RuleInfo.new("graphql_introspection", "GraphQL introspection",
+            "Detects enabled GraphQL introspection, which exposes the full API schema.",
+            Category::INFOLEAK)
+        end
+
         # The introspection RESULT envelope is `{"data":{"__schema":{…}}}`, i.e. `__schema` as a
         # quoted JSON KEY opening an object. Anchoring on `"__schema":{`:
         #   * rejects a response that merely ECHOES an introspection QUERY string (there `__schema`

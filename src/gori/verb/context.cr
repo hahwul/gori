@@ -152,6 +152,13 @@ module Gori
       abstract def scope_delete_rule : Nil     # remove the selected rule
       abstract def scope_rule_selected? : Bool # a scope rule is selected (gates edit/delete in the menu)
 
+      # Probe → Rules sub-tab: toggle the selected rule, and add/edit/delete a custom rule.
+      abstract def probe_rule_toggle : Nil            # enable/disable the selected Probe rule
+      abstract def probe_rule_add : Nil               # open the custom-rule popup to add a rule
+      abstract def probe_rule_edit : Nil              # edit the selected custom rule
+      abstract def probe_rule_delete : Nil            # delete the selected custom rule (with confirm)
+      abstract def probe_custom_rule_selected? : Bool # a CUSTOM (user) rule is selected (gates edit/delete)
+
       # hostname-override editing (Project tab HOST OVERRIDES pane — a DISTINCT pane
       # from SCOPE; also drives its own "space" action menu)
       abstract def hostov_add_entry : Nil        # open the inline add-row for a new IP→host override

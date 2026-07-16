@@ -98,6 +98,43 @@ module Gori
           bytes = decoded || @detail.response_body
           @body_text = (bytes && !bytes.empty?) ? String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub : nil
         end
+
+        # --- region text for user-defined custom match rules ---------------------------------
+        # Scrubbed views of each message region so a custom rule can match string/regex against
+        # request/response × header/body/whole. Lazy + memoized; a rule that never asks pays
+        # nothing. body_text (above) already covers the response body region.
+        @req_head_text : String?
+        @req_body_text : String?
+        @req_body_text_done = false
+        @resp_head_text : String?
+        @resp_head_text_done = false
+
+        # Raw request head (request line + headers) as scrubbed text.
+        def request_head_text : String
+          @req_head_text ||= String.new(@detail.request_head).scrub
+        end
+
+        # Decoded, capped, scrubbed request body text (nil when there is no body). A request body
+        # is rarely content-encoded, but decode through the request head anyway so a gzip'd upload
+        # still matches on its plaintext.
+        def request_body_text : String?
+          return @req_body_text if @req_body_text_done
+          @req_body_text_done = true
+          body = @detail.request_body
+          if body && !body.empty?
+            decoded, _ = Proxy::Codec::ContentDecode.decode(@detail.request_head, body, BODY_CAP)
+            bytes = decoded || body
+            @req_body_text = String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub
+          end
+          @req_body_text
+        end
+
+        # Scrubbed response head (status line + headers); nil when no response head was captured.
+        def response_head_text : String?
+          return @resp_head_text if @resp_head_text_done
+          @resp_head_text_done = true
+          @resp_head_text = @detail.response_head.try { |h| String.new(h).scrub }
+        end
       end
     end
   end

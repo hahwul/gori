@@ -20,6 +20,7 @@ module Gori
       IssuesDetail # an issue's detail is open
       Probe          # the Probe scan-issue list has focus
       ProbeDetail    # a Probe issue's detail is open
+      ProbeRules     # the Probe tab's Rules sub-tab has focus (built-in + custom rule list)
       Intercept      # the Intercept queue tab has focus
       Comparer       # the Comparer tab has focus
       Decoder        # the Decoder tab has focus

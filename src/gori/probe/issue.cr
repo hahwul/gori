@@ -9,7 +9,17 @@ module Gori
       INFOLEAK = "infoleak"
       CORS     = "cors"
       ACTIVE   = "active" # confirmed by a probe (reflected params)
+      CUSTOM   = "custom" # user-defined string/regex match rule
     end
+
+    # Static, display-only metadata for one built-in check — the identity the Rules
+    # sub-tab lists and toggles by. `id` is a stable slug (one per Rule class, even when
+    # the class emits several codes, e.g. Cookies → cookie_*); disabling a rule keys off it.
+    record RuleInfo,
+      id : String,
+      name : String,
+      description : String,
+      category : String
 
     # What a single check emits before grouping. The analyzer folds these into
     # Store::ProbeIssue rows keyed by (code, host); `url` is the accumulating member and

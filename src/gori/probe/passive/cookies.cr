@@ -12,6 +12,12 @@ module Gori
       # logout/reset pattern) carries no secret, so its missing flags are suppressed as noise;
       # only live cookies are scored.
       class Cookies < Rule
+        def info : RuleInfo
+          RuleInfo.new("cookies", "Cookie flags",
+            "Checks Set-Cookie hygiene: Secure, HttpOnly, SameSite, and __Host-/__Secure- prefix rules.",
+            Category::COOKIES)
+        end
+
         # A __Host- cookie is browser-rejected unless it is Secure, Path=/, and has NO Domain;
         # a __Secure- cookie is rejected unless Secure. A violation means the security intent
         # silently fails (the cookie is dropped), so it is a distinct, higher-signal issue.

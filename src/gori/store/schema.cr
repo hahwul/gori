@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 37
+      VERSION = 38
 
       # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
       # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
@@ -645,7 +645,26 @@ module Gori
         "ALTER TABLE repeaters DROP COLUMN mark_transform",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34, V35, V36, V37]
+      # Per-project user-defined Probe match rules (the Rules sub-tab's project-scope custom rules).
+      # Global-scope rules live in settings.json instead. `severity` is the lowercase Store::Severity
+      # label; side/region/kind are validated in the store layer before insert.
+      V38 = [
+        <<-SQL,
+        CREATE TABLE probe_custom_rules (
+          id          INTEGER PRIMARY KEY,
+          title       TEXT    NOT NULL,
+          description TEXT    NOT NULL DEFAULT '',
+          side        TEXT    NOT NULL,
+          region      TEXT    NOT NULL,
+          kind        TEXT    NOT NULL,
+          pattern     TEXT    NOT NULL,
+          severity    TEXT    NOT NULL,
+          enabled     INTEGER NOT NULL DEFAULT 1
+        )
+        SQL
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34, V35, V36, V37, V38]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

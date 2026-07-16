@@ -12,6 +12,7 @@ require "./passive/auth"
 require "./passive/graphql"
 require "./passive/ws_payloads"
 require "./passive/secrets"
+require "./custom_rule"
 
 module Gori
   module Probe
@@ -39,21 +40,33 @@ module Gori
       # WS-only subset used when a flow was already fully analyzed and new WebSocket frames arrive.
       WS_RULES = [WsPayloads.new] of Rule
 
+      # Shared read-only defaults so the common no-config call path (CLI / Repeater / tests) never
+      # allocates. The analyzer passes its own live sets. Callers MUST NOT mutate these.
+      NO_DISABLED = Set(String).new
+      NO_CUSTOM   = [] of CustomRule
+
+      # `disabled` holds RuleInfo#id values the operator switched off in the Rules sub-tab (skipped
+      # here); `custom` are the merged global+project user match rules, run after the built-ins.
       def self.analyze(detail : Store::FlowDetail,
-                       ws_messages : Array(Store::WsMessage) = [] of Store::WsMessage) : Array(Detection)
+                       ws_messages : Array(Store::WsMessage) = [] of Store::WsMessage,
+                       *, disabled : Set(String) = NO_DISABLED,
+                       custom : Array(CustomRule) = NO_CUSTOM) : Array(Detection)
         ctx = Context.new(detail, ws_messages)
         acc = [] of Detection
-        RULES.each(&.check(ctx, acc))
+        RULES.each { |r| r.check(ctx, acc) unless disabled.includes?(r.info.id) }
+        custom.each(&.check(ctx, acc))
         acc
       end
 
-      # Re-scan only WebSocket text payloads (cheap path for post-101 message events).
+      # Re-scan only WebSocket text payloads (cheap path for post-101 message events). Custom rules
+      # are HTTP-only, so only the (single) WS built-in participates, gated by the disabled set.
       def self.analyze_ws(detail : Store::FlowDetail,
-                          ws_messages : Array(Store::WsMessage)) : Array(Detection)
+                          ws_messages : Array(Store::WsMessage),
+                          *, disabled : Set(String) = NO_DISABLED) : Array(Detection)
         return [] of Detection if ws_messages.empty?
         ctx = Context.new(detail, ws_messages)
         acc = [] of Detection
-        WS_RULES.each(&.check(ctx, acc))
+        WS_RULES.each { |r| r.check(ctx, acc) unless disabled.includes?(r.info.id) }
         acc
       end
     end
