@@ -351,20 +351,32 @@ describe Gori::Tui::RepeaterView do
     view.chain_pane_active?.should be_false
   end
 
-  it "shows the CHAIN pane only while the cursor is inside a §…§ marker (no mode toggle)" do
-    # Cursor at offset 0 sits INSIDE the leading §v§ marker → CHAIN pane is split in.
-    inside = RepeaterView.new
-    inside.restore("https://a.test", "§v§ HTTP/1.1\nHost: a.test\n\n", false, false)
-    b_in = MemoryBackend.new(120, 24)
-    inside.render(Screen.new(b_in), Rect.new(0, 0, 120, 24))
-    b_in.contains?("CHAIN").should be_true
+  it "conceals the ¦chain inline and reveals it in the caret tooltip (only §value§ shows)" do
+    view = RepeaterView.new
+    view.restore("https://a.test", "§v¦md5§ HTTP/1.1\nHost: a.test\n\n", false, false)
+    view.focus_pane(:request) # cursor at offset 0 sits inside the §v¦md5§ marker
+    b = MemoryBackend.new(120, 24)
+    view.render(Screen.new(b), Rect.new(0, 0, 120, 24))
+    grid = (0...24).map { |y| b.row(y) }.join("\n")
+    # The request line renders §v§ (the ¦md5 hidden inline), never the full §v¦md5§.
+    grid.should contain("§v§ HTTP/1.1")
+    grid.should_not contain("§v¦md5§")
+    # ...but the caret tooltip reveals the concealed chain + the ^Y edit affordance.
+    grid.should contain("md5")         # chain shown in the tooltip
+    grid.should contain("^Y edit")     # edit affordance
+    grid.should_not contain("PREVIEW") # the ^Y modal is NOT auto-shown
+  end
 
-    # Same buffer shape, but the marker is past the caret (offset 0 is on 'G') → no CHAIN pane.
-    outside = RepeaterView.new
-    outside.restore("https://a.test", "GET §v§ HTTP/1.1\nHost: a.test\n\n", false, false)
-    b_out = MemoryBackend.new(120, 24)
-    outside.render(Screen.new(b_out), Rect.new(0, 0, 120, 24))
-    b_out.contains?("CHAIN").should be_false
+  it "opens the CHAIN modal (with a transform preview) only after ^Y" do
+    view = RepeaterView.new
+    view.restore("https://a.test", "§v¦md5§ HTTP/1.1\nHost: a.test\n\n", false, false)
+    view.focus_pane(:request)
+    view.focus_chain_pane.should be_nil # in a marker → opens the editor (no hint)
+    b = MemoryBackend.new(120, 24)
+    view.render(Screen.new(b), Rect.new(0, 0, 120, 24))
+    grid = (0...24).map { |y| b.row(y) }.join("\n")
+    grid.should contain("CHAIN")   # modal title
+    grid.should contain("PREVIEW") # live transform preview
   end
 
   it "load_grpc keeps the framed body byte-exact and the head editable" do

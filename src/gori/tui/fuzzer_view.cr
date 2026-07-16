@@ -12,6 +12,7 @@ require "./text_area"
 require "./fmt"
 require "./spark"
 require "./chain_pane"
+require "./chain_overlay"
 require "../store"
 require "../fuzz"
 require "../decoder"
@@ -74,6 +75,7 @@ module Gori::Tui
       @editor.gutter = true
       @editor.follow_x = true     # long lines (headers, URLs, §-marked params) scroll horizontally to keep the cursor visible
       @editor.env_complete = true # `$KEY` autocomplete against the registered env vars (expanded on send)
+      @editor.chain_peek = true   # tooltip revealing the concealed ¦chain of the §…§ marker under the caret
       @last_synced_config = ""    # last store config blob applied (reconcile equality)
       @config = Fuzz::Config.new(keep_bodies: :matched)
       @sets = [] of SetSpec
@@ -436,8 +438,6 @@ module Gori::Tui
       @focus == :detail
     end
 
-    CHAIN_PLACEHOLDER = "put the cursor in a §…§ marker, then ^Y to add an encode chain (e.g. base64-encode)"
-
     # The CHAIN sub-pane owns keyboard input (focused on the TEMPLATE column). The
     # controller routes template keys here when true.
     def chain_pane_active? : Bool
@@ -462,6 +462,7 @@ module Gori::Tui
       return unless @chain_focused
       if updated = Fuzz::Template.set_chain(@editor.text, @chain_marker_cursor, @chain_pane.value)
         @editor.set_text(updated)
+        @editor.place_at_offset(@chain_marker_cursor) # back into the marker (set_text reset it) → tooltip stays up
         @dirty = true
       end
       @chain_focused = false
@@ -1350,6 +1351,7 @@ module Gori::Tui
       bottom = Rect.new(rest.x, rest.y + top_h, rest.w, {rest.h - top_h, 0}.max)
       render_top(screen, top, focused)
       render_bottom(screen, bottom, focused) if bottom.h > 0
+      render_chain_overlay(screen, rect) if @chain_focused # centered ^Y modal ON TOP (replaces the old split)
     end
 
     private def render_top(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -1357,53 +1359,16 @@ module Gori::Tui
       left = Rect.new(rect.x, rect.y, half, rect.h)
       right = Rect.new(rect.x + half + 1, rect.y, {rect.w - half - 1, 0}.max, rect.h)
       tmpl_focused = focused && @focus == :template
-      if chain_split_visible? # cursor is in a §…§ marker → split TEMPLATE (top) + CHAIN (bottom)
-        tmpl, chain = template_chain_split(left)
-        render_template(screen, tmpl, tmpl_focused && !@chain_focused)
-        render_chain_pane(screen, chain, tmpl_focused && @chain_focused)
-      else
-        render_template(screen, left, tmpl_focused)
-      end
+      render_template(screen, left, tmpl_focused && !@chain_focused) # dimmed while the ^Y modal owns focus
       render_config(screen, right, focused && @focus == :config)
     end
 
-    # Whether the TEMPLATE column is currently split into TEMPLATE (top) + CHAIN (bottom).
-    # Contextual, mirroring the Repeater (no mode): only while the cursor sits inside a §…§
-    # marker (chain_under_cursor) or the CHAIN pane is being edited — so an unmarked cursor
-    # keeps the full-height editor and the strip appears exactly when the transform matters.
-    private def chain_split_visible? : Bool
-      @chain_focused || !chain_under_cursor.nil?
-    end
-
-    # TEMPLATE (top) + CHAIN (bottom) split — a slim 3-row CHAIN strip that grows (≥8, for
-    # the autocomplete dropdown) while focused; the template editor keeps the rest (≥1).
-    private def template_chain_split(col : Rect) : {Rect, Rect}
-      want = @chain_focused ? {col.h // 2, 8}.max : 3
-      chain_h = want.clamp(1, {col.h - 1, 1}.max)
-      tmpl_h = {col.h - chain_h, 1}.max
-      {Rect.new(col.x, col.y, col.w, tmpl_h),
-       Rect.new(col.x, col.y + tmpl_h, col.w, {col.h - tmpl_h, 0}.max)}
-    end
-
-    # The CHAIN sub-pane. Focused → the live editor (autocomplete); else a read-only view
-    # of the chain of the marker UNDER THE CURSOR (or a hint), so it's always visible.
-    private def render_chain_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
-      return if rect.w < 2 || rect.h < 2
-      if focused
-        @chain_pane.render(screen, rect, true, "CHAIN · #{marker_label}", CHAIN_PLACEHOLDER)
-        return
-      end
-      chain = chain_under_cursor
-      Frame.card(screen, rect, chain ? "CHAIN · #{marker_label}" : "CHAIN", bg: Theme.bg, border: Frame.pane_border(false))
-      inner = rect.inset(1, 1)
-      w = {inner.w, 1}.max
-      if chain.nil?
-        screen.text(inner.x, inner.y, "put the cursor in a §…§ marker · ^Y to edit", Theme.muted, width: w)
-      elsif chain.empty?
-        screen.text(inner.x, inner.y, "^Y to add an encode chain (e.g. base64-encode)", Theme.muted, width: w)
-      else
-        screen.text(inner.x, inner.y, chain, Theme.text, width: w)
-      end
+    # The ^Y chain editor modal over the whole tab, bound to the marker the cursor sat in
+    # when ^Y was pressed. Shows the value, the editable chain, and a live transform
+    # preview. Keys route here via the controller (chain_pane_active?).
+    private def render_chain_overlay(screen : Screen, area : Rect) : Nil
+      value = Fuzz::Template.value_at(@editor.text, @chain_marker_cursor) || ""
+      ChainOverlay.render(screen, area, "CHAIN · #{marker_label}", value, @chain_pane)
     end
 
     private def render_bottom(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -1499,12 +1464,16 @@ module Gori::Tui
       # it reads as metadata, not payload. Colours resolved fresh each frame (offsets are
       # colour-free); marker_regions is 1:1 with `spans`, so the config chips stay in sync.
       bg = [] of {Int32, Int32, Color}
+      conceal = [] of {Int32, Int32}
       marker_regions.each_with_index do |region, i|
         a, sep, close = region
-        bg << {a, close + 1, Theme.marker_bg(i)}
-        bg << {sep, close + 1, Theme.elevated} if sep < close # dim the ¦chain segment
+        bg << {a, close + 1, Theme.marker_bg(i)} # band spans the whole marker; the conceal-aware paint skips hidden cells
+        conceal << {sep, close} if sep < close   # hide the ¦chain inline (kept in the buffer → tooltip + ^Y overlay)
       end
       @editor.bg_regions = bg
+      @editor.conceal_spans = conceal
+      chain = chain_under_cursor
+      @editor.chain_peek_text = (chain && !chain.empty?) ? chain : nil # tooltip only for a concealed (non-empty) chain
       inner = rect.inset(1, 1)
       read_active = focused && !ins
       @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused)
@@ -2070,6 +2039,7 @@ module Gori::Tui
       top_h = rest.h if rest.h < 6
       half = {(rest.w - 1) // 2, 1}.max
       left = Rect.new(rest.x, rest.y, half, top_h)
+      commit_chain_pane if @chain_focused # a click outside the ^Y modal commits + dismisses it
       @editor.click_to_cursor(left.inset(1, 1), mx, my)
     end
 
