@@ -59,6 +59,62 @@ describe Gori::Tui::RepeaterView do
     backend.contains?("— not sent — press ^R to resend —").should be_true
   end
 
+  # The response body is styled one visible line at a time and memoized (per-line) so an
+  # unrelated re-render (a keystroke in the request editor) doesn't re-tokenize the pane.
+  # The memo must be dropped in lockstep with the response view — a new send, or a pretty
+  # toggle — or a stale styled line would keep showing the OLD response.
+  it "styled-line memo re-renders an unchanged response identically, but drops on a new send" do
+    view = RepeaterView.new
+    view.load_blank
+    view.focus_pane(:response)
+    hdr = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+    view.apply(Gori::Repeater::Result.new(hdr.to_slice, %({"tag":"alpha"}).to_slice, nil, 1000_i64))
+
+    first = MemoryBackend.new(120, 20)
+    view.render(Screen.new(first), Rect.new(0, 0, 120, 20))
+    first.contains?("alpha").should be_true
+
+    # A second render with nothing changed is served from the memo — same output.
+    again = MemoryBackend.new(120, 20)
+    view.render(Screen.new(again), Rect.new(0, 0, 120, 20))
+    again.contains?("alpha").should be_true
+
+    # A new send must invalidate the memo: the pane shows the NEW body, not the cached one.
+    view.apply(Gori::Repeater::Result.new(hdr.to_slice, %({"tag":"bravo"}).to_slice, nil, 1000_i64))
+    after = MemoryBackend.new(120, 20)
+    view.render(Screen.new(after), Rect.new(0, 0, 120, 20))
+    after.contains?("bravo").should be_true
+    after.contains?("alpha").should be_false
+  end
+
+  # The memo reuses the SAME styled Line object across frames — safe only because every
+  # downstream consumer (Highlight.draw / slice_left / line_width_upto) is read-only. Guard
+  # that: style a wide line (frame 1), scroll it sideways so slice_left runs on the cached
+  # Line (frame 2), then scroll back — the head must be intact (a slice_left that mutated
+  # its input in place would have corrupted the cached Line).
+  it "styled-line memo survives a horizontal-scroll round-trip without corrupting the cached line" do
+    view = RepeaterView.new
+    view.load_blank
+    view.focus_pane(:response)
+    hdr = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+    body = %({"a":"ALPHATOKEN#{"_" * 90}OMEGATOKEN"})
+    view.apply(Gori::Repeater::Result.new(hdr.to_slice, body.to_slice, nil, 1000_i64))
+
+    at0 = MemoryBackend.new(50, 12)
+    view.render(Screen.new(at0), Rect.new(0, 0, 50, 12))
+    at0.contains?("ALPHATOKEN").should be_true # left edge visible, memo populated
+
+    view.hscroll(10) # slide the pane right → slice_left runs on the cached Line
+    scrolled = MemoryBackend.new(50, 12)
+    view.render(Screen.new(scrolled), Rect.new(0, 0, 50, 12))
+    scrolled.contains?("ALPHATOKEN").should be_false # scrolled past the head (proves the slice took effect)
+
+    view.hscroll(-10) # back to the left edge
+    back = MemoryBackend.new(50, 12)
+    view.render(Screen.new(back), Rect.new(0, 0, 50, 12))
+    back.contains?("ALPHATOKEN").should be_true # cached Line uncorrupted by the intervening slice
+  end
+
   it "duplicate_from copies request content, flags, and last response (no source flow)" do
     src = RepeaterView.new
     src.load_blank
