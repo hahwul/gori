@@ -16,6 +16,12 @@ module Gori
       # parameters whose canary echoes back unencoded (XSS candidates). Gated to safe methods
       # so an automatic probe never mutates server state.
       class ReflectedParam < Rule
+        def info : RuleInfo
+          RuleInfo.new("reflected_param", "Reflected parameter",
+            "Sends a canary in query parameters and flags unencoded reflection (potential XSS).",
+            Category::ACTIVE)
+        end
+
         # The dedup key WITHOUT generating canaries or rebuilding the request — extracts the same
         # (name, location) set `plan` derives from canary_pairs/canary_json (same skip rules), so
         # the key is byte-identical to `plan(detail).dedup_key`. Returns nil in exactly the cases

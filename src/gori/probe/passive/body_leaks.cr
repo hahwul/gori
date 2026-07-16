@@ -8,6 +8,12 @@ module Gori
       # private IPs, server error/stack traces, leaked credentials, and active mixed content.
       # Response-gated; scans the shared, decoded `ctx.body_text`.
       class BodyLeaks < Rule
+        def info : RuleInfo
+          RuleInfo.new("body_leaks", "Response body leaks",
+            "Scans response bodies for private IPs, stack traces, secrets, mixed content, and insecure form actions.",
+            Category::INFOLEAK)
+        end
+
         # Private-IP ranges with valid 0-255 octets, required to stand alone (not embedded in a
         # longer dotted/word token). The leading/trailing guards keep multi-segment version
         # strings such as "10.1.2.3.4" or "v10.1.2.3" out of the match.

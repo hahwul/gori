@@ -400,6 +400,26 @@ private class FakeContext < ExecContext
     true
   end
 
+  def probe_rule_toggle : Nil
+    @calls << :probe_rule_toggle
+  end
+
+  def probe_rule_add : Nil
+    @calls << :probe_rule_add
+  end
+
+  def probe_rule_edit : Nil
+    @calls << :probe_rule_edit
+  end
+
+  def probe_rule_delete : Nil
+    @calls << :probe_rule_delete
+  end
+
+  def probe_custom_rule_selected? : Bool
+    true
+  end
+
   def hostov_add_entry : Nil
     @calls << :hostov_add_entry
   end

@@ -10,6 +10,12 @@ module Gori
       # project's "representative technologies" summary. Runs on every flow (not response-gated):
       # several signals live on the request side or on a 101 upgrade.
       class Tech < Rule
+        def info : RuleInfo
+          RuleInfo.new("tech", "Technology fingerprints",
+            "Identifies server software, frameworks, and protocols (WebSocket, gRPC, GraphQL, SSE, HTTP/2) from headers and bodies.",
+            Category::TECH)
+        end
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           check_protocols(ctx, acc)
           check_tech_headers(ctx, acc)

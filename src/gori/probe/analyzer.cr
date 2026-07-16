@@ -34,6 +34,9 @@ module Gori
       # its Fuzz::Sender, so the next probe picks up the change.
       property? verify_upstream : Bool
 
+      @disabled : Set(String) # RuleInfo#id of built-ins the operator turned off (Rules sub-tab)
+      @custom : Array(CustomRule) # merged global+project user match rules
+
       private record ActiveTask, rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail
 
       def initialize(@store : Store, @scope : Scope, @input : Channel(Store::FlowEvent),
@@ -51,6 +54,33 @@ module Gori
         @events = Channel(Event).new(256)
         @running = false
         @stopped = false
+        # Rules sub-tab config: built-ins the operator disabled (by RuleInfo#id) + the merged
+        # global+project custom match rules. Read once here so even a one-shot scan_detail
+        # (CLI/MCP/Repeater, no start) honours them; reload_rule_config refreshes on UI edits.
+        @disabled = load_disabled
+        @custom = load_custom
+      end
+
+      # Re-read the Rules sub-tab config (disabled built-ins + custom rules) and force a re-scan of
+      # recent flows: clearing @analyzed lets the catch-up sweep re-run a newly-enabled built-in or
+      # a new custom rule over already-seen traffic. Disabling a rule only stops NEW detections —
+      # existing findings persist until dismissed/deleted/cleared.
+      def reload_rule_config : Nil
+        @disabled = load_disabled
+        @custom = load_custom
+        @analyzed.clear
+      end
+
+      private def load_disabled : Set(String)
+        @store.probe_disabled_rules
+      rescue DB::Error | SQLite3::Exception
+        Set(String).new
+      end
+
+      private def load_custom : Array(CustomRule)
+        Probe.custom_rules(@store)
+      rescue DB::Error | SQLite3::Exception
+        [] of CustomRule
       end
 
       def mode : Mode
@@ -117,7 +147,7 @@ module Gori
                       enqueue_active : Bool = false) : Nil
         return if @stopped
         return unless @mode.scanning?
-        detections = Passive.analyze(detail, ws_messages)
+        detections = Passive.analyze(detail, ws_messages, disabled: @disabled, custom: @custom)
         persist(detections, flow_id: detail.row.id, repeater_id: repeater_id)
         maybe_enqueue_active(detail) if enqueue_active
       rescue ex : DB::Error | SQLite3::Exception
@@ -221,7 +251,7 @@ module Gori
           msgs = @store.ws_messages_after(flow_id, after, WS_MSG_CAP)
           break if msgs.empty?
           note_ws_scanned(flow_id, msgs) # ordered asc → advance the hwm to the last id in the batch
-          detections = Passive.analyze_ws(detail, msgs)
+          detections = Passive.analyze_ws(detail, msgs, disabled: @disabled)
           persist(detections, flow_id: flow_id, repeater_id: nil)
           break if msgs.size < WS_MSG_CAP # fewer than a full page ⇒ backlog drained
         end
@@ -272,7 +302,7 @@ module Gori
         # means "probe everything"). in_scope_url? is wrong here: it is permissive when
         # the ⇧S display lens is off.
         return unless @scope.matches_url?(url, row.host)
-        Active::RULES.each { |rule| enqueue_probe(rule, detail) }
+        Active::RULES.each { |rule| enqueue_probe(rule, detail) unless @disabled.includes?(rule.info.id) }
       rescue Channel::ClosedError
       end
 

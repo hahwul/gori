@@ -223,6 +223,20 @@ class FakeExecContext < Gori::Verb::ExecContext
     @scope_has_rule
   end
 
+  property probe_has_custom_rule : Bool = false
+
+  def probe_rule_toggle : Nil; end
+
+  def probe_rule_add : Nil; end
+
+  def probe_rule_edit : Nil; end
+
+  def probe_rule_delete : Nil; end
+
+  def probe_custom_rule_selected? : Bool
+    @probe_has_custom_rule
+  end
+
   property hostov_has_entry : Bool = false
 
   def hostov_add_entry : Nil; end

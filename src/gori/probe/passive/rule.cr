@@ -10,6 +10,10 @@ module Gori
       # `passive/`; register new ones in `Passive::RULES` (passive.cr).
       abstract class Rule
         abstract def check(ctx : Context, acc : Array(Detection)) : Nil
+
+        # Static identity for the Rules sub-tab (list + per-rule enable/disable). One RuleInfo
+        # per class; the analyzer skips a rule when its `info.id` is in the project disabled set.
+        abstract def info : RuleInfo
       end
     end
   end

@@ -9,6 +9,12 @@ module Gori
       # '-'/'_' stripped) so hyphen/underscore/case variants collapse to one form, and a
       # JWT-shaped value under ANY name is flagged regardless of the name.
       class SecretInUrl < Rule
+        def info : RuleInfo
+          RuleInfo.new("secret_in_url", "Secrets in URL",
+            "Flags credentials, tokens, and JWTs carried in the request URL, where they leak via logs, history, and Referer.",
+            Category::INFOLEAK)
+        end
+
         HIGH_PARAMS = Set{"token", "accesstoken", "refreshtoken", "idtoken", "authtoken",
                           "secret", "clientsecret", "secretkey", "password", "passwd", "pwd",
                           "jwt", "apikey", "authorization", "bearer", "sessiontoken",

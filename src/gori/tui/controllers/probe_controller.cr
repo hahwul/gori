@@ -1,7 +1,10 @@
 require "../tab_controller"
 require "../probe_view"
+require "../probe_rules_view"
+require "../custom_rule_overlay"
 require "../../store"
 require "../../probe"
+require "../../settings"
 require "../../hotkeys"
 
 module Gori::Tui
@@ -12,10 +15,15 @@ module Gori::Tui
   # only the `/` filter editing is a controller-claimed text sub-mode. The MODE and
   # set-status pickers are shell overlays (ChoicePicker), so they stay in the Runner.
   class ProbeController < TabController
+    # The two fixed sub-tabs: the scan results/mode view, and the rule-management view.
+    SUBTABS = ["Findings", "Rules"]
+
     def initialize(host : Host)
       super(host)
       @probe = ProbeView.new
       @probe.set_scope(@host.session.scope) # honour the lens + show its chip on the bar
+      @rules = ProbeRulesView.new
+      @sub_idx = 0 # 0 = Findings · 1 = Rules
     end
 
     def view : ProbeView
@@ -26,15 +34,51 @@ module Gori::Tui
       :probe
     end
 
+    # Findings drives the scan-issue verbs (Probe / ProbeDetail); Rules is its own scope so
+    # none of the Findings verbs (mode/filter/open) fire there — its actions are ProbeRules verbs.
     def command_scope : Verb::Scope
+      return Verb::Scope::ProbeRules if @sub_idx == 1
       @probe.detail_open? ? Verb::Scope::ProbeDetail : Verb::Scope::Probe
+    end
+
+    # --- fixed sub-tab strip (no ^N/^W/rename) ---
+    def subtab_labels : Array(String)
+      SUBTABS
+    end
+
+    def subtab_index : Int32
+      @sub_idx
+    end
+
+    def subtab_strip_shown? : Bool
+      true
+    end
+
+    def subtabs_fixed? : Bool
+      true
+    end
+
+    def move_subtab(dir : Int32) : Nil
+      @sub_idx = (@sub_idx + dir).clamp(0, SUBTABS.size - 1)
+    end
+
+    def jump_subtab(idx : Int32) : Nil
+      @sub_idx = idx if 0 <= idx < SUBTABS.size
+    end
+
+    def rules_tab? : Bool
+      @sub_idx == 1
     end
 
     # PageUp/PageDown/Home/End: page the open issue's detail body, else the issue list.
     # Both the view's move and scroll_detail clamp (scroll_detail's ceiling lands at
     # render), so the large Home/End magnitude is safe.
     def body_scroll(delta : Int32) : Bool
-      @probe.detail_open? ? @probe.scroll_detail(delta) : @probe.move(delta)
+      if rules_tab?
+        @rules.move(delta)
+      else
+        @probe.detail_open? ? @probe.scroll_detail(delta) : @probe.move(delta)
+      end
       true
     end
 
@@ -46,7 +90,9 @@ module Gori::Tui
       reg = @host.session.registry
       mode = Hotkeys.binding_label(reg, "probe.mode", "m")
       filt = Hotkeys.binding_label(reg, "probe.filter", "/")
-      if @probe.detail_open?
+      if rules_tab?
+        return "↑/↓ move · ↵/x toggle · a add · e edit · d delete · space cmds · ↑ sub-tabs · esc tabs"
+      elsif @probe.detail_open?
         "o flow · r repeater · p promote · c dismiss · d delete · space cmds · ←/esc back"
       elsif @probe.querying?
         "type to filter · ↹ complete · ↵ apply · esc clear"
@@ -63,34 +109,49 @@ module Gori::Tui
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
       focused = focus == :body
-      proxy = @host.session.proxy
-      BodyChrome.framed(screen, rect, focused) do |inner|
-        @probe.render(screen, inner, focused: focused,
-          listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
+      shell = BodyChrome.shell_focused(focus, multi_pane: false)
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, SUBTABS, @sub_idx, @subtab_start) do |content|
+        if rules_tab?
+          @rules.render(screen, content, focused)
+        else
+          proxy = @host.session.proxy
+          @probe.render(screen, content, focused: focused,
+            listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
+        end
       end
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      inner = rect.inset(1, 1)
+      content = BodyChrome.content_rect(rect, strip: true) # inside the frame, below the sub-tab strip
+      if rules_tab?
+        @host.focus_body
+        if idx = @rules.row_at(content, mx, my)
+          # Select first; a click on the already-selected row toggles it (whole row is the switch).
+          @rules.selected_index == idx ? rules_toggle_selected : @rules.select_index(idx)
+        end
+        return true
+      end
       return true if @probe.detail_open? # detail pane: clicks are inert (use keys)
       @host.focus_body
-      if @probe.preview_enabled? && @probe.preview_at?(inner, mx, my)
+      if @probe.preview_enabled? && @probe.preview_at?(content, mx, my)
         @probe.set_preview_focus(:preview)
         return true
       end
-      list_rect, _ = @probe.list_split(inner)
+      list_rect, _ = @probe.list_split(content)
       if my == list_rect.y + 1 && !@probe.querying? # the filter-bar row (below the MODE band)
         @probe.start_query
         return true
       end
-      return true unless idx = @probe.list_row_at(inner, mx, my)
+      return true unless idx = @probe.list_row_at(content, mx, my)
       @probe.set_preview_focus(:list)
       idx == @probe.selected_index ? probe_open : @probe.select_index(idx) # select-first, then open
       true
     end
 
     def handle_wheel(step : Int32) : Bool
-      if @probe.detail_open?
+      if rules_tab?
+        @rules.move(step)
+      elsif @probe.detail_open?
         @probe.scroll_detail(step)
       else
         @probe.move(step)
@@ -101,8 +162,21 @@ module Gori::Tui
     # Detail scroll + list preview Tab focus. List nav is verb-driven; when detail is
     # closed we claim Tab (preview) only. When open, ↑/↓ scroll the detail pane.
     def handle_body_key(ev : Termisu::Event::Key) : Bool
-      return false if ev.ctrl? || ev.alt?
       key = ev.key
+      if rules_tab?
+        # Nav (↑/↓, j/k) + Esc→strip are controller-owned; everything else (a/e/d/x/↵ ProbeRules
+        # verbs, space menu, global chords) falls through to the keymap.
+        return false if ev.ctrl? || ev.alt?
+        case
+        when key.up?, key.lower_k?
+          @rules.at_top? ? @host.request_focus(:subtabs) : @rules.move(-1)
+        when key.down?, key.lower_j? then @rules.move(1)
+        when key.escape?             then @host.request_focus(:subtabs)
+        else                              return false
+        end
+        return true
+      end
+      return false if ev.ctrl? || ev.alt?
       if @probe.detail_open?
         case
         when key.up?, key.lower_k?   then @probe.scroll_detail(-1)
@@ -160,7 +234,9 @@ module Gori::Tui
     # Re-query the issue list from the store. Called from on_enter, data_version
     # soft-sync, IssueEvent drain, and Runner's per-tick Store#probe_generation poll.
     def refresh_from_store : Nil
-      @probe.reload(@host.session.store)
+      store = @host.session.store
+      @probe.reload(store)
+      @rules.reload(store)
     end
 
     # Drain the analyzer's events (called each main-loop tick from the Runner).
@@ -212,7 +288,7 @@ module Gori::Tui
         @probe.move(delta)
         return
       end
-      return @host.request_focus(:menu) if delta < 0 && @probe.at_top? # ↑ at top pops to the tab bar
+      return @host.request_focus(:subtabs) if delta < 0 && @probe.at_top? # ↑ at top pops to the sub-tab strip
       @probe.move(delta)
     end
 
@@ -283,6 +359,95 @@ module Gori::Tui
         n = @probe.dismiss_by_host(@host.session.store)
         @host.status("dismissed #{n} issue#{n == 1 ? "" : "s"} on #{i.host}")
       end
+    end
+
+    # --- Rules sub-tab actions (ProbeRules verbs + clicks) ---
+
+    # Whether the highlighted Rules row is a user CUSTOM rule (gates edit/delete).
+    def rules_custom_selected? : Bool
+      !!@rules.selected_row.try(&.custom)
+    end
+
+    # Toggle the selected rule on/off. Built-ins flip the per-project disabled set; custom rules
+    # flip their persisted `enabled` flag (global in settings.json, project in the DB). Then reload
+    # the view + the analyzer config (which re-scans recent flows so a re-enabled rule finds hits).
+    def rules_toggle_selected : Nil
+      row = @rules.selected_row
+      return unless row && row.selectable?
+      store = @host.session.store
+      case row.kind
+      when :builtin
+        dis = store.probe_disabled_rules
+        row.enabled? ? dis.add(row.rule_id) : dis.delete(row.rule_id)
+        store.set_probe_disabled_rules(dis)
+        @host.status(row.enabled? ? "disabled rule \"#{row.title}\"" : "enabled rule \"#{row.title}\"")
+      when :custom
+        c = row.custom.not_nil!
+        on = !c.enabled
+        c.global? ? Settings.set_scan_rule_enabled(c.id, on) : store.set_probe_custom_rule_enabled(c.id.to_i64, on)
+        @host.status(on ? "enabled rule \"#{c.title}\"" : "disabled rule \"#{c.title}\"")
+      else
+        return
+      end
+      reload_rules
+    end
+
+    def rules_add : Nil
+      @host.open_custom_rule_editor(nil)
+    end
+
+    def rules_edit : Nil
+      c = @rules.selected_row.try(&.custom) || return
+      @host.open_custom_rule_editor(c)
+    end
+
+    def rules_delete : Nil
+      c = @rules.selected_row.try(&.custom) || return
+      @host.confirm("DELETE RULE",
+        "Delete custom rule \"#{c.title}\"?\nExisting findings from it are kept until cleared.",
+        confirm_label: "delete", danger: true) do
+        c.global? ? Settings.delete_scan_rule(c.id) : @host.session.store.delete_probe_custom_rule(c.id.to_i64)
+        reload_rules
+        @host.status("deleted rule \"#{c.title}\"")
+      end
+    end
+
+    # Persist an add/edit from the overlay. Returns false (keep the form open) when invalid. A
+    # scope change on edit moves the rule between the global library and the project DB.
+    def apply_custom_rule(ov : CustomRuleOverlay) : Bool
+      return false unless ov.valid?
+      store = @host.session.store
+      if id = ov.edit_id
+        if ov.scope == ov.edit_scope
+          if ov.scope == "global"
+            Settings.update_scan_rule(id, ov.title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
+          else
+            store.update_probe_custom_rule(id.to_i64, ov.title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
+          end
+        else
+          ov.edit_scope == "global" ? Settings.delete_scan_rule(id) : store.delete_probe_custom_rule(id.to_i64)
+          insert_custom_rule(ov, store)
+        end
+        @host.status("updated custom rule")
+      else
+        insert_custom_rule(ov, store)
+        @host.status("added custom rule")
+      end
+      reload_rules
+      true
+    end
+
+    private def insert_custom_rule(ov : CustomRuleOverlay, store : Store) : Nil
+      if ov.scope == "global"
+        Settings.add_scan_rule(ov.title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity.label)
+      else
+        store.insert_probe_custom_rule(ov.title, ov.description, ov.side, ov.region, ov.kind, ov.pattern, ov.severity)
+      end
+    end
+
+    private def reload_rules : Nil
+      @rules.reload(@host.session.store)
+      @host.session.probe.reload_rule_config
     end
   end
 end

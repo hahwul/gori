@@ -54,6 +54,10 @@ module Gori
         abstract def dedup_key(detail : Store::FlowDetail) : String?
         abstract def plan(detail : Store::FlowDetail) : Plan?
         abstract def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
+
+        # Static identity for the Rules sub-tab (list + per-rule enable/disable). One RuleInfo
+        # per class; the analyzer skips a rule when its `info.id` is in the project disabled set.
+        abstract def info : RuleInfo
       end
     end
   end

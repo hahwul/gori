@@ -8,6 +8,12 @@ module Gori
       # text messages (both directions) with the same high-confidence credential shapes
       # as BodyLeaks — evidence is the TYPE label only, never the matched value.
       class WsPayloads < Rule
+        def info : RuleInfo
+          RuleInfo.new("ws_payloads", "WebSocket payload secrets",
+            "Scans WebSocket text frames for exposed secrets.",
+            Category::INFOLEAK)
+        end
+
         MSG_CAP = 64 * 1024 # per-message ceiling (mirrors Context::BODY_CAP)
 
         def check(ctx : Context, acc : Array(Detection)) : Nil

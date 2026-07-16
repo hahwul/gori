@@ -8,6 +8,12 @@ module Gori
       # Cache-Control are a common API footgun — especially `application/json` without
       # `no-store`. Response-gated; document (HTML) headers stay in SecurityHeaders.
       class CacheableApi < Rule
+        def info : RuleInfo
+          RuleInfo.new("cacheable_api", "Cacheable API responses",
+            "Flags JSON/API responses cacheable by browsers or shared caches, which may retain tokens or PII.",
+            Category::HEADERS)
+        end
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless resp = ctx.response
           return unless json_api?(ctx)
