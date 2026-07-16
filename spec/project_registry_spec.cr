@@ -49,6 +49,96 @@ describe Gori::ProjectRegistry do
     end
   end
 
+  it "assigns a stable short id at create time and resolves it exactly (case-insensitively)" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("api")
+      Gori::Store.open(p.db_path).close
+      id = reg.id_of(p).not_nil!
+      id.should match(/\A[0-9a-f]{8}\z/) # Random::Secure.hex(4)
+      reg.find(id).try(&.dir).should eq(p.dir)
+      reg.find(id.upcase).try(&.dir).should eq(p.dir)
+    end
+  end
+
+  it "resolves a project by a unique id prefix (git-style abbreviation)" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("api")
+      Gori::Store.open(p.db_path).close
+      id = reg.id_of(p).not_nil!
+      reg.find(id[0, 4]).try(&.dir).should eq(p.dir)
+      reg.find(id[0, 1]).try(&.dir).should eq(p.dir) # any prefix, while it stays unique
+    end
+  end
+
+  it "returns nil for an ambiguous id prefix rather than guessing" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      a = reg.create("alpha")
+      Gori::Store.open(a.db_path).close
+      b = reg.create("beta")
+      Gori::Store.open(b.db_path).close
+      # Pin colliding ids so the prefix is deterministically shared.
+      File.write(File.join(a.dir, Gori::ProjectRegistry::ID_FILE), "abcd1111")
+      File.write(File.join(b.dir, Gori::ProjectRegistry::ID_FILE), "abcd2222")
+      reg.find("abcd").should be_nil                  # shared prefix → ambiguous → nil
+      reg.find("abcd1").try(&.dir).should eq(a.dir)    # now unique
+      reg.find("abcd2222").try(&.dir).should eq(b.dir) # exact id
+    end
+  end
+
+  it "prefers an exact slug/name over another project's id prefix (no hex-name shadowing)" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      a = reg.create("alpha")
+      Gori::Store.open(a.db_path).close
+      File.write(File.join(a.dir, Gori::ProjectRegistry::ID_FILE), "cafe1234")
+      # A hex-like display name that also equals a prefix of a's id.
+      b = reg.create("cafe")
+      Gori::Store.open(b.db_path).close
+      reg.find("cafe").try(&.dir).should eq(b.dir) # exact slug/name wins over the id prefix
+    end
+  end
+
+  it "keeps the short id stable and resolvable across a rename that drifts the slug" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("api")
+      Gori::Store.open(p.db_path).close
+      id = reg.id_of(p).not_nil!
+      renamed = reg.rename(p, "Payment API")
+      reg.id_of(renamed).should eq(id)                    # rename never touches .id
+      reg.find(id).try(&.dir).should eq(p.dir)            # same opaque handle still resolves
+      reg.find("api").try(&.dir).should eq(p.dir)         # frozen slug still resolves
+      reg.find("Payment API").try(&.dir).should eq(p.dir) # and the new display name
+    end
+  end
+
+  it "keeps the id when create reopens an existing same-name project (write-if-absent)" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      first = reg.create("api")
+      Gori::Store.open(first.db_path).close
+      id = reg.id_of(first).not_nil!
+      again = reg.create("api") # same slug → reopen, must not re-roll the id
+      reg.id_of(again).should eq(id)
+    end
+  end
+
+  it "resolves a legacy project (no .id) by slug/name and never backfills one" do
+    with_root do |root|
+      reg = Gori::ProjectRegistry.new(root)
+      p = reg.create("legacy")
+      Gori::Store.open(p.db_path).close
+      File.delete(File.join(p.dir, Gori::ProjectRegistry::ID_FILE)) # created before ids existed
+      reg.id_of(p).should be_nil
+      reg.find("legacy").try(&.dir).should eq(p.dir) # display name / slug still resolve
+      reg.find(reg.slug_of(p)).try(&.dir).should eq(p.dir)
+      reg.id_of(p).should be_nil # find/list are read-only — no write-on-read backfill
+    end
+  end
+
   it "lists created projects (and ignores temp/hidden dirs)" do
     with_root do |root|
       reg = Gori::ProjectRegistry.new(root)

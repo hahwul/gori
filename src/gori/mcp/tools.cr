@@ -95,7 +95,7 @@ module Gori
       def initialize(@store : Store, @allow_actions : Bool, @verify_upstream : Bool,
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil, @selection_source : String? = nil,
-                     @workspace_root : String? = nil)
+                     @workspace_root : String? = nil, @project_id : String? = nil)
         Env.load_project(@store)
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
@@ -1271,6 +1271,7 @@ module Gori
           j.object do
             j.field "project", @project_name
             j.field "project_slug", @project_slug
+            j.field "project_id", @project_id
             j.field "db_path", @db_path
             j.field "selection_source", @selection_source
             j.field "workspace_root", @workspace_root
@@ -1315,6 +1316,7 @@ module Gori
               j.field "available", true
               j.field "project", @project_name
               j.field "project_slug", @project_slug
+              j.field "project_id", @project_id
               j.field "active_tab", parsed["active_tab"]?.try(&.as_s?)
               j.field "focus_pane", parsed["focus_pane"]?.try(&.as_s?)
               if fid = parsed["selected_flow_id"]?.try(&.as_i64?)
@@ -1604,6 +1606,7 @@ module Gori
                 projects.each do |p|
                   j.object do
                     j.field "name", p.name
+                    j.field "id", reg.id_of(p)
                     j.field "slug", reg.slug_of(p)
                     j.field "db_path", p.db_path
                     j.field "db_size", p.db_size
@@ -1634,6 +1637,7 @@ module Gori
         Result.new(JSON.build do |j|
           j.object do
             j.field "name", proj.name
+            j.field "id", reg.id_of(proj)
             j.field "slug", reg.slug_of(proj)
             j.field "db_path", proj.db_path
             j.field "created", !existed # false = reopened an existing same-name project
@@ -1648,7 +1652,7 @@ module Gori
         return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?
         reg = registry
         proj = reg.find(name)
-        return not_found("no such project: #{name} (match display name or directory slug)") unless proj
+        return not_found("no such project: #{name} (match short id, id prefix, dir slug, or display name)") unless proj
         return busy("cannot switch project while a fuzz/mine job is running; stop it first") if jobs_running?
 
         new_store = begin
@@ -1661,6 +1665,7 @@ module Gori
         @owns_store = true
         @project_name = proj.name
         @project_slug = reg.slug_of(proj)
+        @project_id = reg.id_of(proj)
         @db_path = proj.db_path
         @workspace_root = reg.workspace_of(proj)
         @selection_source = "switch_project"
@@ -1670,6 +1675,7 @@ module Gori
             j.field "switched", true
             j.field "project", @project_name
             j.field "project_slug", @project_slug
+            j.field "project_id", @project_id
             j.field "db_path", @db_path
             j.field "flows", @store.count
             j.field "issues", @store.count_issues
@@ -1682,7 +1688,7 @@ module Gori
         return err("missing required 'project'", "INVALID_ARGUMENT", field: "project") if name.nil? || name.strip.empty?
         reg = registry
         proj = reg.find(name)
-        return not_found("no such project: #{name} (match display name or directory slug)") unless proj
+        return not_found("no such project: #{name} (match short id, id prefix, dir slug, or display name)") unless proj
         return busy("cannot delete the project this server is currently serving; switch away first") if proj.db_path == @db_path
         return busy("cannot delete a project while a fuzz/mine job is running") if jobs_running?
 
@@ -1701,6 +1707,7 @@ module Gori
           j.object do
             j.field "dry_run", true
             j.field "name", proj.name
+            j.field "id", reg.id_of(proj)
             j.field "slug", reg.slug_of(proj)
             j.field "db_path", proj.db_path
             j.field "dir", proj.dir
@@ -1735,6 +1742,7 @@ module Gori
           j.object do
             j.field "deleted", true
             j.field "name", proj.name
+            j.field "id", reg.id_of(proj)
             j.field "slug", reg.slug_of(proj)
             j.field "db_path", proj.db_path
           end

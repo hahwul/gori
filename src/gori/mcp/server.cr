@@ -30,12 +30,13 @@ module Gori
       def initialize(@store : Store, *, allow_actions : Bool, verify_upstream : Bool,
                      @project_name : String? = nil, @project_slug : String? = nil,
                      @db_path : String? = nil, @selection_source : String? = nil,
-                     @workspace_root : String? = nil,
+                     @workspace_root : String? = nil, @project_id : String? = nil,
                      @input : IO = STDIN, @output : IO = STDOUT)
         @allow_actions = allow_actions
         @tools = Tools.new(@store, allow_actions, verify_upstream,
           project_name: @project_name, project_slug: @project_slug, db_path: @db_path,
-          selection_source: @selection_source, workspace_root: @workspace_root)
+          selection_source: @selection_source, workspace_root: @workspace_root,
+          project_id: @project_id)
         @initialized = false
       end
 

@@ -473,6 +473,7 @@ module Gori
       resolved = selection.db_path
       project_name = selection.project_name
       project_slug = selection.project_slug
+      project_id = selection.project_id
       Log.info { "mcp: serving #{resolved}#{" (#{project_name})" if project_name}#{" [#{project_slug}]" if project_slug} source=#{selection.source} (actions=#{!read_only})" }
       if selection.auto_created
         Log.warn { "mcp: created an isolated project for workspace #{selection.workspace_root}; use --project/--db to override" }
@@ -492,7 +493,8 @@ module Gori
       begin
         server = MCP::Server.new(store, allow_actions: !read_only, verify_upstream: !insecure_upstream,
           project_name: project_name, project_slug: project_slug, db_path: resolved,
-          selection_source: selection.source, workspace_root: selection.workspace_root)
+          selection_source: selection.source, workspace_root: selection.workspace_root,
+          project_id: project_id)
         server.run # blocks until STDIN EOF (client closed)
       ensure
         store.close

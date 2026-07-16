@@ -1936,13 +1936,16 @@ module Gori
         end
         parser.parse(args)
 
-        projects = ProjectRegistry.new(Paths.projects_dir).list
+        registry = ProjectRegistry.new(Paths.projects_dir)
+        projects = registry.list
         if format == :json
           puts(JSON.build do |j|
             j.array do
               projects.each do |pr|
                 j.object do
                   j.field "name", pr.name
+                  j.field "id", registry.id_of(pr)
+                  j.field "slug", registry.slug_of(pr)
                   j.field "db_path", pr.db_path
                   j.field "db_size", pr.db_size
                   j.field "last_modified", pr.last_modified.try(&.to_unix)
@@ -1956,7 +1959,8 @@ module Gori
         else
           projects.each do |pr|
             ts = pr.last_modified.try(&.to_local.to_s("%Y-%m-%d %H:%M")) || "—"
-            puts "#{pr.name.ljust(24)}  #{ts}  #{CLI::Output.human_size(pr.db_size)}"
+            id = registry.id_of(pr) || "—"
+            puts "#{pr.name.ljust(24)}  #{id.ljust(8)}  #{ts}  #{CLI::Output.human_size(pr.db_size)}"
           end
         end
       end
@@ -2508,19 +2512,25 @@ module Gori
 
       # --- shared helpers ----------------------------------------------------
 
-      # --db wins → else --project (matched case-insensitively on the dir slug) →
-      # else the most-recently-active project. Aborts when nothing resolves.
+      # --db wins → else --project resolved via ProjectRegistry#find (exact short id
+      # → exact dir slug → exact display name → unique id-prefix, all
+      # case-insensitive) → else the most-recently-active project. Aborts when
+      # nothing resolves. Routing through #find is what lets a read command finally
+      # select by slug/id, not display name alone (parity with MCP --project).
       private def self.resolve_read_project(project_name : String?, db_path : String?) : Project
         if path = db_path
           abort "gori run: --db is not a readable file: #{path}" unless File.file?(path)
           return Project.new(File.basename(File.dirname(path)), path)
         end
-        projects = ProjectRegistry.new(Paths.projects_dir).list
+        registry = ProjectRegistry.new(Paths.projects_dir)
         if name = project_name
-          found = projects.find { |pr| pr.name.downcase == name.downcase }
-          abort "gori run: no project named '#{name}'#{projects.empty? ? "" : " (have: #{projects.map(&.name).join(", ")})"}" unless found
-          return found
+          if found = registry.find(name)
+            return found
+          end
+          projects = registry.list
+          abort "gori run: no project matching '#{name}'#{projects.empty? ? "" : " (have: #{projects.map(&.name).join(", ")})"}"
         end
+        projects = registry.list
         abort "gori run: no projects yet — capture some traffic first, or pass --db PATH" if projects.empty?
         projects.first
       end
