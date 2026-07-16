@@ -52,6 +52,20 @@ module Gori::Proxy
       loopback?(target) && (loopback?(bind) || wildcard?(bind))
     end
 
+    # True when the request LITERALLY targets gori's own listener `self_addr` — the
+    # "someone pointed a browser straight at the proxy" case that serves the self-page.
+    # Same loopback/wildcard/port-scoped test as loops_to_self? but WITHOUT the hostname-
+    # override step, so an override that happens to point a real domain at the bind still
+    # falls through to the 502 self-loop refusal (the user meant that mapped host, not the
+    # welcome page) rather than getting the landing page.
+    def self.addresses_self?(host : String, port : Int32, self_addr : {String, Int32}) : Bool
+      return false unless port == self_addr[1]
+      target = normalize_host(host)
+      bind = normalize_host(self_addr[0])
+      return true if target == bind
+      loopback?(target) && (loopback?(bind) || wildcard?(bind))
+    end
+
     private def self.normalize_host(h : String) : String
       h = h[1...-1] if h.starts_with?('[') && h.ends_with?(']') # strip IPv6 brackets
       h.downcase

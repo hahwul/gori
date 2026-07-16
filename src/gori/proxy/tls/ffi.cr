@@ -47,6 +47,11 @@ lib LibCrypto
   fun x509_get_x509_pubkey = X509_get_X509_PUBKEY(x : X509) : X509_PUBKEY
   fun i2d_x509_pubkey = i2d_X509_PUBKEY(a : X509_PUBKEY, pp : UInt8**) : Int
 
+  # DER-encode the whole certificate (for the self-serve CA download page's .der
+  # form). Like i2d_X509_PUBKEY, a null `pp` returns the length so we can size the
+  # buffer before encoding.
+  fun i2d_x509 = i2d_X509(x : X509, pp : UInt8**) : Int
+
   # PEM persistence via file BIOs (root CA only; leaves stay in memory)
   fun bio_new_file = BIO_new_file(filename : Char*, mode : Char*) : Bio*
   fun pem_write_bio_x509 = PEM_write_bio_X509(bio : Bio*, x : X509) : Int

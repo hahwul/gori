@@ -72,7 +72,8 @@ module Gori
         # targets and race issue-writes on the shared DB against the real capturer).
         probe = Probe::Analyzer.new(store, scope, probe_events, store.probe_mode, !config.insecure_upstream?)
         tunnel = Proxy::Tls::Tunnel.new(ca, verify_upstream: !config.insecure_upstream?,
-          rewriter: rules, interceptor: interceptor, host_overrides: host_overrides)
+          rewriter: rules, interceptor: interceptor, host_overrides: host_overrides,
+          serve_landing: Settings.serve_landing?)
         proxy = Proxy::Server.new(config.listen, config.port, sink, tls: tunnel,
           rewriter: rules, interceptor: interceptor, host_overrides: host_overrides)
         # Per-PROJECT capture lock decides whether THIS instance captures. A 2nd
@@ -151,6 +152,14 @@ module Gori
       @config.insecure_upstream = !verify
       @tunnel.verify_upstream = verify
       @probe.verify_upstream = verify
+    end
+
+    # Flip the direct-access info page live (settings:network toggle). Pushed to the
+    # capture proxy's TLS tunnel, which ClientConn reads per request via the TlsMitm
+    # seam — so the next direct hit picks it up with no restart. Global; the persisted
+    # Settings.serve_landing is the source of truth across restarts.
+    def set_serve_landing(enabled : Bool) : Nil
+      @tunnel.serve_landing = enabled
     end
 
     def capturing? : Bool

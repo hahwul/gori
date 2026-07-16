@@ -75,6 +75,13 @@ module Gori::Proxy::Tls
       File.read(@ca_cert_path)
     end
 
+    # DER bytes of the root certificate, for the self-serve CA download page's .der
+    # form. Encoded from the live in-memory cert (so it tracks regenerate!/import!),
+    # unlike ca_cert_pem which reads the on-disk file.
+    def ca_cert_der : Bytes
+      @cert.to_der
+    end
+
     # Regenerate the root CA in place: mint a brand-new self-signed root, persist
     # it over the existing PEM files, and drop the per-host leaf cache so every
     # subsequent connection is signed by the NEW root. The Tunnel/proxy hold THIS

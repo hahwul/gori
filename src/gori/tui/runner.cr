@@ -2440,7 +2440,7 @@ module Gori::Tui
         # rest just persist (the value is read live or only matters next session).
         msg = @settings_view.save
         @toast = case @settings_view.section
-                 when :network then apply_settings(msg).tap { @session.set_verify_upstream(Settings.verify_upstream?); project_controller.refresh_network } # push the verify toggle to the live proxy/probe, then re-sync the Project pane's inherited fields to the new global
+                 when :network then apply_settings(msg).tap { @session.set_verify_upstream(Settings.verify_upstream?); @session.set_serve_landing(Settings.serve_landing?); project_controller.refresh_network } # push the verify + info-page toggles to the live proxy/probe, then re-sync the Project pane's inherited fields to the new global
                  when :theme   then apply_theme(msg)
                  when :layout  then apply_layout(msg)
                  else               msg

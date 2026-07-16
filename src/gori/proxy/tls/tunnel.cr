@@ -21,10 +21,34 @@ module Gori::Proxy::Tls
     # the next tunnelled connection picks up the change.
     property? verify_upstream : Bool
 
+    # Live-mutable too: Session#set_serve_landing flips whether a direct browser hit to the
+    # listener gets the gori welcome + CA-download page (vs the 502 self-loop refusal). Read
+    # per-request in ClientConn via the TlsMitm seam below, so the next request picks it up.
+    property? serve_landing : Bool
+
     def initialize(@ca : CertAuthority, @verify_upstream : Bool = true,
                    @rewriter : Proxy::HeadRewriter? = nil,
                    @interceptor : Gori::Interceptor? = nil,
-                   @host_overrides : Gori::HostOverrides? = nil)
+                   @host_overrides : Gori::HostOverrides? = nil,
+                   @serve_landing : Bool = true)
+    end
+
+    # TlsMitm seam: hand the connection loop the root CA (for the self-serve download
+    # page) without coupling it to the FFI CertAuthority type.
+    def ca_cert_pem : String?
+      @ca.ca_cert_pem
+    end
+
+    def ca_cert_der : Bytes?
+      @ca.ca_cert_der
+    end
+
+    def ca_cert_path : String?
+      @ca.ca_cert_path
+    end
+
+    def ca_spki_sha256 : String?
+      @ca.spki_sha256_base64
     end
 
     def intercept(host : String, port : Int32, client : IO, sink : Proxy::FlowSink) : Nil
@@ -35,7 +59,7 @@ module Gori::Proxy::Tls
       # them. Sandbox forces h1 for EVERY MITM'd host so the per-request block always runs;
       # out-of-scope, sandbox-off, intercept-off, rule-less hosts keep the fast h2 relay.
       advertise_h2 = !(@interceptor.try(&.sandbox_enabled?) ||
-        @interceptor.try(&.intercepts_host?(host)) || @rewriter.try(&.active?))
+                       @interceptor.try(&.intercepts_host?(host)) || @rewriter.try(&.active?))
       server_ctx = @ca.context_for(host, advertise_h2: advertise_h2)
       # sync_close: true is REQUIRED, not cosmetic. The h2/ws relays tear down by
       # closing the socket the *other* pump fiber is mid-read on, to unblock it.
