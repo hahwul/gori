@@ -12,6 +12,11 @@ require "./passive/auth"
 require "./passive/graphql"
 require "./passive/ws_payloads"
 require "./passive/secrets"
+require "./passive/js_scan"
+require "./passive/dom_xss"
+require "./passive/dom_clobbering"
+require "./passive/prototype_pollution"
+require "./passive/post_message"
 require "./custom_rule"
 
 module Gori
@@ -35,6 +40,10 @@ module Gori
         Auth.new,
         GraphqlIntrospection.new,
         WsPayloads.new,
+        DomXss.new,
+        DomClobbering.new,
+        PrototypePollution.new,
+        PostMessage.new,
       ] of Rule
 
       # WS-only subset used when a flow was already fully analyzed and new WebSocket frames arrive.

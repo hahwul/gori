@@ -1,6 +1,7 @@
 require "../../store"
 require "../../proxy/codec/http1"
 require "../../proxy/codec/content_decode"
+require "./js_scan"
 
 module Gori
   module Probe
@@ -11,6 +12,9 @@ module Gori
       # Optional `ws_messages` feeds the WebSocket payload rule (empty for plain HTTP).
       class Context
         BODY_CAP = 64 * 1024 # per-side ceiling on body text fed to the string scans
+        # A larger ceiling used ONLY by the client-side rules: DOM sinks in real minified SPA
+        # bundles routinely sit past the 64 KiB body_text prefix, so those rules decode more.
+        CLIENT_BODY_CAP = 256 * 1024
 
         getter detail : Store::FlowDetail
         getter ws_messages : Array(Store::WsMessage)
@@ -21,6 +25,10 @@ module Gori
         @url : String?
         @body_text : String?
         @body_text_done = false
+        @client_body_text : String?
+        @client_body_text_done = false
+        @client_scripts : Array(String)?
+        @client_code : Array(String)?
 
         def initialize(@detail : Store::FlowDetail, @ws_messages = [] of Store::WsMessage)
         end
@@ -66,6 +74,15 @@ module Gori
           !!content_type.try(&.downcase.includes?("text/html"))
         end
 
+        # A JavaScript response (external bundle / module), distinct from an HTML document with
+        # inline scripts. Used to gate the client-side rules alongside html?.
+        def js? : Bool
+          ct = content_type
+          return false if ct.nil?
+          low = ct.downcase
+          low.includes?("javascript") || low.includes?("ecmascript")
+        end
+
         def request_origin : String?
           req.headers.get?("Origin")
         end
@@ -97,6 +114,32 @@ module Gori
           decoded, _ = Proxy::Codec::ContentDecode.decode(@detail.response_head, @detail.response_body, BODY_CAP)
           bytes = decoded || @detail.response_body
           @body_text = (bytes && !bytes.empty?) ? String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub : nil
+        end
+
+        # Decoded, larger-capped (CLIENT_BODY_CAP), scrubbed body — computed once and shared by
+        # the client-side rules. Only materialised for an HTML or JS response (a non-document
+        # flow pays nothing); reuses the same content-decoder as body_text.
+        def client_body_text : String?
+          return @client_body_text if @client_body_text_done
+          @client_body_text_done = true
+          return @client_body_text = nil unless html? || js?
+          decoded, _ = Proxy::Codec::ContentDecode.decode(@detail.response_head, @detail.response_body, CLIENT_BODY_CAP)
+          bytes = decoded || @detail.response_body
+          @client_body_text = (bytes && !bytes.empty?) ? String.new(bytes[0, {bytes.size, CLIENT_BODY_CAP}.min]).scrub : nil
+        end
+
+        # RAW executable JS fragments (inline <script> bodies for HTML, whole body for JS),
+        # extracted once and shared. The string-literal-driven client rules (postMessage,
+        # prototype pollution) scan these so a "message"/"__proto__" string is still visible.
+        def client_scripts : Array(String)
+          @client_scripts ||= JsScan.scripts(client_body_text, html?, js?)
+        end
+
+        # The same fragments with comments and string/template literals blanked (JsScan.strip),
+        # so the DOM-XSS source->sink correlation never matches a sink or source that lived in a
+        # string or comment. Memoised so the lex runs at most once per flow.
+        def client_code : Array(String)
+          @client_code ||= client_scripts.map { |s| JsScan.strip(s) }
         end
 
         # --- region text for user-defined custom match rules ---------------------------------
