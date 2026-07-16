@@ -66,7 +66,7 @@ gori settings --edit   # open it in your editor
 
 ### Theme {#theme}
 
-gori는 13개의 내장 색상 테마(기본값은 `goridark`)를 제공하며 여러분의 JSON 테마도 지원합니다. 커맨드 팔레트(`Ctrl-P` → `settings:theme`)에서 전환하거나 `settings.json`의 `theme`을 설정하세요. [테마 가이드](/ko/guide/themes/)를 참고하세요.
+gori는 21개의 내장 색상 테마(기본값은 `goridark`)를 제공하며 여러분의 JSON 테마도 지원합니다. 커맨드 팔레트(`Ctrl-P` → `settings:theme`)에서 전환하거나 `settings.json`의 `theme`을 설정하세요. [테마 가이드](/ko/guide/themes/)를 참고하세요.
 
 ### Hotkeys {#hotkeys}
 
