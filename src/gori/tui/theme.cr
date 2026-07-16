@@ -405,10 +405,10 @@ module Gori::Tui
       yellow: Color.from_hex("#e5c07b"),        # 4xx
       red: Color.from_hex("#e2757e"),           # 5xx / error (lifted, 4.7:1)
       orange: Color.from_hex("#d19a66"),
-      syn_header: Color.from_hex("#61afef"),    # header/field names, JSON keys, tag names (blue)
-      syn_string: Color.from_hex("#98c379"),    # quoted strings (green)
-      syn_number: Color.from_hex("#d19a66"),    # numbers, tag attribute names (orange)
-      syn_literal: Color.from_hex("#c678dd"),   # true / false / null (purple)
+      syn_header: Color.from_hex("#61afef"),  # header/field names, JSON keys, tag names (blue)
+      syn_string: Color.from_hex("#98c379"),  # quoted strings (green)
+      syn_number: Color.from_hex("#d19a66"),  # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#c678dd"), # true / false / null (purple)
     )
 
     # The Kanagawa (Wave) palette, after Hokusai's Great Wave: a sumi-ink canvas
@@ -457,10 +457,10 @@ module Gori::Tui
       yellow: Color.from_hex("#d29922"),        # 4xx
       red: Color.from_hex("#f85149"),           # 5xx / error
       orange: Color.from_hex("#ffa657"),
-      syn_header: Color.from_hex("#79c0ff"),    # header/field names, JSON keys, tag names (constant blue)
-      syn_string: Color.from_hex("#a5d6ff"),    # quoted strings (GitHub's light-blue strings)
-      syn_number: Color.from_hex("#ffa657"),    # numbers, tag attribute names (orange)
-      syn_literal: Color.from_hex("#d2a8ff"),   # true / false / null (purple)
+      syn_header: Color.from_hex("#79c0ff"),  # header/field names, JSON keys, tag names (constant blue)
+      syn_string: Color.from_hex("#a5d6ff"),  # quoted strings (GitHub's light-blue strings)
+      syn_number: Color.from_hex("#ffa657"),  # numbers, tag attribute names (orange)
+      syn_literal: Color.from_hex("#d2a8ff"), # true / false / null (purple)
     )
 
     # The classic Zenburn palette: the famously easy-on-the-eyes mid-grey canvas
@@ -483,10 +483,10 @@ module Gori::Tui
       yellow: Color.from_hex("#f0dfaf"),        # 4xx
       red: Color.from_hex("#dca3a3"),           # 5xx / error (red+1, 4.9:1 — the base rose is 4.1)
       orange: Color.from_hex("#dfaf8f"),
-      syn_header: Color.from_hex("#93e0e3"),    # header/field names, JSON keys, tag names (function cyan)
-      syn_string: Color.from_hex("#dca3a3"),    # quoted strings (zenburn's rose strings)
-      syn_number: Color.from_hex("#dfaf8f"),    # numbers, tag attribute names (variable orange)
-      syn_literal: Color.from_hex("#e39ccd"),   # true / false / null (lifted magenta, 5.0:1)
+      syn_header: Color.from_hex("#93e0e3"),  # header/field names, JSON keys, tag names (function cyan)
+      syn_string: Color.from_hex("#dca3a3"),  # quoted strings (zenburn's rose strings)
+      syn_number: Color.from_hex("#dfaf8f"),  # numbers, tag attribute names (variable orange)
+      syn_literal: Color.from_hex("#e39ccd"), # true / false / null (lifted magenta, 5.0:1)
     )
 
     # The GitHub (Primer) light palette: github.com's light mode on a pure-white
@@ -778,6 +778,15 @@ module Gori::Tui
     # Foreground for tinted marker text — near-max contrast on the subtle band across themes.
     def self.marker_fg : Color
       text_bright
+    end
+
+    # Foreground for the closing § of a marker that hides a ¦chain — a "chain attached"
+    # signal set apart from the plain marker_fg. Uses focus_gold (NOT accent): in the
+    # monochrome palettes accent == text_bright == marker_fg, so an accent § would be
+    # invisible against the rest of the marker. focus_gold is a distinct, contrast-guarded
+    # gold in every palette, and reads as actionable (matches the ^Y edit affordance).
+    def self.marker_accent : Color
+      focus_gold
     end
 
     # Linear RGB blend of `hue` toward `base` by ratio t (0 = base, 1 = hue).

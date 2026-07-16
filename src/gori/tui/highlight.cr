@@ -530,6 +530,37 @@ module Gori::Tui
       end
     end
 
+    # Delete the character ranges `ranges` (line-LOCAL char offsets, each `[a, b)`
+    # within `[0, line-char-count]`, sorted ascending and non-overlapping) from a
+    # styled line, keeping every surviving character's exact styling. The result's
+    # span texts concatenate to the source line with those ranges removed — the
+    # concealment counterpart to the module's 1:1 invariant. Used by TextArea to hide
+    # the `¦chain` segment of a §…§ marker inline while the chain stays in the editable
+    # buffer. Identity when `ranges` is empty (the hot path for every other line).
+    def self.conceal(line : Line, ranges : Array({Int32, Int32})) : Line
+      return line if ranges.empty?
+      out = Line.new
+      off = 0 # char offset of the current span's first char within the whole line
+      line.each do |span|
+        t = span.text
+        len = t.size
+        pos = 0 # local index of the next unemitted char in `t`
+        ranges.each do |(a, b)|
+          la = a - off
+          lb = b - off
+          next if lb <= pos || la >= len # range fully behind the cursor / after this span
+          la = {la, pos}.max
+          lb = {lb, len}.min
+          next if la >= lb
+          out << Span.new(t[pos...la], span.fg, span.attr) if la > pos
+          pos = lb
+        end
+        out << Span.new(t[pos...len], span.fg, span.attr) if pos < len
+        off += len
+      end
+      out
+    end
+
     # Total display width of a styled line (sum of its spans) — used to clamp a
     # horizontal scroll offset against the widest currently-visible row.
     def self.line_width(line : Line) : Int32

@@ -389,7 +389,7 @@ describe Gori::Tui::Highlight do
           spans << Highlight::Span.new(chars[i...j].join, Theme.muted)
           name = j
           while name < gt && (chars[name].ascii_letter? || chars[name].ascii_number? ||
-                chars[name] == '-' || chars[name] == '_' || chars[name] == ':')
+                              chars[name] == '-' || chars[name] == '_' || chars[name] == ':')
             name += 1
           end
           spans << Highlight::Span.new(chars[j...name].join, Theme.syn_header) if name > j
@@ -410,7 +410,7 @@ describe Gori::Tui::Highlight do
 
     # A varied byte/char pool: ASCII structural + hex + letters + multibyte (Korean, accented,
     # emoji), so tokens land next to multibyte content and near boundaries.
-    pool = %w(" \\ { } [ ] : , & = < > / - _ + . e E a Z 0 9 x   가 é 🚀 t r u e n l s f) + ["\t"]
+    pool = %w(" \\ { } [ ] : , & = < > / - _ + . e E a Z 0 9 x 가 é 🚀 t r u e n l s f) + ["\t"]
 
     it "matches the reference char tokenizer for :json / :form / :html over a fuzz corpus" do
       rng = Random.new(0x9051) # fixed seed → deterministic
@@ -432,17 +432,48 @@ describe Gori::Tui::Highlight do
         %({"이름": "값🚀", "n": -12.5e3, "ok": true}),
         %(a=가&b=é🚀&=x&flag),
         %(<div class="x">가나다</div><br/><b>té</b>),
-        %("trailing backslash\\),      # overshoot case
-        %(<unclosed tag 가),           # no '>'
-        "",                            # empty
-        "{}[],:",                      # all structural
-        "가나다라",                     # pure multibyte, no ASCII
+        %("trailing backslash\\), # overshoot case
+        %(<unclosed tag 가),       # no '>'
+        "",                       # empty
+        "{}[],:",                 # all structural
+        "가나다라",                   # pure multibyte, no ASCII
       ]
       cases.each do |raw|
         Highlight.body_styled(raw, :json).should eq(ref_json.call(raw))
         Highlight.body_styled(raw, :form).should eq(ref_form.call(raw))
         Highlight.body_styled(raw, :html).should eq(ref_markup.call(raw))
       end
+    end
+  end
+
+  describe ".conceal" do
+    red = Gori::Tui::Color.from_hex("#ff0000")
+    blue = Gori::Tui::Color.from_hex("#0000ff")
+
+    it "is the identity when there are no ranges" do
+      line = [Highlight::Span.new("hello", red)]
+      Highlight.conceal(line, [] of {Int32, Int32}).should eq(line)
+    end
+
+    it "deletes a range from a single span, preserving styling" do
+      line = [Highlight::Span.new("§data¦base64-encode§", red)]
+      res = Highlight.conceal(line, [{5, 19}]) # hide ¦base64-encode, keep the closing §
+      res.map(&.text).join.should eq("§data§")
+      res.all? { |s| s.fg == red }.should be_true
+    end
+
+    it "deletes a range spanning multiple spans, keeping each survivor's style" do
+      # "§data" (red) + "¦b64§" (blue); conceal chars [5,9) = "¦b64", keep the trailing §.
+      line = [Highlight::Span.new("§data", red), Highlight::Span.new("¦b64§", blue)]
+      res = Highlight.conceal(line, [{5, 9}])
+      res.map(&.text).join.should eq("§data§")
+      has_span?(res, "§data", red).should be_true
+      has_span?(res, "§", blue).should be_true
+    end
+
+    it "keeps the concatenation equal to the source minus the deleted chars" do
+      line = [Highlight::Span.new("abc", red), Highlight::Span.new("defg", blue)]
+      Highlight.conceal(line, [{1, 3}, {4, 6}]).map(&.text).join.should eq("a" + "dg")
     end
   end
 end

@@ -26,9 +26,21 @@ describe Gori::Tui::FuzzerView do
     view.focus_chain_pane.should be_nil # in a marker → enters the pane
     view.chain_pane_active?.should be_true
     "rot13".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+    # While the chain is focused, the ^Y modal renders over the tab with a transform preview.
+    b = MemoryBackend.new(120, 30)
+    view.render(Screen.new(b), Rect.new(0, 0, 120, 30))
+    grid = (0...30).map { |y| b.row(y) }.join("\n")
+    grid.should contain("CHAIN")
+    grid.should contain("PREVIEW")
     view.commit_chain_pane
     view.chain_pane_active?.should be_false
     view.template_text.should contain("§x¦rot13§")
+    # Committed: the ¦rot13 is concealed inline (only §x§ shows), never the full marker.
+    b2 = MemoryBackend.new(120, 30)
+    view.render(Screen.new(b2), Rect.new(0, 0, 120, 30))
+    grid2 = (0...30).map { |y| b2.row(y) }.join("\n")
+    grid2.should contain("§x§")
+    grid2.should_not contain("§x¦rot13§")
   end
 
   it "toggle_http2 flips the transport and retargets the template request-line version" do

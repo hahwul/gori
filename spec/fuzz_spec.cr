@@ -162,6 +162,16 @@ describe F::Template do
     F::Template.marked_spans(t).size.should eq(F::Template.parse(t).position_count)
   end
 
+  it "value_at / marker_start_at read the marker under the cursor (nil outside)" do
+    t = "x=§hi¦base64-encode§ y"                    # open § at 2, ¦ at 5, close § at 19
+    F::Template.value_at(t, 4).should eq("hi")      # cursor in the value
+    F::Template.value_at(t, 10).should eq("hi")     # cursor in the (concealed) chain
+    F::Template.marker_start_at(t, 10).should eq(2) # stable open-§ anchor for the ^Y commit
+    F::Template.marker_start_at(t, 19).should eq(2) # even from the closing §
+    F::Template.value_at(t, 0).should be_nil        # outside any marker
+    F::Template.marker_start_at(t, 0).should be_nil
+  end
+
   it "clear_markers drops the marker AND its chain" do
     F::Template.clear_markers("tok=§secret¦base64-encode§&x=1").should eq("tok=secret&x=1")
   end

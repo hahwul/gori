@@ -265,6 +265,22 @@ module Gori::Fuzz
       parse(text).positions[idx]?.try(&.chain)
     end
 
+    # The DEFAULT value (the `§value§` payload, unescaped) of the marker enclosing char
+    # index `cursor`, or nil when the cursor isn't in a closed marker. Feeds the ^Y chain
+    # overlay's transform preview (value → chain → output).
+    def self.value_at(text : String, cursor : Int32) : String?
+      idx = marked_spans(text).index { |(a, b)| a <= cursor && cursor <= b }
+      return nil unless idx
+      parse(text).positions[idx]?.try(&.default)
+    end
+
+    # Char index of the OPEN `§` of the marker enclosing `cursor`, or nil. The value region
+    # [open, ¦) is untouched by a chain edit, so this is a stable, edit-safe anchor to
+    # restore the caret to after the ^Y overlay rewrites the chain.
+    def self.marker_start_at(text : String, cursor : Int32) : Int32?
+      marked_spans(text).find { |(a, b)| a <= cursor && cursor <= b }.try(&.[0])
+    end
+
     # Replace/insert/remove the chain of the marker enclosing `cursor`, returning the
     # new text (nil when the cursor isn't inside a marker). An empty `chain` removes
     # the `¦…` entirely. The raw default bytes are kept verbatim; the new chain has any

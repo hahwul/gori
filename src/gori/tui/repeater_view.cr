@@ -23,6 +23,7 @@ require "../repeater/subtab_filter"
 require "../fuzz"
 require "../decoder"
 require "./chain_pane"
+require "./chain_overlay"
 require "./input_mode"
 require "./read_cursor"
 require "./text_read_state"
@@ -64,6 +65,7 @@ module Gori::Tui
       @editor.gutter = true       # line numbers in the request body (pairs with ^G)
       @editor.follow_x = true     # long lines (headers, URLs, base64 params) scroll horizontally to keep the cursor visible
       @editor.env_complete = true # `$KEY` autocomplete against the registered env vars (expanded on send)
+      @editor.chain_peek = true   # tooltip revealing the concealed ¦chain of the §…§ marker under the caret
       @search_hl = ""             # active ^F query → highlight in the response pane (request is via @editor)
       @reveal = false             # 'w' shows whitespace/CR/LF as glyphs (response from raw bytes, request via @editor)
       @reveal_lines = nil.as(Array(String)?)
@@ -135,7 +137,7 @@ module Gori::Tui
       # Content-Length resynced; otherwise the envelope is sent as captured. Sent as a
       # NORMAL request (ordinary response pane). Session-only (db_id nil) like WS/gRPC.
       @decode_kind = nil.as(Symbol?) # nil | :saml | :graphql
-      @decoded = TextArea.new         # the payload editor (lower split)
+      @decoded = TextArea.new        # the payload editor (lower split)
       @decoded.gutter = true
       @decoded.follow_x = true     # long decoded payload lines (SAML XML, GraphQL query) scroll horizontally
       @decoded.env_complete = true # env tokens re-encode into the request on send here too (WS messages, decoded payload)
@@ -269,7 +271,7 @@ module Gori::Tui
     def pane_insert?(pane : Symbol) : Bool
       case pane
       when :request then request_insert? || request_hex? || chain_pane_active?
-      when :target   then target_insert? || editing_sni?
+      when :target  then target_insert? || editing_sni?
       else               false
       end
     end
@@ -1169,9 +1171,9 @@ module Gori::Tui
     end
 
     def request_bytes : Bytes
-      return grpc_request_bytes if @grpc_mode                 # edited head + reframed body (owns its own hex buffer)
-      return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit # byte-exact; NO auto-CL in hex mode
-      return decoded_request_bytes if @decode_kind            # envelope + re-encoded decoded payload
+      return grpc_request_bytes if @grpc_mode                  # edited head + reframed body (owns its own hex buffer)
+      return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit  # byte-exact; NO auto-CL in hex mode
+      return decoded_request_bytes if @decode_kind             # envelope + re-encoded decoded payload
       return marked_request_bytes unless marker_regions.empty? # §…§ inline Decoder chains applied on send
       raw = expanded_editor_bytes
       @auto_content_length ? sync_content_length(raw) : raw
@@ -1280,22 +1282,10 @@ module Gori::Tui
       end
     end
 
-    CHAIN_PLACEHOLDER = "put the cursor in a §…§ marker, then ^Y to add an encode chain (e.g. base64-encode)"
-
     # Whether the CHAIN sub-pane currently owns keyboard input (focused + actually on the
     # request column). The controller routes body keys here when true.
     def chain_pane_active? : Bool
       @chain_focused && @focus == :request && !request_hex?
-    end
-
-    # Whether the request column is currently split into REQUEST (top) + CHAIN (bottom).
-    # Contextual (no mode): only while the cursor sits inside a §…§ marker (chain_under_cursor)
-    # or the CHAIN pane is being edited. Never in the hex/gRPC/decode/WS request modes, which
-    # own the request column with their own splits. render/hit-test/click all read this so the
-    # visible layout, the badge geometry, and the click targets stay in agreement.
-    private def chain_split_visible? : Bool
-      return false if @req_hex_edit || @grpc_mode || @decode_kind || @ws_mode
-      @chain_focused || !chain_under_cursor.nil?
     end
 
     # ^Y: drop focus into the CHAIN pane for the marker under the request cursor. Returns
@@ -1315,8 +1305,12 @@ module Gori::Tui
     # Idempotent — a no-op when the pane isn't focused (so set_focus can call it freely).
     def commit_chain_pane : Nil
       return unless @chain_focused
+      # The marker's open § (value region) is unchanged by the chain edit, so it's a stable
+      # anchor — restoring the raw cursor could land inside a now-longer hidden chain.
+      anchor = Fuzz::Template.marker_start_at(@editor.text, @chain_marker_cursor) || @chain_marker_cursor
       if updated = Fuzz::Template.set_chain(@editor.text, @chain_marker_cursor, @chain_pane.value)
         @editor.set_text(updated)
+        @editor.place_at_offset(anchor) # back into the marker (set_text reset it) → tooltip stays up
         @dirty = true
       end
       @chain_focused = false
@@ -1541,13 +1535,7 @@ module Gori::Tui
 
       # REQUEST badges: ^R:SEND is always rightmost (primary action). Then CL/PRETTY (or
       # HEX) when drawn. Decode / CHAIN splits keep chrome on the top card.
-      req_card = if @decode_kind || @ws_mode
-                   decode_split(left)[0]
-                 elsif chain_split_visible?
-                   req_chain_split(left)[0]
-                 else
-                   left
-                 end
+      req_card = (@decode_kind || @ws_mode) ? decode_split(left)[0] : left
       if req_card.w >= 2 && my == req_card.y
         label = render_request_label
         min_x = req_card.x + label.size + 4
@@ -1595,16 +1583,7 @@ module Gori::Tui
         end
         return
       end
-      if chain_split_visible? # split: click the CHAIN strip to edit it, else place the request caret
-        req, chain = req_chain_split(col)
-        if my >= chain.y
-          focus_chain_pane # binds to the marker at the current request cursor (hint ignored on a click)
-        else
-          commit_chain_pane if @chain_focused
-          @editor.click_to_cursor(req.inset(1, 1), mx, my)
-        end
-        return
-      end
+      commit_chain_pane if @chain_focused # a click outside the ^Y modal commits + dismisses it, then places the caret
       inner = col.inset(1, 1)
       if h = @req_hex_edit
         h.click_to_nibble(inner, mx, my, @scroll_req) # hex mode: place the nibble cursor
@@ -1669,7 +1648,7 @@ module Gori::Tui
         # instead of ejecting the pane whenever the response fits on screen (@scroll stays 0).
         # The non-navigable hex dump has no caret, so keep scroll-based ejection there.
       when :response then resp_navigable? ? (@resp_cursor.cy == 0 && @scroll == 0) : @scroll == 0
-      else               false
+      else                false
       end
     end
 
@@ -2093,7 +2072,7 @@ module Gori::Tui
       when :request  then !pane_insert?(:request) && @req_read.selection?
       when :response then @resp_cursor.selection?
       when :target   then !pane_insert?(:target) && @target_read.selection?
-      else               false
+      else                false
       end
     end
 
@@ -2213,48 +2192,19 @@ module Gori::Tui
         env, dec = decode_split(left)
         render_request(screen, env, req_focused && @req_pane == :envelope)
         render_decoded(screen, dec, req_focused && @req_pane == :decoded)
-      elsif chain_split_visible? # cursor is in a §…§ marker → split REQUEST (top) + CHAIN (bottom)
-        req, chain = req_chain_split(left)
-        render_request(screen, req, req_focused && !@chain_focused)
-        render_chain_pane(screen, chain, req_focused && @chain_focused)
       else
-        render_request(screen, left, req_focused)
+        render_request(screen, left, req_focused && !@chain_focused) # dimmed while the ^Y modal owns focus
       end
       render_response(screen, right, focused && @focus == :response)
+      render_chain_overlay(screen, rect) if @chain_focused # centered modal ON TOP (replaces the old split)
     end
 
-    # REQUEST (top) + CHAIN (bottom) split. The CHAIN strip is a slim 3
-    # rows normally and grows (≥8, for the autocomplete dropdown) while it's focused; the
-    # request editor keeps the rest (≥1 row).
-    private def req_chain_split(col : Rect) : {Rect, Rect}
-      want = @chain_focused ? {col.h // 2, 8}.max : 3
-      chain_h = want.clamp(1, {col.h - 1, 1}.max)
-      req_h = {col.h - chain_h, 1}.max
-      {Rect.new(col.x, col.y, col.w, req_h),
-       Rect.new(col.x, col.y + req_h, col.w, {col.h - req_h, 0}.max)}
-    end
-
-    # The CHAIN sub-pane. Focused → the live ChainPane editor (with autocomplete). Not
-    # focused → a read-only view of the chain of the marker UNDER THE CURSOR (updates as
-    # you move), or a hint when the cursor isn't in a marker — so the transform is always
-    # visible without entering the pane.
-    private def render_chain_pane(screen : Screen, rect : Rect, focused : Bool) : Nil
-      return if rect.w < 2 || rect.h < 2
-      if focused
-        @chain_pane.render(screen, rect, true, "CHAIN · #{marker_label}", CHAIN_PLACEHOLDER)
-        return
-      end
-      chain = chain_under_cursor
-      Frame.card(screen, rect, chain ? "CHAIN · #{marker_label}" : "CHAIN", bg: Theme.bg, border: pane_border(false))
-      inner = rect.inset(1, 1)
-      w = {inner.w, 1}.max
-      if chain.nil?
-        screen.text(inner.x, inner.y, "put the cursor in a §…§ marker · ^Y to edit", Theme.muted, width: w)
-      elsif chain.empty?
-        screen.text(inner.x, inner.y, "^Y to add an encode chain (e.g. base64-encode)", Theme.muted, width: w)
-      else
-        screen.text(inner.x, inner.y, chain, Theme.text, width: w)
-      end
+    # The ^Y chain editor: a centered modal over the whole tab, bound to the marker the
+    # cursor sat in when ^Y was pressed. Shows the marker's value, the editable chain, and
+    # a live transform preview. Keys route here via the controller (chain_pane_active?).
+    private def render_chain_overlay(screen : Screen, area : Rect) : Nil
+      value = Fuzz::Template.value_at(@editor.text, @chain_marker_cursor) || ""
+      ChainOverlay.render(screen, area, "CHAIN · #{marker_label}", value, @chain_pane)
     end
 
     # "§N" label for the marker under the cursor (1-based), or "§" when not in one.
@@ -2412,11 +2362,15 @@ module Gori::Tui
           @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
         else
           Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false) if @grpc_reframable
+          @editor.conceal_spans = [] of {Int32, Int32} # gRPC frames aren't §-marker HTTP text — no stale concealment
+          @editor.chain_peek_text = nil
           @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused)
         end
         return
       end
       if @ws_mode
+        @editor.conceal_spans = [] of {Int32, Int32} # WS messages aren't §-marker HTTP text — no stale concealment
+        @editor.chain_peek_text = nil
         @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused)
         return
       end
@@ -2479,12 +2433,16 @@ module Gori::Tui
     # a marker-free request yields no regions, so this is a no-op paint then.
     private def update_request_marker_tint : Nil
       bg = [] of {Int32, Int32, Color}
+      conceal = [] of {Int32, Int32}
       marker_regions.each_with_index do |region, i|
         a, sep, close = region
-        bg << {a, close + 1, Theme.marker_bg(i)}
-        bg << {sep, close + 1, Theme.elevated} if sep < close # dim the ¦chain segment
+        bg << {a, close + 1, Theme.marker_bg(i)} # band spans the whole marker; the conceal-aware paint skips hidden cells
+        conceal << {sep, close} if sep < close   # hide the ¦chain inline (kept in the buffer → tooltip + ^Y overlay)
       end
       @editor.bg_regions = bg
+      @editor.conceal_spans = conceal
+      chain = chain_under_cursor
+      @editor.chain_peek_text = (chain && !chain.empty?) ? chain : nil # tooltip only for a concealed (non-empty) chain
     end
 
     # {open, sep, close} marker regions cached on the editor revision — update_request_marker_tint

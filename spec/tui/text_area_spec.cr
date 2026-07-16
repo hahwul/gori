@@ -19,7 +19,81 @@ private def render_peek(text : String, cx : Int32, cursor : Bool, peek : Bool) :
   backend
 end
 
+# Render `text` with the given conceal spans and caret column, returning the screen.
+private def render_concealed(text : String, conceal : Array({Int32, Int32}), cx : Int32 = 0) : MemoryBackend
+  ta = Gori::Tui::TextArea.new(text)
+  ta.conceal_spans = conceal
+  ta.move(0, cx)
+  backend = MemoryBackend.new(60, 8)
+  ta.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 60, 8),
+    cursor: true, highlight: :request)
+  backend
+end
+
 describe Gori::Tui::TextArea do
+  describe "display concealment (@conceal_spans)" do
+    # "q=§data¦base64-encode§ x": open § at 2, ¦ at 7, closing § at 21.
+    text = "q=§data¦base64-encode§ x"
+
+    it "hides the concealed span inline while keeping it in the buffer" do
+      backend = render_concealed(text, [{7, 21}])
+      backend.row(0).rstrip.should eq("q=§data§ x") # ¦base64-encode gone from the screen
+      # the buffer (and thus the wire bytes) still carry the full marker + chain
+    end
+
+    it "is a no-op with no conceal spans (full marker shows)" do
+      backend = render_concealed(text, [] of {Int32, Int32})
+      backend.row(0).rstrip.should eq(text)
+    end
+
+    it "treats a concealed run as atomic on horizontal move (one keypress each way, no hidden rest)" do
+      # run [7,21) = ¦base64-encode; the closing § is at index 21, the trailing " x" after it.
+      ta = TextArea.new(text)
+      ta.conceal_spans = [{7, 21}]
+      ta.move(0, 7) # left edge of the run (offset 7), on the visible value
+      ta.cx.should eq(7)
+      ta.move(0, 1)       # right: skips the whole run AND the closing § in one press
+      ta.cx.should eq(22) # past the § (b+1) — NOT 21, where a backspace would hit a hidden byte
+      ta.move(0, -1)      # left: back across it in one press
+      ta.cx.should eq(7)
+    end
+
+    it "never lets an edit at the run boundary touch a hidden byte" do
+      ta = TextArea.new(text)
+      ta.conceal_spans = [{7, 21}]
+      ta.move(0, 7) # the only legal rest at the value/chain seam is on the VISIBLE value side
+      ta.backspace  # deletes the last value char, never a concealed chain byte
+      ta.text.should eq("q=§dat¦base64-encode§ x")
+    end
+
+    it "keeps concealment from corrupting the buffer text" do
+      ta = TextArea.new(text)
+      ta.conceal_spans = [{7, 21}]
+      ta.text.should eq(text) # concealment is display-only
+    end
+
+    it "bands the visible marker and accents the closing § (chain-attached signal)" do
+      # Displayed "q=§data§ x": § at col 2, data 3..6, closing § at col 7.
+      ta = TextArea.new(text)
+      ta.conceal_spans = [{7, 21}]
+      ta.bg_regions = [{2, 22, Theme.marker_bg(0)}] # whole marker; the conceal-aware paint skips hidden cells
+      b = MemoryBackend.new(60, 8)
+      ta.render(Screen.new(b), Rect.new(0, 0, 60, 8), cursor: false, highlight: :request)
+      b.row(0).rstrip.should eq("q=§data§ x")
+      # The band bg covers the visible marker cells only (cols 2..7), not the surrounding text.
+      b.bg_at(2, 0).should eq(Theme.marker_bg(0))
+      b.bg_at(7, 0).should eq(Theme.marker_bg(0))
+      b.bg_at(0, 0).should_not eq(Theme.marker_bg(0)) # "q" before the marker
+      b.bg_at(8, 0).should_not eq(Theme.marker_bg(0)) # space after the marker
+      # The closing § is accented (chain attached); the opening § keeps plain marker_fg.
+      b.fg_at(7, 0).should eq(Theme.marker_accent)
+      b.fg_at(2, 0).should eq(Theme.marker_fg)
+      # The accent MUST differ from marker_fg or the signal is invisible (in monochrome
+      # palettes accent == text_bright == marker_fg, which is exactly the trap to avoid).
+      Theme.marker_accent.should_not eq(Theme.marker_fg)
+    end
+  end
+
   describe "#home / #end_of_line" do
     it "jumps the caret to the start / end of the current line (insert lands there)" do
       ta = TextArea.new("abc")
@@ -67,29 +141,29 @@ describe Gori::Tui::TextArea do
 
     it "reverts a newline split and a subsequent line-join independently (multi-line ops)" do
       ta = TextArea.new("hello world")
-      ta.move(0, 5)        # caret after "hello"
-      ta.insert_newline    # -> "hello\n world"
+      ta.move(0, 5)     # caret after "hello"
+      ta.insert_newline # -> "hello\n world"
       ta.text.should eq("hello\n world")
-      ta.backspace         # join back -> "hello world"
+      ta.backspace # join back -> "hello world"
       ta.text.should eq("hello world")
-      ta.undo              # undo the join -> split again
+      ta.undo # undo the join -> split again
       ta.text.should eq("hello\n world")
-      ta.undo              # undo the split -> original
+      ta.undo # undo the split -> original
       ta.text.should eq("hello world")
     end
 
     it "keeps earlier snapshots intact after editing a restored buffer (no shared-array corruption)" do
       ta = TextArea.new("a\nb\nc")
       ta.end_of_line
-      ta.insert('X')       # "aX\nb\nc"
-      ta.insert('Y')       # "aXY\nb\nc"
-      ta.undo              # back to "aX\nb\nc"
+      ta.insert('X') # "aX\nb\nc"
+      ta.insert('Y') # "aXY\nb\nc"
+      ta.undo        # back to "aX\nb\nc"
       ta.text.should eq("aX\nb\nc")
-      ta.insert('Z')       # edit the restored buffer -> "aXZ\nb\nc"
+      ta.insert('Z') # edit the restored buffer -> "aXZ\nb\nc"
       ta.text.should eq("aXZ\nb\nc")
-      ta.undo              # the Z edit
+      ta.undo # the Z edit
       ta.text.should eq("aX\nb\nc")
-      ta.undo              # the X edit -> original
+      ta.undo # the X edit -> original
       ta.text.should eq("a\nb\nc")
     end
   end

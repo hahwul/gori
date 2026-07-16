@@ -1,6 +1,5 @@
 require "./screen"
 require "./theme"
-require "./frame"
 require "./decoder_view" # ChainComplete lives here
 require "../decoder"
 
@@ -61,19 +60,18 @@ module Gori::Tui
       true
     end
 
-    def render(screen : Screen, rect : Rect, focused : Bool, header : String, placeholder : String) : Nil
-      return if rect.w < 2 || rect.h < 2
-      Frame.card(screen, rect, header, bg: Theme.bg, border: Frame.pane_border(focused))
-      inner = rect.inset(1, 1)
-      if @chain.empty? && !focused
-        screen.text(inner.x, inner.y, placeholder, Theme.muted, width: {inner.w, 1}.max)
-      else
-        fg = focused ? Theme.text_bright : Theme.text
-        screen.input_line(inner.x, inner.y, @chain, @caret, @pre, fg, Theme.bg, width: {inner.w, 1}.max)
-      end
-      # Dropdown renders DOWNWARD from the input row into the pane body — the pane is
-      # enlarged while focused, so there's room (mirrors the Decoder tab).
-      @complete.render(screen, inner, rect) if focused && @complete.open?
+    # Just the editable chain line at `field` (the ^Y modal composes its own frame + a
+    # transform preview around it, so it can't use `render`'s card). Caret + IME preedit
+    # ride along; `bg` is the card's fill so the field blends into the modal.
+    def render_input(screen : Screen, field : Rect, focused : Bool, bg : Color = Theme.panel) : Nil
+      fg = focused ? Theme.text_bright : Theme.text
+      screen.input_line(field.x, field.y, @chain, @caret, @pre, fg, bg, width: {field.w, 1}.max)
+    end
+
+    # The converter autocomplete dropdown for the modal — drawn LAST (over the preview) so
+    # an open completion list is never hidden behind it. `bounds` clamps it to the card.
+    def render_dropdown(screen : Screen, field : Rect, bounds : Rect) : Nil
+      @complete.render(screen, field, bounds) if @complete.open?
     end
 
     # --- editing primitives ---------------------------------------------------

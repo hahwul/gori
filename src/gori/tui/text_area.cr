@@ -8,6 +8,7 @@ require "./search_hi"
 require "./reveal"
 require "./env_complete"
 require "./env_peek"
+require "./chain_peek"
 
 module Gori::Tui
   # A minimal multi-line text editor for inline editing (e.g. the Repeater
@@ -37,10 +38,10 @@ module Gori::Tui
       @styled_kind = nil.as(Symbol?)
       @styled_rev = Theme.revision
       @styled_env_rev = Env.highlight_rev
-      @gutter = false # left line-number gutter (on for the Repeater request body)
-      @search_hl = "" # active ^F query → matches highlighted in render
-      @reveal = false # show whitespace (space ·, tab →) instead of syntax colours
-      @edits = 0      # monotonic content-change counter — cheap cache key for owners
+      @gutter = false          # left line-number gutter (on for the Repeater request body)
+      @search_hl = ""          # active ^F query → matches highlighted in render
+      @reveal = false          # show whitespace (space ·, tab →) instead of syntax colours
+      @edits = 0               # monotonic content-change counter — cheap cache key for owners
       @lc_lines = [] of String # downcased lines for ^F search, memoized on @edits
       @lc_lines_rev = -1
       # Opt-in background tints: [start, end) FULL-buffer char offsets + colour, painted
@@ -48,6 +49,13 @@ module Gori::Tui
       # except the Fuzzer template — Repeater/Notes never set it, so they're unaffected. The
       # widget knows nothing about §-markers; the owner supplies offsets + resolved colours.
       @bg_regions = [] of {Int32, Int32, Color}
+      # Opt-in DISPLAY concealment: [start, end) FULL-buffer char offsets hidden from the
+      # rendered line while kept verbatim in the buffer (so `to_bytes`/send are unchanged).
+      # Empty for every editor except the Repeater/Fuzzer request editors, which hide the
+      # `¦chain` segment of a §…§ marker (only `§value§` shows; the chain rides a tooltip +
+      # the ^Y overlay). All column math (caret, click, h-scroll, marker band) is remapped
+      # to the concealed line; when empty the widget is byte-for-byte unchanged.
+      @conceal_spans = [] of {Int32, Int32}
       @undo_stack = [] of UndoState
       # Opt-in `$ENV` autocomplete popup (nil = disabled). Enabled only on the outbound
       # request editors (Repeater request, Fuzzer template) where env tokens are expanded on
@@ -57,6 +65,11 @@ module Gori::Tui
       # request editors get it. Shows the resolved value of a COMPLETE `$KEY` token under
       # the caret (NORMAL or INSERT) once the autocomplete dropdown isn't offering matches.
       @env_peek = nil.as(EnvPeek?)
+      # Opt-in chain tooltip (nil = disabled). Paired with @conceal_spans on the request
+      # editors: reveals the hidden ¦chain of the §…§ marker under the caret. @chain_peek_text
+      # is fed by the owner each frame (nil = caret not in a chained marker → no tooltip).
+      @chain_peek = nil.as(ChainPeek?)
+      @chain_peek_text = nil.as(String?)
       set_text(text)
     end
 
@@ -64,6 +77,7 @@ module Gori::Tui
     setter search_hl : String
     setter reveal : Bool
     setter bg_regions : Array({Int32, Int32, Color})
+    setter conceal_spans : Array({Int32, Int32})
     # Enable horizontal cursor-following (the Project description); off everywhere
     # else, so those editors keep @xscroll == 0 and their hot render path unchanged.
     setter follow_x : Bool
@@ -84,6 +98,9 @@ module Gori::Tui
       @styled = nil
       @edits += 1
       @undo_stack.clear
+      # Drop stale conceal offsets — they index the OLD buffer; the owner re-feeds fresh
+      # ones next render. Guards any move/place between now and that render.
+      @conceal_spans = [] of {Int32, Int32} unless @conceal_spans.empty?
       env_complete_close
     end
 
@@ -201,23 +218,25 @@ module Gori::Tui
         @cy = (@cy + dr).clamp(0, @lines.size - 1)
         @cx = @cx.clamp(0, @lines[@cy].size)
       end
-      return if dc == 0
-      @cx += dc
-      if @cx < 0
-        if @cy > 0
-          @cy -= 1
-          @cx = @lines[@cy].size
-        else
-          @cx = 0
-        end
-      elsif @cx > @lines[@cy].size
-        if @cy < @lines.size - 1
-          @cy += 1
-          @cx = 0
-        else
-          @cx = @lines[@cy].size
+      if dc != 0
+        @cx += dc
+        if @cx < 0
+          if @cy > 0
+            @cy -= 1
+            @cx = @lines[@cy].size
+          else
+            @cx = 0
+          end
+        elsif @cx > @lines[@cy].size
+          if @cy < @lines.size - 1
+            @cy += 1
+            @cx = 0
+          else
+            @cx = @lines[@cy].size
+          end
         end
       end
+      snap_cx_out_of_conceal(dc) unless @conceal_spans.empty? # never rest on a hidden ¦chain char
       refresh_env_complete
     end
 
@@ -253,7 +272,13 @@ module Gori::Tui
       gw = @gutter ? {Gutter.width(@lines.size), rect.w}.min : 0
       # + @xscroll: the click lands at display column (mx - content_x) WITHIN the
       # visible window, which is @xscroll columns into the full line.
-      @cx = Screen.column_for(@lines[@cy], mx - (rect.x + gw) + @xscroll)
+      target = mx - (rect.x + gw) + @xscroll
+      line = @lines[@cy]
+      cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
+      # On a concealed line the click column is in concealed space; map it back through
+      # the hidden runs so a click never lands the caret on an unseen ¦chain char.
+      @cx = (cr && !cr.empty?) ? concealed_col_to_raw(line, cr, target) : Screen.column_for(line, target)
+      snap_cx_out_of_conceal(0) # a click on the closing-§ column resolves to it; nudge to a legal rest
       env_complete_close
     end
 
@@ -316,6 +341,21 @@ module Gori::Tui
       off + @cx.clamp(0, @lines[@cy].size)
     end
 
+    # Inverse of cursor_offset: place the caret at a flat char offset into the LF-joined
+    # buffer. Used to restore the caret to a §…§ marker after a set_text that rebuilt the
+    # buffer (e.g. committing the ^Y chain edit) so the marker tooltip keeps showing.
+    def place_at_offset(offset : Int32) : Nil
+      off = {offset, 0}.max
+      cy = 0
+      while cy < @lines.size - 1 && off > @lines[cy].size
+        off -= @lines[cy].size + 1
+        cy += 1
+      end
+      @cy = cy
+      @cx = off.clamp(0, @lines[cy].size)
+      env_complete_close
+    end
+
     # ^F search: 0-based indices of lines containing `query` (case-insensitive). The
     # downcased lines are cached on @edits, so each keystroke of an incremental search (and
     # the re-scans on drain/poll while the prompt is open) reuses them instead of allocating a
@@ -355,14 +395,20 @@ module Gori::Tui
       # opt-in bg_regions consumer (the Fuzzer template) pays the O(@scroll) prefix sum;
       # Repeater/Notes (no regions) skip it so their hot path is unchanged.
       line_off = 0
-      (0...@scroll).each { |k| line_off += @lines[k].size + 1 } unless @bg_regions.empty? # +1 for '\n'
-      caret_cell = nil.as({Int32, Int32}?) # the drawn caret's screen cell — anchors the env-complete popup
+      (0...@scroll).each { |k| line_off += @lines[k].size + 1 } unless @bg_regions.empty? && @conceal_spans.empty? # +1 for '\n'
+      caret_cell = nil.as({Int32, Int32}?)                                                                         # the drawn caret's screen cell — anchors the env-complete popup
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= @lines.size
         Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: li == @cy) if @gutter
         line = @lines[li]
-        if @xscroll > 0
+        # Concealed lines (a §…§ marker with a hidden ¦chain) go through a dedicated draw:
+        # delete the concealed chars from the styled line, then h-scroll-slice + draw. The
+        # IME-preedit caret line is left raw (its columns shift with the composing text).
+        cr = (@conceal_spans.empty? || (li == @cy && !@preedit.empty?)) ? nil : line_conceal(line_off, line.size)
+        if cr && !cr.empty? && !@reveal
+          draw_concealed_line(screen, cx0, rect.y + i, li, line, styled, cr, cw)
+        elsif @xscroll > 0
           draw_scrolled(screen, cx0, rect.y + i, li, line, styled, cw)
         elsif @reveal
           Highlight.draw(screen, cx0, rect.y + i, Reveal.styled(line, false, cw), width: cw)
@@ -391,7 +437,7 @@ module Gori::Tui
         # Marker tint UNDER search/cursor — skip the IME-preedit line (its columns are
         # shifted by the composing text, which isn't in `line`). paint_bg_regions itself
         # no-ops when there are no regions or in reveal mode.
-        paint_bg_regions(screen, cx0, rect.y + i, line_off, line, cw) unless li == @cy && !@preedit.empty?
+        paint_bg_regions(screen, cx0, rect.y + i, line_off, line, cw, cr) unless li == @cy && !@preedit.empty?
         line_off += line.size + 1 # advance BEFORE the cursor `next` so it can't desync
         unless @search_hl.empty?
           # Mark on the visible (left-sliced) text so the highlight columns line up
@@ -406,15 +452,20 @@ module Gori::Tui
         # column_width (not display_width): a raw control char in the prefix occupies a
         # cell and click-to-cursor counts it, so the caret must too — else it sits one
         # column left of the real position and paints over a glyph.
-        prefix_w = Screen.column_width(line[0, @cx])
+        prefix_w = (cr && !cr.empty?) ? concealed_col(line, cr, @cx) : Screen.column_width(line[0, @cx])
         preedit_w = Screen.display_width(@preedit)
         cxs = cx0 + prefix_w + preedit_w - @xscroll
         if cxs >= cx0 && cxs < cx0 + cw
           caret_cell = {cxs, rect.y + i}
           if cursor
             screen.cursor(cxs, rect.y + i)
-            cgw = [Screen.display_width((@preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]).to_s), 1].max
-            ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
+            # The cell under the block caret is the first VISIBLE glyph at/after @cx: on a
+            # concealed line the raw char there may be a hidden `¦chain` byte, so skip past
+            # any concealed run to the glyph the user actually sees (the closing §).
+            r = @cx
+            cr.each { |(a, b)| r = b if r >= a && r < b } if cr && !cr.empty?
+            ch = @preedit.empty? ? (r < line.size ? line[r] : ' ') : @preedit[0]
+            cgw = [Screen.display_width(ch.to_s), 1].max
             (0...cgw).each do |off|
               break if cxs + off >= cx0 + cw # a wide-glyph caret at the last column must not spill its 2nd cell onto the pane border
               cch = (off == 0 ? ch : ' ')
@@ -439,6 +490,8 @@ module Gori::Tui
       if cursor && (cc = caret_cell) && ec
         ec.render(screen, cc[0], cc[1], rect)
       end
+      # Chain tooltip takes precedence over the env peek (a §…§ marker is never also a $KEY).
+      return if render_chain_peek(screen, caret_cell, rect, cursor, peek, ec)
       ep = @env_peek
       return unless ep
       # Suppress the peek only while the autocomplete dropdown is ACTUALLY on screen (insert
@@ -453,6 +506,25 @@ module Gori::Tui
       end
     end
 
+    # The chain tooltip pass: when the caret sits in a chained §…§ marker (owner-fed via
+    # @chain_peek_text) and the editor is focused, reveal the concealed chain at the caret
+    # and suppress the env peek. Returns true when it took over (the caller then skips the
+    # env peek). No-op (false) when the tooltip is disabled or the caret isn't in a marker.
+    private def render_chain_peek(screen : Screen, caret_cell : {Int32, Int32}?, rect : Rect,
+                                  cursor : Bool, peek : Bool, ec : EnvComplete?) : Bool
+      cp = @chain_peek
+      return false unless cp
+      chain = @chain_peek_text
+      if chain && (cursor || peek) && (cc = caret_cell) && !(cursor && ec && ec.open?)
+        cp.set(chain)
+        cp.render(screen, cc[0], cc[1], rect)
+        @env_peek.try(&.close)
+        return true
+      end
+      cp.close
+      false
+    end
+
     # Overlay the bg_regions intersecting THIS line. `off0` is the line's start offset
     # in the full LF-joined buffer. Column math mirrors SearchHi.mark (same
     # Screen.display_width as the base draw, so an ambiguous-width glyph can't drift the
@@ -462,8 +534,9 @@ module Gori::Tui
     # @xscroll and clipped to the visible window — a no-op when @xscroll == 0 (the common
     # case, since only the Fuzzer template sets bg_regions and it doesn't enable follow_x).
     private def paint_bg_regions(screen : Screen, cx0 : Int32, y : Int32, off0 : Int32,
-                                 line : String, cw : Int32) : Nil
+                                 line : String, cw : Int32, cr : Array({Int32, Int32})? = nil) : Nil
       return if @bg_regions.empty? || @reveal # opt-in; reveal rewrites the glyphs
+      return paint_bg_regions_concealed(screen, cx0, y, off0, line, cw, cr) if cr && !cr.empty?
       line_end = off0 + line.size
       @bg_regions.each do |(a, b, color)|
         next if b <= off0 || a >= line_end # region doesn't touch this line
@@ -477,6 +550,140 @@ module Gori::Tui
         next if draw_from >= draw_to
         seg = slice_left(line[la, lb - la], draw_from - start_col)
         screen.text(cx0 + draw_from, y, seg, Theme.marker_fg, color, width: draw_to - draw_from)
+      end
+    end
+
+    # Band over-paint for a line whose §…§ markers hide a ¦chain: re-draw only the VISIBLE
+    # marker glyphs (concealed chars occupy no cell) at their concealed display columns,
+    # matching what the base Highlight.draw already put on screen. The glyph right after
+    # each concealed run — the closing § — is accented so a chained marker reads distinctly
+    # from a plain one; the rest keep Theme.marker_fg.
+    private def paint_bg_regions_concealed(screen : Screen, cx0 : Int32, y : Int32, off0 : Int32,
+                                           line : String, cw : Int32, cr : Array({Int32, Int32})) : Nil
+      line_end = off0 + line.size
+      @bg_regions.each do |(a, b, color)|
+        next if b <= off0 || a >= line_end
+        la = (a - off0).clamp(0, line.size)
+        lb = (b - off0).clamp(0, line.size)
+        next if la >= lb
+        col = concealed_display_prefix(line, cr, la) # display columns before the first drawn char
+        i = la
+        while i < lb
+          hit = cr.find { |(ra, rb)| i >= ra && i < rb }
+          if hit
+            i = hit[1] # skip the hidden run in one hop
+            next
+          end
+          w = Screen.display_width(line[i].to_s)
+          sx = cx0 + col - @xscroll
+          if sx >= cx0 && sx < cx0 + cw
+            accent = cr.any? { |(_, rb)| rb == i } # char immediately after a concealed run = closing §
+            screen.text(sx, y, line[i].to_s, accent ? Theme.marker_accent : Theme.marker_fg, color, width: {cx0 + cw - sx, 1}.max)
+          end
+          col += w
+          i += 1
+        end
+      end
+    end
+
+    # --- display concealment (opt-in @conceal_spans) -------------------------
+    # Everything below no-ops (or isn't reached) when @conceal_spans is empty, so every
+    # editor but the Repeater/Fuzzer request editors keeps its exact column math.
+
+    # Line-LOCAL conceal ranges for the line spanning full-buffer offsets [off0, off0+size),
+    # sorted, clamped to [0, size). Empty when no span touches this line.
+    private def line_conceal(off0 : Int32, size : Int32) : Array({Int32, Int32})
+      out = [] of {Int32, Int32}
+      line_end = off0 + size
+      @conceal_spans.each do |(a, b)|
+        next if b <= off0 || a >= line_end
+        la = (a - off0).clamp(0, size)
+        lb = (b - off0).clamp(0, size)
+        out << {la, lb} if la < lb
+      end
+      out.sort_by!(&.[0]) if out.size > 1
+      out
+    end
+
+    # Full-buffer char offset of line `cy`'s first char (only walked when concealing).
+    private def line_start_offset(cy : Int32) : Int32
+      off = 0
+      (0...cy).each { |i| off += @lines[i].size + 1 } # +1 for the joining '\n'
+      off
+    end
+
+    # Display column (column_width semantics, matching the caret) of raw caret index `cx`
+    # on a concealed line: the width of the surviving chars in [0, cx). A cx inside a
+    # concealed run collapses to that run's start column (both edges share the cell).
+    private def concealed_col(line : String, ranges : Array({Int32, Int32}), cx : Int32) : Int32
+      cx = cx.clamp(0, line.size)
+      w = 0
+      pos = 0
+      ranges.each do |(a, b)|
+        break if a >= cx
+        w += Screen.column_width(line[pos...a]) if a > pos
+        return w if b >= cx # cx lands inside/at this run → column at the run's start
+        pos = b
+      end
+      w + Screen.column_width(line[pos...cx])
+    end
+
+    # As `concealed_col` but in display_width columns (no ≥1 floor) — used by the band
+    # over-paint so its glyph columns line up with Highlight.draw's advance.
+    private def concealed_display_prefix(line : String, ranges : Array({Int32, Int32}), cx : Int32) : Int32
+      w = 0
+      pos = 0
+      ranges.each do |(a, b)|
+        break if a >= cx
+        w += Screen.display_width(line[pos...a]) if a > pos
+        return w if b >= cx
+        pos = b
+      end
+      w + Screen.display_width(line[pos...cx])
+    end
+
+    # Inverse of `concealed_col` for click-to-cursor: the raw char index whose concealed
+    # display cell holds column `target`. Never returns an index inside a concealed run
+    # (those cells aren't drawn), so a click can't land the caret on a hidden char.
+    private def concealed_col_to_raw(line : String, ranges : Array({Int32, Int32}), target : Int32) : Int32
+      return 0 if target <= 0
+      col = 0
+      i = 0
+      n = line.size
+      while i < n
+        hit = ranges.find { |(a, b)| i >= a && i < b }
+        if hit
+          i = hit[1]
+          next
+        end
+        w = {Screen.display_width(line[i].to_s), 1}.max
+        return i if target < col + w
+        col += w
+        i += 1
+      end
+      n
+    end
+
+    # Pull @cx out of the "no-rest zone" `(a, b]` of a concealed run so the caret can't
+    # land where an edit would touch UNSEEN bytes: the interior chars AND the boundary
+    # `@cx == b` (just before the visible closing glyph, where backspace would delete the
+    # last hidden char and typing would insert into the hidden run). Only `a` (the run's
+    # left edge, on visible bytes) and `b + 1` (past the closing glyph) are legal rests —
+    # and they sit at the same column / the next column, so crossing the whole run is one
+    # keypress in each direction (no dead press). `dir` is the travel sign.
+    private def snap_cx_out_of_conceal(dir : Int32) : Nil
+      return if @conceal_spans.empty?
+      line_conceal(line_start_offset(@cy), @lines[@cy].size).each do |(a, b)|
+        next unless @cx > a && @cx <= b
+        right = {b + 1, @lines[@cy].size}.min
+        @cx = if dir > 0
+                right
+              elsif dir < 0
+                a
+              else
+                (@cx - a <= right - @cx) ? a : right # vertical move / click: nearer legal edge
+              end
+        return
       end
     end
 
@@ -508,18 +715,36 @@ module Gori::Tui
       return if cw <= 0
       line = @lines[@cy]
       pw = Screen.display_width(@preedit)
-      # column_width (not display_width) to match the actual draw at line 363: a raw
-      # control char occupies one drawn cell, so measuring it as width 0 here would let
-      # the caret render outside the window (cursor detaches / no scroll-into-view).
-      if Screen.column_width(line) + pw <= cw
+      # On a concealed line, measure in CONCEALED columns — the hidden ¦chain doesn't take
+      # cells, so the caret window must be sized/positioned against what's actually drawn.
+      cr = @conceal_spans.empty? ? nil : line_conceal(line_start_offset(@cy), line.size)
+      concealed = cr && !cr.empty?
+      # column_width (not display_width) to match the actual draw: a raw control char
+      # occupies one drawn cell, so measuring it as width 0 here would let the caret render
+      # outside the window (cursor detaches / no scroll-into-view).
+      full = concealed ? concealed_col(line, cr.not_nil!, line.size) : Screen.column_width(line)
+      if full + pw <= cw
         @xscroll = 0
         return
       end
       cx = @cx.clamp(0, line.size)
-      curx = Screen.column_width(line[0, cx]) + pw      # caret's column in the full line
+      curx = (concealed ? concealed_col(line, cr.not_nil!, cx) : Screen.column_width(line[0, cx])) + pw
       @xscroll = curx if curx < @xscroll                # caret left of the window → snap left
       @xscroll = curx - cw + 1 if curx >= @xscroll + cw # caret past the right edge → snap right
       @xscroll = 0 if @xscroll < 0
+    end
+
+    # Draw a line whose §…§ markers hide a ¦chain: delete the concealed chars from the
+    # styled line (a single plain span when highlighting is off), then h-scroll-slice and
+    # draw. The marker band + accented closing § are over-painted afterwards by
+    # paint_bg_regions (concealment-aware). Only reached when the line has conceal ranges.
+    private def draw_concealed_line(screen : Screen, cx0 : Int32, y : Int32, li : Int32,
+                                    line : String, styled : Array(Highlight::Line)?,
+                                    cr : Array({Int32, Int32}), cw : Int32) : Nil
+      base = (styled && styled[li]?) || [Highlight::Span.new(line, Theme.text)]
+      cl = Highlight.conceal(base, cr)
+      cl = Highlight.slice_left(cl, @xscroll) if @xscroll > 0
+      Highlight.draw(screen, cx0, y, cl, width: cw)
     end
 
     # The horizontally-scrolled per-line draw (only when @xscroll > 0): left-slice
@@ -559,7 +784,7 @@ module Gori::Tui
     def undo : Nil
       return if @undo_stack.empty?
       state = @undo_stack.pop
-      @lines = state.lines           # the snapshot is popped/unreferenced, so no defensive dup
+      @lines = state.lines # the snapshot is popped/unreferenced, so no defensive dup
       @lines = [""] if @lines.empty?
       @cy = state.cy.clamp(0, @lines.size - 1)
       @cx = state.cx.clamp(0, @lines[@cy].size)
@@ -575,6 +800,17 @@ module Gori::Tui
     def env_complete=(on : Bool) : Nil
       @env_complete = on ? (@env_complete || EnvComplete.new) : nil
       @env_peek = on ? (@env_peek || EnvPeek.new) : nil # the value peek rides the same opt-in
+    end
+
+    # Enable the chain tooltip (paired with @conceal_spans on the request editors).
+    def chain_peek=(on : Bool) : Nil
+      @chain_peek = on ? (@chain_peek || ChainPeek.new) : nil
+    end
+
+    # Per-frame feed: the chain of the §…§ marker under the caret, or nil when the caret
+    # isn't in a chained marker. The owner resolves it (it knows the §-marker layout).
+    def chain_peek_text=(chain : String?) : Nil
+      @chain_peek_text = chain
     end
 
     def env_completing? : Bool
