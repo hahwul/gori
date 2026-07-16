@@ -121,24 +121,6 @@ describe "Gori::Store repeater tabs (v9)" do
     end
   end
 
-  it "round-trips the V22 mark_transform flag (default off, insert + update)" do
-    with_store do |store|
-      # defaults to false when the arg is omitted (existing call sites keep working)
-      id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 0)
-      store.repeaters.find!(&.id.==(id)).mark_transform?.should be_false
-      store.get_repeater(id).not_nil!.mark_transform?.should be_false
-
-      # explicit on via insert
-      on = store.insert_repeater("https://b.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 1, mark_transform: true)
-      store.repeaters.find!(&.id.==(on)).mark_transform?.should be_true
-      store.repeaters_meta.find!(&.id.==(on)).mark_transform?.should be_true
-
-      # flip it via update
-      store.update_repeater(id, "https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, mark_transform: true)
-      store.repeaters.find!(&.id.==(id)).mark_transform?.should be_true
-    end
-  end
-
   it "round-trips the V31 tags column (default nil, set + clear)" do
     with_store do |store|
       id = store.insert_repeater("https://a.test", "GET / HTTP/1.1\r\n\r\n", false, true, nil, 0)

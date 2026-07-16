@@ -93,8 +93,6 @@ module Gori
       abstract def repeater_toggle_http2 : Nil               # flip the request transport h1↔h2 (override captured protocol)
       abstract def repeater_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
       abstract def repeater_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
-      # mark-transform mode: mark request values (§…§) and attach Decoder chains applied on send
-      abstract def repeater_toggle_mark_transform : Nil # toggle MARK mode on/off
       abstract def repeater_pretty_request : Nil
       abstract def fuzz_pretty_template : Nil
       abstract def fuzz_toggle_http2 : Nil    # flip the fuzz transport h1↔h2 (override seed protocol)

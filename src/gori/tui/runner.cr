@@ -4790,10 +4790,6 @@ module Gori::Tui
       v.toggle_resp_hex
     end
 
-    def repeater_toggle_mark_transform : Nil
-      repeater_controller.repeater_toggle_mark_transform
-    end
-
     def repeater_pretty_request : Nil
       repeater_controller.repeater_pretty_request
     end
@@ -4815,7 +4811,7 @@ module Gori::Tui
     end
 
     # ^Y: jump focus DOWN into the visible CHAIN pane (the marker under the cursor). The
-    # controller gates on MARK mode + cursor-in-marker and toasts otherwise.
+    # controller gates on the request pane + cursor-in-marker and toasts otherwise.
     def repeater_attach_chain : Nil
       repeater_controller.repeater_focus_chain_pane
     end

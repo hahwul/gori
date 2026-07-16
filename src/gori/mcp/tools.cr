@@ -549,7 +549,6 @@ module Gori
               s.field "issue_id", intprop("optional issue id to populate target/request/messages from")
               s.field "position", intprop("tab position order index (optional, defaults to appending at end)")
               s.field "sni", strprop("optional TLS Server Name Indication override")
-              s.field "mark_transform", boolprop("optional boolean indicating token substitution replacement is active (default false)")
               s.field "name", strprop("optional custom name for the repeater tab")
               s.field "ws_out_messages", arr_or_str_prop("optional array of strings (or a newline-separated string) representing outbound WebSocket messages")
             end
@@ -561,7 +560,6 @@ module Gori
               s.field "http2", boolprop("use HTTP/2")
               s.field "auto_content_length", boolprop("auto-calculate Content-Length")
               s.field "sni", strprop("TLS SNI override")
-              s.field "mark_transform", boolprop("token substitution replacement active")
               s.field "name", strprop("custom name for the repeater tab")
               s.field "ws_out_messages", arr_or_str_prop("optional array of strings (or a newline-separated string) representing outbound WebSocket messages")
             end
@@ -1451,7 +1449,6 @@ module Gori
           j.field "target", r.target
           j.field "http2", r.http2?
           j.field "auto_content_length", r.auto_content_length?
-          j.field "mark_transform", r.mark_transform?
           j.field "flow_id", r.flow_id if r.flow_id
           j.field "name", r.name if r.name
           j.field "sni", r.sni if r.sni
@@ -1902,8 +1899,7 @@ module Gori
           auto_cl: true,
           flow_id: flow_id,
           position: @store.repeaters_meta.size.to_i32,
-          sni: nil,
-          mark_transform: false
+          sni: nil
         )
         return nil unless repeater_id > 0
 
@@ -2636,7 +2632,6 @@ module Gori
         return Result.new("missing required 'request'", is_error: true) if request.nil? || request.empty?
 
         sni = str(h, "sni")
-        mark_transform = bool(h, "mark_transform") || false
 
         position = int(h, "position")
         if position.nil?
@@ -2662,8 +2657,7 @@ module Gori
           auto_cl: auto_cl,
           flow_id: flow_id,
           position: position.to_i32,
-          sni: masked_sni,
-          mark_transform: mark_transform
+          sni: masked_sni
         )
 
         return busy("failed to persist repeater (store busy or unwritable)") if id == 0
@@ -2742,12 +2736,6 @@ module Gori
 
         sni = present?(h, "sni") ? str(h, "sni") : existing.sni
 
-        mark_transform = if present?(h, "mark_transform")
-                           bool(h, "mark_transform") || false
-                         else
-                           existing.mark_transform?
-                         end
-
         masked_target = Env.mask_secrets(target)
         masked_request = Env.mask_secrets(request)
         masked_sni = sni.try { |s| Env.mask_secrets(s) }
@@ -2759,8 +2747,7 @@ module Gori
           request: masked_request,
           http2: http2,
           auto_cl: auto_cl,
-          sni: masked_sni,
-          mark_transform: mark_transform
+          sni: masked_sni
         )
 
         if present?(h, "name")
@@ -3780,7 +3767,7 @@ module Gori
         return if head.empty?
         rec = Store::RepeaterRecord.new(
           repeater_id, target, request, http2, true, flow_id, 0,
-          head, body, nil, duration_us, nil, nil, false)
+          head, body, nil, duration_us, nil, nil)
         return unless detail = Probe.detail_from_repeater(rec)
         Probe::Passive.analyze(detail).each do |d|
           @store.upsert_probe_issue(Probe.with_source(d, flow_id: flow_id, repeater_id: repeater_id))

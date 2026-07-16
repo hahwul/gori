@@ -521,7 +521,6 @@ module Gori
                     j.field "auto_content_length", r.auto_content_length?
                     j.field "flow_id", r.flow_id
                     j.field "sni", r.sni
-                    j.field "mark_transform", r.mark_transform?
                     j.field "last_error", r.response_error
                     j.field "last_duration_us", r.response_duration_us
                   end
@@ -556,7 +555,6 @@ module Gori
         auto_cl = true
         flow_id : Int64? = nil
         sni : String? = nil
-        mark_transform = false
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run repeater create [options]"
@@ -570,7 +568,6 @@ module Gori
           p.on("--no-auto-cl", "Do not auto-calculate Content-Length header") { auto_cl = false }
           p.on("--flow=ID", "Optional original flow ID this repeater stems from") { |v| flow_id = parse_flow_id(v) }
           p.on("--sni=HOST", "TLS SNI override") { |v| sni = v }
-          p.on("--mark-transform", "Enable token substitution replacement (default: false)") { mark_transform = true }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.invalid_option { |f| abort "gori run repeater create: unknown option: #{f}\n#{p}" }
           p.missing_option { |f| abort "gori run repeater create: missing value for #{f}" }
@@ -628,8 +625,7 @@ module Gori
             auto_cl: auto_cl,
             flow_id: flow_id,
             position: pos.to_i32,
-            sni: sni,
-            mark_transform: mark_transform
+            sni: sni
           )
 
           abort "gori run repeater create: failed to create repeater session" if id == 0

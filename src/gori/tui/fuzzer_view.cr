@@ -1483,7 +1483,7 @@ module Gori::Tui
       @editor.bg_regions = bg
       inner = rect.inset(1, 1)
       read_active = focused && !ins
-      @editor.render(screen, inner, cursor: ins, highlight: :request)
+      @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused)
       paint_template_read_chrome(screen, inner, read_active)
     end
 

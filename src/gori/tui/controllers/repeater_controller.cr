@@ -45,7 +45,7 @@ module Gori::Tui
         end
         view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us,
-          sni: r.sni || "", mark_transform: r.mark_transform?, ws_messages: ws_msgs)
+          sni: r.sni || "", ws_messages: ws_msgs)
         view.name = r.name                     # custom sub-tab label survives reopen
         view.tags = Repeater::Tags.parse(r.tags) # flat tags survive reopen (V31)
         seed_repeater_original(view, r.flow_id)
@@ -548,8 +548,9 @@ module Gori::Tui
       Graphql.from_flow(detail.row.target, detail.request_head, detail.request_body)
     end
 
-    # ^T is context-sensitive: a decode tab or WS tab toggles the envelope/decoded split; a MARK tab
-    # drops a single § at the cursor (Fuzzer parity — the direct-marker keystroke).
+    # ^T is context-sensitive: a decode tab or WS tab toggles the envelope/decoded split;
+    # otherwise it drops a single § marker at the cursor (Fuzzer parity — the direct-marker
+    # keystroke; wrap a value in §…§ to give it an inline Decoder chain, applied on send).
     def repeater_toggle_decoded : Nil
       view = current_view
       return @host.status("no repeater open") unless view
@@ -562,10 +563,8 @@ module Gori::Tui
         else
           @host.status(pane == :decoded ? "editing the decoded payload — edits re-encode into the request on ^R send" : "editing the request envelope (headers · target · params)")
         end
-      elsif view.mark_transform?
-        @host.status(view.insert_marker)
       else
-        @host.status("not a decode/WS flow — ^T inserts a § when MARK is on, or switches the split pane")
+        @host.status(view.insert_marker)
       end
     end
 
@@ -641,18 +640,6 @@ module Gori::Tui
       end
     end
 
-    # MARK transform mode: mark request values (§…§) and attach Decoder chains applied on
-    # send. Off by default so a plain request is byte-identical (a captured § is literal).
-    def repeater_toggle_mark_transform : Nil
-      return unless view = current_view
-      if view.request_hex? || view.grpc_mode? || view.decode_mode? || view.ws_mode?
-        @host.status("MARK transform isn't available in this request mode")
-      else
-        on = view.toggle_mark_transform
-        @host.status(on ? "MARK on · ^A mark all · ^T insert § · ^Y edit chain · ^R send" : "MARK transform: off")
-      end
-    end
-
     def repeater_pretty_request : Nil
       return unless view = current_view
       if err = view.pretty_print_request
@@ -710,7 +697,7 @@ module Gori::Tui
     end
 
     # Map a RepeaterView#chrome_hit id onto the same controller methods keyboard verbs use
-    # (toasts, guards for hex/MARK, host-level pretty).
+    # (toasts, guards for hex, host-level pretty).
     private def apply_chrome_click(view : RepeaterView, chip : Symbol) : Nil
       case chip
       when :diff
@@ -725,9 +712,6 @@ module Gori::Tui
       when :cl
         view.focus_pane(:request)
         repeater_toggle_auto_content_length
-      when :mark
-        view.focus_pane(:request)
-        repeater_toggle_mark_transform
       when :pretty_req
         view.focus_pane(:request)
         repeater_pretty_request
@@ -842,8 +826,14 @@ module Gori::Tui
     end
 
     # --- editor $ENV autocomplete + tab-as-text (request pane in insert mode) ---
+    # The CHAIN sub-pane owns Tab while it's focused (like a text editor), so ↹ accepts its
+    # converter suggestion (parity with ↵) instead of the focus ring stealing Tab to switch
+    # panes. Its own converter popup handles ↑/↓/↵/Esc via handle_chain_pane_key already.
     def editor_completing? : Bool
-      current_view.try(&.request_env_completing?) || false
+      v = current_view
+      return false unless v
+      return false if v.chain_pane_active? # CHAIN popup is routed via editor_captures_tab?/handle_editor_tab
+      v.request_env_completing?
     end
 
     def handle_editor_complete_key(ev : Termisu::Event::Key) : Bool
@@ -851,12 +841,20 @@ module Gori::Tui
     end
 
     def editor_captures_tab? : Bool
-      current_view.try(&.request_text_editing?) || false
+      v = current_view
+      return false unless v
+      v.chain_pane_active? || v.request_text_editing?
     end
 
     def handle_editor_tab(ev : Termisu::Event::Key) : Bool
-      return false unless editor_captures_tab?
-      current_view.try(&.request_tab_insert)
+      v = current_view
+      return false unless v
+      if v.chain_pane_active?
+        v.handle_chain_pane_key(ev) # popup open → accept the suggestion (like ↵); closed → commit + leave
+        return true
+      end
+      return false unless v.request_text_editing?
+      v.request_tab_insert
       true
     end
 
@@ -980,7 +978,7 @@ module Gori::Tui
       return if head.empty?
       rec = Store::RepeaterRecord.new(
         repeater_id, view.target, view.request_text, view.http2?, view.auto_content_length?,
-        flow_id, 0, head, body, nil, duration_us, view.name, view.sni_override, view.mark_transform?)
+        flow_id, 0, head, body, nil, duration_us, view.name, view.sni_override)
       return unless detail = Probe.detail_from_repeater(rec)
       @host.session.probe.scan_detail(detail, repeater_id: repeater_id)
     rescue
@@ -996,7 +994,7 @@ module Gori::Tui
       req_text = upgrade.empty? ? view.request_text : String.new(upgrade).scrub
       rec = Store::RepeaterRecord.new(
         repeater_id, view.target, req_text, false, false,
-        flow_id, 0, head, Bytes.empty, nil, result.duration_us, view.name, view.sni_override, false)
+        flow_id, 0, head, Bytes.empty, nil, result.duration_us, view.name, view.sni_override)
       return unless detail = Probe.detail_from_repeater(rec)
       # Synthetic WsMessage rows (id unused by the rule; opcode 1 = text).
       now = Time.utc.to_unix_ms * 1000
@@ -1060,7 +1058,7 @@ module Gori::Tui
         # Only re-apply when the PERSISTED request side actually changed (data_version
         # also bumps on capture/response writes, so most polls touch an identical row).
         next if v.request_side_matches?(row.target, row.request, row.http2?,
-                  row.auto_content_length?, row.mark_transform?, row.sni)
+                  row.auto_content_length?, row.sni)
         # Soft sync: request/target/flags only. Full restore() would reset focus to
         # :target and clear @result (no response BLOBs on this path) — that is the
         # "send then response vanishes / focus jumps to Target" bug.
@@ -1071,7 +1069,7 @@ module Gori::Tui
           end
         end
         v.apply_peer_request(row.target, row.request, row.http2?, row.auto_content_length?,
-          sni: row.sni || "", mark_transform: row.mark_transform?, ws_messages: ws_msgs)
+          sni: row.sni || "", ws_messages: ws_msgs)
         seed_repeater_original(v, row.flow_id) # baseline may need re-seed if it was empty
       end
 
@@ -1086,7 +1084,7 @@ module Gori::Tui
           end
         end
         view.restore(row.target, row.request, row.http2?, row.auto_content_length?,
-          sni: row.sni || "", mark_transform: row.mark_transform?, ws_messages: ws_msgs)
+          sni: row.sni || "", ws_messages: ws_msgs)
         seed_repeater_original(view, row.flow_id)
         @repeaters << RepeaterTab.new(view, row.flow_id, row.id)
       end
@@ -1214,8 +1212,7 @@ module Gori::Tui
     # reconcile key). A closing store returns 0 → nil, leaving the tab unsaved.
     private def persist_new_repeater(view : RepeaterView, flow_id : Int64?) : Int64?
       id = @host.session.store.insert_repeater(view.target, view.request_text, view.http2?,
-        view.auto_content_length?, flow_id, @repeaters.size, view.sni_override,
-        mark_transform: view.mark_transform?)
+        view.auto_content_length?, flow_id, @repeaters.size, view.sni_override)
       id == 0 ? nil : id
     end
 
@@ -1381,12 +1378,12 @@ module Gori::Tui
         # NOT ws_upgrade_bytes (env-expanded + CRLF): baking the expanded form in would
         # write secrets to the DB and defeat the reconcile guard (which compares LF text).
         @host.session.store.update_repeater(id, v.target, v.request_text, v.http2?, v.auto_content_length?,
-          v.sni_override, mark_transform: v.mark_transform?)
+          v.sni_override)
         # Raw message lines too — the store masks secrets; env tokens re-expand on send.
         @host.session.store.update_repeater_ws_messages(id, v.ws_out_texts_raw)
       else
         @host.session.store.update_repeater(id, v.target, v.request_text, v.http2?, v.auto_content_length?,
-          v.sni_override, mark_transform: v.mark_transform?)
+          v.sni_override)
       end
       v.clear_dirty
     end

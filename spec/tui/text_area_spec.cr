@@ -1,9 +1,22 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 include Gori::Tui
 
 private def env_key(k : Termisu::Input::Key)
   Termisu::Event::Key.new(k)
+end
+
+# Render `text` with the caret parked `cx` columns in and env-peek enabled, then return
+# the painted screen (cursor = INSERT mode, peek = the read-mode value-peek flag).
+private def render_peek(text : String, cx : Int32, cursor : Bool, peek : Bool) : MemoryBackend
+  ta = Gori::Tui::TextArea.new(text)
+  ta.env_complete = true # enables the paired value peek too
+  ta.move(0, cx)         # slide the caret into the token
+  backend = MemoryBackend.new(60, 8)
+  ta.render(Gori::Tui::Screen.new(backend), Gori::Tui::Rect.new(0, 0, 60, 8),
+    cursor: cursor, highlight: :request, peek: peek)
+  backend
 end
 
 describe Gori::Tui::TextArea do
@@ -155,6 +168,44 @@ describe Gori::Tui::TextArea do
       ta.env_complete = true
       ta.insert('$')
       ta.env_completing?.should be_false
+    end
+  end
+
+  describe "#env_peek ($ENV value peek)" do
+    before_each do
+      Gori::Settings.env_prefix = "$"
+      Gori::Settings.env_vars = [{"HOST", "api.test"}, {"TOKEN", "s3cr3t-value"}]
+      Gori::Settings.project_env_vars = [] of {String, String}
+    end
+
+    after_each do
+      Gori::Settings.env_vars = [] of {String, String}
+      Gori::Settings.project_env_vars = [] of {String, String}
+      Gori::Settings.env_prefix = "$"
+    end
+
+    it "reveals a complete $KEY's resolved value under the caret in NORMAL mode (peek)" do
+      # "k=$TOKEN" — caret at col 4 sits inside the TOKEN key run; not insert (cursor:false).
+      render_peek("k=$TOKEN", 4, false, true).contains?("s3cr3t-value").should be_true
+    end
+
+    it "also reveals the value in INSERT mode when the autocomplete isn't offering matches" do
+      # Caret at col 8 = end of a fully-typed unique $TOKEN → the dropdown closes, peek shows.
+      render_peek("k=$TOKEN", 8, true, false).contains?("s3cr3t-value").should be_true
+    end
+
+    it "stays hidden for an unregistered $KEY (a literal $word is just text, not a var)" do
+      # $NOPE isn't a registered var → no peek row; row 1 (below the caret) stays blank.
+      # The literal "k=$NOPE" still paints on row 0 as ordinary editor text.
+      render_peek("k=$NOPE", 4, false, true).row(1).strip.should be_empty
+    end
+
+    it "stays hidden when the pane is neither focused-insert nor peeking" do
+      render_peek("k=$TOKEN", 4, false, false).contains?("s3cr3t-value").should be_false
+    end
+
+    it "stays hidden when the caret isn't on an env token" do
+      render_peek("k=$TOKEN", 1, false, true).contains?("s3cr3t-value").should be_false
     end
   end
 end

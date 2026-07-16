@@ -40,4 +40,15 @@ describe Gori::Tui::ChainPane do
     pane.handle_key(key(Termisu::Input::Key::Up)).should be_false
     pane.handle_key(key(Termisu::Input::Key::Escape)).should be_false
   end
+
+  it "accepts the converter suggestion on Tab while the popup is open (Tab = ↵ parity)" do
+    pane = ChainPane.new
+    pane.load("")
+    "base64-en".each_char { |c| pane.handle_key(char_key(c)) } # partial → popup opens on base64-encode
+    # Popup open → Tab is OWNED (consumed) and accepts, not left for the focus ring to steal.
+    pane.handle_key(key(Termisu::Input::Key::Tab)).should be_true
+    pane.value.should eq("base64-encode > ") # accepted + chain separator, ready for the next step
+    # Popup now closed → Tab reverts to a focus-exit key (false), so there's still a way out.
+    pane.handle_key(key(Termisu::Input::Key::Tab)).should be_false
+  end
 end

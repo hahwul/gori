@@ -45,7 +45,6 @@ describe Gori::Store do
       store.@db.exec("DROP TABLE miner_sessions")                      # V19
       store.@db.exec("DROP TABLE probe_issues")                        # V20
       store.@db.exec("DROP TABLE entity_links")                        # V21
-      store.@db.exec("ALTER TABLE repeaters DROP COLUMN mark_transform") # V22 (added a column to a pre-V17 table)
       store.@db.exec("DROP INDEX idx_flows_sizes")                     # V23
       store.@db.exec("DROP INDEX idx_ws_messages_replay")               # V26 (index keeps its historical name)
       store.@db.exec("ALTER TABLE ws_messages DROP COLUMN repeater_id")  # V26
@@ -84,6 +83,7 @@ describe Gori::Store do
       store = Gori::Store.open(path)
       db = store.@db
       db.exec("ALTER TABLE repeaters RENAME TO replays")
+      db.exec("ALTER TABLE replays ADD COLUMN mark_transform INTEGER NOT NULL DEFAULT 0") # V22 col (dropped by V37 on the fresh open) — restore the faithful pre-V32 schema
       db.exec("ALTER TABLE ws_messages RENAME COLUMN repeater_id TO replay_id")
       db.exec("ALTER TABLE probe_issues RENAME COLUMN sample_repeater_id TO sample_replay_id")
       db.exec("ALTER TABLE probe_issues RENAME TO prism_issues")

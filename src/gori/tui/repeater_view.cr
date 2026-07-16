@@ -140,24 +140,24 @@ module Gori::Tui
       @inflight = false           # a repeater round-trip is outstanding — gates re-send (^R mashing)
       @diffable = false           # true only when loaded from a captured flow (has an original to diff)
       @auto_content_length = true # recompute Content-Length from the edited body on send
-      # Mark-transform mode (V22, opt-in, default off): when on, `§…§` markers in the
-      # request carry inline Decoder chains applied on send (mark a value, attach
-      # base64-encode → it's encoded on the wire). Off = byte-identical to a plain send,
-      # so a captured `§` is never reinterpreted unless the user turns this on.
-      @mark_transform = false
+      # `§…§` markers carry inline Decoder chains applied on send (mark a value, attach
+      # base64-encode → it's encoded on the wire). Always active (like the Fuzzer): a request
+      # that contains a marker region renders it on send, a marker-free request is byte-
+      # identical to a plain send. Highlighting + the CHAIN pane surface contextually — no mode.
       @marker_regions_rev = -1
       @marker_regions_cache = [] of {Int32, Int32, Int32}
       # §…§ spans + the chain under the cursor, cached on the editor revision (marked_spans)
       # and on {revision, cursor} (chain_at) — both re-join the whole buffer, so an unchanged
-      # MARK/CHAIN pane shouldn't recompute them every frame (mirrors marker_regions).
+      # request/CHAIN pane shouldn't recompute them every frame (mirrors marker_regions).
       @marker_spans_rev = -1
       @marker_spans_cache = [] of {Int32, Int32}
       @chain_rev = -1
       @chain_cursor = -1
       @chain_cache = nil.as(String?)
-      # The CHAIN sub-pane (MARK mode): a visible editor for the chain of the §…§ marker
-      # under the request cursor. @chain_focused = editing it (split enlarges + keys route
-      # there); @chain_marker_cursor remembers which marker to write back to on commit.
+      # The CHAIN sub-pane: a visible editor for the chain of the §…§ marker under the
+      # request cursor, split in only while the cursor is in a marker. @chain_focused =
+      # editing it (split enlarges + keys route there); @chain_marker_cursor remembers which
+      # marker to write back to on commit.
       @chain_pane = ChainPane.new
       @chain_focused = false
       @chain_marker_cursor = 0
@@ -491,7 +491,6 @@ module Gori::Tui
       j.field "summary", summary(80)
       j.field "http2", @http2
       j.field "auto_content_length", @auto_content_length
-      j.field "mark_transform", @mark_transform
       j.field "ws_mode", @ws_mode
       j.field "grpc_mode", @grpc_mode
       j.field "decode_mode", decode_mode?
@@ -965,10 +964,10 @@ module Gori::Tui
     def restore(target : String, request : String, http2 : Bool, auto_cl : Bool,
                 response_head : Bytes? = nil, response_body : Bytes? = nil,
                 response_error : String? = nil, response_duration_us : Int64? = nil,
-                sni : String = "", mark_transform : Bool = false,
+                sni : String = "",
                 ws_messages : Array(String)? = nil) : Nil
       @flow = nil
-      apply_request_fields(target, request, http2, auto_cl, sni, mark_transform, ws_messages)
+      apply_request_fields(target, request, http2, auto_cl, sni, ws_messages)
 
       @original_lines = [] of String
       # Rebuild the persisted result: a head (success) or an error (failed send)
@@ -996,9 +995,9 @@ module Gori::Tui
     # @result (reconcile never carries response BLOBs), so a post-send data_version
     # bump or a peer request edit looked like "send reset the response to Target".
     def apply_peer_request(target : String, request : String, http2 : Bool, auto_cl : Bool,
-                           sni : String = "", mark_transform : Bool = false,
+                           sni : String = "",
                            ws_messages : Array(String)? = nil) : Nil
-      apply_request_fields(target, request, http2, auto_cl, sni, mark_transform, ws_messages)
+      apply_request_fields(target, request, http2, auto_cl, sni, ws_messages)
       @req_hex_edit = nil
       # Leave @result / @prev_result / @focus / @scroll / @resp_mode / @original_lines alone.
       reflect_content_length_in_editor if @auto_content_length
@@ -1008,16 +1007,15 @@ module Gori::Tui
     # Normalizes empty SNI: view.sni_override is nil when blank, but older/peer rows
     # may store "" — those must compare equal or every poll re-applies needlessly.
     def request_side_matches?(target : String, request : String, http2 : Bool, auto_cl : Bool,
-                              mark_transform : Bool, sni : String?) : Bool
+                              sni : String?) : Bool
       @target == target && request_text == request &&
         @http2 == http2 && @auto_content_length == auto_cl &&
-        @mark_transform == mark_transform &&
         (sni_override || "") == (sni || "")
     end
 
     # Shared request/target/flag write used by restore (full) and apply_peer_request (soft).
     private def apply_request_fields(target : String, request : String, http2 : Bool, auto_cl : Bool,
-                                     sni : String, mark_transform : Bool,
+                                     sni : String,
                                      ws_messages : Array(String)?) : Nil
       @http2 = http2
       @target = target
@@ -1040,7 +1038,6 @@ module Gori::Tui
       end
 
       @auto_content_length = auto_cl
-      @mark_transform = mark_transform
       @loaded = true
       @dirty = false
     end
@@ -1098,7 +1095,6 @@ module Gori::Tui
       @scx = @sni.size
       @target_field = :url
       @auto_content_length = src.@auto_content_length
-      @mark_transform = src.@mark_transform
       @name = SubtabClone.copy_name(src.@name)
 
       @ws_mode = src.@ws_mode
@@ -1168,7 +1164,7 @@ module Gori::Tui
       return grpc_request_bytes if @grpc_mode                 # edited head + reframed body (owns its own hex buffer)
       return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit # byte-exact; NO auto-CL in hex mode
       return decoded_request_bytes if @decode_kind            # envelope + re-encoded decoded payload
-      return marked_request_bytes if @mark_transform          # §…§ inline Decoder chains applied on send
+      return marked_request_bytes unless marker_regions.empty? # §…§ inline Decoder chains applied on send
       raw = expanded_editor_bytes
       @auto_content_length ? sync_content_length(raw) : raw
     end
@@ -1186,22 +1182,21 @@ module Gori::Tui
       Env.expand_wire(text)
     end
 
-    # MARK-transform mode: parse the CRLF wire form as a Fuzz template and render each
-    # marked position's default through its inline Decoder chain (Template#apply_chains),
-    # then resync Content-Length as usual. Parsing the CRLF form (not @editor.text, which
-    # is LF) keeps render's output in wire form so the existing CRLF-based
-    # sync_content_length works unchanged. A chain-less `§v§` renders `v`; a failing chain
-    # passes the value through untransformed.
+    # §…§ marker send: parse the CRLF wire form as a Fuzz template and render each marked
+    # position's default through its inline Decoder chain (Template#apply_chains), then
+    # resync Content-Length as usual. Parsing the CRLF form (not @editor.text, which is LF)
+    # keeps render's output in wire form so the existing CRLF-based sync_content_length works
+    # unchanged. A chain-less `§v§` renders `v`; a failing chain passes the value through.
     private def marked_request_bytes : Bytes
       raw = render_marked(expanded_editor_bytes)
       @auto_content_length ? sync_content_length(raw) : raw
     end
 
     # Render the §…§ template in `raw` (each marked default through its inline Decoder
-    # chain), returning wire-form bytes with the markers stripped. Shared by the
-    # MARK-transform send AND the CL reflection so both derive Content-Length from the
-    # SAME rendered body — otherwise the visible header showed a CL for the raw marked
-    # text while ^R sent one for the rendered body.
+    # chain), returning wire-form bytes with the markers stripped. Shared by the marker
+    # send AND the CL reflection so both derive Content-Length from the SAME rendered body —
+    # otherwise the visible header showed a CL for the raw marked text while ^R sent one for
+    # the rendered body.
     private def render_marked(raw : Bytes) : Bytes
       tmpl = Fuzz::Template.parse(String.new(raw))
       tmpl.render(tmpl.apply_chains(tmpl.default_payloads, Decoder.shared_registry))
@@ -1252,18 +1247,6 @@ module Gori::Tui
       reflect_content_length_in_editor if @auto_content_length
     end
 
-    getter? mark_transform : Bool
-
-    # Toggle MARK-transform mode. Refused in the alternate request modes (hex / gRPC /
-    # decode / WS) where `§…§` templating doesn't apply — their request_bytes paths take
-    # precedence over the marked path anyway. Dirties so the flag persists.
-    def toggle_mark_transform : Bool
-      return @mark_transform if request_hex? || @grpc_mode || @decode_kind || @ws_mode
-      commit_chain_pane if @chain_focused # leaving MARK mode → save any pending chain edit
-      @dirty = true
-      @mark_transform = !@mark_transform
-    end
-
     def pretty_print_request : String?
       return "hex mode active" if request_hex?
       if @ws_mode && @req_pane == :decoded
@@ -1291,16 +1274,25 @@ module Gori::Tui
 
     CHAIN_PLACEHOLDER = "put the cursor in a §…§ marker, then ^Y to add an encode chain (e.g. base64-encode)"
 
-    # Whether the CHAIN sub-pane currently owns keyboard input (MARK mode + focused +
-    # actually on the request column). The controller routes body keys here when true.
+    # Whether the CHAIN sub-pane currently owns keyboard input (focused + actually on the
+    # request column). The controller routes body keys here when true.
     def chain_pane_active? : Bool
-      @mark_transform && @chain_focused && @focus == :request && !request_hex?
+      @chain_focused && @focus == :request && !request_hex?
+    end
+
+    # Whether the request column is currently split into REQUEST (top) + CHAIN (bottom).
+    # Contextual (no mode): only while the cursor sits inside a §…§ marker (chain_under_cursor)
+    # or the CHAIN pane is being edited. Never in the hex/gRPC/decode/WS request modes, which
+    # own the request column with their own splits. render/hit-test/click all read this so the
+    # visible layout, the badge geometry, and the click targets stay in agreement.
+    private def chain_split_visible? : Bool
+      return false if @req_hex_edit || @grpc_mode || @decode_kind || @ws_mode
+      @chain_focused || !chain_under_cursor.nil?
     end
 
     # ^Y: drop focus into the CHAIN pane for the marker under the request cursor. Returns
     # a hint string when it can't (surfaced by the controller), nil on success.
     def focus_chain_pane : String?
-      return "enable MARK mode first (^K)" unless @mark_transform
       return "not available in hex edit" if request_hex?
       return "move to the REQUEST pane first (↹)" unless @focus == :request
       chain = Fuzz::Template.chain_at(@editor.text, @editor.cursor_offset)
@@ -1330,10 +1322,10 @@ module Gori::Tui
       commit_chain_pane if key.escape? || key.enter? || key.tab? || key.up?
     end
 
-    # --- marking (MARK-transform mode) ---------------------------------------
-    # These mirror the Fuzzer's marking helpers but are gated on MARK mode + the REQUEST
-    # pane: a § is only special on send when MARK is on, so marking is pointless (and the
-    # tint hidden) otherwise. All delegate to the shared Fuzz::Template helpers.
+    # --- marking (§…§ Decoder-chain positions) -------------------------------
+    # These mirror the Fuzzer's marking helpers, gated on the REQUEST pane (markers are
+    # always meaningful on send now — a marked value renders through its chain). All
+    # delegate to the shared Fuzz::Template helpers.
     def auto_mark : String
       return mark_hint unless markable?
       @editor.set_text(Fuzz::Template.auto_mark(@editor.text))
@@ -1373,11 +1365,10 @@ module Gori::Tui
     end
 
     private def markable? : Bool
-      @mark_transform && @focus == :request && !request_hex?
+      @focus == :request && !request_hex?
     end
 
     private def mark_hint : String
-      return "enable MARK mode first (toggle it on)" unless @mark_transform
       return "marking isn't available in hex edit" if request_hex?
       "marking works on the REQUEST pane — ↹ to it"
     end
@@ -1403,10 +1394,10 @@ module Gori::Tui
       # whose expansion changes the body length must reflect the SENT Content-Length, or
       # the visible header goes stale and, once Auto-CL is toggled off, is sent mismatched.
       raw = expanded_editor_bytes
-      # In MARK-transform mode the CL that ^R actually sends is computed from the
+      # With §…§ markers present the CL that ^R actually sends is computed from the
       # RENDERED template (markers stripped, chains applied), not the raw marked text —
       # reflect THAT value so the visible header matches request_bytes.
-      source = @mark_transform ? render_marked(raw) : raw
+      source = marker_regions.empty? ? raw : render_marked(raw)
       synced = sync_content_length(source)
       return if synced == source
 
@@ -1540,11 +1531,11 @@ module Gori::Tui
         end
       end
 
-      # REQUEST badges: ^R:SEND is always rightmost (primary action). Then CL/MARK/
-      # PRETTY (or HEX) when drawn. Decode/MARK splits keep chrome on the top card.
+      # REQUEST badges: ^R:SEND is always rightmost (primary action). Then CL/PRETTY (or
+      # HEX) when drawn. Decode / CHAIN splits keep chrome on the top card.
       req_card = if @decode_kind || @ws_mode
                    decode_split(left)[0]
-                 elsif @mark_transform
+                 elsif chain_split_visible?
                    req_chain_split(left)[0]
                  else
                    left
@@ -1565,7 +1556,6 @@ module Gori::Tui
             badges << {:req_hex, "^X", "HEX"}
           else
             badges << {:cl, "^L", "CL"}
-            badges << {:mark, "^K", "MARK"}
             badges << {:pretty_req, "^U", "PRETTY"}
           end
         end
@@ -1597,7 +1587,7 @@ module Gori::Tui
         end
         return
       end
-      if @mark_transform # split: click the CHAIN strip to edit it, else place the request caret
+      if chain_split_visible? # split: click the CHAIN strip to edit it, else place the request caret
         req, chain = req_chain_split(col)
         if my >= chain.y
           focus_chain_pane # binds to the marker at the current request cursor (hint ignored on a click)
@@ -2215,7 +2205,7 @@ module Gori::Tui
         env, dec = decode_split(left)
         render_request(screen, env, req_focused && @req_pane == :envelope)
         render_decoded(screen, dec, req_focused && @req_pane == :decoded)
-      elsif @mark_transform # split into REQUEST (top) + CHAIN pane (bottom)
+      elsif chain_split_visible? # cursor is in a §…§ marker → split REQUEST (top) + CHAIN (bottom)
         req, chain = req_chain_split(left)
         render_request(screen, req, req_focused && !@chain_focused)
         render_chain_pane(screen, chain, req_focused && @chain_focused)
@@ -2225,7 +2215,7 @@ module Gori::Tui
       render_response(screen, right, focused && @focus == :response)
     end
 
-    # REQUEST (top) + CHAIN (bottom) split for a MARK tab. The CHAIN strip is a slim 3
+    # REQUEST (top) + CHAIN (bottom) split. The CHAIN strip is a slim 3
     # rows normally and grows (≥8, for the autocomplete dropdown) while it's focused; the
     # request editor keeps the rest (≥1 row).
     private def req_chain_split(col : Rect) : {Rect, Rect}
@@ -2307,7 +2297,7 @@ module Gori::Tui
         screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg) if bx > rect.x + label.size + 4
       end
       # XML/JSON-ish payload / WS messages → plain editing (no HTTP request/header colouring).
-      @decoded.render(screen, rect.inset(1, 1), cursor: focused, highlight: nil)
+      @decoded.render(screen, rect.inset(1, 1), cursor: focused, highlight: nil, peek: focused)
     end
 
     private def pane_border(focused : Bool, insert : Bool = false) : Color
@@ -2414,12 +2404,12 @@ module Gori::Tui
           @scroll_req = h.render(screen, rect.inset(1, 1), focused, @scroll_req)
         else
           Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false) if @grpc_reframable
-          @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request)
+          @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused)
         end
         return
       end
       if @ws_mode
-        @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request)
+        @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused)
         return
       end
       if h = @req_hex_edit
@@ -2428,12 +2418,11 @@ module Gori::Tui
         return
       end
       cl_x = Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^L", "CL", @auto_content_length)
-      mark_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^K", "MARK", @mark_transform)
-      mode_x = Frame.toggle_badge(screen, mark_x, rect.y, min_x, "^U", "PRETTY", false)
+      mode_x = Frame.toggle_badge(screen, cl_x, rect.y, min_x, "^U", "PRETTY", false)
       render_mode_badge(screen, mode_x, rect.y, min_x, ins)
-      update_request_mark_tint
+      update_request_marker_tint
       inner = rect.inset(1, 1)
-      @editor.render(screen, inner, cursor: ins, highlight: :request)
+      @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused)
       paint_request_read_chrome(screen, inner, focused && !ins)
     end
 
@@ -2477,15 +2466,10 @@ module Gori::Tui
       end
     end
 
-    # MARK-transform tinting: colour each §…§ marker in the request editor — the value in
-    # the position hue, the ¦chain segment over-painted dimmer. Off = clear the regions so
-    # a toggled-off tab paints untinted (empty = no-op paint). The MARK toggle badge itself
-    # rides the top border (see render_request).
-    private def update_request_mark_tint : Nil
-      unless @mark_transform
-        @editor.bg_regions = [] of {Int32, Int32, Color}
-        return
-      end
+    # §…§ marker tinting: colour each marker in the request editor — the value in the
+    # position hue, the ¦chain segment over-painted dimmer. Always on (like the Fuzzer):
+    # a marker-free request yields no regions, so this is a no-op paint then.
+    private def update_request_marker_tint : Nil
       bg = [] of {Int32, Int32, Color}
       marker_regions.each_with_index do |region, i|
         a, sep, close = region
@@ -2495,9 +2479,9 @@ module Gori::Tui
       @editor.bg_regions = bg
     end
 
-    # {open, sep, close} marker regions cached on the editor revision — update_request_mark_tint
-    # runs every render; the cache skips marker_regions' 2× whole-buffer `text.chars` on an
-    # unchanged request buffer.
+    # {open, sep, close} marker regions cached on the editor revision — update_request_marker_tint
+    # (and request_bytes / chain_split_visible?) read it every render; the cache skips
+    # marker_regions' 2× whole-buffer `text.chars` on an unchanged request buffer.
     private def marker_regions : Array({Int32, Int32, Int32})
       if @editor.edits != @marker_regions_rev
         @marker_regions_rev = @editor.edits
