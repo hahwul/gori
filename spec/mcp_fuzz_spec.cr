@@ -171,6 +171,39 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "always reaches a terminal state (never stuck :running) against a dead origin" do
+    # Bind then release a port so every connect is refused deterministically — the
+    # run_fuzz_job fiber must still land the job terminal (finalize_job guarantee),
+    # never leaving a poller to spin on :running forever.
+    probe = TCPServer.new("127.0.0.1", 0)
+    port = probe.local_address.port
+    probe.close
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      start = call_json(tools, "fuzz_start",
+        {"template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+         "url"            => "http://127.0.0.1:#{port}",
+         "payloads"       => %([{"list":["a","b"]}]),
+         "retries"        => 0,
+         "allow_unscoped" => true}.to_json)
+      job_id = start["job_id"].as_s
+
+      terminal = nil.as(JSON::Any?)
+      100.times do
+        sleep 0.02.seconds
+        st = call_json(tools, "fuzz_status", %({"job_id":#{job_id.to_json}}))
+        next if st["status"].as_s == "running"
+        terminal = st
+        break
+      end
+      terminal.should_not be_nil
+      t = terminal.not_nil!
+      t["job_complete"].as_bool.should be_true
+      # finalize_job always stamps an end time on a terminal job (emitted in audit).
+      t["audit"]["ended_at"].raw.should_not be_nil
+    end
+  end
+
   it "records matched results to History with a redacted flow_id when record_history:matched" do
     port = start_origin
     with_store do |store|
