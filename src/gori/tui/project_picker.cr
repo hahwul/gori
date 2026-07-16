@@ -38,7 +38,8 @@ module Gori::Tui
     ]
 
     def initialize(@term : Termisu, @registry : ProjectRegistry)
-      @backend = TermisuBackend.new(@term)
+      # Held as the base Backend: TermisuBackend is generic over the terminal type.
+      @backend = TermisuBackend.new(@term).as(Backend)
       @projects = @registry.list
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
@@ -72,7 +73,9 @@ module Gori::Tui
         @art_frame += 1 if @art_frame < ART_ANIM_DONE
         case ev = @term.poll_event(50)
         when Termisu::Event::Resize
-          # termisu already resized its buffer; force a full repaint next frame.
+          # termisu already resized its buffer to these dims; re-fit the backend grids in
+          # lockstep off the same event dims, and force a full repaint next frame.
+          @backend.resize(ev.width, ev.height)
           @resized = true
         when Termisu::Event::Key
           result = case @mode
@@ -655,13 +658,10 @@ module Gori::Tui
         @term.hide_cursor
       end
       # Full repaint right after a resize (the diff renderer would leave stale
-      # cells, especially for the centered layout); a cheap diff otherwise.
-      if @resized
-        @term.sync
-        @resized = false
-      else
-        @term.render
-      end
+      # cells, especially for the centered layout); a cheap diff otherwise. The
+      # backend forwards only the cells that changed this frame.
+      @backend.flush(sync: @resized)
+      @resized = false
     end
 
     # Centered like a game main menu: title + menu block vertically centered,
