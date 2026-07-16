@@ -2823,23 +2823,52 @@ module Gori
       end
 
       # Background drain (runs during the stdio loop's blocking read). Stores
-      # matched results only, capped, never touches STDOUT.
+      # matched results only, capped, never touches STDOUT. Robustness: a per-event
+      # rescue keeps the drain alive on a callback failure (so the engine's worker
+      # fibers, parked on @events.send, still finish and exit instead of leaking),
+      # and the ensure GUARANTEES a terminal state — a fiber that dies here must
+      # never leave the job wedged at :running, which would hang a polling client
+      # forever and keep jobs_running? true (blocking switch_project/delete_project).
       private def run_fuzz_job(fjob : FuzzJob, engine : Fuzz::Engine) : Nil
-        engine.run do |ev|
-          case ev
-          when Fuzz::ProgressEvent then apply_fuzz_progress(fjob, ev.progress)
-          when Fuzz::ResultEvent
-            flow_id = maybe_record_fuzz_flow(fjob, ev.result)
-            store_fuzz_result(fjob, ev.result, flow_id)
-          when Fuzz::DoneEvent
-            apply_fuzz_progress(fjob, ev.progress)
-            fjob.status = terminal_status(fjob.status, ev.stopped, fjob.sent, fjob.total)
-            fjob.ended_at_ms = Time.utc.to_unix_ms
-          when Fuzz::ErrorEvent
-            fjob.status = :error
-            fjob.error_msg = ev.message
-          end
+        engine.run { |ev| drain_fuzz_event(fjob, ev) }
+      rescue ex
+        Log.error(exception: ex) { "fuzz job #{fjob.id} crashed" }
+        fjob.error_msg ||= ex.message || "internal fuzz job error"
+      ensure
+        finalize_job(fjob)
+      end
+
+      # Apply one fuzz event to the job, contained: a callback failure records the
+      # error and marks the job but never unwinds out of engine.run (see above).
+      private def drain_fuzz_event(fjob : FuzzJob, ev : Fuzz::Event) : Nil
+        case ev
+        when Fuzz::ProgressEvent then apply_fuzz_progress(fjob, ev.progress)
+        when Fuzz::ResultEvent
+          flow_id = maybe_record_fuzz_flow(fjob, ev.result)
+          store_fuzz_result(fjob, ev.result, flow_id)
+        when Fuzz::DoneEvent
+          apply_fuzz_progress(fjob, ev.progress)
+          fjob.status = terminal_status(fjob.status, ev.stopped, fjob.sent, fjob.total)
+          fjob.ended_at_ms = Time.utc.to_unix_ms
+        when Fuzz::ErrorEvent
+          fjob.status = :error
+          fjob.error_msg = ev.message
+          fjob.ended_at_ms ||= Time.utc.to_unix_ms
         end
+      rescue ex
+        Log.error(exception: ex) { "fuzz job #{fjob.id} drain error" }
+        fjob.status = :error if fjob.status == :running
+        fjob.error_msg ||= ex.message || "internal fuzz drain error"
+      end
+
+      # A background job's fiber must never exit with the job still :running — that
+      # hangs every poller and permanently trips jobs_running?. Land it terminal.
+      private def finalize_job(job : FuzzJob | MineJob) : Nil
+        if job.status == :running
+          job.status = :error
+          job.error_msg ||= "job ended without a terminal event"
+        end
+        job.ended_at_ms ||= Time.utc.to_unix_ms
       end
 
       # Record a fuzz result's rendered request + response as a History flow when
@@ -3041,21 +3070,35 @@ module Gori
         Result.new(ex.message || "invalid mine arguments", is_error: true)
       end
 
+      # Same robustness contract as run_fuzz_job: contained per-event, terminal-state
+      # guaranteed by finalize_job so a dead fiber can never wedge the job at :running.
       private def run_mine_job(mjob : MineJob, engine : Miner::Engine) : Nil
-        engine.run do |ev|
-          case ev
-          when Miner::BaselineEvent then mjob.baseline_stable = ev.stable
-          when Miner::ProgressEvent then apply_mine_progress(mjob, ev.progress)
-          when Miner::FindingEvent  then store_mine_finding(mjob, ev.finding)
-          when Miner::DoneEvent
-            apply_mine_progress(mjob, ev.progress)
-            mjob.status = terminal_status(mjob.status, ev.stopped, mjob.names_done, mjob.total)
-            mjob.ended_at_ms = Time.utc.to_unix_ms
-          when Miner::ErrorEvent
-            mjob.status = :error
-            mjob.error_msg = ev.message
-          end
+        engine.run { |ev| drain_mine_event(mjob, ev) }
+      rescue ex
+        Log.error(exception: ex) { "mine job #{mjob.id} crashed" }
+        mjob.error_msg ||= ex.message || "internal mine job error"
+      ensure
+        finalize_job(mjob)
+      end
+
+      private def drain_mine_event(mjob : MineJob, ev : Miner::Event) : Nil
+        case ev
+        when Miner::BaselineEvent then mjob.baseline_stable = ev.stable
+        when Miner::ProgressEvent then apply_mine_progress(mjob, ev.progress)
+        when Miner::FindingEvent  then store_mine_finding(mjob, ev.finding)
+        when Miner::DoneEvent
+          apply_mine_progress(mjob, ev.progress)
+          mjob.status = terminal_status(mjob.status, ev.stopped, mjob.names_done, mjob.total)
+          mjob.ended_at_ms = Time.utc.to_unix_ms
+        when Miner::ErrorEvent
+          mjob.status = :error
+          mjob.error_msg = ev.message
+          mjob.ended_at_ms ||= Time.utc.to_unix_ms
         end
+      rescue ex
+        Log.error(exception: ex) { "mine job #{mjob.id} drain error" }
+        mjob.status = :error if mjob.status == :running
+        mjob.error_msg ||= ex.message || "internal mine drain error"
       end
 
       private def apply_mine_progress(mjob : MineJob, p : Miner::Progress) : Nil

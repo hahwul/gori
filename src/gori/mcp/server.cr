@@ -38,16 +38,25 @@ module Gori
           selection_source: @selection_source, workspace_root: @workspace_root,
           project_id: @project_id)
         @initialized = false
+        # Set when the output pipe breaks (client vanished mid-write): the loop then
+        # stops rather than thrashing on a dead stream or raising an unhandled error.
+        @closed = false
       end
 
       # Reads until EOF on `input` (client closed the pipe). Each line is parsed
-      # and dispatched independently; a bad line never stops the loop.
+      # and dispatched independently; a bad line never stops the loop. A broken
+      # transport (the client process died) ends the session cleanly — a normal
+      # shutdown, not a crash to surface as an unhandled backtrace.
       def run : Nil
         @input.each_line do |line|
+          break if @closed
           line = line.strip
           next if line.empty?
           handle_line(line)
+          break if @closed
         end
+      rescue ex : IO::Error
+        Log.info { "mcp: input stream closed (#{ex.message})" }
       end
 
       private def handle_line(line : String) : Nil
@@ -238,8 +247,14 @@ module Gori
       end
 
       private def send(payload : String) : Nil
+        return if @closed
         @output.puts(payload) # newline framing
         @output.flush         # or the client blocks on the unterminated line
+      rescue ex : IO::Error
+        # The client is gone (broken pipe). Stop writing and let the run loop end
+        # cleanly instead of unwinding an unhandled exception out of a handler.
+        @closed = true
+        Log.info { "mcp: output stream closed (#{ex.message})" }
       end
     end
   end

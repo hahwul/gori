@@ -108,7 +108,72 @@ end
 
 private INIT = %({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}})
 
+# Output pipe that dies on the first write (client process vanished). Counts write
+# attempts so a test can prove the run loop STOPPED after the broken write rather
+# than continuing to process further requests.
+private class BrokenOutput < IO
+  getter writes = 0
+
+  def read(slice : Bytes) : Int32
+    0
+  end
+
+  def write(slice : Bytes) : Nil
+    @writes += 1
+    raise IO::Error.new("broken pipe")
+  end
+end
+
+# Input pipe that yields one chunk then raises mid-read (connection reset), to
+# prove the run loop treats a broken transport as a clean end of session.
+private class BrokenInput < IO
+  def initialize(@chunk : Bytes)
+    @pos = 0
+  end
+
+  def read(slice : Bytes) : Int32
+    # Serve the whole chunk (across as many reads as gets needs), then blow up on
+    # the read that would fetch the NEXT line — the transport died mid-session.
+    raise IO::Error.new("connection reset") if @pos >= @chunk.size
+    n = Math.min(slice.size, @chunk.size - @pos)
+    slice.copy_from(@chunk[@pos, n])
+    @pos += n
+    n
+  end
+
+  def write(slice : Bytes) : Nil
+  end
+end
+
 describe Gori::MCP::Server do
+  describe "transport resilience" do
+    it "shuts down cleanly (no unhandled error) when the output pipe breaks mid-write" do
+      with_store do |store|
+        # Two requests queued; the first response write breaks the pipe. The loop
+        # must stop — the second request is never processed (writes stays at 1).
+        input = IO::Memory.new("#{INIT}\n#{INIT}\n")
+        sink = BrokenOutput.new
+        Gori::MCP::Server.new(store,
+          allow_actions: true, verify_upstream: false,
+          input: input, output: sink).run
+        sink.writes.should eq(1)
+      end
+    end
+
+    it "ends the session cleanly when the input stream raises mid-read" do
+      with_store do |store|
+        sink = IO::Memory.new
+        Gori::MCP::Server.new(store,
+          allow_actions: true, verify_upstream: false,
+          input: BrokenInput.new("#{INIT}\n".to_slice), output: sink).run
+        # The one complete request before the read error was still answered.
+        lines = sink.to_s.each_line.reject(&.strip.empty?).to_a
+        lines.size.should eq(1)
+        JSON.parse(lines[0])["result"]["serverInfo"]["name"].should eq(JSON::Any.new("gori"))
+      end
+    end
+  end
+
   describe "handshake" do
     it "answers initialize with capabilities + serverInfo" do
       with_store do |store|
