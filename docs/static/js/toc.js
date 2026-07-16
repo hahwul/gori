@@ -4,7 +4,22 @@
   if (!rail || !main) return;
 
   var heads = Array.prototype.slice.call(main.querySelectorAll('h2[id], h3[id]'));
+
+  /* Hover anchors: every linkable heading gets a quiet # for copyable URLs.
+     Runs after the TOC labels are read so the "#" never leaks into them. */
+  function addAnchors() {
+    heads.forEach(function (h) {
+      var a = document.createElement('a');
+      a.className = 'h-anchor';
+      a.href = '#' + h.id;
+      a.setAttribute('aria-label', 'Link to "' + h.textContent + '"');
+      a.textContent = '#';
+      h.appendChild(a);
+    });
+  }
+
   if (heads.length < 2) {
+    addAnchors();
     rail.remove();
     return;
   }
@@ -39,6 +54,7 @@
   nav.appendChild(title);
   nav.appendChild(ul);
   rail.appendChild(nav);
+  addAnchors();
 
   var byId = {};
   Array.prototype.slice.call(rail.querySelectorAll('a[data-target]')).forEach(function (a) {

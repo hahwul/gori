@@ -18,6 +18,7 @@
 
   window.openSearch = function () {
     overlay.classList.add('active');
+    document.documentElement.classList.add('search-lock');
     input.value = '';
     resultsEl.innerHTML = '';
     activeIndex = -1;
@@ -27,6 +28,7 @@
 
   window.closeSearch = function () {
     overlay.classList.remove('active');
+    document.documentElement.classList.remove('search-lock');
     activeIndex = -1;
   };
 
@@ -50,42 +52,76 @@
     return d.innerHTML;
   }
 
+  function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function terms(query) {
+    return query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  }
+
   function highlightMatch(text, query) {
-    if (!query) return escapeHtml(text);
-    var escaped = query.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
-    var re = new RegExp('(' + escaped + ')', 'gi');
+    var ts = terms(query);
+    if (!ts.length) return escapeHtml(text);
+    var re = new RegExp('(' + ts.map(escapeRegExp).join('|') + ')', 'gi');
     return escapeHtml(text).replace(re, '<mark>$1</mark>');
   }
 
-  function getSnippet(content, query) {
+  /* Rank a page for the query, or return -1 when some term is missing.
+     Title hits always dominate content hits; within each band an earlier
+     match ranks higher. Word-start title matches get an extra nudge so
+     "install" puts "Installation" first, not last. */
+  function scoreItem(item, ts) {
+    var title = item.title.toLowerCase();
+    var content = item.content.toLowerCase();
+    var score = 0;
+    for (var i = 0; i < ts.length; i++) {
+      var t = ts[i];
+      var ti = title.indexOf(t);
+      var ci = content.indexOf(t);
+      if (ti === -1 && ci === -1) return -1;
+      if (ti !== -1) {
+        score += 1000 - Math.min(ti, 100);
+        if (ti === 0 || /[^a-z0-9]/.test(title.charAt(ti - 1))) score += 200;
+        if (title === t) score += 400;
+      } else {
+        score += 100 - Math.min(90, Math.floor(ci / 24));
+      }
+    }
+    return score;
+  }
+
+  function getSnippet(content, ts) {
     var lower = content.toLowerCase();
-    var idx = lower.indexOf(query.toLowerCase());
+    var idx = -1;
+    for (var i = 0; i < ts.length; i++) {
+      var found = lower.indexOf(ts[i]);
+      if (found !== -1 && (idx === -1 || found < idx)) idx = found;
+    }
+    var qlen = idx === -1 ? 0 : ts[0].length;
+    if (idx === -1) idx = 0;
     var start = Math.max(0, idx - 60);
-    var end = Math.min(content.length, idx + query.length + 100);
-    var snippet = content.substring(start, end).replace(/\\s+/g, ' ').trim();
+    var end = Math.min(content.length, idx + qlen + 100);
+    var snippet = content.substring(start, end).replace(/\s+/g, ' ').trim();
     if (start > 0) snippet = '...' + snippet;
     if (end < content.length) snippet = snippet + '...';
     return snippet;
   }
 
   function search(query) {
-    if (!searchData || !query.trim()) {
+    var ts = terms(query);
+    if (!searchData || !ts.length) {
       resultsEl.innerHTML = '';
       activeIndex = -1;
       return;
     }
-    var q = query.trim().toLowerCase();
     var pageLang = document.documentElement.lang || '';
     var results = [];
     for (var i = 0; i < searchData.length; i++) {
       var item = searchData[i];
       if (pageLang && item.lang && item.lang !== pageLang) continue;
-      var titleIdx = item.title.toLowerCase().indexOf(q);
-      var contentIdx = item.content.toLowerCase().indexOf(q);
-      if (titleIdx !== -1 || contentIdx !== -1) {
-        var score = titleIdx !== -1 ? 100 - titleIdx : contentIdx;
-        results.push({ item: item, score: score });
-      }
+      var score = scoreItem(item, ts);
+      if (score >= 0) results.push({ item: item, score: score });
     }
     results.sort(function (a, b) { return b.score - a.score; });
     results = results.slice(0, 10);
@@ -99,10 +135,10 @@
     var html = '';
     for (var j = 0; j < results.length; j++) {
       var r = results[j].item;
-      var snippet = getSnippet(r.content, query.trim());
+      var snippet = getSnippet(r.content, ts);
       html += '<a class="search-result-item" href="' + encodeURI(r.url) + '" data-index="' + j + '">'
-        + '<div class="search-result-title">' + highlightMatch(r.title, query.trim()) + '</div>'
-        + '<div class="search-result-snippet">' + highlightMatch(snippet, query.trim()) + '</div>'
+        + '<div class="search-result-title">' + highlightMatch(r.title, query) + '</div>'
+        + '<div class="search-result-snippet">' + highlightMatch(snippet, query) + '</div>'
         + '</a>';
     }
     html += '<div class="search-hint"><span><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate</span><span><kbd>Enter</kbd> open</span><span><kbd>ESC</kbd> close</span></div>';
@@ -130,10 +166,12 @@
       var count = items.length;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
+        if (!count) return;
         activeIndex = (activeIndex + 1) % count;
         updateActive();
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        if (!count) return;
         activeIndex = (activeIndex - 1 + count) % count;
         updateActive();
       } else if (e.key === 'Enter') {

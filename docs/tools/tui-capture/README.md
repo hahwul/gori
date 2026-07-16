@@ -9,9 +9,13 @@ light theme).
 ## How it works
 
 1. `capture.sh` spins up a throwaway project under a temp `GORI_HOME`, seeds it
-   with real traffic (httpbin / github / example.com through the proxy), then
+   with real traffic (httpbingo / github / example.com through the proxy), then
    drives a real TUI inside a `tmux` session and grabs each screen with
-   `tmux capture-pane -e` (truecolor ANSI).
+   `tmux capture-pane -e` (truecolor ANSI). Frames are shot at 132 columns so
+   they read as a full-width terminal in the docs. After seeding, the script
+   counts 5xx rows in the throwaway DB and reseeds if the upstream was flaky.
+   The guided-tour shot (`tutorial.svg`) is captured from `gori tutorial` in
+   the same run.
 2. `ansi2svg.py` parses that ANSI into a cell grid and emits an SVG, placing each
    run of text with `textLength` + `lengthAdjust` so the monospace grid stays
    aligned regardless of the viewer's font. It auto-detects the theme's
@@ -26,7 +30,7 @@ shards build                       # ensure ./bin/gori exists
 docs/tools/tui-capture/capture.sh  # writes docs/static/images/tui/*.svg
 ```
 
-Requirements: `bash`, `tmux`, `python3`, `curl`.
+Requirements: `bash`, `tmux`, `python3`, `curl`, `sqlite3`.
 
 Captures are reproducible but not pixel-identical run to run (timestamps,
 durations, and live response bodies vary), so eyeball the output before
