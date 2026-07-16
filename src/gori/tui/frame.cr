@@ -62,6 +62,30 @@ module Gori::Tui
       screen.text(inner.x + 1, y, " ‹ list ", Theme.accent, bg, Attribute::Bold)
     end
 
+    # A slim vertical scroll gauge riding the right border of a framed content area.
+    # The thumb's height is proportional to how much of the content is on screen, so a
+    # glance reads as "roughly how big is this", and its position tracks the scroll
+    # offset. Draws on the border column immediately right of `content` (`content.right`),
+    # so pass the FRAMED INTERIOR rect (the `rect.inset(1, 1)` the body renders into) — the
+    # frame's right hairline sits exactly there. No-op unless the content overflows the
+    # viewport, so a fully-visible body keeps its plain hairline. `total` = total rows,
+    # `top` = the first visible row; `focused` brightens the thumb (gold) vs muted at rest.
+    def self.scroll_gauge(screen : Screen, content : Rect, total : Int32, top : Int32,
+                          focused : Bool, bg : Color = Theme.bg) : Nil
+      track = content.h # interior rows == the windowed viewport height
+      return if track < 2 || total <= track
+      x = content.right # the frame's right border column, one past the content
+      thumb = (track.to_i64 * track // total).to_i.clamp(1, track - 1)
+      max_top = total - track
+      off = ((track - thumb).to_i64 * top.clamp(0, max_top) // max_top).to_i.clamp(0, track - thumb)
+      thumb_fg = focused ? Theme.focus_gold : Theme.muted
+      track_fg = Theme.blend(Theme.border, bg, 0.5)
+      (0...track).each do |i|
+        on = i >= off && i < off + thumb
+        screen.cell(x, content.y + i, on ? '┃' : '│', on ? thumb_fg : track_fg, bg)
+      end
+    end
+
     # A `├───┤` divider across a card's interior at absolute row `y` — the seam
     # between an input/header band and the list below it.
     def self.tee_divider(screen : Screen, rect : Rect, y : Int32, bg : Color = Theme.panel) : Nil

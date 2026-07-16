@@ -292,4 +292,29 @@ describe Gori::Tui::Frame do
     backend.grid[2][19].should eq('┤')
     backend.row(2).should contain("─")
   end
+
+  it "rides a right-border scroll gauge whose thumb tracks the scroll offset" do
+    box = Rect.new(0, 0, 20, 10)
+    inner = box.inset(1, 1) # interior height 8; border column 19
+    col = 19
+
+    top_b = MemoryBackend.new(30, 12)
+    Frame.card(Screen.new(top_b), box)
+    Frame.scroll_gauge(Screen.new(top_b), inner, total: 100, top: 0, focused: true)
+    top_b.grid[1][col].should eq('┃')                           # thumb sits at the top
+    top_b.grid[8][col].should eq('│')                           # track below it
+    (1..8).count { |y| top_b.grid[y][col] == '┃' }.should eq(1) # a huge body → a 1-row thumb
+
+    bot_b = MemoryBackend.new(30, 12)
+    Frame.card(Screen.new(bot_b), box)
+    Frame.scroll_gauge(Screen.new(bot_b), inner, total: 100, top: 92, focused: true) # max scroll
+    bot_b.grid[8][col].should eq('┃')                                                # thumb has ridden to the bottom
+    bot_b.grid[1][col].should eq('│')
+
+    # A body that fits the viewport draws no gauge — the plain hairline stays.
+    fit_b = MemoryBackend.new(30, 12)
+    Frame.card(Screen.new(fit_b), box)
+    Frame.scroll_gauge(Screen.new(fit_b), inner, total: 5, top: 0, focused: true)
+    (1..8).count { |y| fit_b.grid[y][col] == '┃' }.should eq(0)
+  end
 end

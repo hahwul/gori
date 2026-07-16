@@ -308,4 +308,20 @@ describe Gori::Tui::TextArea do
       render_peek("k=$TOKEN", 1, false, true).contains?("s3cr3t-value").should be_false
     end
   end
+
+  describe "right-border scroll gauge (opt-in)" do
+    it "rides a thumb on the border when the buffer overflows, and only when enabled" do
+      ta = Gori::Tui::TextArea.new((0...50).map { |i| "line #{i}" }.join("\n"))
+      col = 20 # rect.right of a 20-wide pane — where a framing card's hairline sits
+
+      on = MemoryBackend.new(30, 10)
+      ta.render(Screen.new(on), Rect.new(0, 0, 20, 8), cursor: false, gauge: true, gauge_focused: true)
+      on.grid[0][col].should eq('┃') # 50 lines ≫ 8 rows → thumb pinned at the top (scroll 0)
+      (0...8).count { |y| on.grid[y][col] == '┃' }.should be > 0
+
+      off = MemoryBackend.new(30, 10)
+      ta.render(Screen.new(off), Rect.new(0, 0, 20, 8), cursor: false) # gauge defaults off
+      (0...8).count { |y| off.grid[y][col] == '┃' }.should eq(0)
+    end
+  end
 end

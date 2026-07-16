@@ -111,7 +111,7 @@ module Gori::Tui
         render_mode_badge(screen, card.right - 1, card.y, card.x + 6, mode == InputMode::Insert)
       end
       body = card.inset(1, 1)
-      input.render(screen, body, cursor: active)
+      input.render(screen, body, cursor: active, gauge: true, gauge_focused: active)
       paint_input_read_chrome(screen, body, input, read, reading) if reading && read
     end
 
@@ -227,6 +227,7 @@ module Gori::Tui
         screen.text(rect.x + gw, rect.y + i, shown, fg, Theme.bg, width: cw)
         paint_out_line_chrome(screen, rect.x + gw, rect.y + i, li, line, lines, focused)
       end
+      Frame.scroll_gauge(screen, rect, lines.size, @out_scroll, focused)
     end
 
     def output_move(dr : Int32, dc : Int32, result : Decoder::ChainResult, selecting : Bool = false) : Nil

@@ -672,7 +672,7 @@ module Gori::Tui
       end
       body = card.inset(1, 1)
       return if body.empty?
-      @notes.render(screen, body, cursor: ins)
+      @notes.render(screen, body, cursor: ins, gauge: true, gauge_focused: notes_active)
       paint_notes_read_chrome(screen, body, notes_active && !notes_insert_mode?)
     end
 

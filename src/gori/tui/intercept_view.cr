@@ -494,6 +494,7 @@ module Gori::Tui
         label = it.kind.request? ? "#{method} #{it.host}#{target}" : "#{it.host} #{target}"
         screen.text(inner.x + 5, y, label, selected ? Theme.text_bright : Theme.text, bg, width: {inner.w - 6, 1}.max)
       end
+      Frame.scroll_gauge(screen, inner, @items.size, @scroll, focused)
     end
 
     private def render_detail(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -511,7 +512,7 @@ module Gori::Tui
       end
       mode = it.kind.request? ? :request : :response
       if @editing && @loaded_id == it.id
-        @editor.render(screen, inner, cursor: focused, highlight: mode)
+        @editor.render(screen, inner, cursor: focused, highlight: mode, gauge: true, gauge_focused: focused)
       else
         win = detail_window_for(it)
         total = win.total
@@ -528,6 +529,7 @@ module Gori::Tui
           shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
           Highlight.draw(screen, inner.x, inner.y + i, shown, width: inner.w)
         end
+        Frame.scroll_gauge(screen, inner, total, @detail_scroll, focused)
       end
     end
 

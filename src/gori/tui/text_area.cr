@@ -1,5 +1,6 @@
 require "./screen"
 require "./theme"
+require "./frame"
 require "./highlight"
 require "../env"
 require "../settings"
@@ -409,7 +410,11 @@ module Gori::Tui
     # HTTP message editors (Repeater, Intercept), nil for plain prose (Notes,
     # Issue notes). The styled lines are 1:1 with `@lines`, so the cursor —
     # drawn last, on top — still lands on the right column.
-    def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil, peek : Bool = false) : Nil
+    # `gauge` rides a right-border scroll gauge on the frame the CALLER drew (pass it
+    # only when this editor fills a card's `rect.inset(1, 1)`, so `rect.right` lands on
+    # the hairline); `gauge_focused` brightens the thumb when this pane holds focus.
+    def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil, peek : Bool = false,
+               gauge : Bool = false, gauge_focused : Bool = false) : Nil
       return if rect.empty?
       @last_h = rect.h # remembered for scroll_view (wheel) clamping
       ensure_visible(rect.h)
@@ -502,6 +507,7 @@ module Gori::Tui
           end
         end
       end
+      Frame.scroll_gauge(screen, rect, @lines.size, @scroll, gauge_focused) if gauge
       # The env-complete dropdown + value peek paint LAST (over the text, anchored at the
       # caret) so they never render when the caret is off-screen.
       render_env_popups(screen, caret_cell, rect, cursor, peek)

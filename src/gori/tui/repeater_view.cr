@@ -2300,7 +2300,7 @@ module Gori::Tui
         screen.text(bx, rect.y, badge, Theme.text_bright, Theme.accent_bg) if bx > rect.x + label.size + 4
       end
       # XML/JSON-ish payload / WS messages → plain editing (no HTTP request/header colouring).
-      @decoded.render(screen, rect.inset(1, 1), cursor: focused, highlight: nil, peek: focused)
+      @decoded.render(screen, rect.inset(1, 1), cursor: focused, highlight: nil, peek: focused, gauge: true, gauge_focused: focused)
     end
 
     private def pane_border(focused : Bool, insert : Bool = false) : Color
@@ -2409,14 +2409,14 @@ module Gori::Tui
           Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "MSG", false) if @grpc_reframable
           @editor.conceal_spans = [] of {Int32, Int32} # gRPC frames aren't §-marker HTTP text — no stale concealment
           @editor.chain_peek_text = nil
-          @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused)
+          @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
         end
         return
       end
       if @ws_mode
         @editor.conceal_spans = [] of {Int32, Int32} # WS messages aren't §-marker HTTP text — no stale concealment
         @editor.chain_peek_text = nil
-        @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused)
+        @editor.render(screen, rect.inset(1, 1), cursor: focused && request_insert?, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
         return
       end
       if h = @req_hex_edit
@@ -2429,7 +2429,7 @@ module Gori::Tui
       render_mode_badge(screen, mode_x, rect.y, min_x, ins)
       update_request_marker_tint
       inner = rect.inset(1, 1)
-      @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused)
+      @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
       paint_request_read_chrome(screen, inner, focused && !ins)
     end
 
@@ -2552,6 +2552,7 @@ module Gori::Tui
       else
         render_response_body(screen, body, focused)
       end
+      Frame.scroll_gauge(screen, body, resp_line_count, @scroll, focused)
     end
 
     # Shared windowed renderer for the WS / gRPC transcript panes (a list of
@@ -2586,6 +2587,7 @@ module Gori::Tui
         paint_resp_line_chrome(screen, body.x + gw, body.y + i, li, text, focused, sel_spans)
         SearchHi.mark(screen, body.x + gw, body.y + i, shown, @search_hl, body.x + gw + cw) unless @search_hl.empty?
       end
+      Frame.scroll_gauge(screen, body, lines.size, @scroll, focused)
     end
 
     # The transcript as {text, colour} rows (cached; rebuilt only when a new result
