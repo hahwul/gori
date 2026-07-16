@@ -3,6 +3,7 @@ require "compress/deflate"
 require "compress/zlib"
 require "./brotli"
 require "./zstd"
+require "../../ascii_bytes"
 
 module Gori::Proxy::Codec
   # Decodes a captured body for DISPLAY: de-chunks the h1 wire form (the stored
@@ -13,6 +14,14 @@ module Gori::Proxy::Codec
   # raise) and output is capped to guard against decompression bombs.
   module ContentDecode
     MAX_OUT = 32 * 1024 * 1024 # decompression-bomb ceiling for the decoded view
+
+    # The two header NAMES whose presence is the necessary condition for `decode` to do any
+    # work. The byte-level gate scans the head for either (case-insensitively) to skip the
+    # head String on the dominant no-encoding response. Full names (not just "-encoding") so
+    # the ubiquitous `Vary: Accept-Encoding` doesn't false-positive the gate open. Lowercase;
+    # the scan folds the head.
+    CE_NEEDLE = "content-encoding".to_slice
+    TE_NEEDLE = "transfer-encoding".to_slice
 
     # Returns {decoded | nil, note | nil}. nil decoded => the caller should show the
     # raw body unchanged (no transfer/content coding, or nothing to do). A note
@@ -26,6 +35,15 @@ module Gori::Proxy::Codec
     # that prefix; a rare multi-coding body yields a valid, decode-tolerant prefix.
     def self.decode(head : Bytes?, body : Bytes?, max_out : Int32 = MAX_OUT) : {Bytes?, String?}
       return {nil, nil} if body.nil? || body.empty? || head.nil?
+      # Zero-alloc gate before the head String: `encoding_headers` only ever populates its
+      # lists from a `content-encoding` / `transfer-encoding` header, and BOTH names contain
+      # the ASCII substring "-encoding". If the head bytes don't contain it (the dominant
+      # uncompressed, unchunked response), the full parse below would return {nil, nil}
+      # anyway — so skip building `String.new(head)` + its per-line substrings entirely.
+      # A rare false positive (a header VALUE literally containing "content-encoding", e.g.
+      # `Vary: Content-Encoding`) simply falls through to the correct parse; only a true
+      # absence is short-circuited. Byte-identical result either way.
+      return {nil, nil} unless head_has_encoding?(head)
       te_values, ce_values = encoding_headers(head)
       te_chunked = transfer_encoding_chunked?(te_values)
       encodings = ce_values
@@ -46,6 +64,12 @@ module Gori::Proxy::Codec
         entity = decoded
       end
       {entity, notes.empty? ? nil : notes.join(" · ")}
+    end
+
+    # Zero-alloc necessary-condition gate: does the head carry a content/transfer-encoding
+    # header at all? (Byte scan for either full name, case-insensitively.)
+    private def self.head_has_encoding?(head : Bytes) : Bool
+      AsciiBytes.contains_ci?(head, CE_NEEDLE) || AsciiBytes.contains_ci?(head, TE_NEEDLE)
     end
 
     # `chunked` frames the body only when it's the FINAL transfer-coding (RFC 7230

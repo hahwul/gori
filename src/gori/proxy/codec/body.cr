@@ -231,12 +231,37 @@ module Gori::Proxy::Codec
     # flag a half-delivered response instead of presenting it as whole.
     def self.read_complete(src : IO, framing : BodyFraming, length : Int64) : {Bytes?, Bool}
       return {nil, true} if framing.none?
-      capture = IO::Memory.new
-      # The body is already buffered once in `capture`; tee into a discard sink rather than
-      # a second IO::Memory so a large response isn't held in memory TWICE (the old
-      # `IO::Memory.new` tee doubled peak RAM on every repeater/read_complete).
-      complete = stream(src, capture, framing, length, DiscardIO.new)
-      {capture.to_slice.dup, complete}
+      # Presize the capture for a KNOWN Content-Length so it doesn't climb IO::Memory's
+      # 64→128→…→N doubling-realloc chain (each step copies everything captured so far);
+      # bounded by PRESIZE_CAP so a lying Content-Length can't force a huge up-front alloc.
+      # Chunked / close-delimited length is unknown → default growth (as before).
+      capture = presized_capture(framing, length)
+      # Right-size the scratch read buffer too: a small Length body drops a 64 KiB
+      # large-object scratch to a body-sized small-object alloc (copy_n/copy_until_eof
+      # re-key their read size off the buffer's own size, so a sub-BUFSIZE buffer stays
+      # in-bounds). The body is already buffered once in `capture`; tee into a discard
+      # sink rather than a second IO::Memory so a large response isn't held in memory
+      # TWICE (the old `IO::Memory.new` tee doubled peak RAM on every read_complete).
+      complete = stream(src, capture, framing, length, DiscardIO.new, read_buffer(framing, length))
+      # `capture` is a fresh local, never stored in a field/closure and unreachable after
+      # return, so the returned view is its SOLE owner (the slice's pointer keeps the backing
+      # buffer alive) — no defensive `.dup` of the whole body (mirrors CaptureBuffer#to_slice).
+      {capture.to_slice, complete}
+    end
+
+    # A capture buffer presized to a known Length body (bounded by PRESIZE_CAP); default
+    # growth for unknown-length (chunked / close-delimited) framings.
+    private def self.presized_capture(framing : BodyFraming, length : Int64) : IO::Memory
+      return IO::Memory.new unless framing.length? && length > 0
+      cap = length > CaptureBuffer::PRESIZE_CAP ? CaptureBuffer::PRESIZE_CAP : length.to_i
+      IO::Memory.new(cap)
+    end
+
+    # A scratch read buffer sized to a small known Length body (so it lands on the small-
+    # object heap, not the 64 KiB large-object path); full BUFSIZE otherwise.
+    private def self.read_buffer(framing : BodyFraming, length : Int64) : Bytes
+      return Bytes.new(BUFSIZE) unless framing.length? && length > 0 && length < BUFSIZE
+      Bytes.new(length.to_i)
     end
 
     # RFC 7230 §3.3.1: `chunked` must be the FINAL transfer-coding. Accept it only
@@ -305,9 +330,10 @@ module Gori::Proxy::Codec
     # Safe to share: a body is pumped one direction on one fiber, so chunks copy sequentially.
     private def self.copy_n(src : IO, dst : IO, tee : IO, n : Int64, buf : Bytes? = nil) : Bool
       cbuf = buf || Bytes.new(BUFSIZE)
+      cap = cbuf.size # a caller may pass a right-sized (sub-BUFSIZE) buffer — bound the read to IT, not the constant
       remaining = n
       while remaining > 0
-        want = remaining < BUFSIZE ? remaining.to_i : BUFSIZE
+        want = remaining < cap ? remaining.to_i : cap
         read = src.read(cbuf[0, want])
         break if read == 0 # premature EOF
         slice = cbuf[0, read]

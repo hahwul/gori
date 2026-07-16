@@ -1,6 +1,7 @@
 require "../proxy/codec/content_decode"
 require "../intercept_filter"
 require "../repeater/engine"
+require "../ascii_bytes"
 
 module Gori::Fuzz
   # Decoded-response metrics for one send.
@@ -57,7 +58,17 @@ module Gori::Fuzz
 
     property match_regex : Regex?
     property filter_regex : Regex?
-    property match_header : String? # substring over the response head
+    # Substring over the response head. Cache the lowercased needle ONCE on assignment
+    # (like the num_spec/status_spec setters) so the per-response check neither re-lowercases
+    # the needle nor materializes a downcased head String — it byte-scans the raw head.
+    getter match_header : String?
+    @match_header_lc : Bytes?
+
+    def match_header=(v : String?)
+      @match_header = v
+      @match_header_lc = (v && !v.empty?) ? v.downcase.to_slice : nil
+    end
+
     property extract : Regex?
     property baseline : Metrics?
     property? auto_calibrate : Bool
@@ -142,9 +153,12 @@ module Gori::Fuzz
     end
 
     private def header_pass?(raw : Repeater::Result) : Bool
-      h = @match_header
-      return true unless h
-      String.new(raw.head).scrub.downcase.includes?(h.downcase)
+      needle = @match_header_lc
+      return true unless needle
+      # ASCII case-insensitive substring scan over the raw head bytes — no per-response
+      # `String.new(raw.head).scrub.downcase` allocation. Header field tokens are ASCII, so
+      # this equals the old downcased-substring test for any ASCII/ISO-8859-1 head + needle.
+      AsciiBytes.contains_ci?(raw.head, needle)
     end
 
     # `default` is returned when the spec is absent (compiled == nil, i.e. the raw spec was

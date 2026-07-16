@@ -104,6 +104,32 @@ describe Gori::Proxy::Codec::ContentDecode do
     String.new(decoded.not_nil!).should eq("zstd round trip works")
     note.should eq("decoded: zstd")
   end
+
+  # The zero-alloc `-encoding` gate must be ASCII case-insensitive: an all-caps header
+  # name still reaches the decoder (a false gate-negative here would silently pass a gzip
+  # body through as garbage).
+  it "gates case-insensitively: an UPPERCASE Content-Encoding still decodes" do
+    decoded, note = decode(head("HTTP/1.1 200 OK", "CONTENT-ENCODING: GZIP"), gzip("caps work"))
+    String.new(decoded.not_nil!).should eq("caps work")
+    note.should eq("decoded: gzip")
+  end
+
+  # A head that CONTAINS the "-encoding" substring only in an unrelated value (Vary:
+  # Accept-Encoding) but carries no real content/transfer-encoding: the gate lets it
+  # through, and the full parse correctly finds nothing to do → passthrough (nil).
+  it "gate false-positive (Vary: Accept-Encoding) still resolves to passthrough" do
+    decoded, note = decode(head("HTTP/1.1 200 OK", "Vary: Accept-Encoding", "Content-Type: text/plain"), "plain".to_slice)
+    decoded.should be_nil
+    note.should be_nil
+  end
+
+  # No "-encoding" anywhere in the head → the gate short-circuits before building any
+  # head String, and the result is the same passthrough as an unmatched full parse.
+  it "no encoding header at all → passthrough (gate short-circuits)" do
+    decoded, note = decode(head("HTTP/1.1 200 OK", "Content-Type: application/json", "Server: nginx"), %({"ok":true}).to_slice)
+    decoded.should be_nil
+    note.should be_nil
+  end
 end
 
 # Compress via the system CLI (decoder-only libs are linked; encoders aren't).
