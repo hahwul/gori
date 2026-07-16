@@ -411,6 +411,24 @@ describe F::Matcher do
     m.build(job, ok_result(200, "abcdef")).matched?.should be_true
   end
 
+  it "matches --mh as a case-insensitive substring over the response head (no head String)" do
+    m = F::Matcher.new
+    job = F::Job.new(0_i64, ["x"], nil, "".to_slice)
+    head = "HTTP/1.1 200 OK\r\nServer: nginx/1.25\r\nX-Powered-By: PHP/8.2\r\nContent-Length: 2\r\n\r\n".to_slice
+    resp = Gori::Proxy::Codec::Http1.parse_response_head(head)
+    res = Gori::Repeater::Result.new(head, "ok".to_slice, resp, 1_i64)
+    # Needle case need not match the head's case (old path downcased both).
+    m.match_header = "SERVER: NGINX"
+    m.build(job, res).matched?.should be_true
+    m.match_header = "x-powered-by: php"
+    m.build(job, res).matched?.should be_true
+    m.match_header = "x-frame-options"
+    m.build(job, res).matched?.should be_false # header absent
+    # A blank/nil needle is unconstrained (matcher passes), not "reject everything".
+    m.match_header = nil
+    m.build(job, res).matched?.should be_true
+  end
+
   it "survives a catastrophic-backtracking user regex instead of killing the worker" do
     # A user --mr/--fr/--extract regex like /(a+)+$/ raises Regex::Error ('match limit
     # exceeded') on a pathological body rather than returning false; unrescued it killed the
