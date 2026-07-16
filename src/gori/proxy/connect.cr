@@ -12,5 +12,30 @@ module Gori::Proxy
     # per-host leaf, dial host:port as a TLS client, and run the decrypted
     # HTTP/1.1 request loop, capturing flows to `sink`.
     abstract def intercept(host : String, port : Int32, client : IO, sink : FlowSink) : Nil
+
+    # Root-CA accessors for the self-serve landing page ClientConn serves when a
+    # browser hits the listener directly. Defined here (returning plain types, not
+    # the FFI CertAuthority) so the connection loop stays decoupled from the TLS
+    # subsystem; Tunnel overrides them from its @ca. Defaults mean "no MITM CA to
+    # hand out" — a nil @tls or a bare TlsMitm just omits the certificate download.
+    def serve_landing? : Bool
+      false
+    end
+
+    def ca_cert_pem : String?
+      nil
+    end
+
+    def ca_cert_der : Bytes?
+      nil
+    end
+
+    def ca_cert_path : String?
+      nil
+    end
+
+    def ca_spki_sha256 : String?
+      nil
+    end
   end
 end

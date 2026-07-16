@@ -91,6 +91,20 @@ module Gori::Proxy::Tls
       end
     end
 
+    # DER (binary ASN.1) encoding of the certificate — the form OS/browser trust
+    # stores accept for a double-click install (the self-serve CA download page's
+    # .der/.crt route). A null `pp` first sizes the buffer, then i2d writes into it
+    # and ADVANCES the pointer (hence a local copy of `der.to_unsafe`), mirroring
+    # CertAuthority#spki_sha256_base64.
+    def to_der : Bytes
+      len = LibCrypto.i2d_x509(@handle, Pointer(Pointer(UInt8)).null)
+      raise Gori::Error.new("i2d_X509 sizing failed") if len <= 0
+      der = Bytes.new(len)
+      ptr = der.to_unsafe
+      LibCrypto.i2d_x509(@handle, pointerof(ptr))
+      der
+    end
+
     def finalize
       LibCrypto.x509_free(@handle)
     end

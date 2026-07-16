@@ -72,6 +72,37 @@ describe SettingsView do
     end
   end
 
+  it "toggles Info page on direct access off, then resets it on save; opener still intact" do
+    dir = File.tempname("gori-settings-landing")
+    Dir.mkdir_p(dir)
+    prev_home = ENV["GORI_HOME"]?
+    prev = Gori::Settings.serve_landing?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.serve_landing = true
+      v = SettingsView.new
+      v.reload(:network)
+      4.times { v.move_field(1) } # Bind IP → Port → Upstream → Verify → Info page (index 4)
+      v.toggle_or_move(-1)        # flip the Info-page bool off
+      v.save
+      Gori::Settings.serve_landing?.should be_false
+
+      v.reset_to_defaults
+      v.save
+      Gori::Settings.serve_landing?.should eq(Gori::Settings::DEFAULT_SERVE_LANDING)
+
+      # The Hostname-overrides opener must still be the focusable action row after the
+      # inserted field (index shift didn't misalign fields/values).
+      v.reload(:network)
+      5.times { v.move_field(1) } # → Hostname overrides (index 5, the opener)
+      v.focused_opener.should eq(:hosts)
+    ensure
+      prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
+      Gori::Settings.serve_landing = prev
+      FileUtils.rm_rf(dir)
+    end
+  end
+
   it "reverts the EDITOR section toggles to their defaults on save" do
     dir = File.tempname("gori-settings-reset-ed")
     Dir.mkdir_p(dir)
@@ -142,8 +173,7 @@ describe SettingsView do
       Gori::Settings.sitemap_expand_depth.should eq(Gori::Settings::DEFAULT_SITEMAP_EXPAND_DEPTH)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
-      Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview,
-        Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth = prev
+      Gori::Settings.history_preview, Gori::Settings.probe_preview, Gori::Settings.issues_preview, Gori::Settings.history_list_order, Gori::Settings.sitemap_expand_depth = prev
       FileUtils.rm_rf(dir)
     end
   end

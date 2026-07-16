@@ -30,6 +30,19 @@ describe Gori::Proxy::Tls::CertAuthority do
     end
   end
 
+  it "exports the root CA as DER matching its PEM body" do
+    with_ca_dir do |dir|
+      ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)
+      der = ca.ca_cert_der
+      der.empty?.should be_false
+      der[0].should eq(0x30_u8) # ASN.1 SEQUENCE tag — a well-formed DER cert
+
+      # PEM is base64(DER) inside the armor lines — decoding the body must reproduce the DER.
+      b64 = ca.ca_cert_pem.lines.reject(&.starts_with?("-----")).join
+      Base64.decode(b64).should eq(der)
+    end
+  end
+
   it "mints a leaf that a client verifies against the CA over a real handshake" do
     with_ca_dir do |dir|
       ca = Gori::Proxy::Tls::CertAuthority.load_or_create(dir)

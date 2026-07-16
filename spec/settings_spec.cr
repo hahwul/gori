@@ -82,21 +82,25 @@ describe Gori::Settings do
       Gori::Settings.bind_host = "0.0.0.0"
       Gori::Settings.bind_port = 9999
       Gori::Settings.upstream_proxy = "up:1234"
+      Gori::Settings.serve_landing = false
       Gori::Settings.save.should be_true
 
       Gori::Settings.bind_host = "x"
       Gori::Settings.bind_port = 1
       Gori::Settings.upstream_proxy = ""
+      Gori::Settings.serve_landing = true
       Gori::Settings.load
       Gori::Settings.bind_host.should eq("0.0.0.0")
       Gori::Settings.bind_port.should eq(9999)
       Gori::Settings.upstream_proxy.should eq("up:1234")
+      Gori::Settings.serve_landing?.should be_false # a stored false survives the reload
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
       Gori::Settings.bind_host = "127.0.0.1"
       Gori::Settings.bind_port = 8070
       Gori::Settings.upstream_proxy = ""
+      Gori::Settings.serve_landing = true
     end
   end
 
@@ -162,20 +166,18 @@ describe Gori::Settings do
       File.write(Gori::Settings.path, legacy.to_json)
       Gori::Settings.load
 
-      Gori::Settings.probe_preview.should be_true                       # layout "prism_preview" -> probe_preview
-      Gori::Settings.issues_preview.should be_true                      # layout "findings_preview" -> issues_preview
-      Gori::Settings.decoder_input.should eq("aGk=")                    # "convert" section -> decoder_*
-      Gori::Settings.tab_prefs.should contain({"repeater", false})      # tab id replay -> repeater (hidden kept)
-      Gori::Settings.tab_prefs.should contain({"decoder", true})        # tab id convert -> decoder
-      Gori::Settings.keymap_overrides.has_key?("repeater.send").should be_true   # verb id replay.send -> repeater.send
+      Gori::Settings.probe_preview.should be_true                                    # layout "prism_preview" -> probe_preview
+      Gori::Settings.issues_preview.should be_true                                   # layout "findings_preview" -> issues_preview
+      Gori::Settings.decoder_input.should eq("aGk=")                                 # "convert" section -> decoder_*
+      Gori::Settings.tab_prefs.should contain({"repeater", false})                   # tab id replay -> repeater (hidden kept)
+      Gori::Settings.tab_prefs.should contain({"decoder", true})                     # tab id convert -> decoder
+      Gori::Settings.keymap_overrides.has_key?("repeater.send").should be_true       # verb id replay.send -> repeater.send
       Gori::Settings.keymap_overrides.has_key?("issue.repeater-flow").should be_true # compound finding.replay-flow -> issue.repeater-flow
-      Gori::Settings.keymap_overrides.has_key?("probe.open").should be_true      # prism.open -> probe.open
+      Gori::Settings.keymap_overrides.has_key?("probe.open").should be_true          # prism.open -> probe.open
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.tab_prefs, Gori::Settings.keymap_overrides,
-        Gori::Settings.probe_preview, Gori::Settings.issues_preview,
-        Gori::Settings.decoder_input, Gori::Settings.decoder_sessions, Gori::Settings.decoder_chains = saved
+      Gori::Settings.tab_prefs, Gori::Settings.keymap_overrides, Gori::Settings.probe_preview, Gori::Settings.issues_preview, Gori::Settings.decoder_input, Gori::Settings.decoder_sessions, Gori::Settings.decoder_chains = saved
     end
   end
 

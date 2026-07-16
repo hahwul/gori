@@ -14,6 +14,7 @@ require "../upstream"
 require "../pump"
 require "../ws/relay"
 require "../../flow_mapper"
+require "./self_page"
 
 module Gori::Proxy
   # Handles one client connection over an `IO` (a plaintext TCPSocket, or — after
@@ -123,6 +124,18 @@ module Gori::Proxy
       rescue ex : URI::Error | OverflowError
         record_error(req, @scheme, req.host? || "", 0, created_at, "malformed absolute-form target: #{ex.message}")
         write_gateway_error
+        return false
+      end
+
+      # A browser pointed STRAIGHT at the listener (origin-form request to gori's own
+      # address, no proxy configured) gets the self-serve welcome + CA-download page
+      # instead of the 502 self-loop refusal below — but only for a plain GET/HEAD and
+      # only while the setting is on. Origin-form only: an absolute-form request (a
+      # proxy-configured browser) that targets self is a genuine loop and still 502s.
+      # Not recorded as a flow — it's a local UI hit, not proxied traffic.
+      if (sa = @self_addr) && (tls = @tls) && tls.serve_landing? &&
+         origin_form?(req) && get_or_head?(req) && Upstream.addresses_self?(host, port, sa)
+        serve_self_page(req, tls, sa)
         return false
       end
 
@@ -1027,6 +1040,32 @@ module Gori::Proxy
 
     private def write_gateway_error : Nil
       @io.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n".to_slice)
+      @io.flush
+    rescue
+    end
+
+    # An origin-form request-target (path-only, e.g. `/` or `/ca.pem`) — i.e. a browser
+    # that hit us DIRECTLY, not via a proxy config (which sends an absolute-form URI).
+    private def origin_form?(req : Codec::RawRequest) : Bool
+      t = req.target
+      !t.starts_with?("http://") && !t.starts_with?("https://")
+    end
+
+    private def get_or_head?(req : Codec::RawRequest) : Bool
+      req.method.compare("GET", case_insensitive: true) == 0 ||
+        req.method.compare("HEAD", case_insensitive: true) == 0
+    end
+
+    # Serve the direct-access welcome + CA-download page (see the guard in handle_request).
+    # The CA bytes/fingerprint/path come through the TlsMitm seam so this stays decoupled
+    # from the FFI cert code; a HEAD request gets headers only. Best-effort — a write error
+    # just drops the connection like every other canned response here.
+    private def serve_self_page(req : Codec::RawRequest, tls : TlsMitm, self_addr : {String, Int32}) : Nil
+      head_only = req.method.compare("HEAD", case_insensitive: true) == 0
+      resp = SelfPage.respond(req.target,
+        pem: tls.ca_cert_pem, der: tls.ca_cert_der, spki: tls.ca_spki_sha256,
+        ca_path: tls.ca_cert_path, listen: self_addr, version: Gori::VERSION, head_only: head_only)
+      @io.write(resp)
       @io.flush
     rescue
     end

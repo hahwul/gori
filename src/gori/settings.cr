@@ -21,6 +21,7 @@ module Gori
     DEFAULT_BIND_PORT       = 8070
     DEFAULT_UPSTREAM_PROXY  = ""
     DEFAULT_VERIFY_UPSTREAM = true
+    DEFAULT_SERVE_LANDING   = true
     DEFAULT_EDITOR          = ""
     DEFAULT_EDITOR_MARKDOWN = true
     DEFAULT_THEME           = "goridark"
@@ -30,7 +31,7 @@ module Gori
     # Layout (settings:layout): list previews off by default; Sitemap fully expanded.
     DEFAULT_HISTORY_PREVIEW      = false
     DEFAULT_PROBE_PREVIEW        = false
-    DEFAULT_ISSUES_PREVIEW     = false
+    DEFAULT_ISSUES_PREVIEW       = false
     DEFAULT_HISTORY_LIST_ORDER   = "newest" # "newest" | "oldest" — list sort direction
     DEFAULT_SITEMAP_EXPAND_DEPTH = -1       # -1 = all
     # Statusline (settings:statusline): opt-in bottom row that runs a command on an
@@ -47,6 +48,11 @@ module Gori
     # settings:network editor toggles it live via Session#set_verify_upstream. Global-only
     # (no per-project override). CLI `run`/MCP paths keep their own --insecure-upstream flag.
     class_property? verify_upstream : Bool = DEFAULT_VERIFY_UPSTREAM
+    # Whether a browser that hits the proxy listener DIRECTLY (origin-form, no proxy
+    # config) gets the gori welcome + CA-download page instead of the 502 self-loop
+    # refusal. Global-only; the settings:network editor toggles it live via
+    # Session#set_serve_landing (pushed to the TLS tunnel, read per-request).
+    class_property? serve_landing : Bool = DEFAULT_SERVE_LANDING
 
     # Per-project network overrides — a RUNTIME layer set by Session.open from the OPEN
     # project's DB and NEVER persisted to settings.json (the project's own DB is the source
@@ -109,6 +115,7 @@ module Gori
     def self.normalize_history_list_order(s : String) : String
       s == "oldest" ? "oldest" : "newest"
     end
+
     # Top tab-bar layout: ordered {tab-id, visible?}. Empty = never customized → Chrome
     # reconciles to catalog defaults. Opaque String ids (Crystal has no runtime String→Symbol);
     # Chrome maps ids→catalog symbols. Only an EXPLICIT false hides a tab.
@@ -161,6 +168,7 @@ module Gori
         self.bind_port = net["bind_port"]?.try(&.as_i?) || bind_port
         self.upstream_proxy = net["upstream_proxy"]?.try(&.as_s?) || upstream_proxy
         self.verify_upstream = load_bool(net, "verify_upstream", verify_upstream?)
+        self.serve_landing = load_bool(net, "serve_landing", serve_landing?)
       end
       self.theme = root["theme"]?.try(&.as_s?) || theme # validated against the known themes by Theme.apply
       self.mouse = load_bool(root, "mouse", mouse)
@@ -496,6 +504,7 @@ module Gori
               j.field "bind_port", bind_port
               j.field "upstream_proxy", upstream_proxy
               j.field "verify_upstream", verify_upstream?
+              j.field "serve_landing", serve_landing?
             end
           end
           j.field "editor" do
