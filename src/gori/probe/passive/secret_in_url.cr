@@ -18,6 +18,14 @@ module Gori
 
         JWT_VALUE = /\beyJ[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]+/
 
+        # Name tiers in priority order (High > Medium > Low); the highest present wins. Built
+        # once at load — was a fresh Hash literal allocated on every flow just to iterate it.
+        TIERS = [
+          {Store::Severity::High, HIGH_PARAMS},
+          {Store::Severity::Medium, MED_PARAMS},
+          {Store::Severity::Low, LOW_PARAMS},
+        ]
+
         def check(ctx : Context, acc : Array(Detection)) : Nil
           pairs = query_pairs(ctx.req.target)
           return if pairs.empty?
@@ -26,8 +34,7 @@ module Gori
             return emit(acc, ctx, hit[0], Store::Severity::High)
           end
           # Otherwise rank by the name tier (High > Medium > Low); the highest present wins.
-          {Store::Severity::High => HIGH_PARAMS, Store::Severity::Medium => MED_PARAMS,
-           Store::Severity::Low => LOW_PARAMS}.each do |sev, names|
+          TIERS.each do |(sev, names)|
             if hit = pairs.find { |(n, _)| names.includes?(normalize(n)) }
               return emit(acc, ctx, hit[0], sev)
             end
@@ -60,6 +67,12 @@ module Gori
 
         # {name, raw value} for each query pair; bare flags carry an empty value.
         private def query_pairs(target : String) : Array({String, String})
+          # Byte-level fast guard: '?' (0x3f) is < 0x80, so in UTF-8 it is ALWAYS a standalone
+          # '?' char (never a lead/continuation byte), and scrub only maps invalid sequences to
+          # U+FFFD (EF BF BD) — it can neither add nor drop a 0x3f byte. So a query-less URL
+          # early-outs here with the SAME [] result, skipping scrub's full-URL UTF-8 decode.
+          # This rule runs on EVERY flow (not response-gated) and most flows are query-less.
+          return [] of {String, String} unless target.to_slice.index(0x3f_u8)
           # The target comes from parse_request_head unscrubbed, so it can carry invalid
           # UTF-8 (legacy Shift-JIS/Latin-1 GET forms, binary tokens, mojibake). PCRE
           # raises on the first illegal byte, which would propagate up and make the whole

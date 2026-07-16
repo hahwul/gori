@@ -13,18 +13,30 @@ module Gori
         BODY_CAP = 64 * 1024 # per-side ceiling on body text fed to the string scans
 
         getter detail : Store::FlowDetail
-        getter req : Proxy::Codec::RawRequest
-        getter url : String
         getter ws_messages : Array(Store::WsMessage)
 
+        @req : Proxy::Codec::RawRequest?
         @resp : Proxy::Codec::RawResponse?
+        @resp_done = false
+        @url : String?
         @body_text : String?
         @body_text_done = false
 
         def initialize(@detail : Store::FlowDetail, @ws_messages = [] of Store::WsMessage)
-          @req = Proxy::Codec::Http1.parse_request_head(@detail.request_head)
-          @resp = @detail.response_head.try { |h| Proxy::Codec::Http1.parse_response_head(h) }
-          @url = @detail.row.url
+        end
+
+        # Request head parsed lazily + memoized. The HTTP analyze() path reaches this on its
+        # first rule (Tech), so total work is unchanged there; but the WS-rescan path
+        # (analyze_ws → only WsPayloads, which never reads req/response) then no longer parses
+        # the handshake heads on every frame batch of a chatty 101 socket. parse_request_head
+        # is pure and total (never raises), so lazy is behavior-identical.
+        def req : Proxy::Codec::RawRequest
+          @req ||= Proxy::Codec::Http1.parse_request_head(@detail.request_head)
+        end
+
+        # Source URL, built lazily (a WS frame batch that emits no detection never touches it).
+        def url : String
+          @url ||= @detail.row.url
         end
 
         def row : Store::FlowRow
@@ -55,19 +67,22 @@ module Gori
         end
 
         def request_origin : String?
-          @req.headers.get?("Origin")
+          req.headers.get?("Origin")
         end
 
         # The parsed response head if one exists (including a 101 upgrade) — used by the tech
-        # fingerprints, which inspect upgrade/server headers regardless of status.
+        # fingerprints, which inspect upgrade/server headers regardless of status. Parsed lazily
+        # + memoized with a done-flag so a genuine nil (no response head) is not re-tested.
         def raw_response : Proxy::Codec::RawResponse?
-          @resp
+          return @resp if @resp_done
+          @resp_done = true
+          @resp = @detail.response_head.try { |h| Proxy::Codec::Http1.parse_response_head(h) }
         end
 
         # A real, scorable HTTP response: excludes a 101 upgrade and the synthetic status 0
         # (no response captured). The header/cookie/CORS/body rules gate on this.
         def response : Proxy::Codec::RawResponse?
-          r = @resp
+          r = raw_response
           return nil if r.nil? || row.status == 101 || row.status == 0
           r
         end

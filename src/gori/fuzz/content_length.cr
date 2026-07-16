@@ -20,6 +20,9 @@ module Gori::Fuzz
       body_start = sep + sep_w
       body_len = bytes.size - body_start
       head = String.new(bytes[0, sep])
+      # chunked? MUST tokenize on LF (see its comment), NOT on `eol` — so it can't share the
+      # `lines` array below (which splits on eol for a byte-exact rewrite). They diverge on a
+      # CRLF head carrying a bare internal LF, a framing the fuzzer deliberately crafts.
       return bytes if chunked?(head)
 
       lines = head.split(eol)
@@ -34,7 +37,8 @@ module Gori::Fuzz
       end
 
       io = IO::Memory.new(bytes.size + 16)
-      io << lines.join(eol) << eol << eol
+      lines.join(io, eol) # stream lines straight into the pre-sized buffer (no joined-head String)
+      io << eol << eol
       io.write(bytes[body_start, body_len]) if body_len > 0
       io.to_slice
     end
@@ -66,7 +70,11 @@ module Gori::Fuzz
     end
 
     # True when the final transfer-coding is `chunked` (RFC 7230 §3.3.1) — mirrors
-    # ContentDecode's strict check, not a loose substring scan.
+    # ContentDecode's strict check, not a loose substring scan. Tokenizes on LF (each_line +
+    # chomp), NOT the boundary `eol`: a CRLF head can still carry a bare-LF-separated header
+    # (a smuggling/desync vector the fuzzer deliberately crafts), and an LF-lenient backend
+    # reads those as distinct lines — so chunked detection must split them the same way, even
+    # though the byte-exact Content-Length rewrite above splits on `eol` to preserve the wire form.
     private def self.chunked?(head : String) : Bool
       head.each_line do |raw|
         line = raw.chomp

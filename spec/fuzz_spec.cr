@@ -211,6 +211,16 @@ describe F::ContentLength do
     F::ContentLength.sync(get).should eq(get)
   end
 
+  it "detects chunked across a bare LF inside a CRLF head (smuggling/desync framing)" do
+    # A CRLF-boundary head where the Transfer-Encoding line is terminated by a BARE LF (not
+    # CRLF). chunked? tokenizes on LF like an LF-lenient backend does, so it must still see
+    # "Transfer-Encoding: chunked" as its own line and leave the request byte-exact — NOT split
+    # only on the CRLF boundary (which would merge the TE value, miss chunked, and rewrite the
+    # Content-Length 3 → 6). Regression guard for the head "tokenize once" pitfall.
+    req = "POST / HTTP/1.1\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\nX\r\n\r\nBODY!!".to_slice
+    F::ContentLength.sync(req).should eq(req)
+  end
+
   it "splices a binary body back byte-exact" do
     body = Bytes[0xff, 0x00, 0xfe, 0x80]
     head = "POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\n".to_slice

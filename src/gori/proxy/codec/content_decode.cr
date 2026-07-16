@@ -26,8 +26,9 @@ module Gori::Proxy::Codec
     # that prefix; a rare multi-coding body yields a valid, decode-tolerant prefix.
     def self.decode(head : Bytes?, body : Bytes?, max_out : Int32 = MAX_OUT) : {Bytes?, String?}
       return {nil, nil} if body.nil? || body.empty? || head.nil?
-      te_chunked = transfer_encoding_chunked?(header_values(head, "transfer-encoding"))
-      encodings = header_values(head, "content-encoding")
+      te_values, ce_values = encoding_headers(head)
+      te_chunked = transfer_encoding_chunked?(te_values)
+      encodings = ce_values
         .flat_map(&.split(','))
         .map(&.strip.downcase)
         .reject { |e| e.empty? || e == "identity" }
@@ -145,21 +146,29 @@ module Gori::Proxy::Codec
       nil
     end
 
-    # Header values for `name` (case-insensitive) from raw head bytes. The first
-    # line (request/status line) never matches a header name, so it's skipped; we
-    # stop at the blank line that ends the head.
-    private def self.header_values(head : Bytes, name : String) : Array(String)
-      target = name.downcase
-      values = [] of String
+    # Collect the transfer-encoding AND content-encoding header values in ONE pass over the
+    # head — previously two separate `String.new(head).each_line` walks (two full head-String
+    # copies + iterations), even in the dominant no-encoding case that returns {nil, nil}.
+    # Same case-insensitive name match, same value extraction (strip after the colon), same
+    # blank-line head terminator, same wire-order append: the returned lists are byte-identical
+    # to two `header_values` calls. The first line (request/status line) has no colon-name that
+    # matches, so it's skipped; we stop at the blank line that ends the head.
+    private def self.encoding_headers(head : Bytes) : {Array(String), Array(String)}
+      te = [] of String
+      ce = [] of String
       String.new(head).each_line do |raw|
         line = raw.chomp
         break if line.empty?
         idx = line.index(':')
         next unless idx
-        next unless line[0...idx].strip.downcase == target
-        values << line[(idx + 1)..].strip
+        name = line[0...idx].strip.downcase
+        if name == "transfer-encoding"
+          te << line[(idx + 1)..].strip
+        elsif name == "content-encoding"
+          ce << line[(idx + 1)..].strip
+        end
       end
-      values
+      {te, ce}
     end
   end
 end
