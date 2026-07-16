@@ -46,7 +46,7 @@ module Gori::Tui
         view.restore(r.target, r.request, r.http2?, r.auto_content_length?,
           r.response_head, r.response_body, r.response_error, r.response_duration_us,
           sni: r.sni || "", ws_messages: ws_msgs)
-        view.name = r.name                     # custom sub-tab label survives reopen
+        view.name = r.name                       # custom sub-tab label survives reopen
         view.tags = Repeater::Tags.parse(r.tags) # flat tags survive reopen (V31)
         seed_repeater_original(view, r.flow_id)
         @repeaters << RepeaterTab.new(view, r.flow_id, r.id)
@@ -794,7 +794,7 @@ module Gori::Tui
 
     # Passive-scan a successful HTTP Repeater send into Probe (mode-gated by the analyzer).
     private def probe_scan_repeater(repeater_id : Int64, head : Bytes, body : Bytes?,
-                                  duration_us : Int64, flow_id : Int64?, view : RepeaterView) : Nil
+                                    duration_us : Int64, flow_id : Int64?, view : RepeaterView) : Nil
       return if head.empty?
       rec = Store::RepeaterRecord.new(
         repeater_id, view.target, view.request_text, view.http2?, view.auto_content_length?,
@@ -807,7 +807,7 @@ module Gori::Tui
 
     # Passive-scan a successful WebSocket Repeater transcript (handshake + text frames).
     private def probe_scan_ws_repeater(repeater_id : Int64, result : Repeater::WsEngine::Result,
-                                     flow_id : Int64?, view : RepeaterView) : Nil
+                                       flow_id : Int64?, view : RepeaterView) : Nil
       head = result.handshake_head
       return if head.empty?
       upgrade = view.ws_upgrade_bytes
@@ -990,7 +990,7 @@ module Gori::Tui
     # No source flow_id — the request is the seed; same persistence path as ^N.
     # `name` is an optional sub-tab chip label (e.g. the Miner param that was injected).
     def repeater_from_request(target : String, request_text : String, http2 : Bool, sni : String?,
-                            name : String? = nil) : Nil
+                              name : String? = nil) : Nil
       view = RepeaterView.new
       view.restore(target, request_text, http2, true, sni: sni || "")
       # restore leaves focus on :target (placeholder-friendly); a fully-built request
@@ -1247,19 +1247,34 @@ module Gori::Tui
       case
       when ev.ctrl_z?     then view.edit_undo
       when key.enter?     then view.edit_newline
-      when key.backspace? then view.edit_backspace
+      when key.backspace? then view.edit_backspace unless guard_marker_delete(view, view.marker_break_on_backspace)
       when key.up?        then view.at_top? ? view.focus_first : view.edit_move(-1, 0) # ↑-at-top → target field above
       when key.down?      then view.edit_move(1, 0)
       when key.left?      then view.edit_move(0, -1)
       when key.right?     then view.edit_move(0, 1)
       when key.home?      then view.edit_home
       when key.end?       then view.edit_end
-      when key.delete?    then view.edit_delete
+      when key.delete?    then view.edit_delete unless guard_marker_delete(view, view.marker_break_on_delete)
       else
         if c && !ev.ctrl? && !ev.alt?
           view.edit_insert(c)
           view.set_preedit("") # commit preedit
         end
+      end
+      true
+    end
+
+    # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker
+    # and expose its concealed ¦chain. Confirm first; on accept, strip the WHOLE marker
+    # down to its raw value. Returns true when it intercepted (a confirm was raised), so
+    # the caller skips the plain edit; false to let the edit through.
+    private def guard_marker_delete(view : RepeaterView, span : {Int32, Int32}?) : Bool
+      return false unless span
+      n = view.marker_ordinal(span)
+      @host.confirm("REMOVE MARKER",
+        "Deleting this character breaks marker §#{n}.\nRemove the whole marker and keep only its value?",
+        confirm_label: "remove marker", danger: true) do
+        view.strip_marker_span(span)
       end
       true
     end
@@ -1398,7 +1413,7 @@ module Gori::Tui
         # Transcript: no d/x/p tools; still let Global breath / copy through.
         return false if c && !ev.ctrl? && !ev.alt? && !c.control?
       when key.lower_x? then view.pane_select_line # 'x' selects the line everywhere (hex is ^X)
-      when key.lower_b? then @host.toggle_reveal  # bare `b` (Global reveal is ^B)
+      when key.lower_b? then @host.toggle_reveal   # bare `b` (Global reveal is ^B)
       when c && !ev.ctrl? && !ev.alt? && !c.control?
         return false # d diff, p pretty, y copy, Global c/i/s, …
       end

@@ -1165,8 +1165,39 @@ module Gori::Tui
 
     # --- template editing ----------------------------------------------------
     def template_insert(ch : Char) : Nil
-      @editor.insert(ch)
+      # Marker-in-marker guard: a §/¦ typed inside (or flush against) a closed marker is
+      # auto-escaped to a §§/¦¦ literal so the structure survives (Template.insert_breaks_marker?).
+      if Fuzz::Template.insert_breaks_marker?(@editor.text, @editor.cursor_offset, ch, marker_spans)
+        @editor.insert_pair(ch)
+      else
+        @editor.insert(ch)
+      end
       @editor.set_preedit("")
+      @dirty = true
+    end
+
+    # --- marker structure guards (delimiter delete / nesting) --------------------
+    # When a backspace here would delete a §/¦ that structures a closed marker, the {a, b}
+    # span of that marker (fed to the strip-confirm) — else nil.
+    def marker_break_on_backspace : {Int32, Int32}?
+      Fuzz::Template.structural_marker_at(@editor.text, @editor.cursor_offset - 1, marker_spans)
+    end
+
+    # Same, for a forward-delete (the char UNDER the caret).
+    def marker_break_on_delete : {Int32, Int32}?
+      Fuzz::Template.structural_marker_at(@editor.text, @editor.cursor_offset, marker_spans)
+    end
+
+    # 1-based ordinal of the closed marker at `span` — for the confirm copy ("marker §N").
+    def marker_ordinal(span : {Int32, Int32}) : Int32
+      (marker_spans.index(span) || 0) + 1
+    end
+
+    # Confirmed strip: drop the whole marker at `span`, keeping only its raw value; caret to
+    # the freed value's end. One undoable edit, so prior edits stay undoable. Dirties the tab.
+    def strip_marker_span(span : {Int32, Int32}) : Nil
+      new_text, caret = Fuzz::Template.strip_marker(@editor.text, span)
+      @editor.replace_all(new_text, caret)
       @dirty = true
     end
 

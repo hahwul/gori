@@ -94,6 +94,32 @@ describe Gori::Tui::TextArea do
     end
   end
 
+  describe "#insert_pair (marker escape §§/¦¦)" do
+    it "inserts the char twice as one undoable unit, caret past both" do
+      ta = TextArea.new("ab")
+      ta.end_of_line
+      ta.insert_pair('§')
+      ta.text.should eq("ab§§")
+      ta.cx.should eq(4)
+      ta.undo # a single undo removes the whole pair
+      ta.text.should eq("ab")
+    end
+  end
+
+  describe "#replace_all (undoable full-buffer swap)" do
+    it "swaps the buffer, places the caret, and stays undoable (unlike set_text)" do
+      ta = TextArea.new("q=§secret¦base64-encode§")
+      ta.insert('X') # a prior edit that must survive as undoable
+      ta.replace_all("q=secretX", 9)
+      ta.text.should eq("q=secretX")
+      ta.cx.should eq(9)
+      ta.undo # reverts the strip...
+      ta.text.should eq("Xq=§secret¦base64-encode§")
+      ta.undo # ...and the earlier insert is still on the stack
+      ta.text.should eq("q=§secret¦base64-encode§")
+    end
+  end
+
   describe "#home / #end_of_line" do
     it "jumps the caret to the start / end of the current line (insert lands there)" do
       ta = TextArea.new("abc")

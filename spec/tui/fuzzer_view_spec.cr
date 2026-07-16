@@ -43,6 +43,29 @@ describe Gori::Tui::FuzzerView do
     grid2.should_not contain("§x¦rot13§")
   end
 
+  describe "marker structure guard (INS editing)" do
+    it "auto-escapes a § typed inside a template marker (structure survives)" do
+      view = FuzzerView.new
+      view.load_request("https://a", "§ab§ HTTP/1.1\r\nHost: a\r\n\r\n", false, "")
+      view.focus_pane(:template)
+      view.template_move(0, 2) # caret between a and b
+      view.template_insert('§')
+      view.template_text.lines.first.should eq("§a§§b§ HTTP/1.1")
+      Gori::Fuzz::Template.marked_spans(view.template_text).size.should eq(1)
+    end
+
+    it "flags a delimiter delete and strips the whole marker to its value on confirm" do
+      view = FuzzerView.new
+      view.load_request("https://a", "§secret¦base64-encode§ HTTP/1.1\r\nHost: a\r\n\r\n", false, "")
+      view.focus_pane(:template)
+      view.template_move(0, 1) # caret just past the opening §
+      view.marker_break_on_backspace.should eq({0, 22})
+      view.strip_marker_span({0, 22})
+      view.template_text.lines.first.should eq("secret HTTP/1.1")
+      Gori::Fuzz::Template.marked_spans(view.template_text).should be_empty
+    end
+  end
+
   it "toggle_http2 flips the transport and retargets the template request-line version" do
     view = loaded_fuzzer
     view.http2?.should be_false

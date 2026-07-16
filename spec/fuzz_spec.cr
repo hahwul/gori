@@ -198,6 +198,44 @@ describe F::Template do
     # chain-less marker: sep == close
     F::Template.marker_regions("a=§1§").should eq([{2, 4, 4}])
   end
+
+  it "structural_marker_at flags the delimiters/separator of a closed marker" do
+    text = "a=§1¦rot13§&b=§2§" # marker1 [2,11): §@2 ¦@4 §@10 ; marker2 [14,17): §@14 2@15 §@16
+    span1 = {2, 11}
+    span2 = {14, 17}
+    # opening §, the ¦ separator, and the closing § are all structural
+    F::Template.structural_marker_at(text, 2).should eq(span1)  # opening §
+    F::Template.structural_marker_at(text, 4).should eq(span1)  # ¦ separator
+    F::Template.structural_marker_at(text, 10).should eq(span1) # closing §
+    F::Template.structural_marker_at(text, 16).should eq(span2) # chain-less closing §
+    F::Template.structural_marker_at(text, 15).should be_nil    # the "2" value byte
+    # a value byte, a byte in the concealed chain, and text outside a marker are NOT structural
+    F::Template.structural_marker_at(text, 3).should be_nil  # the "1" value
+    F::Template.structural_marker_at(text, 5).should be_nil  # inside "rot13"
+    F::Template.structural_marker_at(text, 0).should be_nil  # "a"
+    F::Template.structural_marker_at(text, -1).should be_nil # buffer start (backspace guard)
+    # a §/¦ OUTSIDE every closed marker (escaped literal / unbalanced) folds to text
+    F::Template.structural_marker_at("a§§b", 1).should be_nil
+    F::Template.structural_marker_at("a§b", 1).should be_nil
+  end
+
+  it "insert_breaks_marker? escapes a §/¦ inside or flush against a marker, not in open text" do
+    text = "a=§1§&b"                                                # marker [2,5): §@2 1@3 §@4
+    F::Template.insert_breaks_marker?(text, 3, '§').should be_true  # strictly inside → escape
+    F::Template.insert_breaks_marker?(text, 3, '¦').should be_true  # separator inside → escape
+    F::Template.insert_breaks_marker?(text, 2, '§').should be_true  # flush against the opener (forms §§)
+    F::Template.insert_breaks_marker?(text, 5, '§').should be_true  # flush past the closer (forms §§)
+    F::Template.insert_breaks_marker?(text, 3, 'x').should be_false # a normal char is never escaped
+    F::Template.insert_breaks_marker?(text, 6, '§').should be_false # open text → let a fresh §…§ be typed
+    F::Template.insert_breaks_marker?("plain", 2, '§').should be_false
+  end
+
+  it "strip_marker drops the whole marker (both § and the ¦chain), leaving the raw value" do
+    # chained marker: value survives, ¦chain + both § are gone; caret lands past the value
+    F::Template.strip_marker("a=§secret¦base64-encode§&b", {2, 24}).should eq({"a=secret&b", 8})
+    # chain-less marker
+    F::Template.strip_marker("a=§1§&b", {2, 5}).should eq({"a=1&b", 3})
+  end
 end
 
 describe F::ContentLength do
