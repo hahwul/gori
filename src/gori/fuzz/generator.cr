@@ -6,11 +6,17 @@ module Gori::Fuzz
   #   Pitchfork / ClusterBomb → one set per position (set[i] → position i).
   # (the frontend builds that mapping; out-of-range positions fall back to set 0.)
   class Generator
+    @has_chains : Bool
+
     # `registry` (when given) applies each marked position's inline Decoder chain to
     # its payload at render time — see Template#apply_chains. nil = no transforms
     # (keeps bare 3-arg callers and specs compiling).
     def initialize(@template : Template, @sets : Array(PayloadSet), @config : Config,
                    @registry : Decoder::Registry? = nil)
+      # Whether ANY marked position carries an inline `¦chain`. Computed once over the
+      # immutable template so the per-request `chained` hot path can skip apply_chains'
+      # array allocation entirely on the common no-chain template (auto_mark / bare §v§).
+      @has_chains = @template.positions.any? { |p| !p.chain.empty? }
     end
 
     def mode : Mode
@@ -135,7 +141,9 @@ module Gori::Fuzz
     # Apply each position's inline Decoder chain to its payload (identity when no
     # registry was supplied). Kept separate so `render` stays a byte-verbatim splice.
     private def chained(payloads : Array(String)) : Array(String)
-      (reg = @registry) ? @template.apply_chains(payloads, reg) : payloads
+      # No registry, or no position has a chain ⇒ apply_chains is a per-element identity, so
+      # return payloads verbatim (byte-for-byte the same wire request) and skip its allocation.
+      (reg = @registry) && @has_chains ? @template.apply_chains(payloads, reg) : payloads
     end
 
     private def set_for(p : Int32) : PayloadSet

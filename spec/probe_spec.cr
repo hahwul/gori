@@ -282,6 +282,8 @@ describe Gori::Probe::Active do
         {target: "/cors?q=1", method: "GET", rh: "", rb: nil, resp: cors_resp},                                # CORS + query
         {target: "/nocors", method: "GET", rh: "", rb: nil, resp: plain_resp},                                 # CORS absent → nil
         {target: "/cors", method: "POST", rh: "", rb: nil, resp: cors_resp},                                   # CORS unsafe method → nil
+        {target: "/has space?q=1", method: "GET", rh: "", rb: nil, resp: plain_resp},                          # malformed start-line (space→4 parts) → nil, both paths
+        {target: "/has space", method: "GET", rh: form_ct, rb: "a=1", resp: cors_resp},                        # malformed + body + CORS: fast path must still reject pre-body-parse
       ]
 
       reflected = Gori::Probe::Active::ReflectedParam.new

@@ -107,6 +107,18 @@ module Gori::Proxy::Codec::Http1
     )
   end
 
+  # The request start-line's {method, target, malformed} WITHOUT parsing/allocating the header
+  # block. Mirrors parse_request_head's start-line parse EXACTLY (same index_crlf + String.new
+  # over the first line + split(' ') + `parts.size != 3` malformed rule), so a caller that only
+  # needs method+target (the active-probe dedup_key gate) keys byte-identically to a full parse.
+  # The dedup_key ⇔ plan equivalence spec guards against any drift from parse_request_head.
+  def self.parse_request_line(raw : Bytes) : {String, String, Bool}
+    first_crlf = index_crlf(raw, 0)
+    start = String.new(raw[0, first_crlf || raw.size])
+    parts = start.split(' ')
+    {parts[0]? || "", parts[1]? || "", parts.size != 3}
+  end
+
   def self.parse_response_head(raw : Bytes) : RawResponse
     first_crlf = index_crlf(raw, 0)
     start = String.new(raw[0, first_crlf || raw.size])

@@ -22,14 +22,22 @@ module Gori
         # `plan` does (malformed / unsafe method / no params / too many). Verified against `plan`
         # by the equivalence spec.
         def dedup_key(detail : Store::FlowDetail) : String?
-          req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
-          return nil if req.malformed?
-          return nil unless SAFE_METHODS.includes?(req.method.upcase)
-          path, query = split_target(Active.origin_form(req.target))
+          # Start-line-only fast path: the key needs only method + target, so a non-safe method
+          # or malformed head is rejected WITHOUT allocating the whole header block. The dominant
+          # bodyless GET/HEAD never parses headers; only a request that actually carries a body
+          # falls through to a full parse (for Content-Type). Byte-identical to plan's key.
+          method, target, malformed = Proxy::Codec::Http1.parse_request_line(detail.request_head)
+          return nil if malformed
+          method_up = method.upcase
+          return nil unless SAFE_METHODS.includes?(method_up)
+          path, query = split_target(Active.origin_form(target))
           names = [] of {String, String} # {name, location}, matching Param.{name, location}
           each_param_name(query) { |raw| names << {decode_name(raw), "query"} }
           body = detail.request_body
           if body && !body.empty?
+            # Full parse ONLY when a body exists — reuse HeaderList#get? so the Content-Type
+            # last-match / case-insensitive semantics stay IDENTICAL to plan's (never hand-rolled).
+            req = Proxy::Codec::Http1.parse_request_head(detail.request_head)
             ct = (req.headers.get?("Content-Type") || "").downcase
             if ct.includes?("x-www-form-urlencoded")
               each_param_name(String.new(body).scrub) { |raw| names << {decode_name(raw), "form"} }
@@ -38,7 +46,7 @@ module Gori
             end
           end
           return nil if names.empty? || names.size > MAX_PARAMS
-          build_dedup_key(detail, req.method.upcase, path, names)
+          build_dedup_key(detail, method_up, path, names)
         end
 
         # Build a probe from a captured flow, or nil if there is nothing reflectable.
@@ -74,7 +82,7 @@ module Gori
           end
 
           return nil if params.empty? || params.size > MAX_PARAMS
-          request = rebuild(detail.request_head, body, req.target, path, new_query, new_body)
+          request = rebuild(detail.request_head, path, new_query, new_body)
           # Same key builder `dedup_key` uses, fed the built params — so the pre-build dedup key
           # and this one can't drift.
           key = build_dedup_key(detail, req.method.upcase, path, params.map { |p| {p.name, p.location} })
@@ -211,17 +219,13 @@ module Gori
 
         # Reassemble the request with the canary-stuffed request-line + body, re-syncing
         # Content-Length when the body changed.
-        private def rebuild(orig_head : Bytes, orig_body : Bytes?, orig_target : String,
-                            path : String, new_query : String, new_body : Bytes?) : Bytes
-          combined = if orig_body && !orig_body.empty?
-                       io = IO::Memory.new(orig_head.size + orig_body.size)
-                       io.write(orig_head)
-                       io.write(orig_body)
-                       io.to_slice
-                     else
-                       orig_head
-                     end
-          head, _, eol = Miner::Inject.split(combined)
+        private def rebuild(orig_head : Bytes, path : String, new_query : String,
+                            new_body : Bytes?) : Bytes
+          # detail.request_head always ends in CRLFCRLF (read_head contract) and a well-formed
+          # head has no earlier blank line, so Inject.split keys off that terminator regardless
+          # of whether the body is appended. Splitting orig_head directly is byte-identical to
+          # the old "concat head+body, split, discard the body half" — one alloc+copy fewer.
+          head, _, eol = Miner::Inject.split(orig_head)
           lines = String.new(head).split(eol)
           unless lines.empty?
             parts = lines[0].split(' ')

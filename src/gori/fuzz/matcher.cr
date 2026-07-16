@@ -18,14 +18,43 @@ module Gori::Fuzz
   # status — class (`2xx`). Metrics are computed over the DECODED body (gzip/br/…),
   # falling back to the raw body when a codec isn't built in.
   class Matcher
-    property match_status : String?
-    property filter_status : String?
-    property match_size : String?
-    property filter_size : String?
-    property match_words : String?
-    property filter_words : String?
-    property match_lines : String?
-    property filter_lines : String?
+    # Each match/filter spec string is set ONCE (CLI run.cr / TUI fuzzer_view.cr / MCP
+    # tools.cr) and then evaluated on EVERY response. Keep the raw string (the TUI reads it
+    # back verbatim for the config screen + JSON persist) but precompile it into a parsed
+    # term list, so the per-response hot path does zero split/strip/to_i64 work and allocates
+    # nothing. Recompiled on assignment, so a mid-run TUI re-apply stays correct. A blank ("")
+    # or nil spec compiles to nil ⇒ treated as absent (the `default` is returned), exactly as
+    # the old `spec.nil? || spec.blank?` guard — so a match dimension stays "unconstrained"
+    # rather than flipping to "reject everything".
+    macro num_spec(name)
+      getter {{name.id}} : String?
+      @{{name.id}}_c : Array(NumTerm)?
+
+      def {{name.id}}=(v : String?)
+        @{{name.id}} = v
+        @{{name.id}}_c = (v && !v.blank?) ? Predicate.compile_num(v) : nil
+      end
+    end
+
+    macro status_spec(name)
+      getter {{name.id}} : String?
+      @{{name.id}}_c : Array(StatusTerm)?
+
+      def {{name.id}}=(v : String?)
+        @{{name.id}} = v
+        @{{name.id}}_c = (v && !v.blank?) ? Predicate.compile_status(v) : nil
+      end
+    end
+
+    status_spec match_status
+    status_spec filter_status
+    num_spec match_size
+    num_spec filter_size
+    num_spec match_words
+    num_spec filter_words
+    num_spec match_lines
+    num_spec filter_lines
+
     property match_regex : Regex?
     property filter_regex : Regex?
     property match_header : String? # substring over the response head
@@ -42,15 +71,15 @@ module Gori::Fuzz
     # baseline from the unmodified request).
     def metrics(raw : Repeater::Result) : Metrics
       body = decode(raw)
-      Metrics.new(raw.response.try(&.status), body.size.to_i64, count_words(body), count_lines(body), raw.duration_us)
+      words, lines = count_metrics(body)
+      Metrics.new(raw.response.try(&.status), body.size.to_i64, words, lines, raw.duration_us)
     end
 
     def build(job : Job, raw : Repeater::Result) : Result
       body = decode(raw)
       status = raw.response.try(&.status)
       length = body.size.to_i64
-      words = count_words(body)
-      lines = count_lines(body)
+      words, lines = count_metrics(body)
 
       need_text = !@match_regex.nil? || !@filter_regex.nil? || !@extract.nil?
       text = need_text ? String.new(body).scrub : ""
@@ -85,10 +114,10 @@ module Gori::Fuzz
     # Every active matcher dimension must pass.
     private def matchers_pass?(raw : Repeater::Result, status : Int32?, length : Int64,
                                words : Int32, lines : Int32, text : String) : Bool
-      status_pass?(@match_status, status, default: true) &&
-        num_pass?(@match_size, length, default: true) &&
-        num_pass?(@match_words, words.to_i64, default: true) &&
-        num_pass?(@match_lines, lines.to_i64, default: true) &&
+      status_pass?(@match_status_c, status, default: true) &&
+        num_pass?(@match_size_c, length, default: true) &&
+        num_pass?(@match_words_c, words.to_i64, default: true) &&
+        num_pass?(@match_lines_c, lines.to_i64, default: true) &&
         regex_pass?(@match_regex, text, default: true) &&
         header_pass?(raw)
     end
@@ -96,10 +125,10 @@ module Gori::Fuzz
     # Any filter dimension that passes removes the result.
     private def filtered?(status : Int32?, length : Int64, words : Int32,
                           lines : Int32, text : String) : Bool
-      status_pass?(@filter_status, status, default: false) ||
-        num_pass?(@filter_size, length, default: false) ||
-        num_pass?(@filter_words, words.to_i64, default: false) ||
-        num_pass?(@filter_lines, lines.to_i64, default: false) ||
+      status_pass?(@filter_status_c, status, default: false) ||
+        num_pass?(@filter_size_c, length, default: false) ||
+        num_pass?(@filter_words_c, words.to_i64, default: false) ||
+        num_pass?(@filter_lines_c, lines.to_i64, default: false) ||
         regex_pass?(@filter_regex, text, default: false)
     end
 
@@ -118,19 +147,18 @@ module Gori::Fuzz
       String.new(raw.head).scrub.downcase.includes?(h.downcase)
     end
 
-    # `default` is returned when the spec is absent (a matcher with no spec passes;
-    # a filter with no spec never fires). A BLANK spec ("" — the CLI/MCP `--ms=` etc.
-    # set the property to an empty string, unlike the TUI's blank_nil) counts as absent:
-    # otherwise `Predicate.any?("")` has no terms → false → a match dimension flips from
-    # "unconstrained" to "reject everything", silently returning zero matches.
-    private def status_pass?(spec : String?, status : Int32?, default : Bool) : Bool
-      return default if spec.nil? || spec.blank?
-      (s = status) ? Predicate.status_any?(spec, s) : false
+    # `default` is returned when the spec is absent (compiled == nil, i.e. the raw spec was
+    # nil or blank — see the status_spec/num_spec setters): a matcher with no spec passes; a
+    # filter with no spec never fires. When a spec IS present but the response has no status,
+    # a status dimension can't match (false), mirroring the old behaviour.
+    private def status_pass?(compiled : Array(StatusTerm)?, status : Int32?, default : Bool) : Bool
+      return default if compiled.nil?
+      (s = status) ? compiled.any?(&.matches?(s)) : false
     end
 
-    private def num_pass?(spec : String?, value : Int64, default : Bool) : Bool
-      return default if spec.nil? || spec.blank?
-      Predicate.any?(spec, value)
+    private def num_pass?(compiled : Array(NumTerm)?, value : Int64, default : Bool) : Bool
+      return default if compiled.nil?
+      compiled.any?(&.matches?(value))
     end
 
     private def extract_value(text : String) : String?
@@ -160,67 +188,133 @@ module Gori::Fuzz
       head.empty? ? nil : head
     end
 
-    # Word count over decoded bytes, allocation-free (whitespace transitions).
-    private def count_words(body : Bytes) : Int32
-      count = 0
+    # Word count (whitespace transitions) AND line count (0x0a bytes) over the decoded body
+    # in ONE allocation-free pass. 0x0a is already a whitespace byte in the word scan, so
+    # counting lines inside that same branch is bit-identical to two separate traversals.
+    private def count_metrics(body : Bytes) : {Int32, Int32}
+      words = 0
+      lines = 0
       in_word = false
       body.each do |b|
         if b == 0x20_u8 || b == 0x09_u8 || b == 0x0a_u8 || b == 0x0d_u8
           in_word = false
+          lines += 1 if b == 0x0a_u8
         elsif !in_word
           in_word = true
-          count += 1
+          words += 1
         end
       end
-      count
-    end
-
-    private def count_lines(body : Bytes) : Int32
-      n = 0
-      body.each { |b| n += 1 if b == 0x0a_u8 }
-      n
+      {words, lines}
     end
   end
 
-  # Numeric predicate over comma-listed terms; matches if ANY term matches.
-  module Predicate
-    def self.any?(spec : String, value : Int64) : Bool
-      terms(spec).any? { |t| term?(t, value) }
+  # A precompiled numeric predicate term — parsed once from a comma-spec, evaluated per
+  # response with plain integer comparisons. Mirrors the old Predicate.term? decision exactly.
+  enum NumKind : UInt8
+    Exact
+    Range
+    Ge
+    Le
+    Gt
+    Lt
+    Never # a comparator/bare term whose number failed to parse — never matches (was `false`)
+  end
+
+  struct NumTerm
+    getter kind : NumKind
+    getter a : Int64
+    getter b : Int64
+
+    def initialize(@kind : NumKind, @a : Int64 = 0_i64, @b : Int64 = 0_i64)
     end
 
-    # Status terms additionally support the `Nxx` class form via InterceptFilter.
-    def self.status_any?(spec : String, status : Int32) : Bool
-      terms(spec).any? do |t|
+    def matches?(v : Int64) : Bool
+      case kind
+      in NumKind::Exact then v == a
+      in NumKind::Range then v >= a && v <= b
+      in NumKind::Ge    then v >= a
+      in NumKind::Le    then v <= a
+      in NumKind::Gt    then v > a
+      in NumKind::Lt    then v < a
+      in NumKind::Never then false
+      end
+    end
+  end
+
+  # A precompiled status term: either an inclusive `lo-hi` range, or a raw term delegated to
+  # InterceptFilter.status_match? at eval time (exact / `Nxx` class / comparator forms). The
+  # comma-split is done ONCE at compile; eval allocates nothing. Ranges keep Int64 bounds so a
+  # range wider than Int32 can't overflow (status is small; the compare promotes to Int64).
+  struct StatusTerm
+    getter a : Int64
+    getter b : Int64
+    getter raw : String?
+
+    def initialize(@a : Int64, @b : Int64, @raw : String? = nil)
+    end
+
+    def self.range(lo : Int64, hi : Int64) : StatusTerm
+      new(lo, hi)
+    end
+
+    def self.delegate(term : String) : StatusTerm
+      new(0_i64, 0_i64, term)
+    end
+
+    def matches?(status : Int32) : Bool
+      if r = @raw
+        InterceptFilter.status_match?(status, r)
+      else
+        status >= @a && status <= @b
+      end
+    end
+  end
+
+  # Parses match/filter spec strings into evaluable terms — the single source of truth for spec
+  # PARSING. The Matcher compiles each spec ONCE per run (on assignment) and evaluates the parsed
+  # NumTerm/StatusTerm arrays per response, so no string is re-parsed or re-split on the hot path.
+  module Predicate
+    # Parse a comma-spec into evaluable numeric terms ONCE (mirrors the old per-call term?).
+    def self.compile_num(spec : String) : Array(NumTerm)
+      terms(spec).map { |t| classify_num(t) }
+    end
+
+    # Parse a comma-spec into evaluable status terms ONCE: a `lo-hi` range (inclusive) is
+    # matched numerically; every other term delegates to InterceptFilter.status_match?, the
+    # SAME decision order the old status_any? used (parse_range first, else class/exact match).
+    def self.compile_status(spec : String) : Array(StatusTerm)
+      terms(spec).map do |t|
         if range = parse_range(t)
-          status >= range[0] && status <= range[1]
+          StatusTerm.range(range[0], range[1])
         else
-          InterceptFilter.status_match?(status, t)
+          StatusTerm.delegate(t)
         end
       end
+    end
+
+    private def self.classify_num(t : String) : NumTerm
+      {">=", "<=", ">", "<", "="}.each do |op|
+        if t.starts_with?(op)
+          n = t[op.size..].strip.to_i64?
+          return NumTerm.new(NumKind::Never) unless n
+          kind = case op
+                 when ">=" then NumKind::Ge
+                 when "<=" then NumKind::Le
+                 when ">"  then NumKind::Gt
+                 when "<"  then NumKind::Lt
+                 else           NumKind::Exact # "="
+                 end
+          return NumTerm.new(kind, n)
+        end
+      end
+      if range = parse_range(t)
+        return NumTerm.new(NumKind::Range, range[0], range[1])
+      end
+      (n = t.to_i64?) ? NumTerm.new(NumKind::Exact, n) : NumTerm.new(NumKind::Never)
     end
 
     private def self.terms(spec : String) : Array(String)
       spec.split(',').map(&.strip).reject(&.empty?)
-    end
-
-    private def self.term?(t : String, value : Int64) : Bool
-      {">=", "<=", ">", "<", "="}.each do |op|
-        if t.starts_with?(op)
-          n = t[op.size..].strip.to_i64?
-          return false unless n
-          return case op
-          when ">=" then value >= n
-          when "<=" then value <= n
-          when ">"  then value > n
-          when "<"  then value < n
-          else           value == n
-          end
-        end
-      end
-      if range = parse_range(t)
-        return value >= range[0] && value <= range[1]
-      end
-      (n = t.to_i64?) ? value == n : false
     end
 
     private def self.parse_range(t : String) : {Int64, Int64}?
