@@ -145,6 +145,11 @@ module Gori::Tui
       String.new(@request[0, {@request.size, 256}.min]).each_line.first? || ""
     end
 
+    # HTTP method from the request line — feeds the sub-tab filter's `method:`.
+    def request_method : String
+      request_line.strip.split(' ').first? || ""
+    end
+
     def summary(max : Int32 = 32) : String
       parts = request_line.strip.split(' ')
       s = "#{parts[0]?} #{parts[1]?}".strip

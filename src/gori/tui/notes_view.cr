@@ -420,6 +420,13 @@ module Gori::Tui
       @notes.map_with_index { |note, i| "#{i + 1}:#{note.label(i)}" }
     end
 
+    # The sub-tab filter's searchable projection (one per note, in chip order): the note's
+    # title (nil when blank) + its full body text, so a note is findable by title or by
+    # any content it holds. See NotesController#filter_subjects.
+    def filter_rows : Array({String?, String})
+      @notes.map { |note| {Notes.title(note.area.text), note.area.text} }
+    end
+
     # The note currently being edited; @current is kept in range by every mutator.
     private def current : Note
       @notes[@current.clamp(0, @notes.size - 1)]

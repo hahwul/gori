@@ -81,6 +81,7 @@ module Gori
       # terminals can't deliver). Operate on the active tab; count gates the menu entry.
       abstract def subtab_search_open : Nil                # open the sub-tab search picker for the active tab
       abstract def subtab_search_count : Int32             # active tab's open sub-tab count (gates the search entry)
+      abstract def subtab_filter_open : Nil                # open the `/` sub-tab filter bar for the active tab (issue #121)
       abstract def repeater_rename_subtab : Nil              # open the rename prompt for the active sub-tab
       abstract def repeater_tag_subtab : Nil                 # open the tag editor for the active sub-tab (issue #121)
       abstract def repeater_filter_subtabs : Nil             # open the `/` tag-filter bar over the sub-tab strip

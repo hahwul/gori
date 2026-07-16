@@ -104,6 +104,16 @@ describe Gori::Repeater::SubtabFilter do
       Repeater::SubtabFilter.suggestions("tag:idor ", 9, list).should be_empty
       Repeater::SubtabFilter.suggestions("", 0, list).should be_empty
     end
+
+    it "limits field-name completion to the given fields (adaptive per tab)" do
+      # A text tab passes %w(name): only name: is offered, never host:/method:/tag:.
+      Repeater::SubtabFilter.suggestions("na", 2, list, %w(name)).should eq(["name:"])
+      Repeater::SubtabFilter.suggestions("ta", 2, list, %w(name)).should be_empty
+      # An HTTP tab (no tags) advertises name/host/method.
+      Repeater::SubtabFilter.suggestions("", 0, list, %w(name host method)).should be_empty
+      Repeater::SubtabFilter.suggestions("me", 2, list, %w(name host method)).should eq(["method:"])
+      Repeater::SubtabFilter.suggestions("ta", 2, list, %w(name host method)).should be_empty
+    end
   end
 
   describe ".host_of" do

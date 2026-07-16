@@ -96,7 +96,10 @@ module Gori
       # Returns complete tokens for the whitespace-bounded token under `cx`. Empty
       # when the caret sits on blank space or nothing matches. Value pools for
       # tag/name/host/method come from `subjects` (cardinality is small — open tabs).
-      def self.suggestions(query : String, cx : Int32, subjects : Array(Subject)) : Array(String)
+      # `fields` limits which field NAMES a tab completes (a text tab passes %w(name) so
+      # it never suggests host:/method:); defaults to the full canonical set (Repeater).
+      def self.suggestions(query : String, cx : Int32, subjects : Array(Subject),
+                           fields : Array(String) = FIELDS) : Array(String)
         token, _, _ = token_at(query, cx)
         return [] of String if token.empty?
         neg = token.starts_with?('-') && token.size > 1
@@ -110,7 +113,7 @@ module Gori
           val_prefix = field == "tag" ? prefix.lstrip('#') : prefix
           suggest_values(field, val_prefix, subjects).map { |v| "#{neg_p}#{field_raw}:#{v}" }
         else
-          FIELDS.select(&.starts_with?(core.downcase)).map { |f| "#{neg_p}#{f}:" }
+          fields.select(&.starts_with?(core.downcase)).map { |f| "#{neg_p}#{f}:" }
         end
       end
 

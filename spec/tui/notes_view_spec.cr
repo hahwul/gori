@@ -114,6 +114,23 @@ describe Gori::Tui::NotesView do
     end
   end
 
+  it "projects sub-tab filter rows (title + body) per note in chip order" do
+    view = NotesView.new
+    type(view, "Alpha title\nbody about idor")
+    view.new_note
+    type(view, "Beta notes\nsecond body")
+    rows = view.filter_rows
+    rows.size.should eq(2)
+    rows[0][0].should eq("Alpha title") # name = the note's first non-blank line
+    rows[0][1].should contain("idor")   # body carries the searchable content
+    rows[1][0].should eq("Beta notes")
+    # End-to-end: free text matches the body, name: matches the title, else hidden.
+    subj0 = Gori::Repeater::SubtabFilter::Subject.new(rows[0][0], rows[0][1], "", "", [] of String)
+    Gori::Repeater::SubtabFilter.parse("idor").matches?(subj0).should be_true
+    Gori::Repeater::SubtabFilter.parse("name:alpha").matches?(subj0).should be_true
+    Gori::Repeater::SubtabFilter.parse("name:beta").matches?(subj0).should be_false
+  end
+
   it "keeps multiple notes as independent sub-tabs across a reload" do
     tmp_store do |store|
       view = NotesView.new

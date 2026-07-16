@@ -41,14 +41,31 @@ module Gori::Tui
       true # from the first session (Repeater/Notes style)
     end
 
+    # --- sub-tab filter (issue #121) ---
+    def subtab_filter_enabled? : Bool
+      true
+    end
+
+    def filter_fields : Array(String)
+      %w(name host method) # each session's A/B slots carry a target + method
+    end
+
+    def filter_subjects : Array(Repeater::SubtabFilter::Subject)
+      @sessions.map(&.filter_subject)
+    end
+
+    # Filter-aware strip nav: ←/→ skip hidden chips; ^1-9 to a hidden chip drops the
+    # filter (chip numbers are absolute). Sessions are in-memory, so no persist on switch.
     def move_subtab(dir : Int32) : Nil
-      return if @sessions.size < 2
-      nidx = (@idx + dir).clamp(0, @sessions.size - 1)
-      @idx = nidx unless nidx == @idx
+      if t = step_visible(@idx, dir)
+        @idx = t
+      end
     end
 
     def jump_subtab(idx : Int32) : Nil
-      @idx = idx if 0 <= idx < @sessions.size && idx != @idx
+      return unless 0 <= idx < @sessions.size
+      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
+      @idx = idx if idx != @idx
     end
 
     def comparer_new : Nil
@@ -94,8 +111,11 @@ module Gori::Tui
       body_focused = focus == :body
       labels = subtab_strip_shown? ? subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: false)
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @idx, @subtab_start) do |content|
-        view.render(screen, content, focused: body_focused)
+      subtabs_focused = focus == :subtabs
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?) do |content|
+        render_with_filter(screen, content, subtabs_focused) do |body|
+          view.render(screen, body, focused: body_focused)
+        end
       end
     end
 
@@ -131,10 +151,10 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      # Carve the sub-tab strip too (like Decoder/Notes), not just the border — the view
-      # renders the REQ/RES chips inside the strip-carved content rect, so a plain
-      # inset(1,1) would hit-test STRIP_H rows too high and never match the chips.
-      inner = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
+      # Carve the sub-tab strip AND the filter bar too (like Repeater), not just the
+      # border — the view renders the REQ/RES chips inside that content rect, so a plain
+      # inset(1,1) would hit-test the chrome rows too high and never match the chips.
+      inner = body_rect_below_filter(rect)
       if pane = view.pane_chip_at(inner, mx, my)
         view.set_pane(pane)
       end

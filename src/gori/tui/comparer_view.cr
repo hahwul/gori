@@ -8,6 +8,7 @@ require "../store"
 require "../repeater/diff"
 require "../repeater/side_by_side"
 require "../repeater/message_lines"
+require "../repeater/subtab_filter"
 
 module Gori::Tui
   # The Comparer body: two flow "slots" (A, B) and a side-by-side line diff of
@@ -43,6 +44,17 @@ module Gori::Tui
               auto_label
             end
       raw.size > max ? raw[0, max - 1] + "…" : raw
+    end
+
+    # The sub-tab filter's searchable projection: the custom name + both slot summaries
+    # (free text) with each slot's URL/method folded into target/method so `host:`/
+    # `method:` narrow either side. See ComparerController#filter_subjects.
+    def filter_subject : Repeater::SubtabFilter::Subject
+      slots = [@slot_a, @slot_b].compact
+      summ = slots.map { |d| summary(d) }.join(" · ")
+      targets = slots.map(&.row.url).join(' ') # full URL → host: substring-matches the authority
+      methods = slots.map(&.row.method).join(' ')
+      Repeater::SubtabFilter::Subject.new(@name, summ, targets, methods, [] of String)
     end
 
     # Identity for rename/apply (view object, not content) — mirrors MinerView/RepeaterView.

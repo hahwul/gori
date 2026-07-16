@@ -353,6 +353,14 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 2 },
         mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
+      # Inline `/` filter bar over the fuzz sub-tab strip (issue #121) — narrows chips by
+      # name / host / method + free text. '/' is the shared filter idiom (unique in :tab).
+      r.register Verb::Definition.new(
+        "fuzz.filter-subtabs", "Filter sub-tabs", "Filter the fuzz sub-tab strip by name / host / method",
+        Verb::Scope::Fuzzer,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :fuzzer && ctx.subtab_search_count >= 2 },
+        mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
+
       # Sub-tab rename/close — mirrors repeater.rename-subtab/repeater.close-subtab above:
       # the strip's raw `r` rename / ^W close, promoted to verbs so :subtab isn't
       # empty. 'e'/'w' are free in COMMON ∪ :subtab (Fuzzer COMMON keys: r/s/y/k/u/S/v).
@@ -434,6 +442,20 @@ module Gori
       r.register Verb::Definition.new(
         "mine.duplicate-subtab", "Duplicate subtab", "Open a new miner session with the same request and config",
         Verb::Scope::Miner, available: in_miner, mnemonic: 'd', section: :subtab) { |ctx| ctx.miner_duplicate_subtab; nil }
+
+      # Sub-tab search + inline filter (issue #121), section :tab — brings Miner to full
+      # sub-tab parity (it had neither). Both gate on ≥2 sessions. 'f'/'/' are free here.
+      r.register Verb::Definition.new(
+        "mine.find-subtab", "Search sub-tabs", "Filter the open mining sessions and jump to one",
+        Verb::Scope::Miner,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.subtab_search_count >= 2 },
+        mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+
+      r.register Verb::Definition.new(
+        "mine.filter-subtabs", "Filter sub-tabs", "Filter the mining sub-tab strip by name / host / method",
+        Verb::Scope::Miner,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :miner && ctx.subtab_search_count >= 2 },
+        mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
 
       # Repeater's/Fuzzer's "Link to issue/note" (Round 5 — relocated OUT of
       # register_links, which registers before register_fuzz/register_miner in

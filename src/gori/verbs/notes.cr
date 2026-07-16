@@ -32,6 +32,14 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 },
         mnemonic: 's', section: :tab) { |ctx| ctx.subtab_search_open; nil }
 
+      # Inline `/` filter bar over the note sub-tab strip (issue #121) — narrows chips by
+      # name / free-text over the body. '/' is the shared filter idiom (unique in :tab).
+      r.register Verb::Definition.new(
+        "notes.filter-subtabs", "Filter sub-tabs", "Filter the note sub-tab strip by name / text",
+        Verb::Scope::Notes,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.subtab_search_count >= 2 },
+        mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
+
       # The single smart Copy (see repeater.copy in verbs/history.cr) — copy-all is gone.
       in_notes_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :notes && ctx.notes_read_mode? }
       r.register Verb::Definition.new(

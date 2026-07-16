@@ -74,6 +74,14 @@ module Gori
         Verb::Scope::Decoder,
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_search_count >= 2 },
         mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+
+      # Inline `/` filter bar over the conversion sub-tab strip (issue #121) — narrows
+      # chips by name / free-text over the chain + input. '/' is the shared filter idiom.
+      r.register Verb::Definition.new(
+        "decoder.filter-subtabs", "Filter sub-tabs", "Filter the conversion sub-tab strip by name / text",
+        Verb::Scope::Decoder,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :decoder && ctx.subtab_search_count >= 2 },
+        mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
     end
   end
 end

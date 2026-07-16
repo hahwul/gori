@@ -1,6 +1,7 @@
 require "termisu"
 require "../verb"
 require "../session"
+require "../repeater/subtab_filter"
 require "./screen"
 require "./geometry"
 require "./frame"
@@ -152,6 +153,15 @@ module Gori::Tui
   abstract class TabController
     property subtab_start : Int32 = 0
 
+    # --- sub-tab filter (issue #121; shared across the multi-session workbench tabs) ---
+    # A live in-memory query (tag:/name:/host:/method: + free text) that narrows which
+    # chips the strip shows. Opt-in per tab via subtab_filter_enabled? + filter_subjects;
+    # non-participating tabs (History, Help, …) leave these at their inert defaults.
+    @subtab_filter = ""            # the live query string ("" = no filter, all shown)
+    @subtab_filter_editing = false # the `/` bar is capturing keystrokes
+    @filter_cx = 0                 # caret index within @subtab_filter
+    @filter_preedit = ""           # live IME composition in the bar
+
     def initialize(@host : Host)
     end
 
@@ -247,19 +257,251 @@ module Gori::Tui
       subtab_labels.try(&.size) || 0
     end
 
-    # Absolute chip indices to hide from the strip (Repeater's tag filter); nil = show
-    # all. Rendering + click hit-tests skip these, but the indices stay absolute so
-    # jump/rename/^N keep working unchanged.
+    # Absolute chip indices hidden by the active sub-tab filter; nil = show all (also nil
+    # for tabs that don't opt into filtering). Rendering + click hit-tests skip these, but
+    # the indices stay absolute so jump/rename/^N keep working unchanged.
     def subtab_hidden : Set(Int32)?
-      nil
+      return nil unless subtab_filter_enabled?
+      return nil if @subtab_filter.blank?
+      f = Repeater::SubtabFilter.parse(@subtab_filter)
+      subjects = filter_subjects
+      hidden = Set(Int32).new
+      subjects.each_with_index { |s, i| hidden << i unless f.matches?(s) }
+      hidden
     end
 
-    # Whether BodyChrome carves the hairline under the chip row. Default true.
-    # Repeater returns false so its filter bar can draw the divider under chips+filter
-    # as one chrome group (runner strip hit-tests must use the same flag).
+    # Absolute indices of the sub-tabs the filter keeps visible (all when unfiltered).
+    def visible_indices : Array(Int32)
+      h = subtab_hidden
+      return (0...subtab_count).to_a unless h
+      (0...subtab_count).reject { |i| h.includes?(i) }
+    end
+
+    # Whether BodyChrome carves the hairline under the chip row. When a filter bar is
+    # shown the bar owns the hairline (draws it under chips+filter as one chrome group),
+    # so this is false; otherwise true. Runner strip hit-tests read the same flag.
     def subtab_strip_divider? : Bool
+      !subtab_filter_shown?
+    end
+
+    # ===== sub-tab filter subsystem (issue #121) =============================
+    # Opt-in switch: this tab supports the `/` sub-tab filter bar. Default off — History,
+    # Help, … never show it. The five workbench tabs + Repeater override to true.
+    def subtab_filter_enabled? : Bool
+      false
+    end
+
+    # The searchable projection of each sub-tab, in chip order (one Subject per label).
+    # The matcher + Tab suggestions run over these. Default empty (nothing to filter).
+    def filter_subjects : Array(Repeater::SubtabFilter::Subject)
+      [] of Repeater::SubtabFilter::Subject
+    end
+
+    # The field names this tab advertises in the filter bar guidance/hint rows (and the
+    # only fields Tab-completes). HTTP tabs override to name/host/method; Repeater adds tag.
+    def filter_fields : Array(String)
+      %w(name)
+    end
+
+    # The filter bar occupies a body row whenever there are ≥2 sub-tabs to filter (below
+    # that there is nothing to narrow). Repeater overrides to show it from the first
+    # session (its own History-style discoverability row).
+    def subtab_filter_shown? : Bool
+      subtab_filter_enabled? && subtab_count >= 2
+    end
+
+    # The `/` bar is currently capturing keystrokes (the shell routes keys here).
+    def subtab_filter_editing? : Bool
+      @subtab_filter_editing
+    end
+
+    # True at a cold start (nothing typed, or the caret sits just after a space) — decides
+    # whether the suggestion row shows the standing field hint.
+    private def filter_token_empty? : Bool
+      Repeater::SubtabFilter.token_at(@subtab_filter, @filter_cx)[0].empty?
+    end
+
+    # Open the `/` filter bar (from the strip or the space menu), seeding the caret.
+    def start_subtab_filter : Nil
+      return unless subtab_filter_enabled?
+      @subtab_filter_editing = true
+      @filter_cx = @subtab_filter.size
+      @filter_preedit = ""
+    end
+
+    # Enter: keep the (possibly blank) filter and leave edit mode; re-anchor the current
+    # session onto a still-visible chip so the body matches the narrowed strip.
+    def commit_subtab_filter : Nil
+      @subtab_filter_editing = false
+      @filter_preedit = ""
+      reanchor_current
+    end
+
+    # Esc: drop the filter entirely and leave edit mode (every chip returns).
+    def clear_subtab_filter : Nil
+      @subtab_filter = ""
+      @subtab_filter_editing = false
+      @filter_cx = 0
+      @filter_preedit = ""
+    end
+
+    def set_subtab_filter_preedit(text : String) : Nil
+      @filter_preedit = text
+    end
+
+    def handle_subtab_filter_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      c = ev.char || key.to_char
+      if key.escape?
+        clear_subtab_filter
+      elsif key.enter?
+        commit_subtab_filter
+      elsif key.tab?
+        complete_subtab_filter # History-style Tab: first suggestion for the token
+      elsif key.backspace?
+        if @filter_cx > 0
+          @subtab_filter = @subtab_filter[0, @filter_cx - 1] + @subtab_filter[@filter_cx..]
+          @filter_cx -= 1
+        end
+        @filter_preedit = ""
+      elsif key.left?
+        @filter_cx = {@filter_cx - 1, 0}.max
+      elsif key.right?
+        @filter_cx = {@filter_cx + 1, @subtab_filter.size}.min
+      elsif c && !ev.ctrl? && !ev.alt? && !c.control?
+        @subtab_filter = @subtab_filter[0, @filter_cx] + c + @subtab_filter[@filter_cx..]
+        @filter_cx += 1
+        @filter_preedit = ""
+      end
+    end
+
+    def filter_suggestions : Array(String)
+      return [] of String unless @subtab_filter_editing
+      Repeater::SubtabFilter.suggestions(@subtab_filter, @filter_cx, filter_subjects, filter_fields)
+    end
+
+    # Replace the token under the caret with the first suggestion (History query_complete).
+    def complete_subtab_filter : Bool
+      sugg = filter_suggestions
+      return false if sugg.empty?
+      _, s, e = Repeater::SubtabFilter.token_at(@subtab_filter, @filter_cx)
+      first = sugg.first
+      @subtab_filter = "#{@subtab_filter[0, s]}#{first}#{@subtab_filter[e..]}"
+      @filter_cx = s + first.size
+      @filter_preedit = ""
       true
     end
+
+    # Keep the current session on a visible chip: if the filter hid it, jump to the first
+    # still-visible session (jump_subtab saves the outgoing session as each tab requires).
+    private def reanchor_current : Nil
+      return unless subtab_filter_enabled?
+      vis = visible_indices
+      return if vis.empty? || vis.includes?(subtab_index)
+      jump_subtab(vis.first)
+    end
+
+    # The next VISIBLE absolute index stepping `dir` from `current` (filter-aware strip
+    # nav), or nil when there is nowhere to move. Controllers use this in move_subtab so
+    # ←/→ skip hidden chips. A current index that was filtered out steps onto an edge.
+    protected def step_visible(current : Int32, dir : Int32) : Int32?
+      vis = visible_indices
+      return nil if vis.size < 2
+      cur = vis.index(current)
+      target = cur ? vis[(cur + dir).clamp(0, vis.size - 1)] : (dir < 0 ? vis.first : vis.last)
+      target == current ? nil : target
+    end
+
+    # --- filter bar rendering (shared by every opt-in tab's render_body) ---
+    # Base height: guidance/input row + hairline (the bar owns the strip divider). While
+    # editing, an optional suggestion row sits between the input and the hairline.
+    FILTER_BAR_H = 2
+
+    # Cold-start hint (nothing typed) — spells out the tab's advertised fields + that bare
+    # words are a free-text search, so the language is discoverable the moment `/` opens.
+    private def filter_edit_hint : String
+      "fields:  #{filter_fields.map { |f| "#{f}:" }.join("  ")}    ·    or type words to search"
+    end
+
+    # Opt-in tabs call this inside their framed_body block: carve the filter bar off the
+    # content top, draw it, and yield the body rect below (unchanged content when no bar).
+    protected def render_with_filter(screen : Screen, content : Rect, subtabs_focused : Bool, & : Rect ->) : Nil
+      bar, body = carve_filter_bar(content)
+      render_subtab_filter_bar(screen, bar, subtabs_focused: subtabs_focused) if bar
+      yield body
+    end
+
+    # The body rect below the sub-tab strip AND the filter bar — shared by render + click
+    # hit-tests so body clicks land where the body is actually drawn.
+    protected def body_rect_below_filter(rect : Rect) : Rect
+      content = BodyChrome.content_rect(rect, strip: subtab_strip_shown?, strip_divider: subtab_strip_divider?)
+      carve_filter_bar(content)[1]
+    end
+
+    # Filter (+ optional suggestion row) + hairline carved off the body top. Height is
+    # FILTER_BAR_H idle/active, +1 while editing when there are Tab suggestions/a hint.
+    private def carve_filter_bar(content : Rect) : {Rect?, Rect}
+      return {nil, content} unless subtab_filter_shown? && content.h > 0
+      h = filter_bar_height
+      h = {h, content.h}.min
+      bar = Rect.new(content.x, content.y, content.w, h)
+      body = content.h > h ? Rect.new(content.x, content.y + h, content.w, content.h - h) : Rect.new(content.x, content.y + h, content.w, 0)
+      {bar, body}
+    end
+
+    private def filter_bar_height : Int32
+      base = FILTER_BAR_H
+      return base unless @subtab_filter_editing
+      # Reserve the extra row for the suggestion/hint line: live ↹ completions, OR the
+      # cold-start field hint shown while the token is empty. A non-empty token with no
+      # completions keeps the compact height (nothing to show there).
+      (!filter_suggestions.empty? || filter_token_empty?) ? base + 1 : base
+    end
+
+    # History-style 3-state bar under the sub-tab chips, with the strip hairline drawn
+    # BELOW the filter so chips+filter read as one chrome group:
+    #   editing  → `filter › <input>` [+ `↹ name:…` suggestions]
+    #   active   → `: <query>`
+    #   idle     → `/ filter  ·  name:  host:  method:` (this tab's advertised fields)
+    # Right side always shows visible/total chip counts.
+    private def render_subtab_filter_bar(screen : Screen, rect : Rect, *, subtabs_focused : Bool) : Nil
+      return if rect.w < 8 || rect.h < 1
+      row_y = rect.y
+      screen.fill(Rect.new(rect.x, row_y, rect.w, 1), Theme.panel)
+      vis = visible_indices.size
+      count = "#{vis}/#{subtab_count}"
+      count_x = rect.right - count.size
+      left_w = {count_x - 1 - rect.x, 1}.max
+      if @subtab_filter_editing
+        px = screen.text(rect.x, row_y, "filter › ", Theme.accent, Theme.panel)
+        field_w = {count_x - 1 - px, 1}.max
+        screen.input_line(px, row_y, @subtab_filter, @filter_cx, @filter_preedit,
+          Theme.text_bright, Theme.panel, width: field_w)
+      elsif !@subtab_filter.blank?
+        screen.text(rect.x, row_y, ": #{@subtab_filter}", Theme.text, Theme.panel, width: left_w)
+      else
+        screen.text(rect.x, row_y, "/ filter  ·  #{filter_fields.map { |f| "#{f}:" }.join("  ")}", Theme.muted, Theme.panel, width: left_w)
+      end
+      screen.text(count_x, row_y, count, vis == 0 ? Theme.red : Theme.muted, Theme.panel)
+
+      div_y = row_y + 1
+      if @subtab_filter_editing && rect.h >= 3
+        sugg = filter_suggestions
+        # Live completions to Tab through, else (at a cold start) the standing hint so the
+        # row isn't blank the instant `/` opens; a non-empty no-match token stays quiet.
+        hint = !sugg.empty? ? "↹ #{sugg.first(8).join("  ")}" : (filter_edit_hint if filter_token_empty?)
+        if hint
+          screen.fill(Rect.new(rect.x, row_y + 1, rect.w, 1), Theme.panel)
+          screen.text(rect.x, row_y + 1, hint, Theme.muted, Theme.panel, width: rect.w)
+          div_y = row_y + 2
+        end
+      end
+      return if div_y >= rect.y + rect.h
+      border = subtabs_focused ? Theme.focus_gold : Theme.border
+      screen.hline(rect.x, div_y, rect.w, fg: border, bg: Theme.bg)
+    end
+
+    # ===== end sub-tab filter subsystem =====================================
 
     # A FIXED strip (Help): the chip set is constant — no ^N/^W create/close and the
     # body is read-only. The shell drops "new/close/edit" from the strip hint for it.
