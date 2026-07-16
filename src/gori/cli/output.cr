@@ -2,6 +2,7 @@ require "json"
 require "../store"
 require "../fuzz"
 require "../miner"
+require "../discover"
 require "../sitemap"
 require "../probe/group"
 require "../notes"
@@ -132,6 +133,39 @@ module Gori
           io << f.name.ljust(24)
           io << "  " << f.location.label.ljust(9)
           io << "· " << f.evidence.label
+        end
+      end
+
+      # --- discover findings --------------------------------------------------
+
+      def self.discover_row_json(f : Discover::Finding) : String
+        JSON.build { |j| discover_finding_fields(j, f) }
+      end
+
+      def self.discover_array_json(findings : Array(Discover::Finding)) : String
+        JSON.build { |j| j.array { findings.each { |f| discover_finding_fields(j, f) } } }
+      end
+
+      def self.discover_finding_fields(j : JSON::Builder, f : Discover::Finding) : Nil
+        j.object do
+          j.field "url", f.url
+          j.field "method", f.method
+          j.field "status", f.status
+          j.field "length", f.length
+          j.field "content_type", f.content_type
+          j.field "source", f.source.label
+          j.field "depth", f.depth
+          j.field "confidence", f.confidence.round(2)
+        end
+      end
+
+      # "200  GET  http://h/admin  (bruteforced 0.92)"
+      def self.discover_row_text(f : Discover::Finding) : String
+        String.build do |io|
+          io << (f.status.try(&.to_s.ljust(3)) || "---")
+          io << "  " << f.method.ljust(4)
+          io << " " << f.url
+          io << "  (" << f.source.label << " " << f.confidence.round(2) << ")"
         end
       end
 

@@ -1555,6 +1555,17 @@ module Gori
       nil
     end
 
+    # A representative flow id for a (host, method, target) Sitemap node — prefers a
+    # completed flow (one with a response), newest first. Used by the Sitemap "Send to
+    # Repeater" action, whose node carries no flow id (it's a distinct-tuple aggregate).
+    def representative_flow_id(host : String, method : String, target : String) : Int64?
+      @db.query("SELECT id FROM flows WHERE host = ? AND method = ? AND target = ? ORDER BY (status IS NOT NULL) DESC, id DESC LIMIT 1",
+        host, method, target) do |rs|
+        return rs.read(Int64) if rs.move_next
+      end
+      nil
+    end
+
     # Full detail incl. raw BLOBs (the truth) for the detail view.
     # `body_max`, when set, caps request/response body BLOBs via SQLite `substr`
     # (byte-oriented on BLOBs) so list-preview paths never pull multi-MiB bodies

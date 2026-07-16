@@ -16,6 +16,9 @@ require "../fuzz"
 require "../decoder"
 require "../env"
 require "../miner"
+require "../discover"
+require "../discover/adapters"
+require "../import/builder"
 require "../notes"
 require "../probe"
 require "./serialize"
@@ -61,7 +64,7 @@ module Gori
       # @store, so a post-hoc append would land in the wrong DB) — only in-project side effects.
       AGENT_ACTION_TOOLS = Set{
         "send_request", "send_websocket",
-        "fuzz_start", "fuzz_stop", "mine_start", "mine_stop", "stop_job",
+        "fuzz_start", "fuzz_stop", "mine_start", "mine_stop", "discover_start", "discover_stop", "stop_job",
         "create_issue", "update_issue",
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_note", "update_note", "delete_note",
@@ -82,6 +85,12 @@ module Gori
       MINE_MAX_CONCURRENCY =         100
       MINE_MAX_STORED      =      10_000
 
+      # Discover (spider + brute) safety rails.
+      DISCOVER_MAX_REQUESTS    = 100_000_i64
+      DISCOVER_MAX_CONCURRENCY =         100
+      DISCOVER_MAX_STORED      =      20_000
+      DISCOVER_MAX_DEPTH       =          12
+
       MCP_REPEATER_REQUEST_MAX = 16 * 1024
 
       # Default inlined-body cap for body_mode:preview (full uses Serialize::MAX_TEXT).
@@ -99,6 +108,7 @@ module Gori
         Env.load_project(@store)
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
+        @discover_jobs = {} of String => DiscoverJob
         @job_seq = 0
         # switch_project reopens @store; @owns_store tracks whether WE opened the
         # current one (and must close it on the next switch). The initial store is
@@ -188,6 +198,31 @@ module Gori
         getter audit : JobAudit
 
         def initialize(@id : String, @total : Int64, @engine : Miner::Engine, @audit : JobAudit)
+        end
+
+        def stop : Nil
+          @stop_requested_at_ms ||= Time.utc.to_unix_ms
+          @engine.stop
+        end
+      end
+
+      # An async discover (spider + directory brute-force) run tracked for the discover_* tools.
+      class DiscoverJob
+        getter id : String
+        property status : Symbol = :running # :running | :done | :stopped | :error
+        property found = 0
+        property sent = 0_i64
+        property errors = 0_i64
+        property queued = 0
+        property stats : Discover::RunStats? = nil
+        property error_msg : String? = nil
+        getter results = [] of Discover::Finding
+        property? truncated = false
+        property ended_at_ms : Int64? = nil
+        property stop_requested_at_ms : Int64? = nil
+        getter audit : JobAudit
+
+        def initialize(@id : String, @engine : Discover::Engine, @audit : JobAudit)
         end
 
         def stop : Nil
@@ -672,6 +707,46 @@ module Gori
               s.field "job_id", strprop("id from mine_start"), required: true
             end
 
+            tool j, "discover_start",
+              "Spider a target and brute-force unlinked directories/paths (like Burp's crawl + " \
+              "content discovery / ZAP's spider + forced browse). Follows links AND probes a " \
+              "built-in path wordlist, with per-directory soft-404 calibration to keep false " \
+              "positives down. Discovered endpoints are written into the project so list_sitemap / " \
+              "get_flow see them. Returns a job_id immediately (poll with discover_status / " \
+              "discover_results; end with discover_stop). ACTIVE: sends many real outbound requests. " \
+              "Capped at #{DISCOVER_MAX_REQUESTS} requests / #{DISCOVER_MAX_CONCURRENCY} concurrency." do |s|
+              s.field "url", strprop("seed URL (scheme+host, optionally a path subtree to confine to)"), required: true
+              s.field "spider", boolprop("follow links (default true)")
+              s.field "bruteforce", boolprop("brute-force directory/path names (default true)")
+              s.field "max_depth", intprop("spider depth from the seed (default 4, max #{DISCOVER_MAX_DEPTH})")
+              s.field "wordlist", strprop("path to an extra path wordlist (merged with the built-in list)")
+              s.field "extensions", strprop("comma list of extensions to also probe (e.g. php,json,bak)")
+              s.field "containment", strprop("boundary: same-origin | scope-aware (default) | host+subdomains")
+              s.field "concurrency", intprop("parallel requests (default 20, max #{DISCOVER_MAX_CONCURRENCY})")
+              s.field "rate", intprop("requests/sec cap (0 = unlimited)")
+              s.field "timeout_ms", intprop("per-request connect + idle timeout in milliseconds")
+              s.field "retries", intprop("retries per request on a network error")
+              s.field "insecure", boolprop("skip upstream TLS verification (default false)")
+              s.field "max_requests", intprop("caller cap on total requests")
+              s.field "allow_unscoped", boolprop("run even when the target host is outside the project's configured scope — REQUIRED for an out-of-scope target, or when no scope is configured")
+            end
+
+            tool j, "discover_status", "Counts + state of a discover job (running|done|stopped|error), " \
+                                       "including the FP/FN figures (calibrated_out / *_suppressed)." do |s|
+              s.field "job_id", strprop("id from discover_start"), required: true
+            end
+
+            tool j, "discover_results",
+              "Paged discovered endpoints for a discover job (url, method, status, length, content_type, source, depth, confidence)." do |s|
+              s.field "job_id", strprop("id from discover_start"), required: true
+              s.field "offset", intprop("start row (default 0)")
+              s.field "limit", intprop("max rows (default 100, max 1000)")
+            end
+
+            tool j, "discover_stop", "Stop a running discover job (in-flight requests finish)." do |s|
+              s.field "job_id", strprop("id from discover_start"), required: true
+            end
+
             tool j, "list_jobs",
               "List all fuzz and mine jobs this session started (job_id, kind, status, " \
               "counts, target) — one call to see everything in flight." { }
@@ -785,6 +860,10 @@ module Gori
         when "mine_status"      then gated { mine_status(h) }
         when "mine_results"     then gated { mine_results(h) }
         when "mine_stop"        then gated { mine_stop(h) }
+        when "discover_start"   then gated { discover_start(h) }
+        when "discover_status"  then gated { discover_status(h) }
+        when "discover_results" then gated { discover_results(h) }
+        when "discover_stop"    then gated { discover_stop(h) }
         when "list_jobs"        then gated { list_jobs }
         when "get_job"          then gated { get_job(h) }
         when "stop_job"         then gated { stop_job(h) }
@@ -1588,7 +1667,8 @@ module Gori
       # from under the running fiber, so both refuse until jobs settle.
       private def jobs_running? : Bool
         @jobs.each_value.any? { |j| j.status == :running } ||
-          @mine_jobs.each_value.any? { |j| j.status == :running }
+          @mine_jobs.each_value.any? { |j| j.status == :running } ||
+          @discover_jobs.each_value.any? { |j| j.status == :running }
       end
 
       private def list_projects : Result
@@ -3174,12 +3254,186 @@ module Gori
         @mine_jobs[id]? || not_found("no mine job #{id}")
       end
 
+      # --- discover (spider + directory brute-force) --------------------------
+
+      private def discover_start(h) : Result
+        engine, seed_url, host = build_discover_job(h)
+        p = Discover::Url.parse(seed_url)
+        chk_url = p ? "#{Discover::Url.origin(p)}/" : seed_url
+        sc = scope_check(chk_url, host, bool(h, "allow_unscoped") || false)
+        return scope_blocked(sc) if sc.blocked
+        @job_seq += 1
+        id = "ds_#{@job_seq}"
+        audit = JobAudit.new(seed_url, int(h, "rate").try(&.to_f64),
+          clamp(int(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
+          int(h, "max_requests"), Time.utc.to_unix_ms)
+        djob = DiscoverJob.new(id, engine, audit)
+        @discover_jobs[id] = djob
+        Log.info { "discover_start #{id} #{seed_url} scope=#{sc.decision}" }
+        spawn(name: "mcp-discover-#{id}") { run_discover_job(djob, engine) }
+        Result.new(JSON.build { |j| j.object { j.field "job_id", id; j.field "status", "running"; emit_scope(j, sc) } })
+      rescue ex : FuzzArgError
+        Result.new(ex.message || "invalid discover arguments", is_error: true)
+      end
+
+      # Build a ready-to-run discover engine + seed URL + host from the tool args.
+      private def build_discover_job(h) : {Discover::Engine, String, String}
+        raw = str(h, "url").presence || raise FuzzArgError.new("provide a 'url' seed target")
+        seed = Env.expand(raw)
+        seed = "https://#{seed}" unless seed.matches?(/\Ahttps?:\/\//i)
+        parts = Discover::Url.parse(seed) || raise FuzzArgError.new("could not parse a host from '#{raw}'")
+
+        spider = bool(h, "spider")
+        bruteforce = bool(h, "bruteforce")
+        spider = true if spider.nil?
+        bruteforce = true if bruteforce.nil?
+        raise FuzzArgError.new("at least one of spider/bruteforce must stay enabled") unless spider || bruteforce
+
+        containment = Discover::Containment::ScopeAware
+        if c = str(h, "containment").presence
+          containment = Discover::Containment.parse?(c) || raise FuzzArgError.new("invalid containment '#{c}' (same-origin|scope-aware|host+subdomains)")
+        end
+        extensions = (str(h, "extensions") || "").split(',').compact_map do |t|
+          tok = t.strip.lchop('.')
+          tok.empty? ? nil : tok
+        end
+        cap = int(h, "max_requests")
+        config = Discover::Config.new(
+          concurrency: clamp(int(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
+          rps: int(h, "rate").try(&.to_f64),
+          timeout: discover_timeout(h),
+          retries: (int(h, "retries") || 1_i64).clamp(0_i64, 1000_i64).to_i,
+          max_requests: cap ? {cap, DISCOVER_MAX_REQUESTS}.min : DISCOVER_MAX_REQUESTS,
+          spider: spider, bruteforce: bruteforce,
+          max_depth: clamp(int(h, "max_depth"), 4, DISCOVER_MAX_DEPTH),
+          extensions: extensions, containment: containment)
+        words = Discover::Wordlist.load(str(h, "wordlist").presence)
+        scope = Scope.load(@store)
+        policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
+        sender = Discover::Sender.new(verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: discover_timeout(h))
+        engine = Discover::Engine.new(seed, words, sender, config, policy)
+        {engine, seed, parts.host}
+      rescue ex : File::Error
+        raise FuzzArgError.new("wordlist error: #{ex.message}")
+      end
+
+      private def discover_timeout(h) : Time::Span?
+        ms = int(h, "timeout_ms")
+        ms && ms > 0 ? ms.milliseconds : nil
+      end
+
+      private def run_discover_job(djob : DiscoverJob, engine : Discover::Engine) : Nil
+        base_ts = Time.utc.to_unix * 1_000_000
+        engine.run do |ev|
+          case ev
+          when Discover::FindingEvent then store_discover_finding(djob, ev.finding, base_ts)
+          when Discover::ProgressEvent
+            p = ev.progress
+            djob.sent = p.sent; djob.found = p.found; djob.errors = p.errors; djob.queued = p.queued
+          when Discover::DoneEvent
+            djob.sent = ev.progress.sent; djob.found = ev.progress.found; djob.errors = ev.progress.errors
+            djob.stats = ev.stats
+            djob.status = ev.stopped ? :stopped : :done
+            djob.ended_at_ms = Time.utc.to_unix_ms
+          when Discover::ErrorEvent
+            djob.status = :error
+            djob.error_msg = ev.message
+          end
+        end
+      end
+
+      # Buffer the finding for discover_results AND write it into the project so list_sitemap /
+      # get_flow reflect it. A store write failure (lock/disk) must not kill the running scan.
+      private def store_discover_finding(djob : DiscoverJob, f : Discover::Finding, base_ts : Int64) : Nil
+        if djob.results.size < DISCOVER_MAX_STORED
+          djob.results << f
+        else
+          djob.truncated = true
+        end
+        pair = Discover::Persist.flow_pair(f, base_ts + djob.results.size)
+        @store.insert_import_batch([{pair.request, pair.response}])
+      rescue
+      end
+
+      private def discover_status(h) : Result
+        djob = lookup_discover_job(h)
+        return djob if djob.is_a?(Result)
+        s = djob.stats
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field "job_id", djob.id
+            j.field "status", djob.status.to_s
+            j.field "found", djob.found
+            j.field "sent", djob.sent
+            j.field "errors", djob.errors
+            j.field "queued", djob.queued
+            j.field "job_complete", djob.status != :running
+            j.field "results_truncated", djob.truncated?
+            j.field "error", djob.error_msg
+            if s
+              j.field "calibrated_out", s.calibrated_out
+              j.field "dedup_suppressed", s.dedup_suppressed
+              j.field "template_suppressed", s.template_suppressed
+              j.field "cluster_suppressed", s.cluster_suppressed
+              j.field "uncalibratable_dirs", s.uncalibratable_dirs
+              j.field("confidence_histogram") { j.array { s.conf_hist.each { |c| j.number(c) } } }
+            end
+            emit_audit(j, djob.audit, djob.ended_at_ms)
+          end
+        end)
+      end
+
+      private def discover_results(h) : Result
+        djob = lookup_discover_job(h)
+        return djob if djob.is_a?(Result)
+        offset = clamp_nonneg(int(h, "offset"))
+        limit = clamp(int(h, "limit"), 100, 1000)
+        page = djob.results[offset, limit]? || [] of Discover::Finding
+        Result.new(JSON.build do |j|
+          j.object do
+            j.field("findings") { j.array { page.each { |f| discover_finding_json(j, f) } } }
+            j.field "returned", page.size
+            j.field "offset", offset
+            j.field "total_available", djob.results.size
+            j.field "job_complete", djob.status != :running
+            j.field "has_more", offset + page.size < djob.results.size
+            j.field "results_truncated", djob.truncated?
+          end
+        end)
+      end
+
+      private def discover_finding_json(j : JSON::Builder, f : Discover::Finding) : Nil
+        j.object do
+          j.field "url", f.url
+          j.field "method", f.method
+          j.field "status", f.status
+          j.field "length", f.length
+          j.field "content_type", f.content_type
+          j.field "source", f.source.label
+          j.field "depth", f.depth
+          j.field "confidence", f.confidence.round(2)
+        end
+      end
+
+      private def discover_stop(h) : Result
+        djob = lookup_discover_job(h)
+        return djob if djob.is_a?(Result)
+        djob.stop
+        Result.new(JSON.build { |j| j.object { j.field "job_id", djob.id; j.field "status", "stopping" } })
+      end
+
+      private def lookup_discover_job(h) : DiscoverJob | Result
+        id = str(h, "job_id")
+        return Result.new("missing required 'job_id'", is_error: true) if id.nil? || id.empty?
+        @discover_jobs[id]? || not_found("no discover job #{id}")
+      end
+
       # --- unified async job management (list/get/stop across fuzz + mine) -----
 
       private def list_jobs : Result
         Result.new(JSON.build do |j|
           j.object do
-            j.field "count", @jobs.size + @mine_jobs.size
+            j.field "count", @jobs.size + @mine_jobs.size + @discover_jobs.size
             j.field("jobs") do
               j.array do
                 @jobs.each_value do |f|
@@ -3202,6 +3456,16 @@ module Gori
                     j.field "names_total", m.total
                     j.field "found", m.found
                     j.field "target", m.audit.target
+                  end
+                end
+                @discover_jobs.each_value do |d|
+                  j.object do
+                    j.field "job_id", d.id
+                    j.field "kind", "discover"
+                    j.field "status", d.status.to_s
+                    j.field "sent", d.sent
+                    j.field "found", d.found
+                    j.field "target", d.audit.target
                   end
                 end
               end

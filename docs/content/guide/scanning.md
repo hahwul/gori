@@ -50,6 +50,33 @@ gori run mine <flow-id> \
 
 > The Miner tab is hidden by default. Enable it from the command palette (`Ctrl-P`) when you need it.
 
+## Discover: Spider & Brute-Force
+
+Where the Miner finds hidden inputs, **Discover** finds hidden endpoints. It spiders a target (following links you never clicked) and brute-forces unlinked directories and paths (`/admin`, `.git/config`, `/api/v2`). It lives as a sub-tab under the new **Target** tab, next to the Sitemap, and every endpoint it finds flows straight into that Sitemap.
+
+Start a run from where you already are: on a **Sitemap** node or a **History** flow, press `Space` and pick **Discover here**. A small popup lets you choose the exploration style (spider, brute-force, or both, the default), a max depth, the crawl scope, and concurrency. The run happens in the background: watch the bottom bar, pause or stop it from the Discover sub-tab (`^X` stop, `p` pause), and jump to the results from the completion notification.
+
+Discover is built for tight false-positive and false-negative rates on real sites:
+
+- **Soft-404 calibration.** Before brute-forcing a directory it sends a few known-bad paths to learn how that server answers a miss. It handles a server that returns `200` for everything and one that redirects every unknown path to `/login`, so a wordlist hit only counts when it genuinely diverges from that baseline.
+- **No runaway crawls.** Two independent guards stop a crawl from exploding: URL-shape folding collapses `/user/1`, `/user/2`, `/user/3`… into one template, and a content fingerprint collapses near-duplicate listing pages into one cluster. A depth cap, a page cap, and a hard request budget bound the rest.
+- **Scope-aware by default.** A run stays on the seed origin unless you've set Scope include rules, in which case it follows them; Scope excludes and the sandbox are always respected. Launch on a path (not a host) to confine the run to that subtree.
+
+Each run reports its FP/FN figures: how many probes the calibrator suppressed, how much exploration the traps guards cut, and the confidence spread of what it kept.
+
+Headless, it's `gori run discover`, and it's exposed to agents over MCP (`discover_start` / `discover_status` / `discover_results` / `discover_stop`):
+
+```bash
+gori run discover --target https://target.example \
+  --max-depth 3 \
+  --extensions php,json,bak \
+  --format jsonl
+```
+
+Discover sends real, unsolicited traffic to the target. Only run it against systems you are authorized to test.
+
+> From the Sitemap, `Space` also offers **Send to Repeater**, which opens the selected endpoint's captured request in the Repeater workbench.
+
 ## Issues
 
 **Issues** is your triage list. Promote anything worth tracking (from Probe, the Fuzzer, the Miner, or your own inspection) into an issue with a severity and a status, and jump straight back to the evidence flow. Issues can be exported for reporting:

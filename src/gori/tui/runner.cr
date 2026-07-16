@@ -8,7 +8,7 @@ require "./layout"
 require "./chrome"
 require "./tab_controller"
 require "./controllers/help_controller"
-require "./controllers/sitemap_controller"
+require "./controllers/target_controller"
 require "./controllers/intercept_controller"
 require "./controllers/notes_controller"
 require "./controllers/history_controller"
@@ -55,6 +55,7 @@ require "./notifications_overlay"
 require "./path_complete"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
+require "./discover_config_overlay"
 require "./scope_rule_overlay"
 require "./custom_rule_overlay"
 require "./ca_import_overlay"
@@ -202,6 +203,7 @@ module Gori::Tui
       # The Miner config popup (History/Repeater → space → "Mine parameters"); @overlay is
       # :mine_config while it's up. Built fresh each time it opens (holds the seed request).
       @mine_config_overlay = nil.as(MineConfigOverlay?)
+      @discover_config_overlay = nil.as(DiscoverConfigOverlay?)
       # The Fuzzer config overlays (CONFIG pane → ↵ on a set / Add / Advanced): a payload-set
       # editor and the advanced-settings form. @overlay is :fuzz_set / :fuzz_advanced while up;
       # built fresh from the current fuzz session each time they open.
@@ -231,7 +233,7 @@ module Gori::Tui
       @tabs = {} of Symbol => TabController
       [
         HelpController.new(self),
-        SitemapController.new(self),
+        TargetController.new(self),
         InterceptController.new(self),
         NotesController.new(self),
         HistoryController.new(self),
@@ -255,8 +257,18 @@ module Gori::Tui
       @tabs[:help].as(HelpController)
     end
 
+    private def target_controller : TargetController
+      @tabs[:target].as(TargetController)
+    end
+
+    # Sitemap + Discover are sub-tabs composed under the Target parent, so their controllers
+    # are reached through it (they aren't registered in @tabs directly).
     private def sitemap_controller : SitemapController
-      @tabs[:sitemap].as(SitemapController)
+      target_controller.sitemap
+    end
+
+    private def discover_controller : DiscoverController
+      target_controller.discover
     end
 
     private def intercept_controller : InterceptController
@@ -378,6 +390,7 @@ module Gori::Tui
         end
         dirty = true if fuzzer_controller.drain_events
         dirty = true if miner_controller.drain_events
+        dirty = true if discover_controller.drain_events
         if (rev = @session.interceptor.revision) != last_rev
           last_rev = rev
           dirty = true
@@ -917,6 +930,7 @@ module Gori::Tui
       return handle_hotkeys_key(ev) if @overlay == :hotkeys
       return handle_notifications_key(ev) if @overlay == :notifications
       return handle_mine_config_key(ev) if @overlay == :mine_config
+      return handle_discover_config_key(ev) if @overlay == :discover_config
       return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
       return handle_fuzz_advanced_key(ev) if @overlay == :fuzz_advanced
       return handle_scope_rule_key(ev) if @overlay == :scope_rule
@@ -927,10 +941,10 @@ module Gori::Tui
       if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
         return if history_controller.handle_query_key(ev)
       end
-      if @active_tab == :sitemap && @overlay == :none && @focus == :body && sitemap_controller.view.querying?
+      if @active_tab == :target && target_controller.sitemap_active? && @overlay == :none && @focus == :body && sitemap_controller.view.querying?
         return if sitemap_controller.handle_query_key(ev)
       end
-      if @active_tab == :sitemap && @overlay == :none && @focus == :body && sitemap_controller.view.tagging?
+      if @active_tab == :target && target_controller.sitemap_active? && @overlay == :none && @focus == :body && sitemap_controller.view.tagging?
         return if sitemap_controller.handle_tag_key(ev)
       end
       if @active_tab == :intercept && @overlay == :none && @focus == :body && intercept_controller.querying?
@@ -1166,7 +1180,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :fuzz_set, :fuzz_advanced, :scope_rule, :probe_rule, :ca_import then true
+      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :discover_config, :fuzz_set, :fuzz_advanced, :scope_rule, :probe_rule, :ca_import then true
       else                                                                                                                                                                                                                                                               false
       end
     end
@@ -1272,6 +1286,7 @@ module Gori::Tui
       when :hotkeys       then click_hotkeys(area, mx, my)
       when :notifications then click_notifications(area, mx, my)
       when :mine_config   then click_mine_config(area, mx, my)
+      when :discover_config then click_discover_config(area, mx, my)
       when :fuzz_set      then click_fuzz_set(area, mx, my)
       when :fuzz_advanced then click_fuzz_advanced(area, mx, my)
       when :scope_rule    then click_scope_rule(area, mx, my)
@@ -1337,6 +1352,17 @@ module Gori::Tui
       if idx = ov.row_at(box, mx, my)
         ov.set_selected(idx)
         ov.on_start_row? ? start_mining(ov) : ov.toggle
+      end
+    end
+
+    private def click_discover_config(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @discover_config_overlay
+      return unless ov
+      box = ov.overlay_box(area)
+      return close_discover_config if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = ov.row_at(box, mx, my)
+        ov.set_selected(idx)
+        ov.on_start_row? ? start_discover(ov) : ov.toggle
       end
     end
 
@@ -1519,6 +1545,7 @@ module Gori::Tui
       when :hotkeys       then @hotkeys_overlay.select_move(step)
       when :notifications then @notifications_overlay.select_move(step)
       when :mine_config   then @mine_config_overlay.try(&.move(step))
+      when :discover_config then @discover_config_overlay.try(&.move(step))
       when :fuzz_set      then @fuzz_set_overlay.try(&.move(step))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.move(step))
       when :scope_rule    then @scope_rule_overlay.try(&.move(step))
@@ -1565,6 +1592,25 @@ module Gori::Tui
         ov.adjust(1)
       elsif key.enter? || key.space?
         ov.on_start_row? ? start_mining(ov) : ov.toggle
+      end
+    end
+
+    private def handle_discover_config_key(ev : Termisu::Event::Key) : Nil
+      ov = @discover_config_overlay
+      return unless ov
+      key = ev.key
+      if key.escape?
+        close_discover_config
+      elsif key.up?
+        ov.move(-1)
+      elsif key.down?
+        ov.move(1)
+      elsif key.left?
+        ov.adjust(-1)
+      elsif key.right?
+        ov.adjust(1)
+      elsif key.enter? || key.space?
+        ov.on_start_row? ? start_discover(ov) : ov.toggle
       end
     end
 
@@ -3323,6 +3369,7 @@ module Gori::Tui
       @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
       @notifications_overlay.render(screen, layout.body) if @overlay == :notifications
       @mine_config_overlay.try(&.render(screen, layout.body)) if @overlay == :mine_config
+      @discover_config_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_config
       @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
       @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_advanced
       @scope_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :scope_rule
@@ -3430,6 +3477,7 @@ module Gori::Tui
       when :hotkeys       then "HOTKEYS"
       when :notifications then "NOTIFICATIONS"
       when :mine_config   then "MINE PARAMS"
+      when :discover_config then "DISCOVER"
       when :fuzz_set      then "PAYLOAD SET"
       when :fuzz_advanced then "ADVANCED"
       when :scope_rule    then "SCOPE RULE"
@@ -3478,6 +3526,7 @@ module Gori::Tui
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
+      when :discover_config then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
       when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
       when :fuzz_advanced then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
       when :scope_rule    then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
@@ -4557,7 +4606,7 @@ module Gori::Tui
     def scope_toggle_lens : Nil
       @scope.toggle
       history_controller.view.reload(@session.store)
-      sitemap_controller.reload if @active_tab == :sitemap
+      sitemap_controller.reload if @active_tab == :target && target_controller.sitemap_active?
       probe_controller.view.reload(@session.store) if @active_tab == :probe
       project_controller.toast_scope_state
     end
@@ -4686,6 +4735,77 @@ module Gori::Tui
 
     def sitemap_toggle_grouping : Nil
       sitemap_controller.sitemap_toggle_grouping
+    end
+
+    # --- Discover ExecContext ---
+    # Seed a discovery run from the selected Sitemap node — offering the path subtree AND the
+    # host root as start-target choices in the config popup.
+    def sitemap_discover : Nil
+      ep = sitemap_controller.view.selected_endpoint
+      unless ep
+        @toast = "select a host or path to discover"
+        return
+      end
+      id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+      base = id.try { |i| @session.store.flow_row(i).try(&.url) }
+      origin = base.try { |u| Discover::Url.parse(u).try { |p| Discover::Url.origin(p) } } || "https://#{ep[:host]}"
+      open_discover_config(build_discover_seed(origin, ep[:host], ep[:target]))
+    end
+
+    # Candidate start targets for the Discover popup: the path subtree first (the likely
+    # intent), then the whole host — so `/notes` offers both `/notes/` and `/`.
+    private def build_discover_seed(origin : String, host : String, path : String) : DiscoverSeed
+      clean = path.partition('?')[0]
+      choices = [] of {String, String}
+      if !clean.empty? && clean != "/"
+        sub = clean.ends_with?('/') ? clean : "#{clean}/"
+        choices << {sub, "#{origin}#{sub}"}
+      end
+      choices << {"/", "#{origin}/"}
+      DiscoverSeed.new(choices, host)
+    end
+
+    def sitemap_repeater : Nil
+      ep = sitemap_controller.view.selected_endpoint
+      unless ep
+        @toast = "select an endpoint to send"
+        return
+      end
+      if id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+        repeater_flow(id)
+      else
+        @toast = "no captured request for this path — capture it, or use Discover"
+      end
+    end
+
+    def history_discover : Nil
+      id = history_target_flow_id
+      unless id && (row = @session.store.flow_row(id))
+        @toast = "select a flow to discover"
+        return
+      end
+      unless p = Discover::Url.parse(row.url)
+        @toast = "flow has no discoverable URL"
+        return
+      end
+      open_discover_config(build_discover_seed(Discover::Url.origin(p), p.host, p.path))
+    end
+
+    def discover_run : Nil
+      discover_controller.discover_run
+    end
+
+    def discover_stop : Nil
+      discover_controller.discover_stop
+    end
+
+    def discover_toggle_pause : Nil
+      discover_controller.discover_toggle_pause
+    end
+
+    def goto_discover : Nil
+      focus_tab(:target)
+      target_controller.select_discover
     end
 
     # --- History / detail ExecContext --- (delegated to HistoryController)
@@ -5055,6 +5175,36 @@ module Gori::Tui
     private def close_mine_config : Nil
       @overlay = :none
       @mine_config_overlay = nil
+    end
+
+    # --- Discover config popup (Sitemap/History → "Discover here") ---
+    private def open_discover_config(seed : DiscoverSeed?) : Nil
+      unless seed
+        @toast = "cannot discover from here"
+        return
+      end
+      @discover_config_overlay = DiscoverConfigOverlay.new(seed)
+      @overlay = :discover_config
+    end
+
+    # Confirm the popup: launch the BACKGROUND run and switch to the Discover sub-tab so
+    # its live results are visible (we're already under the Target tab if launched here).
+    private def start_discover(ov : DiscoverConfigOverlay) : Nil
+      unless ov.valid?
+        @toast = "enable spider or bruteforce"
+        return
+      end
+      ov.save_prefs
+      discover_controller.start_session(ov.selected_target, ov.build_config)
+      close_discover_config
+      switch_tab(:target)
+      target_controller.select_discover
+      @focus = :body
+    end
+
+    private def close_discover_config : Nil
+      @overlay = :none
+      @discover_config_overlay = nil
     end
 
     # Host: open the Fuzzer payload-set editor (nil = add, else edit that index) and

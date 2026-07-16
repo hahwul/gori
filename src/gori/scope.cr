@@ -201,6 +201,13 @@ module Gori
       @mutex.synchronize { allowlisted_unlocked?(url, host) }
     end
 
+    # True when any EXCLUDE rule matches the url/host — the "always deny" gate an outbound
+    # scanner (Discover) applies in every containment mode, INDEPENDENT of includes and the
+    # display lens. (matches_url? requires includes; this asks only "is it carved out?".)
+    def excluded?(url : String, host : String) : Bool
+      @mutex.synchronize { @rules.any? { |r| r.exclude? && r.matches?(url, host) } }
+    end
+
     # The ALLOWLIST evaluation (callers hold @mutex): true ⇔ at least one INCLUDE rule
     # matches AND no EXCLUDE matches. Empty includes ⇒ false — "nothing is explicitly
     # allowed". SHARED by the Probe Active gate (matches_url?) and the Sandbox block gate

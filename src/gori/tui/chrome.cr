@@ -8,7 +8,7 @@ module Gori::Tui
     # this constant is only the catalog every config is reconciled against.
     TABS = [
       {:project, "Project"},
-      {:sitemap, "Sitemap"},
+      {:target, "Target"},
       {:history, "History"},
       {:intercept, "Intercept"},
       {:repeater, "Repeater"},

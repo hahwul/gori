@@ -168,6 +168,15 @@ module Gori
     class_property mine_notify : String = "when-found"
     class_property? mine_prefs_saved : Bool = false
 
+    # Last Discover overlay choices (global scratch — not project data).
+    class_property discover_containment : String = "scope-aware"
+    class_property discover_max_depth : Int32 = 4
+    class_property discover_concurrency : Int32 = 20
+    class_property? discover_spider : Bool = true
+    class_property? discover_bruteforce : Bool = true
+    class_property? discover_extensions : Bool = false
+    class_property? discover_prefs_saved : Bool = false
+
     # The exact JSON this process last read from disk (nil = never loaded). It's the
     # 3-way-merge BASE at save time: a top-level section this process didn't change
     # (in-memory == base) yields to whatever is on disk now, so a concurrent writer's
@@ -210,6 +219,7 @@ module Gori
         self.decoder_chains = parse_decoder_chains(cv["chains"]?)
       end
       parse_mine_prefs(root["mine"]?)
+      parse_discover_prefs(root["discover"]?)
       parse_layout(root["layout"]?)
       parse_statusline(root["statusline"]?)
       Env.bump_highlight_rev
@@ -470,6 +480,34 @@ module Gori
       save
     end
 
+    private def self.parse_discover_prefs(node : JSON::Any?) : Nil
+      obj = node.try(&.as_h?)
+      unless obj
+        self.discover_prefs_saved = false
+        return
+      end
+      self.discover_prefs_saved = true
+      obj["containment"]?.try(&.as_s?).try { |s| self.discover_containment = s }
+      obj["max_depth"]?.try(&.as_i?).try { |n| self.discover_max_depth = n }
+      obj["concurrency"]?.try(&.as_i?).try { |n| self.discover_concurrency = n }
+      obj["spider"]?.try(&.as_bool?).try { |b| self.discover_spider = b }
+      obj["bruteforce"]?.try(&.as_bool?).try { |b| self.discover_bruteforce = b }
+      obj["extensions"]?.try(&.as_bool?).try { |b| self.discover_extensions = b }
+    end
+
+    # Persist the Discover overlay's last confirmed choices (called when a run starts).
+    def self.save_discover_prefs(containment : String, max_depth : Int32, concurrency : Int32,
+                                 spider : Bool, bruteforce : Bool, extensions : Bool) : Nil
+      self.discover_containment = containment
+      self.discover_max_depth = max_depth
+      self.discover_concurrency = concurrency
+      self.discover_spider = spider
+      self.discover_bruteforce = bruteforce
+      self.discover_extensions = extensions
+      self.discover_prefs_saved = true
+      save
+    end
+
     private def self.parse_keymap_bindings(node : JSON::Any?) : Hash(String, Array(String))
       obj = node.try(&.as_h?)
       return keymap_overrides unless obj # non-object / absent → keep current
@@ -678,6 +716,18 @@ module Gori
                 end
                 j.field "concurrency", mine_concurrency
                 j.field "notify", mine_notify
+              end
+            end
+          end
+          if discover_prefs_saved?
+            j.field "discover" do
+              j.object do
+                j.field "containment", discover_containment
+                j.field "max_depth", discover_max_depth
+                j.field "concurrency", discover_concurrency
+                j.field "spider", discover_spider?
+                j.field "bruteforce", discover_bruteforce?
+                j.field "extensions", discover_extensions?
               end
             end
           end

@@ -15,7 +15,8 @@ module Gori
       Repeater         # the Repeater tab has focus
       Fuzzer         # the Fuzzer tab has focus
       Miner          # the Miner (param-mining) tab has focus
-      Sitemap        # the Sitemap tab has focus
+      Sitemap        # the Sitemap sub-tab (under Target) has focus
+      Discover       # the Discover sub-tab (under Target) has focus
       Issues       # the Issues list has focus
       IssuesDetail # an issue's detail is open
       Probe          # the Probe scan-issue list has focus

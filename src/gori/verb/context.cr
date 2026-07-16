@@ -140,6 +140,13 @@ module Gori
       abstract def sitemap_query : Nil           # focus the QL filter bar
       abstract def sitemap_tag : Nil             # tag the selected path with a memo
       abstract def sitemap_toggle_grouping : Nil # fold/unfold numeric path-param sequences
+      abstract def sitemap_discover : Nil        # spider + brute-force the selected host/path
+      abstract def sitemap_repeater : Nil        # send the selected endpoint to Repeater
+      abstract def history_discover : Nil        # spider + brute-force the selected flow's host
+      abstract def discover_run : Nil            # start / re-run the current Discover run
+      abstract def discover_stop : Nil           # stop the running Discover run
+      abstract def discover_toggle_pause : Nil   # pause / resume the running Discover run
+      abstract def goto_discover : Nil           # focus the Target tab's Discover sub-tab
 
       # scope lens
       abstract def scope_open : Nil        # jump to the Project tab's scope editor

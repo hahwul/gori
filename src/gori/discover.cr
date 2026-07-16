@@ -1,0 +1,7 @@
+require "./discover/types"
+require "./discover/url"
+require "./discover/fingerprint"
+require "./discover/extract"
+require "./discover/calibrate"
+require "./discover/wordlist"
+require "./discover/engine"
