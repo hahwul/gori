@@ -1547,6 +1547,26 @@ kbd {
   scroll-margin-top: calc(var(--header-h) + 1.2rem);
 }
 
+/* Hover # anchors injected by toc.js */
+.docs-main .h-anchor {
+  margin-left: 0.45rem;
+  color: var(--quiet);
+  font-weight: 400;
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition);
+}
+
+.docs-main h2:hover .h-anchor,
+.docs-main h3:hover .h-anchor,
+.docs-main .h-anchor:focus-visible {
+  opacity: 1;
+}
+
+.docs-main .h-anchor:hover {
+  color: var(--accent-strong);
+}
+
 .docs-toc-rail {
   display: none;
   flex: 0 0 var(--toc-w);
@@ -1814,6 +1834,77 @@ pre {
   scrollbar-color: var(--line-strong) transparent;
 }
 
+/* codecopy.js wraps each pre so the copy button can sit outside the pre's
+   horizontal scroll (an absolute child of the pre would scroll with it). */
+.code-block {
+  position: relative;
+  max-width: min(100%, 58rem);
+  margin: 1rem 0 1.5rem;
+}
+
+.code-block pre {
+  max-width: 100%;
+  margin: 0;
+}
+
+.code-copy {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.code-block:hover .code-copy,
+.code-copy:focus-visible,
+.code-copy.copied {
+  opacity: 1;
+}
+
+.code-copy:hover {
+  border-color: var(--line-strong);
+  color: var(--heading);
+}
+
+.code-copy svg {
+  width: 15px;
+  height: 15px;
+}
+
+.code-copy svg:last-child {
+  display: none;
+}
+
+.code-copy.copied svg:first-child {
+  display: none;
+}
+
+.code-copy.copied svg:last-child {
+  display: block;
+  color: var(--accent-strong);
+}
+
+.code-copy.copied {
+  border-color: rgb(var(--accent-rgb) / 0.4);
+}
+
+/* Touch screens have no hover: keep the button always visible there. */
+@media (hover: none) {
+  .code-copy {
+    opacity: 1;
+  }
+}
+
 pre code,
 pre code.hljs {
   padding: 0;
@@ -2042,11 +2133,13 @@ nav.pagination a:hover,
 }
 
 /* Doc pages keep the sidebar fixed for the full viewport height, so the
-   footer (a flow sibling after .docs-container closes) needs its own
-   left offset to clear it — otherwise the two overlap once the page is
-   scrolled to the bottom. */
+   footer (a flow sibling after .docs-container closes) starts AFTER the
+   sidebar — margin, not padding, so its border-top never runs underneath
+   the translucent sidebar and crosses its border-right. */
 .is-doc .docs-footer {
-  padding-left: calc(var(--sidebar-w) + 3rem);
+  width: auto;
+  margin: 0 0 0 var(--sidebar-w);
+  padding-left: 3rem;
 }
 
 .docs-footer p {
@@ -2094,6 +2187,12 @@ nav.pagination a:hover,
   font-family: "Bradley Hand", "Snell Roundhand", "Apple Chancery", cursive;
   font-size: 0.95rem;
   letter-spacing: 0.02em;
+}
+
+/* Freeze the page behind the search modal (search.js toggles the class). */
+html.search-lock,
+html.search-lock body {
+  overflow: hidden;
 }
 
 .search-overlay {
@@ -2486,12 +2585,20 @@ nav.pagination a:hover,
   }
 
   .is-doc .docs-footer {
+    width: min(100%, 1380px);
+    margin: 0 auto;
     padding-left: 1.25rem;
   }
 
   .docs-main {
     max-width: 100%;
     padding: 2rem 1rem;
+  }
+
+  /* Wide reference tables scroll inside their own box on small screens. */
+  .docs-main table {
+    display: block;
+    overflow-x: auto;
   }
 
   .docs-main h1 {
