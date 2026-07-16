@@ -665,18 +665,20 @@ module Gori::Tui
 
     # --- config pane (calm summary) ------------------------------------------
     # A single row cursor @cfg_row (↑/↓) walks: one row per payload set, then the
-    # Add / Mode / Advanced / Run rows. There is NO text field and NO caret in-pane —
-    # all text entry lives in the Set / Advanced overlays — so ←/→ can only ever cycle
-    # (Mode), which removes the old caret-vs-cycle overload and the axis mismatch.
-    CONFIG_TAIL = [:add, :mode, :advanced, :run]
+    # Add / Mode / Advanced rows (Run is the TEMPLATE border's ^R:RUN badge now, not a
+    # cursor row). There is NO text field and NO caret in-pane — all text entry lives in the
+    # Set / Advanced overlays — so ←/→ can only ever cycle (Mode), which removes the old
+    # caret-vs-cycle overload and the axis mismatch.
+    CONFIG_TAIL = [:add, :mode, :advanced]
 
     private def config_row_count : Int32
       @sets.size + CONFIG_TAIL.size
     end
 
-    # The kind of row under the cursor: :set | :add | :mode | :advanced | :run.
+    # The kind of row under the cursor: :set | :add | :mode | :advanced. (Run is no longer a
+    # config row — it moved to the TEMPLATE border's ^R:RUN badge.)
     def config_row : Symbol
-      @cfg_row < @sets.size ? :set : (CONFIG_TAIL[@cfg_row - @sets.size]? || :run)
+      @cfg_row < @sets.size ? :set : (CONFIG_TAIL[@cfg_row - @sets.size]? || :advanced)
     end
 
     # The payload-set index under the cursor, or nil when the cursor is on a tail row.
@@ -1355,10 +1357,22 @@ module Gori::Tui
       left = Rect.new(rect.x, rect.y, half, rect.h)
       right = Rect.new(rect.x + half + 1, rect.y, {rect.w - half - 1, 0}.max, rect.h)
       tmpl_focused = focused && @focus == :template
-      tmpl, chain = template_chain_split(left)
-      render_template(screen, tmpl, tmpl_focused && !@chain_focused)
-      render_chain_pane(screen, chain, tmpl_focused && @chain_focused)
+      if chain_split_visible? # cursor is in a §…§ marker → split TEMPLATE (top) + CHAIN (bottom)
+        tmpl, chain = template_chain_split(left)
+        render_template(screen, tmpl, tmpl_focused && !@chain_focused)
+        render_chain_pane(screen, chain, tmpl_focused && @chain_focused)
+      else
+        render_template(screen, left, tmpl_focused)
+      end
       render_config(screen, right, focused && @focus == :config)
+    end
+
+    # Whether the TEMPLATE column is currently split into TEMPLATE (top) + CHAIN (bottom).
+    # Contextual, mirroring the Repeater (no mode): only while the cursor sits inside a §…§
+    # marker (chain_under_cursor) or the CHAIN pane is being edited — so an unmarked cursor
+    # keeps the full-height editor and the strip appears exactly when the transform matters.
+    private def chain_split_visible? : Bool
+      @chain_focused || !chain_under_cursor.nil?
     end
 
     # TEMPLATE (top) + CHAIN (bottom) split — a slim 3-row CHAIN strip that grows (≥8, for
@@ -1471,7 +1485,12 @@ module Gori::Tui
       Frame.card(screen, rect, label, bg: Theme.bg, border: pane_border(focused, insert: ins))
       badge = " §#{pc} "
       min_x = rect.x + label.size + 4
-      pretty_x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "^U", "PRETTY", false)
+      # ^R:RUN rides the TEMPLATE border as the primary action — rightmost, mirroring the
+      # Repeater's ^R:SEND so the muscle memory transfers. Lit while idle, muted while a run
+      # streams (^X stops it). The old CONFIG "Run" row is gone; the request-count estimate
+      # stays there as a passive summary (render_run_summary).
+      run_x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "^R", "RUN", !running?)
+      pretty_x = Frame.toggle_badge(screen, run_x, rect.y, min_x, "^U", "PRETTY", false)
       render_mode_badge(screen, pretty_x, rect.y, min_x, ins)
       screen.text({pretty_x - badge.size, min_x}.max, rect.y, badge,
         pc > 0 ? Theme.text_bright : Theme.muted, pc > 0 ? Theme.accent_bg : Theme.bg)
@@ -1542,9 +1561,9 @@ module Gori::Tui
     end
 
     # The calm CONFIG summary: a header, the payload-set rows + an Add row, then the
-    # Mode / Advanced / Run rows anchored at the bottom. One row cursor (@cfg_row), no
-    # text field, no caret — so ←/→ can only cycle Mode. All editing drills into the
-    # Set / Advanced overlays.
+    # Mode / Advanced rows + a passive run-size read-out anchored at the bottom. One row
+    # cursor (@cfg_row), no text field, no caret — so ←/→ can only cycle Mode. All editing
+    # drills into the Set / Advanced overlays; the run itself is the TEMPLATE's ^R:RUN badge.
     private def render_config(screen : Screen, rect : Rect, focused : Bool) : Nil
       return if rect.w < 2 || rect.h < 2
       Frame.card(screen, rect, "CONFIG", bg: Theme.bg, border: Frame.pane_border(focused))
@@ -1559,13 +1578,13 @@ module Gori::Tui
         screen.text(hx, inner.y, sets_hint(mcount, @sets.size), Theme.muted, Theme.bg, width: {mx - hx, 1}.max)
       end
 
-      # Mode / Advanced / Run anchor to the bottom 3 rows; the sets list + Add row fill
-      # the space between the header and that tail (windowed if they overflow).
+      # Mode / Advanced + the run-size read-out anchor to the bottom 3 rows; the sets list +
+      # Add row fill the space between the header and that tail (windowed if they overflow).
       tail_top = {inner.bottom - 3, inner.y + 1}.max
       render_sets(screen, inner, inner.y + 1, focused, tail_top)
       render_mode_row(screen, inner, tail_top, focused)
       render_advanced_row(screen, inner, tail_top + 1, focused)
-      render_run_row(screen, inner, tail_top + 2, focused)
+      render_run_summary(screen, inner, tail_top + 2)
     end
 
     # Payload-set rows within [y0, limit), followed by the "+ Add payload set…" row.
@@ -1642,14 +1661,23 @@ module Gori::Tui
       screen.text(dx, y, "Engine · Match · Filter  ⏎", Theme.muted, bg, width: {inner.right - dx, 1}.max) if dx < inner.right
     end
 
-    private def render_run_row(screen, inner : Rect, y : Int32, focused : Bool) : Nil
+    # A passive read-out of the run size (mode × sets × markers) at the CONFIG foot. NOT a
+    # cursor row — the run action lives on the TEMPLATE border's ^R:RUN badge now; this just
+    # reports what that badge will send, updating live as the config changes. Muted so it
+    # reads as a summary, not a button. Blank when there are no sets yet (the empty-sets
+    # guidance already fills that space); "unknown" when a set's size can't be sized cheaply.
+    private def render_run_summary(screen, inner : Rect, y : Int32) : Nil
       return if y >= inner.bottom
-      foc = focused && config_row == :run
-      bg = foc ? Theme.accent_bg : Theme.bg
-      screen.fill(Rect.new(inner.x, y, inner.w, 1), bg) if foc
-      n = run_request_count
-      label = n ? "▶ Run · #{Fmt.count(n)} request#{n == 1 ? "" : "s"}" : "▶ Run"
-      screen.text(inner.x, y, label, foc ? Theme.text_bright : Theme.accent, bg, width: {inner.w, 1}.max)
+      text =
+        if n = run_request_count
+          "↳ #{Fmt.count(n)} request#{n == 1 ? "" : "s"}"
+        elsif @sets.empty?
+          ""
+        else
+          "↳ run size unknown"
+        end
+      return if text.empty?
+      screen.text(inner.x, y, text, Theme.muted, Theme.bg, width: {inner.w, 1}.max)
     end
 
     # One Sets row. In per-position modes (pp) it carries a marker-coloured swatch + →N
@@ -2092,6 +2120,27 @@ module Gori::Tui
         {:dist, "v", "DIST"},
         {:match, "m", "MATCH"},
         {:sort, "o", @sort.to_s},
+      ] of {Symbol, String, String})
+    end
+
+    # Hit-test the TEMPLATE border's ^R:RUN badge (rightmost, drawn by render_template).
+    # Returns :run when the click lands on it, else nil (caller falls through to caret/focus).
+    # Geometry mirrors render → render_top's left-column top border; the CHAIN split hangs
+    # below, so the border row is unaffected by whether the strip is shown.
+    def template_chrome_hit(rect : Rect, mx : Int32, my : Int32) : Symbol?
+      return nil unless @loaded
+      target_h = {rect.h, 3}.min
+      rest = Rect.new(rect.x, rect.y + target_h, rect.w, {rect.h - target_h, 0}.max)
+      return nil if rest.h <= 0
+      top_h = {rest.h * 45 // 100, 5}.max
+      top_h = rest.h if rest.h < 6
+      half = {(rest.w - 1) // 2, 1}.max
+      left = Rect.new(rest.x, rest.y, half, top_h)
+      return nil if left.w < 2 || my != left.y
+      label = @http2 ? "TEMPLATE (h2)" : "TEMPLATE"
+      min_x = left.x + label.size + 4
+      Frame.right_badge_hit(mx, my, left.y, left.right - 1, min_x, [
+        {:run, "^R", "RUN"},
       ] of {Symbol, String, String})
     end
 

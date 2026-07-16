@@ -127,10 +127,10 @@ module Gori::Tui
         else
           "i/↵ edit · #{read_common} · #{mark} params · ^O config · #{run} run · ↹ pane · esc tabs"
         end
-      when :config   then config_hint(v, run)
-      when :results  then "↑/↓ select · ↵ detail · o sort · m matched · v dist · #{run} run · #{stop} stop · space cmds · ↹ pane"
-      when :detail   then "↑/↓ move · #{read_common} · ←/→ pane · ⇧←/→ h-scroll · esc back"
-      else                "↹/esc tabs"
+      when :config  then config_hint(v, run)
+      when :results then "↑/↓ select · ↵ detail · o sort · m matched · v dist · #{run} run · #{stop} stop · space cmds · ↹ pane"
+      when :detail  then "↑/↓ move · #{read_common} · ←/→ pane · ⇧←/→ h-scroll · esc back"
+      else               "↹/esc tabs"
       end
     end
 
@@ -139,7 +139,6 @@ module Gori::Tui
       when :set  then "↑/↓ row · ↵ edit set · Del remove · #{run} run · ↹ pane"
       when :add  then "↵ add a payload set · ^L quick List · ↑/↓ row · #{run} run · ↹ pane"
       when :mode then "←/→ mode · ↵ open editor · ↑/↓ row · #{run} run · ↹ pane"
-      when :run  then "↵ run · ↑/↓ row · ^O sets · ↹ pane"
       else            "↵ open Advanced · ↑/↓ row · #{run} run · ↹ pane"
       end
     end
@@ -314,7 +313,7 @@ module Gori::Tui
       case
       when key.enter?, key.down? then v.pane_advance(1)
       when key.up?               then @host.request_focus(subtab_strip_shown? ? :subtabs : :menu)
-      else                          edit_target_common(ev, v)
+      else                            edit_target_common(ev, v)
       end
       true
     end
@@ -426,14 +425,14 @@ module Gori::Tui
       end
     end
 
-    # ↵ on a config row: drill into the Set / Advanced overlay, cycle Mode, or run.
+    # ↵ on a config row: drill into the Set / Advanced overlay, or cycle Mode. (Run is no
+    # longer a config row — it's the TEMPLATE border's ^R:RUN badge / the rebindable ^R verb.)
     private def activate_config_row(v : FuzzerView) : Nil
       case v.config_row
       when :set      then @host.open_fuzz_set_editor(v.current_set_index)
       when :add      then @host.open_fuzz_set_editor(nil)
       when :mode     then v.cycle_mode_forward
       when :advanced then @host.open_fuzz_advanced_editor
-      when :run      then fuzz_run
       end
     end
 
@@ -500,6 +499,15 @@ module Gori::Tui
         when :match then @host.status(v.toggle_matched_only)
         when :sort  then @host.status(v.cycle_sort)
         end
+        return true
+      end
+      # The TEMPLATE border's ^R:RUN badge — the primary action, clickable like a button
+      # (mirrors the Repeater's ^R:SEND). Consumes the click (no caret move / focus race).
+      if v.template_chrome_hit(body, mx, my) == :run
+        save_current
+        @host.focus_body
+        v.focus_pane(:template)
+        fuzz_run
         return true
       end
       return true unless pane = v.pane_at(body, mx, my)
@@ -581,7 +589,7 @@ module Gori::Tui
       when :target   then !v.pane_insert?(:target)
       when :detail   then true
       when :results  then true
-      else               false
+      else                false
       end
     end
 

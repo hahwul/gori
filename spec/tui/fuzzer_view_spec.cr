@@ -72,7 +72,7 @@ describe Gori::Tui::FuzzerView do
       backend.contains?("admin,root,guest").should be_true
     end
 
-    it "walks the single row cursor: sets → Add → Mode → Advanced → Run (clamped)" do
+    it "walks the single row cursor: sets → Add → Mode → Advanced (clamped)" do
       view = loaded_fuzzer
       view.apply_set(nil, Gori::Tui::SetSpec.new(:list, "a"))
       view.focus_config
@@ -81,8 +81,7 @@ describe Gori::Tui::FuzzerView do
       view.form_move(1); view.config_row.should eq(:add)
       view.form_move(1); view.config_row.should eq(:mode)
       view.form_move(1); view.config_row.should eq(:advanced)
-      view.form_move(1); view.config_row.should eq(:run)
-      view.form_move(1); view.config_row.should eq(:run) # clamped at the last row
+      view.form_move(1); view.config_row.should eq(:advanced) # clamped at the last row (Run moved to the TEMPLATE border)
     end
 
     it "←/→ only cycles Mode — a no-op on every other row (the de-overload)" do
