@@ -208,8 +208,11 @@ describe Gori::Tui::Chrome do
     backend.row(0).should contain("acme")
     backend.row(0).should contain("scope:2")
     backend.row(0).should contain("01:37 PM")
+    backend.row(0).should contain("⌘")              # far-right palette affordance
     backend.row(0).should contain("127.0.0.1:8080") # listen address always shown, capture state rides its colour
     backend.row(0).should_not contain("notify")     # no unread → badge omitted
+    row = backend.row(0)
+    row.index("01:37 PM").not_nil!.should be < row.index("⌘").not_nil! # clock left of palette
   end
 
   it "shows the unread notify badge on the top bar, left of scope" do
