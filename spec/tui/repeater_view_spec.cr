@@ -343,6 +343,39 @@ describe Gori::Tui::RepeaterView do
     view.request_text.should contain("§v¦md5§")
   end
 
+  describe "marker structure guard (INS editing)" do
+    it "auto-escapes a § typed inside a marker so the ¦chain never leaks" do
+      view = RepeaterView.new
+      view.restore("https://a.test", "§ab§ HTTP/1.1\nHost: a.test\n\n", false, false)
+      view.focus_pane(:request)
+      view.edit_move(0, 2) # caret between a and b, inside the value
+      view.edit_insert('§')
+      view.request_text.lines.first.should eq("§a§§b§ HTTP/1.1")             # §§ escaped literal
+      Gori::Fuzz::Template.marked_spans(view.request_text).size.should eq(1) # still ONE marker
+    end
+
+    it "flags a backspace/forward-delete that would remove a marker delimiter" do
+      view = RepeaterView.new
+      view.restore("https://a.test", "§secret¦base64-encode§ HTTP/1.1\nHost: a.test\n\n", false, false)
+      view.focus_pane(:request)
+      view.edit_move(0, 1) # caret just past the opening §
+      view.marker_break_on_backspace.should eq({0, 22})
+      view.edit_move(0, 6)                           # caret on the ¦ separator (offset 7)
+      view.marker_break_on_delete.should eq({0, 22}) # forward-delete of ¦ would break it
+      view.edit_move(0, -4)                          # caret inside "secret" (offset 3)
+      view.marker_break_on_backspace.should be_nil   # a value byte is not a delimiter
+    end
+
+    it "strips the WHOLE marker (both § and ¦chain) on confirm, keeping only the value" do
+      view = RepeaterView.new
+      view.restore("https://a.test", "§secret¦base64-encode§ HTTP/1.1\nHost: a.test\n\n", false, false)
+      view.focus_pane(:request)
+      view.strip_marker_span({0, 22})
+      view.request_text.lines.first.should eq("secret HTTP/1.1")
+      Gori::Fuzz::Template.marked_spans(view.request_text).should be_empty
+    end
+  end
+
   it "CHAIN pane hints when the cursor isn't in a §…§ marker" do
     view = RepeaterView.new
     view.restore("https://a.test", "GET / HTTP/1.1\n\n", false, false)

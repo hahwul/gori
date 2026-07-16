@@ -146,6 +146,34 @@ module Gori::Tui
       refresh_env_complete
     end
 
+    # Insert `ch` TWICE as one undo unit — the `§§`/`¦¦` escaped-literal pair the marker
+    # guard produces when a `§`/`¦` would otherwise nest inside (or flush against) a marker.
+    # Caret ends past both, so the literal sits behind it like a normal keystroke.
+    def insert_pair(ch : Char) : Nil
+      push_undo
+      line = @lines[@cy]
+      cx = @cx.clamp(0, line.size)
+      @lines[@cy] = "#{line[0, cx]}#{ch}#{ch}#{line[cx..]}"
+      @cx = cx + 2
+      @styled = nil
+      @edits += 1
+      refresh_env_complete
+    end
+
+    # Swap the ENTIRE buffer for `new_text` as ONE undoable edit — unlike set_text, which
+    # hard-resets and CLEARS the undo stack. Used by the marker-strip confirm so the edits
+    # made before it stay undoable. Places the caret at char offset `caret`; stale conceal
+    # offsets are dropped (the owner re-feeds fresh ones next render).
+    def replace_all(new_text : String, caret : Int32) : Nil
+      push_undo
+      @lines = new_text.split('\n').map(&.rstrip('\r'))
+      @lines = [""] if @lines.empty?
+      @conceal_spans = [] of {Int32, Int32} unless @conceal_spans.empty?
+      @styled = nil
+      @edits += 1
+      place_at_offset(caret)
+    end
+
     def insert_newline : Nil
       push_undo
       line = @lines[@cy]

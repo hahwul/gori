@@ -297,6 +297,48 @@ module Gori::Fuzz
       "#{chars[0, a + 1].join}#{interior}#{chars[close..].join}"
     end
 
+    # The closed `§…§` span `{a, b}` (b == closing-§ index + 1) whose STRUCTURE the
+    # char at char-index `idx` belongs to — an opening/closing `§`, the `¦` value|chain
+    # separator, or an escaped `§§`/`¦¦` delimiter half inside — or nil when `idx` isn't
+    # such a char. Deleting any of these unbalances the marker (and exposes its concealed
+    # `¦chain`), so the TUI editor guards a backspace/forward-delete of them behind a
+    # confirm. A normal value byte, or a `§`/`¦` OUTSIDE every closed marker (e.g. an
+    # escaped literal that folds to plain text), returns nil. `spans` defaults to a fresh
+    # `marked_spans`; pass the view's cached one to skip a re-scan.
+    def self.structural_marker_at(text : String, idx : Int32,
+                                  spans : Array({Int32, Int32}) = marked_spans(text)) : {Int32, Int32}?
+      return nil if idx < 0
+      c = text[idx]?
+      return nil unless c == MARKER || c == CHAIN_SEP
+      spans.find { |(a, b)| a <= idx && idx < b } # b == close + 1, so this covers [a, close]
+    end
+
+    # Whether inserting `ch` at char-index `cursor` would drop a NEW `§`/`¦` into (or
+    # flush against) an existing closed marker `[a, b]` — i.e. `a <= cursor <= b` — which a
+    # plain insert would turn into a "marker in marker" / stray escape and unbalance the
+    # structure. The editor escapes such a char (`§§`/`¦¦`) so it survives as a literal in
+    # the value instead. Chars that can't be delimiters, and inserts in the open space
+    # BETWEEN markers, return false (so typing a fresh `§…§` by hand still works). `spans`
+    # defaults to a fresh scan; pass the cached one to skip it.
+    def self.insert_breaks_marker?(text : String, cursor : Int32, ch : Char,
+                                   spans : Array({Int32, Int32}) = marked_spans(text)) : Bool
+      return false unless ch == MARKER || ch == CHAIN_SEP
+      spans.any? { |(a, b)| a <= cursor && cursor <= b }
+    end
+
+    # Remove the closed marker at `span` (`{a, b}`: a = opening §, b-1 = closing §),
+    # leaving ONLY its raw value — both `§` delimiters AND any `¦chain` are dropped
+    # (mirrors `mark_word`'s unmark branch). Returns `{new_text, caret}` with the caret at
+    # the char offset just past the freed value. Fed by the delimiter-delete confirm.
+    def self.strip_marker(text : String, span : {Int32, Int32}) : {String, Int32}
+      chars = text.chars
+      a, b = span
+      close = b - 1
+      value, _ = split_raw_interior(chars[(a + 1)...close])
+      new_text = "#{chars[0, a].join}#{value.join}#{chars[b..].join}"
+      {new_text, a + value.size}
+    end
+
     # Per closed marker: {open, sep, close} char offsets — `open`/`close` index the two
     # `§`, and `sep` is the value|chain boundary `¦` (== `close` when there's no chain).
     # Lets the views tint the value and the (dimmer) chain separately; 1:1 with

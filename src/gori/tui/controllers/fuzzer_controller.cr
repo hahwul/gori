@@ -360,16 +360,31 @@ module Gori::Tui
       key = ev.key
       case
       when key.enter?     then v.template_newline
-      when key.backspace? then v.template_backspace
+      when key.backspace? then v.template_backspace unless guard_marker_delete(v, v.marker_break_on_backspace)
       when key.up?        then template_up(v)
       when key.down?      then v.template_move(1, 0)
       when key.left?      then v.template_move(0, -1)
       when key.right?     then v.template_move(0, 1)
       when key.home?      then v.template_home
       when key.end?       then v.template_end
-      when key.delete?    then v.template_delete
+      when key.delete?    then v.template_delete unless guard_marker_delete(v, v.marker_break_on_delete)
       else
         printable(ev).try { |ch| v.template_insert(ch) }
+      end
+      true
+    end
+
+    # A backspace/forward-delete of a marker delimiter (§/¦) would unbalance the marker and
+    # expose its concealed ¦chain. Confirm first; on accept, strip the WHOLE marker down to
+    # its raw value. Returns true when it intercepted (a confirm was raised), so the caller
+    # skips the plain edit; false to let the edit through.
+    private def guard_marker_delete(v : FuzzerView, span : {Int32, Int32}?) : Bool
+      return false unless span
+      n = v.marker_ordinal(span)
+      @host.confirm("REMOVE MARKER",
+        "Deleting this character breaks marker §#{n}.\nRemove the whole marker and keep only its value?",
+        confirm_label: "remove marker", danger: true) do
+        v.strip_marker_span(span)
       end
       true
     end

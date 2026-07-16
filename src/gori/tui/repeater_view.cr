@@ -1691,7 +1691,14 @@ module Gori::Tui
 
     def edit_insert(ch : Char) : Nil
       return unless @focus == :request
-      req_editor.insert(ch)
+      # Marker-in-marker guard: a §/¦ typed inside (or flush against) a closed marker is
+      # auto-escaped to a §§/¦¦ literal so the structure survives (Template.insert_breaks_marker?).
+      if req_marker_editable? &&
+         Fuzz::Template.insert_breaks_marker?(@editor.text, @editor.cursor_offset, ch, marker_spans)
+        @editor.insert_pair(ch)
+      else
+        req_editor.insert(ch)
+      end
       mark_req_edit
     end
 
@@ -1744,6 +1751,35 @@ module Gori::Tui
     def edit_delete : Nil
       return unless @focus == :request
       req_editor.delete
+      mark_req_edit
+    end
+
+    # --- marker structure guards (delimiter delete / nesting) --------------------
+    # When a backspace here would delete a §/¦ that structures a closed marker, the {a, b}
+    # span of that marker (fed to the strip-confirm) — else nil. Only in the plain-HTTP
+    # request envelope, where §…§ markers render + conceal.
+    def marker_break_on_backspace : {Int32, Int32}?
+      return nil unless req_marker_editable?
+      Fuzz::Template.structural_marker_at(@editor.text, @editor.cursor_offset - 1, marker_spans)
+    end
+
+    # Same, for a forward-delete (the char UNDER the caret).
+    def marker_break_on_delete : {Int32, Int32}?
+      return nil unless req_marker_editable?
+      Fuzz::Template.structural_marker_at(@editor.text, @editor.cursor_offset, marker_spans)
+    end
+
+    # 1-based ordinal of the closed marker at `span` — for the confirm copy ("marker §N").
+    def marker_ordinal(span : {Int32, Int32}) : Int32
+      (marker_spans.index(span) || 0) + 1
+    end
+
+    # Confirmed strip: drop the whole marker at `span`, keeping only its raw value; caret to
+    # the freed value's end. One undoable edit, so prior edits stay undoable. Dirties the tab.
+    def strip_marker_span(span : {Int32, Int32}) : Nil
+      return unless @focus == :request
+      new_text, caret = Fuzz::Template.strip_marker(@editor.text, span)
+      @editor.replace_all(new_text, caret)
       mark_req_edit
     end
 
@@ -2216,6 +2252,15 @@ module Gori::Tui
 
     # §…§ char-offset spans for the current request buffer, cached on the editor revision —
     # marker_label + the CHAIN title both read it, so an unchanged buffer joins/scans once.
+    # The request editor is the plain-HTTP envelope where §…§ markers render + conceal —
+    # the only place the delimiter-delete / nesting guards apply. Hex, gRPC, WS and the
+    # decoded split pane all have their own byte semantics and CLEAR concealment, so a §
+    # there is literal payload, not a marker.
+    private def req_marker_editable? : Bool
+      @focus == :request && !request_hex? && !@grpc_mode && !@ws_mode &&
+        @decode_kind.nil? && req_editor.same?(@editor)
+    end
+
     private def marker_spans : Array({Int32, Int32})
       if @editor.edits != @marker_spans_rev
         @marker_spans_rev = @editor.edits
