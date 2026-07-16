@@ -218,6 +218,36 @@ describe "ProjectView AT A GLANCE Technologies" do
   end
 end
 
+describe "ProjectView AT A GLANCE severity" do
+  # Severity bars draw from the human-confirmed `issues` table only — Probe hits
+  # must not inflate the glance pane (they belong on the Probe tab).
+  it "shows Issues severity and ignores Probe-only findings" do
+    tmp_store do |store|
+      store.insert_issue("XSS on /search", Gori::Store::Severity::Critical, "acme.test", nil)
+      store.insert_issue("Verbose error", Gori::Store::Severity::Low, "acme.test", nil)
+      store.upsert_probe_issue(Gori::Probe::Detection.new(
+        code: "cors_wildcard", category: "security", host: "acme.test",
+        url: "http://acme.test/api", title: "cors *", severity: Gori::Store::Severity::High))
+      store.upsert_probe_issue(Gori::Probe::Detection.new(
+        code: "missing_hsts", category: "security", host: "acme.test",
+        url: "http://acme.test/", title: "no hsts", severity: Gori::Store::Severity::Medium))
+      store.flush
+
+      project = Gori::Project.new("t", File.tempname("gori-projview-sev"))
+      view = ProjectView.new(Gori::Scope.load(store), Gori::HostOverrides.load(store))
+      view.reload(project, store)
+      b = MemoryBackend.new(120, 30)
+      view.render(Screen.new(b), Rect.new(0, 0, 120, 30), focused: false)
+
+      b.contains?("AT A GLANCE").should be_true
+      b.contains?("CRIT").should be_true # Issues Critical
+      b.contains?("LOW").should be_true  # Issues Low
+      b.contains?("HIGH").should be_false # Probe-only High must not appear
+      b.contains?("MED").should be_false  # Probe-only Medium must not appear
+    end
+  end
+end
+
 describe "ProjectView#pane_at" do
   it "hides the ENV pane on short terminals" do
     tmp_store do |store|
