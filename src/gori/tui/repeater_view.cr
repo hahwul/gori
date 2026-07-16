@@ -77,6 +77,14 @@ module Gori::Tui
       # and the LCS diff lines.
       @resp_view_cache = nil.as(RespView?)
       @resp_view_rev = Theme.revision # the theme the cached (colour-baked) response head was built under
+      # Per-visible-line styled BODY memo (keyed by absolute line index). RespView keeps the
+      # body RAW and styles each visible line lazily so a multi-MiB response opens instantly —
+      # but render() fires on EVERY input event (a keystroke in the request editor, a 1-line
+      # scroll), re-styling the whole visible response window each time even when the response
+      # didn't change. Memoize so an unchanged response pane re-renders for free. Bounded
+      # (RESP_STYLED_CACHE_CAP) so scrolling a huge body can't materialise every line — the very
+      # property RespView's laziness exists to protect. Dropped in lockstep with @resp_view_cache.
+      @resp_styled_cache = {} of Int32 => Highlight::Line
       @diff_lines_cache = nil.as(Array(Repeater::DiffLine)?)
       @resp_hex = false                        # 'x' toggles a raw hex dump of the response bytes
       @resp_hex_bytes = nil.as(Bytes?)         # cached combined head+body of the last result (hex source)
@@ -1790,7 +1798,7 @@ module Gori::Tui
     def pretty=(on : Bool) : Nil
       return if @pretty == on
       @pretty = on
-      @resp_view_cache = nil
+      drop_resp_view_cache
       @scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like x/d toggles)
       @xscroll = 0
     end
@@ -2503,7 +2511,7 @@ module Gori::Tui
       total = rv.total
       gw = {Gutter.width(total), body.w}.min
       cw = {body.w - gw, 0}.max
-      rows = (0...body.h).compact_map { |i| i < total ? rv.line_at(i) : nil }
+      rows = (0...body.h).compact_map { |i| i < total ? styled_resp_line(rv, i) : nil }
       rows.each_with_index do |styled, i|
         Gutter.draw(screen, body.x, body.y + i, i, gw)
         shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
@@ -2739,6 +2747,22 @@ module Gori::Tui
       @reveal_lines = Reveal.lines(bytes)
     end
 
+    # Ceiling on the styled-body memo. A visible window is ~tens of lines, so this covers
+    # many screens of local scroll while capping memory on a huge response; on overflow the
+    # whole memo is dropped (the next frame re-styles just the visible window — cheap).
+    RESP_STYLED_CACHE_CAP = 2048
+
+    # The styled line at absolute index `li`, memoized for BODY lines. Head lines are already
+    # materialised (RespView#line_at returns the pre-built array), so they skip the memo.
+    private def styled_resp_line(rv : RespView, li : Int32) : Highlight::Line
+      return rv.line_at(li) if li < rv.head.size
+      if cached = @resp_styled_cache[li]?
+        return cached
+      end
+      @resp_styled_cache.clear if @resp_styled_cache.size >= RESP_STYLED_CACHE_CAP
+      @resp_styled_cache[li] = rv.line_at(li)
+    end
+
     # Steady-scroll hot path: only materialises/styles VISIBLE lines. Selection spans
     # are computed once per frame (lazy line_at over the selected range only).
     private def render_response_body(screen : Screen, rect : Rect, focused : Bool) : Nil
@@ -2747,7 +2771,7 @@ module Gori::Tui
       @resp_last_h = rect.h
       gw = {Gutter.width(total), rect.w}.min
       cw = {rect.w - gw, 0}.max
-      rows = (0...rect.h).compact_map { |i| (li = @scroll + i) < total ? rv.line_at(li) : nil }
+      rows = (0...rect.h).compact_map { |i| (li = @scroll + i) < total ? styled_resp_line(rv, li) : nil }
       @xscroll = @xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @xscroll + cw + 1) } || 0) - cw, 0}.max)
       sel_spans = resp_sel_spans_if(focused)
       rows.each_with_index do |styled, i|
@@ -2866,7 +2890,7 @@ module Gori::Tui
     # Memoized + dropped only when a new result is applied (reset_result_caches), so
     # a held Repeater tab isn't re-parsed / re-highlighted / re-diffed 20×/sec.
     private def reset_result_caches : Nil
-      @resp_view_cache = nil
+      drop_resp_view_cache
       @diff_lines_cache = nil
       @resp_hex_bytes = nil
       @ws_lines_cache = nil
@@ -2884,8 +2908,16 @@ module Gori::Tui
       @transcript_rev = Theme.revision
     end
 
+    # Drop the styled response view AND the per-line styled-body memo together — the memo
+    # holds Lines built from the current view (theme colours + pretty/raw body), so the two
+    # MUST move in lockstep. Every site that invalidates the response view goes through here.
+    private def drop_resp_view_cache : Nil
+      @resp_view_cache = nil
+      @resp_styled_cache.clear
+    end
+
     private def resp_view : RespView
-      @resp_view_cache = nil if @resp_view_rev != Theme.revision # theme switched → rebuild with new colours
+      drop_resp_view_cache if @resp_view_rev != Theme.revision # theme switched → rebuild with new colours
       @resp_view_rev = Theme.revision
       @resp_view_cache ||= begin
         result = @result
