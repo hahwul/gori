@@ -116,6 +116,27 @@ module Gori::Tui
       x
     end
 
+    # The one PRIMARY-action badge on a pane's top border — the button that actually fires
+    # the request: Repeater's ` ^R:SEND `, Fuzzer's ` ^R:RUN `. Geometry + text are identical
+    # to `toggle_badge` (same " chord:NAME " string), so a click still hit-tests through
+    # `right_badge_hit` and neighbours chain off the returned left x unchanged. Only the
+    # dress differs: a solid gold pill with auto-contrast ink + bold when `ready`, so the
+    # trigger reads as a filled button that stands apart from the muted toggles beside it;
+    # a recessed accent-band pill (shortcut still legible) while the action is in flight, so
+    # ^R/^X stay discoverable. Returns the badge's left x, or `right_edge` when it doesn't fit.
+    def self.action_badge(screen : Screen, right_edge : Int32, y : Int32, min_x : Int32,
+                          chord : String, name : String, ready : Bool) : Int32
+      text = " #{chord}:#{name} "
+      x = right_edge - text.size
+      return right_edge if x < min_x
+      if ready
+        screen.text(x, y, text, Theme.ink_on(Theme.focus_gold), Theme.focus_gold, Attribute::Bold)
+      else
+        screen.text(x, y, text, Theme.muted, Theme.accent_bg)
+      end
+      x
+    end
+
     # Hit-test for a left-to-right run of `Frame.chip` labels. `chips` is
     # `{id, label}` in draw order; each chip is followed by a 1-col gap (matching
     # the `+ 1` callers use after `Frame.chip`). Miss → nil. Pure geometry — no Screen.

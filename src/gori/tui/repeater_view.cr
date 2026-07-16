@@ -2404,8 +2404,8 @@ module Gori::Tui
       min_x = rect.x + label.size + 4 # keep clear of the pane title on the top border
       right_edge = rect.right - 1     # leave the right border cell untouched
       # Primary action rides the REQUEST border (discoverable without the footer chord):
-      # rightmost, lit while idle, muted while a send is in flight.
-      send_edge = Frame.toggle_badge(screen, right_edge, rect.y, min_x, "^R", "SEND", !@inflight)
+      # rightmost, a gold button while idle, recessed while a send is in flight.
+      send_edge = Frame.action_badge(screen, right_edge, rect.y, min_x, "^R", "SEND", !@inflight)
       if @grpc_mode # head as text; a unary call's payload is hex-editable (^X → MSG/HEX)
         if h = @req_hex_edit
           Frame.toggle_badge(screen, send_edge, rect.y, min_x, "^X", "HEX", true)
