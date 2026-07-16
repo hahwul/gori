@@ -336,10 +336,12 @@ module Gori::Tui
       start
     end
 
-    # A windowed horizontal sub-tab strip (Repeater / Notes / Fuzzer / …). Mirrors the
-    # top tab menu: no row fill — inactive labels are muted on the canvas, the active
-    # chip is FOCUS_GOLD when the strip holds focus else a dim SELECTION_DIM band.
-    # `‹` / `›` flag overflow.
+    # A windowed horizontal sub-tab strip (Repeater / Notes / Fuzzer / …). No row fill:
+    # the active chip is marked by a FOCUS_GOLD `▎` bar + a bold, underlined label
+    # (TEXT_BRIGHT at rest, FOCUS_GOLD when the strip holds focus) so it reads as the
+    # selected tab whether or not the strip has focus; inactive chips are plain TEXT.
+    # A leading "N:" index is dimmed (MUTED) and a trailing " #tag" run is tinted
+    # (SYN_HEADER) so the eye lands on the label. `‹` / `›` flag overflow.
     # `hidden` (Repeater's tag filter) drops those absolute chip indices from the strip —
     # they keep their absolute number, so the visible chips read with gaps (2, 5, 7).
     def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
@@ -349,18 +351,43 @@ module Gori::Tui
       active = active.clamp(0, labels.size - 1)
       segs, start, last, vis_last = strip_layout(rect, labels, active, prev_start, hidden)
       segs.each do |(i, label, seg)|
+        num_end, tag_start = chip_zones(label)
         if i == active
-          abg = focused ? Theme.focus_gold : Theme.selection_dim
-          afg = focused ? Theme.ink_on(Theme.focus_gold) : Theme.text
-          screen.fill(seg, abg)
-          screen.text(seg.x + 1, seg.y, label, afg, abg, attr: Attribute::Bold)
+          screen.cell(seg.x, seg.y, '▎', Theme.focus_gold, Theme.bg)
+          mid_fg = focused ? Theme.focus_gold : Theme.text_bright
+          attr = Attribute::Bold | Attribute::Underline
         else
-          screen.text(seg.x + 1, seg.y, label, Theme.muted, Theme.bg)
+          mid_fg = Theme.text
+          attr = Attribute::None
         end
+        x = seg.x + 1
+        x = screen.text(x, seg.y, label[0, num_end], Theme.muted, Theme.bg, attr) if num_end > 0
+        x = screen.text(x, seg.y, label[num_end...tag_start], mid_fg, Theme.bg, attr)
+        screen.text(x, seg.y, label[tag_start..], Theme.syn_header, Theme.bg, attr) if tag_start < label.size
       end
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0
       screen.cell(rect.right - 1, rect.y, '›', Theme.muted, Theme.bg) if last < vis_last
       start
+    end
+
+    # Split a chip label into its coloured zones — {num_end, tag_start}:
+    #   * a leading "N:" index run (num_end; 0 when absent — Help's fixed labels),
+    #   * a maximal trailing run of " #token" tag groups (tag_start; label size when
+    #     none). The run must reach the end, so a Notes first line like "fix #42 now"
+    #     keeps its plain colour; a title ending exactly in " #word" is the rare residual.
+    # Display-only: label widths are untouched, so the click hit-test never drifts.
+    private def self.chip_zones(label : String) : {Int32, Int32}
+      num_end = 0
+      while num_end < label.size && label[num_end].ascii_number?
+        num_end += 1
+      end
+      num_end = (num_end > 0 && num_end < label.size && label[num_end] == ':') ? num_end + 1 : 0
+      ts = label.size
+      while (sp = label.rindex(' ', ts - 1)) && sp >= num_end
+        break unless ts - sp >= 3 && label[sp + 1] == '#' # " #token", token ≥ 1 char, no inner space
+        ts = sp
+      end
+      {num_end, ts}
     end
 
     # Pure: the visible sub-tab chips — {index, cell rect} — computed IDENTICALLY to
@@ -388,7 +415,7 @@ module Gori::Tui
       # Window over the VISIBLE positions so the active chip stays on-screen; reserve a
       # column on each edge for the ‹ / › overflow markers.
       apos = vis.index(active) || 0
-      start = scroll_start(vis.map { |i| widths[i] }, apos, {rect.w - 2, 0}.max, prev_start)
+      start = scroll_start(vis.map { |i| widths[i] }, apos, {rect.w - 2, 0}.max, prev_start, gap: 2)
       x = rect.x + 1
       last = start - 1
       vis.each_with_index do |i, pos|
@@ -396,7 +423,7 @@ module Gori::Tui
         seg_w = widths[i]
         break if x + seg_w > rect.right - 1 # leave the last column for the › marker
         segs << {i, labels[i], Rect.new(x, rect.y, seg_w, 1)}
-        x += seg_w + 1
+        x += seg_w + 2 # two columns of breathing room between chips
         last = pos
       end
       {segs, start, last, vis.size - 1}
