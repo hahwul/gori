@@ -39,6 +39,16 @@ module Gori::Tui
     # termisu rejects are pre-substituted with a space here, folding the old runtime check in.
     ASCII_CELL = Array(String).new(128) { |i| (i < 0x20 || i == 0x7f) ? " " : i.unsafe_chr.to_s }
 
+    # The same interning for NON-ASCII single-cell glyphs — box-drawing borders (│ ─ ╭ ╮ …),
+    # the scroll gauge (┃), block/marker glyphs (█ ▎ ✓ ▲ ▼ …) — which ASCII_CELL can't cover yet
+    # are drawn across every frame's chrome, so `Char#to_s` per cell was a fresh String for each
+    # border/gauge cell each frame. Lazily interned + capped: a burst of distinct glyphs (e.g. the
+    # cursor parked over assorted CJK content) can't grow it unbounded — on overflow the whole map
+    # is dropped and re-warms next frame (cheap). A class-level constant map (like ASCII_CELL) so it
+    # survives Screen's per-frame rebuild; the binding is constant, the Hash it holds is the cache.
+    GLYPH_CELL_CAP   = 1024
+    GLYPH_CELL_CACHE = {} of Int32 => String
+
     def initialize(@backend : Backend)
       @width, @height = @backend.size
     end
@@ -119,12 +129,22 @@ module Gori::Tui
       if grapheme.is_a?(Char)
         o = grapheme.ord
         # ASCII → interned cell (control chars already mapped to a space in the table);
-        # non-ASCII control (C1) still substitutes a space; other non-ASCII stringifies.
-        g = o < 128 ? ASCII_CELL[o] : (grapheme.control? ? " " : grapheme.to_s)
+        # non-ASCII control (C1) still substitutes a space; other non-ASCII interns (glyph_cell).
+        g = o < 128 ? ASCII_CELL[o] : (grapheme.control? ? " " : glyph_cell(o, grapheme))
       else
         g = grapheme
       end
       @backend.put(x, y, g, fg, bg, attr)
+    end
+
+    # Interned String for a non-ASCII glyph codepoint (see GLYPH_CELL_CAP): returns the cached
+    # single-char String, allocating (and caching) only the first time a given glyph is drawn.
+    private def glyph_cell(o : Int32, ch : Char) : String
+      if s = GLYPH_CELL_CACHE[o]?
+        return s
+      end
+      GLYPH_CELL_CACHE.clear if GLYPH_CELL_CACHE.size >= GLYPH_CELL_CAP
+      GLYPH_CELL_CACHE[o] = ch.to_s
     end
 
     # Draws `str` at (x, y), truncating with an ellipsis if its *display width*
