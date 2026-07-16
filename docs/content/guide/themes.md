@@ -3,7 +3,7 @@ title = "Themes"
 description = "Switch between gori's built-in colour themes, or drop in your own."
 +++
 
-gori ships twenty-one built-in colour themes: `goridark` (the default), `goriday`, `latte`, `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`, `rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest`, `onedark`, `kanagawa`, `github_dark`, `zenburn`, `github_light`, `gruvbox_light`, `one_light`, and `ayu_light`.
+gori ships twenty-six built-in colour themes: `goridark` (the default), `goriday`, `latte`, `espresso`, `tokyonight`, `gruvbox`, `nord`, `dracula`, `solarized_light`, `rosepine_dawn`, `catppuccin_mocha`, `monokai`, `everforest`, `onedark`, `kanagawa`, `github_dark`, `zenburn`, `synthwave84`, `cyberpunk`, `matrix`, `cobalt2`, `high_contrast`, `github_light`, `gruvbox_light`, `one_light`, and `ayu_light`.
 
 ## Switching Themes
 

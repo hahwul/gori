@@ -58,7 +58,7 @@ describe Gori::Tui::Theme do
   end
 
   it "lists the available themes" do
-    Theme.available.should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest", "onedark", "kanagawa", "github_dark", "zenburn", "github_light", "gruvbox_light", "one_light", "ayu_light"])
+    Theme.available.should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest", "onedark", "kanagawa", "github_dark", "zenburn", "synthwave84", "cyberpunk", "matrix", "cobalt2", "high_contrast", "github_light", "gruvbox_light", "one_light", "ayu_light"])
   end
 
   it "swaps the active palette and bumps the revision" do
@@ -196,7 +196,7 @@ describe "Theme custom loading" do
     }) do
       Gori::Tui::Theme.load_custom
       avail = Gori::Tui::Theme.available
-      avail.first(21).should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest", "onedark", "kanagawa", "github_dark", "zenburn", "github_light", "gruvbox_light", "one_light", "ayu_light"]) # built-ins lead
+      avail.first(26).should eq(["goridark", "goriday", "latte", "espresso", "tokyonight", "gruvbox", "nord", "dracula", "solarized_light", "rosepine_dawn", "catppuccin_mocha", "monokai", "everforest", "onedark", "kanagawa", "github_dark", "zenburn", "synthwave84", "cyberpunk", "matrix", "cobalt2", "high_contrast", "github_light", "gruvbox_light", "one_light", "ayu_light"]) # built-ins lead
       avail.should contain("ocean")
       avail.should contain("badname")
       avail.should_not contain("broken")
@@ -297,7 +297,7 @@ describe "SettingsView theme list" do
 
   it "scrolls to keep the selected theme visible when the list overflows" do
     files = {} of String => String
-    (1..9).each { |i| files["z#{i}.json"] = %({"base": "goridark"}) } # 9 custom → 30 total, overflows the viewport
+    (1..9).each { |i| files["z#{i}.json"] = %({"base": "goridark"}) } # 9 custom → 35 total, overflows the viewport
     with_themes(files) do
       Gori::Settings.theme = "goridark"
       view = SettingsView.new

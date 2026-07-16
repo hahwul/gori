@@ -2,7 +2,7 @@ require "json"
 require "../paths"
 
 module Gori::Tui
-  # The TUI colour palette. gori ships twenty-one themes — GORIDARK (the default; a
+  # The TUI colour palette. gori ships twenty-six themes — GORIDARK (the default; a
   # monochrome palette in the spirit of Grok Build: near-black canvas, white/grey
   # text, a white highlight, hairline dividers), GORIDAY (the same relationships
   # inverted onto an off-white canvas with dark ink), LATTE (a soft, cool light
@@ -16,11 +16,16 @@ module Gori::Tui
   # palette), EVERFOREST (a muted, forest-green-toned dark palette), ONEDARK (the
   # Atom/VS Code blue-grey dark palette), KANAGAWA (an ink-dark palette after
   # Hokusai's Great Wave), GITHUB_DARK (GitHub's Primer dark palette), ZENBURN (the
-  # classic low-contrast grey-green dark palette), GITHUB_LIGHT (GitHub's Primer
-  # light palette on pure white), GRUVBOX_LIGHT (GRUVBOX's warm cream light
-  # counterpart), ONE_LIGHT (the Atom One Light grey-white palette), and AYU_LIGHT
-  # (a bright light palette with Ayu's orange accent). Only HTTP status keeps
-  # functional colour.
+  # classic low-contrast grey-green dark palette), SYNTHWAVE84 (the neon
+  # retro-futurist palette after the famous VS Code theme), CYBERPUNK (neon
+  # yellow/cyan/red on a near-black night-city canvas), MATRIX (green
+  # phosphor-on-black in the spirit of the classic CRT terminal), COBALT2 (Wes
+  # Bos's vivid cobalt-blue palette with the signature yellow), HIGH_CONTRAST (a
+  # maximum-contrast black/white accessibility palette after VS Code's High
+  # Contrast), GITHUB_LIGHT (GitHub's Primer light palette on pure white),
+  # GRUVBOX_LIGHT (GRUVBOX's warm cream light counterpart), ONE_LIGHT (the Atom One
+  # Light grey-white palette), and AYU_LIGHT (a bright light palette with Ayu's
+  # orange accent). Only HTTP status keeps functional colour.
   #
   # `Termisu::Color` is a value struct, so colours can't be mutated in place to
   # re-theme. Instead one Palette is active at a time (`@@active`) and every colour
@@ -524,6 +529,149 @@ module Gori::Tui
       syn_keyword: Color.from_hex("#efb3b3"), # language keywords / auth schemes (rose)
     )
 
+    # The neon retro-futurist Synthwave '84 palette (after Robb Owen's famous VS
+    # Code theme): a deep retro-purple canvas with hot-pink, cyan, and sunset
+    # accents. The upstream neons are bright enough to clear AA as-is on the
+    # purple canvas; only the red/hot-pink sit near the bar (4.7–4.8:1).
+    SYNTHWAVE84 = Palette.new(
+      bg: Color.from_hex("#241b2f"),            # deep retro-purple canvas
+      panel: Color.from_hex("#2a2139"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#34294f"),      # header band, active segment
+      border: Color.from_hex("#45356e"),        # hairline dividers (resting, violet)
+      border_focus: Color.from_hex("#574685"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#fede5d"),    # focused body pane outline (neon sun yellow, 12.4:1)
+      accent: Color.from_hex("#ff7edb"),        # the highlight (signature hot pink)
+      accent_bg: Color.from_hex("#3d2d5e"),     # selection band (focused pane, 1.36:1)
+      selection_dim: Color.from_hex("#2c2342"), # selection band (unfocused pane)
+      text: Color.from_hex("#d8d0ea"),          # body text (pale lavender)
+      text_bright: Color.from_hex("#f8f4ff"),   # emphasis / active
+      muted: Color.from_hex("#8a8fc0"),         # secondary (lifted comment blue, 5.3:1)
+      green: Color.from_hex("#72f1b8"),         # 2xx (the "pro tip" mint)
+      yellow: Color.from_hex("#fede5d"),        # 4xx (neon sun yellow)
+      red: Color.from_hex("#fe4450"),           # 5xx / error (neon red, 4.8:1)
+      orange: Color.from_hex("#ff8b39"),        # (sunset orange)
+      syn_header: Color.from_hex("#36f9f6"),    # header/field names, JSON keys, tag names (neon cyan)
+      syn_string: Color.from_hex("#ff8b39"),    # quoted strings (synthwave's orange strings)
+      syn_number: Color.from_hex("#f97e72"),    # numbers, tag attribute names (salmon)
+      syn_literal: Color.from_hex("#f92aad"),   # true / false / null (hot magenta, 4.7:1)
+      syn_comment: Color.from_hex("#848bbd"),   # comments (synthwave comment blue)
+      syn_keyword: Color.from_hex("#ff7edb"),   # language keywords / auth schemes (hot pink)
+    )
+
+    # A neon cyberpunk palette: yellow/cyan/red neons on a near-black night-city
+    # canvas — the unapologetic high-contrast look of the genre. The signature red
+    # is lifted a touch (#ff1a4f) so it clears AA on the dark canvas.
+    CYBERPUNK = Palette.new(
+      bg: Color.from_hex("#0c0d16"),            # near-black night canvas
+      panel: Color.from_hex("#12141f"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#191c2b"),      # header band, active segment
+      border: Color.from_hex("#2b2f4a"),        # hairline dividers (resting)
+      border_focus: Color.from_hex("#3c4166"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#fcee0a"),    # focused body pane outline (cyber yellow, 16:1)
+      accent: Color.from_hex("#00f0ff"),        # the highlight (neon cyan)
+      accent_bg: Color.from_hex("#212847"),     # selection band (focused pane, 1.35:1)
+      selection_dim: Color.from_hex("#14172a"), # selection band (unfocused pane)
+      text: Color.from_hex("#c6d2e2"),          # body text (cool grey-blue)
+      text_bright: Color.from_hex("#eefcff"),   # emphasis / active (cyan-white)
+      muted: Color.from_hex("#6f7896"),         # secondary (4.4:1)
+      green: Color.from_hex("#00ff9f"),         # 2xx (neon spring green)
+      yellow: Color.from_hex("#fcee0a"),        # 4xx (cyber yellow)
+      red: Color.from_hex("#ff1a4f"),           # 5xx / error (lifted neon red, 5.1:1)
+      orange: Color.from_hex("#ff6c11"),        # (neon orange)
+      syn_header: Color.from_hex("#00f0ff"),    # header/field names, JSON keys, tag names (neon cyan)
+      syn_string: Color.from_hex("#00ff9f"),    # quoted strings (spring green)
+      syn_number: Color.from_hex("#ff9f1c"),    # numbers, tag attribute names (amber)
+      syn_literal: Color.from_hex("#c777ff"),   # true / false / null (neon purple)
+      syn_comment: Color.from_hex("#636e8c"),   # comments (dim steel blue, 3.8:1)
+      syn_keyword: Color.from_hex("#ff2e97"),   # language keywords / auth schemes (hot pink)
+    )
+
+    # A green phosphor-on-black palette in the spirit of the classic CRT terminal:
+    # pure-black canvas, tiers of phosphor green, and a near-monochrome syntax
+    # family that stays within the green range. Like GORIDARK, only HTTP status
+    # keeps functional colour (red/amber break the monochrome on purpose).
+    MATRIX = Palette.new(
+      bg: Color.from_hex("#000000"),            # pure black canvas
+      panel: Color.from_hex("#071207"),         # top bar / status / overlays (faint green lift)
+      elevated: Color.from_hex("#0d1f0d"),      # header band, active segment
+      border: Color.from_hex("#1c3f1c"),        # hairline dividers (resting, dim phosphor)
+      border_focus: Color.from_hex("#2a5c2a"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#00ff41"),    # focused body pane outline (THE matrix green, 15.4:1)
+      accent: Color.from_hex("#ccffcc"),        # the highlight (phosphor flash white-green)
+      accent_bg: Color.from_hex("#123312"),     # selection band (focused pane, 1.51:1)
+      selection_dim: Color.from_hex("#0a1f0a"), # selection band (unfocused pane)
+      text: Color.from_hex("#35e065"),          # body text (phosphor green, 12:1)
+      text_bright: Color.from_hex("#b4ffc8"),   # emphasis / active (bright phosphor)
+      muted: Color.from_hex("#23a94c"),         # secondary (dimmer phosphor tier, 6.9:1)
+      green: Color.from_hex("#00ff41"),         # 2xx (matrix green)
+      yellow: Color.from_hex("#eaff4d"),        # 4xx (phosphor amber-green)
+      red: Color.from_hex("#ff4444"),           # 5xx / error (the one true break from green, 6.2:1)
+      orange: Color.from_hex("#ffa030"),        # (amber)
+      syn_header: Color.from_hex("#45ffd5"),    # header/field names, JSON keys, tag names (green-cyan)
+      syn_string: Color.from_hex("#8aff8a"),    # quoted strings (light phosphor)
+      syn_number: Color.from_hex("#d0ff4a"),    # numbers, tag attribute names (yellow-green)
+      syn_literal: Color.from_hex("#baffd9"),   # true / false / null (pale mint)
+      syn_comment: Color.from_hex("#1e8f42"),   # comments (dim phosphor, 5.1:1)
+      syn_keyword: Color.from_hex("#00d967"),   # language keywords / auth schemes (spring green)
+    )
+
+    # Wes Bos's Cobalt2 palette: the vivid cobalt-blue canvas with the signature
+    # bright-yellow accent, green strings, and blue comments. The upstream
+    # pink-red (#ff628c) sits just under AA on the blue canvas, so it's lifted a
+    # touch; the iconic #0088ff comments clear the dimmer secondary tier as-is.
+    COBALT2 = Palette.new(
+      bg: Color.from_hex("#193549"),            # cobalt blue canvas
+      panel: Color.from_hex("#1d3c52"),         # top bar / status / overlays (lifted)
+      elevated: Color.from_hex("#24475f"),      # header band, active segment
+      border: Color.from_hex("#33607e"),        # hairline dividers (resting)
+      border_focus: Color.from_hex("#40759a"),  # brighter hairline for an active modal card
+      focus_gold: Color.from_hex("#ffc600"),    # focused body pane outline (THE cobalt2 yellow, 8.1:1)
+      accent: Color.from_hex("#ffffff"),        # the highlight (cobalt2 white)
+      accent_bg: Color.from_hex("#254e6a"),     # selection band (focused pane, 1.44:1)
+      selection_dim: Color.from_hex("#1e3e55"), # selection band (unfocused pane)
+      text: Color.from_hex("#dce9f5"),          # body text (soft blue-white)
+      text_bright: Color.from_hex("#ffffff"),   # emphasis / active
+      muted: Color.from_hex("#87a9c0"),         # secondary (steel blue, 5.1:1)
+      green: Color.from_hex("#3ad900"),         # 2xx (cobalt2 mint)
+      yellow: Color.from_hex("#ffc600"),        # 4xx (signature yellow)
+      red: Color.from_hex("#ff6f9a"),           # 5xx / error (lifted pink-red, 4.9:1)
+      orange: Color.from_hex("#ff9d00"),        # (cobalt2 orange)
+      syn_header: Color.from_hex("#9effff"),    # header/field names, JSON keys, tag names (light cyan)
+      syn_string: Color.from_hex("#3ad900"),    # quoted strings (cobalt2's green strings)
+      syn_number: Color.from_hex("#ff6d97"),    # numbers, tag attribute names (lifted cobalt2 pink, 4.8:1)
+      syn_literal: Color.from_hex("#fb94ff"),   # true / false / null (cobalt2 pink-purple)
+      syn_comment: Color.from_hex("#0088ff"),   # comments (cobalt2's iconic blue comments, 3.6:1)
+      syn_keyword: Color.from_hex("#ff9d00"),   # language keywords / auth schemes (cobalt2 orange keywords)
+    )
+
+    # A maximum-contrast accessibility palette after VS Code's High Contrast dark:
+    # pure black + pure white (21:1 body text) with vivid unmistakable accents,
+    # cyan hairlines everywhere (HC's contrastBorder), and its orange focus ring.
+    HIGH_CONTRAST = Palette.new(
+      bg: Color.from_hex("#000000"),            # pure black canvas
+      panel: Color.from_hex("#0d0d0d"),         # top bar / status / overlays (barely lifted)
+      elevated: Color.from_hex("#1a1a1a"),      # header band, active segment
+      border: Color.from_hex("#4e91ab"),        # hairline dividers (resting) — HC keeps EVERY border visible
+      border_focus: Color.from_hex("#6fc3df"),  # active modal card (VS Code HC contrastBorder cyan)
+      focus_gold: Color.from_hex("#f38518"),    # focused body pane outline (VS Code HC focus orange, 8.2:1)
+      accent: Color.from_hex("#ffffff"),        # the highlight (pure white)
+      accent_bg: Color.from_hex("#2a2a2a"),     # selection band (focused pane, 1.46:1)
+      selection_dim: Color.from_hex("#161616"), # selection band (unfocused pane)
+      text: Color.from_hex("#ffffff"),          # body text (pure white, 21:1)
+      text_bright: Color.from_hex("#ffffff"),   # emphasis / active
+      muted: Color.from_hex("#a6a6a6"),         # secondary (still 8.6:1 — nothing here is faint)
+      green: Color.from_hex("#3cff3c"),         # 2xx (vivid green)
+      yellow: Color.from_hex("#ffd700"),        # 4xx (gold)
+      red: Color.from_hex("#ff3b3b"),           # 5xx / error (vivid red, 5.9:1)
+      orange: Color.from_hex("#ff9e2e"),        # (vivid orange)
+      syn_header: Color.from_hex("#66d9ff"),    # header/field names, JSON keys, tag names (bright cyan)
+      syn_string: Color.from_hex("#8aff8a"),    # quoted strings (light green)
+      syn_number: Color.from_hex("#ffb84d"),    # numbers, tag attribute names (amber)
+      syn_literal: Color.from_hex("#cf9bff"),   # true / false / null (bright purple)
+      syn_comment: Color.from_hex("#8c8c8c"),   # comments (grey, still 6.3:1)
+      syn_keyword: Color.from_hex("#ff70b8"),   # language keywords / auth schemes (bright pink)
+    )
+
     # The GitHub (Primer) light palette: github.com's light mode on a pure-white
     # canvas with its blue/green/red accents and dark-ink text. Primer's functional
     # foregrounds already target AA on white, so they're used as-is.
@@ -637,7 +785,7 @@ module Gori::Tui
       syn_keyword: Color.from_hex("#9c3a86"),   # language keywords / auth schemes (magenta, 6.1:1)
     )
 
-    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN, "catppuccin_mocha" => CATPPUCCIN_MOCHA, "monokai" => MONOKAI, "everforest" => EVERFOREST, "onedark" => ONEDARK, "kanagawa" => KANAGAWA, "github_dark" => GITHUB_DARK, "zenburn" => ZENBURN, "github_light" => GITHUB_LIGHT, "gruvbox_light" => GRUVBOX_LIGHT, "one_light" => ONE_LIGHT, "ayu_light" => AYU_LIGHT}
+    BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN, "catppuccin_mocha" => CATPPUCCIN_MOCHA, "monokai" => MONOKAI, "everforest" => EVERFOREST, "onedark" => ONEDARK, "kanagawa" => KANAGAWA, "github_dark" => GITHUB_DARK, "zenburn" => ZENBURN, "synthwave84" => SYNTHWAVE84, "cyberpunk" => CYBERPUNK, "matrix" => MATRIX, "cobalt2" => COBALT2, "high_contrast" => HIGH_CONTRAST, "github_light" => GITHUB_LIGHT, "gruvbox_light" => GRUVBOX_LIGHT, "one_light" => ONE_LIGHT, "ayu_light" => AYU_LIGHT}
     DEFAULT_THEME  = "goridark"
     # Pre-rename names so a settings.json from the first theme release still resolves.
     LEGACY_ALIASES = {"dark" => "goridark", "light" => "goriday"}
