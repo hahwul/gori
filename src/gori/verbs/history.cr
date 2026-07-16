@@ -126,14 +126,9 @@ module Gori
         available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater && ctx.repeater_subtab_count >= 1 },
         mnemonic: 'd', section: :subtab) { |ctx| ctx.repeater_duplicate_subtab; nil }
 
-      # --- REQUEST pane, mark-transform (mark request values, attach Decoder chains
-      # applied on send) — Round 5 order: the marker actions the user reaches for
-      # most (toggle the mode, then insert/mark/auto/clear/attach), THEN the view
-      # toggles (hex/decoded/pretty) below.
-      r.register Verb::Definition.new(
-        "repeater.toggle-mark-transform", "Toggle MARK transform", "Mark request values (§…§) and apply Decoder chains on send",
-        Verb::Scope::Repeater, [Verb::Chord.new("k", ctrl: true)],
-        available: in_repeater, mnemonic: 't', section: :request) { |ctx| ctx.repeater_toggle_mark_transform; nil }
+      # --- REQUEST pane, §…§ markers (mark request values, attach Decoder chains applied
+      # on send — always active, no mode). The marker actions the user reaches for most
+      # (insert/mark/auto/clear/attach), THEN the view toggles (hex/decoded/pretty) below.
       r.register Verb::Definition.new(
         "repeater.insert-marker", "Insert marker", "Drop a single § at the cursor to bracket a region by hand",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'i', section: :request) { |ctx| ctx.repeater_insert_marker; nil }
@@ -162,7 +157,7 @@ module Gori
         Verb::Scope::Repeater, [Verb::Chord.new("x", ctrl: true)],
         available: in_repeater, mnemonic: 'b', section: :request) { |ctx| ctx.repeater_toggle_hex; nil }
       r.register Verb::Definition.new(
-        "repeater.toggle-decoded", "Switch envelope/decoded", "SAML/GraphQL flow: switch envelope/decoded · in MARK mode: insert a § at the cursor",
+        "repeater.toggle-decoded", "Switch envelope/decoded", "SAML/GraphQL/WS flow: switch envelope/decoded · otherwise: insert a § marker at the cursor",
         Verb::Scope::Repeater, [Verb::Chord.new("t", ctrl: true)],
         available: in_repeater, mnemonic: 'd', section: :request) { |ctx| ctx.repeater_toggle_decoded; nil }
       r.register Verb::Definition.new(

@@ -589,8 +589,14 @@ module Gori::Tui
     end
 
     # --- editor $ENV autocomplete + tab-as-text (template pane in insert mode) ---
+    # The CHAIN sub-pane owns Tab while it's focused (like a text editor), so ↹ accepts its
+    # converter suggestion (parity with ↵) instead of the focus ring stealing Tab to switch
+    # panes. Its own converter popup handles ↑/↓/↵/Esc via handle_chain_pane_key already.
     def editor_completing? : Bool
-      current_view.try(&.template_env_completing?) || false
+      v = current_view
+      return false unless v
+      return false if v.chain_pane_active? # CHAIN popup is routed via editor_captures_tab?/handle_editor_tab
+      v.template_env_completing?
     end
 
     def handle_editor_complete_key(ev : Termisu::Event::Key) : Bool
@@ -598,12 +604,20 @@ module Gori::Tui
     end
 
     def editor_captures_tab? : Bool
-      current_view.try(&.template_text_editing?) || false
+      v = current_view
+      return false unless v
+      v.chain_pane_active? || v.template_text_editing?
     end
 
     def handle_editor_tab(ev : Termisu::Event::Key) : Bool
-      return false unless editor_captures_tab?
-      current_view.try(&.template_tab_insert)
+      v = current_view
+      return false unless v
+      if v.chain_pane_active?
+        v.handle_chain_pane_key(ev) # popup open → accept the suggestion (like ↵); closed → commit + leave
+        return true
+      end
+      return false unless v.template_text_editing?
+      v.template_tab_insert
       true
     end
 

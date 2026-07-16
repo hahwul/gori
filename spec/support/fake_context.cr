@@ -113,8 +113,6 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def repeater_toggle_resp_hex : Nil; end
 
-  def repeater_toggle_mark_transform : Nil; end
-
   def repeater_pretty_request : Nil; end
 
   def fuzz_pretty_template : Nil; end

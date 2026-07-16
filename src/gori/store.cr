@@ -815,13 +815,13 @@ module Gori
     # (potentially multi-MB) response on each cross-session commit.
     def repeaters : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, mark_transform, tags FROM repeaters ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, response_head, response_body, response_error, response_duration_us, name, sni, tags FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
-            mark_transform: rs.read(Int32) != 0, tags: rs.read(String?))
+            tags: rs.read(String?))
         end
       end
       list
@@ -832,12 +832,12 @@ module Gori
     # response (responses are personal per session). Response fields stay nil.
     def get_repeater(id : Int64) : RepeaterRecord?
       @db.query(
-        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform, name FROM repeaters WHERE id = ?",
+        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, name FROM repeaters WHERE id = ?",
         id) do |rs|
         return RepeaterRecord.new(
           rs.read(Int64), rs.read(String), rs.read(String),
           rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-          sni: rs.read(String?), mark_transform: rs.read(Int32) != 0, name: rs.read(String?)) if rs.move_next
+          sni: rs.read(String?), name: rs.read(String?)) if rs.move_next
       end
       nil
     end
@@ -848,14 +848,14 @@ module Gori
     def get_repeater_full(id : Int64) : RepeaterRecord?
       @db.query(
         "SELECT id, target, request, http2, auto_content_length, flow_id, position, " \
-        "response_head, response_body, response_error, response_duration_us, name, sni, mark_transform, tags " \
+        "response_head, response_body, response_error, response_duration_us, name, sni, tags " \
         "FROM repeaters WHERE id = ?", id) do |rs|
         if rs.move_next
           return RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
             rs.read(Bytes?), rs.read(Bytes?), rs.read(String?), rs.read(Int64?), rs.read(String?), rs.read(String?),
-            mark_transform: rs.read(Int32) != 0, tags: rs.read(String?))
+            tags: rs.read(String?))
         end
       end
       nil
@@ -863,12 +863,12 @@ module Gori
 
     def repeaters_meta : Array(RepeaterRecord)
       list = [] of RepeaterRecord
-      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform FROM repeaters ORDER BY position, id") do |rs|
+      @db.query("SELECT id, target, request, http2, auto_content_length, flow_id, position, sni FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            sni: rs.read(String?), mark_transform: rs.read(Int32) != 0)
+            sni: rs.read(String?))
         end
       end
       list
@@ -879,13 +879,13 @@ module Gori
     def repeaters_mcp : Array(RepeaterRecord)
       list = [] of RepeaterRecord
       @db.query(
-        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform, " \
+        "SELECT id, target, request, http2, auto_content_length, flow_id, position, sni, " \
         "name, response_head, response_error, response_duration_us FROM repeaters ORDER BY position, id") do |rs|
         rs.each do
           list << RepeaterRecord.new(
             rs.read(Int64), rs.read(String), rs.read(String),
             rs.read(Int32) != 0, rs.read(Int32) != 0, rs.read(Int64?), rs.read(Int32),
-            sni: rs.read(String?), mark_transform: rs.read(Int32) != 0, name: rs.read(String?),
+            sni: rs.read(String?), name: rs.read(String?),
             response_head: rs.read(Bytes?), response_error: rs.read(String?), response_duration_us: rs.read(Int64?))
         end
       end
@@ -895,21 +895,20 @@ module Gori
     # Returns the new row id (or 0 if the store is closing — the caller normalizes
     # 0 → nil so a later update never targets a bogus row).
     def insert_repeater(target : String, request : String, http2 : Bool,
-                      auto_cl : Bool, flow_id : Int64?, position : Int32, sni : String? = nil,
-                      mark_transform : Bool = false) : Int64
+                      auto_cl : Bool, flow_id : Int64?, position : Int32, sni : String? = nil) : Int64
       ts = now_us
       exec_task ->(c : DB::Connection) {
-        c.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni, mark_transform) VALUES (?,?,?,?,?,?,?,?,?,?)",
-          ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position, sni, mark_transform ? 1 : 0)
+        c.exec("INSERT INTO repeaters (created_at, updated_at, target, request, http2, auto_content_length, flow_id, position, sni) VALUES (?,?,?,?,?,?,?,?,?)",
+          ts, ts, target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, flow_id, position, sni)
         nil
       }
     end
 
     def update_repeater(id : Int64, target : String, request : String, http2 : Bool, auto_cl : Bool,
-                      sni : String? = nil, mark_transform : Bool = false) : Nil
+                      sni : String? = nil) : Nil
       exec_task ->(c : DB::Connection) {
-        c.exec("UPDATE repeaters SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, mark_transform = ?, updated_at = ? WHERE id = ?",
-          target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, mark_transform ? 1 : 0, now_us, id)
+        c.exec("UPDATE repeaters SET target = ?, request = ?, http2 = ?, auto_content_length = ?, sni = ?, updated_at = ? WHERE id = ?",
+          target, request, http2 ? 1 : 0, auto_cl ? 1 : 0, sni, now_us, id)
         nil
       }
     end

@@ -217,12 +217,12 @@ describe Gori::Tui::RepeaterView do
     view.request_text.includes?("Content-Length: 99").should be_false
   end
 
-  it "reflects the RENDERED Content-Length when MARK transform + auto-CL are both on" do
+  it "reflects the RENDERED Content-Length when a §…§ marker + auto-CL are both on" do
     view = RepeaterView.new
-    # auto-CL (^L) on and MARK transform (^K) on. Body q=§hi§ is 8 raw bytes but renders
-    # to q=hi (4 bytes) — the value ^R actually sends.
+    # auto-CL (^L) on; §…§ markers are always active (no mode). Body q=§hi§ is 8 raw bytes
+    # but renders to q=hi (4 bytes) — the value ^R actually sends.
     view.restore("https://a.test",
-      "POST /x HTTP/1.1\nHost: a.test\nContent-Length: 0\n\nq=§hi§", false, true, mark_transform: true)
+      "POST /x HTTP/1.1\nHost: a.test\nContent-Length: 0\n\nq=§hi§", false, true)
     String.new(view.request_bytes).includes?("Content-Length: 4").should be_true # what ^R sends
     view.request_text.includes?("Content-Length: 4").should be_true              # editor matches (was 8)
     view.request_text.includes?("Content-Length: 8").should be_false
@@ -239,11 +239,11 @@ describe Gori::Tui::RepeaterView do
     view.request_text.includes?("Content-Length: 99").should be_false
   end
 
-  it "MARK transform off (default) sends § verbatim — byte-identical to today" do
+  it "sends a lone § (no complete §…§ region) verbatim — byte-identical to today" do
     view = RepeaterView.new
-    view.restore("https://a.test", "POST /x HTTP/1.1\nHost: a.test\n\nq=§hi§", false, false)
-    view.mark_transform?.should be_false
-    String.new(view.request_bytes).should eq("POST /x HTTP/1.1\r\nHost: a.test\r\n\r\nq=§hi§")
+    # a single § doesn't form a §…§ region, so there's nothing to render — sent as typed.
+    view.restore("https://a.test", "POST /x HTTP/1.1\nHost: a.test\n\nq=§hi", false, false)
+    String.new(view.request_bytes).should eq("POST /x HTTP/1.1\r\nHost: a.test\r\n\r\nq=§hi")
   end
 
   it "does not double CRLF when a $KEY value carries its own CRLF" do
@@ -263,29 +263,20 @@ describe Gori::Tui::RepeaterView do
     end
   end
 
-  it "MARK transform on applies a marker's inline chain on send + resyncs Content-Length" do
+  it "applies a §…§ marker's inline chain on send + resyncs Content-Length" do
     view = RepeaterView.new
     view.restore("https://a.test",
       "POST /x HTTP/1.1\nHost: a.test\nContent-Length: 99\n\ntok=§secret¦base64-encode§", false, true)
-    view.toggle_mark_transform
-    view.mark_transform?.should be_true
     sent = String.new(view.request_bytes)
     sent.includes?("tok=c2VjcmV0").should be_true       # base64("secret") == c2VjcmV0
     sent.includes?("Content-Length: 12").should be_true # body "tok=c2VjcmV0" is 12 bytes
     sent.includes?("Content-Length: 99").should be_false
   end
 
-  it "restore round-trips the MARK transform flag" do
-    view = RepeaterView.new
-    view.restore("https://a.test", "GET / HTTP/1.1\n\n", false, true, mark_transform: true)
-    view.mark_transform?.should be_true
-  end
-
-  it "MARK CHAIN pane: focus a marker, type a chain, commit writes it back" do
+  it "CHAIN pane: focus a marker, type a chain, commit writes it back" do
     view = RepeaterView.new
     # marker at offset 0 → set_text zeroes the cursor, so it sits inside §v§
     view.restore("https://a.test", "§v§ HTTP/1.1\nHost: a.test\n\n", false, false)
-    view.toggle_mark_transform
     view.chain_pane_active?.should be_false
     view.focus_pane(:request)
     view.focus_chain_pane.should be_nil # in a marker → enters the pane (no hint)
@@ -296,15 +287,28 @@ describe Gori::Tui::RepeaterView do
     view.request_text.should contain("§v¦md5§")
   end
 
-  it "MARK CHAIN pane hints when MARK is off or the cursor isn't in a marker" do
+  it "CHAIN pane hints when the cursor isn't in a §…§ marker" do
     view = RepeaterView.new
     view.restore("https://a.test", "GET / HTTP/1.1\n\n", false, false)
     view.focus_pane(:request)
-    view.focus_chain_pane.should_not be_nil # MARK off → hint, not activated
+    view.focus_chain_pane.should_not be_nil # no marker under the cursor → hint, not activated
     view.chain_pane_active?.should be_false
-    view.toggle_mark_transform
-    view.focus_chain_pane.should_not be_nil # MARK on but no marker under the cursor → hint
-    view.chain_pane_active?.should be_false
+  end
+
+  it "shows the CHAIN pane only while the cursor is inside a §…§ marker (no mode toggle)" do
+    # Cursor at offset 0 sits INSIDE the leading §v§ marker → CHAIN pane is split in.
+    inside = RepeaterView.new
+    inside.restore("https://a.test", "§v§ HTTP/1.1\nHost: a.test\n\n", false, false)
+    b_in = MemoryBackend.new(120, 24)
+    inside.render(Screen.new(b_in), Rect.new(0, 0, 120, 24))
+    b_in.contains?("CHAIN").should be_true
+
+    # Same buffer shape, but the marker is past the caret (offset 0 is on 'G') → no CHAIN pane.
+    outside = RepeaterView.new
+    outside.restore("https://a.test", "GET §v§ HTTP/1.1\nHost: a.test\n\n", false, false)
+    b_out = MemoryBackend.new(120, 24)
+    outside.render(Screen.new(b_out), Rect.new(0, 0, 120, 24))
+    b_out.contains?("CHAIN").should be_false
   end
 
   it "load_grpc keeps the framed body byte-exact and the head editable" do
@@ -832,7 +836,7 @@ describe Gori::Tui::RepeaterView do
     view.focus_pane(:response)
 
     view.apply_peer_request("https://peer.example", "GET /peer HTTP/1.1\nHost: peer.example\n\n",
-      false, true, sni: "", mark_transform: false)
+      false, true, sni: "")
 
     view.focus.should eq(:response)
     view.target.should eq("https://peer.example")
@@ -848,11 +852,11 @@ describe Gori::Tui::RepeaterView do
     view = RepeaterView.new
     view.load_blank
     view.request_side_matches?(view.target, view.request_text, view.http2?,
-      view.auto_content_length?, view.mark_transform?, nil).should be_true
+      view.auto_content_length?, nil).should be_true
     view.request_side_matches?(view.target, view.request_text, view.http2?,
-      view.auto_content_length?, view.mark_transform?, "").should be_true
+      view.auto_content_length?, "").should be_true
     view.request_side_matches?(view.target, view.request_text, view.http2?,
-      view.auto_content_length?, view.mark_transform?, "evil.com").should be_false
+      view.auto_content_length?, "evil.com").should be_false
   end
 
   it "post-send store response write + peer request sync keeps the applied result" do
@@ -864,7 +868,7 @@ describe Gori::Tui::RepeaterView do
       view = RepeaterView.new
       view.load_blank
       rid = store.insert_repeater(view.target, view.request_text, view.http2?, view.auto_content_length?,
-        nil, 0, view.sni_override, mark_transform: view.mark_transform?)
+        nil, 0, view.sni_override)
       view.clear_dirty
       ok = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "KEEPME".to_slice, nil, 500_i64)
       view.apply(ok)
@@ -875,14 +879,14 @@ describe Gori::Tui::RepeaterView do
       row = store.repeaters_meta.find { |r| r.id == rid }.not_nil!
       # Own row still matches → reconcile would skip. Force a peer-like request edit.
       store.update_repeater(rid, "https://peer.test", "GET /from-peer HTTP/1.1\nHost: peer.test\n\n",
-        false, true, nil, false)
+        false, true, nil)
       store.flush
       row = store.repeaters_meta.find { |r| r.id == rid }.not_nil!
       view.request_side_matches?(row.target, row.request, row.http2?,
-        row.auto_content_length?, row.mark_transform?, row.sni).should be_false
+        row.auto_content_length?, row.sni).should be_false
 
       view.apply_peer_request(row.target, row.request, row.http2?, row.auto_content_length?,
-        sni: row.sni || "", mark_transform: row.mark_transform?)
+        sni: row.sni || "")
       view.focus.should eq(:response)
       view.target.should eq("https://peer.test")
       backend = MemoryBackend.new(120, 20)

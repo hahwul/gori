@@ -208,10 +208,6 @@ private class FakeContext < ExecContext
     @calls << :repeater_toggle_resp_hex
   end
 
-  def repeater_toggle_mark_transform : Nil
-    @calls << :repeater_toggle_mark_transform
-  end
-
   def repeater_pretty_request : Nil
     @calls << :repeater_pretty_request
   end

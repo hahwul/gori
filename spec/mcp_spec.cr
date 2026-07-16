@@ -1115,7 +1115,7 @@ describe Gori::MCP::Server do
         port = start_mcp_http_origin("repeater-ok")
         rid = store.insert_repeater(target: "http://127.0.0.1:#{port}",
           request: "GET /rep HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\n\r\n",
-          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil, mark_transform: false)
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
         p = tool_payload(drive(store, call, verify_upstream: false)[0])
         p["status"].as_i.should eq(200)
@@ -1128,7 +1128,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         rid = store.insert_repeater(target: "http://127.0.0.1:9",
           request: "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:9\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: x\r\nSec-WebSocket-Version: 13\r\n\r\n",
-          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil, mark_transform: false)
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send_request","arguments":{"repeater_id":#{rid},"allow_unscoped":true}}})
         resp = drive(store, call)[0]["result"]
         resp["isError"].as_bool.should be_true
@@ -1392,7 +1392,7 @@ describe Gori::MCP::Server do
       with_store do |store|
         rid = store.insert_repeater(target: "https://h.test",
           request: "GET / HTTP/1.1\r\nHost: h.test\r\nAuthorization: Bearer topsecret\r\n\r\n",
-          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil, mark_transform: false)
+          http2: false, auto_cl: true, flow_id: nil, position: 0, sni: nil)
         call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_repeater_context","arguments":{"id":#{rid},"include_content":true}}})
         p = tool_payload(drive(store, call)[0])
         p["sensitive_headers_redacted"].as_bool.should be_true

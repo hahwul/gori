@@ -7,6 +7,7 @@ require "./gutter"
 require "./search_hi"
 require "./reveal"
 require "./env_complete"
+require "./env_peek"
 
 module Gori::Tui
   # A minimal multi-line text editor for inline editing (e.g. the Repeater
@@ -52,6 +53,10 @@ module Gori::Tui
       # request editors (Repeater request, Fuzzer template) where env tokens are expanded on
       # send; every other editor keeps it nil so its edit path is byte-for-byte unchanged.
       @env_complete = nil.as(EnvComplete?)
+      # Opt-in `$ENV` value peek (nil = disabled). Paired with @env_complete — the same
+      # request editors get it. Shows the resolved value of a COMPLETE `$KEY` token under
+      # the caret (NORMAL or INSERT) once the autocomplete dropdown isn't offering matches.
+      @env_peek = nil.as(EnvPeek?)
       set_text(text)
     end
 
@@ -336,7 +341,7 @@ module Gori::Tui
     # HTTP message editors (Repeater, Intercept), nil for plain prose (Notes,
     # Issue notes). The styled lines are 1:1 with `@lines`, so the cursor —
     # drawn last, on top — still lands on the right column.
-    def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil) : Nil
+    def render(screen : Screen, rect : Rect, cursor : Bool, highlight : Symbol? = nil, peek : Bool = false) : Nil
       return if rect.empty?
       @last_h = rect.h # remembered for scroll_view (wheel) clamping
       ensure_visible(rect.h)
@@ -394,7 +399,10 @@ module Gori::Tui
           st = @xscroll > 0 ? slice_left(line, @xscroll) : line
           SearchHi.mark(screen, cx0, rect.y + i, st, @search_hl, cx0 + cw)
         end
-        next unless cursor && li == @cy
+        # The caret cell is captured for the caret line whether or not the block cursor
+        # is drawn (cursor=false in NORMAL) — the value peek anchors to it in read mode too.
+        # The block-cursor GLYPH itself still paints only when `cursor` (insert mode).
+        next unless li == @cy
         # column_width (not display_width): a raw control char in the prefix occupies a
         # cell and click-to-cursor counts it, so the caret must too — else it sits one
         # column left of the real position and paints over a glyph.
@@ -403,20 +411,45 @@ module Gori::Tui
         cxs = cx0 + prefix_w + preedit_w - @xscroll
         if cxs >= cx0 && cxs < cx0 + cw
           caret_cell = {cxs, rect.y + i}
-          screen.cursor(cxs, rect.y + i)
-          cgw = [Screen.display_width((@preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]).to_s), 1].max
-          ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
-          (0...cgw).each do |off|
-            break if cxs + off >= cx0 + cw # a wide-glyph caret at the last column must not spill its 2nd cell onto the pane border
-            cch = (off == 0 ? ch : ' ')
-            screen.cell(cxs + off, rect.y + i, cch, Theme.bg, Theme.accent)
+          if cursor
+            screen.cursor(cxs, rect.y + i)
+            cgw = [Screen.display_width((@preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]).to_s), 1].max
+            ch = @preedit.empty? ? (@cx < line.size ? line[@cx] : ' ') : @preedit[0]
+            (0...cgw).each do |off|
+              break if cxs + off >= cx0 + cw # a wide-glyph caret at the last column must not spill its 2nd cell onto the pane border
+              cch = (off == 0 ? ch : ' ')
+              screen.cell(cxs + off, rect.y + i, cch, Theme.bg, Theme.accent)
+            end
           end
         end
       end
-      # The env-complete dropdown paints LAST (over the text, anchored at the caret) so it
-      # never renders when the caret is off-screen or the editor is unfocused (cursor=false).
-      if cursor && (cc = caret_cell) && (ec = @env_complete)
+      # The env-complete dropdown + value peek paint LAST (over the text, anchored at the
+      # caret) so they never render when the caret is off-screen.
+      render_env_popups(screen, caret_cell, rect, cursor, peek)
+    end
+
+    # The caret-anchored `$ENV` overlays, drawn after the text. The autocomplete dropdown
+    # shows only in INSERT (cursor) while a `$partial` is typed; the value peek shows the
+    # resolved value of a COMPLETE token under the caret in NORMAL (peek) OR INSERT, but
+    # never while the dropdown owns the caret. The peek is re-derived each frame from
+    # @cx/@cy, so moving the cursor off the token closes it without any explicit event.
+    private def render_env_popups(screen : Screen, caret_cell : {Int32, Int32}?,
+                                  rect : Rect, cursor : Bool, peek : Bool) : Nil
+      ec = @env_complete
+      if cursor && (cc = caret_cell) && ec
         ec.render(screen, cc[0], cc[1], rect)
+      end
+      ep = @env_peek
+      return unless ep
+      # Suppress the peek only while the autocomplete dropdown is ACTUALLY on screen (insert
+      # mode + open). In NORMAL mode the dropdown never renders, so a stale-open `ec` (left by
+      # a cursor move mid-token) must not hide the peek.
+      dropdown_visible = cursor && ec && ec.open?
+      if (cursor || peek) && (cc = caret_cell) && !dropdown_visible && (tok = env_token_at_cursor)
+        ep.set(tok[0], tok[1], Settings.env_prefix)
+        ep.render(screen, cc[0], cc[1], rect)
+      else
+        ep.close
       end
     end
 
@@ -541,6 +574,7 @@ module Gori::Tui
     # keep @env_complete nil and every edit-path guard below short-circuits.
     def env_complete=(on : Bool) : Nil
       @env_complete = on ? (@env_complete || EnvComplete.new) : nil
+      @env_peek = on ? (@env_peek || EnvPeek.new) : nil # the value peek rides the same opt-in
     end
 
     def env_completing? : Bool
@@ -631,6 +665,36 @@ module Gori::Tui
     private def env_value_preview(v : String) : String
       s = v.gsub(/\s+/, " ").strip
       s.size > 20 ? "#{s[0, 19]}…" : s
+    end
+
+    # The COMPLETE, REGISTERED `$KEY` env token the caret currently sits inside (or
+    # immediately after), as {key, value-preview} — for the value peek. Scans the key run
+    # around @cx, requires the prefix sigil right before it, and looks the key up in the
+    # effective env vars. nil when the caret isn't on a token OR the key isn't registered —
+    # an unknown `$word` (e.g. a literal `$` typed during testing) is just text, no peek.
+    private def env_token_at_cursor : {String, String}?
+      prefix = Settings.env_prefix
+      return nil if prefix.empty?
+      line = @lines[@cy]?
+      return nil unless line
+      cx = @cx.clamp(0, line.size)
+      plen = prefix.size
+      ks = cx
+      while ks > 0 && env_key_tail?(line[ks - 1]) # walk left to the key run's start
+        ks -= 1
+      end
+      # The prefix sigil must sit immediately before the key run (else it isn't an env token).
+      return nil unless ks - plen >= 0 && line[(ks - plen)...ks] == prefix
+      ke = cx
+      while ke < line.size && env_key_tail?(line[ke]) # extend right over the rest of the key
+        ke += 1
+      end
+      key = line[ks...ke]
+      # A valid identifier: non-empty and starting with a key head (`$1` never expands).
+      return nil if key.empty? || !env_key_head?(key[0])
+      val = Env.effective_vars[key]?
+      return nil unless val # unregistered → just a literal string, not an env reference
+      {key, env_value_preview(val)}
     end
   end
 end

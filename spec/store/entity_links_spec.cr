@@ -78,7 +78,6 @@ describe "entity_links (V21)" do
         "INSERT INTO issues (id, created_at, updated_at, title, severity, host, flow_id, notes, status) " \
         "VALUES (1, 5, 5, 'legacy', 2, 'a.test', ?, '', 0)", fid)
       store.@db.exec("DROP TABLE entity_links")
-      store.@db.exec("ALTER TABLE repeaters DROP COLUMN mark_transform")        # V22 (added a column to a pre-V17 table)
       store.@db.exec("DROP INDEX idx_flows_sizes")                            # V23
       store.@db.exec("DROP INDEX idx_ws_messages_replay")                      # V26 (index keeps its historical name)
       store.@db.exec("ALTER TABLE ws_messages DROP COLUMN repeater_id")         # V26
