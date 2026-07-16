@@ -29,6 +29,11 @@ module Gori::Tui
 
     WORDMARK = "𝓰𝓸𝓻𝓲"
 
+    # How far the unfocused active sub-tab's receded gold sits between the canvas (0.0)
+    # and the bright focus_gold pill (1.0). 0.7 keeps it a definite gold — a step below
+    # the focus pill — in every palette (blended against that theme's own bg).
+    SUBTAB_DIM_GOLD = 0.7
+
     # Draw WORDMARK left-aligned at (x, y), or horizontally centred when `center_w`
     # is set. Returns the x just past the drawn wordmark. Defaults to the theme's
     # gold (focus_gold) so the brand mark reads gold in every palette; `fg` exists
@@ -336,12 +341,14 @@ module Gori::Tui
       start
     end
 
-    # A windowed horizontal sub-tab strip (Repeater / Notes / Fuzzer / …). No row fill:
-    # the active chip is marked by a FOCUS_GOLD `▎` bar + a bold, underlined label
-    # (TEXT_BRIGHT at rest, FOCUS_GOLD when the strip holds focus) so it reads as the
-    # selected tab whether or not the strip has focus; inactive chips are plain TEXT.
-    # A leading "N:" index is dimmed (MUTED) and a trailing " #tag" run is tinted
-    # (SYN_HEADER) so the eye lands on the label. `‹` / `›` flag overflow.
+    # A windowed horizontal sub-tab strip (Repeater / Notes / Fuzzer / …). The active chip
+    # fills a gold pill (mirroring the main tab bar): a bright FOCUS_GOLD pill with auto-
+    # contrast ink when the strip holds focus, else a calmer receded gold (FOCUS_GOLD blended
+    # 70% over the canvas) with TEXT_BRIGHT ink — a definite gold both ways, a step below the
+    # focus pill, so the active session reads clearly while the strip is unfocused (the common
+    # case, editing the body) rather than fading into a faint grey band. Inactive chips are
+    # unfilled with a leading "N:" index dimmed (MUTED), a plain TEXT label, and a trailing
+    # " #tag" run tinted (SYN_HEADER) so the eye lands on the label. `‹` / `›` flag overflow.
     # `hidden` (Repeater's tag filter) drops those absolute chip indices from the strip —
     # they keep their absolute number, so the visible chips read with gaps (2, 5, 7).
     def self.render_tab_strip(screen : Screen, rect : Rect, labels : Array(String),
@@ -351,19 +358,26 @@ module Gori::Tui
       active = active.clamp(0, labels.size - 1)
       segs, start, last, vis_last = strip_layout(rect, labels, active, prev_start, hidden)
       segs.each do |(i, label, seg)|
-        num_end, tag_start = chip_zones(label)
         if i == active
-          screen.cell(seg.x, seg.y, '▎', Theme.focus_gold, Theme.bg)
-          mid_fg = focused ? Theme.focus_gold : Theme.text_bright
-          attr = Attribute::Bold | Attribute::Underline
+          if focused
+            bg = Theme.focus_gold
+            screen.fill(seg, bg)
+            screen.text(seg.x + 1, seg.y, label, Theme.ink_on(bg), bg, Attribute::Bold)
+          else
+            # Unfocused: a calmer, receded gold (FOCUS_GOLD 70% over the canvas) — still
+            # unmistakably a gold chip, a step below the bright focus pill, never the
+            # near-invisible ACCENT_BG grey band.
+            bg = Theme.blend(Theme.focus_gold, Theme.bg, SUBTAB_DIM_GOLD)
+            screen.fill(seg, bg)
+            screen.text(seg.x + 1, seg.y, label, Theme.text_bright, bg, Attribute::Bold)
+          end
         else
-          mid_fg = Theme.text
-          attr = Attribute::None
+          num_end, tag_start = chip_zones(label)
+          x = seg.x + 1
+          x = screen.text(x, seg.y, label[0, num_end], Theme.muted, Theme.bg) if num_end > 0
+          x = screen.text(x, seg.y, label[num_end...tag_start], Theme.text, Theme.bg)
+          screen.text(x, seg.y, label[tag_start..], Theme.syn_header, Theme.bg) if tag_start < label.size
         end
-        x = seg.x + 1
-        x = screen.text(x, seg.y, label[0, num_end], Theme.muted, Theme.bg, attr) if num_end > 0
-        x = screen.text(x, seg.y, label[num_end...tag_start], mid_fg, Theme.bg, attr)
-        screen.text(x, seg.y, label[tag_start..], Theme.syn_header, Theme.bg, attr) if tag_start < label.size
       end
       screen.cell(rect.x, rect.y, '‹', Theme.muted, Theme.bg) if start > 0
       screen.cell(rect.right - 1, rect.y, '›', Theme.muted, Theme.bg) if last < vis_last

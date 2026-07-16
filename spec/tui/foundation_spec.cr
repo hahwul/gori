@@ -95,7 +95,7 @@ describe Gori::Tui::Chrome do
     backend.contains?("History").should be_true
     backend.contains?("Intercept").should be_true
     backend.contains?("Sitemap").should be_true
-    backend.contains?("(3)").should be_true        # held-message badge on Intercept (the only tab-bar count)
+    backend.contains?("(3)").should be_true      # held-message badge on Intercept (the only tab-bar count)
     backend.contains?("Issues(").should be_false # issues/repeater/notes carry no count badge
     # active segment ` Project ` (now first tab) starts at col 2 (rect.x+1 fill, +1 pad); FOCUS_GOLD pill.
     backend.fg_at(2, 1).should eq(Theme.ink_on(Theme.focus_gold))
@@ -139,7 +139,7 @@ describe Gori::Tui::Chrome do
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 36, 1),
       focus: "ISSUE", hints: "type title · esc cancel",
       activity: {"scanning a very long-running background job", Theme.accent})
-    backend.row(0)[0, 7].should eq(" ISSUE ")     # badge survives, no chip bled into it
+    backend.row(0)[0, 7].should eq(" ISSUE ") # badge survives, no chip bled into it
     backend.fg_at(1, 0).should eq(Theme.text_bright)
     backend.contains?("scanning").should be_true # chip still present (floored at the hint start, truncated at the right edge)
   end
@@ -169,14 +169,14 @@ describe Gori::Tui::Chrome do
     content.h.should eq(outer.h - 2 - BodyChrome::CHIPS_H)
   end
 
-  it "renders the sub-tab strip without a row fill and a divider hairline" do
+  it "renders the active sub-tab chip as a filled pill with a divider hairline" do
     backend = MemoryBackend.new(60, 2)
     screen = Screen.new(backend)
     BodyChrome.render_subtab_strip(screen, Rect.new(0, 0, 60, 2),
       ["1:alpha", "2:beta"], 0, focused: true)
 
-    backend.bg_at(12, 0).should eq(Theme.bg) # inactive label, no pill
-    backend.bg_at(12, 0).should_not eq(Theme.elevated)
+    backend.bg_at(13, 0).should eq(Theme.bg) # inactive label sits on the canvas, no pill
+    backend.bg_at(13, 0).should_not eq(Theme.elevated)
     backend.bg_at(2, 0).should eq(Theme.focus_gold) # active pill when focused
     backend.row(1).should contain("─")              # hairline under the chips
   end
@@ -191,12 +191,15 @@ describe Gori::Tui::Chrome do
     backend.row(0).should_not contain("─")
   end
 
-  it "settles the active sub-tab chip to selection_dim when the strip is unfocused" do
+  it "settles the active sub-tab chip to a calmer receded gold when the strip is unfocused" do
     backend = MemoryBackend.new(60, 1)
     Chrome.render_tab_strip(Screen.new(backend), Rect.new(0, 0, 60, 1),
       ["one", "two"], 1, focused: false)
-    backend.bg_at(8, 0).should eq(Theme.selection_dim)
-    backend.fg_at(8, 0).should eq(Theme.text)
+    dim_gold = Theme.blend(Theme.focus_gold, Theme.bg, Chrome::SUBTAB_DIM_GOLD)
+    backend.bg_at(8, 0).should eq(dim_gold)             # the whole chip fills the receded gold, edge to edge
+    backend.bg_at(9, 0).should eq(dim_gold)             # band body under the label
+    backend.bg_at(9, 0).should_not eq(Theme.focus_gold) # a step below the bright focus pill
+    backend.fg_at(9, 0).should eq(Theme.text_bright)    # active label ink on the band
   end
 
   it "renders the top bar with project, scope, and the right-aligned clock" do
