@@ -103,11 +103,10 @@ module Gori::Tui
       @probe_tech = scoped_tech(store.probe_tech_rows)
       @db_size = project.db_size
       @total_captured = store.total_size
-      # AT A GLANCE aggregates: status mix + combined issue/Probe severity tally.
+      # AT A GLANCE aggregates: traffic status mix + Issues severity (human-confirmed
+      # `issues` table only — Probe hits stay on the Probe tab, not here).
       @status_counts = store.flow_status_counts
-      f = store.issues_severity_counts
-      p = store.probe_severity_counts
-      @sev_tally = StaticArray(Int64, 5).new { |i| f[i] + p[i] }
+      @sev_tally = store.issues_severity_counts
       earliest = store.earliest_created_at
       # earliest_created_at is unix MICROSECONDS (the flows.created_at unit) — decoder
       # to seconds for Time.unix, like History's fmt_time does. (Passing micros makes
@@ -927,7 +926,7 @@ module Gori::Tui
 
     # AT A GLANCE viz pane riding the right of the OVERVIEW band (read-only, like OVERVIEW
     # — no focus/keys). Two stacked micro-charts an analyst wants without leaving the tab:
-    # the captured traffic's HTTP status mix, then the issue/Probe severity breakdown.
+    # the captured traffic's HTTP status mix, then the Issues severity breakdown (not Probe).
     # Degrades top-down by height (mirrors the Fuzzer DIST pane).
     private def render_analytics(screen : Screen, rect : Rect) : Nil
       return if rect.w < 2 || rect.h < 2
@@ -969,8 +968,8 @@ module Gori::Tui
       out
     end
 
-    # Severity rows (Critical first) with nonzero counts, from the combined issue+Probe
-    # tally. The Int value feeds Theme.severity_color.
+    # Severity rows (Critical first) with nonzero counts, from the Issues table only.
+    # The Int value feeds Theme.severity_color.
     private def severity_rows : Array({String, Int64, Int32})
       labels = { {4, "CRIT"}, {3, "HIGH"}, {2, "MED"}, {1, "LOW"}, {0, "INFO"} }
       out = [] of {String, Int64, Int32}
