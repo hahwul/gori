@@ -94,7 +94,13 @@ module Gori::Tui
 
     private def recount(base : Array(Store::ProbeIssue)) : Nil
       @counts = StaticArray(Int32, 5).new(0)
-      base.each { |i| @counts[i.severity.value] += 1 }
+      base.each do |i|
+        v = i.severity.value
+        # Enum.new doesn't validate, so a probe_issues row from a foreign/newer/corrupt DB can
+        # carry a severity outside 0..4; guard the fixed-size tally so an out-of-range value
+        # can't raise IndexError and crash the TUI render.
+        @counts[v] += 1 if v >= 0 && v < @counts.size
+      end
     end
 
     # The default lens shows only OPEN issues; triaged (dismissed/confirmed/resolved) rows

@@ -374,6 +374,12 @@ module Gori::Tui
       return unless focused
       lines = ed.lines_snapshot
       return if lines.empty?
+      # Re-sync the read cursor from the editor before painting. A peer edit (2nd session or MCP
+      # update_note) can reload a shorter note via soft_merge_from, which resets the editor's
+      # clamped caret but deliberately leaves @read alone — a stale @read.cursor.cy past the new
+      # end would make the lines[cy] below raise IndexError and crash the TUI render. Mirrors
+      # RepeaterView#paint_request_read_chrome.
+      @read.sync_from(ed)
       scr = ed.scroll
       sel_bg = Theme.accent_bg
       @read.cursor.highlight_spans(lines).each do |(li, x0, x1)|

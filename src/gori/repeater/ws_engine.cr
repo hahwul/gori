@@ -43,7 +43,11 @@ module Gori
       UPGRADE_HEADER = /(?:^|\n)upgrade:[ \t]*websocket/i
 
       def self.upgrade_request?(request : String) : Bool
-        request.matches?(UPGRADE_HEADER)
+        # scrub: `request` is a captured request head+body kept byte-exact (never scrubbed, P7);
+        # an obs-text byte in a header value would make PCRE matches? raise. This is a read-only
+        # classification (the request is never re-sent from it), so scrub is lossless and fixes
+        # all callers (cli/run.cr's `gori run` path is otherwise unrescued).
+        request.scrub.matches?(UPGRADE_HEADER)
       end
 
       # An outbound message to resend (opcode 1=text, 2=binary).

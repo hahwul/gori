@@ -76,7 +76,10 @@ module Gori::Proxy::Tls
     # that bogus host — the safe outcome) rather than minting an injected cert.
     private def self.safe_san?(host : String) : Bool
       return false if host.empty? || host.bytesize > 253
-      return true if (host =~ /\A[A-Za-z0-9.\-*]+\z/) != nil # hostname / IPv4 / wildcard labels
+      # scrub: host is the attacker-supplied CONNECT/SNI authority kept byte-exact; an invalid
+      # UTF-8 byte would make this PCRE match raise on the proxy path. Scrubbed bytes (U+FFFD)
+      # fall outside the charset → SAN skipped (the designed graceful outcome), never a raise.
+      return true if (host.scrub =~ /\A[A-Za-z0-9.\-*]+\z/) != nil # hostname / IPv4 / wildcard labels
       ipv6?(host) # IPv6 literals contain ':' (rejected by the DNS charset above)
     end
 
@@ -110,7 +113,9 @@ module Gori::Proxy::Tls
     # value stays injection-safe and parseable by OpenSSL's a2i_IPADDRESS; anything else
     # falls through to a DNS SAN (won't verify for that odd literal, but never crashes).
     private def self.ipv6?(host : String) : Bool
-      return false unless (host =~ /\A[0-9A-Fa-f:.]+\z/) != nil
+      # scrub: independent raise site — safe_san? also reaches here with the raw (unscrubbed)
+      # host, so this PCRE match must scrub too or an invalid-UTF-8 CONNECT authority raises.
+      return false unless (host.scrub =~ /\A[0-9A-Fa-f:.]+\z/) != nil
       Socket::IPAddress.valid_v6?(host)
     end
 

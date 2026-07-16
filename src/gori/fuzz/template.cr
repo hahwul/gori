@@ -393,6 +393,11 @@ module Gori::Fuzz
       # Also mark boolean/null scalar values so `--auto` exercises flag-style fields
       # (e.g. "admin":true) as documented. (Array-element values are still unmarked.)
       out.gsub(/("(?:[^"\\]|\\.)*"\s*:\s*)(true|false|null)\b/) { "#{$1}#{MARKER}#{$2}#{MARKER}" }
+    rescue ArgumentError
+      # An invalid-UTF-8 body (e.g. a repeater seeded from a captured non-UTF-8 JSON request) makes
+      # the PCRE gsub raise; leave it unmarked rather than crash the TUI auto-mark — and do NOT
+      # scrub, because this template is re-sent and its bytes must stay exact (P7).
+      body
     end
 
     private def self.word_char?(c : Char) : Bool

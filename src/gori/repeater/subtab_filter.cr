@@ -131,7 +131,10 @@ module Gori
       # Host portion of a target URL for `host:` suggestions (falls back to the
       # authority-ish first path segment when URI.parse fails).
       def self.host_of(target : String) : String?
-        t = target.strip
+        # scrub: target derives from a captured request; URI.parse returns an EMPTY host for an
+        # invalid-UTF-8 authority (falling through past the guard below), so the bare-host sub
+        # would then raise. Scrub once here — host_of only produces a display/suggestion string.
+        t = target.scrub.strip
         return nil if t.empty?
         begin
           if h = URI.parse(t).host

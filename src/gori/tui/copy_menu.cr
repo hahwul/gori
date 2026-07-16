@@ -18,7 +18,10 @@ module Gori::Tui
     def self.request_options(wire : String, target : String, *,
                              websocket_messages : Array(String)? = nil) : Array(Option)
       head, body = split_message(wire)
-      lines = head.split(/\r?\n/)
+      # scrub: `wire` is a captured request kept byte-exact; an obs-text/binary byte in the head
+      # would make the PCRE split raise and crash the TUI copy menu. Scrub only the head we parse
+      # into lines — the "Raw request" row below still copies the untouched `wire`.
+      lines = head.scrub.split(/\r?\n/)
       request_line = lines.first? || ""
       header_lines = lines.size > 1 ? lines[1..] : [] of String
       method, req_target, _ = parse_request_line(request_line)
@@ -47,7 +50,9 @@ module Gori::Tui
     # offered ONLY when both parts are present, since with just one it would be a
     # byte-identical duplicate of the Status+headers (empty body) or Body (empty head) row.
     def self.response_options(head : String, body : String) : Array(Option)
-      head_clean = head.sub(/\r?\n\r?\n\z/, "")
+      # scrub: server response head bytes can carry obs-text (0x80-0xFF); the PCRE sub would
+      # otherwise raise and crash the TUI copy menu. (Clipboard content is text anyway.)
+      head_clean = head.scrub.sub(/\r?\n\r?\n\z/, "")
       opts = [] of Option
       opts << Option.new("Status + headers", 'h', head_clean) unless head_clean.strip.empty?
       opts << Option.new("Body", 'b', body) unless body.empty?

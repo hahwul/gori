@@ -1583,3 +1583,16 @@ describe "Store#upsert_probe_issue (title stays consistent with severity)" do
     end
   end
 end
+
+describe "Gori::Probe.tech_summary" do
+  it "does not raise on invalid-UTF-8 evidence (a hostile Server header byte)" do
+    # tech_summary runs on the TUI render fiber (project_view / probe_view); a value-tech
+    # evidence with a raw 0x80-0xFF byte would make the PCRE split raise and crash the whole
+    # TUI. The `.scrub` keeps the first token instead. Byte 0x80 → U+FFFD, dropped by the split.
+    rows = [{"tech_server", String.new(Bytes[0x6e, 0x67, 0x69, 0x6e, 0x78, 0x80])}] of {String, String?}
+    out = Gori::Probe.tech_summary(rows)
+    out.size.should eq(1)
+    out[0].starts_with?("nginx").should be_true
+    out[0].valid_encoding?.should be_true
+  end
+end

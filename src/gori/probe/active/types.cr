@@ -34,7 +34,11 @@ module Gori
         return target unless target.starts_with?("http://") || target.starts_with?("https://")
         scheme_end = target.index("://") || return target
         rest = target[(scheme_end + 3)..]
-        cut = rest.index(/[\/?#]/) || return "/"
+        # Find the authority terminator with Char index, not a regex: `target` derives from a
+        # captured request and can be invalid UTF-8, which would make a PCRE `index(/[\/?#]/)`
+        # raise on the active-probe planning path (only partly rescued). index(Char) is byte-safe
+        # and preserves the target's bytes for the re-sent probe. Mirrors from_repeater.cr's idiom.
+        cut = [rest.index('/'), rest.index('?'), rest.index('#')].compact.min? || return "/"
         seg = rest[cut..]
         seg.starts_with?('/') ? seg : "/#{seg}"
       end

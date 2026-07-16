@@ -72,7 +72,9 @@ module Gori
       # Markdown heading here, a one-row line in the text export. Shared with
       # `gori run issues --format text`.
       def self.one_line(s : String) : String
-        s.gsub(/[[:cntrl:]]+/, " ").strip
+        # scrub: captured values (target/host/method/title, e.g. an h2 :path with a raw byte) can
+        # be invalid UTF-8, which would make the PCRE gsub raise and crash the markdown/text export.
+        s.scrub.gsub(/[[:cntrl:]]+/, " ").strip
       end
 
       private def self.append_related_links(io : String::Builder, f : Store::Issue, store : Store) : Nil
