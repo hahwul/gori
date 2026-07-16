@@ -3,6 +3,23 @@ require "../support/memory_backend"
 
 include Gori::Tui
 
+# Records the exact String object handed to `put`, so a spec can prove Screen#cell
+# reuses one interned String for a repeated non-ASCII glyph instead of allocating per cell.
+private class CaptureBackend < Gori::Tui::Backend
+  getter drawn = [] of String
+
+  def initialize(@w : Int32, @h : Int32)
+  end
+
+  def put(x : Int32, y : Int32, grapheme : Char | String, fg : Gori::Tui::Color, bg : Gori::Tui::Color, attr : Gori::Tui::Attribute) : Nil
+    @drawn << (grapheme.is_a?(String) ? grapheme : grapheme.to_s)
+  end
+
+  def size : {Int32, Int32}
+    {@w, @h}
+  end
+end
+
 describe Gori::Tui::Rect do
   it "computes edges and containment" do
     r = Rect.new(2, 3, 10, 5)
@@ -36,6 +53,16 @@ describe Gori::Tui::Screen do
     screen.fit("abcdefgh", 5).should eq("abcd…") # overflows → 4 chars + ellipsis = width 5
     screen.fit("日本語テスト", 5).should eq("日本…")     # wide glyphs (2 cols): 2+2+ellipsis = 5
     screen.fit("x", 0).should eq("")
+  end
+
+  it "interns non-ASCII glyph cells so a repeated glyph reuses one String (no per-cell alloc)" do
+    cap = CaptureBackend.new(10, 2)
+    screen = Screen.new(cap)
+    screen.cell(0, 0, '┃', Theme.text) # box-drawing glyph — the scroll gauge thumb
+    screen.cell(1, 0, '┃', Theme.text)
+    cap.drawn.size.should eq(2)
+    cap.drawn[0].should eq("┃")                       # renders the correct glyph
+    cap.drawn[0].same?(cap.drawn[1]).should be_true   # …and the SAME interned instance, not a fresh String
   end
 end
 
