@@ -1895,7 +1895,7 @@ module Gori::Tui
 
     private def graphql_detail_lines(op : Graphql::Op) : Array(Highlight::Line)
       lines = [] of Highlight::Line
-      append_styled(lines, Graphql.display(op), :text)
+      append_styled(lines, Graphql.display(op), :graphql)
       lines
     end
 

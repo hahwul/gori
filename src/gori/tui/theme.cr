@@ -37,7 +37,8 @@ module Gori::Tui
       focus_gold : Color, accent : Color, accent_bg : Color, selection_dim : Color,
       text : Color, text_bright : Color, muted : Color,
       green : Color, yellow : Color, red : Color, orange : Color,
-      syn_header : Color, syn_string : Color, syn_number : Color, syn_literal : Color
+      syn_header : Color, syn_string : Color, syn_number : Color, syn_literal : Color,
+      syn_comment : Color, syn_keyword : Color
 
     GORIDARK = Palette.new(
       bg: Color.from_hex("#0a0a0b"),            # near-black canvas
@@ -61,6 +62,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#8fb87a"),  # quoted strings
       syn_number: Color.from_hex("#ca9b6a"),  # numbers, tag attribute names
       syn_literal: Color.from_hex("#b08ec2"), # true / false / null
+      syn_comment: Color.from_hex("#6f8172"), # comments (GraphQL #, JSONC //, HTML <!-- -->)
+      syn_keyword: Color.from_hex("#d08c9a"), # language keywords / auth schemes
     )
 
     # The GORIDARK relationships inverted onto an off-white canvas: BG lightest,
@@ -88,6 +91,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#2f7a30"),    # quoted strings (AA: 5.1:1)
       syn_number: Color.from_hex("#9c5d1f"),    # numbers, tag attribute names
       syn_literal: Color.from_hex("#864f9e"),   # true / false / null
+      syn_comment: Color.from_hex("#6d774f"),   # comments (GraphQL #, JSONC //, HTML <!-- -->)
+      syn_keyword: Color.from_hex("#a8386a"),   # language keywords / auth schemes
     )
 
     # A soft, cool light palette inspired by Catppuccin Latte: a lavender-grey
@@ -116,6 +121,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#2f7d1f"),    # quoted strings (green)
       syn_number: Color.from_hex("#bd2f43"),    # numbers, tag attribute names (maroon)
       syn_literal: Color.from_hex("#7a30d6"),   # true / false / null (mauve)
+      syn_comment: Color.from_hex("#616a4d"),   # comments (green-grey)
+      syn_keyword: Color.from_hex("#b83a8f"),   # language keywords / auth schemes (magenta)
     )
 
     # A warm, slightly muddy dark-brown palette: espresso-brown canvas, tan body
@@ -142,6 +149,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#a3b16a"),  # quoted strings (olive)
       syn_number: Color.from_hex("#d99356"),  # numbers, tag attribute names (warm orange)
       syn_literal: Color.from_hex("#c79bc0"), # true / false / null (dusty mauve)
+      syn_comment: Color.from_hex("#9c8c6c"), # comments (dim tan)
+      syn_keyword: Color.from_hex("#db9aa8"), # language keywords / auth schemes (dusty rose)
     )
 
     # The popular Tokyo Night palette: deep blue-purple canvas with bright,
@@ -169,6 +178,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#9ece6a"),  # quoted strings (green)
       syn_number: Color.from_hex("#ff9e64"),  # numbers, tag attribute names (orange)
       syn_literal: Color.from_hex("#bb9af7"), # true / false / null (magenta)
+      syn_comment: Color.from_hex("#6b74a3"), # comments (lifted blue-grey)
+      syn_keyword: Color.from_hex("#f294a4"), # language keywords / auth schemes (rose)
     )
 
     # The warm retro Gruvbox (dark, medium) palette: a muddy brown-grey canvas with
@@ -195,6 +206,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#b8bb26"),    # quoted strings (green)
       syn_number: Color.from_hex("#d3869b"),    # numbers, tag attribute names (purple)
       syn_literal: Color.from_hex("#8ec07c"),   # true / false / null (aqua)
+      syn_comment: Color.from_hex("#928374"),   # comments (gruvbox gray)
+      syn_keyword: Color.from_hex("#f2846b"),   # language keywords / auth schemes (red-orange)
     )
 
     # The cool arctic Nord palette: a desaturated blue-grey (Polar Night) canvas with
@@ -221,6 +234,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#a3be8c"),    # quoted strings (green)
       syn_number: Color.from_hex("#d3a3b3"),    # numbers, tag attribute names (soft maroon)
       syn_literal: Color.from_hex("#c49bc0"),   # true / false / null (lifted purple)
+      syn_comment: Color.from_hex("#859bb0"),   # comments (frost grey)
+      syn_keyword: Color.from_hex("#8fb0d6"),   # language keywords / auth schemes (frost blue)
     )
 
     # The popular high-contrast Dracula palette: a blue-tinted charcoal canvas with
@@ -248,6 +263,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#f1fa8c"),  # quoted strings (yellow)
       syn_number: Color.from_hex("#bd93f9"),  # numbers, tag attribute names (purple)
       syn_literal: Color.from_hex("#ff79c6"), # true / false / null (pink)
+      syn_comment: Color.from_hex("#7d8ac2"), # comments (lifted dracula comment)
+      syn_keyword: Color.from_hex("#bd93f9"), # language keywords / auth schemes (purple)
     )
 
     # The iconic Solarized Light palette: a warm cream/beige "paper" canvas (base3)
@@ -276,6 +293,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#5e6b00"),    # quoted strings (green)
       syn_number: Color.from_hex("#167068"),    # numbers, tag attribute names (cyan)
       syn_literal: Color.from_hex("#6455bd"),   # true / false / null (violet)
+      syn_comment: Color.from_hex("#6b7266"),   # comments (base grey)
+      syn_keyword: Color.from_hex("#b32d6e"),   # language keywords / auth schemes (magenta)
     )
 
     # The Rosé Pine Dawn palette: a soft rosy "paper" canvas with muted blue-violet
@@ -302,6 +321,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#467730"),    # quoted strings (sage green)
       syn_number: Color.from_hex("#96611e"),    # numbers, tag attribute names (warm brown)
       syn_literal: Color.from_hex("#7a5fa0"),   # true / false / null (dawn iris)
+      syn_comment: Color.from_hex("#6f6a54"),   # comments (muted olive)
+      syn_keyword: Color.from_hex("#a5445f"),   # language keywords / auth schemes (dawn rose)
     )
 
     # The popular Catppuccin Mocha palette: a dark blue-purple canvas with the
@@ -328,6 +349,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#a6e3a1"),    # quoted strings (green)
       syn_number: Color.from_hex("#fab387"),    # numbers, tag attribute names (peach)
       syn_literal: Color.from_hex("#cba6f7"),   # true / false / null (mauve)
+      syn_comment: Color.from_hex("#787c94"),   # comments (overlay grey)
+      syn_keyword: Color.from_hex("#f2a0bd"),   # language keywords / auth schemes (pink)
     )
 
     # The classic Monokai code-editor palette: an olive-dark canvas with the
@@ -355,6 +378,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#e6db74"),    # quoted strings (yellow)
       syn_number: Color.from_hex("#fd971f"),    # numbers, tag attribute names (orange)
       syn_literal: Color.from_hex("#ae81ff"),   # true / false / null (purple)
+      syn_comment: Color.from_hex("#8f8b76"),   # comments (lifted monokai comment)
+      syn_keyword: Color.from_hex("#f76ea0"),   # language keywords / auth schemes (pink)
     )
 
     # A muted, forest-green-toned dark palette inspired by Everforest: a soft
@@ -382,6 +407,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#a7c080"),    # quoted strings (green)
       syn_number: Color.from_hex("#e69875"),    # numbers, tag attribute names (orange)
       syn_literal: Color.from_hex("#d699b6"),   # true / false / null (purple)
+      syn_comment: Color.from_hex("#87968b"),   # comments (everforest grey)
+      syn_keyword: Color.from_hex("#e59aa0"),   # language keywords / auth schemes (soft red)
     )
 
     # The Atom/VS Code One Dark palette: a blue-grey canvas with the recognizable
@@ -409,6 +436,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#98c379"),  # quoted strings (green)
       syn_number: Color.from_hex("#d19a66"),  # numbers, tag attribute names (orange)
       syn_literal: Color.from_hex("#c678dd"), # true / false / null (purple)
+      syn_comment: Color.from_hex("#848e81"), # comments (lifted comment grey)
+      syn_keyword: Color.from_hex("#e08b93"), # language keywords / auth schemes (rose)
     )
 
     # The Kanagawa (Wave) palette, after Hokusai's Great Wave: a sumi-ink canvas
@@ -435,6 +464,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#98bb6c"),    # quoted strings (spring green)
       syn_number: Color.from_hex("#d27e99"),    # numbers, tag attribute names (sakura pink)
       syn_literal: Color.from_hex("#957fb8"),   # true / false / null (oni violet, 4.7:1)
+      syn_comment: Color.from_hex("#847f74"),   # comments (lifted fuji grey)
+      syn_keyword: Color.from_hex("#e0899a"),   # language keywords / auth schemes (wave red)
     )
 
     # The GitHub (Primer) dark palette: the near-black canvas of github.com's dark
@@ -461,6 +492,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#a5d6ff"),  # quoted strings (GitHub's light-blue strings)
       syn_number: Color.from_hex("#ffa657"),  # numbers, tag attribute names (orange)
       syn_literal: Color.from_hex("#d2a8ff"), # true / false / null (purple)
+      syn_comment: Color.from_hex("#7d8590"), # comments (primer fg muted)
+      syn_keyword: Color.from_hex("#ff7b72"), # language keywords / auth schemes (coral)
     )
 
     # The classic Zenburn palette: the famously easy-on-the-eyes mid-grey canvas
@@ -487,6 +520,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#dca3a3"),  # quoted strings (zenburn's rose strings)
       syn_number: Color.from_hex("#dfaf8f"),  # numbers, tag attribute names (variable orange)
       syn_literal: Color.from_hex("#e39ccd"), # true / false / null (lifted magenta, 5.0:1)
+      syn_comment: Color.from_hex("#8faf8f"), # comments (zenburn green-grey)
+      syn_keyword: Color.from_hex("#efb3b3"), # language keywords / auth schemes (rose)
     )
 
     # The GitHub (Primer) light palette: github.com's light mode on a pure-white
@@ -513,6 +548,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#116329"),    # quoted strings (markup green)
       syn_number: Color.from_hex("#953800"),    # numbers, tag attribute names (severe orange)
       syn_literal: Color.from_hex("#8250df"),   # true / false / null (done purple, 5.1:1)
+      syn_comment: Color.from_hex("#5f6a52"),   # comments (green-grey, 5.7:1)
+      syn_keyword: Color.from_hex("#99286e"),   # language keywords / auth schemes (deep pink, 7.3:1)
     )
 
     # The Gruvbox light palette — GRUVBOX's warm cream counterpart: bg0 paper with
@@ -540,6 +577,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#6d680c"),    # quoted strings (green)
       syn_number: Color.from_hex("#af3a03"),    # numbers, tag attribute names (orange)
       syn_literal: Color.from_hex("#8f3f71"),   # true / false / null (faded purple, 5.9:1)
+      syn_comment: Color.from_hex("#6f6a4a"),   # comments (olive, 4.8:1)
+      syn_keyword: Color.from_hex("#9d0658"),   # language keywords / auth schemes (berry, 7.1:1)
     )
 
     # The Atom One Light palette: a soft grey-white canvas with ONEDARK's accent
@@ -566,6 +605,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#3f7d3e"),    # quoted strings (green)
       syn_number: Color.from_hex("#986801"),    # numbers, tag attribute names (gold)
       syn_literal: Color.from_hex("#a626a4"),   # true / false / null (magenta, 5.9:1)
+      syn_comment: Color.from_hex("#5f6a4f"),   # comments (green-grey, 5.5:1)
+      syn_keyword: Color.from_hex("#b02a6e"),   # language keywords / auth schemes (rose, 5.9:1)
     )
 
     # The Ayu Light palette: a bright near-white canvas with Ayu's signature warm
@@ -592,6 +633,8 @@ module Gori::Tui
       syn_string: Color.from_hex("#547a00"),    # quoted strings (lime)
       syn_number: Color.from_hex("#ab5510"),    # numbers, tag attribute names (orange)
       syn_literal: Color.from_hex("#8054b8"),   # true / false / null (darkened constant purple, 5.3:1)
+      syn_comment: Color.from_hex("#6a7250"),   # comments (green-grey, 5.0:1)
+      syn_keyword: Color.from_hex("#9c3a86"),   # language keywords / auth schemes (magenta, 6.1:1)
     )
 
     BUILTIN_THEMES = {"goridark" => GORIDARK, "goriday" => GORIDAY, "latte" => LATTE, "espresso" => ESPRESSO, "tokyonight" => TOKYONIGHT, "gruvbox" => GRUVBOX, "nord" => NORD, "dracula" => DRACULA, "solarized_light" => SOLARIZED_LIGHT, "rosepine_dawn" => ROSEPINE_DAWN, "catppuccin_mocha" => CATPPUCCIN_MOCHA, "monokai" => MONOKAI, "everforest" => EVERFOREST, "onedark" => ONEDARK, "kanagawa" => KANAGAWA, "github_dark" => GITHUB_DARK, "zenburn" => ZENBURN, "github_light" => GITHUB_LIGHT, "gruvbox_light" => GRUVBOX_LIGHT, "one_light" => ONE_LIGHT, "ayu_light" => AYU_LIGHT}
@@ -720,7 +763,7 @@ module Gori::Tui
     private def self.merge_palette(base : Palette, root : JSON::Any) : Palette
       {% begin %}
         Palette.new(
-          {% for f in %w(bg panel elevated border border_focus focus_gold accent accent_bg selection_dim text text_bright muted green yellow red orange syn_header syn_string syn_number syn_literal) %}
+          {% for f in %w(bg panel elevated border border_focus focus_gold accent accent_bg selection_dim text text_bright muted green yellow red orange syn_header syn_string syn_number syn_literal syn_comment syn_keyword) %}
             {{ f.id }}: color_field(root, {{ f }}, base.{{ f.id }}),
           {% end %}
         )
@@ -741,7 +784,7 @@ module Gori::Tui
 
     # Colour accessors generated from the Palette fields. Each reads the active
     # palette, so call sites (`Theme.bg`, `Theme.accent`, …) re-theme automatically.
-    {% for name in %w(bg panel elevated border border_focus focus_gold accent accent_bg selection_dim text text_bright muted green yellow red orange syn_header syn_string syn_number syn_literal) %}
+    {% for name in %w(bg panel elevated border border_focus focus_gold accent accent_bg selection_dim text text_bright muted green yellow red orange syn_header syn_string syn_number syn_literal syn_comment syn_keyword) %}
       def self.{{ name.id }} : Color
         @@active.{{ name.id }}
       end

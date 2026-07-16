@@ -211,6 +211,91 @@ describe Gori::Tui::Highlight do
       has_span?(spans, "<", Theme.muted).should be_true
       has_span?(spans, ">", Theme.muted).should be_true
     end
+
+    it "tokenises attribute names (syn_number) and quoted values (syn_string)" do
+      spans = body_spans("text/html", %(<a href="/x" data-id='5'>), request: false)
+      spans.map(&.text).join.should eq(%(<a href="/x" data-id='5'>))
+      has_span?(spans, "href", Theme.syn_number).should be_true
+      has_span?(spans, %("/x"), Theme.syn_string).should be_true
+      has_span?(spans, "data-id", Theme.syn_number).should be_true
+    end
+
+    it "colours comments and declarations" do
+      c = body_spans("text/html", "<!-- hi -->", request: false)
+      has_span?(c, "<!-- hi -->", Theme.syn_comment).should be_true
+      d = body_spans("text/html", "<!DOCTYPE html>", request: false)
+      has_span?(d, "DOCTYPE", Theme.syn_keyword).should be_true
+    end
+  end
+
+  describe "request-line query string" do
+    it "breaks path / ? / query params" do
+      line = Highlight.from_lines(["GET /api/users?id=42&sort=name HTTP/1.1"], request: true).first
+      line.map(&.text).join.should eq("GET /api/users?id=42&sort=name HTTP/1.1")
+      has_span?(line, "/api/users", Theme.text_bright).should be_true
+      has_span?(line, "?", Theme.muted).should be_true
+      has_span?(line, "id", Theme.syn_header).should be_true
+      has_span?(line, "&", Theme.muted).should be_true
+    end
+
+    it "leaves a query-less target as a single bright span" do
+      line = Highlight.from_lines(["GET /plain/path HTTP/1.1"], request: true).first
+      has_span?(line, "/plain/path", Theme.text_bright).should be_true
+    end
+  end
+
+  describe "header values" do
+    it "tokenises Set-Cookie name/value and attributes" do
+      line = Highlight.from_lines(["HTTP/1.1 200 OK", "Set-Cookie: sid=abc; Path=/; HttpOnly"], false)[1]
+      line.map(&.text).join.should eq("Set-Cookie: sid=abc; Path=/; HttpOnly")
+      has_span?(line, " sid", Theme.syn_header).should be_true
+      has_span?(line, "abc", Theme.text).should be_true
+      has_span?(line, " Path", Theme.syn_keyword).should be_true
+      has_span?(line, " HttpOnly", Theme.syn_keyword).should be_true
+    end
+
+    it "colours the Authorization scheme distinctly from the credential" do
+      line = Highlight.from_lines(["GET / HTTP/1.1", "Authorization: Bearer eyJhbGc"], request: true)[1]
+      line.map(&.text).join.should eq("Authorization: Bearer eyJhbGc")
+      has_span?(line, "Bearer", Theme.syn_keyword).should be_true
+      has_span?(line, " eyJhbGc", Theme.syn_string).should be_true
+    end
+
+    it "keeps a structureless value as one plain span (Host / Date)" do
+      line = Highlight.from_lines(["GET / HTTP/1.1", "Host: h.test"], request: true)[1]
+      has_span?(line, " h.test", Theme.text).should be_true
+      dline = Highlight.from_lines(["GET / HTTP/1.1", "Date: Mon 01:02:03"], request: true)[1]
+      has_span?(dline, " Mon 01:02:03", Theme.text).should be_true
+    end
+
+    it "accents param keys in a generic value" do
+      line = Highlight.from_lines(["HTTP/1.1 200 OK", "Content-Type: text/html; charset=utf-8"], false)[1]
+      has_span?(line, " charset", Theme.syn_header).should be_true
+      has_span?(line, "=", Theme.muted).should be_true
+    end
+  end
+
+  describe "JSONC comments" do
+    it "styles a leading // line as a comment (JWT markers)" do
+      has_span?(body_spans("application/json", "// header"), "// header", Theme.syn_comment).should be_true
+      has_span?(body_spans("application/json", "  // payload"), "  // payload", Theme.syn_comment).should be_true
+      # a real JSON line is unaffected
+      has_span?(body_spans("application/json", %({"a": 1})), %("a"), Theme.syn_header).should be_true
+    end
+  end
+
+  describe "GraphQL bodies" do
+    it "colours keywords, fields, and variables" do
+      spans = Highlight.body_styled("query Q($id: ID!) { user(id: $id) { name } }", :graphql)
+      spans.map(&.text).join.should eq("query Q($id: ID!) { user(id: $id) { name } }")
+      has_span?(spans, "query", Theme.syn_keyword).should be_true
+      has_span?(spans, "$id", Theme.syn_literal).should be_true
+      has_span?(spans, "user", Theme.syn_header).should be_true
+    end
+
+    it "styles # comments" do
+      has_span?(Highlight.body_styled("# operationName: Q", :graphql), "# operationName: Q", Theme.syn_comment).should be_true
+    end
   end
 
   describe ".draw" do
@@ -289,7 +374,13 @@ describe Gori::Tui::Highlight do
       spans = [] of Highlight::Span
       chars = raw.chars
       n = chars.size
-      i = 0
+      ws = 0
+      while ws < n && chars[ws].ascii_whitespace?
+        ws += 1
+      end
+      comment = ws + 1 < n && chars[ws] == '/' && chars[ws + 1] == '/' # JSONC line comment
+      spans << Highlight::Span.new(raw, Theme.syn_comment) if comment
+      i = comment ? n : 0 # a comment line skips the tokenizer loop
       while i < n
         c = chars[i]
         if c == '"'
@@ -372,6 +463,56 @@ describe Gori::Tui::Highlight do
       spans
     end
 
+    name_char = ->(c : Char) { c.ascii_letter? || c.ascii_number? || c == '-' || c == '_' || c == ':' }
+
+    ref_attr = ->(seg : String) do
+      spans = [] of Highlight::Span
+      chars = seg.chars
+      n = chars.size
+      i = 0
+      after_eq = false
+      while i < n
+        c = chars[i]
+        if c == '"' || c == '\''
+          quote = c
+          start = i
+          i += 1
+          while i < n && chars[i] != quote
+            i += 1
+          end
+          i += 1 if i < n
+          spans << Highlight::Span.new(chars[start...i].join, Theme.syn_string)
+          after_eq = false
+        elsif c == '='
+          spans << Highlight::Span.new("=", Theme.muted)
+          i += 1
+          after_eq = true
+        elsif c == '/'
+          spans << Highlight::Span.new("/", Theme.muted)
+          i += 1
+        elsif name_char.call(c)
+          start = i
+          i += 1
+          while i < n && name_char.call(chars[i])
+            i += 1
+          end
+          spans << Highlight::Span.new(chars[start...i].join, after_eq ? Theme.text : Theme.syn_number)
+          after_eq = false
+        else
+          start = i
+          i += 1
+          while i < n
+            d = chars[i]
+            break if d == '"' || d == '\'' || d == '=' || d == '/' || name_char.call(d)
+            i += 1
+          end
+          spans << Highlight::Span.new(chars[start...i].join, Theme.text)
+          after_eq = false
+        end
+      end
+      spans
+    end
+
     ref_markup = ->(raw : String) do
       spans = [] of Highlight::Span
       chars = raw.chars
@@ -379,21 +520,48 @@ describe Gori::Tui::Highlight do
       i = 0
       while i < n
         if chars[i] == '<'
+          # comment '<!-- … -->' (line-local)
+          if i + 3 < n && chars[i + 1] == '!' && chars[i + 2] == '-' && chars[i + 3] == '-'
+            close = nil.as(Int32?)
+            k = i + 4
+            while k + 2 < n
+              if chars[k] == '-' && chars[k + 1] == '-' && chars[k + 2] == '>'
+                close = k
+                break
+              end
+              k += 1
+            end
+            stop = close ? close + 3 : n
+            spans << Highlight::Span.new(chars[i...stop].join, Theme.syn_comment)
+            i = stop
+            next
+          end
           gt = i + 1
           while gt < n && chars[gt] != '>'
             gt += 1
           end
           closed = gt < n
           j = i + 1
-          j += 1 if j < n && chars[j] == '/'
+          decl = false
+          if j < n && (chars[j] == '!' || chars[j] == '?')
+            decl = true
+            j += 1
+          elsif j < n && chars[j] == '/'
+            j += 1
+          end
           spans << Highlight::Span.new(chars[i...j].join, Theme.muted)
           name = j
-          while name < gt && (chars[name].ascii_letter? || chars[name].ascii_number? ||
-                              chars[name] == '-' || chars[name] == '_' || chars[name] == ':')
+          while name < gt && name_char.call(chars[name])
             name += 1
           end
-          spans << Highlight::Span.new(chars[j...name].join, Theme.syn_header) if name > j
-          spans << Highlight::Span.new(chars[name...gt].join, Theme.text) if name < gt
+          spans << Highlight::Span.new(chars[j...name].join, decl ? Theme.syn_keyword : Theme.syn_header) if name > j
+          if name < gt
+            if decl
+              spans << Highlight::Span.new(chars[name...gt].join, Theme.text)
+            else
+              ref_attr.call(chars[name...gt].join).each { |s| spans << s }
+            end
+          end
           spans << Highlight::Span.new(">", Theme.muted) if closed
           i = closed ? gt + 1 : gt
         else

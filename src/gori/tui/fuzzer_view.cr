@@ -166,6 +166,12 @@ module Gori::Tui
       # (same invariant @decoded_index relies on), so this only recomputes on pane/row change.
       @detail_lines_cache = nil.as(Array(String)?)
       @detail_lines_key = nil.as({Symbol, Int64}?)
+      # Styled overlay for the detail lines (syntax highlighting), keyed by pane/row +
+      # theme revision so a palette switch rebuilds it. Held in lockstep with the plain
+      # @detail_lines_cache; the plain lines still back the gutter/cursor/selection math.
+      @detail_styled_cache = nil.as(Array(Highlight::Line)?)
+      @detail_styled_key = nil.as({Symbol, Int64}?)
+      @detail_styled_rev = 0_u32
       @focus = :template
       @loaded = false
       @dirty = false
@@ -622,6 +628,8 @@ module Gori::Tui
       # cache — otherwise an old row's lines could survive under a colliding new index.
       @detail_lines_cache = nil
       @detail_lines_key = nil
+      @detail_styled_cache = nil
+      @detail_styled_key = nil
       @sel = 0
       @scroll = 0
       @running = true
@@ -1035,6 +1043,8 @@ module Gori::Tui
       @detail_cursor.reset
       @detail_lines_cache = nil
       @detail_lines_key = nil
+      @detail_styled_cache = nil
+      @detail_styled_key = nil
     end
 
     # Parse the OPEN result's request/response into the optional protocol panes
@@ -1870,6 +1880,7 @@ module Gori::Tui
       render_detail_chips(screen, rect, panes)
       inner = rect.inset(1, 1)
       lines = detail_lines(r)
+      styled = detail_styled(r, lines)
       @detail_last_h = inner.h
       ensure_detail_visible(inner.h) if focused
       @detail_scroll = @detail_scroll.clamp(0, {lines.size - inner.h, 0}.max)
@@ -1880,8 +1891,10 @@ module Gori::Tui
       rows.each_with_index do |line, i|
         li = @detail_scroll + i
         Gutter.draw(screen, inner.x, inner.y + i, li, gw, current: focused && li == @detail_cursor.cy)
-        shown = @detail_xscroll > 0 ? Highlight.slice_left_text(line, @detail_xscroll) : line
-        screen.text(inner.x + gw, inner.y + i, shown, Theme.text, Theme.bg, width: cw)
+        # Draw the styled overlay; the plain `line` still drives the cursor/selection chrome.
+        sline = styled[li]? || [Highlight::Span.new(line, Theme.text)]
+        sline = Highlight.slice_left(sline, @detail_xscroll) if @detail_xscroll > 0
+        Highlight.draw(screen, inner.x + gw, inner.y + i, sline, bg: Theme.bg, width: cw)
         paint_detail_line_chrome(screen, inner.x + gw, inner.y + i, li, line, focused, lines)
       end
     end
@@ -1952,6 +1965,30 @@ module Gori::Tui
       @detail_lines_cache = lines
       @detail_lines_key = key
       lines
+    end
+
+    # Syntax-highlighted overlay for the detail `lines`, cached in lockstep with the
+    # plain @detail_lines_cache (+ theme revision). Request/response panes go through the
+    # full message highlighter; the decoded panes style per line with their body kind.
+    # 1:1 with `lines`, so the plain strings still drive the gutter/cursor/selection.
+    private def detail_styled(r : Fuzz::Result, lines : Array(String)) : Array(Highlight::Line)
+      key = {@detail_pane, r.index}
+      if (c = @detail_styled_cache) && @detail_styled_key == key && @detail_styled_rev == Theme.revision
+        return c
+      end
+      styled =
+        case @detail_pane
+        when :request  then Highlight.from_lines(lines, request: true)
+        when :response then Highlight.from_lines(lines, request: false)
+        when :graphql  then lines.map { |ln| Highlight.body_styled(ln, :graphql) }
+        when :jwt      then lines.map { |ln| Highlight.body_styled(ln, :json) }
+        when :saml     then lines.map { |ln| Highlight.body_styled(ln, :xml) }
+        else                lines.map { |ln| Highlight.body_styled(ln, :text) }
+        end
+      @detail_styled_cache = styled
+      @detail_styled_key = key
+      @detail_styled_rev = Theme.revision
+      styled
     end
 
     # The reconstructed wire request for a result (template with its payloads spliced in).

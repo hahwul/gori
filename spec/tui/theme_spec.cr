@@ -117,13 +117,17 @@ describe Gori::Tui::Theme do
         "syn_string"  => Theme.syn_string,
         "syn_number"  => Theme.syn_number,
         "syn_literal" => Theme.syn_literal,
+        "syn_keyword" => Theme.syn_keyword,
       }
       functional.each do |label, color|
         ratio = wcag_contrast(color, bg)
         fail "#{name}/#{label} contrast #{ratio.round(2)}:1 < 4.5:1 on bg" if ratio < 4.5
       end
-      muted_ratio = wcag_contrast(Theme.muted, bg)
-      fail "#{name}/muted contrast #{muted_ratio.round(2)}:1 < 3.5:1 on bg" if muted_ratio < 3.5
+      # muted and syn_comment are deliberately dimmer secondary tiers (≥3.5:1).
+      {"muted" => Theme.muted, "syn_comment" => Theme.syn_comment}.each do |label, color|
+        dim_ratio = wcag_contrast(color, bg)
+        fail "#{name}/#{label} contrast #{dim_ratio.round(2)}:1 < 3.5:1 on bg" if dim_ratio < 3.5
+      end
     end
   end
 
