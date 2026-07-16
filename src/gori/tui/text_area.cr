@@ -98,6 +98,9 @@ module Gori::Tui
       @styled = nil
       @edits += 1
       @undo_stack.clear
+      # Drop stale conceal offsets — they index the OLD buffer; the owner re-feeds fresh
+      # ones next render. Guards any move/place between now and that render.
+      @conceal_spans = [] of {Int32, Int32} unless @conceal_spans.empty?
       env_complete_close
     end
 
@@ -275,6 +278,7 @@ module Gori::Tui
       # On a concealed line the click column is in concealed space; map it back through
       # the hidden runs so a click never lands the caret on an unseen ¦chain char.
       @cx = (cr && !cr.empty?) ? concealed_col_to_raw(line, cr, target) : Screen.column_for(line, target)
+      snap_cx_out_of_conceal(0) # a click on the closing-§ column resolves to it; nudge to a legal rest
       env_complete_close
     end
 
@@ -660,19 +664,24 @@ module Gori::Tui
       n
     end
 
-    # After a horizontal cursor move, pull @cx off any hidden char so the caret never
-    # rests inside a concealed run (where it would be invisible / edit unseen bytes).
-    # `dir` is the travel sign: land on the run's far edge in the direction of motion.
+    # Pull @cx out of the "no-rest zone" `(a, b]` of a concealed run so the caret can't
+    # land where an edit would touch UNSEEN bytes: the interior chars AND the boundary
+    # `@cx == b` (just before the visible closing glyph, where backspace would delete the
+    # last hidden char and typing would insert into the hidden run). Only `a` (the run's
+    # left edge, on visible bytes) and `b + 1` (past the closing glyph) are legal rests —
+    # and they sit at the same column / the next column, so crossing the whole run is one
+    # keypress in each direction (no dead press). `dir` is the travel sign.
     private def snap_cx_out_of_conceal(dir : Int32) : Nil
       return if @conceal_spans.empty?
       line_conceal(line_start_offset(@cy), @lines[@cy].size).each do |(a, b)|
-        next unless @cx > a && @cx < b
+        next unless @cx > a && @cx <= b
+        right = {b + 1, @lines[@cy].size}.min
         @cx = if dir > 0
-                b
+                right
               elsif dir < 0
                 a
               else
-                (@cx - a <= b - @cx) ? a : b # vertical move: snap to the nearer edge
+                (@cx - a <= right - @cx) ? a : right # vertical move / click: nearer legal edge
               end
         return
       end

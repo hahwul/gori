@@ -460,9 +460,12 @@ module Gori::Tui
     # Idempotent so the focus changers above can call it freely.
     def commit_chain_pane : Nil
       return unless @chain_focused
+      # The marker's open § (value region) is unchanged by the chain edit, so it's a stable
+      # anchor — restoring the raw cursor could land inside a now-longer hidden chain.
+      anchor = Fuzz::Template.marker_start_at(@editor.text, @chain_marker_cursor) || @chain_marker_cursor
       if updated = Fuzz::Template.set_chain(@editor.text, @chain_marker_cursor, @chain_pane.value)
         @editor.set_text(updated)
-        @editor.place_at_offset(@chain_marker_cursor) # back into the marker (set_text reset it) → tooltip stays up
+        @editor.place_at_offset(anchor) # back into the marker (set_text reset it) → tooltip stays up
         @dirty = true
       end
       @chain_focused = false

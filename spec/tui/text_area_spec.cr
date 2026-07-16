@@ -46,14 +46,24 @@ describe Gori::Tui::TextArea do
       backend.row(0).rstrip.should eq(text)
     end
 
-    it "snaps the caret out of a concealed run on horizontal move (never rests hidden)" do
+    it "treats a concealed run as atomic on horizontal move (one keypress each way, no hidden rest)" do
+      # run [7,21) = ¦base64-encode; the closing § is at index 21, the trailing " x" after it.
       ta = TextArea.new(text)
       ta.conceal_spans = [{7, 21}]
-      ta.move(0, 7) # land on the ¦ (start of the hidden run)
-      ta.move(0, 1) # step right into the hidden run → snaps to its end (the closing §)
-      ta.cx.should eq(21)
-      ta.move(0, -1) # left off the run's far edge → snaps to its start
+      ta.move(0, 7) # left edge of the run (offset 7), on the visible value
       ta.cx.should eq(7)
+      ta.move(0, 1)       # right: skips the whole run AND the closing § in one press
+      ta.cx.should eq(22) # past the § (b+1) — NOT 21, where a backspace would hit a hidden byte
+      ta.move(0, -1)      # left: back across it in one press
+      ta.cx.should eq(7)
+    end
+
+    it "never lets an edit at the run boundary touch a hidden byte" do
+      ta = TextArea.new(text)
+      ta.conceal_spans = [{7, 21}]
+      ta.move(0, 7) # the only legal rest at the value/chain seam is on the VISIBLE value side
+      ta.backspace  # deletes the last value char, never a concealed chain byte
+      ta.text.should eq("q=§dat¦base64-encode§ x")
     end
 
     it "keeps concealment from corrupting the buffer text" do
