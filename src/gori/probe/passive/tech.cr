@@ -19,6 +19,7 @@ module Gori
         def check(ctx : Context, acc : Array(Detection)) : Nil
           check_protocols(ctx, acc)
           check_tech_headers(ctx, acc)
+          check_frameworks(ctx, acc)
         end
 
         private def check_protocols(ctx : Context, acc : Array(Detection)) : Nil
@@ -121,6 +122,33 @@ module Gori
           doc = q.lstrip
           doc.starts_with?('{') || doc.starts_with?("query") || doc.starts_with?("mutation") ||
             doc.starts_with?("subscription") || doc.starts_with?("fragment")
+        end
+
+        # Client-side framework/library fingerprints from the response BODY (headers rarely
+        # name these). Each {marker, code, label, has_version}: has_version marks a pattern that
+        # defines capture group 1 (a version we surface in evidence — a CVE aid and the scope
+        # for prototype-pollution / clobbering findings). Info, and each doubles as a project
+        # tech fact via FIXED_TECH_LABELS. Nuxt implies Vue and Next implies React by design —
+        # both are reported when both markers are present.
+        FRAMEWORK_MARKERS = [
+          {/\bdata-reactroot\b|__REACT_DEVTOOLS_GLOBAL_HOOK__|\breact-dom(?:[.-][\w.]*)?\.js\b/, "tech_react", "React", false},
+          {/\b__NEXT_DATA__\b|\/_next\/static\//, "tech_nextjs", "Next.js", false},
+          {/\bwindow\.__NUXT__\b|\/_nuxt\//, "tech_nuxt", "Nuxt", false},
+          {/\bdata-v-[0-9a-f]{6,10}\b|\b__VUE__\b|\bVue\.createApp\b/, "tech_vue", "Vue", false},
+          {/\bng-version\s*=\s*"([^"]+)"|\bng-app\b|\[ng-version\]/, "tech_angular", "Angular", true},
+          {/\bjquery[-.](\d+\.\d+(?:\.\d+)?)(?:\.min)?\.js\b|\bjQuery\.fn\.jquery\b|\/jquery(?:\.min)?\.js\b/, "tech_jquery", "jQuery", true},
+        ] of {Regex, String, String, Bool}
+
+        private def check_frameworks(ctx : Context, acc : Array(Detection)) : Nil
+          return unless ctx.html? || ctx.js?
+          text = ctx.body_text
+          return if text.nil? || text.empty?
+          FRAMEWORK_MARKERS.each do |(re, code, label, has_version)|
+            next unless m = re.match(text)
+            ver = has_version ? m[1]? : nil
+            title = ver ? "#{label} #{ver}" : label
+            acc << tech(ctx, code, title, ver)
+          end
         end
 
         private def tech(ctx : Context, code : String, title : String, evidence : String? = nil) : Detection

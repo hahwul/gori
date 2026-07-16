@@ -8,6 +8,7 @@ module Gori
       TECH     = "tech" # technology/protocol fingerprints — also project facts
       INFOLEAK = "infoleak"
       CORS     = "cors"
+      CLIENT   = "client" # client-side/DOM suspicions (DOM XSS, clobbering, prototype pollution, postMessage)
       ACTIVE   = "active" # confirmed by a probe (reflected params)
       CUSTOM   = "custom" # user-defined string/regex match rule
     end
@@ -74,6 +75,16 @@ module Gori
       "insecure_form_action"           => "Point the form action at an HTTPS URL; a form submitting to http:// sends everything the user enters (credentials included) in cleartext.",
       "reflected_param"                => "Context-encode reflected input; this parameter echoes attacker-controlled data and may enable XSS.",
       "graphql_introspection"          => "Disable GraphQL introspection in production; the full schema it returns maps the entire API surface for an attacker.",
+      "dom_xss"                        => "A DOM taint source reaches an execution sink in one statement — review and sanitize: assign text via textContent, build nodes with the DOM API, or run untrusted HTML through a sanitizer (DOMPurify) before it touches innerHTML/write/eval. Heuristic; confirm the data path in a browser.",
+      "dom_clobbering"                 => "Don't trust globals that HTML id/name attributes can define: declare variables with let/const, look elements up defensively, and avoid the window.X = window.X || … fallback. A strict CSP and sanitizing injected markup (dropping id/name) also mitigate clobbering.",
+      "prototype_pollution"            => "Guard object merges: reject __proto__/constructor/prototype keys, use Object.create(null) or Map for untrusted key sets, and update deep-merge libraries (lodash, jQuery.extend) to patched versions.",
+      "prototype_pollution_param"      => "A request carried a __proto__/constructor[prototype] key. Ensure the server- and client-side parsers that expand nested parameters reject these keys so an attacker can't reach Object.prototype.",
+      "postmessage_no_origin"          => "Validate event.origin against an allowlist at the top of every message handler before using event.data; an unchecked handler accepts messages from any frame.",
+      "postmessage_wildcard"           => "Pass an explicit target origin to postMessage instead of \"*\", so the message isn't delivered to whatever document occupies the target window.",
+      "document_domain_set"            => "Avoid assigning document.domain; it relaxes the same-origin policy for the whole page. Use postMessage (with an origin check) or CORS for cross-subdomain communication instead.",
+      "inline_js_uri"                  => "Replace javascript: URLs in href/src/action with real handlers/URLs; they execute script in the page's origin and are blocked by a script-src CSP.",
+      "mixed_passive"                  => "Load images/media over HTTPS; passive http:// sub-resources on an HTTPS page are tampered in transit and downgrade the page's security indicator.",
+      "reverse_tabnabbing"             => "Add rel=\"noopener\" (or noreferrer) to target=\"_blank\" links so the opened page can't repoint this tab via window.opener.",
     } of String => String
 
     TECH_REMEDIATION = "Detected technology — informational; recorded as a project fact."
@@ -92,6 +103,12 @@ module Gori
       "tech_aspnet"    => "ASP.NET",
       "tech_aspnetmvc" => "ASP.NET MVC",
       "tech_drupal"    => "Drupal",
+      "tech_react"     => "React",
+      "tech_nextjs"    => "Next.js",
+      "tech_vue"       => "Vue",
+      "tech_nuxt"      => "Nuxt",
+      "tech_angular"   => "Angular",
+      "tech_jquery"    => "jQuery",
     }
 
     # Codes whose product name is the header VALUE's first token (Server/X-Powered-By/X-Generator).

@@ -22,7 +22,9 @@ module Gori
         MED_PARAMS = Set{"session", "sessionid", "sid"} # session identifiers
         LOW_PARAMS = Set{"sig", "signature"}            # signed-URL params (frequently intentional)
 
-        JWT_VALUE = /\beyJ[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]+/
+        # All three segments ≥6 chars: the old 1-char-signature tail (`[...]+`) matched dotted
+        # non-JWT values like `eyJx.yy.z`. A real signed JWT's signature is far longer.
+        JWT_VALUE = /\beyJ[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}/
 
         # Name tiers in priority order (High > Medium > Low); the highest present wins. Built
         # once at load — was a fresh Hash literal allocated on every flow just to iterate it.

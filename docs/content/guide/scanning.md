@@ -23,6 +23,7 @@ Its **active** checks are deliberately *light-touch*: a handful of safe, low-vol
 | `tech` | Technology and protocol fingerprints (also surface on the Project tab) |
 | `infoleak` | Body disclosures, secrets in URLs / WS frames, GraphQL introspection |
 | `cors` | Wildcard / null origin / credentialed misconfigurations; active origin reflection |
+| `client` | Client-side suspicions in page and bundle scripts: DOM-based XSS (source into sink), DOM clobbering, prototype pollution, and postMessage weaknesses. Heuristic, so treat as leads to confirm |
 | `active` | Confirmed by a light-touch probe (for example reflected parameters). TUI active scan only |
 
 Severities run `info`, `low`, `medium`, `high`, `critical`. Headless `gori run probe` runs **passive** checks only (categories except `active`).

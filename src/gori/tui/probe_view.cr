@@ -636,6 +636,7 @@ module Gori::Tui
       when Probe::Category::TECH     then "tech"
       when Probe::Category::INFOLEAK then "leak"
       when Probe::Category::CORS     then "cors"
+      when Probe::Category::CLIENT   then "client"
       when Probe::Category::ACTIVE   then "active"
       when Probe::Category::CUSTOM   then "custom"
       else                                category

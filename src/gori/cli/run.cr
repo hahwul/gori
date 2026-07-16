@@ -1351,7 +1351,7 @@ module Gori
       # this command doesn't run, so accepting `--category active` would be a guaranteed-empty filter.
       PROBE_CATEGORIES = [
         Probe::Category::HEADERS, Probe::Category::COOKIES, Probe::Category::TECH,
-        Probe::Category::INFOLEAK, Probe::Category::CORS,
+        Probe::Category::INFOLEAK, Probe::Category::CORS, Probe::Category::CLIENT,
       ]
 
       private def self.cmd_probe(args : Array(String)) : Nil

@@ -1598,3 +1598,185 @@ describe "Gori::Probe.tech_summary" do
     out[0].valid_encoding?.should be_true
   end
 end
+
+# A valid, long JWT used across several tests (all three segments well over the length gate).
+JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+
+# Wrap a JS snippet in an HTML document so it reaches the client-side rules as an inline script.
+private def html_with_script(js : String) : String
+  "<!doctype html><html><head></head><body><script>#{js}</script></body></html>"
+end
+
+private def analyze_html(store, body : String)
+  analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n",
+    content_type: "text/html", body: body)
+end
+
+private def analyze_js(store, body : String)
+  analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n",
+    content_type: "application/javascript", body: body)
+end
+
+describe Gori::Probe::Passive::JsScan do
+  it "blanks string literals and comments but keeps code" do
+    stripped = Gori::Probe::Passive::JsScan.strip(%q{a = "el.innerHTML=location.hash"; // note document.cookie
+b = location.search;})
+    # Tokens that lived inside a string or a comment are gone...
+    stripped.includes?("el.innerHTML").should be_false
+    stripped.includes?("document.cookie").should be_false
+    # ...but real code (identifiers outside strings/comments) survives, offsets preserved.
+    stripped.includes?("location.search").should be_true
+    stripped.size.should eq(%q{a = "el.innerHTML=location.hash"; // note document.cookie
+b = location.search;}.size)
+  end
+
+  it "correlates a source and a sink only in the same statement" do
+    same = Gori::Probe::Passive::JsScan.source_sink_pairs("el.innerHTML = location.hash;")
+    same.map(&.[1]).should contain("innerHTML")
+    # Split across two statements (no taint tracking) -> no pair.
+    split = Gori::Probe::Passive::JsScan.source_sink_pairs("var x = location.hash; el.innerHTML = y;")
+    split.empty?.should be_true
+  end
+end
+
+describe Gori::Probe::Passive::DomXss do
+  it "flags a source flowing into a sink in one statement (HTML inline script)" do
+    with_store do |store|
+      dets = analyze_html(store, html_with_script("document.getElementById('o').innerHTML = location.hash;"))
+      hit = dets.find(&.code.==("dom_xss")).not_nil!
+      hit.severity.should eq(Gori::Store::Severity::Medium)
+      hit.category.should eq("client")
+      hit.evidence.not_nil!.should contain("→")
+    end
+  end
+
+  it "flags document.write / eval / setTimeout in a JS bundle" do
+    with_store do |store|
+      codes_of(analyze_js(store, "document.write(location.search);")).should contain("dom_xss")
+      codes_of(analyze_js(store, "eval('x'+document.referrer);")).should contain("dom_xss")
+    end
+  end
+
+  it "does not flag a sink inside a comment or a string, or a bare sink" do
+    with_store do |store|
+      codes_of(analyze_html(store, html_with_script("// el.innerHTML = location.hash"))).should_not contain("dom_xss")
+      codes_of(analyze_html(store, html_with_script(%(log("el.innerHTML = location.hash"))))).should_not contain("dom_xss")
+      codes_of(analyze_html(store, html_with_script("el.innerHTML = 'static markup';"))).should_not contain("dom_xss")
+    end
+  end
+end
+
+describe Gori::Probe::Passive::DomClobbering do
+  it "flags named HTMLCollection access and the window-global fallback idiom" do
+    with_store do |store|
+      codes_of(analyze_html(store, html_with_script("var f = document.forms['login'];"))).should contain("dom_clobbering")
+      codes_of(analyze_html(store, html_with_script("window.cfg = window.cfg || {};"))).should contain("dom_clobbering")
+    end
+  end
+
+  it "does not flag ordinary DOM lookups" do
+    with_store do |store|
+      codes_of(analyze_html(store, html_with_script("var a = document.getElementById('a');"))).should_not contain("dom_clobbering")
+    end
+  end
+end
+
+describe Gori::Probe::Passive::PrototypePollution do
+  it "flags a prototype-key write and pollution-prone merge APIs" do
+    with_store do |store|
+      codes_of(analyze_js(store, "obj.__proto__ = evil;")).should contain("prototype_pollution")
+      codes_of(analyze_js(store, "$.extend(true, target, src);")).should contain("prototype_pollution")
+    end
+  end
+
+  it "flags a __proto__ parameter in the request" do
+    with_store do |store|
+      dets = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/api?__proto__[polluted]=1")
+      codes_of(dets).should contain("prototype_pollution_param")
+    end
+  end
+
+  it "does not flag ordinary object code or a clean request" do
+    with_store do |store|
+      dets = analyze_js(store, "var o = {}; o.foo = 1;")
+      codes_of(dets).should_not contain("prototype_pollution")
+      codes_of(dets).should_not contain("prototype_pollution_param")
+    end
+  end
+end
+
+describe Gori::Probe::Passive::PostMessage do
+  it "flags a message handler with no origin check" do
+    with_store do |store|
+      js = %(window.addEventListener("message", function(e){ handle(e.data); });)
+      codes_of(analyze_js(store, js)).should contain("postmessage_no_origin")
+    end
+  end
+
+  it "does not flag a handler that validates the origin" do
+    with_store do |store|
+      js = %(window.addEventListener("message", function(e){ if (e.origin === "https://x") handle(e.data); });)
+      codes_of(analyze_js(store, js)).should_not contain("postmessage_no_origin")
+    end
+  end
+
+  it "flags a wildcard target origin and document.domain relaxation" do
+    with_store do |store|
+      codes_of(analyze_js(store, %(parent.postMessage(payload, "*");))).should contain("postmessage_wildcard")
+      codes_of(analyze_js(store, %(document.domain = "example.com";))).should contain("document_domain_set")
+    end
+  end
+end
+
+describe "Gori::Probe::Passive::Tech (framework fingerprints)" do
+  it "fingerprints React from the response body" do
+    with_store do |store|
+      codes_of(analyze_html(store, %(<html><body data-reactroot=""><div id="root"></div></body></html>))).should contain("tech_react")
+    end
+  end
+
+  it "fingerprints jQuery and captures its version" do
+    with_store do |store|
+      dets = analyze_html(store, %(<html><head><script src="/assets/jquery-3.4.1.min.js"></script></head></html>))
+      hit = dets.find(&.code.==("tech_jquery")).not_nil!
+      hit.evidence.should eq("3.4.1")
+    end
+  end
+end
+
+describe "Gori::Probe::Passive::BodyLeaks (client-side HTML sinks)" do
+  it "flags a javascript: URL but not the void(0) no-op" do
+    with_store do |store|
+      codes_of(analyze_html(store, %(<a href="javascript:alert(1)">x</a>))).should contain("inline_js_uri")
+      codes_of(analyze_html(store, %(<a href="javascript:void(0)">x</a>))).should_not contain("inline_js_uri")
+    end
+  end
+
+  it "flags passive mixed content and reverse-tabnabbing links" do
+    with_store do |store|
+      codes_of(analyze_html(store, %(<img src="http://cdn.example/x.png">))).should contain("mixed_passive")
+      codes_of(analyze_html(store, %(<a target="_blank" href="http://x/">x</a>))).should contain("reverse_tabnabbing")
+      codes_of(analyze_html(store, %(<a target="_blank" rel="noopener" href="http://x/">x</a>))).should_not contain("reverse_tabnabbing")
+    end
+  end
+end
+
+describe "Gori::Probe::Passive::Secrets (client-side shapes)" do
+  it "flags a JWT and a Slack webhook embedded in a JS bundle" do
+    with_store do |store|
+      codes_of(analyze_js(store, "var t = '#{JWT}';")).should contain("secret_in_body")
+      hook = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+      codes_of(analyze_js(store, "var w = '#{hook}';")).should contain("secret_in_body")
+    end
+  end
+end
+
+describe "Gori::Probe::Passive::SecretInUrl (JWT tightening)" do
+  it "still flags a full JWT in the query but not a short dotted value" do
+    with_store do |store|
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/cb?tok=#{JWT}")).should contain("secret_in_url")
+      # Long first two segments but a 1-char signature: the old `[...]+` tail false-matched this.
+      codes_of(analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n", target: "/cb?data=eyJhbGciOiJIUzI1.eyJzdWIiOiIx.z")).should_not contain("secret_in_url")
+    end
+  end
+end

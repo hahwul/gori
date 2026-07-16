@@ -65,12 +65,25 @@ module Gori
         # The (?<![-\w]) guard requires a real attribute boundary before `src`, so a hyphenated
         # data attribute (`data-src="http://…"`, a lazy-loading placeholder) doesn't false-match
         # — `\b` alone treated the hyphen as a boundary.
-        MIXED_ACTIVE = /<(?:script|iframe)\b[^>]*(?<![-\w])src\s*=\s*["']?http:\/\//i
+        MIXED_ACTIVE = /<(?:script|iframe|embed)\b[^>]*(?<![-\w])src\s*=\s*["']?http:\/\//i
+        # A stylesheet or <object> is also ACTIVE mixed content (browsers block it). Attribute
+        # order varies, so two lookaheads assert both attrs are present in the same <link> tag.
+        MIXED_ACTIVE_LINK   = /<link\b(?=[^>]*(?<![-\w])rel\s*=\s*["']?stylesheet)(?=[^>]*(?<![-\w])href\s*=\s*["']?http:\/\/)[^>]*>/i
+        MIXED_ACTIVE_OBJECT = /<object\b[^>]*(?<![-\w])data\s*=\s*["']?http:\/\//i
+        # PASSIVE mixed content: an http:// image/media on an HTTPS page. Lower impact (not
+        # blocked, but tamperable + downgrades the lock icon).
+        MIXED_PASSIVE = /<(?:img|audio|video|source)\b[^>]*(?<![-\w])src\s*=\s*["']?http:\/\//i
 
         # A form on an HTTPS page that SUBMITS to a plain-http action: everything the user types
         # (credentials included) is sent in cleartext. Browsers flag this for password fields;
         # it's a distinct, higher-impact case than a passively-loaded sub-resource.
         INSECURE_FORM = /<form\b[^>]*(?<![-\w])action\s*=\s*["']?http:\/\//i
+
+        # A javascript: URL in an executable attribute — a client-side script sink. The negative
+        # lookahead drops the ubiquitous no-op forms (javascript:void(0), javascript:;).
+        INLINE_JS_URI = /(?<![-\w])(?:href|src|action|formaction)\s*=\s*["']?javascript:(?!\s*(?:void|;|"|'))/i
+        # An <a target="_blank"> tag; reverse-tabnabbing risk unless it carries rel=noopener.
+        ANCHOR_BLANK = /<a\b[^>]*(?<![-\w])target\s*=\s*["']?_blank\b[^>]*>/i
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
           return unless ctx.response
@@ -108,15 +121,43 @@ module Gori
           Secrets::PATTERNS.each do |(pat, label)|
             acc << leak(ctx, "secret_in_body", "Credential/secret disclosed in response body", Store::Severity::High, label) if pat.matches?(text)
           end
-          if ctx.html? && ctx.scheme == "https"
-            if MIXED_ACTIVE.matches?(text)
+          check_html_sinks(ctx, acc, text) if ctx.html?
+        end
+
+        # HTML-only client-side sink checks: mixed content (active/passive), insecure form
+        # actions, javascript: URLs, and reverse-tabnabbing links. Split out of check so each
+        # method stays under the complexity budget.
+        private def check_html_sinks(ctx : Context, acc : Array(Detection), text : String) : Nil
+          if ctx.scheme == "https"
+            if MIXED_ACTIVE.matches?(text) || MIXED_ACTIVE_LINK.matches?(text) || MIXED_ACTIVE_OBJECT.matches?(text)
               acc << Detection.new("mixed_content", Category::HEADERS, ctx.host, ctx.url,
                 "Active mixed content (http:// sub-resource on an HTTPS page)", Store::Severity::Low, nil, ctx.fid)
+            end
+            if MIXED_PASSIVE.matches?(text)
+              acc << Detection.new("mixed_passive", Category::HEADERS, ctx.host, ctx.url,
+                "Passive mixed content (http:// image/media on an HTTPS page)", Store::Severity::Info, nil, ctx.fid)
             end
             if INSECURE_FORM.matches?(text)
               acc << Detection.new("insecure_form_action", Category::HEADERS, ctx.host, ctx.url,
                 "Form on an HTTPS page submits over cleartext http://", Store::Severity::Medium, nil, ctx.fid)
             end
+          end
+          if INLINE_JS_URI.matches?(text)
+            acc << Detection.new("inline_js_uri", Category::CLIENT, ctx.host, ctx.url,
+              "javascript: URL in an HTML attribute", Store::Severity::Low, nil, ctx.fid)
+          end
+          flag_reverse_tabnabbing(ctx, acc, text)
+        end
+
+        # A target="_blank" anchor with no rel=noopener/noreferrer lets the opened page repoint
+        # this tab via window.opener. Report once (grouped by code+host anyway).
+        private def flag_reverse_tabnabbing(ctx : Context, acc : Array(Detection), text : String) : Nil
+          text.scan(ANCHOR_BLANK) do |m|
+            tag = m[0]
+            next if tag.includes?("noopener") || tag.includes?("noreferrer")
+            acc << Detection.new("reverse_tabnabbing", Category::HEADERS, ctx.host, ctx.url,
+              "target=\"_blank\" link without rel=noopener", Store::Severity::Low, nil, ctx.fid)
+            break
           end
         end
 
