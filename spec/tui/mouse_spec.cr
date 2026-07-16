@@ -340,7 +340,7 @@ describe "Chrome.top_bar_chip_rect" do
   end
 
   it "keeps notify/scope hit-test rects in sync with the drawn row even when the project name is squeezed" do
-    # Narrow rect: chips (notify:3 · scope:99 · 127.0.0.1:8080 · 01:37 PM) leave the
+    # Narrow rect: chips (notify:3 · scope:99 · 127.0.0.1:8080 · 01:37 PM · ⌘) leave the
     # project name almost no room — exercises the "name squeezed to zero width" branch.
     rect = Rect.new(0, 0, 45, 1)
     backend = MemoryBackend.new(45, 1)
@@ -355,6 +355,20 @@ describe "Chrome.top_bar_chip_rect" do
     srect = Chrome.top_bar_chip_rect(rect, :scope, scope: "scope:99", listen: "127.0.0.1:8080",
       time: "01:37 PM", unread: 3).not_nil!
     backend.row(0)[srect.x, srect.w].should eq("scope:99")
+  end
+
+  it "returns a rect matching the drawn far-right palette chip (⌘)" do
+    rect = Rect.new(0, 0, 80, 1)
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), rect,
+      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2")
+    prect = Chrome.top_bar_chip_rect(rect, :palette, scope: "scope:2", listen: "127.0.0.1:8080",
+      time: "01:37 PM").not_nil!
+    backend.row(0)[prect.x, prect.w].should eq("⌘")
+    # Right of the clock chip.
+    trect = Chrome.top_bar_chip_rect(rect, :time, scope: "scope:2", listen: "127.0.0.1:8080",
+      time: "01:37 PM").not_nil!
+    prect.x.should be > trect.x
   end
 end
 

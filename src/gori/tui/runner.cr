@@ -1274,7 +1274,8 @@ module Gori::Tui
 
     # Click a top-bar chip: the notification badge (`notify:N`, left of scope) opens
     # the center; the scope chip (`scope:N` / `scope:off`) flips the lens — the same
-    # action as the global `s` chord. Returns true when consumed. Each rect is
+    # action as the global `s` chord; the far-right `⌘` glyph opens the command
+    # palette (same as Ctrl/Cmd-P). Returns true when consumed. Each rect is
     # rebuilt from the same tagged source render uses, so a click can't drift.
     private def click_top_bar(rect : Rect, mx : Int32, my : Int32) : Bool
       return false unless rect.contains?(mx, my)
@@ -1296,6 +1297,14 @@ module Gori::Tui
         unread: unread, capturing: capturing, write_failures: write_failures)
       if srect && srect.contains?(mx, my)
         scope_toggle_lens
+        return true
+      end
+
+      prect = Chrome.top_bar_chip_rect(rect, :palette, scope: scope_label, rules: rules_label,
+        intercept: intercept_label, sandbox: sandbox_label, listen: listen, time: clock_label,
+        unread: unread, capturing: capturing, write_failures: write_failures)
+      if prect && prect.contains?(mx, my)
+        open_palette
         return true
       end
 

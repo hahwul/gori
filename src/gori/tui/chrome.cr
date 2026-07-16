@@ -153,12 +153,14 @@ module Gori::Tui
       name_x = x + 1
 
       # right-aligned status chips: notify:N · scope:N · rules:N · intercept:on(N) ·
-      # ●listen · h:MM AM/PM — value-emphasized, dim · separators; the hot intercept
-      # state in RED. The clock is the rightmost anchor. `unread` rides just left of
-      # scope so a background-job ping surfaces beside the state it's most likely to
-      # affect. The listen chip's address text never changes — capture on/off/failing
-      # rides as the leading dot + label colour (green/muted/red), so the one address
-      # a user glances at doubles as the capture indicator instead of a separate chip.
+      # ●listen · h:MM AM/PM · ⌘ — value-emphasized, dim · separators; the hot
+      # intercept state in RED. The clock is the penultimate anchor; the palette
+      # glyph (`⌘`, click → open palette) is rightmost. `unread` rides just left
+      # of scope so a background-job ping surfaces beside the state it's most
+      # likely to affect. The listen chip's address text never changes — capture
+      # on/off/failing rides as the leading dot + label colour (green/muted/red),
+      # so the one address a user glances at doubles as the capture indicator
+      # instead of a separate chip.
       tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept, sandbox: sandbox,
         listen: listen, time: time, unread: unread, capturing: capturing,
         write_failures: write_failures)
@@ -189,6 +191,9 @@ module Gori::Tui
       label, color = listen_chip(listen, capturing, write_failures)
       chips << {:listen, label, color}
       chips << {:time, time, Theme.muted}
+      # Far-right command-palette affordance — same action as Ctrl/Cmd-P. Always
+      # present so a mouse user can open the palette without knowing the chord.
+      chips << {:palette, "⌘", Theme.text}
       chips
     end
 
