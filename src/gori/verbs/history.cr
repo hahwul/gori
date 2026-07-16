@@ -43,6 +43,13 @@ module Gori
         Verb::Scope::Body, [Verb::Chord.new("r", ctrl: true)],
         available: history_selected, mnemonic: 'r') { |ctx| ctx.repeater_selected; nil }
 
+      # Spider + brute-force the selected flow's host (opens the Discover config popup; the
+      # run streams into the Target → Discover sub-tab). Menu-only (no chord).
+      r.register Verb::Definition.new(
+        "history.discover", "Discover from flow", "Spider + brute-force the selected flow's host",
+        Verb::Scope::Body, [] of Verb::Chord,
+        available: history_selected, mnemonic: 'd') { |ctx| ctx.history_discover; nil }
+
       # Send the selected flow to the Comparer's next slot (A → B → A), then open the
       # Comparer tab to view the diff.
       r.register Verb::Definition.new(
@@ -496,6 +503,7 @@ module Gori
       register_import(r)
       register_history(r)
       register_sitemap(r)
+      register_discover(r)
       register_links(r)
       register_issues(r)
       register_probe(r)

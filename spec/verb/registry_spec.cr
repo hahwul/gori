@@ -372,6 +372,34 @@ private class FakeContext < ExecContext
     @calls << :sitemap_toggle_grouping
   end
 
+  def sitemap_discover : Nil
+    @calls << :sitemap_discover
+  end
+
+  def sitemap_repeater : Nil
+    @calls << :sitemap_repeater
+  end
+
+  def history_discover : Nil
+    @calls << :history_discover
+  end
+
+  def discover_run : Nil
+    @calls << :discover_run
+  end
+
+  def discover_stop : Nil
+    @calls << :discover_stop
+  end
+
+  def discover_toggle_pause : Nil
+    @calls << :discover_toggle_pause
+  end
+
+  def goto_discover : Nil
+    @calls << :goto_discover
+  end
+
   def scope_open : Nil
     @calls << :scope_open
   end

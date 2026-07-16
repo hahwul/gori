@@ -47,6 +47,16 @@ module Gori
         "sitemap.scope-toggle", "Toggle scope lens", "Filter the tree to in-scope endpoints on/off",
         Verb::Scope::Sitemap, [Verb::Chord.new("s", shift: true)], mnemonic: 's') { |ctx| ctx.scope_toggle_lens; nil }
 
+      # `d` — spider + brute-force the selected host/path (opens the Discover config popup).
+      r.register Verb::Definition.new(
+        "sitemap.discover", "Discover here", "Spider + brute-force the selected host or path subtree",
+        Verb::Scope::Sitemap, [Verb::Chord.new("d")], mnemonic: 'd') { |ctx| ctx.sitemap_discover; nil }
+
+      # `r` — send the selected endpoint to Repeater (resolves a representative captured flow).
+      r.register Verb::Definition.new(
+        "sitemap.repeater", "Send to Repeater", "Open the selected endpoint's captured request in Repeater",
+        Verb::Scope::Sitemap, [Verb::Chord.new("r")], mnemonic: 'r') { |ctx| ctx.sitemap_repeater; nil }
+
       r.register Verb::Definition.new(
         "sitemap.to-menu", "Back to menu", "Move focus up to the tab menu", Verb::Scope::Sitemap,
         [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:menu); nil }

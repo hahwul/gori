@@ -205,6 +205,20 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def sitemap_toggle_grouping : Nil; end
 
+  def sitemap_discover : Nil; end
+
+  def sitemap_repeater : Nil; end
+
+  def history_discover : Nil; end
+
+  def discover_run : Nil; end
+
+  def discover_stop : Nil; end
+
+  def discover_toggle_pause : Nil; end
+
+  def goto_discover : Nil; end
+
   def scope_open : Nil; end
 
   def scope_add_host : Nil; end

@@ -10,7 +10,7 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 - **[Proxy & History](/guide/proxy/)**: capture, intercept, scope, import, match & replace, host overrides.
 - **[Repeater & Fuzzer](/guide/repeater-and-fuzzer/)**: the request workbench, env tokens, and the Intruder-style fuzzer.
 - **[Decoder](/guide/decoder/)**: encode / decode / hash pipeline in the TUI.
-- **[Scanning & Issues](/guide/scanning/)**: Probe, Param Miner, Issues, Notes, Comparer.
+- **[Scanning & Issues](/guide/scanning/)**: Probe, Param Miner, Discover (spider & brute-force), Issues, Notes, Comparer.
 - **[MCP Server](/guide/mcp/)**: drive gori from an AI agent or script.
 - **[Themes](/guide/themes/)**: switch between built-in colour themes or create your own.
 - **[Hotkeys](/guide/hotkeys/)**: rebind gori's keyboard shortcuts.
@@ -22,7 +22,7 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | Tab | Purpose |
 |-----|---------|
 | **Project** | Home: scope, host overrides, env vars, description, network |
-| **Sitemap** | Deduplicated host → path endpoint tree |
+| **Target** | Sitemap (host → path endpoint tree) + Discover (spider & directory brute-force) |
 | **History** | Captured (and imported) flows with full request/response detail |
 | **Intercept** | Hold requests/responses for a manual decision |
 | **Repeater** | Request workbench (incl. WebSocket & gRPC modes) |

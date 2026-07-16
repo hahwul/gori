@@ -49,6 +49,33 @@ gori run mine <flow-id> \
 
 > Miner 탭은 기본적으로 숨겨져 있습니다. 필요할 때 커맨드 팔레트(`Ctrl-P`)에서 활성화하세요.
 
+## Discover: 스파이더 & 브루트포스 {#discover-spider-brute-force}
+
+Miner가 숨은 입력값을 찾는다면, **Discover**는 숨은 엔드포인트를 찾습니다. 링크를 따라가며 사이트를 스파이더링하고(직접 눌러보지 않은 링크까지), 링크되지 않은 디렉터리와 경로(`/admin`, `.git/config`, `/api/v2`)를 브루트포스합니다. 새로 생긴 **Target** 탭 아래 Sitemap 옆의 서브탭으로 존재하며, 찾아낸 엔드포인트는 모두 그 Sitemap으로 바로 반영됩니다.
+
+지금 있는 자리에서 바로 실행하세요. **Sitemap** 노드나 **History** 플로우에서 `Space`를 눌러 **Discover here**를 고르면 됩니다. 작은 팝업에서 탐색 방식(spider, bruteforce, 또는 기본값인 둘 다), 최대 깊이, 크롤 스코프, 동시성을 선택합니다. 실행은 백그라운드에서 진행됩니다. 하단 바에서 상태를 확인하고, Discover 서브탭에서 일시중지하거나 멈추며(`^X` 중지, `p` 일시중지), 완료 알림에서 결과로 바로 이동할 수 있습니다.
+
+Discover는 실제 사이트에서 오탐/미탐을 낮추도록 설계했습니다:
+
+- **Soft-404 캘리브레이션.** 디렉터리를 브루트포스하기 전에, 존재하지 않는 경로 몇 개를 보내 그 서버가 "없음"에 어떻게 응답하는지 학습합니다. 모든 경로에 `200`을 주는 서버, 모든 미지의 경로를 `/login`으로 리다이렉트하는 서버까지 다루므로, 워드리스트 히트는 그 기준선과 실제로 달라질 때만 인정됩니다.
+- **폭주하지 않는 크롤.** 두 개의 독립적인 가드가 크롤 폭발을 막습니다. URL 형태 접기가 `/user/1`, `/user/2`, `/user/3`…을 하나의 템플릿으로 모으고, 콘텐츠 지문이 거의 동일한 목록 페이지를 하나의 클러스터로 모읍니다. 깊이 제한, 페이지 제한, 하드 요청 예산이 나머지를 묶어줍니다.
+- **기본은 Scope 연동.** 실행은 Scope include 규칙을 설정하지 않은 한 시드 origin에 머물고, 설정했다면 그 규칙을 따릅니다. Scope exclude와 sandbox는 항상 존중됩니다. 호스트가 아닌 경로에서 실행하면 그 하위로 범위를 좁힙니다.
+
+각 실행은 FP/FN 수치를 보고합니다. 캘리브레이터가 억제한 프로브 수, 트랩 가드가 잘라낸 탐색량, 그리고 남긴 결과의 신뢰도 분포입니다.
+
+헤드리스로는 `gori run discover`이며, MCP로 에이전트에도 노출됩니다(`discover_start` / `discover_status` / `discover_results` / `discover_stop`):
+
+```bash
+gori run discover --target https://target.example \
+  --max-depth 3 \
+  --extensions php,json,bak \
+  --format jsonl
+```
+
+Discover는 대상에 실제 요청을 보냅니다. 테스트 권한이 있는 시스템에만 실행하세요.
+
+> Sitemap에서 `Space`는 **Send to Repeater**도 제공합니다. 선택한 엔드포인트의 캡처된 요청을 Repeater 워크벤치에서 엽니다.
+
 ## Issues {#issues}
 
 **Issues**는 트리아지 목록입니다. 추적할 가치가 있는 것이라면 무엇이든(Probe, Fuzzer, Miner, 또는 직접 검사한 결과에서) 심각도와 상태를 붙여 이슈로 승격하고, 증거 플로우로 바로 되돌아갈 수 있습니다. 이슈는 리포트용으로 익스포트할 수 있습니다.

@@ -39,20 +39,29 @@ module Gori::Tui
     end
 
     def render_body(screen : Screen, rect : Rect, focus : Symbol) : Nil
+      BodyChrome.framed(screen, rect, focus == :body) { |inner| render_content(screen, inner, focus) }
+    end
+
+    # Frameless render into an already-inset content rect — the seam TargetController drives
+    # so the Sitemap sub-tab draws under the shared Target frame + sub-tab strip.
+    def render_content(screen : Screen, content : Rect, focus : Symbol) : Nil
       focused = focus == :body
       proxy = @host.session.proxy
-      BodyChrome.framed(screen, rect, focused) do |inner|
-        @sitemap.render(screen, inner, focused: focused,
-          listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
-      end
+      @sitemap.render(screen, content, focused: focused,
+        listen: "#{proxy.host}:#{proxy.port}", capturing: @host.session.capturing?)
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
+      handle_click_content(rect.inset(1, 1), mx, my)
+    end
+
+    # Click hit-test against the content rect directly (TargetController passes the rect
+    # below its sub-tab strip; the standalone path insets the frame itself).
+    def handle_click_content(content : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      inner = rect.inset(1, 1)
-      return true unless ri = @sitemap.row_at(inner, mx, my)
+      return true unless ri = @sitemap.row_at(content, mx, my)
       @sitemap.select_index(ri)
-      @sitemap.toggle_at(ri) if @sitemap.marker_hit?(inner, mx, ri)
+      @sitemap.toggle_at(ri) if @sitemap.marker_hit?(content, mx, ri)
       true
     end
 

@@ -94,7 +94,7 @@ describe Gori::Tui::Chrome do
     backend.contains?("Project").should be_true
     backend.contains?("History").should be_true
     backend.contains?("Intercept").should be_true
-    backend.contains?("Sitemap").should be_true
+    backend.contains?("Target").should be_true
     backend.contains?("(3)").should be_true      # held-message badge on Intercept (the only tab-bar count)
     backend.contains?("Issues(").should be_false # issues/repeater/notes carry no count badge
     # active segment ` Project ` (now first tab) starts at col 2 (rect.x+1 fill, +1 pad); FOCUS_GOLD pill.

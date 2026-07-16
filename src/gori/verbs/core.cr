@@ -220,7 +220,7 @@ module Gori
       # this list in sync with Tui::Chrome::TABS so every catalog tab — including the
       # default-hidden one (Miner) — stays reachable from the command palette.
       {
-        :project => "Project", :sitemap => "Sitemap", :history => "History", :intercept => "Intercept",
+        :project => "Project", :target => "Target", :history => "History", :intercept => "Intercept",
         :repeater => "Repeater", :fuzzer => "Fuzzer", :miner => "Miner", :decoder => "Decoder",
         :comparer => "Comparer", :probe => "Probe", :issues => "Issues", :notes => "Notes",
       }.each do |tab, label|
@@ -233,6 +233,12 @@ module Gori
       r.register Verb::Definition.new(
         "tab.help", "Go to Help", "Focus the Help tab (keyboard cheat-sheet)", Verb::Scope::Global,
         [Verb::Chord.new("?")], category: Verb::Category::Navigation) { |ctx| ctx.focus_tab(:help); nil }
+
+      # Discover is a sub-tab under Target, so it gets its own "Go to" (Target's own jump
+      # lands on the last-active sub-tab).
+      r.register Verb::Definition.new(
+        "tab.discover", "Go to Discover", "Focus the Target tab's Discover sub-tab", Verb::Scope::Global,
+        category: Verb::Category::Navigation) { |ctx| ctx.goto_discover; nil }
 
       # Close the command palette overlay.
       r.register Verb::Definition.new(

@@ -478,6 +478,17 @@ module Gori::Tui
       {host_label_for_row(rows, @selected), row.node.path}
     end
 
+    # The selected endpoint's {host, method, target} for cross-surface actions (Send to
+    # Repeater / Discover here). GET-preferred method; nil for a grouped fold node.
+    def selected_endpoint : {host: String, method: String, target: String}?
+      rows = visible_rows
+      return nil unless row = rows[@selected]?
+      return nil if row.node.grouped
+      methods = row.node.methods
+      method = methods.includes?("GET") ? "GET" : (methods.first? || "GET")
+      {host: host_label_for_row(rows, @selected), method: method, target: row.node.path}
+    end
+
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
                listen : String? = nil, capturing : Bool = true) : Nil
       return if rect.empty?
