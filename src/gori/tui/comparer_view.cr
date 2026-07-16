@@ -1,6 +1,7 @@
 require "./screen"
 require "./theme"
 require "./frame"
+require "./highlight"
 require "./url"
 require "./flow_status"
 require "./subtab_clone"
@@ -19,7 +20,7 @@ module Gori::Tui
   # Multiple views are held as session sub-tabs by ComparerController (in-memory;
   # no project DB) so History handoffs don't clobber prior pairs.
   class ComparerView
-    getter pane : Symbol # :request | :response — which half of the two flows we diff
+    getter pane : Symbol    # :request | :response — which half of the two flows we diff
     property name : String? # custom sub-tab chip label (nil = auto from slots)
 
     SEP_W = 3 # the centre marker band between the A and B columns
@@ -32,6 +33,11 @@ module Gori::Tui
       @scroll = 0
       @fill_next = :a # the slot the next "Send to Comparer" fills (rings A → B → A …)
       @rows_cache = nil.as(Array(Repeater::SideBySide::Row)?)
+      # Styled overlay for the UNCHANGED (same) rows only — parallel to @rows_cache, nil
+      # per changed/del/add row (those keep their diff colours). Rebuilt with the rows and
+      # on a theme switch. See build_rows / draw_diff_row.
+      @styled_same = nil.as(Array(Highlight::Line?)?)
+      @styled_same_rev = 0_u32
       @truncated = false
       @change_count = 0 # cached with @rows_cache so the footer doesn't recount each frame
     end
@@ -181,6 +187,7 @@ module Gori::Tui
 
     private def invalidate : Nil
       @rows_cache = nil
+      @styled_same = nil
     end
 
     private def rows : Array(Repeater::SideBySide::Row)
@@ -197,6 +204,34 @@ module Gori::Tui
       result = Repeater::SideBySide.rows(Repeater::Diff.lines(al, bl))
       @change_count = Repeater::SideBySide.change_count(result)
       result
+    end
+
+    # Syntax-highlighted lines for the UNCHANGED rows, parallel to `rows` (nil per
+    # changed/del/add row). The A message is styled as a whole via `Highlight.from_lines`
+    # (so header vs body + content-type styling is correct), then mapped to rows by
+    # replaying SideBySide's advance rule: a Same/Changed/DelOnly row consumes one A line.
+    # Cached with the rows and rebuilt on a theme switch. The input is capped to
+    # `Diff::MAX_LINES` — the diff (and thus every row index) is already truncated there,
+    # so styling past it would colour lines that can never be displayed.
+    private def styled_same : Array(Highlight::Line?)
+      cached = @styled_same
+      return cached if cached && @styled_same_rev == Theme.revision
+      rs = rows
+      out = Array(Highlight::Line?).new(rs.size, nil)
+      if a = @slot_a
+        al = lines_for(a)
+        al = al.first(Repeater::Diff::MAX_LINES) if al.size > Repeater::Diff::MAX_LINES
+        al_styled = Highlight.from_lines(al, request: @pane == :request)
+        ai = 0
+        rs.each_with_index do |r, idx|
+          out[idx] = al_styled[ai]? if r.kind.same?
+          # DelOnly/Changed/Same all consume one A (left) line; AddOnly consumes none.
+          ai += 1 unless r.kind.add_only?
+        end
+      end
+      @styled_same = out
+      @styled_same_rev = Theme.revision
+      out
     end
 
     private def lines_for(d : Store::FlowDetail) : Array(String)
@@ -236,11 +271,12 @@ module Gori::Tui
       end
 
       data = rows
+      sr = styled_same
       clamp_scroll(body_h, data.size)
       (0...body_h).each do |i|
         di = @scroll + i
         break if di >= data.size
-        draw_diff_row(screen, rect.x, body_top + i, left_w, sep_x, right_x, right_w, data[di])
+        draw_diff_row(screen, rect.x, body_top + i, left_w, sep_x, right_x, right_w, data[di], sr[di]?)
       end
       draw_footer(screen, rect, footer_y)
     end
@@ -287,16 +323,24 @@ module Gori::Tui
 
     private def draw_diff_row(screen : Screen, x : Int32, y : Int32, left_w : Int32,
                               sep_x : Int32, right_x : Int32, right_w : Int32,
-                              r : Repeater::SideBySide::Row) : Nil
+                              r : Repeater::SideBySide::Row, styled : Highlight::Line?) : Nil
       lcolor, rcolor, glyph, gcolor = case r.kind
                                       when .same?     then {Theme.text, Theme.text, '│', Theme.border}
                                       when .changed?  then {Theme.red, Theme.green, '~', Theme.yellow}
                                       when .del_only? then {Theme.red, Theme.muted, '-', Theme.red}
                                       else                 {Theme.muted, Theme.green, '+', Theme.green} # add_only
                                       end
-      screen.text(x, y, r.left || "", lcolor, width: left_w) if left_w > 0
-      screen.cell(sep_x + 1, y, glyph, gcolor)
-      screen.text(right_x, y, r.right || "", rcolor, width: right_w) if right_w > 0
+      # Unchanged rows get syntax highlighting (both columns hold identical text); changed/
+      # added/deleted rows keep the red/green diff colours so the diff signal stays legible.
+      if styled && r.kind.same?
+        Highlight.draw(screen, x, y, styled, bg: Theme.bg, width: left_w) if left_w > 0
+        screen.cell(sep_x + 1, y, glyph, gcolor)
+        Highlight.draw(screen, right_x, y, styled, bg: Theme.bg, width: right_w) if right_w > 0
+      else
+        screen.text(x, y, r.left || "", lcolor, width: left_w) if left_w > 0
+        screen.cell(sep_x + 1, y, glyph, gcolor)
+        screen.text(right_x, y, r.right || "", rcolor, width: right_w) if right_w > 0
+      end
     end
 
     private def draw_footer(screen : Screen, rect : Rect, y : Int32) : Nil

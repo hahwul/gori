@@ -586,9 +586,10 @@ module Gori::Tui
       request ? request_line(raw) : status_line(raw)
     end
 
-    # `METHOD target HTTP/x.x` — method coloured by verb, the target bright, the
-    # version muted. Spaces are preserved verbatim as their own muted spans so
-    # the partition is exact regardless of odd spacing.
+    # `METHOD target HTTP/x.x` — method coloured by verb, the target broken into
+    # path + query (see `target_spans`), the version muted. Spaces are preserved
+    # verbatim as their own muted spans so the partition is exact regardless of odd
+    # spacing.
     private def self.request_line(raw : String) : Line
       first = raw.index(' ')
       return [Span.new(raw, Theme.method_color(raw), Attribute::Bold)] unless first
@@ -596,13 +597,32 @@ module Gori::Tui
       spans = [Span.new(method, Theme.method_color(method), Attribute::Bold)]
       last = raw.rindex(' ')
       if last && last > first
-        spans << Span.new(raw[first...first + 1], Theme.muted)      # space
-        spans << Span.new(raw[first + 1...last], Theme.text_bright) # target
-        spans << Span.new(raw[last...last + 1], Theme.muted)        # space
-        spans << Span.new(raw[last + 1..], Theme.muted)             # version
+        spans << Span.new(raw[first...first + 1], Theme.muted) # space
+        target_spans(raw[first + 1...last]).each { |s| spans << s }
+        spans << Span.new(raw[last...last + 1], Theme.muted) # space
+        spans << Span.new(raw[last + 1..], Theme.muted)      # version
       else
-        spans << Span.new(raw[first..], Theme.text_bright)
+        spans << Span.new(raw[first...first + 1], Theme.muted) # space
+        target_spans(raw[first + 1..]).each { |s| spans << s }
       end
+      spans
+    end
+
+    # Break a request target into `path[?query][#fragment]`: the path (incl. any
+    # absolute-form `scheme://host`) stays bright; `?`/`#` and the query's `&`/`=`
+    # mute; query keys accent (syn_header), values body text — reusing `form_line`.
+    # Byte/index-based so the spans still concatenate to the exact target. Identity
+    # (one bright span) when there's no query string — the common case.
+    private def self.target_spans(t : String) : Line
+      qi = t.index('?')
+      return [Span.new(t, Theme.text_bright)] unless qi
+      spans = [] of Span
+      spans << Span.new(t[0...qi], Theme.text_bright) if qi > 0 # path
+      spans << Span.new("?", Theme.muted)
+      fi = t.index('#', qi + 1)
+      query = fi ? t[(qi + 1)...fi] : t[(qi + 1)..]
+      form_line(query).each { |s| spans << s } unless query.empty?
+      spans << Span.new(t[fi..], Theme.muted) if fi # '#fragment'
       spans
     end
 
@@ -626,15 +646,128 @@ module Gori::Tui
       spans
     end
 
-    # `Name: value` — field name accented, the colon muted, the value in body
-    # text. The first colon is the separator (values may themselves contain ':').
+    # `Name: value` — field name accented, the colon muted, the value tokenised by
+    # `header_value_spans`. The first colon is the separator (values may themselves
+    # contain ':').
     private def self.header_line(raw : String) : Line
       colon = raw.index(':')
       return plain(raw) unless colon
       spans = [Span.new(raw[0...colon], Theme.syn_header)]
       spans << Span.new(raw[colon...colon + 1], Theme.muted) # ":"
       rest = raw[colon + 1..]
-      spans << Span.new(rest, Theme.text) unless rest.empty?
+      unless rest.empty?
+        header_value_spans(raw[0...colon].downcase, rest).each { |s| spans << s }
+      end
+      spans
+    end
+
+    # Well-known Set-Cookie attribute names (lowercased) — coloured as keywords so the
+    # cookie's own name/value pairs stand out from the flags that follow.
+    COOKIE_ATTRS = %w(path domain expires max-age samesite secure httponly partitioned priority)
+
+    # Colour a header value by header name: cookies and auth get dedicated tokenisers,
+    # everything else a light param lexer. `v` keeps the leading space after the colon
+    # so the spans concatenate back to the exact value. Guarded against a pathological
+    # multi-KB header the same way body lines are.
+    private def self.header_value_spans(name_lc : String, v : String) : Line
+      return [Span.new(v, Theme.text)] if v.bytesize > MAX_HL_LINE
+      case name_lc
+      when "cookie", "set-cookie"                 then cookie_value_spans(v)
+      when "authorization", "proxy-authorization" then auth_value_spans(v)
+      else                                             generic_value_spans(v)
+      end
+    end
+
+    # `scheme credential` (Bearer …, Basic …, Digest …): the scheme keyword-coloured,
+    # the credential as a string. Leading whitespace kept as its own muted span.
+    private def self.auth_value_spans(v : String) : Line
+      n = v.size
+      i = 0
+      while i < n && v[i] == ' '
+        i += 1
+      end
+      return [Span.new(v, Theme.text)] if i >= n
+      s0 = i
+      while i < n && v[i] != ' '
+        i += 1
+      end
+      spans = [] of Span
+      spans << Span.new(v[0...s0], Theme.muted) if s0 > 0  # leading space(s)
+      spans << Span.new(v[s0...i], Theme.syn_keyword)      # scheme
+      spans << Span.new(v[i..], Theme.syn_string) if i < n # space + credential
+      spans
+    end
+
+    # `name=value; name=value; Attr` (Cookie / Set-Cookie): names accented, values
+    # body text, `=`/`;` muted, known Set-Cookie attributes keyword-coloured.
+    private def self.cookie_value_spans(v : String) : Line
+      spans = [] of Span
+      b = v.to_slice
+      n = b.size
+      i = 0
+      expect_name = true
+      while i < n
+        c = b.unsafe_fetch(i)
+        if c == 0x3b_u8 # ';'
+          spans << Span.new(v.byte_slice(i, 1), Theme.muted)
+          i += 1
+          expect_name = true
+        elsif c == 0x3d_u8 # '='
+          spans << Span.new(v.byte_slice(i, 1), Theme.muted)
+          i += 1
+          expect_name = false
+        else
+          start = i
+          while i < n && b.unsafe_fetch(i) != 0x3b_u8 && b.unsafe_fetch(i) != 0x3d_u8
+            i += 1
+          end
+          tok = v.byte_slice(start, i - start)
+          color = if expect_name
+                    COOKIE_ATTRS.includes?(tok.strip.downcase) ? Theme.syn_keyword : Theme.syn_header
+                  else
+                    Theme.text
+                  end
+          spans << Span.new(tok, color)
+        end
+      end
+      spans
+    end
+
+    # Generic header value: a single plain span when there's no structure (Host, Date,
+    # User-Agent, …), else a light param lexer — quoted strings syn_string, param keys
+    # (a token immediately before '=') syn_header, `=`/`;`/`,` muted, the rest body text.
+    # Bare numbers/dates are intentionally NOT highlighted (too noisy across headers).
+    private def self.generic_value_spans(v : String) : Line
+      return [Span.new(v, Theme.text)] unless v.includes?('=') || v.includes?('"')
+      spans = [] of Span
+      b = v.to_slice
+      n = b.size
+      i = 0
+      while i < n
+        c = b.unsafe_fetch(i)
+        if c == 0x22_u8 # '"' — quoted string (to the next quote or EOL)
+          start = i
+          i += 1
+          while i < n
+            d = b.unsafe_fetch(i)
+            i += 1
+            break if d == 0x22_u8
+          end
+          spans << Span.new(v.byte_slice(start, {i, n}.min - start), Theme.syn_string)
+        elsif c == 0x3d_u8 || c == 0x3b_u8 || c == 0x2c_u8 # '=' ';' ','
+          spans << Span.new(v.byte_slice(i, 1), Theme.muted)
+          i += 1
+        else
+          start = i
+          while i < n
+            d = b.unsafe_fetch(i)
+            break if d == 0x22_u8 || d == 0x3d_u8 || d == 0x3b_u8 || d == 0x2c_u8
+            i += 1
+          end
+          key = i < n && b.unsafe_fetch(i) == 0x3d_u8 # a token right before '=' is a param key
+          spans << Span.new(v.byte_slice(start, i - start), key ? Theme.syn_header : Theme.text)
+        end
+      end
       spans
     end
 
@@ -655,6 +788,7 @@ module Gori::Tui
       when :json       then json_line(raw)
       when :form       then form_line(raw)
       when :xml, :html then markup_line(raw)
+      when :graphql    then graphql_line(raw)
       else                  plain(raw)
       end
     end
@@ -672,6 +806,16 @@ module Gori::Tui
       spans = [] of Span
       b = raw.to_slice # view over the UTF-8 bytes, no copy
       n = b.size
+      # JSONC line comment: a line whose first non-space bytes are `//` is a comment
+      # (the JWT decoder emits `// header` / `// payload` markers around JSON segments).
+      # Real JSON never starts a line with `//`, so this is safe for genuine bodies.
+      ws = 0
+      while ws < n && ascii_ws?(b.unsafe_fetch(ws))
+        ws += 1
+      end
+      if ws + 1 < n && b.unsafe_fetch(ws) == 0x2f_u8 && b.unsafe_fetch(ws + 1) == 0x2f_u8
+        return [Span.new(raw, Theme.syn_comment)]
+      end
       i = 0
       while i < n
         c = b.unsafe_fetch(i)
@@ -753,6 +897,117 @@ module Gori::Tui
       x == 0x7b_u8 || x == 0x7d_u8 || x == 0x5b_u8 || x == 0x5d_u8 || x == 0x3a_u8 || x == 0x2c_u8
     end
 
+    # GraphQL operation keywords (styled distinctly from `true`/`false`/`null` literals).
+    GRAPHQL_KEYWORDS = %w(query mutation subscription fragment on)
+
+    # GraphQL query language (the Pretty/decoded display form): `#` comments, operation
+    # keywords, `$variables`, `@directives`, strings, numbers, and field/type names (an
+    # identifier immediately before `:` / `(` / `{`). Byte-scanned and line-local like
+    # the other body tokenizers, so the spans concatenate back to the exact line.
+    private def self.graphql_line(raw : String) : Line
+      spans = [] of Span
+      b = raw.to_slice
+      n = b.size
+      i = 0
+      while i < n
+        c = b.unsafe_fetch(i)
+        if c == 0x23_u8 # '#' — comment to end of line
+          spans << Span.new(raw.byte_slice(i, n - i), Theme.syn_comment)
+          i = n
+        elsif c == 0x22_u8 # '"' — string (to the next unescaped quote or EOL)
+          start = i
+          i += 1
+          while i < n
+            d = b.unsafe_fetch(i)
+            if d == 0x5c_u8
+              i += 2
+            elsif d == 0x22_u8
+              i += 1
+              break
+            else
+              i += 1
+            end
+          end
+          spans << Span.new(raw.byte_slice(start, {i, n}.min - start), Theme.syn_string)
+        elsif c == 0x24_u8 # '$' — variable
+          start = i
+          i += 1
+          while i < n && gql_name?(b.unsafe_fetch(i))
+            i += 1
+          end
+          spans << Span.new(raw.byte_slice(start, i - start), Theme.syn_literal)
+        elsif c == 0x40_u8 # '@' — directive
+          start = i
+          i += 1
+          while i < n && gql_name?(b.unsafe_fetch(i))
+            i += 1
+          end
+          spans << Span.new(raw.byte_slice(start, i - start), Theme.syn_keyword)
+        elsif ascii_digit?(c) || (c == 0x2d_u8 && i + 1 < n && ascii_digit?(b.unsafe_fetch(i + 1)))
+          start = i
+          i += 1
+          while i < n && (ascii_digit?(b.unsafe_fetch(i)) || num_cont?(b.unsafe_fetch(i)))
+            i += 1
+          end
+          spans << Span.new(raw.byte_slice(start, i - start), Theme.syn_number)
+        elsif gql_name_start?(c)
+          start = i
+          i += 1
+          while i < n && gql_name?(b.unsafe_fetch(i))
+            i += 1
+          end
+          word = raw.byte_slice(start, i - start)
+          k = i
+          while k < n && ascii_ws?(b.unsafe_fetch(k))
+            k += 1
+          end
+          nxt = k < n ? b.unsafe_fetch(k) : 0_u8
+          color = if GRAPHQL_KEYWORDS.includes?(word)
+                    Theme.syn_keyword
+                  elsif word == "true" || word == "false" || word == "null"
+                    Theme.syn_literal
+                  elsif nxt == 0x3a_u8 || nxt == 0x28_u8 || nxt == 0x7b_u8 # ':' '(' '{' → field/arg/type
+                    Theme.syn_header
+                  else
+                    Theme.text
+                  end
+          spans << Span.new(word, color)
+        elsif gql_punct?(c)
+          spans << Span.new(raw.byte_slice(i, 1), Theme.muted)
+          i += 1
+        else
+          start = i
+          i += 1
+          while i < n
+            d = b.unsafe_fetch(i)
+            break if d == 0x23_u8 || d == 0x22_u8 || d == 0x24_u8 || d == 0x40_u8 ||
+                     gql_name_start?(d) || ascii_digit?(d) || gql_punct?(d) ||
+                     (d == 0x2d_u8 && i + 1 < n && ascii_digit?(b.unsafe_fetch(i + 1)))
+            i += 1
+          end
+          spans << Span.new(raw.byte_slice(start, i - start), Theme.text)
+        end
+      end
+      spans
+    end
+
+    # GraphQL name start byte: ASCII letter or `_`.
+    private def self.gql_name_start?(x : UInt8) : Bool
+      ascii_letter?(x) || x == 0x5f_u8
+    end
+
+    # GraphQL name continuation byte: letter, digit, or `_`.
+    private def self.gql_name?(x : UInt8) : Bool
+      ascii_letter?(x) || ascii_digit?(x) || x == 0x5f_u8
+    end
+
+    # GraphQL punctuation: one of `{ } ( ) [ ] : ! = , |`.
+    private def self.gql_punct?(x : UInt8) : Bool
+      x == 0x7b_u8 || x == 0x7d_u8 || x == 0x28_u8 || x == 0x29_u8 ||
+        x == 0x5b_u8 || x == 0x5d_u8 || x == 0x3a_u8 || x == 0x21_u8 ||
+        x == 0x3d_u8 || x == 0x2c_u8 || x == 0x7c_u8
+    end
+
     # `application/x-www-form-urlencoded` — keys accented, `=`/`&` muted, values
     # in body text.
     private def self.form_line(raw : String) : Line
@@ -782,9 +1037,11 @@ module Gori::Tui
       spans
     end
 
-    # HTML/XML — tag delimiters muted, tag names accented, attributes/text in
-    # body text. Line-local: a tag split across lines simply isn't recognised on
-    # the continuation line (cosmetic only; text is never altered).
+    # HTML/XML — tag delimiters muted, tag names accented, attributes tokenised (see
+    # `attr_spans`), text in body colour. `<!-- -->` comments and `<!DOCTYPE>`/`<?xml?>`
+    # declarations get their own colours. Line-local: a tag (or comment) split across
+    # lines simply isn't recognised on the continuation line (cosmetic only; text is
+    # never altered).
     private def self.markup_line(raw : String) : Line
       spans = [] of Span
       b = raw.to_slice
@@ -792,20 +1049,42 @@ module Gori::Tui
       i = 0
       while i < n
         if b.unsafe_fetch(i) == 0x3c_u8 # '<'
+          # Comment: '<!-- … -->' (line-local — an unterminated comment runs to EOL).
+          if i + 3 < n && b.unsafe_fetch(i + 1) == 0x21_u8 && b.unsafe_fetch(i + 2) == 0x2d_u8 && b.unsafe_fetch(i + 3) == 0x2d_u8
+            close = find_seq(b, i + 4, n)
+            stop = close ? close + 3 : n
+            spans << Span.new(raw.byte_slice(i, stop - i), Theme.syn_comment)
+            i = stop
+            next
+          end
           gt = i + 1
           while gt < n && b.unsafe_fetch(gt) != 0x3e_u8 # '>'
             gt += 1
           end
           closed = gt < n # found a '>'
           j = i + 1
-          j += 1 if j < n && b.unsafe_fetch(j) == 0x2f_u8          # '/' closing tag
-          spans << Span.new(raw.byte_slice(i, j - i), Theme.muted) # '<' or '</'
+          # A declaration ('<!DOCTYPE …') or processing instruction ('<?xml …?>'): the
+          # name reads as a keyword; a closing tag keeps the '/' in the delimiter.
+          decl = false
+          if j < n && (b.unsafe_fetch(j) == 0x21_u8 || b.unsafe_fetch(j) == 0x3f_u8) # '!' or '?'
+            decl = true
+            j += 1
+          elsif j < n && b.unsafe_fetch(j) == 0x2f_u8 # '/' closing tag
+            j += 1
+          end
+          spans << Span.new(raw.byte_slice(i, j - i), Theme.muted) # '<' / '</' / '<!' / '<?'
           name = j
           while name < gt && tag_name?(b.unsafe_fetch(name))
             name += 1
           end
-          spans << Span.new(raw.byte_slice(j, name - j), Theme.syn_header) if name > j
-          spans << Span.new(raw.byte_slice(name, gt - name), Theme.text) if name < gt
+          spans << Span.new(raw.byte_slice(j, name - j), decl ? Theme.syn_keyword : Theme.syn_header) if name > j
+          if name < gt
+            if decl
+              spans << Span.new(raw.byte_slice(name, gt - name), Theme.text)
+            else
+              attr_spans(raw.byte_slice(name, gt - name)).each { |s| spans << s }
+            end
+          end
           spans << Span.new(raw.byte_slice(gt, 1), Theme.muted) if closed # '>'
           i = closed ? gt + 1 : gt
         else
@@ -815,6 +1094,68 @@ module Gori::Tui
             i += 1
           end
           spans << Span.new(raw.byte_slice(start, i - start), Theme.text)
+        end
+      end
+      spans
+    end
+
+    # Byte offset of the first `-->` at or after `from` (comment terminator), or nil.
+    private def self.find_seq(b : Bytes, from : Int32, n : Int32) : Int32?
+      k = from
+      while k + 2 < n
+        return k if b.unsafe_fetch(k) == 0x2d_u8 && b.unsafe_fetch(k + 1) == 0x2d_u8 && b.unsafe_fetch(k + 2) == 0x3e_u8
+        k += 1
+      end
+      nil
+    end
+
+    # The attribute region between a tag name and '>': attribute names → syn_number (the
+    # palette's reserved "tag attribute names" slot), '=' muted, quoted values ("…"/'…')
+    # → syn_string, '/' (self-close) muted, whitespace/other → body text. `after_eq`
+    # keeps an UNQUOTED value (e.g. `type=text`) body-coloured rather than as a name.
+    private def self.attr_spans(seg : String) : Line
+      spans = [] of Span
+      b = seg.to_slice
+      n = b.size
+      i = 0
+      after_eq = false
+      while i < n
+        c = b.unsafe_fetch(i)
+        if c == 0x22_u8 || c == 0x27_u8 # '"' / '\'' quoted value (to the matching quote or EOL)
+          quote = c
+          start = i
+          i += 1
+          while i < n && b.unsafe_fetch(i) != quote
+            i += 1
+          end
+          i += 1 if i < n # include the closing quote
+          spans << Span.new(seg.byte_slice(start, {i, n}.min - start), Theme.syn_string)
+          after_eq = false
+        elsif c == 0x3d_u8 # '='
+          spans << Span.new(seg.byte_slice(i, 1), Theme.muted)
+          i += 1
+          after_eq = true
+        elsif c == 0x2f_u8 # '/' self-closing
+          spans << Span.new(seg.byte_slice(i, 1), Theme.muted)
+          i += 1
+        elsif tag_name?(c)
+          start = i
+          i += 1
+          while i < n && tag_name?(b.unsafe_fetch(i))
+            i += 1
+          end
+          spans << Span.new(seg.byte_slice(start, i - start), after_eq ? Theme.text : Theme.syn_number)
+          after_eq = false
+        else
+          start = i
+          i += 1
+          while i < n
+            d = b.unsafe_fetch(i)
+            break if d == 0x22_u8 || d == 0x27_u8 || d == 0x3d_u8 || d == 0x2f_u8 || tag_name?(d)
+            i += 1
+          end
+          spans << Span.new(seg.byte_slice(start, i - start), Theme.text)
+          after_eq = false
         end
       end
       spans

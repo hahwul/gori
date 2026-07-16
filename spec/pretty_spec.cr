@@ -53,10 +53,10 @@ describe Gori::Pretty do
   end
 
   describe "GraphQL" do
-    it "presents operationName + query + variables, kind :text" do
+    it "presents operationName + query + variables, kind :graphql" do
       body = %({"operationName":"Q","query":"query Q { me { id } }","variables":{"x":1}})
       res = pretty("application/json", body)
-      res.not_nil!.kind.should eq(:text)
+      res.not_nil!.kind.should eq(:graphql)
       t = text(res)
       t.should contain("# operationName: Q")
       t.should contain("query Q { me { id } }")
@@ -89,9 +89,9 @@ describe Gori::Pretty do
   end
 
   describe "JWT" do
-    it "decodes header/payload (signature not verified), kind :text" do
+    it "decodes header/payload (signature not verified), kind :json" do
       res = pretty("text/plain", jwt_token)
-      res.not_nil!.kind.should eq(:text)
+      res.not_nil!.kind.should eq(:json)
       t = text(res)
       t.should contain("// header")
       t.should contain(%("alg": "HS256"))

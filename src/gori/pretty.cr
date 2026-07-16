@@ -129,7 +129,7 @@ module Gori
       end
       ob = text.to_slice
       return nil if ob.size > MAX_OUT_PRETTY
-      Result.new(ob, "pretty: graphql", :text)
+      Result.new(ob, "pretty: graphql", :graphql)
     end
 
     # ---- JWT (reuses Decoder::Codecs.jwt_decode) ---------------------------
@@ -143,7 +143,9 @@ module Gori
       decoded = Decoder::Codecs.jwt_decode(t.to_slice)
       slice = decoded.to_slice
       return nil if slice.size > MAX_OUT_PRETTY
-      Result.new(slice, "pretty: jwt (decoded · signature not verified)", :text)
+      # The decoded form is JSONC (`// header` / `// payload` markers + JSON segments);
+      # the JSON tokenizer styles the `//` markers as comments (see Highlight.json_line).
+      Result.new(slice, "pretty: jwt (decoded · signature not verified)", :json)
     rescue
       nil
     end
