@@ -1486,10 +1486,10 @@ module Gori::Tui
       badge = " §#{pc} "
       min_x = rect.x + label.size + 4
       # ^R:RUN rides the TEMPLATE border as the primary action — rightmost, mirroring the
-      # Repeater's ^R:SEND so the muscle memory transfers. Lit while idle, muted while a run
-      # streams (^X stops it). The old CONFIG "Run" row is gone; the request-count estimate
-      # stays there as a passive summary (render_run_summary).
-      run_x = Frame.toggle_badge(screen, rect.right - 1, rect.y, min_x, "^R", "RUN", !running?)
+      # Repeater's ^R:SEND so the muscle memory transfers. A gold button while idle, recessed
+      # while a run streams (^X stops it). The old CONFIG "Run" row is gone; the request-count
+      # estimate stays there as a passive summary (render_run_summary).
+      run_x = Frame.action_badge(screen, rect.right - 1, rect.y, min_x, "^R", "RUN", !running?)
       pretty_x = Frame.toggle_badge(screen, run_x, rect.y, min_x, "^U", "PRETTY", false)
       render_mode_badge(screen, pretty_x, rect.y, min_x, ins)
       screen.text({pretty_x - badge.size, min_x}.max, rect.y, badge,
