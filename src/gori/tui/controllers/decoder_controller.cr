@@ -112,6 +112,21 @@ module Gori::Tui
       true
     end
 
+    # --- sub-tab filter (issue #121) ---
+    def subtab_filter_enabled? : Bool
+      true
+    end
+
+    def filter_fields : Array(String)
+      %w(name) # a conversion has no HTTP context; free-text covers the chain + input
+    end
+
+    def filter_subjects : Array(Repeater::SubtabFilter::Subject)
+      @sessions.map do |s|
+        Repeater::SubtabFilter::Subject.new(s.view.name, "#{s.chain} #{s.input.text}", "", "", [] of String)
+      end
+    end
+
     # The chip label: the custom name if set, else a compact preview of the chain
     # spec (or "empty" when blank), capped to ~18 cols like Repeater/Notes.
     private def session_label(s : DecoderSession) : String
@@ -121,14 +136,17 @@ module Gori::Tui
 
     # Move the active sub-tab by ±1 (strip ←/→), clamped, no wrap. No persist needed:
     # every session keeps its own state in memory, so switching loses nothing.
+    # Filter-aware: ←/→ skip hidden chips; ^1-9 to a hidden chip escapes the filter.
     def move_subtab(dir : Int32) : Nil
-      return if @sessions.size < 2
-      nidx = (@idx + dir).clamp(0, @sessions.size - 1)
-      switch_to(nidx) unless nidx == @idx
+      if t = step_visible(@idx, dir)
+        switch_to(t)
+      end
     end
 
     def jump_subtab(idx : Int32) : Nil
-      switch_to(idx) if 0 <= idx < @sessions.size && idx != @idx
+      return unless 0 <= idx < @sessions.size
+      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
+      switch_to(idx) if idx != @idx
     end
 
     private def switch_to(idx : Int32) : Nil
@@ -196,13 +214,16 @@ module Gori::Tui
       labels = subtab_strip_shown? ? subtab_labels : nil
       s = cur
       shell = BodyChrome.shell_focused(focus, multi_pane: true)
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @idx, @subtab_start) do |content|
-        # Each section frames its own card (per-pane focus border) inside the shell frame.
-        s.view.render(screen, content,
-          input: s.input, chain: s.chain, chain_cx: s.chain_cx, chain_pre: @chain_pre,
-          result: s.result, pane: s.pane, focused: body_focused,
-          popup: @popup, prompt: @prompt, prompt_buf: @prompt_buf,
-          input_mode: s.input_mode, input_read: s.input_read)
+      subtabs_focused = focus == :subtabs
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?) do |content|
+        render_with_filter(screen, content, subtabs_focused) do |body|
+          # Each section frames its own card (per-pane focus border) inside the shell frame.
+          s.view.render(screen, body,
+            input: s.input, chain: s.chain, chain_cx: s.chain_cx, chain_pre: @chain_pre,
+            result: s.result, pane: s.pane, focused: body_focused,
+            popup: @popup, prompt: @prompt, prompt_buf: @prompt_buf,
+            input_mode: s.input_mode, input_read: s.input_read)
+        end
       end
     end
 
@@ -273,7 +294,7 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
+      body = body_rect_below_filter(rect)
       s = cur
       # The view frames each card itself; editable content lives one cell inside each card border.
       regions = s.view.layout(body)

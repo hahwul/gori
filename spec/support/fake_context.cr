@@ -83,6 +83,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def subtab_search_open : Nil; end
 
+  def subtab_filter_open : Nil; end
+
   property subtab_search_tab_count : Int32 = 0
 
   def subtab_search_count : Int32

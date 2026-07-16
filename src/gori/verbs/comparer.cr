@@ -45,6 +45,20 @@ module Gori
         "comparer.duplicate-subtab", "Duplicate comparison", "Clone the active A/B pair into a new sub-tab",
         Verb::Scope::Comparer, available: in_comparer, mnemonic: 'd',
         section: :subtab) { |ctx| ctx.comparer_duplicate_subtab; nil }
+
+      # Sub-tab search + inline filter (issue #121), section :tab — like the other
+      # workbench tabs. Both gate on ≥2 open comparisons. 'f'/'/' are free in this scope.
+      r.register Verb::Definition.new(
+        "comparer.find-subtab", "Search sub-tabs", "Filter the open comparisons and jump to one",
+        Verb::Scope::Comparer,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_search_count >= 2 },
+        mnemonic: 'f', section: :tab) { |ctx| ctx.subtab_search_open; nil }
+
+      r.register Verb::Definition.new(
+        "comparer.filter-subtabs", "Filter sub-tabs", "Filter the comparison sub-tab strip by name / host / method",
+        Verb::Scope::Comparer,
+        available: ->(ctx : Verb::ExecContext) { ctx.current_tab == :comparer && ctx.subtab_search_count >= 2 },
+        mnemonic: '/', section: :tab) { |ctx| ctx.subtab_filter_open; nil }
     end
   end
 end

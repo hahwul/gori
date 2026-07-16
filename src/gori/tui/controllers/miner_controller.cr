@@ -98,12 +98,15 @@ module Gori::Tui
       body_focused = focus == :body
       labels = subtab_strip_shown? ? subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: !current_view.nil?)
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @current_idx, @subtab_start) do |content|
-        if v = current_view
-          v.render(screen, content, body_focused)
-        else
-          screen.text(content.x + 1, content.y,
-            "no mining sessions — from History/Repeater press space → \"Mine parameters\"", Theme.muted)
+      subtabs_focused = focus == :subtabs
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @current_idx, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?) do |content|
+        render_with_filter(screen, content, subtabs_focused) do |body|
+          if v = current_view
+            v.render(screen, body, body_focused)
+          else
+            screen.text(body.x + 1, body.y,
+              "no mining sessions — from History/Repeater press space → \"Mine parameters\"", Theme.muted)
+          end
         end
       end
     end
@@ -207,7 +210,7 @@ module Gori::Tui
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
-      body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
+      body = body_rect_below_filter(rect)
       return true unless v = current_view
       if pane = v.pane_at(body, mx, my)
         v.focus_pane(pane) unless pane == :detail
@@ -248,14 +251,33 @@ module Gori::Tui
       current_view.try(&.focus_last)
     end
 
-    # --- sub-tab nav ---
+    # --- sub-tab filter (issue #121) ---
+    def subtab_filter_enabled? : Bool
+      true
+    end
+
+    def filter_fields : Array(String)
+      %w(name host method) # mining sessions carry an HTTP request (target + method)
+    end
+
+    def filter_subjects : Array(Repeater::SubtabFilter::Subject)
+      @miners.map do |t|
+        v = t.view
+        Repeater::SubtabFilter::Subject.new(v.name, v.summary(200), v.target, v.request_method, [] of String)
+      end
+    end
+
+    # --- sub-tab nav (filter-aware: ←/→ skip hidden chips; ^1-9 escapes the filter) ---
     def move_subtab(dir : Int32) : Nil
-      return unless subtab_strip_shown? && @miners.size >= 2
-      @current_idx = (@current_idx + dir).clamp(0, @miners.size - 1)
+      if t = step_visible(@current_idx, dir)
+        @current_idx = t
+      end
     end
 
     def jump_subtab(idx : Int32) : Nil
-      @current_idx = idx if 0 <= idx < @miners.size
+      return unless 0 <= idx < @miners.size
+      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
+      @current_idx = idx
     end
 
     # Notification "jump to result": focus the session row with this db_id.

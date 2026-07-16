@@ -807,8 +807,8 @@ module Gori::Tui
         @import_preedit = text
         return
       end
-      if @active_tab == :repeater && repeater_controller.subtab_filter_editing?
-        repeater_controller.set_subtab_filter_preedit(text)
+      if (ctl = @tabs[@active_tab]?) && ctl.subtab_filter_editing?
+        ctl.set_subtab_filter_preedit(text)
         return
       end
       # Route preedit to whichever input is active so composing text (e.g. Hangul
@@ -934,10 +934,11 @@ module Gori::Tui
       if @active_tab == :probe && @overlay == :none && @focus == :body && probe_controller.view.querying?
         return if probe_controller.handle_query_key(ev)
       end
-      # Repeater sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc.
-      # Opened from the strip (not the body), so it's not gated on @focus.
-      if @active_tab == :repeater && @overlay == :none && repeater_controller.subtab_filter_editing?
-        repeater_controller.handle_subtab_filter_key(ev)
+      # Sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc. Opened
+      # from the strip (not the body), so it's not gated on @focus. Generic across the
+      # workbench tabs — only the active tab's controller can be in filter-edit mode.
+      if @overlay == :none && (ctl = @tabs[@active_tab]?) && ctl.subtab_filter_editing?
+        ctl.handle_subtab_filter_key(ev)
         return
       end
       if @active_tab == :issues && @overlay == :none && @focus == :body && issues_controller.view.detail_open?
@@ -2822,8 +2823,8 @@ module Gori::Tui
         repeater_controller.repeater_send # send from the strip too — not just :body focus
       when @active_tab == :repeater && !ev.ctrl? && !ev.alt? && key.lower_t?
         open_tag_edit(current_subtab_index) # tag the active Repeater sub-tab (issue #121)
-      when @active_tab == :repeater && !ev.ctrl? && !ev.alt? && c == '/'
-        repeater_controller.start_subtab_filter # open the `/` tag-filter bar
+      when !ev.ctrl? && !ev.alt? && c == '/' && @tabs[@active_tab]?.try(&.subtab_filter_shown?)
+        @tabs[@active_tab]?.try(&.start_subtab_filter) # open the `/` sub-tab filter bar
       when key.left?, key.lower_h?
         move_subtab(-1)
       when key.right?, key.lower_l?
@@ -4727,6 +4728,13 @@ module Gori::Tui
 
     def subtab_search_count : Int32
       @tabs[@active_tab]?.try(&.subtab_count) || 0
+    end
+
+    # Open the `/` sub-tab filter bar over the ACTIVE tab's strip (generic sibling of
+    # subtab_search_open). Each opt-in controller owns the bar; a no-op on tabs that
+    # don't support filtering (start_subtab_filter guards on subtab_filter_enabled?).
+    def subtab_filter_open : Nil
+      @tabs[@active_tab]?.try(&.start_subtab_filter)
     end
 
     def repeater_subtab_count : Int32

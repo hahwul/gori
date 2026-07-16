@@ -281,6 +281,11 @@ module Gori::Tui
       s.size > max ? "#{s[0, max - 1]}…" : s
     end
 
+    # HTTP method from the template's request line — feeds the sub-tab filter's `method:`.
+    def request_method : String
+      (@editor.first_nonblank_line || "").strip.split(' ').first? || ""
+    end
+
     def label(max : Int32 = 18) : String
       if (n = @name) && !(t = n.strip).empty?
         t.size > max ? "#{t[0, max - 1]}…" : t

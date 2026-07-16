@@ -50,6 +50,22 @@ describe ComparerView do
     v.label.should eq("empty")
   end
 
+  it "projects a sub-tab filter subject across both A/B slots (name + host/method)" do
+    v = ComparerView.new
+    v.set_slot(:a, flow("GET", "/orders", "app.test"))
+    v.set_slot(:b, flow("POST", "/login", "api.test"))
+    v.name = "auth pair"
+    s = v.filter_subject
+    s.name.should eq("auth pair")
+    s.target.should contain("app.test")
+    s.target.should contain("api.test")
+    # End-to-end through the matcher: host:/method: narrow either side; free text hits summary.
+    Gori::Repeater::SubtabFilter.parse("host:api").matches?(s).should be_true
+    Gori::Repeater::SubtabFilter.parse("method:post").matches?(s).should be_true
+    Gori::Repeater::SubtabFilter.parse("login").matches?(s).should be_true
+    Gori::Repeater::SubtabFilter.parse("host:nope").matches?(s).should be_false
+  end
+
   # Regression: the REQ/RES divider chips were hit-tested one column off the cells
   # they were drawn on — the RES chip's left edge was a dead click and a phantom
   # clickable column sat one past it. render + pane_chip_at now share one geometry

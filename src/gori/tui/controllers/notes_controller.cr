@@ -35,15 +35,18 @@ module Gori::Tui
       body_focused = focus == :body
       labels = subtab_strip_shown? ? @notes.subtab_labels : nil
       shell = BodyChrome.shell_focused(focus, multi_pane: false)
-      @subtab_start = BodyChrome.framed_body(screen, rect, shell, focus == :subtabs, labels, @notes.current_index, @subtab_start) do |content|
-        editor_rect = content
-        if !@notes.link_preview.empty?
-          links_rect, editor_rect = carve_links_row(content)
-          screen.text(links_rect.x + 1, links_rect.y, "links", Theme.accent, width: 6)
-          screen.text(links_rect.x + 8, links_rect.y, @notes.link_preview, Theme.muted,
-            width: {links_rect.w - 9, 0}.max)
+      subtabs_focused = focus == :subtabs
+      @subtab_start = BodyChrome.framed_body(screen, rect, shell, subtabs_focused, labels, @notes.current_index, @subtab_start, subtab_hidden, strip_divider: subtab_strip_divider?) do |content|
+        render_with_filter(screen, content, subtabs_focused) do |body|
+          editor_rect = body
+          if !@notes.link_preview.empty?
+            links_rect, editor_rect = carve_links_row(body)
+            screen.text(links_rect.x + 1, links_rect.y, "links", Theme.accent, width: 6)
+            screen.text(links_rect.x + 8, links_rect.y, @notes.link_preview, Theme.muted,
+              width: {links_rect.w - 9, 0}.max)
+          end
+          @notes.render(screen, editor_rect, focused: body_focused)
         end
-        @notes.render(screen, editor_rect, focused: body_focused)
       end
     end
 
@@ -148,7 +151,7 @@ module Gori::Tui
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool
       @host.focus_body
-      body = BodyChrome.content_rect(rect, strip: subtab_strip_shown?)
+      body = body_rect_below_filter(rect)
       body = carve_links_row(body)[1] unless @notes.link_preview.empty?
       @notes.click_to_cursor(body, mx, my)
       true
@@ -210,6 +213,21 @@ module Gori::Tui
       true
     end
 
+    # --- sub-tab filter (issue #121) ---
+    def subtab_filter_enabled? : Bool
+      true
+    end
+
+    def filter_fields : Array(String)
+      %w(name) # notes have no HTTP context; free-text covers each note's body text
+    end
+
+    def filter_subjects : Array(Repeater::SubtabFilter::Subject)
+      @notes.filter_rows.map do |(title, body)|
+        Repeater::SubtabFilter::Subject.new(title, body, "", "", [] of String)
+      end
+    end
+
     def body_badge : Symbol
       @notes.insert_mode? ? :editor : :body
     end
@@ -227,17 +245,18 @@ module Gori::Tui
       :notes
     end
 
+    # Filter-aware: ←/→ skip hidden chips; ^1-9 to a hidden chip escapes the filter.
     def move_subtab(dir : Int32) : Nil
-      return unless @notes.count >= 2
-      nidx = (@notes.current_index + dir).clamp(0, @notes.count - 1)
-      return if nidx == @notes.current_index
-      save_notes
-      @notes.switch_note(nidx)
-      refresh_link_preview
+      if t = step_visible(@notes.current_index, dir)
+        save_notes
+        @notes.switch_note(t)
+        refresh_link_preview
+      end
     end
 
     def jump_subtab(idx : Int32) : Nil
       return unless 0 <= idx < @notes.count
+      clear_subtab_filter if (h = subtab_hidden) && h.includes?(idx)
       save_notes
       @notes.switch_note(idx)
       refresh_link_preview

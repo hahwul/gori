@@ -156,6 +156,10 @@ private class FakeContext < ExecContext
     @calls << :subtab_search_open
   end
 
+  def subtab_filter_open : Nil
+    @calls << :subtab_filter_open
+  end
+
   def subtab_search_count : Int32
     0
   end
