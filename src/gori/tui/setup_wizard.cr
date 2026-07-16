@@ -34,7 +34,8 @@ module Gori::Tui
     end
 
     def initialize(@term : Termisu)
-      @backend = TermisuBackend.new(@term)
+      # Held as the base Backend: TermisuBackend is generic over the terminal type.
+      @backend = TermisuBackend.new(@term).as(Backend)
       @step = Step::Bind
       # Bind step — staged values prefilled from the live Settings (which already
       # reflect any `gori tui --port` flag).
@@ -67,7 +68,8 @@ module Gori::Tui
         render
         case ev = @term.poll_event(50)
         when Termisu::Event::Resize
-          @resized = true # buffer already resized; force a full repaint next frame
+          @backend.resize(ev.width, ev.height) # re-fit grids off the event dims (lockstep w/ termisu)
+          @resized = true                      # buffer already resized; force a full repaint next frame
         when Termisu::Event::Key
           handle_key(ev)
         when Termisu::Event::Mouse
@@ -352,12 +354,10 @@ module Gori::Tui
     end
 
     private def flush : Nil
-      if @resized
-        @term.sync # full repaint after a resize or a live theme swap
-        @resized = false
-      else
-        @term.render
-      end
+      # Full repaint after a resize or a live theme swap; a diff otherwise. The
+      # backend forwards only the cells that changed this frame.
+      @backend.flush(sync: @resized)
+      @resized = false
     end
 
     private def render_header(screen : Screen, w : Int32) : Nil

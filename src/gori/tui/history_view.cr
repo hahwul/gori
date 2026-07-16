@@ -103,6 +103,11 @@ module Gori::Tui
       # and styled per VISIBLE line, so opening a multi-MiB response is instant
       # instead of tokenising 100k+ off-screen lines up front.
       @detail_cache = nil.as(DetailView?)
+      # Per-visible-line styled BODY memo (keyed by absolute line index), mirroring
+      # RepeaterView's @resp_styled_cache: a held/scrolling detail was re-tokenising every
+      # visible body line (BodyLines#[] scrub + body_styled) on EVERY frame — spinner ticks,
+      # live-capture drains, cursor moves. Dropped in lockstep with @detail_cache (drop_detail_cache).
+      @detail_styled_cache = {} of Int32 => Highlight::Line
       @detail_cache_rev = Theme.revision # the theme the cached (colour-baked) head/notes were built under
       @detail_read = ReadCursor.new
       @detail_last_h = 0
@@ -530,7 +535,7 @@ module Gori::Tui
       @detail_scroll = 0
       @detail_xscroll = 0
       @detail_pane = :request
-      @detail_cache = nil
+      drop_detail_cache
       @detail_hex = false # hex is a deliberate per-open peek — don't carry it into the next flow
       @detail_hex_bytes = nil
       @detail_read.reset
@@ -539,7 +544,7 @@ module Gori::Tui
 
     def close_detail : Nil
       @detail = nil
-      @detail_cache = nil
+      drop_detail_cache
       @detail_frames = nil # release the h2-frame / ws-message payload arrays (can be MiB)
       @detail_ws = nil
       @detail_frames_total = 0
@@ -654,7 +659,7 @@ module Gori::Tui
       return false unless fresh = store.get_flow(id)
       @detail = fresh
       load_detail_logs(store)
-      @detail_cache = nil # content changed → rebuild (windowed) on next render
+      drop_detail_cache # content changed → rebuild (windowed) on next render
       @detail_hex_bytes = nil
       @detail_scroll = @detail_scroll.clamp(0, detail_scroll_max) # content may have shrunk
       true
@@ -865,7 +870,7 @@ module Gori::Tui
     def pretty=(on : Bool) : Nil
       return if @pretty == on
       @pretty = on
-      @detail_cache = nil
+      drop_detail_cache
       @detail_scroll = 0 # reflow changes the line count → a stale offset could blank the pane (like hex/pane toggles)
       @detail_xscroll = 0
       @detail_read.reset
@@ -974,7 +979,7 @@ module Gori::Tui
       @detail_pane = pane
       @detail_scroll = 0
       @detail_xscroll = 0
-      @detail_cache = nil     # pane switch changes the content
+      drop_detail_cache       # pane switch changes the content
       @detail_hex_bytes = nil # …and the hex source bytes
       @detail_read.reset
     end
@@ -1361,7 +1366,7 @@ module Gori::Tui
       cw = {body.w - gw, 0}.max
       # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
       # never re-styles just to measure width (mirrors RepeaterView#render_response_body).
-      rows = (0...body.h).compact_map { |i| (li = @detail_scroll + i) < total ? dv.line_at(li) : nil }
+      rows = (0...body.h).compact_map { |i| (li = @detail_scroll + i) < total ? styled_detail_line(dv, li) : nil }
       @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
       ensure_detail_visible(body.h) if detail_navigable? && focused
       # Selection spans only fetch lines in the selected range (lazy line_at).
@@ -1612,9 +1617,36 @@ module Gori::Tui
     # opaque gRPC hex — are bounded, so they go in `head` (eager, wrapped plain);
     # only a plain request/response body is windowed (styled per visible line).
     private def detail_view : DetailView
-      @detail_cache = nil if @detail_cache_rev != Theme.revision # theme switched → rebuild with new colours
+      drop_detail_cache if @detail_cache_rev != Theme.revision # theme switched → rebuild with new colours
       @detail_cache_rev = Theme.revision
       @detail_cache ||= build_detail_view
+    end
+
+    # Drop the memoized detail view AND its per-line styled-body cache together — the styled
+    # lines are built from the current view (theme colours + pretty/raw body), so the two MUST
+    # move in lockstep. Every site that invalidates the detail view goes through here (mirrors
+    # RepeaterView#drop_resp_view_cache).
+    private def drop_detail_cache : Nil
+      @detail_cache = nil
+      @detail_styled_cache.clear
+    end
+
+    # Ceiling on the styled-body memo (a visible window is ~tens of lines, so this covers many
+    # screens of local scroll while capping memory on a huge body; on overflow the whole memo is
+    # dropped and the next frame re-styles just the visible window). Mirrors RepeaterView.
+    DETAIL_STYLED_CACHE_CAP = 2048
+
+    # The styled line at absolute index `li`, memoized for BODY lines only — head/trailer are
+    # already-materialised arrays (DetailView#line_at returns them directly), so they skip the
+    # memo. Without this a held/scrolling detail re-tokenises every visible body line each frame.
+    private def styled_detail_line(dv : DetailView, li : Int32) : Highlight::Line
+      hs = dv.head.size
+      return dv.line_at(li) if li < hs || li >= hs + dv.body.size # head or trailer → pre-built
+      if cached = @detail_styled_cache[li]?
+        return cached
+      end
+      @detail_styled_cache.clear if @detail_styled_cache.size >= DETAIL_STYLED_CACHE_CAP
+      @detail_styled_cache[li] = dv.line_at(li)
     end
 
     EMPTY_LINES = [] of Highlight::Line

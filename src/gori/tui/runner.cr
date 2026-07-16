@@ -76,7 +76,9 @@ module Gori::Tui
     include Host # the narrow facade per-tab controllers drive the shell through
 
     def initialize(@session : Session, @term : Termisu)
-      @backend = TermisuBackend.new(@term)
+      # Held as the base Backend: TermisuBackend is generic over the terminal type so
+      # specs can drive its diff against a double (Termisu.new needs a live /dev/tty).
+      @backend = TermisuBackend.new(@term).as(Backend)
       @keymap = Hotkeys.build_keymap(@session.registry) # base verbs + OS profile + user overrides
       @scope = @session.scope
       @rules_overlay = RulesOverlay.new(@session.rules)
@@ -781,8 +783,10 @@ module Gori::Tui
       when Termisu::Event::Mouse
         handle_mouse(ev)
       when Termisu::Event::Resize
-        # termisu already resized its cell buffer (prepare_event); flag the next
-        # frame to full-repaint, since the diff renderer would leave stale cells.
+        # termisu already resized its cell buffer to these dims (prepare_event). Re-fit the
+        # backend's grids in lockstep off the SAME event dims (never a racing live ioctl),
+        # and flag the next frame to full-repaint since the diff would leave stale cells.
+        @backend.resize(ev.width, ev.height)
         @resized = true
       when Termisu::Event::Preedit
         apply_preedit(ev.text)
@@ -3360,12 +3364,11 @@ module Gori::Tui
     # Emit the frame: a full repaint right after a resize (the diff renderer would
     # otherwise leave stale cells), a cheap diff otherwise.
     private def flush_screen : Nil
-      if @resized
-        @term.sync
-        @resized = false
-      else
-        @term.render
-      end
+      # The backend accumulated this frame in its own grid; forward only the changed
+      # cells now. A resize (or theme reload / alt-screen re-entry, which set @resized)
+      # forces a full repaint since the diff would otherwise leave stale cells.
+      @backend.flush(sync: @resized)
+      @resized = false
     end
 
     private def scope_label : String

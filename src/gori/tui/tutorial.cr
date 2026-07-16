@@ -69,7 +69,8 @@ module Gori::Tui
     end
 
     def initialize(@term : Termisu)
-      @backend = TermisuBackend.new(@term)
+      # Held as the base Backend: TermisuBackend is generic over the terminal type.
+      @backend = TermisuBackend.new(@term).as(Backend)
       @step = Step::Welcome
       @tick = 0        # loop counter driving the demo animations (advances ~20/s)
       @resized = false # forces a full repaint after a resize
@@ -124,7 +125,7 @@ module Gori::Tui
       loop do
         render
         case ev = @term.poll_event(50)
-        when Termisu::Event::Resize then @resized = true
+        when Termisu::Event::Resize then (@backend.resize(ev.width, ev.height); @resized = true)
         when Termisu::Event::Key    then handle_key(ev)
         when Termisu::Event::Mouse  then handle_mouse(ev)
         end
@@ -713,12 +714,8 @@ module Gori::Tui
     end
 
     private def flush : Nil
-      if @resized
-        @term.sync
-        @resized = false
-      else
-        @term.render
-      end
+      @backend.flush(sync: @resized)
+      @resized = false
     end
 
     # Card sits between the 2-row header and the 2-row footer.
