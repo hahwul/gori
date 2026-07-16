@@ -16,7 +16,8 @@ module Gori
         project_slug : String?,
         source : String,
         workspace_root : String? = nil,
-        auto_created : Bool = false
+        auto_created : Bool = false,
+        project_id : String? = nil
 
       class Error < Exception
       end
@@ -82,7 +83,8 @@ module Gori
         raise Error.new("#{source} directory does not exist: #{parent}") unless Dir.exists?(parent)
         project = registry.list.find { |candidate| candidate.db_path == expanded }
         Selection.new(expanded, project.try(&.name),
-          project.try { |candidate| registry.slug_of(candidate) }, source)
+          project.try { |candidate| registry.slug_of(candidate) }, source,
+          project_id: project.try { |candidate| registry.id_of(candidate) })
       end
 
       private def self.active_fallback(registry : ProjectRegistry) : Selection
@@ -90,7 +92,8 @@ module Gori
           if File.file?(path)
             project_for_path = registry.list.find { |candidate| candidate.db_path == path }
             return Selection.new(path, project_for_path.try(&.name),
-              project_for_path.try { |candidate| registry.slug_of(candidate) }, "active-tui")
+              project_for_path.try { |candidate| registry.slug_of(candidate) }, "active-tui",
+              project_id: project_for_path.try { |candidate| registry.id_of(candidate) })
           end
         end
         if mru = registry.list.first?
@@ -102,7 +105,7 @@ module Gori
       private def self.select_project(name : String, source : String,
                                       registry : ProjectRegistry) : Selection
         project = registry.find(name)
-        raise Error.new("no such project: #{name} (match display name or directory slug)") unless project
+        raise Error.new("no such project: #{name} (match short id, id prefix, dir slug, or display name)") unless project
         from_project(project, registry, source)
       end
 
@@ -110,7 +113,7 @@ module Gori
                                     source : String, workspace_root : String? = nil,
                                     auto_created : Bool = false) : Selection
         Selection.new(project.db_path, project.name, registry.slug_of(project), source,
-          workspace_root, auto_created)
+          workspace_root, auto_created, project_id: registry.id_of(project))
       end
 
       private def self.canonical(path : String) : String

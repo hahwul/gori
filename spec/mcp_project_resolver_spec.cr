@@ -38,6 +38,7 @@ describe Gori::MCP::ProjectResolver do
 
       selected.project_name.should eq("zaps-rest")
       selected.project_slug.should eq("zaps-rest")
+      selected.project_id.not_nil!.should match(/\A[0-9a-f]{8}\z/) # stable short id
       selected.workspace_root.should eq(File.realpath(workspace))
       selected.source.should eq("workspace-created")
       selected.db_path.should_not eq(active.db_path)
@@ -102,6 +103,13 @@ describe Gori::MCP::ProjectResolver do
       first_by_slug = Gori::MCP::ProjectResolver.resolve(nil, "api", cwd: second_root,
         env_db: nil, env_project: nil)
       first_by_slug.db_path.should eq(first.db_path)
+
+      # --project also resolves by the stable short id, decoupled from the ambiguous
+      # "api" display name shared by both workspaces. (Unique-PREFIX matching is
+      # covered deterministically with pinned ids in project_registry_spec.)
+      first_by_id = Gori::MCP::ProjectResolver.resolve(nil, first.project_id.not_nil!,
+        cwd: second_root, env_db: nil, env_project: nil)
+      first_by_id.db_path.should eq(first.db_path)
     end
   end
 

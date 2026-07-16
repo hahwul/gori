@@ -18,27 +18,56 @@ module Gori
     # share the same basename, and the globally active TUI project can belong to
     # an entirely different repository.
     WORKSPACE_FILE = ".workspace"
+    # Stable, opaque, NAME-INDEPENDENT short id (8 hex chars, like a git short SHA).
+    # Written once at create time so a project stays addressable by a unique id
+    # prefix even after a rename drifts its display name away from its frozen dir
+    # slug. Optional: legacy projects created before this sidecar have none and
+    # stay addressable by slug/name (see #find) — no backfill, no write-on-read.
+    # Lives inside the project dir, so it is never itself listed as a project.
+    ID_FILE = ".id"
 
     def initialize(@root : String)
     end
 
-    # Resolve a project by its verbatim display name OR its directory slug (both
-    # case-insensitive). Lets `gori mcp --project=api` work when the display name
-    # is a non-ASCII phrase stored in `.name`.
+    # Resolve a project by (case-insensitively, in priority order): its exact short
+    # id, its exact directory slug, its exact verbatim display name, or a UNIQUE
+    # PREFIX of its short id — git-style abbreviation. Lets `gori mcp --project=api`
+    # work when the display name is a non-ASCII phrase stored in `.name`, and
+    # `--project=a1b2` work as a short handle decoupled from the (renamable) name.
+    #
+    # Order matters: all three EXACT matches are tried before the id-prefix, so a
+    # hex-like display name can never be shadowed by another project's id prefix.
+    # An ambiguous prefix (2+ ids share it) resolves to nothing rather than guessing.
     def find(name_or_slug : String) : Project?
       q = name_or_slug.strip.downcase
       return nil if q.empty?
-      projects = list
+      # Read each id once (a small sidecar per project) and reuse across the passes.
+      entries = list.map { |project| {project, id_of(project).try(&.downcase)} }
+
+      # Exact short id — the opaque, name-independent handle; most specific, so first.
+      entries.each { |project, id| return project if id == q }
       # A slug is unique while display names need not be (two workspaces with the
       # same basename deliberately share a display name). Prefer an exact slug so
       # `--project=api` cannot resolve the newer `api-2` merely due to MRU order.
-      projects.find { |project| slug_of(project).downcase == q } ||
-        projects.find { |project| project.name.downcase == q }
+      entries.each { |project, _| return project if slug_of(project).downcase == q }
+      entries.each { |project, _| return project if project.name.downcase == q }
+      # Git-style abbreviation: a prefix that uniquely identifies ONE project's id.
+      prefixed = entries.select { |_, id| id && id.starts_with?(q) }
+      prefixed.size == 1 ? prefixed.first[0] : nil
     end
 
     # The on-disk directory name for a project (the slugified workspace dir).
     def slug_of(project : Project) : String
       File.basename(project.dir)
+    end
+
+    # The stable short id from the `.id` sidecar, or nil for a legacy project
+    # created before ids existed (which stays addressable by slug/name). Parallels
+    # workspace_of — a small sidecar read, never an open of the project DB.
+    def id_of(project : Project) : String?
+      File.read(File.join(project.dir, ID_FILE)).strip.presence
+    rescue
+      nil
     end
 
     # Resolve a project by the workspace path it was explicitly bound to.
@@ -104,6 +133,7 @@ module Gori
       # Persist the verbatim display name so a later `list` shows "My Project", not
       # the lossy slug "my-project".
       File.write(File.join(dir, NAME_FILE), display) rescue nil
+      write_id_if_absent(dir) # a fresh project gets a stable short id; a reopen keeps its own
       proj = Project.new(display, File.join(dir, Project::DB_FILE))
       desc = description.strip
       unless desc.empty?
@@ -142,6 +172,7 @@ module Gori
             File.chmod(dir, Paths::DIR_MODE) rescue nil
             File.write(File.join(dir, WORKSPACE_FILE), workspace)
             File.write(File.join(dir, NAME_FILE), display) rescue nil
+            write_id_if_absent(dir)
             return Project.new(display, db)
           rescue File::AlreadyExistsError
             # Another process claimed it after the exists? check; inspect below.
@@ -179,6 +210,32 @@ module Gori
       dir = File.join(@root, slug)
       return false unless Dir.exists?(dir) && File.exists?(File.join(dir, Project::DB_FILE))
       display_name(dir, slug).downcase != display.downcase
+    end
+
+    # Assign a stable short id to a freshly created project. WRITE-IF-ABSENT: never
+    # overwrites an existing id (it must stay stable across reopens), and it is only
+    # ever called from create/create_for_workspace — never from read/list — so
+    # legacy projects keep resolving by slug/name until explicitly (re)created.
+    # Best-effort like NAME_FILE: an unwritable id sidecar just leaves the project
+    # id-less, still fully addressable by slug/name.
+    private def write_id_if_absent(dir : String) : Nil
+      path = File.join(dir, ID_FILE)
+      return if File.exists?(path)
+      File.write(path, generate_id) rescue nil
+    end
+
+    # A short, opaque id (8 hex chars → 2^32 space) that no existing project already
+    # holds. Collisions are astronomically unlikely for the small project counts
+    # gori sees; we still re-roll on the off chance, capped so a corrupt tree can't
+    # spin forever (after which a duplicate is harmless — exact-id still resolves,
+    # only the prefix of a genuine twin turns ambiguous).
+    private def generate_id : String
+      taken = list.compact_map { |project| id_of(project).try(&.downcase) }
+      10.times do
+        candidate = Random::Secure.hex(4)
+        return candidate unless taken.includes?(candidate)
+      end
+      Random::Secure.hex(4)
     end
 
     private def normalized_workspace(path : String) : String
