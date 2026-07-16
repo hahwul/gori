@@ -411,6 +411,8 @@ module Gori::Tui
         break if idx >= @results.size
         draw_result(screen, inner, idx, inner.y + 1 + i, focused)
       end
+      # Gauge over the rows region (below the header), aligned to what @scroll windows.
+      Frame.scroll_gauge(screen, Rect.new(inner.x, inner.y + 1, inner.w, cap), @results.size, @scroll, focused)
     end
 
     private def header_row(screen : Screen, inner : Rect) : Nil

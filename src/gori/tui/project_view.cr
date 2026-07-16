@@ -1253,7 +1253,7 @@ module Gori::Tui
       end
       inner = rect.inset(1, 1)
       @desc_area.render(screen, inner, cursor: ins,
-        highlight: Settings.editor_markdown ? :markdown : nil)
+        highlight: Settings.editor_markdown ? :markdown : nil, gauge: true, gauge_focused: focused)
       paint_desc_read_chrome(screen, inner, focused && !ins)
     end
 

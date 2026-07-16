@@ -1489,7 +1489,7 @@ module Gori::Tui
       @editor.chain_peek_text = (chain && !chain.empty?) ? chain : nil # tooltip only for a concealed (non-empty) chain
       inner = rect.inset(1, 1)
       read_active = focused && !ins
-      @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused)
+      @editor.render(screen, inner, cursor: ins, highlight: :request, peek: focused, gauge: true, gauge_focused: focused)
       paint_template_read_chrome(screen, inner, read_active)
     end
 
@@ -1729,6 +1729,9 @@ module Gori::Tui
         body = Rect.new(inner.x, inner.y + 1, inner.w, {inner.h - 1, 0}.max)
         TrafficEmptyState.render(screen, body, variant: :fuzzer_results, running: @running)
       end
+      # Gauge rides the rows region (below the header row), so its track lines up with
+      # what @scroll actually windows.
+      Frame.scroll_gauge(screen, Rect.new(inner.x, inner.y + 1, inner.w, rows_h), view.size, @scroll, focused)
     end
 
     private def render_result_row(screen : Screen, inner : Rect, y : Int32, r : Fuzz::Result, selected : Bool) : Nil
@@ -1897,6 +1900,7 @@ module Gori::Tui
         Highlight.draw(screen, inner.x + gw, inner.y + i, sline, bg: Theme.bg, width: cw)
         paint_detail_line_chrome(screen, inner.x + gw, inner.y + i, li, line, focused, lines)
       end
+      Frame.scroll_gauge(screen, inner, lines.size, @detail_scroll, focused)
     end
 
     private def paint_detail_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,

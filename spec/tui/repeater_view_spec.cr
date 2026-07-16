@@ -21,6 +21,34 @@ describe Gori::Tui::RepeaterView do
   # off so a (future) valid-JSON/XML fixture can't silently reflow and shift assertions.
   before_each { Gori::Settings.pretty_bodies_default = false }
 
+  # The right-border scroll gauge: a heavy-vertical thumb rides the response card's
+  # right edge ONLY when the body overflows the viewport, so its height reads as
+  # "how big is this response" at a glance. A body that fits keeps the plain hairline.
+  it "draws a right-border scroll gauge only when the response overflows the viewport" do
+    view = RepeaterView.new
+    view.load_blank
+    view.focus_pane(:response)
+
+    big = String.build do |io|
+      io << "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n"
+      300.times { |i| io << "line #{i}\n" }
+    end
+    view.apply(Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n".to_slice, big.to_slice, nil, 1000_i64))
+
+    big_b = MemoryBackend.new(120, 20)
+    view.render(Screen.new(big_b), Rect.new(0, 0, 120, 20))
+    col = 119 # the response card's right border column (right half's right edge)
+    thumb_rows = (0...20).count { |y| big_b.grid[y][col] == '┃' }
+    thumb_rows.should be > 0  # a thumb segment is present
+    thumb_rows.should be < 18 # but not the whole track — content clearly exceeds the pane
+
+    # A tiny response fits the pane, so no gauge — the border stays a plain hairline.
+    view.apply(Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, "PONG".to_slice, nil, 1000_i64))
+    small_b = MemoryBackend.new(120, 20)
+    view.render(Screen.new(small_b), Rect.new(0, 0, 120, 20))
+    (0...20).count { |y| small_b.grid[y][col] == '┃' }.should eq(0)
+  end
+
   # The response pane's ^X hex dump: repeater_toggle_hex routes response-focus to
   # exactly this view toggle (the `x` key selects a line now — hex moved to ^X).
   it "toggle_resp_hex flips resp_hex? and renders a raw byte dump of the response" do
