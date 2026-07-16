@@ -128,6 +128,12 @@ module Gori::Tui
       @dist_cache = nil.as(DistData?)
       @dist_cache_rev = -1_i64
       @dist_cache_w = -1
+      # Reused scratch for build_dist's histogram inputs — cleared + refilled each rebuild so a
+      # live run doesn't reallocate three growing arrays every frame. Not stored in DistData
+      # (histogram consumes them into fresh bin arrays), so clearing on the next rebuild is safe.
+      @dist_lens = [] of Int64
+      @dist_words = [] of Int32
+      @dist_times = [] of Int64
       # Results-pane memos, all keyed on @results_rev (the O(n)/O(n log n) scans below
       # ran EVERY frame — the busiest moment is a live run streaming results, each of
       # which forces a redraw). matched_count is rev-only; the sorted view also keys on
@@ -1874,9 +1880,9 @@ module Gori::Tui
     private def build_dist(w : Int32) : DistData
       codes = Hash(Int32, Int32).new(0)
       err = 0
-      lens = [] of Int64
-      words = [] of Int32
-      times = [] of Int64
+      lens = @dist_lens; lens.clear
+      words = @dist_words; words.clear
+      times = @dist_times; times.clear
       @results.each do |r|
         if s = r.status
           codes[s] += 1
@@ -1887,12 +1893,40 @@ module Gori::Tui
         end
         times << r.duration_us # every row: a timeout's latency IS the signal
       end
+      lh, lmin, lmax = hist_bounds64(lens, w)
+      wh, wmin, wmax = hist_bounds32(words, w)
+      th, tmin, tmax = hist_bounds64(times, w)
       DistData.new(
         codes: codes.to_a.sort_by!(&.[0]), err: err,
-        len_hist: Spark.histogram(lens, w), len_min: (lens.min? || 0_i64), len_max: (lens.max? || 0_i64),
-        words_hist: Spark.histogram(words, w), words_min: (words.min? || 0), words_max: (words.max? || 0),
-        time_hist: Spark.histogram(times, w), time_min: (times.min? || 0_i64), time_max: (times.max? || 0_i64),
+        len_hist: lh, len_min: lmin, len_max: lmax,
+        words_hist: wh, words_min: wmin, words_max: wmax,
+        time_hist: th, time_min: tmin, time_max: tmax,
       )
+    end
+
+    # Histogram + {min, max} for a dimension in a SINGLE min/max scan whose result is fed to
+    # Spark.histogram so it doesn't re-scan for bounds — replacing the old three passes per
+    # dimension (histogram's own min/max scan + an explicit `.min?` + `.max?`). Empty → zeros,
+    # matching the old `(values.min? || 0)` / `(values.max? || 0)`; the passed bounds are the
+    # array's own min/max, so the binning is byte-identical.
+    private def hist_bounds64(values : Array(Int64), w : Int32) : {Array(Int32), Int64, Int64}
+      return {Spark.histogram(values, w), 0_i64, 0_i64} if values.empty?
+      lo = hi = values.unsafe_fetch(0)
+      values.each do |v|
+        lo = v if v < lo
+        hi = v if v > hi
+      end
+      {Spark.histogram(values, w, min: lo.to_f, max: hi.to_f), lo, hi}
+    end
+
+    private def hist_bounds32(values : Array(Int32), w : Int32) : {Array(Int32), Int32, Int32}
+      return {Spark.histogram(values, w), 0, 0} if values.empty?
+      lo = hi = values.unsafe_fetch(0)
+      values.each do |v|
+        lo = v if v < lo
+        hi = v if v > hi
+      end
+      {Spark.histogram(values, w, min: lo.to_f, max: hi.to_f), lo, hi}
     end
 
     private def adjust_scroll(h : Int32) : Nil
