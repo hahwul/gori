@@ -585,6 +585,12 @@ module Gori::Tui
       @host.status("copied #{written}b to clipboard")
     end
 
+    # The focused pane's selection (or current line) text without copying — for the
+    # "Send selection to" flow.
+    def fuzzer_selection_text : String
+      (v = current_view) ? v.pane_copy_text : ""
+    end
+
     def fuzzer_copy_all : Nil
       v = current_view
       return unless v

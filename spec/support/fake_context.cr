@@ -443,8 +443,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def project_copy_all : Nil; end
 
+  property selection_active : Bool = false # settable so selection-gated verbs (send-to, clear-selection) can be exercised
+
   def read_selection_active? : Bool
-    false
+    selection_active
   end
 
   def read_select_line : Nil; end
@@ -454,6 +456,12 @@ class FakeExecContext < Gori::Verb::ExecContext
   def read_copy : Nil; end
 
   def copy_as_open : Nil; end
+
+  getter send_to_opened : Bool = false
+
+  def send_to_open : Nil
+    @send_to_opened = true
+  end
 
   property detail_navigable : Bool = false # settable so grouped-menu specs can exercise detail.select-line
 

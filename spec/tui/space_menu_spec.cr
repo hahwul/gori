@@ -551,3 +551,45 @@ describe Gori::Tui::SpaceMenu do
     end
   end
 end
+
+# "Send selection to…" is registered per selection-capable scope, gated on an active
+# selection, and shares the mnemonic 'S' — the parallel of the clear-selection verbs.
+describe "send-to verbs" do
+  # {verb id, scope} for every selection-capable source view.
+  send_to = {
+    "notes.send-to"    => Gori::Verb::Scope::Notes,
+    "repeater.send-to" => Gori::Verb::Scope::Repeater,
+    "fuzzer.send-to"   => Gori::Verb::Scope::Fuzzer,
+    "decoder.send-to"  => Gori::Verb::Scope::Decoder,
+    "issue.send-to"    => Gori::Verb::Scope::IssuesDetail,
+    "project.send-to"  => Gori::Verb::Scope::Body,
+    "detail.send-to"   => Gori::Verb::Scope::HistoryDetail,
+  }
+
+  it "registers a send-to verb (mnemonic 'S') in every selection-capable scope" do
+    registry = Gori::Verbs.registry
+    send_to.each do |id, scope|
+      v = registry.find { |d| d.id == id }
+      v.should_not be_nil
+      v.not_nil!.scope.should eq(scope)
+      v.not_nil!.menu_key.should eq('S')
+    end
+  end
+
+  it "shows only when a selection is active" do
+    registry = Gori::Verbs.registry
+    ctx = FakeExecContext.new
+    v = registry.find { |d| d.id == "notes.send-to" }.not_nil!
+    ctx.selection_active = false
+    v.available?(ctx).should be_false
+    ctx.selection_active = true
+    v.available?(ctx).should be_true
+  end
+
+  it "dispatches send_to_open when invoked" do
+    registry = Gori::Verbs.registry
+    ctx = FakeExecContext.new
+    registry.find { |d| d.id == "notes.send-to" }.not_nil!.call(ctx)
+    ctx.send_to_opened.should be_true
+  end
+end

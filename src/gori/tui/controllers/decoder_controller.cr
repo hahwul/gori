@@ -166,6 +166,21 @@ module Gori::Tui
       @host.status("new conversion (#{@sessions.size} open)")
     end
 
+    # Seed a NEW conversion from an externally-supplied string (the "Send selection
+    # to → Decoder" flow) and jump into it. Mirrors decoder_new but pre-fills the
+    # input and, since the caller is on ANOTHER tab, switches tabs with goto_tab
+    # (like RepeaterController#repeater_from_request) rather than request_focus.
+    # make_session already runs the chain, so the output lands populated.
+    def decoder_from_text(text : String, name : String? = nil) : Nil
+      @sessions << make_session(text, "", name)
+      @idx = @sessions.size - 1
+      @popup.close
+      @chain_pre = ""
+      @dirty = true
+      @host.goto_tab(:decoder)
+      @host.status("sent selection to Decoder (#{text.bytesize}b)")
+    end
+
     # Content-only clone of the active conversion (input + chain + chip name).
     def decoder_duplicate : Nil
       s = cur
@@ -478,6 +493,17 @@ module Gori::Tui
         msg = "copied all (#{written}b)"
         msg += " — clipped from #{text.bytesize}b (64KB cap)" if written < text.bytesize
         @host.status(msg)
+      end
+    end
+
+    # The focused pane's selection (or current line) text without copying — for the
+    # "Send selection to" flow. Mirrors decoder_copy_selection's pane routing.
+    def decoder_selection_text : String
+      s = cur
+      case s.pane
+      when :output then s.view.output_copy_text(s.result)
+      when :input  then s.input_read.copy_text(s.input)
+      else              ""
       end
     end
 
