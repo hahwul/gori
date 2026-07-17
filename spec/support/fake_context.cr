@@ -237,6 +237,32 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def goto_discover : Nil; end
 
+  def oast_listen : Nil; end
+
+  def oast_stop : Nil; end
+
+  def oast_generate : Nil; end
+
+  def oast_copy : Nil; end
+
+  def oast_filter : Nil; end
+
+  def oast_add_provider : Nil; end
+
+  def oast_edit_provider : Nil; end
+
+  def oast_toggle_provider : Nil; end
+
+  def oast_delete_provider : Nil; end
+
+  def oast_payload_available? : Bool
+    false
+  end
+
+  def oast_insert_payload : Nil; end
+
+  def oast_copy_payload : Nil; end
+
   def scope_open : Nil; end
 
   def scope_add_host : Nil; end

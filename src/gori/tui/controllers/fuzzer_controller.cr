@@ -65,6 +65,11 @@ module Gori::Tui
       current_tab_obj.try(&.view)
     end
 
+    # Cross-tab "Insert OAST payload": drop the URL at the template caret.
+    def insert_oast_payload(url : String) : Bool
+      (v = current_view) ? v.insert_oast_payload(url) : false
+    end
+
     def subtab_labels : Array(String)
       @fuzzers.map_with_index { |t, i| "#{i + 1}:#{t.view.label(18)}" }
     end

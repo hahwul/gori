@@ -58,6 +58,10 @@ describe Gori::Store do
       store.@db.exec("DROP TABLE intercept_held")                        # V36
       store.@db.exec("DROP TABLE intercept_commands")                    # V36
       store.@db.exec("DROP TABLE probe_custom_rules")                    # V38
+      store.@db.exec("DROP TABLE sequencer_sessions")                    # V39
+      store.@db.exec("DROP TABLE oast_callbacks")                        # V40
+      store.@db.exec("DROP TABLE oast_sessions")                         # V40
+      store.@db.exec("DROP TABLE oast_providers")                        # V40
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 
@@ -103,6 +107,10 @@ describe Gori::Store do
       db.exec("DROP TABLE intercept_held")     # V36
       db.exec("DROP TABLE intercept_commands") # V36
       db.exec("DROP TABLE probe_custom_rules") # V38
+      db.exec("DROP TABLE sequencer_sessions") # V39
+      db.exec("DROP TABLE oast_callbacks")     # V40
+      db.exec("DROP TABLE oast_sessions")      # V40
+      db.exec("DROP TABLE oast_providers")     # V40
       db.exec("PRAGMA user_version = 31")
       store.close
 

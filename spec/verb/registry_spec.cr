@@ -432,6 +432,54 @@ private class FakeContext < ExecContext
     @calls << :discover_toggle_pause
   end
 
+  def oast_listen : Nil
+    @calls << :oast_listen
+  end
+
+  def oast_stop : Nil
+    @calls << :oast_stop
+  end
+
+  def oast_generate : Nil
+    @calls << :oast_generate
+  end
+
+  def oast_copy : Nil
+    @calls << :oast_copy
+  end
+
+  def oast_filter : Nil
+    @calls << :oast_filter
+  end
+
+  def oast_add_provider : Nil
+    @calls << :oast_add_provider
+  end
+
+  def oast_edit_provider : Nil
+    @calls << :oast_edit_provider
+  end
+
+  def oast_toggle_provider : Nil
+    @calls << :oast_toggle_provider
+  end
+
+  def oast_delete_provider : Nil
+    @calls << :oast_delete_provider
+  end
+
+  def oast_payload_available? : Bool
+    false
+  end
+
+  def oast_insert_payload : Nil
+    @calls << :oast_insert_payload
+  end
+
+  def oast_copy_payload : Nil
+    @calls << :oast_copy_payload
+  end
+
   def goto_discover : Nil
     @calls << :goto_discover
   end

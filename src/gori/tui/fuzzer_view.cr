@@ -577,6 +577,16 @@ module Gori::Tui
       "cleared all § markers"
     end
 
+    # Insert an OAST payload URL at the template caret (cross-tab "Insert OAST payload").
+    # Only when the template pane is focused.
+    def insert_oast_payload(url : String) : Bool
+      return false unless @focus == :template
+      @editor.insert_string(url)
+      @editor.set_preedit("")
+      @dirty = true
+      true
+    end
+
     def position_count : Int32
       marker_spans.size
     end

@@ -14,6 +14,7 @@ module Gori::Tui
       {:repeater, "Repeater"},
       {:fuzzer, "Fuzzer"},
       {:miner, "Miner"},
+      {:oast, "OAST"},
       {:sequencer, "Sequencer"},
       {:decoder, "Decoder"},
       {:jwt, "JWT"},

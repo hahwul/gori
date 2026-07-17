@@ -410,6 +410,56 @@ module Gori
       end
     end
 
+    # A configured OAST provider (the Providers sub-tab). `kind` is the ProviderKind label.
+    struct OastProviderRecord
+      getter id : Int64
+      getter name : String
+      getter kind : String
+      getter host : String
+      getter token : String?
+      getter? enabled : Bool
+      getter position : Int32
+
+      def initialize(@id, @name, @kind, @host, @token, @enabled, @position)
+      end
+    end
+
+    # A listening session: the secrets to poll + decrypt. `private_key_pem` is the
+    # interactsh RSA private key (nil for other providers).
+    struct OastSessionRecord
+      getter id : Int64
+      getter provider_id : Int64?
+      getter kind : String
+      getter server_url : String
+      getter correlation_id : String
+      getter secret : String
+      getter private_key_pem : String?
+      getter token : String?
+      getter last_poll_at : Int64?
+
+      def initialize(@id, @provider_id, @kind, @server_url, @correlation_id, @secret,
+                     @private_key_pem, @token, @last_poll_at)
+      end
+    end
+
+    # One received callback (immutable). `provider_uid` is the dedup key.
+    struct OastCallbackRecord
+      getter id : Int64
+      getter session_id : Int64
+      getter created_at : Int64
+      getter provider_uid : String
+      getter protocol : String
+      getter method : String?
+      getter source_ip : String?
+      getter full_id : String
+      getter raw_request : Bytes
+      getter raw_response : Bytes?
+
+      def initialize(@id, @session_id, @created_at, @provider_uid, @protocol, @method,
+                     @source_ip, @full_id, @raw_request, @raw_response)
+      end
+    end
+
     # One persisted token-randomness session (a sub-tab under the Sequencer tab). Stores
     # the byte-exact `request` to re-collect, plus opaque `config` JSON (mode, token
     # location, goal, pacing) managed by the frontend. Collected tokens are NEVER
