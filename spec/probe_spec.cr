@@ -548,6 +548,38 @@ describe "Gori::Probe::Passive (FP reduction)" do
     end
   end
 
+  it "does not flag loopback 127.0.0.1 as a private IP but still flags an RFC 1918 address" do
+    with_store do |store|
+      # Loopback aids no recon and is ubiquitous in bundles/configs (a near-pure FP source).
+      loopback = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n",
+        content_type: "text/html", body: "<p>dev server on http://127.0.0.1:3000/</p>")
+      codes_of(loopback).should_not contain("private_ip_leak")
+      # A real internal (RFC 1918) address is still surfaced.
+      internal = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n",
+        content_type: "text/html", body: "<p>proxy 192.168.1.20</p>")
+      internal.find(&.code.==("private_ip_leak")).not_nil!.evidence.should eq("192.168.1.20")
+    end
+  end
+
+  it "does not flag document headers on a 3xx redirect (not rendered), but still on an error page" do
+    with_store do |store|
+      # A 302 with text/html (the ubiquitous "Redirecting…" body) is FOLLOWED, never rendered,
+      # so its missing CSP/XFO/XCTO/Referrer are noise — the real target page is checked on its
+      # own flow. HSTS still applies to the HTTPS redirect response.
+      redirect = analyze(store, resp_head: "HTTP/1.1 302 Found\r\nLocation: /home\r\n\r\n",
+        status: 302, content_type: "text/html")
+      codes_of(redirect).should_not contain("missing_csp")
+      codes_of(redirect).should_not contain("missing_x_frame_options")
+      codes_of(redirect).should_not contain("missing_referrer_policy")
+      codes_of(redirect).should contain("missing_hsts")
+      # A 4xx/5xx error page IS a rendered document (framable / may reflect) — keep the checks.
+      error = analyze(store, resp_head: "HTTP/1.1 404 Not Found\r\n\r\n",
+        status: 404, content_type: "text/html")
+      codes_of(error).should contain("missing_csp")
+      codes_of(error).should contain("missing_x_frame_options")
+    end
+  end
+
   it "does not flag prose containing a bare '.rb:' but flags a real backtrace frame" do
     with_store do |store|
       prose = analyze(store, resp_head: "HTTP/1.1 200 OK\r\n\r\n",
@@ -617,6 +649,23 @@ describe "Gori::Probe::Passive (FP reduction)" do
                                            "script-src 'self' data:\r\n\r\n",
         content_type: "text/html")
       codes_of(data_csp).should contain("weak_csp")
+    end
+  end
+
+  it "flags a bare https:/http: scheme source in script-src, but not a specific https host" do
+    with_store do |store|
+      # A bare 'https:' scheme source is an allowlist that permits ANY host over https to serve
+      # scripts — effectively allow-all, and flagged by CSP evaluators as weak (was a FN here).
+      scheme = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \
+                                         "script-src 'self' https:\r\n\r\n", content_type: "text/html")
+      codes_of(scheme).should contain("weak_csp")
+      http = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \
+                                       "default-src 'self'; script-src http:\r\n\r\n", content_type: "text/html")
+      codes_of(http).should contain("weak_csp")
+      # A SPECIFIC host over https is a distinct token — a normal, safe allowlist entry.
+      host = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: " \
+                                       "script-src 'self' https://cdn.example.com\r\n\r\n", content_type: "text/html")
+      codes_of(host).should_not contain("weak_csp")
     end
   end
 
@@ -1615,6 +1664,26 @@ end
 private def analyze_js(store, body : String)
   analyze(store, resp_head: "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n",
     content_type: "application/javascript", body: body)
+end
+
+describe "Gori::Probe::Passive (shared body decode)" do
+  it "decodes a compressed HTML body once yet feeds both body_text and the client rules" do
+    with_store do |store|
+      # An HTML document with a body-text finding (leaked AWS key → BodyLeaks, uses body_text)
+      # AND a client-rule finding (source→sink in an inline script → DomXss, uses client_body_text).
+      # Both must still fire when the body is gzip-encoded, proving the single shared inflate
+      # (Context#decoded_body) feeds both getters correctly.
+      plain = "<html><script>document.write(location.hash)</script>" \
+              "<p>key AKIAIOSFODNN7EXAMPLE here</p></html>"
+      gz = IO::Memory.new
+      Compress::Gzip::Writer.open(gz) { |w| w.write(plain.to_slice) }
+      dets = analyze(store,
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n\r\n",
+        content_type: "text/html", body: String.new(gz.to_slice))
+      codes_of(dets).should contain("secret_in_body") # body_text path
+      codes_of(dets).should contain("dom_xss")         # client_body_text path
+    end
+  end
 end
 
 describe Gori::Probe::Passive::JsScan do

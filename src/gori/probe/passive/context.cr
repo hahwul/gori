@@ -23,6 +23,8 @@ module Gori
         @resp : Proxy::Codec::RawResponse?
         @resp_done = false
         @url : String?
+        @decoded_body : Bytes?
+        @decoded_body_done = false
         @body_text : String?
         @body_text_done = false
         @client_body_text : String?
@@ -104,27 +106,39 @@ module Gori
           r
         end
 
+        # Response body inflated ONCE at the largest cap any rule needs, then shared by both
+        # body_text (a BODY_CAP prefix) and client_body_text (a CLIENT_BODY_CAP prefix). For an
+        # HTML/JS document BOTH getters are live, so decoding here — at CLIENT_BODY_CAP — content-
+        # decodes the body a single time instead of twice: the deterministic first BODY_CAP bytes
+        # of the larger inflate are byte-identical to a BODY_CAP-capped inflate, so body_text is
+        # unchanged. A non-document flow needs only BODY_CAP, so it caps there and never over-
+        # inflates. An unencoded body returns its raw bytes verbatim (the per-getter slice caps it).
+        private def decoded_body : Bytes?
+          return @decoded_body if @decoded_body_done
+          @decoded_body_done = true
+          cap = (html? || js?) ? CLIENT_BODY_CAP : BODY_CAP
+          decoded, _ = Proxy::Codec::ContentDecode.decode(@detail.response_head, @detail.response_body, cap)
+          @decoded_body = decoded || @detail.response_body
+        end
+
         # Decoded, capped, scrubbed response body text — computed once and shared by the rules
-        # that scan the body. nil when there is no body.
+        # that scan the body. nil when there is no body. Slices the shared `decoded_body` buffer
+        # to its first BODY_CAP bytes.
         def body_text : String?
           return @body_text if @body_text_done
           @body_text_done = true
-          # Only the first BODY_CAP bytes are scanned, so cap the inflate too: a large
-          # compressed body stops decoding at the prefix instead of expanding in full.
-          decoded, _ = Proxy::Codec::ContentDecode.decode(@detail.response_head, @detail.response_body, BODY_CAP)
-          bytes = decoded || @detail.response_body
+          bytes = decoded_body
           @body_text = (bytes && !bytes.empty?) ? String.new(bytes[0, {bytes.size, BODY_CAP}.min]).scrub : nil
         end
 
         # Decoded, larger-capped (CLIENT_BODY_CAP), scrubbed body — computed once and shared by
         # the client-side rules. Only materialised for an HTML or JS response (a non-document
-        # flow pays nothing); reuses the same content-decoder as body_text.
+        # flow pays nothing); slices the same shared `decoded_body` buffer as body_text.
         def client_body_text : String?
           return @client_body_text if @client_body_text_done
           @client_body_text_done = true
           return @client_body_text = nil unless html? || js?
-          decoded, _ = Proxy::Codec::ContentDecode.decode(@detail.response_head, @detail.response_body, CLIENT_BODY_CAP)
-          bytes = decoded || @detail.response_body
+          bytes = decoded_body
           @client_body_text = (bytes && !bytes.empty?) ? String.new(bytes[0, {bytes.size, CLIENT_BODY_CAP}.min]).scrub : nil
         end
 

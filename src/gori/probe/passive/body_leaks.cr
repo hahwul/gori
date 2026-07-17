@@ -14,10 +14,13 @@ module Gori
             Category::INFOLEAK)
         end
 
-        # Private-IP ranges with valid 0-255 octets, required to stand alone (not embedded in a
-        # longer dotted/word token). The leading/trailing guards keep multi-segment version
-        # strings such as "10.1.2.3.4" or "v10.1.2.3" out of the match.
-        PRIVATE_IP = /(?<![\w.])(?:10(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){2}|192\.168(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){2}|127\.0\.0\.1)(?![\w.])/
+        # RFC 1918 private-IP ranges with valid 0-255 octets, required to stand alone (not
+        # embedded in a longer dotted/word token). The leading/trailing guards keep multi-segment
+        # version strings such as "10.1.2.3.4" or "v10.1.2.3" out of the match. Loopback
+        # (127.0.0.1) is DELIBERATELY excluded: it is not an internal-network address, aids no
+        # reconnaissance (everyone knows localhost), and is ubiquitous in JS bundles, source maps,
+        # dev configs, and CSP report URIs — flagging it was almost pure false positive.
+        PRIVATE_IP = /(?<![\w.])(?:10(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){2}|192\.168(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){2})(?![\w.])/
 
         # Server-side error / stack-trace signatures, each tightened to a specific frame or
         # exception shape so a mere SYMBOL MENTION in documentation / tutorials / package

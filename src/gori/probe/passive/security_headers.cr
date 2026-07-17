@@ -21,7 +21,17 @@ module Gori
               acc << hdr(ctx, "missing_hsts", "Missing or disabled HSTS header", Store::Severity::Medium)
             end
           end
-          check_doc_headers(ctx, resp.headers, acc) if ctx.html?
+          check_doc_headers(ctx, resp.headers, acc) if ctx.html? && rendered_document?(resp.status)
+        end
+
+        # CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy all govern how a
+        # browser RENDERS a document. A 3xx redirect is never rendered — the UA follows it — and
+        # a 204/304 carries no body, so their "missing" document headers are pure noise (the real
+        # target 200 / error page is captured as its own flow and checked there). A 4xx/5xx error
+        # page IS a rendered document (framable, may reflect XSS), so it keeps the checks. HSTS is
+        # unaffected: it applies to any HTTPS response, redirects included, and is checked above.
+        private def rendered_document?(status : Int32) : Bool
+          !((300..399).includes?(status) || status == 204)
         end
 
         # HSTS with no max-age, or max-age=0 (RFC 6797: instructs the UA to DROP the policy), is
@@ -89,8 +99,11 @@ module Gori
         #   * 'unsafe-inline' ⇒ weak ONLY when no nonce/hash source AND no 'strict-dynamic':
         #     browsers IGNORE 'unsafe-inline' in the presence of either, so a nonce-based CSP
         #     that keeps 'unsafe-inline' for CSP2-browser fallback is safe, not weak.
-        #   * a bare '*' or a 'data:' script source ⇒ any-origin / data-URI scripts (XSS), weak
-        #     UNLESS 'strict-dynamic' is present (it makes host/scheme sources be ignored).
+        #   * a bare '*', 'data:', or a bare 'http:'/'https:' SCHEME source ⇒ any-origin (an
+        #     allowlist that is effectively allow-all: any host over that scheme can serve
+        #     scripts) / data-URI scripts (XSS), weak UNLESS 'strict-dynamic' is present (it makes
+        #     host/scheme sources be ignored). A specific host like 'https://cdn.example.com' is a
+        #     distinct token and does NOT trip this — only the bare scheme does.
         # (`unsafe-inline` confined to style-src is a common, low-risk pattern; only the SCRIPT
         # context is inspected, so it still does NOT trip this.)
         private def weak_csp?(dirs : Hash(String, Array(String))) : Bool
@@ -100,7 +113,7 @@ module Gori
           nonce_or_hash = script.any? { |s| SCRIPT_NONCE_HASH.matches?(s) }
           strict_dynamic = script.includes?("'strict-dynamic'")
           return true if !nonce_or_hash && !strict_dynamic && script.any?(&.includes?("unsafe-inline"))
-          return true if !strict_dynamic && script.any? { |s| s == "*" || s == "data:" }
+          return true if !strict_dynamic && script.any? { |s| s == "*" || s == "data:" || s == "http:" || s == "https:" }
           false
         end
 
