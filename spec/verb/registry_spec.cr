@@ -216,6 +216,10 @@ private class FakeContext < ExecContext
     @calls << :repeater_pretty_request
   end
 
+  def repeater_minimize : Nil
+    @calls << :repeater_minimize
+  end
+
   def repeater_auto_mark : Nil
     @calls << :repeater_auto_mark
   end

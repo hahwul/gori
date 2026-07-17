@@ -885,6 +885,14 @@ module Gori::Tui
       !(@req_hex_edit || @grpc_mode || @ws_mode || @decode_kind || @http2)
     end
 
+    # "Minimize request" removes header/cookie/param lines from the plain-text request and
+    # re-sends to verify the response is unchanged — so it needs plain HTTP text: hex / gRPC
+    # / WS / decode carry their own byte semantics, and §…§ markers make line-removal +
+    # resolution ambiguous. h2 is fine (H2Engine reframes the h1-form text).
+    def minimizable? : Bool
+      !(@req_hex_edit || @grpc_mode || @ws_mode || @decode_kind) && marker_regions.empty?
+    end
+
     # The requests a "send group" pipelines: the editor text split on a lone `%%%` line,
     # each chunk env-expanded, CRLF-normalized and (honouring Auto-CL) length-synced.
     # Returns {label, wire-bytes}; an all-blank chunk is dropped, and no separator ⇒ the

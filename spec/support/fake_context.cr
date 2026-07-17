@@ -117,6 +117,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def repeater_pretty_request : Nil; end
 
+  def repeater_minimize : Nil; end
+
   def fuzz_pretty_template : Nil; end
 
   def fuzz_toggle_http2 : Nil; end

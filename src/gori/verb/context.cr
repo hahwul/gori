@@ -95,6 +95,7 @@ module Gori
       abstract def repeater_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
       abstract def repeater_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
       abstract def repeater_pretty_request : Nil
+      abstract def repeater_minimize : Nil     # squash the request (strip cosmetic headers/cookies/params) in the background
       abstract def fuzz_pretty_template : Nil
       abstract def fuzz_toggle_http2 : Nil    # flip the fuzz transport h1↔h2 (override seed protocol)
       abstract def repeater_auto_mark : Nil     # wrap every request param value in §…§
