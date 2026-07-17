@@ -100,6 +100,21 @@ module Gori
       list
     end
 
+    # Watermark load across ALL sessions: callbacks with id > since_id, oldest first. One
+    # rowid-indexed query the OAST controller uses to fold new callbacks in on a soft-sync
+    # (reconcile) without re-selecting the whole table per session on every data_version bump.
+    def oast_callbacks_since(since_id : Int64) : Array(OastCallbackRecord)
+      list = [] of OastCallbackRecord
+      @db.query("SELECT id, session_id, created_at, provider_uid, protocol, method, source_ip, full_id, raw_request, raw_response FROM oast_callbacks WHERE id > ? ORDER BY id", since_id) do |rs|
+        rs.each do
+          list << OastCallbackRecord.new(
+            rs.read(Int64), rs.read(Int64), rs.read(Int64), rs.read(String), rs.read(String),
+            rs.read(String?), rs.read(String?), rs.read(String), rs.read(Bytes), rs.read(Bytes?))
+        end
+      end
+      list
+    end
+
     # INSERT OR IGNORE on the UNIQUE(session_id, provider_uid) dedup key. The DB enforces
     # dedup; the return (last_insert_rowid) is NOT a reliable new-vs-ignored signal, so the
     # controller dedups in memory (a seen-uid set) and treats this as a durable backstop.
