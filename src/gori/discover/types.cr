@@ -165,13 +165,19 @@ module Gori
       # boundary
       property containment : Containment
 
+      # custom request headers ({name, value}) added to every GET; overrides the
+      # default Accept/User-Agent, appended otherwise. Host/Connection are forced by
+      # the Sender and ignored here (see Discover::Headers).
+      property headers : Array({String, String})
+
       def initialize(@concurrency = 20, @rps = nil, @throttle_ms = nil, @jitter_ms = 0,
                      @timeout = nil, @retries = 1, @retry_pause = 500.milliseconds, @max_requests = nil,
                      @spider = true, @bruteforce = true,
                      @max_depth = 4, @max_pages = 5000, @follow_redirects = true, @template_saturation = 20,
                      @user_wordlist = nil, @extensions = [] of String, @per_dir_cap = 0, @calibrate_probes = 3,
                      @cluster_saturation = 15, @simhash_distance = 3,
-                     @confidence_floor = 0.5, @containment = Containment::ScopeAware)
+                     @confidence_floor = 0.5, @containment = Containment::ScopeAware,
+                     @headers = [] of {String, String})
       end
     end
   end

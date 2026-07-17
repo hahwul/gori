@@ -1,4 +1,5 @@
 require "./discover/types"
+require "./discover/headers"
 require "./discover/url"
 require "./discover/fingerprint"
 require "./discover/extract"

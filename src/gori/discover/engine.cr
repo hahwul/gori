@@ -41,7 +41,14 @@ module Gori::Discover
 
   # Production backend over the Repeater engine (fresh connection per send). GET only.
   class Sender < Backend
-    def initialize(@verify : Bool, @timeout : Time::Span? = nil, @http2 : Bool = false)
+    @header_block : String
+
+    def initialize(@verify : Bool, @timeout : Time::Span? = nil, @http2 : Bool = false,
+                   headers : Array({String, String}) = [] of {String, String})
+      # Merge the user headers over the defaults once — the block is identical for
+      # every send (only Host varies, per target). Host + Connection are emitted
+      # separately in build_get and never come from user input.
+      @header_block = Headers.merge(headers).map { |name, value| "#{name}: #{value}\r\n" }.join
     end
 
     def fetch(scheme : String, host : String, port : Int32, target : String) : Repeater::Result
@@ -58,7 +65,7 @@ module Gori::Discover
     private def build_get(scheme : String, host : String, port : Int32, target : String) : Bytes
       default = scheme == "https" ? 443 : 80
       hostline = port == default ? host : "#{host}:#{port}"
-      "GET #{target} HTTP/1.1\r\nHost: #{hostline}\r\nAccept: */*\r\nUser-Agent: gori-discover\r\nConnection: close\r\n\r\n".to_slice
+      "GET #{target} HTTP/1.1\r\nHost: #{hostline}\r\n#{@header_block}Connection: close\r\n\r\n".to_slice
     end
   end
 

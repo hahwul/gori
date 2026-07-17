@@ -186,7 +186,8 @@ module Gori::Tui
       words = Discover::Wordlist.load(run.config.user_wordlist)
       scope = @host.session.scope
       policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
-      sender = Discover::Sender.new(verify: !@host.session.config.insecure_upstream?, timeout: run.config.timeout)
+      sender = Discover::Sender.new(verify: !@host.session.config.insecure_upstream?, timeout: run.config.timeout,
+        headers: run.config.headers)
       {Discover::Engine.new(run.target, words, sender, run.config, policy), nil}
     rescue ex
       {nil, "config error: #{ex.message}"}
