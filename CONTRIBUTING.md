@@ -30,16 +30,17 @@ work via stdlib) with `crystal build -Dwithout_native_codecs`.
 - **`just test`** must be green. Add or update specs under `spec/` mirroring the source
   you touched; `just test-<area>` runs a single subdir while iterating.
 - Never build or benchmark with `-Dpreview_mt` — gori assumes the single-threaded fiber
-  scheduler (see DESIGN.md §2).
+  scheduler.
 - Keep changes scoped and behavior-preserving unless the PR is explicitly a behavior
   change; note any intentional behavior change in the PR description.
 
 ## Where things live
 
-Read **CLAUDE.md** for the module map, the build/test/lint commands, the TUI seams
-(`TabController`/`Host`, `Overlay`/`OverlayHost`), and the "how to add a feature"
-checklist. Read **DESIGN.md** for the architecture and the P0–P8 design principles the
-code cites inline.
+`src/gori/` is organized by subsystem: `proxy/` (the MITM proxy), `store.cr` + `store/`
+(SQLite persistence), `tui/` (terminal UI), `verb.cr` + `verbs/` (the command system),
+`mcp/` (MCP server), `cli/` (the `gori run` suite), and one directory per tool
+(`repeater`, `fuzz`, `miner`, `sequencer`, `discover`, `oast`, `probe`, `decoder`).
+Specs under `spec/` mirror the source tree.
 
 ## Licensing
 
