@@ -342,6 +342,57 @@ describe Gori::Tui::HistoryView do
     end
   end
 
+  it "opens in the body, flips to the strip level, and resets to the body on re-open" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/api", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+
+      view.detail_strip_focus?.should be_false # a fresh open lands in the BODY
+      view.set_detail_focus(:strip)            # ↑-at-top ascends to the chip strip
+      view.detail_strip_focus?.should be_true
+      view.open_detail(store).should be_true   # re-opening resets the sub-state
+      view.detail_strip_focus?.should be_false
+    end
+  end
+
+  it "follows the caret horizontally as ←/→ walk a long line (no explicit h-scroll)" do
+    tmp_store do |store|
+      id = store.insert_flow(Gori::Store::CapturedRequest.new(
+        created_at: 1_i64, scheme: "https", host: "h.test", port: 443,
+        method: "GET", target: "/api", http_version: "HTTP/1.1",
+        head: "GET /api HTTP/1.1\r\nHost: h.test\r\n\r\n".to_slice, body: nil))
+      store.update_response(Gori::Store::CapturedResponse.new(
+        flow_id: id, status: 200,
+        head: "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n".to_slice,
+        body: ("HEAD" + ("." * 100) + "TAIL").to_slice, content_type: "text/plain"))
+
+      view = HistoryView.new
+      view.reload(store)
+      view.open_detail(store).should be_true
+      view.toggle_pane # request -> response
+
+      rect = Rect.new(0, 0, 80, 16)
+      # The first render records the body's content width so caret moves can follow-x.
+      b0 = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(b0), rect)
+      b0.contains?("HEAD").should be_true
+      b0.contains?("TAIL").should be_false # off the right edge at xscroll 0
+
+      # Park the caret at the start of the long body line, then walk it to end-of-line
+      # (the body has no trailing newline, so moving past EOL clamps — it never wraps).
+      row = view.detail_search_lines("HEAD").first
+      view.goto_detail_line(row + 1)
+      130.times { view.detail_move(0, 1) } # plain ←/→ horizontal caret; ensure_detail_visible_x tracks it
+
+      b1 = MemoryBackend.new(80, 16)
+      view.render_detail(Screen.new(b1), rect)
+      b1.contains?("TAIL").should be_true  # caret-follow scrolled the tail into view
+      b1.contains?("HEAD").should be_false # the start slid off the left edge
+    end
+  end
+
   it "pretty-prints a JSON response body when enabled, and restores raw when off" do
     tmp_store do |store|
       id = store.insert_flow(Gori::Store::CapturedRequest.new(

@@ -251,7 +251,7 @@ module Gori
         hidden: true) { |ctx| ctx.move_detail_pane(1); nil }
 
       r.register Verb::Definition.new(
-        "detail.prev-pane", "Previous pane ←", "Move to the previous detail pane (FRAMES → RES → REQ; past REQ returns to the list)",
+        "detail.prev-pane", "Previous pane ←", "Move to the previous detail pane (FRAMES → RES → REQ)",
         Verb::Scope::HistoryDetail, [Verb::Chord.new("left"), Verb::Chord.new("h")],
         hidden: true) { |ctx| ctx.move_detail_pane(-1); nil }
 
@@ -263,16 +263,9 @@ module Gori
         "detail.up", "Move detail up", "Move the detail caret up (scroll in hex mode)", Verb::Scope::HistoryDetail,
         [Verb::Chord.new("k"), Verb::Chord.new("up")], hidden: true) { |ctx| ctx.scroll_detail(-1); nil }
 
-      # Shift+←/→ scroll a long line sideways instead of walking panes (plain ←/→,
-      # registered above as detail.next-pane/detail.prev-pane) — distinct chords
-      # (shift: true), so they coexist without collision.
-      r.register Verb::Definition.new(
-        "detail.hscroll-right", "Scroll detail right", "Scroll a long line right", Verb::Scope::HistoryDetail,
-        [Verb::Chord.new("right", shift: true)], hidden: true) { |ctx| ctx.hscroll_detail(1); nil }
-
-      r.register Verb::Definition.new(
-        "detail.hscroll-left", "Scroll detail left", "Scroll a long line left", Verb::Scope::HistoryDetail,
-        [Verb::Chord.new("left", shift: true)], hidden: true) { |ctx| ctx.hscroll_detail(-1); nil }
+      # Shift+←/→ now extends a horizontal selection (handled inline in
+      # HistoryController#handle_detail_body_key), so there is no dedicated h-scroll
+      # binding — the caret follows the viewport instead (ensure_detail_visible_x).
 
       r.register Verb::Definition.new(
         "detail.toggle-pane", "Switch pane (cycle)", "Cycle REQ → RES → FRAMES",

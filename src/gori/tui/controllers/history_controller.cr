@@ -44,7 +44,12 @@ module Gori::Tui
       # List (optionally + bottom Req/Res preview) or full detail drill-in.
       proxy = @host.session.proxy
       if @host.overlay == :detail
-        BodyChrome.framed(screen, rect, body_focused) { |inner| @history.render_detail(screen, inner, focused: body_focused) }
+        # Two-level detail focus: the STRIP (chip row) vs the BODY. When the strip holds
+        # focus the frame greys and the caret/selection stand down (gated on `focused`),
+        # while the active chip lights a gold pill (strip_focused).
+        strip_here = body_focused && @history.detail_strip_focus?
+        body_here = body_focused && !@history.detail_strip_focus?
+        BodyChrome.framed(screen, rect, body_here) { |inner| @history.render_detail(screen, inner, focused: body_here, strip_focused: strip_here) }
       else
         @history.refresh_preview(@host.session.store) if @history.preview_enabled?
         BodyChrome.framed(screen, rect, body_focused) do |inner|
@@ -73,8 +78,10 @@ module Gori::Tui
       if @host.overlay == :detail
         if pane = @history.detail_pane_at(inner, mx, my)
           @history.set_detail_pane_public(pane)
+          @history.set_detail_focus(:strip) # a chip click parks focus on the strip
         elsif mode = @history.detail_mode_at(inner, mx, my)
           @host.focus_body
+          @history.set_detail_focus(:strip) # the mode chips live on the strip row too
           case mode
           when :hex    then @history.toggle_detail_hex
           when :ws     then @host.toggle_reveal
@@ -83,6 +90,7 @@ module Gori::Tui
         elsif my >= inner.y + 2
           body = Rect.new(inner.x + 1, inner.y + 2, {inner.w - 2, 0}.max, {inner.bottom - (inner.y + 2), 0}.max)
           @host.focus_body
+          @history.set_detail_focus(:body) # a body click enters the caret/text level
           @history.detail_click_to_cursor(body, mx, my, focused: true)
         end
         return true
@@ -139,25 +147,70 @@ module Gori::Tui
       true
     end
 
+    # Two-level detail input, the direct analogue of Runner#handle_subtabs_key: the chip
+    # row (STRIP) switches panes / descends; the BODY moves the caret + selects. Runs
+    # BEFORE the HistoryDetail verb keymap, so returning true shadows the plain-arrow
+    # verbs; anything it returns false for (esc, Tab, ^X/b/p, ^R/⇧F, x select-line) falls
+    # through to the keymap.
     def handle_detail_key(ev : Termisu::Event::Key) : Bool
       return false unless @host.overlay == :detail
       if ev.key.space? && !ev.ctrl? && !ev.alt?
         @host.open_space_menu
         return true
       end
-      return true if handle_detail_hscroll(ev)
+      @history.detail_strip_focus? ? handle_detail_strip_key(ev) : handle_detail_body_key(ev)
+    end
+
+    # STRIP level: the chip row acts as a focusable sub-tab strip. ←/→ switch panes
+    # (clamped at both ends — no auto-close), ↓/↵/j descend into the body, ↑/k pop out
+    # (close detail → the tab bar). esc/Tab/toggles fall through (return false).
+    private def handle_detail_strip_key(ev : Termisu::Event::Key) : Bool
+      return false if ev.ctrl? || ev.alt?
       key = ev.key
-      selecting = ev.shift?
-      nav = @history.detail_navigable?
       case
-      when key.left? && selecting  then @history.detail_move(0, -1, selecting: true) if nav
-      when key.right? && selecting then @history.detail_move(0, 1, selecting: true) if nav
-      when key.up? && selecting, key.lower_k? && selecting
-        @history.detail_move(-1, 0, selecting: true) if nav
-      when key.down? && selecting, key.lower_j? && selecting
-        @history.detail_move(1, 0, selecting: true) if nav
-      when ev.char == 'y' || ev.key.lower_y?
-        detail_copy_selection
+      when key.left?, key.lower_h?             then @history.detail_pane_advance(-1)
+      when key.right?, key.lower_l?            then @history.detail_pane_advance(1)
+      when key.down?, key.lower_j?, key.enter? then @history.set_detail_focus(:body)
+      when key.up?, key.lower_k?               then close_detail; @host.request_focus(:menu)
+      else
+        return false
+      end
+      true
+    end
+
+    # BODY level: caret move + shift-selection (all four directions, incl. horizontal
+    # ⇧←/→), y copies. ↑/k at the very top ascends to the STRIP instead of scrolling.
+    # detail_move self-guards on detail_navigable? (a no-op in the hex dump), so plain
+    # ←/→ just do nothing there and no explicit gate is needed here.
+    private def handle_detail_body_key(ev : Termisu::Event::Key) : Bool
+      return true if ev.shift? && handle_detail_body_select(ev) # ⇧arrows extend the selection
+      key = ev.key
+      case
+      when key.left?, key.lower_h?        then @history.detail_move(0, -1) # plain horizontal caret
+      when key.right?, key.lower_l?       then @history.detail_move(0, 1)
+      when key.up?, key.lower_k?          then detail_body_up
+      when key.down?, key.lower_j?        then @history.scroll_detail(1)
+      when ev.char == 'y' || key.lower_y? then detail_copy_selection
+      else
+        return false
+      end
+      true
+    end
+
+    # ↑/k in the body: at the very top ascend to the STRIP, else move the caret up.
+    private def detail_body_up : Nil
+      @history.detail_at_top? ? @history.set_detail_focus(:strip) : @history.scroll_detail(-1)
+    end
+
+    # ⇧+arrow (or ⇧+h/j/k/l) extends the selection from the caret. Returns false for a
+    # non-arrow key so the caller falls through to the plain-nav case.
+    private def handle_detail_body_select(ev : Termisu::Event::Key) : Bool
+      key = ev.key
+      case
+      when key.up?, key.lower_k?    then @history.detail_move(-1, 0, selecting: true)
+      when key.down?, key.lower_j?  then @history.detail_move(1, 0, selecting: true)
+      when key.left?, key.lower_h?  then @history.detail_move(0, -1, selecting: true)
+      when key.right?, key.lower_l? then @history.detail_move(0, 1, selecting: true)
       else
         return false
       end
@@ -176,31 +229,20 @@ module Gori::Tui
       @history.detail_clear_selection
     end
 
-    private def handle_detail_hscroll(ev : Termisu::Event::Key) : Bool
-      key = ev.key
-      if key.left? && ev.shift?
-        @history.hscroll_detail(-1)
-        true
-      elsif key.right? && ev.shift?
-        @history.hscroll_detail(1)
-        true
-      else
-        false
-      end
-    end
-
     def body_hint(focus : Symbol) : String
       reg = @host.session.registry
-      y = Hotkeys.binding_label(reg, "history.copy", "y")
       repeater = Hotkeys.binding_label(reg, "history.repeater", "^R")
       issue = Hotkeys.binding_label(reg, "issue.create", "⇧F")
       follow = Hotkeys.binding_label(reg, "history.toggle-follow", "f")
       filter = Hotkeys.binding_label(reg, "history.query", "/")
       intercept = Hotkeys.binding_label(reg, "intercept.toggle", "i")
       if @host.overlay == :detail
-        nav = @history.detail_navigable? ? "↑/↓ move" : "↑/↓ scroll"
+        if @history.detail_strip_focus?
+          return "←/→ panes · ↓/↵ enter · ↑ tabs · ↹ pane · space cmds · esc back"
+        end
+        nav = @history.detail_navigable? ? "↑/↓ move · ←/→ caret" : "↑/↓ scroll"
         dy = Hotkeys.binding_label(reg, "detail.copy", "y")
-        return "←/→ panes · #{nav} · ⇧arrows select · #{dy} copy · ⇧←/→ h-scroll · space cmds · esc back"
+        return "#{nav} · ⇧arrows select · #{dy} copy · ↑ strip · ↹ pane · space cmds · esc back"
       end
       return "type query · ↹ complete · ↵ apply · esc clear" if @history.querying?
       if @history.preview_enabled?
