@@ -132,7 +132,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       if callbacks_sub?
-        return "↑/↓ scroll · esc back" if @cb_detail
+        return "←/esc back · ↑/↓ scroll" if @cb_detail
         return "type to filter · ↵ keep · esc clear" if @filter_editing
         "↑/↓ select · ‹/› provider · g payload · y copy · / filter · ^R listen · ^X stop · ↵ detail · space cmds"
       else
@@ -604,10 +604,19 @@ module Gori::Tui
       c = ev.char || key.to_char
       if @cb_detail
         case
-        when key.escape?             then @cb_detail = false
-        when key.up?, key.lower_k?   then @cb_detail_scroll -= 1
-        when key.down?, key.lower_j? then @cb_detail_scroll += 1
-        else                              return true
+        when key.escape?, key.left?, key.lower_h?
+          @cb_detail = false
+        when key.up?, key.lower_k?
+          if @cb_detail_scroll <= 0
+            @cb_detail = false
+            @host.request_focus(:subtabs)
+          else
+            @cb_detail_scroll -= 1
+          end
+        when key.down?, key.lower_j?
+          @cb_detail_scroll += 1
+        else
+          return true
         end
         return true
       end
@@ -617,7 +626,11 @@ module Gori::Tui
       when key.down?, key.lower_j? then @cb_sel = {@cb_sel + 1, {filtered_callbacks.size - 1, 0}.max}.min
       when key.left?               then cycle_provider(-1)
       when key.right?              then cycle_provider(1)
-      when key.enter?              then @cb_detail = true if selected_callback
+      when key.enter?
+        if selected_callback
+          @cb_detail = true
+          @cb_detail_scroll = 0
+        end
       when c == 'g'                then generate_payload
       when c == 'y'                then copy_payload
       else                              return false
