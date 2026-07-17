@@ -5149,6 +5149,10 @@ module Gori::Tui
       repeater_controller.repeater_pretty_request
     end
 
+    def repeater_minimize : Nil
+      repeater_controller.repeater_minimize
+    end
+
     def repeater_auto_mark : Nil
       repeater_controller.repeater_auto_mark
     end

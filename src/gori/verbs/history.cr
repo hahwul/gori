@@ -90,6 +90,15 @@ module Gori
         Verb::Scope::Repeater, [Verb::Chord.new("n", ctrl: true)],
         available: in_repeater, mnemonic: 'n') { |ctx| ctx.repeater_new; nil }
 
+      # "Minimize request" (Caido-"squash"-style): strip cosmetic headers, tracking-cookie
+      # crumbs and unused query/body params, re-sending to verify the response is unchanged.
+      # Runs in the BACKGROUND (bottom-bar spinner + notification) and writes the trimmed
+      # request back when done. Menu-only (no chord); 'M' is free across COMMON ∪ every
+      # Repeater section (all-lowercase keys there — pairs like Copy 'y' / Copy-as 'Y').
+      r.register Verb::Definition.new(
+        "repeater.minimize", "Minimize request", "Strip cosmetic headers, cookies and unused params while keeping the response unchanged (runs in the background)",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'M') { |ctx| ctx.repeater_minimize; nil }
+
       # Search the open repeater sub-tabs and jump to the chosen one — menu-only
       # (no chord), shown only when there are ≥2 sessions to pick between. Tagged
       # :tab (session-level) rather than :common: it's the one verb that seeds

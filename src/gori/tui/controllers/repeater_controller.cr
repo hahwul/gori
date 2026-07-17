@@ -11,6 +11,8 @@ require "../../hotkeys"
 require "../../repeater/engine"
 require "../../repeater/h2_engine"
 require "../../repeater/ws_engine"
+require "../../repeater/minimize"
+require "../../fuzz/engine"
 
 module Gori::Tui
   # One open repeater session (a "sub-tab" under the top-level Repeater tab). Each carries
@@ -64,6 +66,11 @@ module Gori::Tui
       # "Send group" pipelines several requests on one connection and delivers the
       # labelled per-request results here (distinct type again — an ordered array).
       @group_results = Channel({RepeaterView, Array({String, Repeater::Result})}).new(8)
+      # "Minimize request" fires many probe sends off the UI fiber; it streams Progress
+      # pings and one terminal Report back here (a union type — Progress or Report), drained
+      # by drain_results. Only one minimize runs at a time (tracked by @minimize_job).
+      @minimize_events = Channel({RepeaterView, Repeater::Minimize::Progress | Repeater::Minimize::Report}).new(256)
+      @minimize_job = nil.as({RepeaterView, Int32}?) # the {view, Jobs id} of a running minimize
     end
 
     def tab : Symbol
@@ -795,7 +802,47 @@ module Gori::Tui
         @host.status("send group: #{ok}/#{labeled.size} ok on one connection")
         applied = true
       end
+      while pair = nonblocking_minimize_event
+        view, msg = pair
+        next unless tab = @repeaters.find { |t| t.view.same?(view) } # sub-tab closed mid-run → drop
+        case msg
+        in Repeater::Minimize::Progress
+          if (mj = @minimize_job) && mj[0].same?(view)
+            @host.jobs.progress(mj[1], msg.done, msg.total, "#{msg.done}/#{msg.total}")
+          end
+        in Repeater::Minimize::Report
+          apply_minimize_report(tab, msg)
+        end
+        applied = true
+      end
       applied
+    end
+
+    # Apply a finished minimize on the UI fiber: install the trimmed request into the editor
+    # (only when it actually removed something), finish the job, and notify. A closed tab is
+    # already dropped by the drain, and close_repeater_tab finished its job.
+    private def apply_minimize_report(tab : RepeaterTab, report : Repeater::Minimize::Report) : Nil
+      view = tab.view
+      job = (mj = @minimize_job) && mj[0].same?(view) ? mj[1] : nil
+      @minimize_job = nil if job
+      unless report.aborted || report.removed.empty?
+        view.replace_request(report.minimized_text)
+        persist_repeater_tab(tab) # persist even if the user switched sub-tabs while it ran
+      end
+      level = report.aborted ? :warning : (report.removed.empty? ? :info : :success)
+      @host.jobs.finish(job, report.aborted ? :error : :done, report.note) if job
+      @host.notifications.push(level, "Minimize: #{report.note} on #{view.summary}",
+        Jobs::Goto.new(:repeater, tab.db_id), source: "minimize")
+      @host.status(report.note)
+    end
+
+    # Persist a specific tab's request edits (minimize can land on a tab that isn't current).
+    # Plain-text only — minimize is gated off WS/hex/decode, so no ws-message branch here.
+    private def persist_repeater_tab(tab : RepeaterTab) : Nil
+      return unless (id = tab.db_id) && tab.view.dirty?
+      v = tab.view
+      @host.session.store.update_repeater(id, v.target, v.request_text, v.http2?, v.auto_content_length?, v.sni_override)
+      v.clear_dirty
     end
 
     # Passive-scan a successful HTTP Repeater send into Probe (mode-gated by the analyzer).
@@ -854,6 +901,15 @@ module Gori::Tui
     private def nonblocking_group_result : {RepeaterView, Array({String, Repeater::Result})}?
       select
       when p = @group_results.receive
+        p
+      else
+        nil
+      end
+    end
+
+    private def nonblocking_minimize_event : {RepeaterView, Repeater::Minimize::Progress | Repeater::Minimize::Report}?
+      select
+      when p = @minimize_events.receive
         p
       else
         nil
@@ -1054,6 +1110,14 @@ module Gori::Tui
     # closes the Repeater tab shows its empty hint.
     def close_repeater_tab : Nil
       return if @current_repeater_idx < 0 || @current_repeater_idx >= @repeaters.size
+      closing = @repeaters[@current_repeater_idx].view
+      # Finish a running minimize job NOW: once the view leaves @repeaters the drain drops
+      # its remaining events (incl. the terminal Report), so jobs.finish would never run and
+      # the bottom-bar spinner would animate forever. The background fiber unwinds on its own.
+      if (mj = @minimize_job) && mj[0].same?(closing)
+        @host.jobs.finish(mj[1], :stopped, "closed")
+        @minimize_job = nil
+      end
       if id = @repeaters[@current_repeater_idx].db_id
         @host.session.store.delete_repeater(id) # also propagates the close to peer sessions
       end
@@ -1105,6 +1169,64 @@ module Gori::Tui
         # Clear HERE (not in the drain) — a dropped late send never reaches the drain,
         # which would otherwise leave the flag stuck and wedge re-send.
         view.inflight = false
+      end
+    end
+
+    # Hard ceiling on a single minimize's total network sends (calibration + probes). A
+    # request with a huge header/param set can't blast the origin — the CappedBackend
+    # returns a benign error past the cap and the run reports a partial result.
+    MINIMIZE_SEND_CAP = 250_i64
+
+    # "Minimize request" (Space → M): strip cosmetic headers, tracking-cookie crumbs and
+    # unused query/body params from the current request while keeping the response
+    # essentially unchanged (Caido-"squash"-style). It fires many probe sends, so it runs as
+    # a BACKGROUND job (bottom-bar spinner + completion notification) and writes the trimmed
+    # request back into the editor when done. One minimize at a time, per project.
+    def repeater_minimize : Nil
+      return unless (tab = current_repeater_tab) && (view = tab.view).loaded?
+      unless view.minimizable?
+        @host.status("minimize needs a plain HTTP text request (not hex/gRPC/WS/decode or §markers)")
+        return
+      end
+      if view.inflight? || @minimize_job
+        @host.status("repeater busy — one send/minimize at a time")
+        return
+      end
+      view.commit_chain_pane
+      scheme, host, port = view.parse_target
+      if host.empty?
+        @host.status("repeater: invalid target — use scheme://host[:port]/path")
+        return
+      end
+      save_current_repeater # persist the request we're about to minimize
+      # Everything the background fiber needs, captured as plain locals — it must never
+      # touch @editor / the store. `resolve` mirrors request_bytes' plain-text branch:
+      # env-expand → Content-Length resync (only when Auto-CL is on).
+      text = view.request_text
+      auto_cl = view.auto_content_length?
+      resolve = ->(t : String) do
+        raw = Env.expand_wire(t)
+        auto_cl ? Repeater::FlowRequest.resync_content_length(raw) : raw
+      end
+      backend = Fuzz::CappedBackend.new(
+        Fuzz::Sender.new(Fuzz::Origin.new(scheme, host, port), view.http2?,
+          !@host.session.config.insecure_upstream?, view.sni_override, timeout: 10.seconds),
+        MINIMIZE_SEND_CAP)
+      job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
+      @minimize_job = {view, job}
+      events = @minimize_events
+      @host.status("minimizing #{view.summary} in the background — watch the bottom bar / notifications")
+      spawn(name: "gori-minimize") do
+        report = Repeater::Minimize.run(text, auto_cl: auto_cl, resolve: resolve, backend: backend) do |progress|
+          select # progress pings are droppable — the terminal Report is not
+          when events.send({view, progress})
+          else
+          end
+        end
+        events.send({view, report})
+      rescue ex
+        events.send({view, Repeater::Minimize::Report.new(
+          text, [] of Repeater::Minimize::Removed, 0, true, "minimize failed: #{ex.message}")})
       end
     end
 
