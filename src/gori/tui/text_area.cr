@@ -147,6 +147,21 @@ module Gori::Tui
       refresh_env_complete
     end
 
+    # Insert a whole string at the caret as ONE undo unit (cross-tab "insert OAST payload").
+    # Assumes single-line content (URLs have no newline); a per-char loop would create N undo
+    # steps and refresh env-complete N times.
+    def insert_string(str : String) : Nil
+      return if str.empty?
+      push_undo
+      line = @lines[@cy]
+      cx = @cx.clamp(0, line.size)
+      @lines[@cy] = "#{line[0, cx]}#{str}#{line[cx..]}"
+      @cx = cx + str.size
+      @styled = nil
+      @edits += 1
+      refresh_env_complete
+    end
+
     # Insert `ch` TWICE as one undo unit — the `§§`/`¦¦` escaped-literal pair the marker
     # guard produces when a `§`/`¦` would otherwise nest inside (or flush against) a marker.
     # Caret ends past both, so the literal sits behind it like a normal keystroke.

@@ -69,7 +69,21 @@ module Gori
         "create_rule", "update_rule", "delete_rule", "set_rule_enabled",
         "create_note", "update_note", "delete_note",
         "create_repeater", "update_repeater", "delete_repeater",
+        "oast_start", "oast_stop",
       }
+
+      # A live OAST listening session held server-side across tool calls (oast_start →
+      # oast_poll/oast_payload → oast_stop). Ephemeral to this MCP process.
+      private class OastMcpSession
+        getter provider : Oast::Provider
+        getter session : Oast::Session
+        getter http : Oast::Http
+        getter kind_label : String
+        getter seen = Set(String).new
+
+        def initialize(@provider, @session, @http, @kind_label)
+        end
+      end
 
       # Fuzz-run safety rails (a single tool call must never launch an unbounded
       # flood, and the in-memory result buffer can't grow without bound).
@@ -109,6 +123,7 @@ module Gori
         @jobs = {} of String => FuzzJob
         @mine_jobs = {} of String => MineJob
         @discover_jobs = {} of String => DiscoverJob
+        @oast_mcp = {} of String => OastMcpSession
         @job_seq = 0
         # switch_project reopens @store; @owns_store tracks whether WE opened the
         # current one (and must close it on the next switch). The initial store is
@@ -406,7 +421,35 @@ module Gori
             "workspace binding) and which one this server is currently serving (current:true). " \
             "Use switch_project to change the active project." { }
 
+          tool j, "oast_presets",
+            "List built-in public OAST providers (interactsh servers, BOAST, webhook.site, postbin)." { }
+
+          tool j, "oast_poll",
+            "Poll an OAST session (from oast_start) for new out-of-band callbacks. Returns only " \
+            "interactions not already seen on this session; each has protocol/method/source/" \
+            "destination/raw_request. Use to confirm blind SSRF/XXE/RCE etc." do |s|
+            s.field "session_id", strprop("session id returned by oast_start"), required: true
+          end
+
+          tool j, "oast_payload",
+            "Generate a fresh OAST payload URL for an existing session (local, no network). All " \
+            "payloads in a session share the correlation id oast_poll watches." do |s|
+            s.field "session_id", strprop("session id returned by oast_start"), required: true
+          end
+
           if @allow_actions
+            tool j, "oast_start",
+              "Register an OAST listener and return {session_id, payload_url}. Default provider is " \
+              "interactsh on a public server. Put payload_url in a target, then oast_poll for hits." do |s|
+              s.field "provider", strprop("interactsh (default) | custom-http | webhook.site | BOAST | postbin")
+              s.field "server", strprop("provider server/base URL (default: the provider's public preset)")
+              s.field "token", strprop("optional provider auth token")
+            end
+
+            tool j, "oast_stop",
+              "Deregister and stop an OAST session (frees the server-side registration)." do |s|
+              s.field "session_id", strprop("session id returned by oast_start"), required: true
+            end
             tool j, "intercept_forward",
               "Forward a currently-held intercept item (from intercept_list) byte-exact, letting " \
               "the request/response continue. The action is applied by the capturing gori instance " \
@@ -812,6 +855,56 @@ module Gori
       end
 
       # Read-only tools (always exposed). nil when `name` isn't one of them.
+      # --- OAST (out-of-band) tools ------------------------------------------
+      private def oast_presets_tool : Result
+        presets = Oast::Presets.all.map { |p| {type: p.kind.label, name: p.name, host: p.host} }
+        Result.new(presets.to_json)
+      end
+
+      private def oast_start(h) : Result
+        provider = str(h, "provider") || "interactsh"
+        kind = Oast::ProviderKind.parse?(provider)
+        return Result.new("unknown provider '#{provider}'", is_error: true) unless kind
+        host = str(h, "server") || Oast::Presets.all.find { |p| p.kind == kind }.try(&.host)
+        return Result.new("'server' is required for #{kind.label}", is_error: true) unless host
+        prov = Oast::Provider.build(kind, host, str(h, "token"))
+        http = Oast::HttpClient.new(@verify_upstream)
+        session = prov.register(http)
+        sid = "oast-#{@job_seq += 1}"
+        @oast_mcp[sid] = OastMcpSession.new(prov, session, http, kind.label)
+        payload = prov.generate_payload(session)
+        Result.new({session_id: sid, provider: kind.label, payload_url: payload}.to_json)
+      rescue ex
+        Result.new("OAST register failed: #{ex.message}", is_error: true)
+      end
+
+      private def oast_payload(h) : Result
+        sid = str(h, "session_id")
+        s = sid ? @oast_mcp[sid]? : nil
+        return Result.new("unknown or expired session_id", is_error: true) unless s
+        Result.new({session_id: sid, payload_url: s.provider.generate_payload(s.session)}.to_json)
+      end
+
+      private def oast_poll(h) : Result
+        sid = str(h, "session_id")
+        s = sid ? @oast_mcp[sid]? : nil
+        return Result.new("unknown or expired session_id", is_error: true) unless s
+        fresh = s.provider.poll(s.http, s.session).reject { |i| s.seen.includes?(i.unique_id) }
+        fresh.each { |i| s.seen << i.unique_id }
+        callbacks = fresh.map { |i| Oast::Present.interaction(i, s.kind_label) }
+        Result.new({session_id: sid, count: fresh.size, callbacks: callbacks}.to_json)
+      rescue ex
+        Result.new("OAST poll failed: #{ex.message}", is_error: true)
+      end
+
+      private def oast_stop(h) : Result
+        sid = str(h, "session_id")
+        s = sid ? @oast_mcp.delete(sid) : nil
+        return Result.new("unknown or expired session_id", is_error: true) unless s
+        s.provider.deregister(s.http, s.session) rescue nil
+        Result.new({stopped: sid}.to_json)
+      end
+
       private def read_tool(name : String, h) : Result?
         case name
         when "list_history"            then list_history(h)
@@ -831,6 +924,9 @@ module Gori
         when "list_notes"              then list_notes
         when "get_note"                then get_note(h)
         when "decode"                  then decoder(h)
+        when "oast_presets"            then oast_presets_tool
+        when "oast_poll"               then oast_poll(h)
+        when "oast_payload"            then oast_payload(h)
         when "list_rules"              then list_rules
         when "list_projects"           then list_projects
         when "ql_explain"              then ql_explain(h)
@@ -843,6 +939,8 @@ module Gori
         case name
         when "send_request"     then gated { send_request(h) }
         when "send_websocket"   then gated { send_websocket(h) }
+        when "oast_start"       then gated { oast_start(h) }
+        when "oast_stop"        then gated { oast_stop(h) }
         when "intercept_forward"       then gated { intercept_forward(h) }
         when "intercept_drop"          then gated { intercept_drop(h) }
         when "intercept_forward_edit"  then gated { intercept_forward_edit(h) }

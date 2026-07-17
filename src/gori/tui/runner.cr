@@ -18,6 +18,7 @@ require "./controllers/project_controller"
 require "./controllers/repeater_controller"
 require "./controllers/fuzzer_controller"
 require "./controllers/miner_controller"
+require "./controllers/oast_controller"
 require "./controllers/comparer_controller"
 require "./controllers/decoder_controller"
 require "./controllers/statusline_controller"
@@ -60,6 +61,7 @@ require "./discover_config_overlay"
 require "./discover_headers_overlay"
 require "./scope_rule_overlay"
 require "./custom_rule_overlay"
+require "./oast_provider_overlay"
 require "./ca_import_overlay"
 require "../paths"
 require "../browser"
@@ -218,6 +220,8 @@ module Gori::Tui
       # Project SCOPE add/edit popup (a/e on the rule list). Built fresh each open.
       @scope_rule_overlay = nil.as(ScopeRuleOverlay?)
       @custom_rule_overlay = nil.as(CustomRuleOverlay?)
+      # OAST provider add/edit popup (a/e on the Providers sub-tab). Built fresh each open.
+      @oast_provider_overlay = nil.as(OastProviderOverlay?)
       # The "Import CA certificate" popup (palette → ca.import): collects the cert +
       # key PEM paths, then hands off to the destructive-CA confirm. @overlay is :ca_import.
       @ca_import_overlay = nil.as(CAImportOverlay?)
@@ -250,6 +254,7 @@ module Gori::Tui
         RepeaterController.new(self),
         FuzzerController.new(self),
         MinerController.new(self),
+        OastController.new(self),
         ComparerController.new(self),
         DecoderController.new(self),
       ].each { |c| @tabs[c.tab] = c }
@@ -312,6 +317,10 @@ module Gori::Tui
 
     private def miner_controller : MinerController
       @tabs[:miner].as(MinerController)
+    end
+
+    private def oast_controller : OastController
+      @tabs[:oast].as(OastController)
     end
 
     private def comparer_controller : ComparerController
@@ -397,6 +406,7 @@ module Gori::Tui
         end
         dirty = true if fuzzer_controller.drain_events
         dirty = true if miner_controller.drain_events
+        dirty = true if oast_controller.drain_events
         dirty = true if discover_controller.drain_events
         if (rev = @session.interceptor.revision) != last_rev
           last_rev = rev
@@ -785,6 +795,7 @@ module Gori::Tui
       repeater_controller.reconcile
       fuzzer_controller.reconcile
       miner_controller.reconcile
+      oast_controller.reconcile
       notes_controller.view.reload(@session.store) unless notes_locked?
       search_recompute # a ^F prompt open over the reloaded view keeps fresh hits
     end
@@ -862,6 +873,7 @@ module Gori::Tui
       when :fuzz_set      then @fuzz_set_overlay.try(&.set_preedit(text))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.set_preedit(text))
       when :scope_rule    then @scope_rule_overlay.try(&.set_preedit(text))
+      when :oast_provider then @oast_provider_overlay.try(&.set_preedit(text))
       when :probe_rule    then @custom_rule_overlay.try(&.set_preedit(text))
       when :ca_import     then @ca_import_overlay.try(&.set_preedit(text))
       when :none          then apply_preedit_body(text)
@@ -953,6 +965,7 @@ module Gori::Tui
       return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
       return handle_fuzz_advanced_key(ev) if @overlay == :fuzz_advanced
       return handle_scope_rule_key(ev) if @overlay == :scope_rule
+      return handle_oast_provider_key(ev) if @overlay == :oast_provider
       return handle_custom_rule_key(ev) if @overlay == :probe_rule
       return handle_ca_import_key(ev) if @overlay == :ca_import
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
@@ -974,6 +987,9 @@ module Gori::Tui
       end
       if @active_tab == :probe && @overlay == :none && @focus == :body && probe_controller.view.querying?
         return if probe_controller.handle_query_key(ev)
+      end
+      if @active_tab == :oast && @overlay == :none && @focus == :body && oast_controller.cb_filter_editing?
+        return if oast_controller.handle_cb_filter_key(ev)
       end
       # Sub-tab filter (issue #121): the `/` bar captures keys until Enter/Esc. Opened
       # from the strip (not the body), so it's not gated on @focus. Generic across the
@@ -1200,7 +1216,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :probe_rule, :ca_import then true
+      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :ca_import then true
       else                                                                                                                                                                                                                                                               false
       end
     end
@@ -1311,6 +1327,7 @@ module Gori::Tui
       when :fuzz_set      then click_fuzz_set(area, mx, my)
       when :fuzz_advanced then click_fuzz_advanced(area, mx, my)
       when :scope_rule    then click_scope_rule(area, mx, my)
+      when :oast_provider then click_oast_provider(area, mx, my)
       when :probe_rule    then click_custom_rule(area, mx, my)
       when :ca_import     then click_ca_import(area, mx, my)
         # :issue_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
@@ -1583,6 +1600,7 @@ module Gori::Tui
       when :fuzz_set      then @fuzz_set_overlay.try(&.move(step))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.move(step))
       when :scope_rule    then @scope_rule_overlay.try(&.move(step))
+      when :oast_provider then @oast_provider_overlay.try(&.move(step))
       when :probe_rule    then @custom_rule_overlay.try(&.move(step))
       when :ca_import     then @ca_import_overlay.try(&.move(step))
       end
@@ -1728,6 +1746,37 @@ module Gori::Tui
     private def close_scope_rule : Nil
       @overlay = :none
       @scope_rule_overlay = nil
+    end
+
+    # OAST provider add/edit popup: same interaction as the scope-rule form. Commit persists
+    # via the controller; an invalid form (missing name/host) keeps the popup open.
+    private def handle_oast_provider_key(ev : Termisu::Event::Key) : Nil
+      ov = @oast_provider_overlay || return
+      case ov.handle_key(ev)
+      when :cancel then close_oast_provider
+      when :commit then commit_oast_provider_overlay(ov)
+      end
+    end
+
+    private def click_oast_provider(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @oast_provider_overlay || return
+      box = ov.overlay_box(area)
+      return close_oast_provider if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
+      if idx = ov.row_at(box, mx, my)
+        ov.set_selected(idx)
+        commit_oast_provider_overlay(ov) if ov.on_save_row?
+      end
+    end
+
+    private def commit_oast_provider_overlay(ov : OastProviderOverlay) : Nil
+      return unless ov.valid?
+      oast_controller.save_provider(ov.edit_id, ov.provider_name, ov.kind, ov.host, ov.token)
+      close_oast_provider
+    end
+
+    private def close_oast_provider : Nil
+      @overlay = :none
+      @oast_provider_overlay = nil
     end
 
     # Probe custom-rule popup: same interaction as the scope-rule form. Commit persists via the
@@ -3508,6 +3557,7 @@ module Gori::Tui
       @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
       @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_advanced
       @scope_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :scope_rule
+      @oast_provider_overlay.try(&.render(screen, layout.body)) if @overlay == :oast_provider
       @custom_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :probe_rule
       @ca_import_overlay.try(&.render(screen, layout.body)) if @overlay == :ca_import
       # The space menu + bottom prompts float over everything else (drawn last).
@@ -3619,6 +3669,7 @@ module Gori::Tui
       when :fuzz_set      then "PAYLOAD SET"
       when :fuzz_advanced then "ADVANCED"
       when :scope_rule    then "SCOPE RULE"
+      when :oast_provider then "OAST PROVIDER"
       when :ca_import     then "IMPORT CA"
       else
         case @focus
@@ -3670,6 +3721,7 @@ module Gori::Tui
       when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
       when :fuzz_advanced then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
       when :scope_rule    then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
+      when :oast_provider then "↑/↓ field · ←/→ type · type name/host/token · ↵ save · esc cancel"
       when :ca_import     then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
       when :detail        then history_controller.body_hint(:body)
       else
@@ -4961,6 +5013,72 @@ module Gori::Tui
       discover_controller.discover_toggle_pause
     end
 
+    # --- OAST tab (delegated to OastController) ---
+    def oast_listen : Nil
+      oast_controller.start_listening_action
+    end
+
+    def oast_stop : Nil
+      oast_controller.stop_listening
+    end
+
+    def oast_generate : Nil
+      oast_controller.generate_payload
+    end
+
+    def oast_copy : Nil
+      oast_controller.copy_payload
+    end
+
+    def oast_filter : Nil
+      oast_controller.start_cb_filter
+    end
+
+    def oast_add_provider : Nil
+      oast_controller.open_add_provider
+    end
+
+    def oast_edit_provider : Nil
+      oast_controller.open_edit_provider
+    end
+
+    def oast_toggle_provider : Nil
+      oast_controller.toggle_provider
+    end
+
+    def oast_delete_provider : Nil
+      oast_controller.delete_provider
+    end
+
+    # --- OAST cross-tab payload insertion (mediated in the shell) ---
+    def oast_payload_available? : Bool
+      oast_controller.has_active_listener?
+    end
+
+    def oast_insert_payload : Nil
+      url = oast_controller.generate_for_insert
+      unless url
+        @toast = "no OAST listener — start one in the OAST tab (^R)"
+        return
+      end
+      ok = case @active_tab
+           when :repeater then repeater_controller.insert_oast_payload(url)
+           when :fuzzer   then fuzzer_controller.insert_oast_payload(url)
+           else                false
+           end
+      @toast = ok ? "inserted OAST payload: #{url}" : "focus the request/template editor first"
+    end
+
+    def oast_copy_payload : Nil
+      url = oast_controller.generate_for_insert
+      unless url
+        @toast = "no OAST listener — start one in the OAST tab (^R)"
+        return
+      end
+      Clipboard.copy(url)
+      @toast = "copied OAST payload: #{url}"
+    end
+
     def goto_discover : Nil
       focus_tab(:target)
       target_controller.select_discover
@@ -5413,6 +5531,18 @@ module Gori::Tui
           ScopeRuleOverlay.new(kind: kind, match_type: match_type, pattern: pattern)
         end
       @overlay = :scope_rule
+    end
+
+    # Host: open the OAST provider add/edit popup (nil edit_id = add a new provider).
+    def open_oast_provider_editor(edit_id : Int64?, name : String, kind : String, host : String, token : String) : Nil
+      k = Oast::ProviderKind.parse?(kind) || Oast::ProviderKind::Interactsh
+      @oast_provider_overlay =
+        if id = edit_id
+          OastProviderOverlay.editing(id, name, k, host, token)
+        else
+          OastProviderOverlay.adding
+        end
+      @overlay = :oast_provider
     end
 
     # Host: open the Probe custom-rule popup (nil rule = add; else edit the given rule).

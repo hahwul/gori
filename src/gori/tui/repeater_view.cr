@@ -1366,6 +1366,16 @@ module Gori::Tui
       "cleared all § markers"
     end
 
+    # Insert an OAST payload URL at the request-editor caret (cross-tab "Insert OAST
+    # payload"). Only when the request pane is focused and not in hex mode.
+    def insert_oast_payload(url : String) : Bool
+      return false unless @focus == :request && !request_hex?
+      @editor.insert_string(url)
+      @editor.set_preedit("")
+      @dirty = true
+      true
+    end
+
     private def markable? : Bool
       @focus == :request && !request_hex?
     end

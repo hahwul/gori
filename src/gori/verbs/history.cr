@@ -504,6 +504,7 @@ module Gori
       register_history(r)
       register_sitemap(r)
       register_discover(r)
+      register_oast(r)
       register_links(r)
       register_issues(r)
       register_probe(r)
