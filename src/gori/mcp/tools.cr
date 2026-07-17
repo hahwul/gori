@@ -389,8 +389,9 @@ module Gori
             "result — the same engine as the TUI Decoder tab. Pure transform: no network, no state. " \
             "`spec` is converter tokens separated by '>', '|' or ',' applied left-to-right, e.g. " \
             "'base64-decode > gunzip', 'url-encode', 'sha256'. Common converters: base64, " \
-            "base64-decode, url-encode, url-decode, hex, hex-decode, gzip, gunzip, deflate, inflate, " \
-            "jwt-decode, html-encode, md5, sha1, sha256. An unknown token returns the full list." do |s|
+            "base64-decode, url-encode, url-encode-all, url-decode, hex, hex-decode, gzip, gunzip, " \
+            "deflate, inflate, raw-deflate, raw-inflate, jwt-decode, html-encode, md5, sha256, crc32, " \
+            "decimal, binary, rot47. An unknown token returns the full list." do |s|
             s.field "input", strprop("the value to transform (UTF-8 text unless input_base64 is set)"), required: true
             s.field "spec", strprop("converter chain, e.g. 'base64-decode > gunzip'"), required: true
             s.field "input_base64", boolprop("treat `input` as base64 and decode it to raw bytes first (for binary input)")

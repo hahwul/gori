@@ -6,6 +6,7 @@ require "digest/md5"
 require "digest/sha1"
 require "digest/sha256"
 require "digest/sha512"
+require "digest/crc32"
 
 module Gori::Decoder
   # Builds the default registry — every v1 converter, in autocomplete display
@@ -34,6 +35,9 @@ module Gori::Decoder
     r.register text("url-decode", "urldecode", "percent-decode",
       category: Category::Encoding, direction: Direction::Decode,
       description: "URL/percent decode ('+' -> space, %XX)") { |s| URI.decode_www_form(s) }
+    r.register encode("url-encode-all", "url-encode-full", "percent-encode-all",
+      category: Category::Encoding,
+      description: "Percent-encode every byte (%XX, uppercase) — WAF-bypass style") { |b| Codecs.url_encode_all(b) }
 
     # ---------------- ENCODING: hex ----------------
     r.register encode("hex-encode", "hex", "tohex",
@@ -59,6 +63,22 @@ module Gori::Decoder
     r.register decode("base58-decode", "unbase58",
       category: Category::Encoding, description: "Base58 decode (Bitcoin alphabet)") { |s| Codecs.base58_decode(s) }
 
+    # ---------------- ENCODING: number bases (byte-oriented, space-separated) ----------------
+    r.register encode("decimal-encode", "decimal", "to-decimal", "dec",
+      category: Category::Encoding, description: "Bytes to space-separated decimal (0-255)") { |b| Codecs.decimal_encode(b) }
+    r.register decode("decimal-decode", "from-decimal", "undecimal",
+      category: Category::Encoding, description: "Space/comma-separated decimal to bytes") { |s| Codecs.decimal_decode(s) }
+
+    r.register encode("binary-encode", "binary", "to-binary", "bin",
+      category: Category::Encoding, description: "Bytes to space-separated 8-bit binary") { |b| Codecs.binary_encode(b) }
+    r.register decode("binary-decode", "from-binary", "unbinary",
+      category: Category::Encoding, description: "Space/comma-separated binary to bytes") { |s| Codecs.binary_decode(s) }
+
+    r.register encode("octal-encode", "octal", "to-octal", "oct",
+      category: Category::Encoding, description: "Bytes to space-separated octal") { |b| Codecs.octal_encode(b) }
+    r.register decode("octal-decode", "from-octal", "unoctal",
+      category: Category::Encoding, description: "Space/comma-separated octal to bytes") { |s| Codecs.octal_decode(s) }
+
     # ---------------- COMPRESSION ----------------
     r.register bytes("gzip-compress", "gzip", "gz",
       category: Category::Compression, direction: Direction::Encode,
@@ -72,6 +92,12 @@ module Gori::Decoder
     r.register bytes("zlib-decompress", "inflate",
       category: Category::Compression, direction: Direction::Decode,
       description: "Zlib/deflate decompress (32 MiB cap)") { |b| Codecs.zlib_decompress(b) }
+    r.register bytes("raw-deflate", "deflate-raw",
+      category: Category::Compression, direction: Direction::Encode,
+      description: "Raw DEFLATE compress (RFC 1951, no zlib/gzip header)") { |b| Codecs.deflate_raw(b) }
+    r.register bytes("raw-inflate", "inflate-raw",
+      category: Category::Compression, direction: Direction::Decode,
+      description: "Raw DEFLATE decompress (RFC 1951, 32 MiB cap)") { |b| Codecs.inflate_raw(b) }
 
     # ---------------- TOKEN ----------------
     r.register encode("jwt-decode", "jwt",
@@ -83,6 +109,7 @@ module Gori::Decoder
     r.register encode("sha1", category: Category::Hash, direction: Direction::Hash, description: "SHA-1 digest (hex)") { |b| Digest::SHA1.hexdigest(b) }
     r.register encode("sha256", category: Category::Hash, direction: Direction::Hash, description: "SHA-256 digest (hex)") { |b| Digest::SHA256.hexdigest(b) }
     r.register encode("sha512", category: Category::Hash, direction: Direction::Hash, description: "SHA-512 digest (hex)") { |b| Digest::SHA512.hexdigest(b) }
+    r.register encode("crc32", category: Category::Hash, direction: Direction::Hash, description: "CRC-32 checksum (hex)") { |b| Digest::CRC32.checksum(b).to_s(16).rjust(8, '0') }
 
     # ---------------- ESCAPE ----------------
     r.register text("html-escape", "html-encode", "htmlentities", "html",
@@ -115,6 +142,8 @@ module Gori::Decoder
       description: "Lowercase") { |s| s.downcase }
     r.register text("reverse", category: Category::Text, direction: Direction::Transform,
       description: "Reverse characters") { |s| s.reverse }
+    r.register text("rot47", category: Category::Text, direction: Direction::Transform,
+      description: "ROT47 (printable ASCII 33-126, self-inverse)") { |s| Codecs.rot47(s) }
 
     r
   end
