@@ -40,6 +40,10 @@ module Gori::Tui
       @styled_same_rev = 0_u32
       @truncated = false
       @change_count = 0 # cached with @rows_cache so the footer doesn't recount each frame
+      # Decoded display lines per slot, cached so a rebuild (build_rows + styled_same)
+      # and a theme reshade don't re-decode/-scrub/-split the same body more than once.
+      @lines_a = nil.as(Array(String)?)
+      @lines_b = nil.as(Array(String)?)
     end
 
     # Chip label (custom name, or a compact A ⇄ B summary). Capped like Repeater/Decoder.
@@ -188,6 +192,8 @@ module Gori::Tui
     private def invalidate : Nil
       @rows_cache = nil
       @styled_same = nil
+      @lines_a = nil
+      @lines_b = nil
     end
 
     private def rows : Array(Repeater::SideBySide::Row)
@@ -195,11 +201,9 @@ module Gori::Tui
     end
 
     private def build_rows : Array(Repeater::SideBySide::Row)
-      a = @slot_a
-      b = @slot_b
-      return [] of Repeater::SideBySide::Row unless a && b
-      al = lines_for(a)
-      bl = lines_for(b)
+      return [] of Repeater::SideBySide::Row unless @slot_a && @slot_b
+      al = lines_a
+      bl = lines_b
       @truncated = al.size > Repeater::Diff::MAX_LINES || bl.size > Repeater::Diff::MAX_LINES
       result = Repeater::SideBySide.rows(Repeater::Diff.lines(al, bl))
       @change_count = Repeater::SideBySide.change_count(result)
@@ -218,8 +222,8 @@ module Gori::Tui
       return cached if cached && @styled_same_rev == Theme.revision
       rs = rows
       out = Array(Highlight::Line?).new(rs.size, nil)
-      if a = @slot_a
-        al = lines_for(a)
+      if @slot_a
+        al = lines_a
         al = al.first(Repeater::Diff::MAX_LINES) if al.size > Repeater::Diff::MAX_LINES
         al_styled = Highlight.from_lines(al, request: @pane == :request)
         ai = 0
@@ -232,6 +236,18 @@ module Gori::Tui
       @styled_same = out
       @styled_same_rev = Theme.revision
       out
+    end
+
+    private def lines_a : Array(String)
+      a = @slot_a
+      return [] of String unless a
+      @lines_a ||= lines_for(a)
+    end
+
+    private def lines_b : Array(String)
+      b = @slot_b
+      return [] of String unless b
+      @lines_b ||= lines_for(b)
     end
 
     private def lines_for(d : Store::FlowDetail) : Array(String)
