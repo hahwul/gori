@@ -96,6 +96,14 @@ private class FakeContext < ExecContext
     @calls << :history_query
   end
 
+  def history_delete : Nil
+    @calls << :history_delete
+  end
+
+  def history_clear : Nil
+    @calls << :history_clear
+  end
+
   def scroll_detail(delta : Int32) : Nil
     @calls << :scroll_detail
   end
@@ -334,6 +342,30 @@ private class FakeContext < ExecContext
 
   def mine_stop : Nil
     @calls << :mine_stop
+  end
+
+  def sequence_selected : Nil
+    @calls << :sequence_selected
+  end
+
+  def sequence_from_repeater : Nil
+    @calls << :sequence_from_repeater
+  end
+
+  def sequence_from_sitemap : Nil
+    @calls << :sequence_from_sitemap
+  end
+
+  def sequence_run : Nil
+    @calls << :sequence_run
+  end
+
+  def sequence_stop : Nil
+    @calls << :sequence_stop
+  end
+
+  def sequence_configure : Nil
+    @calls << :sequence_configure
   end
 
   def miner_duplicate_subtab : Nil

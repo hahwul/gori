@@ -18,6 +18,7 @@ require "./controllers/project_controller"
 require "./controllers/repeater_controller"
 require "./controllers/fuzzer_controller"
 require "./controllers/miner_controller"
+require "./controllers/sequencer_controller"
 require "./controllers/comparer_controller"
 require "./controllers/decoder_controller"
 require "./controllers/jwt_controller"
@@ -94,7 +95,7 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :probe_active | :fuzz_set | :fuzz_advanced | :scope_rule | :probe_rule | :rewriter_rule | :ca_import
+      @overlay = :none # :none | :palette | :detail | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :sequence_config | :probe_active | :fuzz_set | :fuzz_advanced | :scope_rule | :probe_rule | :rewriter_rule | :ca_import
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -120,7 +121,7 @@ module Gori::Tui
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove repeater tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
-      @rename_view = nil.as(RepeaterView | FuzzerView | DecoderView | JwtView | MinerView | ComparerView | Nil)
+      @rename_view = nil.as(RepeaterView | FuzzerView | DecoderView | JwtView | MinerView | SequencerView | ComparerView | Nil)
       # The Repeater sub-tab TAG editor (issue #121) — a bottom prompt mirroring rename,
       # space-separated tags. Held by VIEW identity for the same reconcile-race reason.
       @tag_edit_open = false
@@ -210,6 +211,12 @@ module Gori::Tui
       # The Miner config popup (History/Repeater → space → "Mine parameters"); @overlay is
       # :mine_config while it's up. Built fresh each time it opens (holds the seed request).
       @mine_config_overlay = nil.as(MineConfigOverlay?)
+      # The Sequencer config popup (History/Repeater/Sitemap → "Send to Sequencer", or `c`
+      # to reconfigure the current session); @overlay is :sequence_config while up.
+      # @sequence_reconfigure distinguishes a reconfigure of the CURRENT session (apply +
+      # re-run) from a new-session flow handoff (create + run).
+      @sequence_config_overlay = nil.as(SequenceConfigOverlay?)
+      @sequence_reconfigure = false
       @discover_config_overlay = nil.as(DiscoverConfigOverlay?)
       @discover_headers_overlay = nil.as(DiscoverHeadersOverlay?)
       # :probe_active while the "Run active scan" popup is up (holds the seed flow + estimate).
@@ -258,6 +265,7 @@ module Gori::Tui
         RepeaterController.new(self),
         FuzzerController.new(self),
         MinerController.new(self),
+        SequencerController.new(self),
         ComparerController.new(self),
         DecoderController.new(self),
         JwtController.new(self),
@@ -322,6 +330,10 @@ module Gori::Tui
 
     private def miner_controller : MinerController
       @tabs[:miner].as(MinerController)
+    end
+
+    private def sequencer_controller : SequencerController
+      @tabs[:sequencer].as(SequencerController)
     end
 
     private def comparer_controller : ComparerController
@@ -415,6 +427,7 @@ module Gori::Tui
         end
         dirty = true if fuzzer_controller.drain_events
         dirty = true if miner_controller.drain_events
+        dirty = true if sequencer_controller.drain_events
         dirty = true if discover_controller.drain_events
         if (rev = @session.interceptor.revision) != last_rev
           last_rev = rev
@@ -803,6 +816,7 @@ module Gori::Tui
       repeater_controller.reconcile
       fuzzer_controller.reconcile
       miner_controller.reconcile
+      sequencer_controller.reconcile
       notes_controller.view.reload(@session.store) unless notes_locked?
       search_recompute # a ^F prompt open over the reloaded view keeps fresh hits
     end
@@ -966,6 +980,7 @@ module Gori::Tui
       return handle_notifications_key(ev) if @overlay == :notifications
       return handle_mine_config_key(ev) if @overlay == :mine_config
       return handle_probe_active_key(ev) if @overlay == :probe_active
+      return handle_sequence_config_key(ev) if @overlay == :sequence_config
       return handle_discover_config_key(ev) if @overlay == :discover_config
       return handle_discover_headers_key(ev) if @overlay == :discover_headers
       return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
@@ -1219,7 +1234,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :probe_rule, :rewriter_rule, :ca_import then true
+      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :probe_rule, :rewriter_rule, :ca_import then true
       else                                                                                                                                                                                                                                                               false
       end
     end
@@ -1325,6 +1340,7 @@ module Gori::Tui
       when :notifications then click_notifications(area, mx, my)
       when :mine_config   then click_mine_config(area, mx, my)
       when :probe_active  then click_probe_active(area, mx, my)
+      when :sequence_config then click_sequence_config(area, mx, my)
       when :discover_config then click_discover_config(area, mx, my)
       when :discover_headers then click_discover_headers(area, mx, my)
       when :fuzz_set      then click_fuzz_set(area, mx, my)
@@ -1404,6 +1420,17 @@ module Gori::Tui
       if idx = ov.row_at(box, mx, my)
         ov.set_selected(idx)
         ov.on_run_row? ? start_probe_active(ov) : ov.toggle
+      end
+    end
+
+    private def click_sequence_config(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @sequence_config_overlay
+      return unless ov
+      box = ov.overlay_box(area)
+      return close_sequence_config if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = ov.row_at(box, mx, my)
+        ov.set_selected(idx)
+        start_sequencing(ov) if ov.on_start_row?
       end
     end
 
@@ -1612,6 +1639,7 @@ module Gori::Tui
       when :notifications then @notifications_overlay.select_move(step)
       when :mine_config   then @mine_config_overlay.try(&.move(step))
       when :probe_active  then @probe_active_overlay.try(&.move(step))
+      when :sequence_config then @sequence_config_overlay.try(&.move(step))
       when :discover_config then @discover_config_overlay.try(&.move(step))
       when :fuzz_set      then @fuzz_set_overlay.try(&.move(step))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.move(step))
@@ -1680,6 +1708,41 @@ module Gori::Tui
         ov.adjust(1)
       elsif key.enter? || key.space?
         ov.on_run_row? ? start_probe_active(ov) : ov.toggle
+      end
+    end
+
+    # Sequencer config popup: ↑/↓ field · type to edit the selector · ←/→ cycle · ↵ start.
+    # The selector row is a text field, so printable/caret keys route there first; every
+    # other row uses the ←/→ cycler nav.
+    private def handle_sequence_config_key(ev : Termisu::Event::Key) : Nil
+      ov = @sequence_config_overlay
+      return unless ov
+      key = ev.key
+      if key.escape?
+        close_sequence_config
+        return
+      end
+      if key.up?
+        ov.move(-1)
+        return
+      end
+      if key.down?
+        ov.move(1)
+        return
+      end
+      if key.enter?
+        ov.on_start_row? ? start_sequencing(ov) : ov.toggle_or_advance
+        return
+      end
+      # On the selector row, let the text field consume printable/caret/backspace keys
+      # (incl. ←/→ as caret motion) before the cycler nav sees them.
+      return if ov.editing_selector? && ov.handle_text_key(ev)
+      if key.left?
+        ov.adjust(-1)
+      elsif key.right?
+        ov.adjust(1)
+      elsif key.space?
+        ov.toggle_or_advance
       end
     end
 
@@ -2185,6 +2248,7 @@ module Gori::Tui
         case dest.tab
         when :decoder then decoder_controller.decoder_from_text(payload)
         when :jwt     then jwt_controller.jwt_from_text(payload)
+        when :sequencer then sequencer_controller.sequence_from_text(payload)
         end
       end
       close_send_picker
@@ -3158,6 +3222,7 @@ module Gori::Tui
       when :repeater   then repeater_controller.request_close
       when :fuzzer   then fuzzer_controller.request_close
       when :miner    then miner_controller.request_close
+      when :sequencer then sequencer_controller.request_close
       when :decoder  then decoder_controller.decoder_close
       when :jwt      then jwt_controller.jwt_close
       when :notes    then notes_controller.notes_close
@@ -3170,6 +3235,7 @@ module Gori::Tui
       when :repeater  then repeater_controller.save_current_repeater
       when :fuzzer  then fuzzer_controller.save_current
       when :miner   then miner_controller.save_current
+      when :sequencer then sequencer_controller.save_current
       when :decoder then decoder_controller.commit
       when :notes   then notes_controller.save_notes
       end
@@ -3574,6 +3640,7 @@ module Gori::Tui
       @notifications_overlay.render(screen, layout.body) if @overlay == :notifications
       @mine_config_overlay.try(&.render(screen, layout.body)) if @overlay == :mine_config
       @probe_active_overlay.try(&.render(screen, layout.body)) if @overlay == :probe_active
+      @sequence_config_overlay.try(&.render(screen, layout.body)) if @overlay == :sequence_config
       @discover_config_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_config
       @discover_headers_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_headers
       @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
@@ -3686,6 +3753,7 @@ module Gori::Tui
       when :notifications then "NOTIFICATIONS"
       when :mine_config   then "MINE PARAMS"
       when :probe_active  then "ACTIVE SCAN"
+      when :sequence_config then "SEQUENCER"
       when :discover_config then "DISCOVER"
       when :discover_headers then "CUSTOM HEADERS"
       when :fuzz_set      then "PAYLOAD SET"
@@ -3738,6 +3806,7 @@ module Gori::Tui
       when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
       when :probe_active  then "↑/↓ field · ←/→ notify · ↵ run · esc cancel"
+      when :sequence_config then "↑/↓ field · type to edit selector · ←/→ cycle · ↵ start · esc cancel"
       when :discover_config then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
       when :discover_headers then "one header per line · Host/Connection ignored · esc saves & closes"
       when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
@@ -3820,6 +3889,7 @@ module Gori::Tui
       repeater_controller.save_current_repeater
       fuzzer_controller.save_current
       miner_controller.save_current
+      sequencer_controller.save_current
       issues_controller.commit
       decoder_controller.commit
     end
@@ -4014,7 +4084,7 @@ module Gori::Tui
     # Notes derives its label from the body text, so it has no rename.
     private def renameable_subtabs? : Bool
       @active_tab == :repeater || @active_tab == :fuzzer || @active_tab == :decoder ||
-        @active_tab == :jwt || @active_tab == :miner || @active_tab == :comparer
+        @active_tab == :jwt || @active_tab == :miner || @active_tab == :sequencer || @active_tab == :comparer
     end
 
     # Open the rename prompt for sub-tab `idx` on the active tab, seeding its current
@@ -4028,6 +4098,7 @@ module Gori::Tui
              when :decoder  then decoder_controller.view_at(idx)
              when :jwt      then jwt_controller.view_at(idx)
              when :miner    then miner_controller.view_at(idx)
+             when :sequencer then sequencer_controller.view_at(idx)
              when :comparer then comparer_controller.view_at(idx)
              end
       return unless view
@@ -4054,6 +4125,7 @@ module Gori::Tui
       when DecoderView  then decoder_controller.apply_rename(v, name)
       when JwtView      then jwt_controller.apply_rename(v, name)
       when MinerView    then miner_controller.apply_rename(v, name)
+      when SequencerView then sequencer_controller.apply_rename(v, name)
       when ComparerView then comparer_controller.apply_rename(v, name)
       end
     end
@@ -4283,6 +4355,7 @@ module Gori::Tui
       repeater_controller.save_current_repeater if @active_tab == :repeater
       fuzzer_controller.save_current if @active_tab == :fuzzer
       miner_controller.save_current if @active_tab == :miner
+      sequencer_controller.save_current if @active_tab == :sequencer
       decoder_controller.commit if @active_tab == :decoder
       notes_controller.save_notes if @active_tab == :notes
       issues_controller.commit if @active_tab == :issues
@@ -5165,6 +5238,14 @@ module Gori::Tui
       history_controller.history_query
     end
 
+    def history_delete : Nil
+      history_controller.history_delete
+    end
+
+    def history_clear : Nil
+      history_controller.history_clear
+    end
+
     def scroll_detail(delta : Int32) : Nil
       # ↑ at the very top of the open detail pops focus up to the tab bar, mirroring
       # the list's ↑-at-top → TABS. current_scope keys off @overlay before @focus, so
@@ -5507,6 +5588,85 @@ module Gori::Tui
     private def close_mine_config : Nil
       @overlay = :none
       @mine_config_overlay = nil
+    end
+
+    # --- Sequencer ExecContext / cross-tab mediators ---
+    # CROSS-TAB: open the config popup for History's selected flow (space → Send to Sequencer).
+    def sequence_selected : Nil
+      id = history_target_flow_id
+      return (@toast = "select a flow first") unless id
+      open_sequence_config(sequencer_controller.build_seed_from_flow(id))
+    end
+
+    # CROSS-TAB: open the config popup for the current Repeater request.
+    def sequence_from_repeater : Nil
+      return unless v = repeater_controller.current_view
+      v.flush_decoded_edits
+      open_sequence_config(sequencer_controller.build_seed_from_request(v.target, v.request_text, v.http2?, v.sni_override))
+    end
+
+    # CROSS-TAB: open the config popup for the selected Sitemap endpoint's captured flow.
+    def sequence_from_sitemap : Nil
+      ep = sitemap_controller.view.selected_endpoint
+      return (@toast = "select an endpoint to send") unless ep
+      if id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
+        open_sequence_config(sequencer_controller.build_seed_from_flow(id))
+      else
+        @toast = "no captured request for this path — capture it, or use Discover"
+      end
+    end
+
+    def sequence_run : Nil
+      sequencer_controller.sequence_run
+    end
+
+    def sequence_stop : Nil
+      sequencer_controller.sequence_stop
+    end
+
+    def sequence_configure : Nil
+      reconfigure_sequence
+    end
+
+    # Reconfigure the CURRENT session's token descriptor/goal (Sequencer `c` / verb). Opens
+    # the same overlay with the reconfigure flag so Start applies to the open session.
+    def reconfigure_sequence : Nil
+      seed = sequencer_controller.build_seed_from_current
+      return (@toast = "manual sessions have no token descriptor to configure") unless seed
+      @sequence_reconfigure = true
+      @sequence_config_overlay = SequenceConfigOverlay.new(seed)
+      @overlay = :sequence_config
+    end
+
+    private def open_sequence_config(seed : SequenceSeed?) : Nil
+      unless seed
+        @toast = "cannot sequence this request"
+        return
+      end
+      @sequence_reconfigure = false
+      @sequence_config_overlay = SequenceConfigOverlay.new(seed)
+      @overlay = :sequence_config
+    end
+
+    # Confirm the config popup: start collecting (new session) or apply + re-collect
+    # (reconfigure), staying where we are.
+    private def start_sequencing(ov : SequenceConfigOverlay) : Nil
+      unless ov.valid?
+        @toast = "set a token location first"
+        return
+      end
+      if @sequence_reconfigure
+        sequencer_controller.reconfigure_current(ov.build_config)
+      else
+        sequencer_controller.start_session(ov.seed, ov.build_config)
+      end
+      close_sequence_config
+    end
+
+    private def close_sequence_config : Nil
+      @overlay = :none
+      @sequence_config_overlay = nil
+      @sequence_reconfigure = false
     end
 
     # --- Discover config popup (Sitemap/History → "Discover here") ---

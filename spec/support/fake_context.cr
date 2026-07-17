@@ -49,6 +49,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def history_query : Nil; end
 
+  def history_delete : Nil; end
+
+  def history_clear : Nil; end
+
   def scroll_detail(delta : Int32) : Nil; end
 
   def detail_copy_selection : Nil; end
@@ -182,6 +186,18 @@ class FakeExecContext < Gori::Verb::ExecContext
   def mine_run : Nil; end
 
   def mine_stop : Nil; end
+
+  def sequence_selected : Nil; end
+
+  def sequence_from_repeater : Nil; end
+
+  def sequence_from_sitemap : Nil; end
+
+  def sequence_run : Nil; end
+
+  def sequence_stop : Nil; end
+
+  def sequence_configure : Nil; end
 
   def miner_duplicate_subtab : Nil; end
 

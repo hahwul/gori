@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added — Delete / clear History from the space menu
+
+History can now drop captured flows without compacting the whole project:
+
+- **Delete flow** — Space → `X` on a selected list row (or the open detail) asks
+  once, then removes that flow plus its captured WS messages, FTS row, and flow
+  entity_links.
+- **Clear history** — Space → `C` asks once, then wipes every History flow for
+  the project (Repeater/Probe/Issues sessions stay; dangling sample-flow ids
+  resolve as “gone”).
+
+Both actions are space-menu only (no bare-key shortcut) and always confirm first.
+
 ### Added — Create issue/note while linking from History / Replay / …
 
 Space → **Link to issue** / **Link to note** (History, detail, Repeater, Fuzzer,

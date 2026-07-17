@@ -227,11 +227,11 @@ module Gori
       # Named tab jumps (no chord) — palette discoverability + the only by-command way to
       # reach a tab hidden in settings:tabs (focus_tab force-shows it while active). Keep
       # this list in sync with Tui::Chrome::TABS so every catalog tab — including the
-      # default-hidden one (Miner) — stays reachable from the command palette.
+      # default-hidden ones (Miner, Sequencer) — stays reachable from the command palette.
       {
         :project => "Project", :target => "Target", :history => "History", :intercept => "Intercept",
-        :repeater => "Repeater", :fuzzer => "Fuzzer", :miner => "Miner", :decoder => "Decoder",
-        :jwt => "JWT", :comparer => "Comparer", :probe => "Probe", :issues => "Issues", :notes => "Notes",
+        :repeater => "Repeater", :fuzzer => "Fuzzer", :miner => "Miner", :sequencer => "Sequencer",
+        :decoder => "Decoder", :jwt => "JWT", :comparer => "Comparer", :probe => "Probe", :issues => "Issues", :notes => "Notes",
         :rewriter => "Rewriter",
       }.each do |tab, label|
         r.register Verb::Definition.new(

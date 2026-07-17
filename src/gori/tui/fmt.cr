@@ -36,6 +36,19 @@ module Gori::Tui
       unit(n / 1_000_000_000.0, "B")
     end
 
+    # A fraction (0.0–1.0) as a percentage: whole at/above 10% (27%), one decimal below
+    # (3.4%). Used by the Sequencer's entropy/uniqueness readouts.
+    def self.pct(frac : Float64) : String
+      v = frac * 100
+      v >= 10 || v <= -10 ? "#{v.round.to_i}%" : "#{v.round(1)}%"
+    end
+
+    # A bits figure for the Sequencer's entropy readouts (132b / 5.98b), one decimal
+    # below 100 and whole above — same rounding spirit as `unit`.
+    def self.bits(v : Float64) : String
+      v.abs < 100 ? "#{v.round(1)}b" : "#{v.round.to_i}b"
+    end
+
     # Compact request→response latency (ms/s/m/h), bounded to ≤6 cols. "—" until the
     # response lands; a minute/hour tier keeps very slow flows from overflowing.
     def self.dur(us : Int64?) : String

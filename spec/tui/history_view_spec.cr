@@ -885,6 +885,36 @@ describe Gori::Tui::HistoryView do
       rows.should_not contain("esc clears the filter") # would be misleading — esc won't unfilter
     end
   end
+
+  it "delete_by_id removes one flow and reloads the list" do
+    tmp_store do |store|
+      keep = add_flow(store, "GET", "/keep", 200)
+      gone = add_flow(store, "GET", "/gone", 200)
+      view = HistoryView.new
+      view.reload(store)
+      view.rows.size.should eq(2)
+      view.flow_summary(gone).should contain("GET")
+      view.flow_summary(gone).should contain("/gone")
+
+      view.delete_by_id(store, gone)
+      view.rows.map(&.id).should eq([keep])
+      store.get_flow(gone).should be_nil
+    end
+  end
+
+  it "clear wipes every flow and empties the list" do
+    tmp_store do |store|
+      add_flow(store, "GET", "/a", 200)
+      add_flow(store, "POST", "/b", 201)
+      view = HistoryView.new
+      view.reload(store)
+      view.rows.size.should eq(2)
+
+      view.clear(store)
+      view.empty?.should be_true
+      store.count.should eq(0)
+    end
+  end
 end
 
 describe Gori::Tui::Keybind do

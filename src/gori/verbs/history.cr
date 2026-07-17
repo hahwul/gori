@@ -63,6 +63,18 @@ module Gori
         "history.probe-active", "Run active scan", "Run the Probe active checks against the selected flow (shows the request count first)",
         Verb::Scope::Body, available: history_selected, mnemonic: 'A') { |ctx| ctx.probe_active_selected; nil }
 
+      # Delete the selected flow (confirm-gated). Menu-only — L3 destructive; 'X' is free
+      # across Body COMMON (lowercase 'x' is select-line). Mirrors probe.delete-selected.
+      r.register Verb::Definition.new(
+        "history.delete", "Delete flow", "Delete the selected flow from History (asks first)",
+        Verb::Scope::Body, available: history_selected, mnemonic: 'X') { |ctx| ctx.history_delete; nil }
+
+      # Wipe the project's entire History (confirm-gated). Menu-only; 'C' is free across
+      # Body COMMON (lowercase 'c' is compare). Available whenever History has any rows.
+      r.register Verb::Definition.new(
+        "history.clear", "Clear history", "Delete ALL History flows for this project (asks first)",
+        Verb::Scope::Body, available: in_history, mnemonic: 'C') { |ctx| ctx.history_clear; nil }
+
       # --- repeater workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
       in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
@@ -339,6 +351,13 @@ module Gori
       r.register Verb::Definition.new(
         "detail.probe-active", "Run active scan", "Run the Probe active checks against this flow (shows the request count first)",
         Verb::Scope::HistoryDetail, mnemonic: 'A') { |ctx| ctx.close_detail; ctx.probe_active_selected; nil }
+
+      # Delete the open flow (mirrors history.delete). Menu-only 'X' — free in HistoryDetail
+      # (lowercase 'x' is select-line). Confirm runs after the menu closes; the controller
+      # captures the id so a live reload can't retarget the delete.
+      r.register Verb::Definition.new(
+        "detail.delete", "Delete flow", "Delete this flow from History (asks first)",
+        Verb::Scope::HistoryDetail, mnemonic: 'X') { |ctx| ctx.history_delete; nil }
     end
 
     # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette
@@ -537,6 +556,7 @@ module Gori
       register_probe(r)
       register_fuzz(r)
       register_miner(r)
+      register_sequencer(r)
       register_comparer(r)
       register_decoder(r)
       register_jwt(r)

@@ -1188,6 +1188,63 @@ module Gori
       exec_task ->(c : DB::Connection) { c.exec("DELETE FROM miner_sessions WHERE id = ?", id); nil }
     end
 
+    # --- sequencer sessions (mirror miner_sessions; request is a byte-exact BLOB) ---
+
+    def sequencer_sessions : Array(SequencerSessionRecord)
+      list = [] of SequencerSessionRecord
+      @db.query("SELECT id, target, request, http2, sni, config, flow_id, position, name FROM sequencer_sessions ORDER BY position, id") do |rs|
+        rs.each do
+          list << SequencerSessionRecord.new(
+            rs.read(Int64), rs.read(String), rs.read(Bytes), rs.read(Int32) != 0,
+            rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?))
+        end
+      end
+      list
+    end
+
+    def get_sequencer_session(id : Int64) : SequencerSessionRecord?
+      @db.query(
+        "SELECT id, target, request, http2, sni, config, flow_id, position, name FROM sequencer_sessions WHERE id = ?",
+        id) do |rs|
+        return SequencerSessionRecord.new(
+          rs.read(Int64), rs.read(String), rs.read(Bytes), rs.read(Int32) != 0,
+          rs.read(String?), rs.read(String), rs.read(Int64?), rs.read(Int32), rs.read(String?)) if rs.move_next
+      end
+      nil
+    end
+
+    def insert_sequencer_session(target : String, request : Bytes, http2 : Bool, sni : String?,
+                                 config : String, flow_id : Int64?, position : Int32, name : String? = nil) : Int64
+      ts = now_us
+      exec_task ->(c : DB::Connection) {
+        c.exec("INSERT INTO sequencer_sessions (created_at, updated_at, target, request, http2, sni, config, flow_id, position, name) VALUES (?,?,?,?,?,?,?,?,?,?)",
+          ts, ts, target, request, http2 ? 1 : 0, sni, config, flow_id, position, name)
+        nil
+      }
+    end
+
+    def update_sequencer_session(id : Int64, target : String, request : Bytes, http2 : Bool,
+                                 sni : String?, config : String, name : String? = nil) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE sequencer_sessions SET target=?, request=?, http2=?, sni=?, config=?, name=?, updated_at=? WHERE id=?",
+          target, request, http2 ? 1 : 0, sni, config, name, now_us, id)
+        nil
+      }
+    end
+
+    # Set (or clear, with nil) a sequencer session's custom sub-tab name — its own UPDATE
+    # so a rename never rewrites the request/config (mirrors set_miner_session_name).
+    def set_sequencer_session_name(id : Int64, name : String?) : Nil
+      exec_task ->(c : DB::Connection) {
+        c.exec("UPDATE sequencer_sessions SET name = ?, updated_at = ? WHERE id = ?", name, now_us, id)
+        nil
+      }
+    end
+
+    def delete_sequencer_session(id : Int64) : Nil
+      exec_task ->(c : DB::Connection) { c.exec("DELETE FROM sequencer_sessions WHERE id = ?", id); nil }
+    end
+
     def insert_fuzz_run(session_id : Int64?, target : String, mode : String, total : Int64?) : Int64
       exec_task ->(c : DB::Connection) {
         c.exec("INSERT INTO fuzz_runs (session_id, created_at, target, mode, total, sent, matched, errors, status) VALUES (?,?,?,?,?,0,0,0,'running')",
@@ -1650,6 +1707,46 @@ module Gori
 
     def count : Int64
       @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
+    end
+
+    # Hard-delete one History flow and its captured dependents (WS messages, FTS row,
+    # entity_links that pointed at it). Issues/Probe/Repeater that referenced the id keep
+    # the dangling cross-ref — their resolvers already surface "gone". Writer-fiber only
+    # so it races cleanly with live capture; orphaned h2 frame logs are reaped by the
+    # retention prune (same as a single-id miss in keep_flows).
+    def delete_flow(id : Int64) : Nil
+      exec_task ->(c : DB::Connection) {
+        delete_flow_one(c, id)
+        nil
+      }
+    end
+
+    # Wipe every captured History flow in this project (and their WS/FTS/h2 logs and
+    # flow entity_links). Repeater-owned WS rows (repeater_id set) and workbench sessions
+    # are left intact. Issues/Probe keep dangling sample flow ids.
+    def clear_flows : Nil
+      exec_task ->(c : DB::Connection) {
+        # Captured WS only — WebSocket-Repeater output is keyed by repeater_id.
+        c.exec("DELETE FROM ws_messages WHERE repeater_id IS NULL")
+        # contentless FTS: per-row DELETE is a tombstone; wipe the whole index in one go
+        # so a large clear doesn't leave a full-size tombstone table behind.
+        c.exec("INSERT INTO flows_fts(flows_fts) VALUES('delete-all')")
+        c.exec("DELETE FROM entity_links WHERE ref_kind = 'flow'")
+        c.exec("DELETE FROM flows")
+        c.exec("DELETE FROM h2_frames")
+        c.exec("DELETE FROM h2_connections")
+        @pending_req_fts.clear
+        nil
+      }
+    end
+
+    # Cascade for one flow id (writer connection). Shared by delete_flow.
+    private def delete_flow_one(conn : DB::Connection, id : Int64) : Nil
+      conn.exec("DELETE FROM ws_messages WHERE flow_id = ? AND repeater_id IS NULL", id)
+      conn.exec("DELETE FROM flows_fts WHERE rowid = ?", id)
+      conn.exec("DELETE FROM entity_links WHERE ref_kind = 'flow' AND ref_id = ?", id)
+      conn.exec("DELETE FROM flows WHERE id = ?", id)
+      @pending_req_fts.delete(id)
     end
 
     # Distinct host values for History QL Tab-complete (`host:`). Prefix-filtered
