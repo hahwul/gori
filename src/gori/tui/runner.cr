@@ -3925,8 +3925,11 @@ module Gori::Tui
     end
 
     def leave_project : Nil
-      commit_pending_edits
-      @outcome = :back
+      confirm("LEAVE PROJECT", "Close this project and return to the picker?",
+        confirm_label: "leave", danger: false, return_to: @overlay) do
+        commit_pending_edits
+        @outcome = :back
+      end
     end
 
     # Flush any in-progress editor before leaving/quitting (quit is now centralized,
