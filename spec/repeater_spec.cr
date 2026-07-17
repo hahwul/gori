@@ -1,6 +1,17 @@
 require "./spec_helper"
 require "socket"
 
+# Reference O(n*m) LCS length — the optimality yardstick the fast line diff must match.
+private def lcs_len(a : Array(String), b : Array(String)) : Int32
+  dp = Array.new(a.size + 1) { Array.new(b.size + 1, 0) }
+  a.size.times do |i|
+    b.size.times do |j|
+      dp[i + 1][j + 1] = a[i] == b[j] ? dp[i][j] + 1 : Math.max(dp[i][j + 1], dp[i + 1][j])
+    end
+  end
+  dp[a.size][b.size]
+end
+
 # Origin that records the exact request bytes it received and replies with `body`.
 private def start_origin(body : String, seen : Channel(String)) : Int32
   origin = TCPServer.new("127.0.0.1", 0)
@@ -164,5 +175,40 @@ describe Gori::Repeater::Diff do
     lines = ["a", "b", "c"]
     diff = Gori::Repeater::Diff.lines(lines, lines)
     Gori::Repeater::Diff.change_count(diff).should eq(0)
+  end
+
+  it "collapses a common prefix and suffix around a changed middle" do
+    a = ["h1", "h2", "old-a", "old-b", "t1", "t2"]
+    b = ["h1", "h2", "new-a", "t1", "t2"]
+    diff = Gori::Repeater::Diff.lines(a, b)
+    diff.first(2).map(&.text).should eq(["h1", "h2"])
+    diff.last(2).map(&.text).should eq(["t1", "t2"])
+    diff.first(2).all? { |d| d.kind.same? }.should be_true
+    diff.last(2).all? { |d| d.kind.same? }.should be_true
+  end
+
+  it "always emits a valid, minimal diff (prefix/suffix peeling stays optimal)" do
+    # Small alphabet + duplicated lines is the case where peeling could diverge from
+    # the plain LCS; sweep many shapes and assert each reconstructs both sides and
+    # hits the optimal Same-count. Deterministic (no RNG) so it can't flake.
+    pool = ["a", "b", "c", "a", "b", ""]
+    seeds = [3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41]
+    seeds.each do |sa|
+      seeds.each do |sb|
+        la = (sa % 6) + 1
+        lb = (sb % 6) + 1
+        a = Array.new(la) { |i| pool[(i * sa + sb) % pool.size] }
+        b = Array.new(lb) { |i| pool[(i * sb + sa) % pool.size] }
+        diff = Gori::Repeater::Diff.lines(a, b)
+
+        # Reconstruct: a = Same+Del in order, b = Same+Add in order.
+        got_a = diff.reject(&.kind.add?).map(&.text)
+        got_b = diff.reject(&.kind.del?).map(&.text)
+        got_a.should eq(a)
+        got_b.should eq(b)
+        # Minimal ⇔ Same-count equals the LCS length.
+        diff.count(&.kind.same?).should eq(lcs_len(a, b))
+      end
+    end
   end
 end
