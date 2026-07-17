@@ -35,7 +35,7 @@ home_link = "홈으로 돌아가기"
 
 [home]
 kicker = "HTTP 인터셉트 프록시 · TUI"
-title = "터미널에서 웹을 인터셉트하세요."
+title = "터미널에서 해킹하세요."
 lede = "빠르고 키보드로 움직이는 HTTP/HTTPS 프록시이자 보안 툴킷. 캡처하고, 다시 보내고, 퍼징하고, 스캔하고, 필요하면 AI 에이전트에 통째로 맡길 수도 있습니다."
 cta_start = "시작하기"
 cta_github = "GitHub에서 보기"
