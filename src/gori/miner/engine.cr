@@ -130,8 +130,12 @@ module Gori::Miner
     private def run_round(tasks : Array(Task)) : Array(Array(Task))
       outcomes = [] of Array(Task)
       return outcomes if tasks.empty?
-      jobs = Channel(Task).new(@concurrency)
-      finished = Channel(Nil).new(@concurrency)
+      # Never spawn more workers than there are tasks: the tail bisection/isolation rounds carry
+      # 1–2 tasks, so a fixed pool of @concurrency (up to 100) would spawn dozens of fibers that
+      # only see the closed channel and exit. Capping keeps full parallelism with no idle churn.
+      workers = {@concurrency, tasks.size}.min
+      jobs = Channel(Task).new(workers)
+      finished = Channel(Nil).new(workers)
       interval = pace_interval
 
       spawn(name: "miner-dispatch") do
@@ -151,7 +155,7 @@ module Gori::Miner
         end
       end
 
-      @concurrency.times do |i|
+      workers.times do |i|
         spawn(name: "miner-worker-#{i}") do
           begin
             while task = jobs.receive?
@@ -164,7 +168,7 @@ module Gori::Miner
         end
       end
 
-      @concurrency.times { finished.receive }
+      workers.times { finished.receive }
       outcomes
     end
 
@@ -172,9 +176,10 @@ module Gori::Miner
 
     # Test one bucket; emit any findings; return the bisection children to test next.
     private def process_bucket(task : Task) : Array(Task)
-      canaries = Hash(String, String).new # name => canary
-      task.names.each { |n| canaries[n] = Canary.fresh }
-      raw = send_with_retries(Inject.apply(@base, task.location, canaries.to_a, @config.add_content_length_when_missing?))
+      # One {name, canary} pair per candidate — the SAME array feeds the injector and the
+      # detector (decide), so no per-bucket name→canary / canary→name hashes are built.
+      pairs = task.names.map { |n| {n, Canary.fresh} }
+      raw = send_with_retries(Inject.apply(@base, task.location, pairs, @config.add_content_length_when_missing?))
       if raw.error
         @errors += 1
         mark_done(task.names.size) # keep the bar monotonic; this bucket is inconclusive
@@ -182,13 +187,12 @@ module Gori::Miner
       end
 
       probe = Fingerprint.probe(raw)
-      inv = Hash(String, String).new
-      canaries.each { |name, canary| inv[canary] = name }
-      decision = Miner.decide(report, probe, inv, task.location)
+      decision = Miner.decide(report, probe, pairs, task.location)
 
-      # Reflection is self-identifying — resolve those names with no bisection.
-      decision.reflected.each_value do |name|
-        confirmed = confirm(name, task.location, Evidence::Reflection, canaries[name]?)
+      # Reflection is self-identifying — resolve those names with no bisection. `reflected`
+      # maps canary → name, so the confirming canary is in hand without a name→canary lookup.
+      decision.reflected.each do |canary, name|
+        confirmed = confirm(name, task.location, Evidence::Reflection, canary)
         record_finding(confirmed) if confirmed
         mark_done(1)
       end
@@ -220,6 +224,11 @@ module Gori::Miner
         return Finding.new(name, location, evidence, confidence_for(true, location), canary, nil, 0_i64)
       end
 
+      # Once `majority` matching rounds land, `reproduced` is locked true and no further round
+      # can change the verdict — so stop re-sending. Saves the tail confirm requests for every
+      # finding whose signal reproduces early (the common case, e.g. confirm_rounds=2 → 1 round);
+      # the classification is identical, and a run that never reaches majority still runs them all.
+      majority = (rounds + 1) // 2
       hits = 0
       last_status = nil.as(Int32?)
       last_delta = 0_i64
@@ -229,7 +238,7 @@ module Gori::Miner
         raw = send_with_retries(Inject.apply(@base, location, [{name, c}], @config.add_content_length_when_missing?))
         next if raw.error
         probe = Fingerprint.probe(raw)
-        decision = Miner.decide(r, probe, {c => name}, location)
+        decision = Miner.decide(r, probe, [{name, c}], location)
         if matches_evidence?(decision, evidence, name)
           hits += 1
           # Only record status/delta from a round that actually reproduced the signal, so a
@@ -237,10 +246,11 @@ module Gori::Miner
           last_status = probe.metrics.status
           last_delta = probe.metrics.length - r.base_length
           last_canary = c if evidence.reflection?
+          break if hits >= majority
         end
       end
       return nil if hits == 0
-      Finding.new(name, location, evidence, confidence_for(hits >= (rounds + 1) // 2, location),
+      Finding.new(name, location, evidence, confidence_for(hits >= majority, location),
         last_canary, last_status, last_delta)
     end
 

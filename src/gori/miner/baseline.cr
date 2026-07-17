@@ -119,12 +119,12 @@ module Gori::Miner
   # Compare a probe to the baseline: which canaries reflected, and the strongest metric
   # diff (suppressed when the location is reflection-only).
   def self.decide(report : Baseline::Report, probe : Probe,
-                  canaries_inv : Hash(String, String), location : Location) : Decision
+                  candidates : Array({String, String}), location : Location) : Decision
     reflected = Hash(String, String).new
     # Skip reflection detection on an echo endpoint (reflects ANY input): there every
     # candidate would "reflect", so it carries no discovery signal — only noise.
     unless report.reflects_all[location]?
-      canaries_inv.each do |canary, name|
+      candidates.each do |(name, canary)|
         reflected[canary] = name if probe.reflects?(canary)
       end
     end
