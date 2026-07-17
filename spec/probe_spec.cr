@@ -1380,6 +1380,99 @@ describe "Gori::Probe::Active::CorsReflection" do
   end
 end
 
+describe "Gori::Probe::Active::ForbiddenBypass" do
+  probe = Gori::Probe::Active::ForbiddenBypass.new
+
+  it "only probes originally-denied (401/403) responses with a safe method" do
+    with_store do |store|
+      # A normally-served endpoint has no gate to bypass.
+      ok = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/admin", status: 200, content_type: nil)
+      probe.plan(ok).should be_nil
+      # 404/5xx are not access-control denials.
+      missing = capture_flow(store, "HTTP/1.1 404 Not Found\r\n\r\n", target: "/admin", status: 404, content_type: nil)
+      probe.plan(missing).should be_nil
+      # A denied GET/HEAD → a probe is built.
+      forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403, content_type: nil)
+      probe.plan(forbidden).should_not be_nil
+      unauth = capture_flow(store, "HTTP/1.1 401 Unauthorized\r\n\r\n", target: "/admin", status: 401, content_type: nil)
+      probe.plan(unauth).should_not be_nil
+      # A POST is never probed (no auto state mutation) even when denied.
+      post = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403,
+        method: "POST", content_type: nil)
+      probe.plan(post).should be_nil
+    end
+  end
+
+  it "inserts the full IP-spoof header set once each, dropping any the browser sent" do
+    with_store do |store|
+      forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403,
+        req_headers: "X-Forwarded-For: 9.9.9.9\r\n", content_type: nil)
+      plan = probe.plan(forbidden).not_nil!
+      text = String.new(plan.request)
+      Gori::Probe::Active::ForbiddenBypass::BYPASS_HEADERS.each do |name|
+        # Anchor to the CRLF + exact value so a shorter name (Client-IP) isn't counted inside a
+        # longer one (X-Client-IP).
+        text.scan("\r\n#{name}: 127.0.0.1").size.should eq(1), "expected exactly one #{name}"
+      end
+      text.should_not contain("9.9.9.9") # the browser's original X-Forwarded-For was replaced
+    end
+  end
+
+  it "sends an ORIGIN-FORM request line even for an absolute-form (forward-proxy) flow" do
+    with_store do |store|
+      forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", scheme: "http", host: "target.com",
+        target: "http://target.com/admin?x=1", status: 403, content_type: nil)
+      plan = probe.plan(forbidden).not_nil!
+      line = String.new(plan.request).each_line.first
+      line.should start_with("GET /admin?x=1 ")
+      line.should_not contain("http://target.com")
+    end
+  end
+
+  it "flags High only when the denied response flips to 2xx" do
+    with_store do |store|
+      forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403, content_type: nil)
+      plan = probe.plan(forbidden).not_nil!
+
+      bypassed = Gori::Repeater::Result.new("HTTP/1.1 200 OK\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      dets = probe.detections(plan, bypassed, forbidden)
+      dets.size.should eq(1)
+      dets.first.code.should eq("forbidden_bypass")
+      dets.first.severity.should eq(Gori::Store::Severity::High)
+
+      # Still denied → the gate held → not flagged.
+      still_denied = Gori::Repeater::Result.new("HTTP/1.1 403 Forbidden\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections(plan, still_denied, forbidden).should be_empty
+      # A redirect (e.g. to login) is ambiguous → not flagged.
+      redirect = Gori::Repeater::Result.new("HTTP/1.1 302 Found\r\nLocation: /login\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)
+      probe.detections(plan, redirect, forbidden).should be_empty
+      # A send failure never flags.
+      errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
+      probe.detections(plan, errored, forbidden).should be_empty
+    end
+  end
+
+  it "dedup_key equals plan.dedup_key across denied/allowed/method/absolute-form flows" do
+    with_store do |store|
+      cases = [
+        {target: "/admin", method: "GET", status: 403},                 # denied GET
+        {target: "/admin?id=1", method: "GET", status: 403},            # denied GET + query (stripped in key)
+        {target: "/admin", method: "HEAD", status: 401},                # denied HEAD is safe
+        {target: "/admin", method: "GET", status: 200},                 # allowed → nil
+        {target: "/admin", method: "GET", status: 404},                 # not a denial → nil
+        {target: "/admin", method: "POST", status: 403},                # unsafe method → nil
+        {target: "http://t.example/admin", method: "GET", status: 403}, # absolute-form
+        {target: "/has space", method: "GET", status: 403},             # malformed start-line → nil
+      ]
+      cases.each do |c|
+        d = capture_flow(store, "HTTP/1.1 #{c[:status]} X\r\n\r\n", scheme: "http", host: "t.example",
+          target: c[:target], method: c[:method], status: c[:status], content_type: nil)
+        probe.dedup_key(d).should eq(probe.plan(d).try(&.dedup_key)), "forbidden_bypass #{c[:target]} #{c[:method]} #{c[:status]}"
+      end
+    end
+  end
+end
+
 describe "Gori::Probe::Active (safety + coverage)" do
   it "does not probe mutating methods (POST), only safe ones (GET)" do
     with_store do |store|
