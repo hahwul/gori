@@ -788,6 +788,58 @@ private class FakeContext < ExecContext
     @calls << :decoder_load
   end
 
+  def jwt_new : Nil
+    @calls << :jwt_new
+  end
+
+  def jwt_close : Nil
+    @calls << :jwt_close
+  end
+
+  def jwt_rename_subtab : Nil
+    @calls << :jwt_rename_subtab
+  end
+
+  def jwt_duplicate_subtab : Nil
+    @calls << :jwt_duplicate_subtab
+  end
+
+  def jwt_clear : Nil
+    @calls << :jwt_clear
+  end
+
+  def jwt_toggle_mode : Nil
+    @calls << :jwt_toggle_mode
+  end
+
+  def jwt_cycle_alg : Nil
+    @calls << :jwt_cycle_alg
+  end
+
+  def jwt_load_decoded : Nil
+    @calls << :jwt_load_decoded
+  end
+
+  def jwt_copy : Nil
+    @calls << :jwt_copy
+  end
+
+  def jwt_copy_all : Nil
+    @calls << :jwt_copy_all
+  end
+
+  def jwt_copy_token : Nil
+    @calls << :jwt_copy_token
+  end
+
+  def jwt_copy_attack : Nil
+    @calls << :jwt_copy_attack
+  end
+
+  def jwt_read_mode? : Bool
+    false
+  end
+
   def notes_new : Nil
     @calls << :notes_new
   end

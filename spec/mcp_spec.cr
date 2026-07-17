@@ -2,6 +2,8 @@ require "./spec_helper"
 require "compress/gzip"
 require "socket"
 require "digest/sha1"
+require "base64"
+require "openssl/hmac"
 
 # Drives Gori::MCP end-to-end with scripted JSON-RPC lines over IO::Memory, plus
 # unit tests for the body serializer and the send_request byte builder.
@@ -751,6 +753,64 @@ describe Gori::MCP::Server do
         resp = drive(store, call)[0]
         resp["result"]["isError"].as_bool.should be_true
         resp["result"]["content"][0]["text"].as_s.should contain("no converter tokens")
+      end
+    end
+  end
+
+  describe "jwt tools" do
+    # header {"alg":"HS256","typ":"JWT"}, payload {"sub":"1","admin":false}, key "secret".
+    jwt = begin
+      h = Base64.urlsafe_encode(%({"alg":"HS256","typ":"JWT"}), padding: false)
+      p = Base64.urlsafe_encode(%({"sub":"1","admin":false}), padding: false)
+      sig = Base64.urlsafe_encode(OpenSSL::HMAC.digest(OpenSSL::Algorithm::SHA256, "secret", "#{h}.#{p}"), padding: false)
+      "#{h}.#{p}.#{sig}"
+    end
+
+    it "jwt_decode returns header/payload/signature (read-only, no gating)" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_decode","arguments":{"token":"#{jwt}"}}})
+        resp = drive(store, call, allow_actions: false)[0]
+        resp["result"]["isError"]?.should_not eq(true)
+        payload = tool_payload(resp)
+        payload["alg"].as_s.should eq("HS256")
+        payload["header"]["typ"].as_s.should eq("JWT")
+        payload["payload"]["sub"].as_s.should eq("1")
+        payload["signed"].as_bool.should be_true
+      end
+    end
+
+    it "jwt_encode re-signs and the signature verifies with the given secret" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_encode","arguments":{"token":"#{jwt}","alg":"HS256","secret":"hunter2"}}})
+        token = tool_payload(drive(store, call)[0])["token"].as_s
+        header, body, sig = token.split('.')
+        Gori::Jwt.sign("#{header}.#{body}", "HS256", "hunter2").should eq(sig)
+      end
+    end
+
+    it "jwt_attacks lists none/weak-secret/header-inject payloads" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_attacks","arguments":{"token":"#{jwt}"}}})
+        cats = tool_payload(drive(store, call, allow_actions: false)[0]).as_a.map { |a| a["category"].as_s }.uniq
+        cats.should contain("none")
+        cats.should contain("weak-secret")
+        cats.should contain("header-inject")
+      end
+    end
+
+    it "all three jwt tools are listed even in read-only mode" do
+      with_store do |store|
+        names = drive(store, %({"jsonrpc":"2.0","id":1,"method":"tools/list"}), allow_actions: false)[0]["result"]["tools"].as_a.map { |t| t["name"].as_s }
+        names.should contain("jwt_decode")
+        names.should contain("jwt_encode")
+        names.should contain("jwt_attacks")
+      end
+    end
+
+    it "jwt_decode errors cleanly on a non-JWT" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"jwt_decode","arguments":{"token":"plainstring"}}})
+        drive(store, call)[0]["result"]["isError"].as_bool.should be_true
       end
     end
   end

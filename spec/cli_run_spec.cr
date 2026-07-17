@@ -479,3 +479,33 @@ describe Gori::Notes do
     Gori::Notes.line_count("a\n").should eq(2) # trailing newline → a second (empty) line
   end
 end
+
+# `gori run jwt` builds its JSON output from the shared engine emitters (jwt/present.cr)
+# and its text from CLI::Output — the same pure functions tested here.
+describe "gori run jwt output" do
+  jwt = Gori::Jwt.encode(%({"typ":"JWT"}), %({"sub":"1"}), "HS256", "k")
+
+  it "decode_json carries nested header/payload objects + the signed flag" do
+    j = JSON.parse(Gori::Jwt.decode_json(jwt))
+    j["alg"].as_s.should eq("HS256")
+    j["header"]["typ"].as_s.should eq("JWT")
+    j["payload"]["sub"].as_s.should eq("1")
+    j["signed"].as_bool.should be_true
+  end
+
+  it "attacks_json is an array of {name, category, note, token}" do
+    arr = JSON.parse(Gori::Jwt.attacks_json(Gori::Jwt.attacks(jwt))).as_a
+    arr.should_not be_empty
+    arr.first["name"].as_s.should_not be_empty
+    arr.first["token"].as_s.should contain(".")
+    arr.map { |a| a["category"].as_s }.uniq.should contain("weak-secret")
+  end
+
+  it "jwt_attack_text prints the category, name, note, and token" do
+    a = Gori::Jwt.attacks(jwt).find { |x| x.name == "alg=none" }.not_nil!
+    text = Gori::CLI::Output.jwt_attack_text(a)
+    text.should contain("[none]")
+    text.should contain("alg=none")
+    text.should contain(a.token)
+  end
+end
