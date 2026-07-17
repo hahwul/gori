@@ -14,6 +14,7 @@ require "../flow_mapper"
 require "../proxy/codec/http1"
 require "../fuzz"
 require "../decoder"
+require "../jwt"
 require "../env"
 require "../miner"
 require "../discover"
@@ -395,6 +396,32 @@ module Gori
             s.field "input", strprop("the value to transform (UTF-8 text unless input_base64 is set)"), required: true
             s.field "spec", strprop("converter chain, e.g. 'base64-decode > gunzip'"), required: true
             s.field "input_base64", boolprop("treat `input` as base64 and decode it to raw bytes first (for binary input)")
+          end
+
+          tool j, "jwt_decode",
+            "Decode a JWT into its header + payload JSON and signature — the same engine as the " \
+            "TUI JWT tab. Pure transform: no network, no state, no signature verification. Returns " \
+            "{alg, header, payload, signature, signed}." do |s|
+            s.field "token", strprop("the JWT (header.payload[.signature])"), required: true
+          end
+
+          tool j, "jwt_encode",
+            "Re-sign a JWT with a chosen algorithm + secret — the classic testing move (swap alg to " \
+            "none, or re-sign with a guessed HS secret). Takes the header + payload from `token` " \
+            "(or the explicit `header`/`payload` JSON overrides), FORCES `alg` into the header, and " \
+            "HMAC-signs with `secret` (HS256/384/512) or leaves it unsigned (none). Returns {token, alg}." do |s|
+            s.field "token", strprop("a JWT to take the header + payload from (optional if header+payload are given)")
+            s.field "header", strprop("header JSON object (overrides the token's header)")
+            s.field "payload", strprop("payload JSON (overrides the token's payload)")
+            s.field "alg", strprop("HS256 (default) | HS384 | HS512 | none")
+            s.field "secret", strprop("HMAC secret for an HS algorithm")
+          end
+
+          tool j, "jwt_attacks",
+            "Generate testing payloads from a JWT: alg:none variants + signature strip, weak-secret " \
+            "HS256 re-signs, and header-parameter injection (kid path-traversal/SQLi, jku/x5u/jwk). " \
+            "Pure transform: no network. Returns an array of {name, category, note, token}." do |s|
+            s.field "token", strprop("the JWT to derive testing payloads from"), required: true
           end
 
           tool j, "list_rules",
@@ -831,6 +858,9 @@ module Gori
         when "list_notes"              then list_notes
         when "get_note"                then get_note(h)
         when "decode"                  then decoder(h)
+        when "jwt_decode"              then jwt_decode_tool(h)
+        when "jwt_encode"              then jwt_encode_tool(h)
+        when "jwt_attacks"             then jwt_attacks_tool(h)
         when "list_rules"              then list_rules
         when "list_projects"           then list_projects
         when "ql_explain"              then ql_explain(h)
@@ -2498,6 +2528,45 @@ module Gori
             end
           end
         end)
+      end
+
+      # --- jwt workbench tools (pure compute; always exposed, not action-gated) ---
+      # Shapes come from Jwt.decode_json / Jwt.attacks_json (jwt/present.cr) so they match
+      # `gori run jwt --format json` byte-for-byte.
+
+      private def jwt_decode_tool(h) : Result
+        token = str(h, "token")
+        return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
+        t = token.strip
+        if Jwt.header_json(t).empty? && Jwt.payload_json(t).empty?
+          return Result.new("not a decodable JWT (need header.payload)", is_error: true)
+        end
+        Result.new(Jwt.decode_json(t))
+      end
+
+      private def jwt_encode_tool(h) : Result
+        token = str(h, "token")
+        header = str(h, "header") || (token ? Jwt.header_json(token.strip) : "")
+        payload = str(h, "payload") || (token ? Jwt.payload_json(token.strip) : "")
+        if header.empty? && payload.empty?
+          return Result.new("provide a 'token' to re-sign, or explicit 'header'/'payload' JSON", is_error: true)
+        end
+        alg = str(h, "alg") || "HS256"
+        secret = str(h, "secret") || ""
+        begin
+          signed = Jwt.encode(header, payload, alg, secret)
+        rescue ex : Jwt::ForgeError
+          return Result.new(ex.message || "invalid input", is_error: true)
+        end
+        Result.new(JSON.build { |j| j.object { j.field "token", signed; j.field "alg", alg } })
+      end
+
+      private def jwt_attacks_tool(h) : Result
+        token = str(h, "token")
+        return Result.new("missing required 'token'", is_error: true) if token.nil? || token.strip.empty?
+        attacks = Jwt.attacks(token.strip)
+        return Result.new("not a decodable JWT — no payloads generated", is_error: true) if attacks.empty?
+        Result.new(Jwt.attacks_json(attacks))
       end
 
       private def list_rules : Result

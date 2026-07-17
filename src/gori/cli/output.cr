@@ -6,6 +6,7 @@ require "../discover"
 require "../sitemap"
 require "../probe/group"
 require "../notes"
+require "../jwt"
 
 module Gori
   module CLI
@@ -133,6 +134,20 @@ module Gori
           io << f.name.ljust(24)
           io << "  " << f.location.label.ljust(9)
           io << "· " << f.evidence.label
+        end
+      end
+
+      # --- jwt workbench (decode / re-sign / attack payloads) -----------------
+      # JSON shapes live in the engine (jwt/present.cr) so `gori run jwt` and the MCP
+      # jwt_* tools stay byte-identical; the text formatter below is CLI-only.
+
+      # "[none]     alg=none            unsigned; accepted if …"
+      def self.jwt_attack_text(a : Jwt::Attack) : String
+        String.build do |io|
+          io << "[" << a.category << "]"
+          io << " " * {12 - a.category.size - 2, 1}.max
+          io << a.name.ljust(24) << "  " << a.note << "\n"
+          io << "  " << a.token
         end
       end
 

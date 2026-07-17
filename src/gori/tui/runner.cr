@@ -20,6 +20,7 @@ require "./controllers/fuzzer_controller"
 require "./controllers/miner_controller"
 require "./controllers/comparer_controller"
 require "./controllers/decoder_controller"
+require "./controllers/jwt_controller"
 require "./controllers/statusline_controller"
 require "./history_view"
 require "./repeater_view"
@@ -119,7 +120,7 @@ module Gori::Tui
       # The target is held by VIEW identity (not a positional index): the cross-session
       # reconcile can reorder/remove repeater tabs while the prompt is open, so the
       # controller's apply_rename re-finds the tab by its view — never a shifted neighbour.
-      @rename_view = nil.as(RepeaterView | FuzzerView | DecoderView | MinerView | ComparerView | Nil)
+      @rename_view = nil.as(RepeaterView | FuzzerView | DecoderView | JwtView | MinerView | ComparerView | Nil)
       # The Repeater sub-tab TAG editor (issue #121) — a bottom prompt mirroring rename,
       # space-separated tags. Held by VIEW identity for the same reconcile-race reason.
       @tag_edit_open = false
@@ -255,6 +256,7 @@ module Gori::Tui
         MinerController.new(self),
         ComparerController.new(self),
         DecoderController.new(self),
+        JwtController.new(self),
       ].each { |c| @tabs[c.tab] = c }
     end
 
@@ -323,6 +325,10 @@ module Gori::Tui
 
     private def decoder_controller : DecoderController
       @tabs[:decoder].as(DecoderController)
+    end
+
+    private def jwt_controller : JwtController
+      @tabs[:jwt].as(JwtController)
     end
 
     def run : Symbol
@@ -2153,6 +2159,7 @@ module Gori::Tui
         payload = p.payload
         case dest.tab
         when :decoder then decoder_controller.decoder_from_text(payload)
+        when :jwt     then jwt_controller.jwt_from_text(payload)
         end
       end
       close_send_picker
@@ -3106,6 +3113,7 @@ module Gori::Tui
       when :repeater   then repeater_controller.repeater_new
       when :fuzzer   then fuzzer_controller.fuzz_new
       when :decoder  then decoder_controller.decoder_new
+      when :jwt      then jwt_controller.jwt_new
       when :notes    then notes_controller.notes_new
       when :comparer then comparer_controller.comparer_new
       end
@@ -3115,8 +3123,8 @@ module Gori::Tui
     # — its sessions are seeded by a background job, not ^N — so the strip hint omits ^N new.
     private def subtab_new_supported? : Bool
       case @active_tab
-      when :repeater, :fuzzer, :decoder, :notes, :comparer then true
-      else                                                    false
+      when :repeater, :fuzzer, :decoder, :jwt, :notes, :comparer then true
+      else                                                         false
       end
     end
 
@@ -3126,6 +3134,7 @@ module Gori::Tui
       when :fuzzer   then fuzzer_controller.request_close
       when :miner    then miner_controller.request_close
       when :decoder  then decoder_controller.decoder_close
+      when :jwt      then jwt_controller.jwt_close
       when :notes    then notes_controller.notes_close
       when :comparer then comparer_controller.comparer_close
       end
@@ -3980,7 +3989,7 @@ module Gori::Tui
     # Notes derives its label from the body text, so it has no rename.
     private def renameable_subtabs? : Bool
       @active_tab == :repeater || @active_tab == :fuzzer || @active_tab == :decoder ||
-        @active_tab == :miner || @active_tab == :comparer
+        @active_tab == :jwt || @active_tab == :miner || @active_tab == :comparer
     end
 
     # Open the rename prompt for sub-tab `idx` on the active tab, seeding its current
@@ -3992,6 +4001,7 @@ module Gori::Tui
              when :repeater   then repeater_controller.view_at(idx)
              when :fuzzer   then fuzzer_controller.view_at(idx)
              when :decoder  then decoder_controller.view_at(idx)
+             when :jwt      then jwt_controller.view_at(idx)
              when :miner    then miner_controller.view_at(idx)
              when :comparer then comparer_controller.view_at(idx)
              end
@@ -4017,6 +4027,7 @@ module Gori::Tui
       when RepeaterView   then repeater_controller.apply_rename(v, name)
       when FuzzerView   then fuzzer_controller.apply_rename(v, name)
       when DecoderView  then decoder_controller.apply_rename(v, name)
+      when JwtView      then jwt_controller.apply_rename(v, name)
       when MinerView    then miner_controller.apply_rename(v, name)
       when ComparerView then comparer_controller.apply_rename(v, name)
       end
@@ -5733,6 +5744,61 @@ module Gori::Tui
       decoder_controller.open_prompt(:load)
     end
 
+    # --- jwt workbench (sub-tab + lens actions). The body's text editing + focus nav
+    # stay inline in JwtController; these power the space menu + palette. ---
+    def jwt_new : Nil
+      jwt_controller.jwt_new
+    end
+
+    def jwt_close : Nil
+      jwt_controller.jwt_close
+      resolve_subtab_focus_after_close # don't strand on a now-hidden strip
+    end
+
+    def jwt_rename_subtab : Nil
+      open_rename(current_subtab_index)
+    end
+
+    def jwt_duplicate_subtab : Nil
+      jwt_controller.jwt_duplicate
+    end
+
+    def jwt_clear : Nil
+      jwt_controller.clear_all
+    end
+
+    def jwt_toggle_mode : Nil
+      jwt_controller.toggle_mode
+    end
+
+    def jwt_cycle_alg : Nil
+      jwt_controller.cycle_alg
+    end
+
+    def jwt_load_decoded : Nil
+      jwt_controller.load_decoded
+    end
+
+    def jwt_copy : Nil
+      jwt_controller.jwt_copy
+    end
+
+    def jwt_copy_all : Nil
+      jwt_controller.jwt_copy_all
+    end
+
+    def jwt_copy_token : Nil
+      jwt_controller.jwt_copy_token
+    end
+
+    def jwt_copy_attack : Nil
+      jwt_controller.jwt_copy_attack
+    end
+
+    def jwt_read_mode? : Bool
+      jwt_controller.jwt_read_mode?
+    end
+
     # --- notes scratchpad (sub-tab actions). The body's text editing stays inline
     # in NotesController; these power the space menu reachable from the sub-tab strip. ---
     def notes_new : Nil
@@ -5794,6 +5860,7 @@ module Gori::Tui
       when :repeater   then repeater_controller.repeater_selection_active?
       when :fuzzer   then fuzzer_controller.fuzzer_selection_active?
       when :decoder  then decoder_controller.decoder_selection_active?
+      when :jwt      then jwt_controller.jwt_selection_active?
       when :issues then issues_controller.issues_notes_selection_active?
       when :project  then project_controller.project_desc_selection_active?
       when :history
@@ -5813,6 +5880,7 @@ module Gori::Tui
       when :repeater then repeater_controller.repeater_selection_text
       when :fuzzer   then fuzzer_controller.fuzzer_selection_text
       when :decoder  then decoder_controller.decoder_selection_text
+      when :jwt      then jwt_controller.jwt_selection_text
       when :issues   then issues_controller.issues_notes_selection_text
       when :project  then project_controller.project_desc_selection_text
       when :history
@@ -5828,6 +5896,7 @@ module Gori::Tui
       when :repeater   then repeater_controller.repeater_select_line
       when :fuzzer   then fuzzer_controller.fuzzer_select_line
       when :decoder  then decoder_controller.decoder_select_line
+      when :jwt      then jwt_controller.jwt_select_line
       when :issues then issues_controller.issues_notes_select_line
       when :project  then project_controller.project_desc_select_line
       when :history
@@ -5841,6 +5910,7 @@ module Gori::Tui
       when :repeater   then repeater_controller.repeater_clear_selection
       when :fuzzer   then fuzzer_controller.fuzzer_clear_selection
       when :decoder  then decoder_controller.decoder_clear_selection
+      when :jwt      then jwt_controller.jwt_clear_selection
       when :issues then issues_controller.issues_notes_clear_selection
       when :project  then project_controller.project_desc_clear_selection
       when :history
@@ -5858,6 +5928,7 @@ module Gori::Tui
       when :repeater   then read_selection_active? ? repeater_copy : repeater_copy_all
       when :fuzzer   then read_selection_active? ? fuzzer_copy : fuzzer_copy_all
       when :decoder  then read_selection_active? ? decoder_copy_selection : decoder_copy_all
+      when :jwt      then jwt_copy
       when :issues then read_selection_active? ? issues_copy : issues_copy_all
       when :project  then read_selection_active? ? project_copy : project_copy_all
       when :history

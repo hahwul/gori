@@ -287,6 +287,22 @@ module Gori
       abstract def decoder_save : Nil             # save the current chain by name (in-body prompt)
       abstract def decoder_load : Nil             # load a saved chain by name (in-body prompt)
 
+      # jwt: the decode / re-sign / attack-payload workbench (sub-tab + lens actions; the
+      # body's text editing + focus nav stay inline, these power the space menu + palette)
+      abstract def jwt_new : Nil               # open a fresh blank JWT session sub-tab
+      abstract def jwt_close : Nil             # close the active JWT session (keeps ≥1)
+      abstract def jwt_rename_subtab : Nil     # open the rename prompt for the active sub-tab
+      abstract def jwt_duplicate_subtab : Nil  # clone the active session into a new sibling
+      abstract def jwt_clear : Nil             # clear the token + editors of the active session
+      abstract def jwt_toggle_mode : Nil       # flip the DECODE ⇄ ENCODE lens
+      abstract def jwt_cycle_alg : Nil         # cycle the signing alg (HS256/384/512/none)
+      abstract def jwt_load_decoded : Nil      # seed the ENCODE editors from the INPUT token's claims
+      abstract def jwt_copy : Nil              # copy selection or the focused pane's content
+      abstract def jwt_copy_all : Nil          # copy the focused pane's content (space-menu fallback)
+      abstract def jwt_copy_token : Nil        # copy the re-signed OUTPUT token
+      abstract def jwt_copy_attack : Nil       # copy the selected ATTACK payload's token
+      abstract def jwt_read_mode? : Bool       # focused pane is READ (gates y/copy/select verbs)
+
       # notes: the multi-note scratchpad (sub-tab actions; the body's text editing
       # stays inline, these power the space menu reachable from the sub-tab strip)
       abstract def notes_new : Nil              # open a fresh blank note sub-tab

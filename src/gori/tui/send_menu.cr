@@ -18,6 +18,7 @@ module Gori::Tui
     def self.destinations : Array(Destination)
       [
         Destination.new("Decoder", 'd', :decoder, "decode / encode input"),
+        Destination.new("JWT", 'j', :jwt, "decode / re-sign / attack a token"),
       ]
     end
   end

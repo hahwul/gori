@@ -417,6 +417,36 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def decoder_load : Nil; end
 
+  def jwt_new : Nil; end
+
+  def jwt_close : Nil; end
+
+  def jwt_rename_subtab : Nil; end
+
+  def jwt_duplicate_subtab : Nil; end
+
+  def jwt_clear : Nil; end
+
+  def jwt_toggle_mode : Nil; end
+
+  def jwt_cycle_alg : Nil; end
+
+  def jwt_load_decoded : Nil; end
+
+  def jwt_copy : Nil; end
+
+  def jwt_copy_all : Nil; end
+
+  def jwt_copy_token : Nil; end
+
+  def jwt_copy_attack : Nil; end
+
+  property jwt_read_mode : Bool = false # settable so grouped-menu specs can exercise COMMON's Copy
+
+  def jwt_read_mode? : Bool
+    @jwt_read_mode
+  end
+
   def notes_new : Nil; end
 
   def notes_close : Nil; end

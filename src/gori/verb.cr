@@ -25,6 +25,7 @@ module Gori
       Intercept      # the Intercept queue tab has focus
       Comparer       # the Comparer tab has focus
       Decoder        # the Decoder tab has focus
+      Jwt            # the JWT workbench tab has focus
       Notes          # the Notes tab has focus (sub-tab strip space menu)
       Project        # the Project tab's SCOPE rule list has focus
       HostOverrides  # the Project tab's HOST OVERRIDES list has focus
