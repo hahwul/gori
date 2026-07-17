@@ -187,6 +187,18 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def mine_stop : Nil; end
 
+  def sequence_selected : Nil; end
+
+  def sequence_from_repeater : Nil; end
+
+  def sequence_from_sitemap : Nil; end
+
+  def sequence_run : Nil; end
+
+  def sequence_stop : Nil; end
+
+  def sequence_configure : Nil; end
+
   def miner_duplicate_subtab : Nil; end
 
   property? miner_has_issue = false

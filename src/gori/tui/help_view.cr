@@ -105,6 +105,15 @@ module Gori::Tui
         Item.new("r", "rename the sub-tab (on the strip)"),
         Item.new("⇧←/→", "detail: scroll a long line sideways"),
       ]},
+      {"SEQUENCER", [
+        Item.new("Send to Sequencer", "from History/Repeater/Sitemap (space menu) — replay + analyze a token"),
+        Item.new("Send selection to → Sequencer", "selected text becomes manual token sample(s)"),
+        Item.new("c", "configure the token location (cookie/header/regex/position/jsonpath) + goal", "sequence.configure"),
+        Item.new("^R · ^X", "run collection · stop", "sequence.run"),
+        Item.new("↹", "cycle config → samples → analysis"),
+        Item.new("↑/↓ · ↵", "samples: select · open detail"),
+        Item.new("^W · r", "close · rename the sub-tab (on the strip)"),
+      ]},
       {"COMPARER", [
         Item.new("a · b", "pick flow A · flow B"),
         Item.new("←/→", "compare requests ⟷ responses"),

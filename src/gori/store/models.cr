@@ -410,6 +410,25 @@ module Gori
       end
     end
 
+    # One persisted token-randomness session (a sub-tab under the Sequencer tab). Stores
+    # the byte-exact `request` to re-collect, plus opaque `config` JSON (mode, token
+    # location, goal, pacing) managed by the frontend. Collected tokens are NEVER
+    # persisted (live secrets, in-memory per session).
+    struct SequencerSessionRecord
+      getter id : Int64
+      getter target : String
+      getter request : Bytes
+      getter? http2 : Bool
+      getter sni : String?
+      getter config : String # opaque JSON managed by the frontend
+      getter flow_id : Int64?
+      getter position : Int32
+      getter name : String? # custom sub-tab label (nil = derive from the request line)
+
+      def initialize(@id, @target, @request, @http2, @sni, @config, @flow_id, @position, @name = nil)
+      end
+    end
+
     # One fuzz sweep's metadata. Live counters are updated as the run streams; `status`
     # is running | done | stopped | error.
     struct FuzzRunRecord

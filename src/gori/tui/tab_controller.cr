@@ -29,6 +29,8 @@ module Gori::Tui
     # index) / the advanced-settings overlay. The Runner builds them from the current view.
     abstract def open_fuzz_set_editor(edit_index : Int32?) : Nil
     abstract def open_fuzz_advanced_editor : Nil
+    # Reconfigure the current Sequencer session's token descriptor/goal (the `c` chord).
+    abstract def reconfigure_sequence : Nil
     # Open the Project SCOPE rule popup (nil edit_id = add; else edit that rule id).
     # Kind/type/pattern seed the form when editing (or defaults for add).
     abstract def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil

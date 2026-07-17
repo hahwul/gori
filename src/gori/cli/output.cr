@@ -2,6 +2,7 @@ require "json"
 require "../store"
 require "../fuzz"
 require "../miner"
+require "../sequencer"
 require "../discover"
 require "../sitemap"
 require "../probe/group"
@@ -148,6 +149,20 @@ module Gori
           io << " " * {12 - a.category.size - 2, 1}.max
           io << a.name.ljust(24) << "  " << a.note << "\n"
           io << "  " << a.token
+        end
+      end
+
+      # --- sequencer samples (jsonl stream) -----------------------------------
+
+      def self.sequence_sample_json(s : Sequencer::Sample) : String
+        JSON.build do |j|
+          j.object do
+            j.field "index", s.index
+            j.field "status", s.status
+            j.field "token", s.token
+            j.field "length", s.length
+            j.field "error", s.error
+          end
         end
       end
 

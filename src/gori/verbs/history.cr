@@ -556,6 +556,7 @@ module Gori
       register_probe(r)
       register_fuzz(r)
       register_miner(r)
+      register_sequencer(r)
       register_comparer(r)
       register_decoder(r)
       register_jwt(r)
