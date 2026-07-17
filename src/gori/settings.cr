@@ -235,6 +235,10 @@ module Gori
     class_property mine_notify : String = "when-found"
     class_property? mine_prefs_saved : Bool = false
 
+    # Last "Run active scan" notification choice (global scratch — the run popup's cycler
+    # default). Mirrors mine_notify's token set ("when-found"/"off"/"always").
+    class_property probe_active_notify : String = "when-found"
+
     # Last Discover overlay choices (global scratch — not project data).
     class_property discover_containment : String = "scope-aware"
     class_property discover_max_depth : Int32 = 4
@@ -289,6 +293,9 @@ module Gori
         self.decoder_chains = parse_decoder_chains(cv["chains"]?)
       end
       parse_mine_prefs(root["mine"]?)
+      if pr = root["probe"]?.try(&.as_h?)
+        pr["active_notify"]?.try(&.as_s?).try { |s| self.probe_active_notify = s }
+      end
       parse_discover_prefs(root["discover"]?)
       parse_layout(root["layout"]?)
       parse_statusline(root["statusline"]?)
@@ -586,6 +593,12 @@ module Gori
       save
     end
 
+    # Persist the "Run active scan" popup's last notification choice.
+    def self.save_probe_active_notify(notify : String) : Nil
+      self.probe_active_notify = notify
+      save
+    end
+
     private def self.parse_discover_prefs(node : JSON::Any?) : Nil
       obj = node.try(&.as_h?)
       unless obj
@@ -861,6 +874,9 @@ module Gori
                 j.field "notify", mine_notify
               end
             end
+          end
+          j.field "probe" do
+            j.object { j.field "active_notify", probe_active_notify }
           end
           if discover_prefs_saved?
             j.field "discover" do

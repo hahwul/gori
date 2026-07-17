@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 39
+      VERSION = 40
 
       # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
       # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
@@ -664,12 +664,36 @@ module Gori
         SQL
       ]
 
+      # Sequencer sessions: a persisted token-randomness session (sub-tab under the
+      # Sequencer tab). Structurally identical to miner_sessions — the byte-exact
+      # `request` (BLOB) to re-collect, `config` opaque JSON (mode, token location, goal,
+      # …). Collected tokens are live secrets, so like the miner there is NO results table:
+      # samples and the computed report stay in-memory per session and never hit disk.
+      V39 = [
+        <<-SQL,
+        CREATE TABLE sequencer_sessions (
+          id         INTEGER PRIMARY KEY,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          target     TEXT    NOT NULL,
+          request    BLOB    NOT NULL,
+          http2      INTEGER NOT NULL DEFAULT 0,
+          sni        TEXT,
+          config     TEXT    NOT NULL DEFAULT '',
+          flow_id    INTEGER,
+          position   INTEGER NOT NULL DEFAULT 0,
+          name       TEXT
+        )
+        SQL
+        "CREATE INDEX idx_sequencer_sessions_position ON sequencer_sessions (position, id)",
+      ]
+
       # OAST (out-of-band) tab: configured providers, listening sessions, and the durable
       # callback history. Providers are config (name/kind/host/token). Sessions hold the
       # secrets needed to poll + decrypt (interactsh RSA private key PEM lives here — the DB
       # is already 0600 and holds captured credentials; never logged). Callbacks are
       # append-only/immutable; UNIQUE(session_id, provider_uid) + INSERT OR IGNORE dedups.
-      V39 = [
+      V40 = [
         <<-SQL,
         CREATE TABLE oast_providers (
           id         INTEGER PRIMARY KEY,
@@ -715,7 +739,7 @@ module Gori
         "CREATE INDEX idx_oast_callbacks_session ON oast_callbacks (session_id, id)",
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34, V35, V36, V37, V38, V39]
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34, V35, V36, V37, V38, V39, V40]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

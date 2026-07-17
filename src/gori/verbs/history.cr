@@ -56,6 +56,25 @@ module Gori
         "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
         Verb::Scope::Body, available: history_selected, mnemonic: 'c') { |ctx| ctx.comparer_add_selected; nil }
 
+      # Manually run the Probe ACTIVE checks (reflected params, CORS) against the selected flow,
+      # regardless of the Probe mode — opens a confirm dialog with the expected request count.
+      # Menu-only ('A'); mirrors detail.probe-active in the drill-in.
+      r.register Verb::Definition.new(
+        "history.probe-active", "Run active scan", "Run the Probe active checks against the selected flow (shows the request count first)",
+        Verb::Scope::Body, available: history_selected, mnemonic: 'A') { |ctx| ctx.probe_active_selected; nil }
+
+      # Delete the selected flow (confirm-gated). Menu-only — L3 destructive; 'X' is free
+      # across Body COMMON (lowercase 'x' is select-line). Mirrors probe.delete-selected.
+      r.register Verb::Definition.new(
+        "history.delete", "Delete flow", "Delete the selected flow from History (asks first)",
+        Verb::Scope::Body, available: history_selected, mnemonic: 'X') { |ctx| ctx.history_delete; nil }
+
+      # Wipe the project's entire History (confirm-gated). Menu-only; 'C' is free across
+      # Body COMMON (lowercase 'c' is compare). Available whenever History has any rows.
+      r.register Verb::Definition.new(
+        "history.clear", "Clear history", "Delete ALL History flows for this project (asks first)",
+        Verb::Scope::Body, available: in_history, mnemonic: 'C') { |ctx| ctx.history_clear; nil }
+
       # --- repeater workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
       in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
@@ -89,6 +108,15 @@ module Gori
         "repeater.new", "New repeater request", "Open a blank request in Repeater to author and send",
         Verb::Scope::Repeater, [Verb::Chord.new("n", ctrl: true)],
         available: in_repeater, mnemonic: 'n') { |ctx| ctx.repeater_new; nil }
+
+      # "Minimize request" (Caido-"squash"-style): strip cosmetic headers, tracking-cookie
+      # crumbs and unused query/body params, re-sending to verify the response is unchanged.
+      # Runs in the BACKGROUND (bottom-bar spinner + notification) and writes the trimmed
+      # request back when done. Menu-only (no chord); 'M' is free across COMMON ∪ every
+      # Repeater section (all-lowercase keys there — pairs like Copy 'y' / Copy-as 'Y').
+      r.register Verb::Definition.new(
+        "repeater.minimize", "Minimize request", "Strip cosmetic headers, cookies and unused params while keeping the response unchanged (runs in the background)",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'M') { |ctx| ctx.repeater_minimize; nil }
 
       # Search the open repeater sub-tabs and jump to the chosen one — menu-only
       # (no chord), shown only when there are ≥2 sessions to pick between. Tagged
@@ -317,6 +345,19 @@ module Gori
       r.register Verb::Definition.new(
         "detail.add-host", "Add host to scope", "Add this flow's host to the scope lens",
         Verb::Scope::HistoryDetail, mnemonic: 'h') { |ctx| ctx.scope_add_host; nil }
+
+      # Run the Probe active checks against the open flow (mirrors history.probe-active 'A' from
+      # the list) — close the detail first so the confirm dialog isn't buried under it.
+      r.register Verb::Definition.new(
+        "detail.probe-active", "Run active scan", "Run the Probe active checks against this flow (shows the request count first)",
+        Verb::Scope::HistoryDetail, mnemonic: 'A') { |ctx| ctx.close_detail; ctx.probe_active_selected; nil }
+
+      # Delete the open flow (mirrors history.delete). Menu-only 'X' — free in HistoryDetail
+      # (lowercase 'x' is select-line). Confirm runs after the menu closes; the controller
+      # captures the id so a live reload can't retarget the delete.
+      r.register Verb::Definition.new(
+        "detail.delete", "Delete flow", "Delete this flow from History (asks first)",
+        Verb::Scope::HistoryDetail, mnemonic: 'X') { |ctx| ctx.history_delete; nil }
     end
 
     # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette
@@ -430,6 +471,12 @@ module Gori
         "repeater.mine", "Mine parameters", "Discover hidden parameters for this repeater request",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'm') { |ctx| ctx.mine_from_repeater; nil }
 
+      # Run the Probe active checks against the current Repeater request's last send (COMMON, so
+      # it's reachable from any Repeater pane) — opens a confirm with the expected request count.
+      r.register Verb::Definition.new(
+        "repeater.probe-active", "Run active scan", "Run the Probe active checks against this Repeater request (needs a prior send)",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'A') { |ctx| ctx.probe_active_from_repeater; nil }
+
       r.register Verb::Definition.new(
         "mine.run", "Run mining", "Re-run parameter mining for this session", Verb::Scope::Miner,
         [Verb::Chord.new("r", ctrl: true)], available: in_miner, mnemonic: 'r') { |ctx| ctx.mine_run; nil }
@@ -510,8 +557,10 @@ module Gori
       register_probe(r)
       register_fuzz(r)
       register_miner(r)
+      register_sequencer(r)
       register_comparer(r)
       register_decoder(r)
+      register_jwt(r)
       register_notes(r)
       register_host_overrides(r)
       register_env(r)

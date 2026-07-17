@@ -49,6 +49,9 @@ module Gori
       abstract def selected_flow_id : Int64?
       abstract def copy_selection : Nil
       abstract def history_query : Nil # focus the QL filter bar
+      # History destructive actions (space-menu only; each opens a confirm first).
+      abstract def history_delete : Nil # delete the selected/open flow
+      abstract def history_clear : Nil  # wipe every History flow for this project
 
       # detail view
       abstract def scroll_detail(delta : Int32) : Nil
@@ -95,6 +98,7 @@ module Gori
       abstract def repeater_toggle_resp_diff : Nil           # switch the response pane between raw and diff-vs-previous
       abstract def repeater_toggle_resp_hex : Nil            # toggle a raw hex dump of the response bytes
       abstract def repeater_pretty_request : Nil
+      abstract def repeater_minimize : Nil     # squash the request (strip cosmetic headers/cookies/params) in the background
       abstract def fuzz_pretty_template : Nil
       abstract def fuzz_toggle_http2 : Nil    # flip the fuzz transport h1↔h2 (override seed protocol)
       abstract def repeater_auto_mark : Nil     # wrap every request param value in §…§
@@ -131,6 +135,14 @@ module Gori
       abstract def miner_duplicate_subtab : Nil   # clone the active miner sub-tab's content into a new sibling
       abstract def miner_finding_selected? : Bool # a finding is selected in the focused miner session
       abstract def mine_repeater_selected : Nil     # send the selected miner finding to Repeater
+
+      # sequencer (token randomness — cross-tab seeds open a config popup, collection runs in background)
+      abstract def sequence_selected : Nil        # send History's selected flow to the Sequencer (config popup)
+      abstract def sequence_from_repeater : Nil     # sequence the current Repeater request
+      abstract def sequence_from_sitemap : Nil      # sequence the selected Sitemap endpoint's captured flow
+      abstract def sequence_run : Nil             # re-run collection for the focused Sequencer session
+      abstract def sequence_stop : Nil            # stop the running collection
+      abstract def sequence_configure : Nil       # reconfigure the focused session's token descriptor
 
       # sitemap tree
       abstract def sitemap_move(delta : Int32) : Nil
@@ -250,6 +262,13 @@ module Gori
       abstract def probe_repeater_flow : Nil   # send the issue's sample flow to Repeater
       abstract def probe_promote : Nil       # create a Issue from the open issue
 
+      # probe active scan — manual, on-demand run of the request-sending active rules against ONE
+      # flow, regardless of the current Probe mode. Each opens a confirm dialog showing the
+      # expected request count, then runs the probes in the background.
+      abstract def probe_active_selected : Nil      # active-scan History's selected (or open) flow
+      abstract def probe_active_rescan : Nil        # re-active-scan the selected Probe issue's sample flow
+      abstract def probe_active_from_repeater : Nil # active-scan the current Repeater session's last send
+
       # intercept (hold-and-decide; P4)
       abstract def intercept_toggle : Nil          # toggle the hold queue on/off
       abstract def intercept_forward : Nil         # forward the selected held message (edited bytes)
@@ -294,6 +313,22 @@ module Gori
       abstract def decoder_cycle_mode : Nil       # cycle the output display (text/hex/base64)
       abstract def decoder_save : Nil             # save the current chain by name (in-body prompt)
       abstract def decoder_load : Nil             # load a saved chain by name (in-body prompt)
+
+      # jwt: the decode / re-sign / attack-payload workbench (sub-tab + lens actions; the
+      # body's text editing + focus nav stay inline, these power the space menu + palette)
+      abstract def jwt_new : Nil               # open a fresh blank JWT session sub-tab
+      abstract def jwt_close : Nil             # close the active JWT session (keeps ≥1)
+      abstract def jwt_rename_subtab : Nil     # open the rename prompt for the active sub-tab
+      abstract def jwt_duplicate_subtab : Nil  # clone the active session into a new sibling
+      abstract def jwt_clear : Nil             # clear the token + editors of the active session
+      abstract def jwt_toggle_mode : Nil       # flip the DECODE ⇄ ENCODE lens
+      abstract def jwt_cycle_alg : Nil         # cycle the signing alg (HS256/384/512/none)
+      abstract def jwt_load_decoded : Nil      # seed the ENCODE editors from the INPUT token's claims
+      abstract def jwt_copy : Nil              # copy selection or the focused pane's content
+      abstract def jwt_copy_all : Nil          # copy the focused pane's content (space-menu fallback)
+      abstract def jwt_copy_token : Nil        # copy the re-signed OUTPUT token
+      abstract def jwt_copy_attack : Nil       # copy the selected ATTACK payload's token
+      abstract def jwt_read_mode? : Bool       # focused pane is READ (gates y/copy/select verbs)
 
       # notes: the multi-note scratchpad (sub-tab actions; the body's text editing
       # stays inline, these power the space menu reachable from the sub-tab strip)

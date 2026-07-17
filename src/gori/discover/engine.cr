@@ -516,18 +516,27 @@ module Gori::Discover
       raw = send_with_retries(task.url)
       body = decode_body(raw)
       fetched = distill(raw, body)
-      links = [] of RawLink
-      if raw.error.nil?
-        case task.source
-        when Source::Robots
-          Extract.from_robots(body).each { |h| links << RawLink.new(h, Source::Robots) }
-        when Source::Sitemap
-          Extract.from_sitemap(body).each { |h| links << RawLink.new(h, Source::Sitemap) }
-        else
-          Extract.from_html(body).each { |h| links << RawLink.new(h, Source::Crawled) } if html_like?(fetched.content_type)
-        end
-      end
+      links = raw.error.nil? ? extract_links(task, fetched, body) : EMPTY_LINKS
       Outcome.new(task, fetched, links, nil, false, 0.0)
+    end
+
+    # Pick the link extractor from the RESPONSE, not from how the URL was found. Only the
+    # well-known robots.txt (fetched by role at its fixed path) is parsed by label — it is
+    # plain text and never sniffable. Everything else defers to the body: a <loc>-bearing
+    # payload is a sitemap (the well-known /sitemap.xml, a <sitemapindex> child, OR a
+    # robots.txt `Sitemap:` URL at any path), and only genuine HTML is parsed as HTML. This
+    # stops a non-standard-path sitemap from being wrongly parsed as HTML and lost.
+    private def extract_links(task : Task, fetched : Calibrate::Fetched, body : Bytes) : Array(RawLink)
+      if task.kind.fetch? && task.source.robots?
+        return Extract.from_robots(body).map { |h| RawLink.new(h, Source::Robots) }
+      end
+      if Extract.sitemap_body?(body)
+        Extract.from_sitemap(body).map { |h| RawLink.new(h, Source::Sitemap) }
+      elsif html_like?(fetched.content_type)
+        Extract.from_html(body).map { |h| RawLink.new(h, Source::Crawled) }
+      else
+        EMPTY_LINKS
+      end
     end
 
     private def process_calibrate(task : Task) : Outcome

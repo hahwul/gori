@@ -2,10 +2,12 @@ require "json"
 require "../store"
 require "../fuzz"
 require "../miner"
+require "../sequencer"
 require "../discover"
 require "../sitemap"
 require "../probe/group"
 require "../notes"
+require "../jwt"
 
 module Gori
   module CLI
@@ -133,6 +135,34 @@ module Gori
           io << f.name.ljust(24)
           io << "  " << f.location.label.ljust(9)
           io << "· " << f.evidence.label
+        end
+      end
+
+      # --- jwt workbench (decode / re-sign / attack payloads) -----------------
+      # JSON shapes live in the engine (jwt/present.cr) so `gori run jwt` and the MCP
+      # jwt_* tools stay byte-identical; the text formatter below is CLI-only.
+
+      # "[none]     alg=none            unsigned; accepted if …"
+      def self.jwt_attack_text(a : Jwt::Attack) : String
+        String.build do |io|
+          io << "[" << a.category << "]"
+          io << " " * {12 - a.category.size - 2, 1}.max
+          io << a.name.ljust(24) << "  " << a.note << "\n"
+          io << "  " << a.token
+        end
+      end
+
+      # --- sequencer samples (jsonl stream) -----------------------------------
+
+      def self.sequence_sample_json(s : Sequencer::Sample) : String
+        JSON.build do |j|
+          j.object do
+            j.field "index", s.index
+            j.field "status", s.status
+            j.field "token", s.token
+            j.field "length", s.length
+            j.field "error", s.error
+          end
         end
       end
 

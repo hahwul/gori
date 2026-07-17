@@ -58,6 +58,14 @@ module Gori
         # Static identity for the Rules sub-tab (list + per-rule enable/disable). One RuleInfo
         # per class; the analyzer skips a rule when its `info.id` is in the project disabled set.
         abstract def info : RuleInfo
+
+        # How many probe requests this rule sends for ONE qualifying flow — drives the manual
+        # "Run active scan" estimate and the Rules sub-tab annotation. Every rule today sends
+        # exactly one (a rule that tests many params stuffs them all into a single request); a
+        # future multi-probe rule overrides this with its own (possibly wider) range.
+        def requests_per_flow : Range(Int32, Int32)
+          1..1
+        end
       end
     end
   end

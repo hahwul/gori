@@ -17,6 +17,7 @@ module Gori
       Miner          # the Miner (param-mining) tab has focus
       OastCallbacks  # the OAST tab's Callbacks sub-tab has focus
       OastProviders  # the OAST tab's Providers sub-tab has focus
+      Sequencer      # the Sequencer (token-randomness) tab has focus
       Sitemap        # the Sitemap sub-tab (under Target) has focus
       Discover       # the Discover sub-tab (under Target) has focus
       Issues       # the Issues list has focus
@@ -27,6 +28,7 @@ module Gori
       Intercept      # the Intercept queue tab has focus
       Comparer       # the Comparer tab has focus
       Decoder        # the Decoder tab has focus
+      Jwt            # the JWT workbench tab has focus
       Notes          # the Notes tab has focus (sub-tab strip space menu)
       Project        # the Project tab's SCOPE rule list has focus
       HostOverrides  # the Project tab's HOST OVERRIDES list has focus
