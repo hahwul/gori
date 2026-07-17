@@ -18,7 +18,7 @@ Its **active** checks are deliberately *light-touch*: a handful of safe, low-vol
 
 | Category | What it covers |
 |----------|----------------|
-| `headers` | Security headers (HSTS, CSP, …), cleartext Basic auth, mixed content, cacheable API responses |
+| `headers` | Security headers (HSTS, CSP incl. report-only-only, XFO, Permissions-Policy, …), cleartext Basic auth, mixed content, cacheable API responses |
 | `cookies` | `Secure` / `HttpOnly` / `SameSite` and related cookie hygiene |
 | `tech` | Technology and protocol fingerprints (also surface on the Project tab) |
 | `infoleak` | Body disclosures, secrets in URLs / WS frames, GraphQL introspection |

@@ -4,12 +4,24 @@ module Gori
   module Probe
     module Passive
       # Security response headers (category "headers"): HSTS on HTTPS, and the document-only
-      # CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy checks (gated on
-      # text/html upstream). Response-gated.
+      # CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy
+      # checks (gated on text/html upstream). Response-gated.
       class SecurityHeaders < Rule
+        # Powerful features whose allow-all (`*` / `(*)`) is worth a Low finding. Keep short —
+        # only sensors / payment / clipboard that change attacker capability when any origin can use them.
+        RISKY_PERMISSIONS = Set{
+          "camera", "microphone", "geolocation", "payment", "usb",
+          "display-capture", "clipboard-read",
+        }
+
+        # HSTS max-age under 1 day is almost always a mistake (or intentional disable-in-progress).
+        # Longer "short" thresholds (e.g. 6 months) are too noisy during staged rollouts.
+        SHORT_HSTS_MAX_AGE = 86_400_i64
+
         def info : RuleInfo
           RuleInfo.new("security_headers", "Security headers",
-            "Checks for missing or weak HSTS, CSP, X-Frame-Options, X-Content-Type-Options, and Referrer-Policy.",
+            "Checks for missing or weak HSTS, CSP (incl. report-only-only), X-Frame-Options, " \
+            "X-Content-Type-Options, Referrer-Policy, and Permissions-Policy.",
             Category::HEADERS)
         end
 
@@ -19,17 +31,20 @@ module Gori
             hsts = resp.headers.get_all("Strict-Transport-Security").first? # RFC 6797 §8.1: UA honours the FIRST STS header
             if hsts.nil? || hsts_disabled?(hsts)
               acc << hdr(ctx, "missing_hsts", "Missing or disabled HSTS header", Store::Severity::Medium)
+            elsif short_hsts?(hsts)
+              acc << hdr(ctx, "short_hsts", "HSTS max-age is under 1 day", Store::Severity::Low,
+                "max-age=#{hsts_max_age(hsts)}")
             end
           end
           check_doc_headers(ctx, resp.headers, acc) if ctx.html? && rendered_document?(resp.status)
         end
 
-        # CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy all govern how a
-        # browser RENDERS a document. A 3xx redirect is never rendered — the UA follows it — and
-        # a 204/304 carries no body, so their "missing" document headers are pure noise (the real
-        # target 200 / error page is captured as its own flow and checked there). A 4xx/5xx error
-        # page IS a rendered document (framable, may reflect XSS), so it keeps the checks. HSTS is
-        # unaffected: it applies to any HTTPS response, redirects included, and is checked above.
+        # CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy all
+        # govern how a browser RENDERS a document. A 3xx redirect is never rendered — the UA follows
+        # it — and a 204/304 carries no body, so their "missing" document headers are pure noise
+        # (the real target 200 / error page is captured as its own flow and checked there). A 4xx/5xx
+        # error page IS a rendered document (framable, may reflect XSS), so it keeps the checks.
+        # HSTS is unaffected: it applies to any HTTPS response, redirects included, and is checked above.
         private def rendered_document?(status : Int32) : Bool
           !((300..399).includes?(status) || status == 204)
         end
@@ -37,9 +52,19 @@ module Gori
         # HSTS with no max-age, or max-age=0 (RFC 6797: instructs the UA to DROP the policy), is
         # effectively disabled even though the header is present.
         private def hsts_disabled?(value : String) : Bool
+          age = hsts_max_age(value)
+          age.nil? || age == 0
+        end
+
+        private def short_hsts?(value : String) : Bool
+          age = hsts_max_age(value)
+          !age.nil? && age > 0 && age < SHORT_HSTS_MAX_AGE
+        end
+
+        private def hsts_max_age(value : String) : Int64?
           m = value.scrub.downcase.match(/max-age\s*=\s*"?(\d+)/) # scrub: a non-UTF-8 byte makes the PCRE match raise (cf. cors.cr)
-          return true if m.nil?
-          (m[1].to_i64? || 1_i64) == 0
+          return nil if m.nil?
+          m[1].to_i64?
         end
 
         private def check_doc_headers(ctx : Context, h, acc : Array(Detection)) : Nil
@@ -49,10 +74,17 @@ module Gori
             acc << hdr(ctx, "weak_csp", "Weak Content-Security-Policy", Store::Severity::Low, csp[0, 80]) if weak_csp?(dirs)
           else
             dirs = nil
-            acc << hdr(ctx, "missing_csp", "Missing Content-Security-Policy", Store::Severity::Medium)
+            # Report-Only alone does not enforce — flag that specifically instead of a bare
+            # missing_csp so the analyst doesn't misread "has CSP" from the R-O header name.
+            if h.get?("Content-Security-Policy-Report-Only")
+              acc << hdr(ctx, "csp_report_only", "CSP is report-only (not enforced)", Store::Severity::Medium)
+            else
+              acc << hdr(ctx, "missing_csp", "Missing Content-Security-Policy", Store::Severity::Medium)
+            end
           end
           # A CSP frame-ancestors directive only substitutes for X-Frame-Options when it is
-          # actually restrictive (not '*').
+          # actually restrictive (not '*'). Only the enforcing CSP counts — Report-Only does not
+          # block framing.
           fa = dirs.try(&.["frame-ancestors"]?)
           framed_ok = fa && !fa.empty? && !fa.includes?("*")
           # Only DENY / SAMEORIGIN actually restrict framing; the obsolete ALLOW-FROM (and any
@@ -66,9 +98,77 @@ module Gori
           if h.get?("X-Content-Type-Options").try(&.downcase.strip) != "nosniff"
             acc << hdr(ctx, "missing_x_content_type_options", "Missing X-Content-Type-Options: nosniff", Store::Severity::Low)
           end
-          if h.get?("Referrer-Policy").nil?
+          check_referrer_policy(ctx, h, acc)
+          check_permissions_policy(ctx, h, acc)
+        end
+
+        private def check_referrer_policy(ctx : Context, h, acc : Array(Detection)) : Nil
+          rp = h.get?("Referrer-Policy")
+          if rp.nil?
             acc << hdr(ctx, "missing_referrer_policy", "Missing Referrer-Policy", Store::Severity::Info)
+            return
           end
+          # Comma-separated multi-token policies are allowed (fallback list); flag only when a
+          # token is exactly unsafe-url. no-referrer-when-downgrade is the browser default and
+          # too common to flag without drowning signal.
+          tokens = rp.scrub.downcase.split(',').map(&.strip).reject(&.empty?)
+          if tokens.includes?("unsafe-url")
+            acc << hdr(ctx, "weak_referrer_policy", "Weak Referrer-Policy (unsafe-url)",
+              Store::Severity::Low, "unsafe-url")
+          end
+        end
+
+        private def check_permissions_policy(ctx : Context, h, acc : Array(Detection)) : Nil
+          # Prefer modern Permissions-Policy; fall back to legacy Feature-Policy.
+          pp = h.get?("Permissions-Policy")
+          fp = h.get?("Feature-Policy")
+          if pp.nil? && fp.nil?
+            acc << hdr(ctx, "missing_permissions_policy", "Missing Permissions-Policy", Store::Severity::Info)
+            return
+          end
+          policy = pp || fp.not_nil!
+          modern = !pp.nil?
+          weak = modern ? weak_permissions_modern(policy) : weak_permissions_legacy(policy)
+          return if weak.empty?
+          # Cap evidence so a giant policy doesn't bloat the issue row.
+          evidence = weak.first(5).join(", ")
+          evidence = "#{evidence}, …" if weak.size > 5
+          acc << hdr(ctx, "weak_permissions_policy", "Permissions-Policy allows sensitive features for all origins",
+            Store::Severity::Low, evidence)
+        end
+
+        # Permissions-Policy: `feature=(allowlist), feature=*, feature=()`. Bare `*` or `(*)`
+        # means every origin may use the feature. Empty `()` / `(self)` etc. are restrictive.
+        private def weak_permissions_modern(policy : String) : Array(String)
+          weak = [] of String
+          policy.scrub.downcase.split(',').each do |segment|
+            parts = segment.strip.split('=', 2)
+            next unless parts.size == 2
+            feature = parts[0].strip
+            next unless RISKY_PERMISSIONS.includes?(feature)
+            allow = parts[1].strip
+            # `*` or `(*)` (optional whitespace inside parens)
+            if allow == "*" || allow.matches?(/\A\(\s*\*\s*\)\z/)
+              weak << feature unless weak.includes?(feature)
+            end
+          end
+          weak
+        end
+
+        # Feature-Policy (legacy): `feature *; feature 'self'; feature 'none'`. Flag high-risk
+        # features whose allowlist contains a bare `*`.
+        private def weak_permissions_legacy(policy : String) : Array(String)
+          weak = [] of String
+          policy.scrub.downcase.split(';').each do |segment|
+            toks = segment.strip.split(/\s+/).reject(&.empty?)
+            next if toks.empty?
+            feature = toks[0]
+            next unless RISKY_PERMISSIONS.includes?(feature)
+            if toks[1..].includes?("*")
+              weak << feature unless weak.includes?(feature)
+            end
+          end
+          weak
         end
 
         # Parse a CSP into {directive => [sources]}, all lowercased. A directive repeated within

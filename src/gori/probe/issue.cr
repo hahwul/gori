@@ -50,11 +50,16 @@ module Gori
     # Dynamic-titled codes (tech_server / tech_powered_by) share the generic tech hint.
     REMEDIATION = {
       "missing_hsts"                   => "Send Strict-Transport-Security with a long max-age (and includeSubDomains/preload) on HTTPS responses.",
+      "short_hsts"                     => "Raise HSTS max-age to at least several months (e.g. 31536000) so browsers retain the HTTPS-only policy across visits.",
       "missing_csp"                    => "Define a Content-Security-Policy to constrain script/style/connect sources and mitigate XSS.",
+      "csp_report_only"                => "Promote Content-Security-Policy-Report-Only to an enforcing Content-Security-Policy once violations are clean; report-only never blocks XSS.",
       "weak_csp"                       => "Remove 'unsafe-inline'/'unsafe-eval' and wildcard sources; prefer nonces/hashes.",
       "missing_x_frame_options"        => "Set X-Frame-Options: DENY/SAMEORIGIN or a CSP frame-ancestors directive to prevent clickjacking.",
       "missing_x_content_type_options" => "Send X-Content-Type-Options: nosniff to stop MIME-type sniffing.",
       "missing_referrer_policy"        => "Set a Referrer-Policy (e.g. strict-origin-when-cross-origin) to limit referrer leakage.",
+      "weak_referrer_policy"           => "Replace Referrer-Policy: unsafe-url with strict-origin-when-cross-origin or no-referrer so full URLs (and query tokens) are not leaked cross-origin.",
+      "missing_permissions_policy"     => "Send a Permissions-Policy that disables or tightly scopes powerful features (camera, microphone, geolocation, payment, …) by default.",
+      "weak_permissions_policy"        => "Do not allow high-risk features for all origins (*); use () to disable or (self) / an explicit origin allowlist.",
       "cacheable_json"                 => "Send Cache-Control: no-store (and typically no-cache, private) on JSON/API responses so browsers and shared caches do not retain tokens, PII, or account data.",
       "cookie_no_secure"               => "Add the Secure attribute so the cookie is only sent over HTTPS.",
       "cookie_no_httponly"             => "Add HttpOnly so client-side script cannot read the cookie.",
