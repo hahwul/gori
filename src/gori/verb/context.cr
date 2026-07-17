@@ -49,6 +49,9 @@ module Gori
       abstract def selected_flow_id : Int64?
       abstract def copy_selection : Nil
       abstract def history_query : Nil # focus the QL filter bar
+      # History destructive actions (space-menu only; each opens a confirm first).
+      abstract def history_delete : Nil # delete the selected/open flow
+      abstract def history_clear : Nil  # wipe every History flow for this project
 
       # detail view
       abstract def scroll_detail(delta : Int32) : Nil

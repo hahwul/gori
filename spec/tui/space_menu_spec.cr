@@ -26,6 +26,8 @@ describe Gori::Tui::SpaceMenu do
 
     menu.verb_for('y').try(&.id).should eq("history.copy")
     menu.verb_for('r').try(&.id).should eq("history.repeater")
+    menu.verb_for('X').try(&.id).should eq("history.delete")
+    menu.verb_for('C').try(&.id).should eq("history.clear")
     menu.verb_for('Q').should be_nil # no entry bound to this key
   end
 
@@ -53,9 +55,11 @@ describe Gori::Tui::SpaceMenu do
     ids = menu.entries.map(&.id)
     ids.should contain("detail.repeater")     # flow action carried over from the list
     ids.should contain("detail.toggle-hex") # a detail-only view toggle
+    ids.should contain("detail.delete")     # destructive parity with the list menu
     menu.verb_for('r').try(&.id).should eq("detail.repeater")
     menu.verb_for('x').try(&.id).should eq("detail.select-line")
     menu.verb_for('e').try(&.id).should eq("detail.toggle-hex")
+    menu.verb_for('X').try(&.id).should eq("detail.delete")
   end
 
   it "lists the scope-rule actions in the Project scope pane (space replaced the lens toggle)" do

@@ -442,6 +442,44 @@ module Gori::Tui
       @rows[@selected]?.try(&.id)
     end
 
+    def empty? : Bool
+      @rows.empty?
+    end
+
+    # Selected list row (nil when empty) — used to name the flow in the delete confirm.
+    def selected_row : Store::FlowRow?
+      @rows[@selected]?
+    end
+
+    # Short "METHOD /path" label for confirm dialogs; falls back to "flow #id".
+    def flow_summary(id : Int64) : String
+      if (d = @detail) && d.row.id == id
+        return "#{d.row.method} #{Url.origin_path(d.row.target)}"
+      end
+      if (row = @rows.find { |r| r.id == id })
+        return "#{row.method} #{Url.origin_path(row.target)}"
+      end
+      "flow ##{id}"
+    end
+
+    # Hard-delete one flow by id, then re-anchor the list. Closes the detail if it was
+    # showing that flow. Id is captured by the controller at confirm-open time so a
+    # live-capture reload can't retarget the delete.
+    def delete_by_id(store : Store, id : Int64) : Nil
+      store.delete_flow(id)
+      close_detail if @detail.try(&.row.id) == id
+      clear_preview if @preview_id == id
+      reload(store)
+    end
+
+    # Wipe every History flow, close detail/preview, and reload the empty list.
+    def clear(store : Store) : Nil
+      store.clear_flows
+      close_detail
+      clear_preview
+      reload(store)
+    end
+
     # --- QL bar editing ------------------------------------------------------
 
     def start_query : Nil

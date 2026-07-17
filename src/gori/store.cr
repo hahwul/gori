@@ -1624,6 +1624,46 @@ module Gori
       @db.scalar("SELECT COUNT(*) FROM flows").as(Int64)
     end
 
+    # Hard-delete one History flow and its captured dependents (WS messages, FTS row,
+    # entity_links that pointed at it). Issues/Probe/Repeater that referenced the id keep
+    # the dangling cross-ref — their resolvers already surface "gone". Writer-fiber only
+    # so it races cleanly with live capture; orphaned h2 frame logs are reaped by the
+    # retention prune (same as a single-id miss in keep_flows).
+    def delete_flow(id : Int64) : Nil
+      exec_task ->(c : DB::Connection) {
+        delete_flow_one(c, id)
+        nil
+      }
+    end
+
+    # Wipe every captured History flow in this project (and their WS/FTS/h2 logs and
+    # flow entity_links). Repeater-owned WS rows (repeater_id set) and workbench sessions
+    # are left intact. Issues/Probe keep dangling sample flow ids.
+    def clear_flows : Nil
+      exec_task ->(c : DB::Connection) {
+        # Captured WS only — WebSocket-Repeater output is keyed by repeater_id.
+        c.exec("DELETE FROM ws_messages WHERE repeater_id IS NULL")
+        # contentless FTS: per-row DELETE is a tombstone; wipe the whole index in one go
+        # so a large clear doesn't leave a full-size tombstone table behind.
+        c.exec("INSERT INTO flows_fts(flows_fts) VALUES('delete-all')")
+        c.exec("DELETE FROM entity_links WHERE ref_kind = 'flow'")
+        c.exec("DELETE FROM flows")
+        c.exec("DELETE FROM h2_frames")
+        c.exec("DELETE FROM h2_connections")
+        @pending_req_fts.clear
+        nil
+      }
+    end
+
+    # Cascade for one flow id (writer connection). Shared by delete_flow.
+    private def delete_flow_one(conn : DB::Connection, id : Int64) : Nil
+      conn.exec("DELETE FROM ws_messages WHERE flow_id = ? AND repeater_id IS NULL", id)
+      conn.exec("DELETE FROM flows_fts WHERE rowid = ?", id)
+      conn.exec("DELETE FROM entity_links WHERE ref_kind = 'flow' AND ref_id = ?", id)
+      conn.exec("DELETE FROM flows WHERE id = ?", id)
+      @pending_req_fts.delete(id)
+    end
+
     # Distinct host values for History QL Tab-complete (`host:`). Prefix-filtered
     # (case-insensitive), hard-capped so a huge capture history never materialises
     # the full DISTINCT set on every keystroke. Uses idx_flows_sitemap's leading

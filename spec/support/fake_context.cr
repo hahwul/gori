@@ -49,6 +49,10 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def history_query : Nil; end
 
+  def history_delete : Nil; end
+
+  def history_clear : Nil; end
+
   def scroll_detail(delta : Int32) : Nil; end
 
   def detail_copy_selection : Nil; end

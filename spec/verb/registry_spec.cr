@@ -96,6 +96,14 @@ private class FakeContext < ExecContext
     @calls << :history_query
   end
 
+  def history_delete : Nil
+    @calls << :history_delete
+  end
+
+  def history_clear : Nil
+    @calls << :history_clear
+  end
+
   def scroll_detail(delta : Int32) : Nil
     @calls << :scroll_detail
   end
