@@ -17,10 +17,12 @@ module Gori
       @mutex = Mutex.new
       # Lock-free fast-path flags: rewrite_* run on EVERY message, but the common case
       # is no rule for that side/part. These let the hot path skip the mutex + select-
-      # array allocation entirely when nothing would match. `@head_count` gates the head
-      # rewrite (replace-head AND the header ops, which all act on the head); the two body
-      # counts also gate whether ClientConn buffers a body at all.
-      @head_count = Atomic(Int32).new(active_count(@rules, part: Store::RulePart::Head))
+      # array allocation entirely when nothing would match. The head counts gate the head
+      # rewrite (replace-head AND the header ops, which all act on the head), split PER
+      # DIRECTION like the body counts so a request-only rule doesn't tax every response
+      # (and vice versa); the body counts also gate whether ClientConn buffers a body at all.
+      @req_head_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Request, part: Store::RulePart::Head))
+      @resp_head_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Head))
       @req_body_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Request, part: Store::RulePart::Body))
       @resp_body_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Body))
     end
@@ -98,11 +100,11 @@ module Gori
     # --- HeadRewriter (called from proxy fibers) -----------------------------
 
     def rewrite_request(head : Bytes, host : String) : Bytes
-      apply(head, Store::RuleTarget::Request, Store::RulePart::Head, @head_count, host)
+      apply(head, Store::RuleTarget::Request, Store::RulePart::Head, @req_head_count, host)
     end
 
     def rewrite_response(head : Bytes, host : String) : Bytes
-      apply(head, Store::RuleTarget::Response, Store::RulePart::Head, @head_count, host)
+      apply(head, Store::RuleTarget::Response, Store::RulePart::Head, @resp_head_count, host)
     end
 
     # A body rule is live iff at least one enabled, non-empty rule targets that side's
@@ -319,7 +321,8 @@ module Gori
     private def refresh : Nil
       fresh = @store.match_rules
       @mutex.synchronize { @rules = fresh }
-      @head_count.set(active_count(fresh, part: Store::RulePart::Head))
+      @req_head_count.set(active_count(fresh, Store::RuleTarget::Request, part: Store::RulePart::Head))
+      @resp_head_count.set(active_count(fresh, Store::RuleTarget::Response, part: Store::RulePart::Head))
       @req_body_count.set(active_count(fresh, Store::RuleTarget::Request, part: Store::RulePart::Body))
       @resp_body_count.set(active_count(fresh, Store::RuleTarget::Response, part: Store::RulePart::Body))
     end

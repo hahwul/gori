@@ -3995,6 +3995,8 @@ module Gori::Tui
       flush_active_tab_edits # cross-tab "open this and land in it" jumps must persist the outgoing edit too
       @active_tab = tab
       @focus = :body
+      @overlay = :none # clear any launching overlay (e.g. History :detail) so the destination
+      #                  tab's body keys/scope aren't deadened by a stale overlay gate
     end
 
     def session : Session

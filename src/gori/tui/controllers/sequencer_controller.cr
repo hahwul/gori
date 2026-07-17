@@ -505,6 +505,8 @@ module Gori::Tui
     end
 
     private def finish_job(v : SequencerView, ev : Sequencer::DoneEvent) : Nil
+      return if @host.jobs.errored?(v.job_id) # an ErrorEvent already finalized this run — the
+      #                                         engine's trailing DoneEvent must not log/notify success
       rep = v.report
       n = rep.usable_count
       @host.jobs.finish(v.job_id, :done, "#{n} · #{rep.rating.label.downcase}")

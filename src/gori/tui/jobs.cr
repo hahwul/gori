@@ -67,6 +67,12 @@ module Gori::Tui
       j.note = summary if summary
     end
 
+    # True once a job has been finished with :error — lets a controller's DoneEvent handler
+    # skip its success side effects (log/notification/status) when an ErrorEvent already fired.
+    def errored?(id : Int32) : Bool
+      (j = find(id)) ? j.state == :error : false
+    end
+
     def active : Array(Job)
       @jobs.select(&.running?)
     end

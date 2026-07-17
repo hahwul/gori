@@ -276,14 +276,17 @@ module Gori
         # CONTENTS can't false-match) and track brace depth to find the matching `}`. Every
         # consumed char emits exactly one char, so offsets stay aligned. `i` points at `$`.
         private def self.emit_interpolation(chars : Array(Char), i : Int32, n : Int32, io : IO) : Int32
-          io << '$' << '{'
+          io << "  " # blank the '${' delimiter (2 spaces, offset-preserved): keeps the inner
+          #            expression as code but removes the '{' so source_in_window's /[;{}\n]/
+          #            statement-boundary scan doesn't truncate the window at the interpolation
+          #            (else `innerHTML = `${location.hash}`` loses its source and DOM-XSS misses it)
           i += 2
           depth = 1
           while i < n && depth > 0
             ch = chars[i]
             if ch == '{' || ch == '}'
               depth += ch == '{' ? 1 : -1
-              io << ch
+              io << (ch == '}' && depth == 0 ? ' ' : ch) # blank the OUTER closing '}'; keep inner braces
               i += 1
             elsif j = blank_token_at(chars, i, n, io) # nested string/comment (recurses for a nested template)
               i = j

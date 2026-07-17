@@ -2800,6 +2800,17 @@ module Gori
         end)
       end
 
+      # Whether a rule's pattern is acceptable: only a Replace+Regex rule must compile; a
+      # literal or header-op rule is always fine. Mirrors the CLI's valid_regex? guard so the
+      # MCP surface rejects a bad pattern instead of persisting a rule that silently never fires.
+      private def valid_rule_regex?(op : Store::RuleOp, match_kind : Store::MatchKind, pattern : String) : Bool
+        return true unless op.replace? && match_kind.regex?
+        Regex.new(pattern)
+        true
+      rescue
+        false
+      end
+
       private def create_rule(h) : Result
         pattern = str(h, "pattern")
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
@@ -2810,6 +2821,11 @@ module Gori
         return ok if ok.is_a?(Result)
         op, match_kind = ok
         part = Store::RulePart::Head if op.header? # header ops are head-only
+        # Reject an uncompilable regex up front (the CLI does; the proxy would otherwise
+        # rescue the compile to passthrough and the rule would silently never fire).
+        unless valid_rule_regex?(op, match_kind, pattern)
+          return err("invalid regex pattern (failed to compile)", "INVALID_ARGUMENT", field: "pattern")
+        end
         replacement = str(h, "replacement") || ""
         name = str(h, "name") || ""
         host = str(h, "host") || ""
@@ -2846,6 +2862,9 @@ module Gori
         part = Store::RulePart::Head if op.header?
         pattern = present?(h, "pattern") ? str(h, "pattern") : existing.pattern
         return err("pattern must not be empty", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
+        unless valid_rule_regex?(op, match_kind, pattern)
+          return err("invalid regex pattern (failed to compile)", "INVALID_ARGUMENT", field: "pattern")
+        end
         replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : existing.replacement
         name = present?(h, "name") ? (str(h, "name") || "") : existing.name
         host = present?(h, "host") ? (str(h, "host") || "") : existing.host

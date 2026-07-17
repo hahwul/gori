@@ -2852,7 +2852,7 @@ module Gori
         op = parse_rewriter_op(op_s)
         target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter add: invalid --target '#{target_s}'")
         part = Store::RulePart.parse?(part_s) || abort("gori run rewriter add: invalid --part '#{part_s}'")
-        match = Store::MatchKind.from_label(match_s.downcase)
+        match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter add: invalid --match '#{match_s}' (literal|regex)")
         if op.replace? && match.regex? && !valid_regex?(f)
           abort "gori run rewriter add: invalid regex --find (failed to compile)"
         end
@@ -2971,7 +2971,7 @@ module Gori
         op = parse_rewriter_op(op_s)
         target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter preview: invalid --target '#{target_s}'")
         part = Store::RulePart.parse?(part_s) || abort("gori run rewriter preview: invalid --part '#{part_s}'")
-        match = Store::MatchKind.from_label(match_s.downcase)
+        match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter preview: invalid --match '#{match_s}' (literal|regex)")
         part = Store::RulePart::Head if op.header?
 
         project = resolve_read_project(project_name, db_path)

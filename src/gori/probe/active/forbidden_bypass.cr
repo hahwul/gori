@@ -8,12 +8,14 @@ module Gori
       # Active IP-header access-control bypass probe. Many gateways/apps gate a resource on the
       # *claimed* client IP (an allowlist, an "internal only" path, an admin panel), trusting a
       # proxy header like X-Forwarded-For instead of the real socket peer. Passive analysis can't
-      # tell such a control apart from any other 403/401; only re-sending the SAME request with a
-      # spoofed loopback IP in those headers proves the gate is header-controllable.
+      # tell such a control apart from any other 403/401; re-sending the SAME request with a
+      # spoofed loopback IP in those headers surfaces a candidate header-controllable gate.
       #
       # For one in-scope flow whose captured response was 401/403, it re-sends ONE request with the
-      # full IP-spoofing header set (all 127.0.0.1) and flags a High issue only when the response
-      # flips to 2xx — the definitive "access denied → granted by forging my IP" bypass. Gated to
+      # full IP-spoofing header set (all 127.0.0.1) and flags a Medium "possible bypass" when the
+      # response flips to 2xx. It is a single-shot probe against the CAPTURED baseline (no control
+      # re-send without the headers), so a transient/rate-limited 403 that later clears can also
+      # flip — hence "possible", to be confirmed by re-sending without the headers. Gated to
       # safe methods (GET/HEAD) so an automatic probe never mutates server state, and to originally-
       # denied responses so a normally-200 endpoint is never probed. A control that correctly keys
       # on the socket peer ignores the headers and still returns 401/403, so it is never flagged.
@@ -81,9 +83,13 @@ module Gori
           # ambiguous and would inflate false positives, so it is intentionally not flagged.
           return [] of Detection unless (200..299).includes?(status)
           orig = detail.row.status
+          # A single-shot flip against the CAPTURED baseline (no control re-send without the
+          # headers at probe time) can't prove the header caused it — a transient/rate-limited
+          # 403 that later clears looks identical. Report it as a Medium "possible" lead, not a
+          # confirmed High bypass, so a naturally-varying 403 doesn't produce a false High.
           [Detection.new("forbidden_bypass", Category::ACTIVE, detail.row.host, detail.row.url,
-            "Access control bypassed via spoofed client-IP header", Store::Severity::High,
-            "#{orig} → #{status} when X-Forwarded-For/X-Real-IP set to #{BYPASS_VALUE}", detail.row.id)]
+            "Possible access-control bypass via spoofed client-IP header", Store::Severity::Medium,
+            "#{orig} → #{status} with X-Forwarded-For/X-Real-IP=#{BYPASS_VALUE} (single-shot; confirm by re-sending WITHOUT the headers)", detail.row.id)]
         rescue
           [] of Detection
         end

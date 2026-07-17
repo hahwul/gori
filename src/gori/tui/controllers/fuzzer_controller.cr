@@ -769,6 +769,8 @@ module Gori::Tui
     end
 
     private def finish_job(v : FuzzerView, ev : Fuzz::DoneEvent) : Nil
+      return if @host.jobs.errored?(v.job_id) # an ErrorEvent already finalized this run — the
+      #                                         engine's trailing DoneEvent must not log/notify success
       n = v.matched_count
       @host.jobs.finish(v.job_id, :done, "#{n} hit")
       level = n > 0 ? :success : :info
