@@ -51,6 +51,7 @@ module Gori::Tui
       super(host)
       @registry = Decoder.default_registry
       @popup = ChainComplete.new
+      @popup_engaged = false # false = passive full-list menu (Tab still navigates panes)
       @prompt = nil # :save_as | :load inline mini-prompt (else nil)
       @prompt_buf = ""
       @chain_pre = "" # IME preedit for the focused CHAIN field
@@ -278,7 +279,7 @@ module Gori::Tui
     # via a pre-ring guard (gated on `completing?`). Returns false for any other key
     # so normal chain editing still flows down to handle_body_key + refilters.
     def completing? : Bool
-      cur.pane == :chain && @popup.open?
+      cur.pane == :chain && @popup.open? && @popup_engaged
     end
 
     def handle_complete_key(ev : Termisu::Event::Key) : Bool
@@ -363,11 +364,12 @@ module Gori::Tui
 
     def pane_advance(dir : Int32) : Bool
       s = cur
-      @popup.close
       i = PANE_ORDER.index(s.pane) || 0
       ni = i + dir
       return false if ni < 0 || ni >= PANE_ORDER.size
       s.pane = PANE_ORDER[ni]
+      # Surface the converter list when landing on CHAIN (discovery); close it otherwise.
+      s.pane == :chain ? surface_chain_list : @popup.close
       true
     end
 
@@ -381,6 +383,22 @@ module Gori::Tui
       @popup.close
     end
 
+    # Focus the CHAIN field and surface the converter list (used by ↓ from INPUT and ↑
+    # from OUTPUT, mirroring the Tab focus ring).
+    private def focus_chain : Nil
+      cur.pane = :chain
+      surface_chain_list
+    end
+
+    # Discovery aid: when the token under the caret is empty, pop the FULL converter list
+    # as a *passive* menu (Tab still navigates the focus ring; ↓ dives in). With a real
+    # token present, leave the popup closed so merely focusing never hijacks Tab.
+    private def surface_chain_list : Nil
+      s = cur
+      ts, te = token_span(s.chain, s.chain_cx)
+      s.chain[ts...te].strip.empty? ? refilter_popup : @popup.close
+    end
+
     def body_hint(focus : Symbol) : String
       return "type a name · ↵ save · esc cancel" if @prompt == :save_as
       return "type a name · ↵ load · esc cancel" if @prompt == :load
@@ -388,7 +406,9 @@ module Gori::Tui
       y = Hotkeys.binding_label(@host.session.registry, "decoder.copy", "y")
       case s.pane
       when :chain
-        return "↑/↓ pick · ↹/↵ complete · esc close · type to filter" if @popup.open?
+        if @popup.open?
+          return @popup_engaged ? "↑/↓ pick · ↹/↵ complete · esc close · type to filter" : "↓ browse · type to filter · ⇥ output · esc tabs"
+        end
         "chain (> | ,) · ↑ input · ↓ output · ^Y copy · ^X mode · ^S save · ^O load · esc tabs"
       when :output
         "↑/↓ move · ⇧arrows select · #{y} copy · ⇧←/→ h-scroll · ↑-top chain · space cmds · ^X mode · ^Y copy all · esc tabs"
@@ -531,7 +551,7 @@ module Gori::Tui
           s.input.move(-1, 0)
         end
       when key.down?
-        s.input.at_bottom? ? (s.pane = :chain) : s.input.move(1, 0)
+        s.input.at_bottom? ? focus_chain : s.input.move(1, 0)
       else
         edit_input_caret(ev, s, c) # ←/→/Home/End/Delete + literal insert
       end
@@ -553,7 +573,7 @@ module Gori::Tui
         else
           s.input_read.move(s.input, -1, 0, selecting: selecting)
         end
-      when key.down?  then s.input.at_bottom? ? (s.pane = :chain) : s.input_read.move(s.input, 1, 0, selecting: selecting)
+      when key.down?  then s.input.at_bottom? ? focus_chain : s.input_read.move(s.input, 1, 0, selecting: selecting)
       when key.left?  then s.input_read.move(s.input, 0, -1, selecting: selecting)
       when key.right? then s.input_read.move(s.input, 0, 1, selecting: selecting)
       when key.home?  then s.input.home
@@ -592,8 +612,13 @@ module Gori::Tui
         s.pane = :input
         @popup.close
       when key.down?
-        s.pane = :output # down from CHAIN drops into the OUTPUT pane (popup owns ↓ while open)
-        @popup.close
+        if @popup.open?
+          @popup_engaged = true # dive into the passively-shown list; ↓ now navigates it
+          @popup.move(1)
+        else
+          s.pane = :output # down from CHAIN drops into the OUTPUT pane
+          @popup.close
+        end
       when key.backspace?
         if s.chain_cx > 0
           s.chain = s.chain[0, s.chain_cx - 1] + s.chain[s.chain_cx..]
@@ -633,7 +658,7 @@ module Gori::Tui
       selecting = ev.shift?
       case
       when key.up?, key.lower_k?
-        s.view.output_at_top? ? (s.pane = :chain) : out_nav_step(s, -1, 0, selecting)
+        s.view.output_at_top? ? focus_chain : out_nav_step(s, -1, 0, selecting)
       when key.down?, key.lower_j? then out_nav_step(s, 1, 0, selecting)
       when key.left?               then out_nav_step(s, 0, -1, selecting)
       when key.right?              then out_nav_step(s, 0, 1, selecting)
@@ -664,6 +689,7 @@ module Gori::Tui
       s = cur
       s.chain, s.chain_cx = @popup.accept(s.chain, s.chain_cx)
       @popup.close
+      @popup_engaged = false
       touch
     end
 
@@ -671,12 +697,13 @@ module Gori::Tui
       s = cur
       ts, te = token_span(s.chain, s.chain_cx)
       tok = s.chain[ts...te].strip
-      if tok.empty?
-        @popup.close
-      else
-        matches = @registry.match(tok).map(&.name).uniq
-        @popup.set(matches.first(40), ts, te)
-      end
+      # match("") returns EVERY converter, so an empty token surfaces the full list as a
+      # passive discovery menu (engaged? = false → Tab keeps navigating the focus ring,
+      # ↓ dives in). A typed token filters AND engages it (Tab/↵ accept). set() opens the
+      # popup iff the match list is non-empty.
+      matches = @registry.match(tok).map(&.name).uniq
+      @popup.set(matches.first(64), ts, te)
+      @popup_engaged = !tok.empty?
     end
 
     # The token under the caret = the run of non-separator chars around it.

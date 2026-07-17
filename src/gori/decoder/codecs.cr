@@ -2,6 +2,7 @@ require "base64"
 require "json"
 require "compress/gzip"
 require "compress/zlib"
+require "compress/deflate"
 require "big"
 
 module Gori::Decoder
@@ -415,6 +416,19 @@ module Gori::Decoder
       drain(Compress::Zlib::Reader.new(IO::Memory.new(data)))
     end
 
+    # Raw DEFLATE (RFC 1951) — no zlib/gzip wrapper. Common on the wire: many servers
+    # send `Content-Encoding: deflate` as raw deflate, and websocket permessage-deflate
+    # is raw. Mirrors zlib_compress/zlib_decompress; reuses the bounded drain.
+    def deflate_raw(data : Bytes) : Bytes
+      io = IO::Memory.new
+      Compress::Deflate::Writer.open(io, &.write(data))
+      io.to_slice
+    end
+
+    def inflate_raw(data : Bytes) : Bytes
+      drain(Compress::Deflate::Reader.new(IO::Memory.new(data)))
+    end
+
     # Drain a decompression reader into memory, capped at MAX_OUT (no zip-bombs).
     # Tolerant: a mid-stream error keeps whatever was decoded; an immediate failure
     # (nothing decoded) raises a DecoderError. Mirrors content_decode.cr's read_all.
@@ -430,6 +444,81 @@ module Gori::Decoder
         raise DecoderError.new("decompress failed: #{ex.message}") if sink.bytesize == 0
       end
       sink.to_slice
+    end
+
+    # ---- byte-oriented number bases (space-separated, matches CyberChef To/From) ----
+    def decimal_encode(data : Bytes) : String
+      String.build do |io|
+        data.each_with_index do |b, i|
+          io << ' ' if i > 0
+          io << b
+        end
+      end
+    end
+
+    def binary_encode(data : Bytes) : String
+      String.build do |io|
+        data.each_with_index do |b, i|
+          io << ' ' if i > 0
+          io << b.to_s(2).rjust(8, '0')
+        end
+      end
+    end
+
+    def octal_encode(data : Bytes) : String
+      String.build do |io|
+        data.each_with_index do |b, i|
+          io << ' ' if i > 0
+          io << b.to_s(8)
+        end
+      end
+    end
+
+    def decimal_decode(s : String) : Bytes
+      parse_numbers(s, 10)
+    end
+
+    def binary_decode(s : String) : Bytes
+      parse_numbers(s, 2)
+    end
+
+    def octal_decode(s : String) : Bytes
+      parse_numbers(s, 8)
+    end
+
+    # Split on whitespace/commas; every token must parse in `base` and fit a byte.
+    private def parse_numbers(s : String, base : Int32) : Bytes
+      toks = s.split(/[\s,]+/).reject(&.empty?)
+      out = Bytes.new(toks.size)
+      toks.each_with_index do |t, i|
+        v = t.to_i?(base)
+        raise DecoderError.new("invalid base-#{base} value: #{t.inspect}") unless v && 0 <= v <= 255
+        out[i] = v.to_u8
+      end
+      out
+    end
+
+    # Percent-encode EVERY byte (%XX, uppercase) — WAF-bypass style. Contrast with the
+    # url-encode converter (URI.encode_www_form), which only escapes reserved chars.
+    def url_encode_all(data : Bytes) : String
+      String.build(data.size * 3) do |io|
+        data.each { |b| io << ("%%%02X" % b) }
+      end
+    end
+
+    # ROT47: rotate printable ASCII 33..126 by 47 (mod 94); all else passes through.
+    # Self-inverse — applying it twice restores the original.
+    def rot47(s : String) : String
+      String.build do |io|
+        s.each_char do |c|
+          o = c.ord
+          if 33 <= o <= 126
+            io << ((o - 33 + 47) % 94 + 33).chr
+          else
+            io << c
+          end
+        end
+      end
     end
   end
 end

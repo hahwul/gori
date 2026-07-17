@@ -36,6 +36,11 @@ describe Gori::Decoder do
       names.first.should eq "url-encode"
       names.index("url-encode").not_nil!.should be < names.index("base64url-encode").not_nil!
     end
+
+    it "returns every converter (registration order) for an empty query" do
+      # Foundation for the Decoder tab's show-all-on-empty discovery popup.
+      REG.match("").map(&.name).should eq REG.names
+    end
   end
 
   describe "base64 / url / hex round-trips" do
@@ -59,6 +64,12 @@ describe Gori::Decoder do
     it "url encode/decode (form style)" do
       conv("url-encode", "a b+c").should eq "a+b%2Bc"
       conv("url-decode", "a+b%2Bc").should eq "a b+c"
+    end
+
+    it "url-encode-all percent-encodes every byte (uppercase)" do
+      conv("url-encode-all", "A/").should eq "%41%2F"
+      conv("url-encode-all", "hi").should eq "%68%69"
+      conv("url-decode", conv("url-encode-all", "a b+c")).should eq "a b+c" # round-trips via the std decoder
     end
 
     it "hex encode/decode (tolerant of 0x / ':' / spaces)" do
@@ -140,11 +151,49 @@ describe Gori::Decoder do
       String.new(conv_bytes("zlib-decompress", z)).should eq "hello world"
     end
 
+    it "raw deflate round-trips (RFC 1951, no zlib/gzip wrapper)" do
+      d = conv_bytes("raw-deflate", "hello world".to_slice)
+      String.new(conv_bytes("raw-inflate", d)).should eq "hello world"
+    end
+
     it "gzip-compress is deterministic (mtime pinned to epoch)" do
       a = conv_bytes("gzip-compress", "hello world".to_slice)
       b = conv_bytes("gzip-compress", "hello world".to_slice)
       a.should eq(b) # same input → identical bytes (no wall-clock mtime)
       String.new(conv_bytes("gzip-decompress", a)).should eq "hello world"
+    end
+  end
+
+  describe "number bases (byte-oriented, space-separated)" do
+    it "decimal encode/decode" do
+      conv("decimal-encode", "hi").should eq "104 105"
+      conv("decimal-decode", "104 105").should eq "hi"
+      conv("decimal-decode", "104,105").should eq "hi" # comma-separated tolerated
+    end
+
+    it "binary encode/decode (8-bit groups)" do
+      conv("binary-encode", "hi").should eq "01101000 01101001"
+      conv("binary-decode", "01101000 01101001").should eq "hi"
+    end
+
+    it "octal encode/decode" do
+      conv("octal-encode", "hi").should eq "150 151"
+      conv("octal-decode", "150 151").should eq "hi"
+    end
+
+    it "round-trips every byte value 0..255 in each base" do
+      bytes = Bytes.new(256) { |i| i.to_u8 }
+      {"decimal", "binary", "octal"}.each do |base|
+        rt = conv_bytes("#{base}-decode", conv_bytes("#{base}-encode", bytes).dup)
+        rt.should eq bytes
+      end
+    end
+
+    it "raises on out-of-range or non-numeric tokens" do
+      expect_raises(Gori::Decoder::DecoderError) { conv("decimal-decode", "256") }
+      expect_raises(Gori::Decoder::DecoderError) { conv("decimal-decode", "-1") }
+      expect_raises(Gori::Decoder::DecoderError) { conv("decimal-decode", "12x") }
+      expect_raises(Gori::Decoder::DecoderError) { conv("binary-decode", "012") } # '2' not a binary digit
     end
   end
 
@@ -154,6 +203,8 @@ describe Gori::Decoder do
       conv("sha1", "").should eq "da39a3ee5e6b4b0d3255bfef95601890afd80709"
       conv("sha256", "abc").should eq "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
       conv("sha512", "abc").should start_with "ddaf35a193617aba"
+      conv("crc32", "hello world").should eq "0d4a1185"
+      conv("crc32", "").should eq "00000000" # empty input → zero, left-padded to 8 hex
     end
   end
 
@@ -212,6 +263,12 @@ describe Gori::Decoder do
       conv("upper", "abc").should eq "ABC"
       conv("lower", "ABC").should eq "abc"
       conv("reverse", "abc").should eq "cba"
+    end
+
+    it "rot47 rotates printable ASCII 33..126 and is self-inverse" do
+      conv("rot47", "Hello").should eq "w6==@"
+      conv("rot47", conv("rot47", "Hello, World! 123")).should eq "Hello, World! 123"
+      conv("rot47", " ").should eq " " # space (0x20) is below 33 → passes through unchanged
     end
   end
 
