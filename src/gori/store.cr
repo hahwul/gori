@@ -5,6 +5,7 @@ require "json"
 require "./store/models"
 require "./store/safe_regexp"
 require "./store/schema"
+require "./store/compact"
 require "./ql"
 
 module Gori

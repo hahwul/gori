@@ -37,6 +37,11 @@ module Gori
       @disabled : Set(String) # RuleInfo#id of built-ins the operator turned off (Rules sub-tab)
       @custom : Array(CustomRule) # merged global+project user match rules
 
+      # One enabled active rule that WOULD run against a given flow, plus the request count it
+      # sends. `active_estimate` returns these (empty when nothing applies) so the manual "Run
+      # active scan" confirm can show a per-rule breakdown + total before any request goes out.
+      record ActiveEstimate, info : RuleInfo, requests : Range(Int32, Int32)
+
       private record ActiveTask, rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail
 
       def initialize(@store : Store, @scope : Scope, @input : Channel(Store::FlowEvent),
@@ -154,6 +159,52 @@ module Gori
         raise ex
       rescue
         # a single detail's analysis blew up — skip it
+      end
+
+      # Per-flow active-scan estimate for the manual "Run active scan" action: every ENABLED
+      # active rule that applies to `detail` (dedup_key non-nil ⇔ plan non-nil, per the equivalence
+      # spec), with the requests it sends. Cheap — dedup_key never builds canaries and nothing is
+      # sent — so it's safe on the render path. Matches exactly what run_active_now will fire.
+      def active_estimate(detail : Store::FlowDetail) : Array(ActiveEstimate)
+        Active::RULES.compact_map do |rule|
+          next if @disabled.includes?(rule.info.id)
+          next unless rule.dedup_key(detail)
+          ActiveEstimate.new(rule.info, rule.requests_per_flow)
+        end
+      end
+
+      # Manual, on-demand active scan of ONE flow (the History / Probe / Repeater "Run active
+      # scan" action). Unlike the automatic pipeline this BYPASSES the mode gate (runs even in
+      # Off/Passive), the scope gate, and the @active_seen dedup (the operator deliberately asked
+      # to re-run) — but still honours @disabled (Rules sub-tab) and @suppressed (hard-deletes).
+      # Runs in the background so the sends never block the render loop; findings land via the
+      # usual upsert (probe_generation poll) + IssueEvent notification path. `repeater_id` stamps
+      # detections for evidence linking back to a Repeater tab. `notify` (the run popup's choice)
+      # gates the tray: Off is silent, WhenFound posts per finding, Always also posts a completion
+      # note when the scan came back clean.
+      def run_active_now(detail : Store::FlowDetail, *, repeater_id : Int64? = nil,
+                         notify : Miner::NotifyMode = Miner::NotifyMode::WhenFound) : Nil
+        return if @stopped
+        spawn(name: "gori-probe-active-manual") do
+          found = 0
+          errored = false
+          Active::RULES.each do |rule|
+            break if @stopped
+            next if @disabled.includes?(rule.info.id)
+            plan = rule.plan(detail)
+            next unless plan
+            if wrote = execute_active(rule, plan, detail, repeater_id: repeater_id, notify: notify)
+              found += wrote
+            else
+              errored = true # send failure already posted its own error notification
+            end
+          end
+          # Always mode wants a "done, nothing found" note — but only for a scan that actually
+          # completed cleanly (WhenFound/Off stay quiet; a real finding or an error already posted).
+          if notify.always? && found == 0 && !errored && !@stopped
+            emit(CompleteEvent.new(detail.row.host, "active scan on #{detail.row.host}: no issues"))
+          end
+        end
       end
 
       # --- passive fiber ----------------------------------------------------------------
@@ -369,27 +420,43 @@ module Gori
           @active_seen.delete(task.plan.dedup_key)
           return
         end
-        row = task.detail.row
+        execute_active(task.rule, task.plan, task.detail)
+      end
+
+      # Send ONE built probe and fold its response into issues + a notification. Shared by the
+      # automatic queue worker (run_active) and the manual run_active_now — so both paths dedup,
+      # persist, and notify identically. Stamps flow/repeater source like the passive `persist`,
+      # so a Repeater-sourced manual run links its findings back to the Repeater tab (flow id 0 →
+      # nil), while a History flow keeps its real flow id. Returns the number of issues written
+      # (0 = a clean send with no finding), or nil when the probe ERRORED (send failed / store
+      # closing) — so a manual run doesn't post an "all clean" completion over a failed scan.
+      # `notify` gates the per-finding notification: Off emits the list-refresh IssueEvent WITHOUT
+      # a summary (no tray post); WhenFound/Always attach it (the automatic path stays WhenFound).
+      private def execute_active(rule : Active::Rule, plan : Active::Plan, detail : Store::FlowDetail,
+                                 repeater_id : Int64? = nil,
+                                 notify : Miner::NotifyMode = Miner::NotifyMode::WhenFound) : Int32?
+        row = detail.row
         origin = Fuzz::Origin.new(row.scheme, row.host, row.port)
-        http2 = task.detail.http_version.starts_with?("HTTP/2")
+        http2 = detail.http_version.starts_with?("HTTP/2")
         sender = Fuzz::Sender.new(origin, http2, @verify_upstream, timeout: ACTIVE_TIMEOUT)
-        result = sender.send(task.plan.request)
+        result = sender.send(plan.request)
         # Surface send failures (TLS/DNS/timeout) so Active never fails silently — but
         # only ONCE per host: a flapping origin with many distinct param sets would
         # otherwise flood the notification tray (one event per unique plan.dedup_key).
         unless result.ok?
           emit_active_error(row.host, result.error || "send failed")
-          return
+          return nil
         end
-        detections = task.rule.detections(task.plan, result, task.detail)
-        return if detections.empty?
-        wrote = false
+        detections = rule.detections(plan, result, detail)
+        return 0 if detections.empty?
+        wrote = 0
         detections.each do |d|
           next if suppressed?(d.code, d.host)
-          @store.upsert_probe_issue(d)
-          wrote = true
+          stamped = Probe.with_source(d, flow_id: (row.id > 0 ? row.id : nil), repeater_id: repeater_id)
+          @store.upsert_probe_issue(stamped)
+          wrote += 1
         end
-        return unless wrote
+        return 0 if wrote == 0
         # Store#upsert already bumps probe_generation (TUI polls that). Event is for
         # notifications; may be dropped when the channel is full.
         # Notification wording is rule-agnostic: the detection's own title + evidence (so a CORS
@@ -397,11 +464,14 @@ module Gori
         first = detections.first
         msg = "#{first.title} on #{row.host}"
         msg = "#{msg}: #{first.evidence}" if first.evidence
-        emit(IssueEvent.new(row.host, msg))
+        emit(IssueEvent.new(row.host, notify.off? ? nil : msg))
+        wrote
       rescue DB::Error | SQLite3::Exception
         # store closing — stop quietly (the worker will exit when the queue closes)
+        nil
       rescue ex
-        emit_active_error(task.detail.row.host, ex.message || "error")
+        emit_active_error(detail.row.host, ex.message || "error")
+        nil
       end
 
       # First failure per host only (see run_active). Cap the set so a long-lived project

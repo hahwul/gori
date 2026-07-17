@@ -2,6 +2,9 @@ require "base64"
 require "json"
 require "uri"
 require "./decoder/codecs"
+require "./jwt/forge"
+require "./jwt/attacks"
+require "./jwt/present"
 
 module Gori
   # Finds and decodes the JSON Web Tokens a flow carries. Unlike Pretty's whole-body

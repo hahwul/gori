@@ -845,6 +845,23 @@ module Gori::Tui
       v.clear_dirty
     end
 
+    # Build a synthetic FlowDetail from the active session's last HTTP send (the request as
+    # currently edited + its captured response), for the manual "Run active scan" action. nil
+    # when there's no session, no captured HTTP response yet, or the session is WS/gRPC. Mirrors
+    # the RepeaterRecord shape probe_scan_repeater builds for the passive path.
+    def active_scan_detail : Store::FlowDetail?
+      return unless tab = current_repeater_tab
+      view = tab.view
+      return unless resp = view.last_http_response
+      head, body = resp
+      rec = Store::RepeaterRecord.new(
+        tab.db_id || 0_i64, view.target, view.request_text, view.http2?, view.auto_content_length?,
+        tab.flow_id, 0, head, body, nil, 0_i64, view.name, view.sni_override)
+      Probe.detail_from_repeater(rec)
+    rescue
+      nil
+    end
+
     # Passive-scan a successful HTTP Repeater send into Probe (mode-gated by the analyzer).
     private def probe_scan_repeater(repeater_id : Int64, head : Bytes, body : Bytes?,
                                     duration_us : Int64, flow_id : Int64?, view : RepeaterView) : Nil

@@ -8,7 +8,10 @@ module Gori
     # reflection was confirmed) the controller also raises a notification.
     record IssueEvent, host : String, summary : String? = nil
     record ErrorEvent, message : String
+    # A manual "Run active scan" finished with something worth announcing on its own (not a
+    # per-finding IssueEvent): today only the Always-mode "scan complete — no issues" note.
+    record CompleteEvent, host : String, message : String
 
-    alias Event = IssueEvent | ErrorEvent
+    alias Event = IssueEvent | ErrorEvent | CompleteEvent
   end
 end

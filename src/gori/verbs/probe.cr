@@ -70,6 +70,12 @@ module Gori
         "probe.repeater-evidence", "Repeater evidence", "Send the selected issue's sample flow to Repeater",
         Verb::Scope::Probe, [Verb::Chord.new("r")]) { |ctx| ctx.probe_repeater_flow; nil }
 
+      # Re-run the ACTIVE checks against the selected issue's sample flow (menu-only 'A') — opens
+      # a confirm with the expected request count. 'a' is toggle-closed; capital 'A' is free.
+      r.register Verb::Definition.new(
+        "probe.active-rescan", "Run active scan", "Re-run the Probe active checks against the selected issue's sample flow",
+        Verb::Scope::Probe, mnemonic: 'A') { |ctx| ctx.probe_active_rescan; nil }
+
       r.register Verb::Definition.new(
         "probe.promote-selected", "Promote to issue", "Create a Issue from the selected issue",
         Verb::Scope::Probe, [Verb::Chord.new("p")]) { |ctx| ctx.probe_promote; nil }

@@ -231,7 +231,7 @@ module Gori
       {
         :project => "Project", :target => "Target", :history => "History", :intercept => "Intercept",
         :repeater => "Repeater", :fuzzer => "Fuzzer", :miner => "Miner", :decoder => "Decoder",
-        :comparer => "Comparer", :probe => "Probe", :issues => "Issues", :notes => "Notes",
+        :jwt => "JWT", :comparer => "Comparer", :probe => "Probe", :issues => "Issues", :notes => "Notes",
       }.each do |tab, label|
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global,

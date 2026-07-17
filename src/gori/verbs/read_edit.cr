@@ -86,6 +86,21 @@ module Gori
         "fuzzer.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
         Verb::Scope::Fuzzer, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
+      # JWT workbench read-mode panes (INPUT-read, DECODED, OUTPUT, ATTACKS). Tagged
+      # :input for select-line (the token pane is the one with a fine selection); send-to
+      # stays COMMON (menu-only, must show in every read pane — see repeater.send-to note).
+      in_jwt_read = ->(ctx : Verb::ExecContext) { ctx.current_tab == :jwt && ctx.jwt_read_mode? }
+      r.register Verb::Definition.new(
+        "jwt.select-line", "Select line", "Select the entire current line",
+        Verb::Scope::Jwt, [Verb::Chord.new("x")],
+        available: in_jwt_read, mnemonic: 'x', section: :input) { |ctx| ctx.read_select_line; nil }
+      r.register Verb::Definition.new(
+        "jwt.clear-selection", "Clear selection", "Clear the text selection",
+        Verb::Scope::Jwt, available: in_sel, mnemonic: 'v', section: :input) { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "jwt.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, JWT, …)",
+        Verb::Scope::Jwt, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
+
       in_issues_notes = ->(ctx : Verb::ExecContext) { ctx.issues_notes_read_mode? }
       r.register Verb::Definition.new(
         "issue.select-line", "Select line", "Select the entire current notes line",

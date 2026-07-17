@@ -56,6 +56,13 @@ module Gori
         "history.compare", "Send to Comparer", "Send the selected flow to the Comparer (next slot A/B)",
         Verb::Scope::Body, available: history_selected, mnemonic: 'c') { |ctx| ctx.comparer_add_selected; nil }
 
+      # Manually run the Probe ACTIVE checks (reflected params, CORS) against the selected flow,
+      # regardless of the Probe mode — opens a confirm dialog with the expected request count.
+      # Menu-only ('A'); mirrors detail.probe-active in the drill-in.
+      r.register Verb::Definition.new(
+        "history.probe-active", "Run active scan", "Run the Probe active checks against the selected flow (shows the request count first)",
+        Verb::Scope::Body, available: history_selected, mnemonic: 'A') { |ctx| ctx.probe_active_selected; nil }
+
       # --- repeater workbench (request editing is inline; these power the palette
       # and show their key hints — actual keys are handled directly by the TUI) ---
       in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
@@ -326,6 +333,12 @@ module Gori
       r.register Verb::Definition.new(
         "detail.add-host", "Add host to scope", "Add this flow's host to the scope lens",
         Verb::Scope::HistoryDetail, mnemonic: 'h') { |ctx| ctx.scope_add_host; nil }
+
+      # Run the Probe active checks against the open flow (mirrors history.probe-active 'A' from
+      # the list) — close the detail first so the confirm dialog isn't buried under it.
+      r.register Verb::Definition.new(
+        "detail.probe-active", "Run active scan", "Run the Probe active checks against this flow (shows the request count first)",
+        Verb::Scope::HistoryDetail, mnemonic: 'A') { |ctx| ctx.close_detail; ctx.probe_active_selected; nil }
     end
 
     # Fuzzer/Intruder verbs: the cross-tab "send to Fuzzer" (⇧I from History, palette
@@ -439,6 +452,12 @@ module Gori
         "repeater.mine", "Mine parameters", "Discover hidden parameters for this repeater request",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'm') { |ctx| ctx.mine_from_repeater; nil }
 
+      # Run the Probe active checks against the current Repeater request's last send (COMMON, so
+      # it's reachable from any Repeater pane) — opens a confirm with the expected request count.
+      r.register Verb::Definition.new(
+        "repeater.probe-active", "Run active scan", "Run the Probe active checks against this Repeater request (needs a prior send)",
+        Verb::Scope::Repeater, available: in_repeater, mnemonic: 'A') { |ctx| ctx.probe_active_from_repeater; nil }
+
       r.register Verb::Definition.new(
         "mine.run", "Run mining", "Re-run parameter mining for this session", Verb::Scope::Miner,
         [Verb::Chord.new("r", ctrl: true)], available: in_miner, mnemonic: 'r') { |ctx| ctx.mine_run; nil }
@@ -520,6 +539,7 @@ module Gori
       register_miner(r)
       register_comparer(r)
       register_decoder(r)
+      register_jwt(r)
       register_notes(r)
       register_host_overrides(r)
       register_env(r)
