@@ -280,10 +280,10 @@ describe Gori::Tui::HistoryView do
       view.reload(store)
       view.open_detail(store).should be_true
 
-      view.detail_at_top?.should be_true  # fresh open → caret on row 0
-      view.scroll_detail(1)               # caret down one line
+      view.detail_at_top?.should be_true # fresh open → caret on row 0
+      view.scroll_detail(1)              # caret down one line
       view.detail_at_top?.should be_false
-      view.scroll_detail(-1)              # back to row 0
+      view.scroll_detail(-1) # back to row 0
       view.detail_at_top?.should be_true
     end
   end
@@ -342,18 +342,18 @@ describe Gori::Tui::HistoryView do
     end
   end
 
-  it "opens in the body, flips to the strip level, and resets to the body on re-open" do
+  it "opens on the strip, flips to the body level, and resets to the strip on re-open" do
     tmp_store do |store|
       add_flow(store, "GET", "/api", 200)
       view = HistoryView.new
       view.reload(store)
       view.open_detail(store).should be_true
 
-      view.detail_strip_focus?.should be_false # a fresh open lands in the BODY
-      view.set_detail_focus(:strip)            # ↑-at-top ascends to the chip strip
-      view.detail_strip_focus?.should be_true
-      view.open_detail(store).should be_true   # re-opening resets the sub-state
+      view.detail_strip_focus?.should be_true # a fresh open lands on the STRIP
+      view.set_detail_focus(:body)            # enters the body (caret/text)
       view.detail_strip_focus?.should be_false
+      view.open_detail(store).should be_true # re-opening resets the sub-state to STRIP
+      view.detail_strip_focus?.should be_true
     end
   end
 
