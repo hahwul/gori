@@ -36,7 +36,7 @@ end
 
 describe "Chrome.menu_segments" do
   it "lays out every tab left-to-right, non-overlapping, on a wide row" do
-    rect = Rect.new(2, 1, 160, 1)
+    rect = Rect.new(2, 1, 180, 1)
     segs = Chrome.menu_segments(rect, :project)
     segs.size.should eq(Chrome::TABS.size) # all tabs fit on a wide row
     segs.map(&.first).should eq(Chrome::TABS.map(&.first))

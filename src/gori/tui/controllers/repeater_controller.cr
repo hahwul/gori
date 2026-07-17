@@ -108,6 +108,11 @@ module Gori::Tui
       current_repeater_tab.try(&.view)
     end
 
+    # Cross-tab "Insert OAST payload": drop the URL at the request-editor caret.
+    def insert_oast_payload(url : String) : Bool
+      (v = current_view) ? v.insert_oast_payload(url) : false
+    end
+
     def subtab_labels : Array(String)
       @repeaters.map_with_index { |tab, i| "#{i + 1}:#{tab.view.label(18)}#{tab.view.tags_label(12)}" }
     end
