@@ -27,6 +27,13 @@ module Gori::Tui
     # this no longer applies.
     DEFAULT_HIDDEN = [:miner]
 
+    # The human sidebar label for a tab symbol (the catalog name), used off the render
+    # path too — e.g. the terminal-window title. Falls back to a capitalized symbol for
+    # an unknown key so a future tab is never blank.
+    def self.tab_label(sym : Symbol) : String
+      TABS.find { |(s, _)| s == sym }.try(&.[1]) || sym.to_s.capitalize
+    end
+
     WORDMARK = "𝓰𝓸𝓻𝓲"
 
     # How far the unfocused active sub-tab's receded gold sits between the canvas (0.0)
