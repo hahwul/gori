@@ -12,26 +12,91 @@ module Gori::Decoder
   module Codecs
     extend self
 
+    # ASCII whitespace test — HT/LF/VT/FF/CR (0x09..0x0d) + space. Matches PCRE2's
+    # default `\s` class over the ASCII plane, which is all base64/hex/base32
+    # payloads ever contain, so this replaces the per-codec `gsub(/\s/, "")` regex
+    # with a plain byte compare on the hot path (recompute runs every keystroke).
+    private def ascii_ws?(b : UInt8) : Bool
+      b == 0x20_u8 || (0x09_u8 <= b <= 0x0d_u8)
+    end
+
     # ---- base64 / hex: stdlib + raise-wrapping ----
 
     # Tolerant decode: strips whitespace; Base64.decode accepts BOTH the standard
-    # and url-safe alphabets and missing padding (so one decoder serves both).
+    # and url-safe alphabets and missing padding (so one decoder serves both). The
+    # common (no-whitespace) input decodes with zero extra allocation — the byte
+    # scan returns the original string untouched instead of the old regex copy.
     def base64_decode(s : String) : Bytes
-      Base64.decode(s.gsub(/\s/, ""))
+      Base64.decode(strip_ascii_ws(s))
     rescue ex : Base64::Error
       raise DecoderError.new("invalid base64: #{ex.message}")
     end
 
+    # Return `s` unchanged when it holds no ASCII whitespace (one pass, no alloc);
+    # otherwise a filtered copy. Base64 blobs are usually unwrapped, so the fast
+    # path is the norm.
+    private def strip_ascii_ws(s : String) : String
+      bytes = s.to_slice
+      return s unless bytes.any? { |b| ascii_ws?(b) }
+      String.build(bytes.size) do |io|
+        bytes.each { |b| io.write_byte(b) unless ascii_ws?(b) }
+      end
+    end
+
+    # Optimistic: already-clean hex decodes in place via `hexbytes?` — no cleaning
+    # copy. `hexbytes?` rejects any whitespace/':'/'x', so a direct success PROVES
+    # the input had no separators (cleaning would be a no-op) and the result is
+    # identical to the old `gsub(/0x/i,"").gsub(/[\s:]/,"")` path. Only separator-
+    # laden or malformed input falls to the manual single pass below, which drops a
+    # literal adjacent "0x"/"0X" (greedy, non-overlapping — the old regex saw the
+    # original string, so whitespace removal never manufactures a new "0x") and
+    # skips whitespace and ':' everywhere.
     def hex_decode(s : String) : Bytes
-      cleaned = s.gsub(/0x/i, "").gsub(/[\s:]/, "")
+      if direct = s.hexbytes?
+        return direct
+      end
+      bytes = s.to_slice
+      cleaned = String.build(bytes.size) do |io|
+        i = 0
+        while i < bytes.size
+          b = bytes[i]
+          if b == 0x30_u8 && (nx = bytes[i + 1]?) && (nx == 0x78_u8 || nx == 0x58_u8)
+            i += 2                           # drop a literal "0x" / "0X"
+          elsif ascii_ws?(b) || b == 0x3a_u8 # whitespace or ':'
+            i += 1
+          else
+            io.write_byte(b)
+            i += 1
+          end
+        end
+      end
       cleaned.hexbytes? || raise DecoderError.new("invalid hex (odd length or non-hex char)")
     end
 
     # ---- base32 (RFC 4648, padded) ----
     B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
+    # Symbol bytes for O(1) byte-indexed encode (the string is pure ASCII).
+    B32_ENC = B32.to_slice
+
+    # Byte -> 5-bit value, or 0xFF for "not a base32 symbol". Both letter cases fold
+    # to the same value so decode needs no whole-string `upcase` copy, and the O(32)
+    # `B32.index(c)` linear scan per char becomes a single table load.
+    B32_DEC = begin
+      t = StaticArray(UInt8, 256).new(0xff_u8)
+      B32.each_char_with_index do |c, i|
+        t[c.ord] = i.to_u8
+        t[c.downcase.ord] = i.to_u8
+      end
+      t
+    end
+
     def base32_encode(data : Bytes) : String
-      sb = String::Builder.new
+      # Exact RFC 4648 output length: ceil(n/5) groups of 8 chars. One allocation,
+      # filled in place — no String::Builder growth + `to_s` + `s + pad` copies.
+      out_size = ((data.size + 4) // 5) * 8
+      buf = Bytes.new(out_size)
+      n = 0
       acc = 0_u32
       bits = 0
       data.each do |b|
@@ -39,29 +104,40 @@ module Gori::Decoder
         bits += 8
         while bits >= 5
           bits -= 5
-          sb << B32[((acc >> bits) & 0x1f).to_i]
+          buf[n] = B32_ENC[(acc >> bits) & 0x1f]
+          n += 1
         end
       end
-      sb << B32[((acc << (5 - bits)) & 0x1f).to_i] if bits > 0
-      s = sb.to_s
-      s + ("=" * ((8 - s.size % 8) % 8))
+      if bits > 0
+        buf[n] = B32_ENC[(acc << (5 - bits)) & 0x1f]
+        n += 1
+      end
+      while n < out_size # pad to the 8-char group boundary
+        buf[n] = 0x3d_u8 # '='
+        n += 1
+      end
+      String.new(buf)
     end
 
     def base32_decode(s : String) : Bytes
-      io = IO::Memory.new
+      bytes = s.to_slice
+      buf = Bytes.new((bytes.size * 5) // 8 + 1) # upper bound (padding/ws over-counts)
+      n = 0
       acc = 0_u32
       bits = 0
-      s.upcase.each_char do |c|
-        next if c == '=' || c.whitespace?
-        v = B32.index(c) || raise DecoderError.new("invalid base32 char: #{c}")
+      bytes.each do |b|
+        next if b == 0x3d_u8 || ascii_ws?(b) # '=' padding / whitespace
+        v = B32_DEC[b]
+        raise DecoderError.new("invalid base32 char: #{b.chr}") if v == 0xff_u8
         acc = (acc << 5) | v.to_u32
         bits += 5
         if bits >= 8
           bits -= 8
-          io.write_byte(((acc >> bits) & 0xff).to_u8)
+          buf[n] = ((acc >> bits) & 0xff).to_u8
+          n += 1
         end
       end
-      io.to_slice
+      buf[0, n]
     end
 
     # ---- ascii85 (Adobe; 'z' shortcut for an all-zero quad; no <~ ~> wrap) ----
@@ -197,27 +273,46 @@ module Gori::Decoder
       end
     end
 
-    # Parse EXACTLY 4 hex digits at `at`, or nil. A short slice near end-of-string
-    # (e.g. `\uAB`) must NOT decode — it stays literal, matching the mid-string case
-    # where `\uABX` is left alone because `X` is not a hex digit. The explicit
-    # `hex?` guard is load-bearing: `to_i?(16)` also accepts a leading sign or
-    # whitespace, so `\u+ABC`/`\u 1FF` would silently mis-decode and `\u-1FF` would
-    # even reach `Int#chr` with a negative value (a raw ArgumentError). Requiring all
-    # four chars to be hex digits keeps those literal, as intended.
-    private def hex4(s : String, at : Int32) : Int32?
-      h = s[at, 4]?
-      return nil unless h && h.size == 4 && h.each_char.all?(&.hex?)
-      h.to_i?(16)
+    # Single hex digit's value (0..15), or -1 for a non-hex byte. Only 0-9a-fA-F
+    # count: a sign/space/underscore returns -1 so `\u+ABC`/`\u 1FF`/`\u-1FF` stay
+    # literal (the old `hex?` guard that kept `to_i?(16)` from accepting them).
+    private def hex_digit(b : UInt8) : Int32
+      case b
+      when 0x30_u8..0x39_u8 then (b - 0x30_u8).to_i      # '0'..'9'
+      when 0x61_u8..0x66_u8 then (b - 0x61_u8 + 10).to_i # 'a'..'f'
+      when 0x41_u8..0x46_u8 then (b - 0x41_u8 + 10).to_i # 'A'..'F'
+      else                       -1
+      end
     end
 
+    # Parse EXACTLY 4 hex digits at byte offset `at`, or nil. A short run near
+    # end-of-string (e.g. `\uAB`) must NOT decode — it stays literal, matching the
+    # mid-string case where `\uABX` is left alone because `X` is not a hex digit.
+    private def hex4(bytes : Bytes, at : Int32) : Int32?
+      return nil if at + 4 > bytes.size
+      v = 0
+      4.times do |k|
+        d = hex_digit(bytes[at + k])
+        return nil if d < 0
+        v = (v << 4) | d
+      end
+      v
+    end
+
+    # Byte-level scan: `\uXXXX` escapes are pure ASCII, and any non-escape byte
+    # (incl. UTF-8 continuation bytes of a real multibyte char) is copied verbatim,
+    # so the output stays valid without materializing `s.chars` — and without the
+    # old O(n^2) `s[at, 4]` char-index slicing on mixed-multibyte input.
     def unicode_unescape(s : String) : String
-      String.build do |io|
-        chars = s.chars
+      bytes = s.to_slice
+      len = bytes.size
+      String.build(len) do |io|
         i = 0
-        while i < chars.size
-          if chars[i] == '\\' && i + 1 < chars.size && chars[i + 1] == 'u'
-            hi = hex4(s, i + 2)
-            if hi && 0xD800 <= hi <= 0xDBFF && s[i + 6, 2]? == "\\u" && (lo = hex4(s, i + 8)) && 0xDC00 <= lo <= 0xDFFF
+        while i < len
+          if bytes[i] == 0x5c_u8 && bytes[i + 1]? == 0x75_u8 # "\u"
+            hi = hex4(bytes, i + 2)
+            if hi && 0xD800 <= hi <= 0xDBFF && bytes[i + 6]? == 0x5c_u8 && bytes[i + 7]? == 0x75_u8 &&
+               (lo = hex4(bytes, i + 8)) && 0xDC00 <= lo <= 0xDFFF
               io << (0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)).chr
               i += 12
               next
@@ -230,7 +325,7 @@ module Gori::Decoder
               next
             end
           end
-          io << chars[i]
+          io.write_byte(bytes[i])
           i += 1
         end
       end

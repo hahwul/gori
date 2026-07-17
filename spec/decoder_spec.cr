@@ -49,6 +49,13 @@ describe Gori::Decoder do
       String.new(conv_bytes("base64url-encode", Bytes[0xfb, 0xff])).should eq "-_8="
     end
 
+    it "base64-decode strips embedded whitespace (MIME-wrapped input)" do
+      # The fast path returns the string untouched when clean; wrapped input must
+      # still decode after the newlines/tabs are dropped (old gsub(/\s/,"") behavior).
+      conv("base64-decode", "aGVsbG8g\nd29ybGQ=").should eq "hello world"
+      conv("base64-decode", "aGVs bG8g\td29y\r\nbG Q=").should eq "hello world"
+    end
+
     it "url encode/decode (form style)" do
       conv("url-encode", "a b+c").should eq "a+b%2Bc"
       conv("url-decode", "a+b%2Bc").should eq "a b+c"
@@ -58,6 +65,13 @@ describe Gori::Decoder do
       conv("hex-encode", "hi").should eq "6869"
       conv("hex-decode", "0x68 69").should eq "hi"
       conv("hex-decode", "68:69").should eq "hi"
+      conv("hex-decode", "6869").should eq "hi"       # clean fast path (no separators)
+      conv("hex-decode", "0X6869").should eq "hi"     # uppercase 0X prefix
+      conv("hex-decode", "0x68:0x69").should eq "hi"  # a "0x" per byte, colon between
+      conv("hex-decode", "  68\t69\n").should eq "hi" # surrounding whitespace
+      # non-hex and odd-length still raise
+      expect_raises(Gori::Decoder::DecoderError) { conv("hex-decode", "68z") }
+      expect_raises(Gori::Decoder::DecoderError) { conv("hex-decode", "689") }
     end
   end
 
@@ -71,6 +85,25 @@ describe Gori::Decoder do
     it "base32 round-trips and matches the RFC 4648 vector" do
       conv("base32-encode", "foobar").should eq "MZXW6YTBOI======"
       conv("base32-decode", "MZXW6YTBOI======").should eq "foobar"
+    end
+
+    it "base32-decode folds lowercase and rejects non-alphabet chars" do
+      # The decode table maps both cases to the same value (no whole-string upcase).
+      conv("base32-decode", "mzxw6ytboi======").should eq "foobar" # all lowercase
+      conv("base32-decode", "MzXw6YtBoI").should eq "foobar"       # mixed case, no padding
+      # 0/1/8/9 are not in the RFC 4648 alphabet
+      expect_raises(Gori::Decoder::DecoderError) { conv("base32-decode", "MZXW0918") }
+    end
+
+    it "base32-encode emits exact RFC 4648 length + padding across input sizes" do
+      # Locks the single-shot exact-size buffer: output = ceil(n/5)*8 chars, with
+      # every trailing group '='-padded. Round-trips for lengths 0..17.
+      (0..17).each do |n|
+        bytes = Slice(UInt8).new(n) { |i| (i * 37 + 5).to_u8! }
+        enc = conv_bytes("base32-encode", bytes)
+        enc.size.should eq(((n + 4) // 5) * 8)
+        conv_bytes("base32-decode", enc.dup).should eq bytes
+      end
     end
 
     it "ascii85 round-trips, incl. encodings that contain '<'/'>' data symbols" do
@@ -140,6 +173,12 @@ describe Gori::Decoder do
       conv("unicode-escape", "aé").should eq "a\\u00e9"
       conv("unicode-unescape", "a\\u00e9").should eq "aé"
       conv("unicode-unescape", conv("unicode-escape", "x🎉y")).should eq "x🎉y"
+    end
+
+    it "unicode-unescape passes real multibyte chars through verbatim beside escapes" do
+      # The byte-level scan copies non-escape bytes (incl. a real 'é'/'🎉' UTF-8
+      # sequence) verbatim while still decoding adjacent \uXXXX escapes.
+      conv("unicode-unescape", "é\\u00e9🎉\\u0041").should eq "éé🎉A"
     end
 
     it "unicode-unescape leaves a truncated \\u escape at end-of-string literal" do
