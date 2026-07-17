@@ -29,10 +29,14 @@ module Gori::Tui
     ROW_CONTAIN = 4
     ROW_CONC    = 5
     ROW_EXT     = 6
-    ROW_START   = 7
-    ROWS        = 8
+    ROW_HEADERS = 7
+    ROW_START   = 8
+    ROWS        = 9
 
     getter seed : DiscoverSeed
+    # Custom request headers ({name, value}) prefilled from a History flow and/or
+    # edited in the headers overlay. NOT persisted to prefs — they can carry secrets.
+    getter headers : Array({String, String}) = [] of {String, String}
 
     def initialize(@seed : DiscoverSeed)
       @target_idx = 0
@@ -44,6 +48,14 @@ module Gori::Tui
       @ext = false
       @selected = 0
       restore_saved_prefs
+    end
+
+    def set_headers(headers : Array({String, String})) : Nil
+      @headers = headers
+    end
+
+    def on_headers_row? : Bool
+      @selected == ROW_HEADERS
     end
 
     # The chosen start URL + its display path.
@@ -112,7 +124,8 @@ module Gori::Tui
         spider: @spider, bruteforce: @bruteforce,
         max_depth: DEPTHS[@depth_idx], concurrency: CONCS[@conc_idx],
         containment: CONTAINMENTS[@contain_idx],
-        extensions: @ext ? COMMON_EXT.dup : [] of String)
+        extensions: @ext ? COMMON_EXT.dup : [] of String,
+        headers: @headers)
     end
 
     def overlay_box(area : Rect) : Rect?
@@ -152,15 +165,28 @@ module Gori::Tui
       when ROW_DEPTH   then cyc(screen, x, py, bg, sel, "max depth:", DEPTHS[@depth_idx].to_s)
       when ROW_CONTAIN then cyc(screen, x, py, bg, sel, "scope:", CONTAINMENTS[@contain_idx].label)
       when ROW_CONC    then cyc(screen, x, py, bg, sel, "concurrency:", CONCS[@conc_idx].to_s)
-      else
-        label = valid? ? "[ Start discovery ]" : "[ enable spider or bruteforce ]"
-        screen.text(x, py, label, valid? ? Theme.accent : Theme.muted, bg, Attribute::Bold)
+      when ROW_HEADERS then headers_row(screen, x, py, bg, sel)
+      else                  start_row(screen, x, py, bg)
       end
+    end
+
+    private def start_row(screen : Screen, x : Int32, py : Int32, bg : Color) : Nil
+      label = valid? ? "[ Start discovery ]" : "[ enable spider or bruteforce ]"
+      screen.text(x, py, label, valid? ? Theme.accent : Theme.muted, bg, Attribute::Bold)
     end
 
     private def check(screen : Screen, x : Int32, py : Int32, bg : Color, sel : Bool, on : Bool, label : String) : Nil
       screen.text(x, py, on ? "[x]" : "[ ]", on ? Theme.green : Theme.muted, bg)
       screen.text(x + 4, py, label, sel ? Theme.text_bright : Theme.text, bg)
+    end
+
+    private def headers_row(screen : Screen, x : Int32, py : Int32, bg : Color, sel : Bool) : Nil
+      label = "custom headers:"
+      screen.text(x, py, label, Theme.muted, bg)
+      val = @headers.empty? ? "none" : "#{@headers.size} set"
+      vx = x + label.size + 1
+      screen.text(vx, py, val, sel ? Theme.text_bright : Theme.text, bg)
+      screen.text(vx + val.size + 2, py, "↵ edit", Theme.muted, bg)
     end
 
     private def cyc(screen : Screen, x : Int32, py : Int32, bg : Color, sel : Bool, label : String, val : String, cyclable : Bool = true) : Nil

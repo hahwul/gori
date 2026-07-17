@@ -57,6 +57,7 @@ require "./path_complete"
 require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
 require "./discover_config_overlay"
+require "./discover_headers_overlay"
 require "./scope_rule_overlay"
 require "./custom_rule_overlay"
 require "./ca_import_overlay"
@@ -208,6 +209,7 @@ module Gori::Tui
       # :mine_config while it's up. Built fresh each time it opens (holds the seed request).
       @mine_config_overlay = nil.as(MineConfigOverlay?)
       @discover_config_overlay = nil.as(DiscoverConfigOverlay?)
+      @discover_headers_overlay = nil.as(DiscoverHeadersOverlay?)
       # The Fuzzer config overlays (CONFIG pane → ↵ on a set / Add / Advanced): a payload-set
       # editor and the advanced-settings form. @overlay is :fuzz_set / :fuzz_advanced while up;
       # built fresh from the current fuzz session each time they open.
@@ -851,6 +853,7 @@ module Gori::Tui
       when :settings      then @settings_view.set_preedit(text)
       when :hosts         then @hosts_overlay.set_preedit(text)
       when :env           then @env_overlay.set_preedit(text)
+      when :discover_headers then @discover_headers_overlay.try(&.set_preedit(text))
       when :fuzz_set      then @fuzz_set_overlay.try(&.set_preedit(text))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.set_preedit(text))
       when :scope_rule    then @scope_rule_overlay.try(&.set_preedit(text))
@@ -941,6 +944,7 @@ module Gori::Tui
       return handle_notifications_key(ev) if @overlay == :notifications
       return handle_mine_config_key(ev) if @overlay == :mine_config
       return handle_discover_config_key(ev) if @overlay == :discover_config
+      return handle_discover_headers_key(ev) if @overlay == :discover_headers
       return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
       return handle_fuzz_advanced_key(ev) if @overlay == :fuzz_advanced
       return handle_scope_rule_key(ev) if @overlay == :scope_rule
@@ -1191,7 +1195,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :discover_config, :fuzz_set, :fuzz_advanced, :scope_rule, :probe_rule, :ca_import then true
+      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :probe_rule, :ca_import then true
       else                                                                                                                                                                                                                                                               false
       end
     end
@@ -1298,6 +1302,7 @@ module Gori::Tui
       when :notifications then click_notifications(area, mx, my)
       when :mine_config   then click_mine_config(area, mx, my)
       when :discover_config then click_discover_config(area, mx, my)
+      when :discover_headers then click_discover_headers(area, mx, my)
       when :fuzz_set      then click_fuzz_set(area, mx, my)
       when :fuzz_advanced then click_fuzz_advanced(area, mx, my)
       when :scope_rule    then click_scope_rule(area, mx, my)
@@ -1373,8 +1378,20 @@ module Gori::Tui
       return close_discover_config if box.nil? || dismiss_zone?(box, mx, my)
       if idx = ov.row_at(box, mx, my)
         ov.set_selected(idx)
-        ov.on_start_row? ? start_discover(ov) : ov.toggle
+        if ov.on_start_row?
+          start_discover(ov)
+        elsif ov.on_headers_row?
+          open_discover_headers(ov)
+        else
+          ov.toggle
+        end
       end
+    end
+
+    private def click_discover_headers(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @discover_headers_overlay || return
+      box = ov.overlay_box(area)
+      commit_discover_headers if box.nil? || dismiss_zone?(box, mx, my) # click-away saves (esc semantics)
     end
 
     private def click_fuzz_set(area : Rect, mx : Int32, my : Int32) : Nil
@@ -1622,7 +1639,13 @@ module Gori::Tui
       elsif key.right?
         ov.adjust(1)
       elsif key.enter? || key.space?
-        ov.on_start_row? ? start_discover(ov) : ov.toggle
+        if ov.on_start_row?
+          start_discover(ov)
+        elsif ov.on_headers_row?
+          open_discover_headers(ov)
+        else
+          ov.toggle
+        end
       end
     end
 
@@ -3464,6 +3487,7 @@ module Gori::Tui
       @notifications_overlay.render(screen, layout.body) if @overlay == :notifications
       @mine_config_overlay.try(&.render(screen, layout.body)) if @overlay == :mine_config
       @discover_config_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_config
+      @discover_headers_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_headers
       @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
       @fuzz_advanced_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_advanced
       @scope_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :scope_rule
@@ -3574,6 +3598,7 @@ module Gori::Tui
       when :notifications then "NOTIFICATIONS"
       when :mine_config   then "MINE PARAMS"
       when :discover_config then "DISCOVER"
+      when :discover_headers then "CUSTOM HEADERS"
       when :fuzz_set      then "PAYLOAD SET"
       when :fuzz_advanced then "ADVANCED"
       when :scope_rule    then "SCOPE RULE"
@@ -3623,7 +3648,8 @@ module Gori::Tui
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
-      when :discover_config then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
+      when :discover_config then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
+      when :discover_headers then "one header per line · Host/Connection ignored · esc saves & closes"
       when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
       when :fuzz_advanced then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
       when :scope_rule    then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
@@ -4877,15 +4903,33 @@ module Gori::Tui
 
     def history_discover : Nil
       id = history_target_flow_id
-      unless id && (row = @session.store.flow_row(id))
+      # get_flow (not flow_row) so we also have the request head to offer its headers.
+      unless id && (detail = @session.store.get_flow(id))
         @toast = "select a flow to discover"
         return
       end
-      unless p = Discover::Url.parse(row.url)
+      unless p = Discover::Url.parse(detail.row.url)
         @toast = "flow has no discoverable URL"
         return
       end
       open_discover_config(build_discover_seed(Discover::Url.origin(p), p.host, p.path))
+      offer_flow_headers(id, detail.request_head)
+    end
+
+    # After the config popup opens on a History flow, offer to reuse that flow's own
+    # request headers (auth/cookies) — filtered to what makes sense on a discovery GET.
+    # Accept prefills the popup's headers; cancel leaves it empty. Skipped when the flow
+    # carries no reusable headers.
+    private def offer_flow_headers(id : Int64, request_head : Bytes) : Nil
+      hdrs = Discover::Headers.from_flow(request_head)
+      return if hdrs.empty?
+      ov = @discover_config_overlay
+      names = hdrs.first(3).map { |n, _| n }.join(", ")
+      names += ", …" if hdrs.size > 3
+      confirm("Use this flow's headers?",
+        "#{hdrs.size} header(s) from flow ##{id}: #{names}",
+        confirm_label: "use", cancel_label: "start clean",
+        danger: false, return_to: :discover_config) { ov.try(&.set_headers(hdrs)) }
     end
 
     def discover_run : Nil
@@ -5302,6 +5346,26 @@ module Gori::Tui
     private def close_discover_config : Nil
       @overlay = :none
       @discover_config_overlay = nil
+    end
+
+    # --- Discover custom-headers editor (opened from the config popup's headers row) ---
+    private def open_discover_headers(ov : DiscoverConfigOverlay) : Nil
+      @discover_headers_overlay = DiscoverHeadersOverlay.new(ov.headers)
+      @overlay = :discover_headers
+    end
+
+    # esc / click-away: parse the edited lines back onto the config popup and reopen it.
+    private def commit_discover_headers : Nil
+      if (hov = @discover_headers_overlay) && (ov = @discover_config_overlay)
+        ov.set_headers(hov.headers)
+      end
+      @discover_headers_overlay = nil
+      @overlay = :discover_config
+    end
+
+    private def handle_discover_headers_key(ev : Termisu::Event::Key) : Nil
+      ov = @discover_headers_overlay || return
+      commit_discover_headers if ov.handle_key(ev) == :commit
     end
 
     # Host: open the Fuzzer payload-set editor (nil = add, else edit that index) and

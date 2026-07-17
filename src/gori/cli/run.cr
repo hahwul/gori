@@ -1298,6 +1298,7 @@ module Gori
         force = false
         no_store = false
         format = :text
+        headers = [] of String
 
         parser = OptionParser.new do |p|
           p.banner = "Usage: gori run discover --target URL [options]"
@@ -1309,6 +1310,7 @@ module Gori
           p.on("--no-bruteforce", "Disable directory brute-forcing (crawl only)") { bruteforce = false }
           p.on("--wordlist=PATH", "Extra path wordlist (merged with the built-in list)") { |v| wordlist = v }
           p.on("--extensions=LIST", "Also probe these extensions (e.g. php,json,bak)") { |v| extensions = parse_extensions(v) }
+          p.on("-HHEADER", "--header=HEADER", "Custom request header on every probe, e.g. \"Authorization: Bearer …\" (repeatable)") { |v| headers << v }
           p.on("--containment=MODE", "same-origin | scope-aware (default) | host+subdomains") { |v| containment = parse_containment(v) }
           p.on("--concurrency=N", "Parallel requests (default 20)") { |v| concurrency = parse_count(v, "--concurrency") }
           p.on("--rate=RPS", "Cap requests/sec (0 = unlimited)") { |v| rate = parse_rate(v) }
@@ -1339,14 +1341,15 @@ module Gori
           config = Discover::Config.new(
             concurrency: concurrency, rps: rate, throttle_ms: throttle, timeout: timeout,
             retries: retries, max_requests: max_requests, spider: spider, bruteforce: bruteforce,
-            max_depth: max_depth, extensions: extensions, containment: containment)
+            max_depth: max_depth, extensions: extensions, containment: containment,
+            headers: Discover::Headers.parse_lines(headers))
           words = begin
             Discover::Wordlist.load(wordlist)
           rescue ex
             abort "gori run discover: wordlist error: #{ex.message}"
           end
           policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
-          sender = Discover::Sender.new(verify: !insecure, timeout: timeout)
+          sender = Discover::Sender.new(verify: !insecure, timeout: timeout, headers: config.headers)
           engine = Discover::Engine.new(seed_url, words, sender, config, policy)
           discover_preflight(seed_url, config, words.size, force)
           run_discover_stream(engine, store, format, no_store)

@@ -722,6 +722,7 @@ module Gori
               s.field "max_depth", intprop("spider depth from the seed (default 4, max #{DISCOVER_MAX_DEPTH})")
               s.field "wordlist", strprop("path to an extra path wordlist (merged with the built-in list)")
               s.field "extensions", strprop("comma list of extensions to also probe (e.g. php,json,bak)")
+              s.field "headers", objprop("custom request-header name->value map added to every probe (e.g. Authorization/Cookie); overrides Accept/User-Agent, Host/Connection are ignored")
               s.field "containment", strprop("boundary: same-origin | scope-aware (default) | host+subdomains")
               s.field "concurrency", intprop("parallel requests (default 20, max #{DISCOVER_MAX_CONCURRENCY})")
               s.field "rate", intprop("requests/sec cap (0 = unlimited)")
@@ -3298,6 +3299,10 @@ module Gori
           tok = t.strip.lchop('.')
           tok.empty? ? nil : tok
         end
+        header_lines = [] of String
+        if hm = h["headers"]?.try(&.as_h?)
+          hm.each { |k, v| header_lines << "#{k}: #{Env.expand(v.as_s? || v.to_s)}" }
+        end
         cap = int(h, "max_requests")
         config = Discover::Config.new(
           concurrency: clamp(int(h, "concurrency"), 20, DISCOVER_MAX_CONCURRENCY),
@@ -3307,11 +3312,13 @@ module Gori
           max_requests: cap ? {cap, DISCOVER_MAX_REQUESTS}.min : DISCOVER_MAX_REQUESTS,
           spider: spider, bruteforce: bruteforce,
           max_depth: clamp(int(h, "max_depth"), 4, DISCOVER_MAX_DEPTH),
-          extensions: extensions, containment: containment)
+          extensions: extensions, containment: containment,
+          headers: Discover::Headers.parse_lines(header_lines))
         words = Discover::Wordlist.load(str(h, "wordlist").presence)
         scope = Scope.load(@store)
         policy : Discover::ScopePolicy = scope.configured? ? Discover::StoreScope.new(scope) : Discover::OpenScope.new
-        sender = Discover::Sender.new(verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: discover_timeout(h))
+        sender = Discover::Sender.new(verify: @verify_upstream && !(bool(h, "insecure") || false), timeout: discover_timeout(h),
+          headers: config.headers)
         engine = Discover::Engine.new(seed, words, sender, config, policy)
         {engine, seed, parts.host}
       rescue ex : File::Error
