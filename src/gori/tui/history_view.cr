@@ -91,7 +91,7 @@ module Gori::Tui
       @detail_scroll = 0
       @detail_xscroll = 0 # horizontal scroll offset for the detail body (caret-follow)
       @detail_pane = initial_detail_pane
-      @detail_focus = :body                  # :strip (chip row) | :body (caret/text) — two-level detail focus
+      @detail_focus = :strip                 # :strip (chip row) | :body (caret/text) — two-level detail focus
       @search_hl = ""                        # active ^F query → highlight in the detail body
       @reveal = false                        # 'w' shows whitespace/CR/LF as glyphs (smuggling)
       @reveal_lines = nil.as(Array(String)?) # cached revealed lines, keyed on the pane bytes ptr
@@ -580,7 +580,7 @@ module Gori::Tui
       @detail_scroll = 0
       @detail_xscroll = 0
       @detail_pane = initial_detail_pane
-      @detail_focus = :body # open lands in the body (immediate read/scroll); the strip is one ↑-at-top away
+      @detail_focus = :strip # open lands on the strip (sub-tabs/chips); down-arrow enters the body
       drop_detail_cache
       @detail_hex = false # hex is a deliberate per-open peek — don't carry it into the next flow
       @detail_hex_bytes = nil
