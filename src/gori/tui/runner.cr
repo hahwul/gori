@@ -227,6 +227,7 @@ module Gori::Tui
       @quit_armed = false              # first ^D/^C arms quit; second confirms (avoids accidental exit)
       @resized = false                 # set on a Resize event → next frame full-repaints
       @body_h = 24                     # last body rect height (captured at render); drives PageUp/Down step size
+      @title_tab = nil.as(Symbol?)     # last tab reflected into the terminal-window title (memo; see sync_terminal_title)
 
       # Per-tab controllers (strangler-fig: tabs migrate into this registry one at a
       # time; an unmigrated tab is absent and still runs through the case ladders
@@ -489,6 +490,10 @@ module Gori::Tui
       ensure
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
+        # Drop the per-tab window title back to a neutral "gori" on leave — the shared term
+        # outlives this Runner (project picker + the next session reuse it), so a stale
+        # "Gori - Notes" mustn't linger. The shell's prompt overwrites it again after quit.
+        @term.title = "gori"
       end
       @outcome
     end
@@ -3414,7 +3419,19 @@ module Gori::Tui
       Settings.statusline_enabled?
     end
 
+    # Reflect the active tab in the terminal-window title ("Gori - History"), so a
+    # terminal tab/window running gori is identifiable at a glance (and multiple open
+    # projects can be told apart by which tab each is on). Driven from render — not
+    # threaded through each @active_tab write site — so every switch path is covered;
+    # memoized on the tab so the OSC sequence is emitted only when it actually changes.
+    private def sync_terminal_title : Nil
+      return if @title_tab == @active_tab
+      @title_tab = @active_tab
+      @term.title = "Gori - #{Chrome.tab_label(@active_tab)}"
+    end
+
     private def render : Nil
+      sync_terminal_title
       screen = Screen.new(@backend)
       w, h = screen.width, screen.height
       screen.fill(Rect.new(0, 0, w, h), Theme.bg)
