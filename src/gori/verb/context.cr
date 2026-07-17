@@ -136,6 +136,14 @@ module Gori
       abstract def miner_finding_selected? : Bool # a finding is selected in the focused miner session
       abstract def mine_repeater_selected : Nil     # send the selected miner finding to Repeater
 
+      # sequencer (token randomness — cross-tab seeds open a config popup, collection runs in background)
+      abstract def sequence_selected : Nil        # send History's selected flow to the Sequencer (config popup)
+      abstract def sequence_from_repeater : Nil     # sequence the current Repeater request
+      abstract def sequence_from_sitemap : Nil      # sequence the selected Sitemap endpoint's captured flow
+      abstract def sequence_run : Nil             # re-run collection for the focused Sequencer session
+      abstract def sequence_stop : Nil            # stop the running collection
+      abstract def sequence_configure : Nil       # reconfigure the focused session's token descriptor
+
       # sitemap tree
       abstract def sitemap_move(delta : Int32) : Nil
       abstract def sitemap_toggle : Nil

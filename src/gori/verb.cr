@@ -15,6 +15,7 @@ module Gori
       Repeater         # the Repeater tab has focus
       Fuzzer         # the Fuzzer tab has focus
       Miner          # the Miner (param-mining) tab has focus
+      Sequencer      # the Sequencer (token-randomness) tab has focus
       Sitemap        # the Sitemap sub-tab (under Target) has focus
       Discover       # the Discover sub-tab (under Target) has focus
       Issues       # the Issues list has focus
