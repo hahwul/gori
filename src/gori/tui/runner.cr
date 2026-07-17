@@ -75,6 +75,26 @@ require "./keybind"
 require "../scope"
 require "../rules"
 require "../import"
+require "./runner/comparer"
+require "./runner/decoder"
+require "./runner/discover"
+require "./runner/env"
+require "./runner/fuzzer"
+require "./runner/history"
+require "./runner/host_overrides"
+require "./runner/intercept"
+require "./runner/issues"
+require "./runner/jwt"
+require "./runner/miner"
+require "./runner/notes"
+require "./runner/oast"
+require "./runner/probe"
+require "./runner/project"
+require "./runner/repeater"
+require "./runner/rewriter"
+require "./runner/scope"
+require "./runner/sequencer"
+require "./runner/sitemap"
 
 module Gori::Tui
   # The shell controller for ONE open project: owns view state, implements the
@@ -409,127 +429,127 @@ module Gori::Tui
       last_clock = clock_label                         # top-bar wall clock; re-render only when the minute rolls over
       last_ui_ident = nil.as(String?)                  # last-written ui-state identity (see UI_STATE_THROTTLE)
       last_ui_write = Time.instant
-      last_pub_rev = -1                                 # #123: last interceptor revision mirrored to the store (-1 = publish on first tick)
-      last_bridge_pub = Time.instant                    # #123: last bridge-heartbeat write (throttled so idle never churns the WAL)
+      last_pub_rev = -1                                                     # #123: last interceptor revision mirrored to the store (-1 = publish on first tick)
+      last_bridge_pub = Time.instant                                        # #123: last bridge-heartbeat write (throttled so idle never churns the WAL)
       @intercept_cmd_watermark = @session.store.latest_intercept_command_id # tail agent commands from now
       begin
-      loop do
-        ev = @term.poll_event(50)
-        dirty = false
-        if ev
-          handle(ev)
-          dirty = true
-          # Drain any input already queued behind `ev` in the SAME tick, then
-          # render once. A fast scroll arrives as a burst — held ↑/↓/j/k key
-          # repeat, or (under the terminal's alternate-scroll mode) a mouse wheel
-          # fed as a run of ↑/↓ keys. Handling one event per rendered frame let the
-          # burst back up: the view crept one step per frame and kept moving after
-          # the user stopped. Draining applies the whole burst before the frame, so
-          # scrolling tracks the input. Bounded so an infinitely-held key can't
-          # starve the render / async-channel drains below.
-          drain_burst
-        end
-        dirty = true if drain_events # always drains; true if anything arrived
-        if repeater_controller.drain_results
-          search_recompute # a ^F over a now-updated response keeps fresh hits
-          dirty = true
-        end
-        dirty = true if fuzzer_controller.drain_events
-        dirty = true if miner_controller.drain_events
-        dirty = true if oast_controller.drain_events
-        dirty = true if sequencer_controller.drain_events
-        dirty = true if discover_controller.drain_events
-        if (rev = @session.interceptor.revision) != last_rev
-          last_rev = rev
-          dirty = true
-        end
-        if (wf = @session.store.write_failures) != last_wf
-          last_wf = wf
-          dirty = true
-        end
-        # Probe list live refresh: Store#probe_generation increments after every
-        # committed probe_issues write (upsert/delete/status). Poll every tick —
-        # do NOT rely on the droppable analyzer event channel or PRAGMA data_version.
-        # Reload the (full-table SELECT + filter) list ONLY when Probe is the active tab:
-        # nothing in the always-visible chrome reads it (toasts arrive via drain_events),
-        # and on_enter reloads on tab switch, so an off-tab bump is caught up on return.
-        # `last_probe_gen` still advances so returning to Probe doesn't reload redundantly.
-        # When Probe is visible, force a full terminal sync (not just cell-diff) so a
-        # new/removed row cannot stick as a stale paint.
-        if (pgen = @session.store.probe_generation) != last_probe_gen
-          last_probe_gen = pgen
-          if @active_tab == :probe
-            probe_controller.refresh_from_store
+        loop do
+          ev = @term.poll_event(50)
+          dirty = false
+          if ev
+            handle(ev)
             dirty = true
-            @resized = true
+            # Drain any input already queued behind `ev` in the SAME tick, then
+            # render once. A fast scroll arrives as a burst — held ↑/↓/j/k key
+            # repeat, or (under the terminal's alternate-scroll mode) a mouse wheel
+            # fed as a run of ↑/↓ keys. Handling one event per rendered frame let the
+            # burst back up: the view crept one step per frame and kept moving after
+            # the user stopped. Draining applies the whole burst before the frame, so
+            # scrolling tracks the input. Bounded so an infinitely-held key can't
+            # starve the render / async-channel drains below.
+            drain_burst
           end
-        end
-        # Live store refresh: PRAGMA data_version bumps when the writer fiber (or a
-        # second gori process) commits. Own captures/saves bump it too — soft-sync
-        # in apply_external_change must not full-restore session UI every poll.
-        now = Time.instant
-        if now - last_dv_poll >= DV_POLL_INTERVAL
-          last_dv_poll = now
-          if (dv = @session.store.data_version) != last_dv
-            last_dv = dv
-            apply_external_change
+          dirty = true if drain_events # always drains; true if anything arrived
+          if repeater_controller.drain_results
+            search_recompute # a ^F over a now-updated response keeps fresh hits
             dirty = true
           end
-          # #123: keep the store-backed intercept bridge fresh for the MCP process, but ONLY in
-          # the capture-lock holder (a view-only 2nd instance has an empty queue and must not
-          # clobber the real holder's snapshot). Re-mirror the held queue only when it actually
-          # changed (revision), but refresh the tiny bridge heartbeat every cadence so liveness
-          # stays current. The command drain (Phase 2) runs here too, before the republish.
-          if @session.capturing_lock_held?
-            ic = @session.interceptor
-            # Order (per plan): drain+apply agent commands, THEN re-mirror the (now-updated)
-            # queue, THEN refresh the heartbeat. forward/drop bump revision, so a drained
-            # command triggers the snapshot republish below in the same tick.
-            dirty = true if drain_intercept_commands
-            dirty = true if reap_stale_holds
-            if (prev = ic.revision) != last_pub_rev
-              last_pub_rev = prev
-              publish_intercept_snapshot(ic)   # queue changed → re-mirror held rows
-              publish_intercept_bridge(ic)     # and refresh config/heartbeat immediately
-              last_bridge_pub = now
-            elsif now - last_bridge_pub >= INTERCEPT_HEARTBEAT_INTERVAL
-              publish_intercept_bridge(ic)     # periodic liveness heartbeat (throttled)
-              last_bridge_pub = now
+          dirty = true if fuzzer_controller.drain_events
+          dirty = true if miner_controller.drain_events
+          dirty = true if oast_controller.drain_events
+          dirty = true if sequencer_controller.drain_events
+          dirty = true if discover_controller.drain_events
+          if (rev = @session.interceptor.revision) != last_rev
+            last_rev = rev
+            dirty = true
+          end
+          if (wf = @session.store.write_failures) != last_wf
+            last_wf = wf
+            dirty = true
+          end
+          # Probe list live refresh: Store#probe_generation increments after every
+          # committed probe_issues write (upsert/delete/status). Poll every tick —
+          # do NOT rely on the droppable analyzer event channel or PRAGMA data_version.
+          # Reload the (full-table SELECT + filter) list ONLY when Probe is the active tab:
+          # nothing in the always-visible chrome reads it (toasts arrive via drain_events),
+          # and on_enter reloads on tab switch, so an off-tab bump is caught up on return.
+          # `last_probe_gen` still advances so returning to Probe doesn't reload redundantly.
+          # When Probe is visible, force a full terminal sync (not just cell-diff) so a
+          # new/removed row cannot stick as a stale paint.
+          if (pgen = @session.store.probe_generation) != last_probe_gen
+            last_probe_gen = pgen
+            if @active_tab == :probe
+              probe_controller.refresh_from_store
+              dirty = true
+              @resized = true
             end
           end
+          # Live store refresh: PRAGMA data_version bumps when the writer fiber (or a
+          # second gori process) commits. Own captures/saves bump it too — soft-sync
+          # in apply_external_change must not full-restore session UI every poll.
+          now = Time.instant
+          if now - last_dv_poll >= DV_POLL_INTERVAL
+            last_dv_poll = now
+            if (dv = @session.store.data_version) != last_dv
+              last_dv = dv
+              apply_external_change
+              dirty = true
+            end
+            # #123: keep the store-backed intercept bridge fresh for the MCP process, but ONLY in
+            # the capture-lock holder (a view-only 2nd instance has an empty queue and must not
+            # clobber the real holder's snapshot). Re-mirror the held queue only when it actually
+            # changed (revision), but refresh the tiny bridge heartbeat every cadence so liveness
+            # stays current. The command drain (Phase 2) runs here too, before the republish.
+            if @session.capturing_lock_held?
+              ic = @session.interceptor
+              # Order (per plan): drain+apply agent commands, THEN re-mirror the (now-updated)
+              # queue, THEN refresh the heartbeat. forward/drop bump revision, so a drained
+              # command triggers the snapshot republish below in the same tick.
+              dirty = true if drain_intercept_commands
+              dirty = true if reap_stale_holds
+              if (prev = ic.revision) != last_pub_rev
+                last_pub_rev = prev
+                publish_intercept_snapshot(ic) # queue changed → re-mirror held rows
+                publish_intercept_bridge(ic)   # and refresh config/heartbeat immediately
+                last_bridge_pub = now
+              elsif now - last_bridge_pub >= INTERCEPT_HEARTBEAT_INTERVAL
+                publish_intercept_bridge(ic) # periodic liveness heartbeat (throttled)
+                last_bridge_pub = now
+              end
+            end
+          end
+          # Animate the bottom-bar background-job spinner: while any job runs, advance the
+          # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
+          # CPU at zero when nothing is running.
+          if (@jobs.any_active? || repeater_controller.any_inflight?) && now - last_spin >= SPINNER_INTERVAL
+            last_spin = now
+            @spinner_frame &+= 1
+            dirty = true
+          end
+          # Statusline: drain a finished script result and (re-)launch on its interval.
+          # Self-gated on Settings.statusline_enabled? — a no-op (zero cost) while disabled.
+          dirty = true if @statusline.tick(now)
+          # Debounced QL filter: fire the deferred search once typing has paused.
+          dirty = true if history_controller.flush_query_reload_if_due(now)
+          dirty = true if sitemap_controller.flush_query_reload_if_due(now)
+          # Tick the top-bar clock: dirty only when the displayed minute changes, so the
+          # idle loop wakes once a minute to repaint rather than every second.
+          if (clock = clock_label) != last_clock
+            last_clock = clock
+            dirty = true
+          end
+          # Record what the user is currently viewing (active tab / focus / selection) to
+          # the project store so a separate `gori mcp` process can report it via
+          # get_current_context. Throttled + diffed so idle focus never churns the WAL.
+          ident = ui_state_identity
+          if ident != last_ui_ident && (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE)
+            @session.store.set_setting(Store::UI_STATE_KEY, ui_state_json)
+            last_ui_ident = ident
+            last_ui_write = now
+          end
+          render if dirty
+          break unless @outcome == :running
         end
-        # Animate the bottom-bar background-job spinner: while any job runs, advance the
-        # frame on a fixed cadence and force a redraw. The any_active? guard keeps idle
-        # CPU at zero when nothing is running.
-        if (@jobs.any_active? || repeater_controller.any_inflight?) && now - last_spin >= SPINNER_INTERVAL
-          last_spin = now
-          @spinner_frame &+= 1
-          dirty = true
-        end
-        # Statusline: drain a finished script result and (re-)launch on its interval.
-        # Self-gated on Settings.statusline_enabled? — a no-op (zero cost) while disabled.
-        dirty = true if @statusline.tick(now)
-        # Debounced QL filter: fire the deferred search once typing has paused.
-        dirty = true if history_controller.flush_query_reload_if_due(now)
-        dirty = true if sitemap_controller.flush_query_reload_if_due(now)
-        # Tick the top-bar clock: dirty only when the displayed minute changes, so the
-        # idle loop wakes once a minute to repaint rather than every second.
-        if (clock = clock_label) != last_clock
-          last_clock = clock
-          dirty = true
-        end
-        # Record what the user is currently viewing (active tab / focus / selection) to
-        # the project store so a separate `gori mcp` process can report it via
-        # get_current_context. Throttled + diffed so idle focus never churns the WAL.
-        ident = ui_state_identity
-        if ident != last_ui_ident && (last_ui_ident.nil? || now - last_ui_write >= UI_STATE_THROTTLE)
-          @session.store.set_setting(Store::UI_STATE_KEY, ui_state_json)
-          last_ui_ident = ident
-          last_ui_write = now
-        end
-        render if dirty
-        break unless @outcome == :running
-      end
       ensure
         # Wind down the statusline worker fiber so it doesn't outlive this project's Runner.
         @statusline.stop
@@ -667,7 +687,7 @@ module Gori::Tui
       viewed = {} of Int64 => Int64
       @session.store.intercept_held(@session.intercept_token).each { |r| viewed[r.item_id] = r.viewed_ms }
       @intercept_agent_seen = true if viewed.each_value.any? { |v| v > 0 } # an agent polled the queue
-      return false unless @intercept_agent_seen # no agent ever attached → P4: hold indefinitely
+      return false unless @intercept_agent_seen                            # no agent ever attached → P4: hold indefinitely
       now_ms = Time.utc.to_unix_ms
       reaped = false
       pending.each do |it|
@@ -891,24 +911,24 @@ module Gori::Tui
       # then the focused tab body — so EVERY text field gets the same live
       # composition preview, not just the Notes/Project/Repeater editors.
       case @overlay
-      when :palette       then @palette.set_preedit(text)
-      when :issue_new   then @issue_form.set_preedit(text)
-      when :comparer_pick then @flow_picker.try(&.set_preedit(text))
-      when :repeater_subtab then @subtab_picker.try(&.set_preedit(text))
-      when :issue_pick  then @issue_picker.try(&.set_preedit(text))
-      when :note_pick     then @note_picker.try(&.set_preedit(text))
-      when :settings      then @settings_view.set_preedit(text)
-      when :hosts         then @hosts_overlay.set_preedit(text)
-      when :env           then @env_overlay.set_preedit(text)
+      when :palette          then @palette.set_preedit(text)
+      when :issue_new        then @issue_form.set_preedit(text)
+      when :comparer_pick    then @flow_picker.try(&.set_preedit(text))
+      when :repeater_subtab  then @subtab_picker.try(&.set_preedit(text))
+      when :issue_pick       then @issue_picker.try(&.set_preedit(text))
+      when :note_pick        then @note_picker.try(&.set_preedit(text))
+      when :settings         then @settings_view.set_preedit(text)
+      when :hosts            then @hosts_overlay.set_preedit(text)
+      when :env              then @env_overlay.set_preedit(text)
       when :discover_headers then @discover_headers_overlay.try(&.set_preedit(text))
-      when :fuzz_set      then @fuzz_set_overlay.try(&.set_preedit(text))
-      when :fuzz_advanced then @fuzz_advanced_overlay.try(&.set_preedit(text))
-      when :scope_rule    then @scope_rule_overlay.try(&.set_preedit(text))
-      when :oast_provider then @oast_provider_overlay.try(&.set_preedit(text))
-      when :probe_rule    then @custom_rule_overlay.try(&.set_preedit(text))
-      when :rewriter_rule then @rewriter_rule_overlay.try(&.set_preedit(text))
-      when :ca_import     then @ca_import_overlay.try(&.set_preedit(text))
-      when :none          then apply_preedit_body(text)
+      when :fuzz_set         then @fuzz_set_overlay.try(&.set_preedit(text))
+      when :fuzz_advanced    then @fuzz_advanced_overlay.try(&.set_preedit(text))
+      when :scope_rule       then @scope_rule_overlay.try(&.set_preedit(text))
+      when :oast_provider    then @oast_provider_overlay.try(&.set_preedit(text))
+      when :probe_rule       then @custom_rule_overlay.try(&.set_preedit(text))
+      when :rewriter_rule    then @rewriter_rule_overlay.try(&.set_preedit(text))
+      when :ca_import        then @ca_import_overlay.try(&.set_preedit(text))
+      when :none             then apply_preedit_body(text)
       end
     end
 
@@ -1251,7 +1271,7 @@ module Gori::Tui
     private def modal_overlay? : Bool
       case @overlay
       when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :rewriter_rule, :ca_import then true
-      else                                                                                                                                                                                                                                                               false
+      else                                                                                                                                                                                                                                                                                                                                                                        false
       end
     end
 
@@ -1338,34 +1358,34 @@ module Gori::Tui
     private def handle_overlay_click(layout : Layout, mx : Int32, my : Int32) : Nil
       area = layout.body
       case @overlay
-      when :palette       then click_palette(area, mx, my)
-      when :browser       then click_browser(area, mx, my)
-      when :choice        then click_choice(area, mx, my)
-      when :tabs_more     then click_more_menu(layout, mx, my)
-      when :comparer_pick then click_flow_picker(area, mx, my)
-      when :repeater_subtab then click_subtab_picker(area, mx, my)
-      when :links         then click_links(area, mx, my)
-      when :issue_pick  then click_issue_picker(area, mx, my)
-      when :note_pick     then click_note_picker(area, mx, my)
-      when :confirm       then click_confirm(area, mx, my)
-      when :settings      then click_settings(area, mx, my)
-      when :tabs          then click_tabs(area, mx, my)
-      when :hosts         then click_hosts(area, mx, my)
-      when :env           then click_env(area, mx, my)
-      when :hotkeys       then click_hotkeys(area, mx, my)
-      when :notifications then click_notifications(area, mx, my)
-      when :mine_config   then click_mine_config(area, mx, my)
-      when :probe_active  then click_probe_active(area, mx, my)
-      when :sequence_config then click_sequence_config(area, mx, my)
-      when :discover_config then click_discover_config(area, mx, my)
+      when :palette          then click_palette(area, mx, my)
+      when :browser          then click_browser(area, mx, my)
+      when :choice           then click_choice(area, mx, my)
+      when :tabs_more        then click_more_menu(layout, mx, my)
+      when :comparer_pick    then click_flow_picker(area, mx, my)
+      when :repeater_subtab  then click_subtab_picker(area, mx, my)
+      when :links            then click_links(area, mx, my)
+      when :issue_pick       then click_issue_picker(area, mx, my)
+      when :note_pick        then click_note_picker(area, mx, my)
+      when :confirm          then click_confirm(area, mx, my)
+      when :settings         then click_settings(area, mx, my)
+      when :tabs             then click_tabs(area, mx, my)
+      when :hosts            then click_hosts(area, mx, my)
+      when :env              then click_env(area, mx, my)
+      when :hotkeys          then click_hotkeys(area, mx, my)
+      when :notifications    then click_notifications(area, mx, my)
+      when :mine_config      then click_mine_config(area, mx, my)
+      when :probe_active     then click_probe_active(area, mx, my)
+      when :sequence_config  then click_sequence_config(area, mx, my)
+      when :discover_config  then click_discover_config(area, mx, my)
       when :discover_headers then click_discover_headers(area, mx, my)
-      when :fuzz_set      then click_fuzz_set(area, mx, my)
-      when :fuzz_advanced then click_fuzz_advanced(area, mx, my)
-      when :scope_rule    then click_scope_rule(area, mx, my)
-      when :oast_provider then click_oast_provider(area, mx, my)
-      when :probe_rule    then click_custom_rule(area, mx, my)
-      when :rewriter_rule then click_rewriter_rule(area, mx, my)
-      when :ca_import     then click_ca_import(area, mx, my)
+      when :fuzz_set         then click_fuzz_set(area, mx, my)
+      when :fuzz_advanced    then click_fuzz_advanced(area, mx, my)
+      when :scope_rule       then click_scope_rule(area, mx, my)
+      when :oast_provider    then click_oast_provider(area, mx, my)
+      when :probe_rule       then click_custom_rule(area, mx, my)
+      when :rewriter_rule    then click_rewriter_rule(area, mx, my)
+      when :ca_import        then click_ca_import(area, mx, my)
         # :issue_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
@@ -1639,32 +1659,32 @@ module Gori::Tui
     # Wheel inside a centered modal scrolls its list (no movement for the button modals).
     private def wheel_overlay(step : Int32) : Nil
       case @overlay
-      when :palette       then @palette.move(step)
-      when :browser       then @browser_picker.try(&.move(step))
-      when :choice        then @choice_picker.try(&.move(step))
-      when :tabs_more     then @more_menu.try(&.move(step))
-      when :comparer_pick then @flow_picker.try(&.move(step))
+      when :palette         then @palette.move(step)
+      when :browser         then @browser_picker.try(&.move(step))
+      when :choice          then @choice_picker.try(&.move(step))
+      when :tabs_more       then @more_menu.try(&.move(step))
+      when :comparer_pick   then @flow_picker.try(&.move(step))
       when :repeater_subtab then @subtab_picker.try(&.move(step))
-      when :links         then @links_overlay.try(&.move(step))
-      when :issue_pick  then @issue_picker.try(&.move(step))
-      when :note_pick     then @note_picker.try(&.move(step))
-      when :settings      then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
-      when :tabs          then @tabs_overlay.select_move(step)
-      when :hosts         then @hosts_overlay.select_move(step)
-      when :env           then @env_overlay.select_move(step)
-      when :hotkeys       then @hotkeys_overlay.select_move(step)
-      when :notifications then @notifications_overlay.select_move(step)
-      when :mine_config   then @mine_config_overlay.try(&.move(step))
-      when :probe_active  then @probe_active_overlay.try(&.move(step))
+      when :links           then @links_overlay.try(&.move(step))
+      when :issue_pick      then @issue_picker.try(&.move(step))
+      when :note_pick       then @note_picker.try(&.move(step))
+      when :settings        then (@settings_view.move_field(step); preview_theme) # wheel scrolls the theme list too
+      when :tabs            then @tabs_overlay.select_move(step)
+      when :hosts           then @hosts_overlay.select_move(step)
+      when :env             then @env_overlay.select_move(step)
+      when :hotkeys         then @hotkeys_overlay.select_move(step)
+      when :notifications   then @notifications_overlay.select_move(step)
+      when :mine_config     then @mine_config_overlay.try(&.move(step))
+      when :probe_active    then @probe_active_overlay.try(&.move(step))
       when :sequence_config then @sequence_config_overlay.try(&.move(step))
       when :discover_config then @discover_config_overlay.try(&.move(step))
-      when :fuzz_set      then @fuzz_set_overlay.try(&.move(step))
-      when :fuzz_advanced then @fuzz_advanced_overlay.try(&.move(step))
-      when :scope_rule    then @scope_rule_overlay.try(&.move(step))
-      when :oast_provider then @oast_provider_overlay.try(&.move(step))
-      when :probe_rule    then @custom_rule_overlay.try(&.move(step))
-      when :rewriter_rule then @rewriter_rule_overlay.try(&.move(step))
-      when :ca_import     then @ca_import_overlay.try(&.move(step))
+      when :fuzz_set        then @fuzz_set_overlay.try(&.move(step))
+      when :fuzz_advanced   then @fuzz_advanced_overlay.try(&.move(step))
+      when :scope_rule      then @scope_rule_overlay.try(&.move(step))
+      when :oast_provider   then @oast_provider_overlay.try(&.move(step))
+      when :probe_rule      then @custom_rule_overlay.try(&.move(step))
+      when :rewriter_rule   then @rewriter_rule_overlay.try(&.move(step))
+      when :ca_import       then @ca_import_overlay.try(&.move(step))
       end
     end
 
@@ -2292,8 +2312,8 @@ module Gori::Tui
       if dest = p.selected_destination
         payload = p.payload
         case dest.tab
-        when :decoder then decoder_controller.decoder_from_text(payload)
-        when :jwt     then jwt_controller.jwt_from_text(payload)
+        when :decoder   then decoder_controller.decoder_from_text(payload)
+        when :jwt       then jwt_controller.jwt_from_text(payload)
         when :sequencer then sequencer_controller.sequence_from_text(payload)
         end
       end
@@ -2393,9 +2413,9 @@ module Gori::Tui
           ref_id = if rk = ref_kind
                      case rk
                      when .repeater? then repeater_controller.db_id_at(idx)
-                     when .fuzz?   then fuzzer_controller.db_id_at(idx)
-                     when .miner?  then miner_controller.db_id_at(idx)
-                     else               nil
+                     when .fuzz?     then fuzzer_controller.db_id_at(idx)
+                     when .miner?    then miner_controller.db_id_at(idx)
+                     else                 nil
                      end
                    end
           if rid = ref_id
@@ -3245,7 +3265,7 @@ module Gori::Tui
     # body_hint never advertises it). Rename/close still work.
     private def subtab_new : Nil
       case @active_tab
-      when :repeater   then repeater_controller.repeater_new
+      when :repeater then repeater_controller.repeater_new
       when :fuzzer   then fuzzer_controller.fuzz_new
       when :decoder  then decoder_controller.decoder_new
       when :jwt      then jwt_controller.jwt_new
@@ -3259,31 +3279,31 @@ module Gori::Tui
     private def subtab_new_supported? : Bool
       case @active_tab
       when :repeater, :fuzzer, :decoder, :jwt, :notes, :comparer then true
-      else                                                         false
+      else                                                            false
       end
     end
 
     private def subtab_close : Nil
       case @active_tab
-      when :repeater   then repeater_controller.request_close
-      when :fuzzer   then fuzzer_controller.request_close
-      when :miner    then miner_controller.request_close
+      when :repeater  then repeater_controller.request_close
+      when :fuzzer    then fuzzer_controller.request_close
+      when :miner     then miner_controller.request_close
       when :sequencer then sequencer_controller.request_close
-      when :decoder  then decoder_controller.decoder_close
-      when :jwt      then jwt_controller.jwt_close
-      when :notes    then notes_controller.notes_close
-      when :comparer then comparer_controller.comparer_close
+      when :decoder   then decoder_controller.decoder_close
+      when :jwt       then jwt_controller.jwt_close
+      when :notes     then notes_controller.notes_close
+      when :comparer  then comparer_controller.comparer_close
       end
     end
 
     private def subtab_commit : Nil
       case @active_tab
       when :repeater  then repeater_controller.save_current_repeater
-      when :fuzzer  then fuzzer_controller.save_current
-      when :miner   then miner_controller.save_current
+      when :fuzzer    then fuzzer_controller.save_current
+      when :miner     then miner_controller.save_current
       when :sequencer then sequencer_controller.save_current
-      when :decoder then decoder_controller.commit
-      when :notes   then notes_controller.save_notes
+      when :decoder   then decoder_controller.commit
+      when :notes     then notes_controller.save_notes
       end
     end
 
@@ -3453,10 +3473,10 @@ module Gori::Tui
       case target
       when :repeater_request  then repeater_controller.current_view.try(&.goto_request_line(n))
       when :repeater_response then repeater_controller.current_view.try(&.goto_response_line(n))
-      when :notes           then notes_controller.view.goto_line(n)
-      when :project         then project_controller.view.goto_line(n)
-      when :detail          then history_controller.view.goto_detail_line(n)
-      when :intercept       then intercept_controller.view.edit_goto_line(n)
+      when :notes             then notes_controller.view.goto_line(n)
+      when :project           then project_controller.view.goto_line(n)
+      when :detail            then history_controller.view.goto_detail_line(n)
+      when :intercept         then intercept_controller.view.edit_goto_line(n)
       end
     end
 
@@ -3464,11 +3484,11 @@ module Gori::Tui
       case target
       when :repeater_request  then repeater_controller.current_view.try(&.request_search_lines(query)) || [] of Int32
       when :repeater_response then repeater_controller.current_view.try(&.response_search_lines(query)) || [] of Int32
-      when :notes           then notes_controller.view.search_lines(query)
-      when :project         then project_controller.view.search_lines(query)
-      when :detail          then history_controller.view.detail_search_lines(query)
-      when :intercept       then intercept_controller.view.edit_search_lines(query)
-      else                       [] of Int32
+      when :notes             then notes_controller.view.search_lines(query)
+      when :project           then project_controller.view.search_lines(query)
+      when :detail            then history_controller.view.detail_search_lines(query)
+      when :intercept         then intercept_controller.view.edit_search_lines(query)
+      else                         [] of Int32
       end
     end
 
@@ -3478,10 +3498,10 @@ module Gori::Tui
       case @search_target
       when :repeater_request  then repeater_controller.current_view.try(&.request_search_hl=(q))
       when :repeater_response then repeater_controller.current_view.try(&.response_search_hl=(q))
-      when :notes           then notes_controller.view.search_hl = q
-      when :project         then project_controller.view.search_hl = q
-      when :detail          then history_controller.view.search_hl = q
-      when :intercept       then intercept_controller.view.search_hl = q
+      when :notes             then notes_controller.view.search_hl = q
+      when :project           then project_controller.view.search_hl = q
+      when :detail            then history_controller.view.search_hl = q
+      when :intercept         then intercept_controller.view.search_hl = q
       end
     end
 
@@ -3547,19 +3567,6 @@ module Gori::Tui
       set_search_hl("") # clear the match highlight on the target view
       @search_open = false
       @search_preedit = ""
-    end
-
-    # Toggle whitespace reveal (·→␍␊) in the req/res views — for smuggling tests.
-    def toggle_reveal : Nil
-      @reveal = !@reveal
-      @toast = "whitespace: #{@reveal ? "on (·→␍␊)" : "off"}"
-    end
-
-    # Toggle pretty-print of req/res bodies (display only) — global like reveal, so a
-    # single `p` flips both History detail and the Repeater response.
-    def toggle_pretty : Nil
-      @pretty = !@pretty
-      @toast = "pretty bodies: #{@pretty ? "on" : "off"}"
     end
 
     private def current_scope : Verb::Scope
@@ -3781,34 +3788,34 @@ module Gori::Tui
       return @copy_picker.try(&.title) || "COPY AS" if copy_as_shown? # ditto
       return "SEND TO" if send_to_shown?                              # ditto
       case @overlay
-      when :palette       then "PALETTE"
-      when :issue_new   then "ISSUE"
-      when :detail        then "DETAIL"
-      when :confirm       then "CONFIRM"
-      when :browser       then "BROWSER"
-      when :choice        then @choice_picker.try(&.title) || "CHOOSE"
-      when :comparer_pick then "PICK FLOW"
-      when :repeater_subtab then @subtab_picker.try(&.title) || "FIND SUB-TAB"
-      when :links         then @links_overlay.try(&.title) || "LINKS"
-      when :issue_pick  then "PICK ISSUE"
-      when :note_pick     then "PICK NOTE"
-      when :settings      then "SETTINGS"
-      when :tabs          then "TAB BAR"
-      when :hosts         then "HOSTNAME OVERRIDES"
-      when :env           then "ENVIRONMENT"
-      when :hotkeys       then "HOTKEYS"
-      when :notifications then "NOTIFICATIONS"
-      when :mine_config   then "MINE PARAMS"
-      when :probe_active  then "ACTIVE SCAN"
-      when :sequence_config then "SEQUENCER"
-      when :discover_config then "DISCOVER"
+      when :palette          then "PALETTE"
+      when :issue_new        then "ISSUE"
+      when :detail           then "DETAIL"
+      when :confirm          then "CONFIRM"
+      when :browser          then "BROWSER"
+      when :choice           then @choice_picker.try(&.title) || "CHOOSE"
+      when :comparer_pick    then "PICK FLOW"
+      when :repeater_subtab  then @subtab_picker.try(&.title) || "FIND SUB-TAB"
+      when :links            then @links_overlay.try(&.title) || "LINKS"
+      when :issue_pick       then "PICK ISSUE"
+      when :note_pick        then "PICK NOTE"
+      when :settings         then "SETTINGS"
+      when :tabs             then "TAB BAR"
+      when :hosts            then "HOSTNAME OVERRIDES"
+      when :env              then "ENVIRONMENT"
+      when :hotkeys          then "HOTKEYS"
+      when :notifications    then "NOTIFICATIONS"
+      when :mine_config      then "MINE PARAMS"
+      when :probe_active     then "ACTIVE SCAN"
+      when :sequence_config  then "SEQUENCER"
+      when :discover_config  then "DISCOVER"
       when :discover_headers then "CUSTOM HEADERS"
-      when :fuzz_set      then "PAYLOAD SET"
-      when :fuzz_advanced then "ADVANCED"
-      when :scope_rule    then "SCOPE RULE"
-      when :rewriter_rule then "REWRITER RULE"
-      when :oast_provider then "OAST PROVIDER"
-      when :ca_import     then "IMPORT CA"
+      when :fuzz_set         then "PAYLOAD SET"
+      when :fuzz_advanced    then "ADVANCED"
+      when :scope_rule       then "SCOPE RULE"
+      when :rewriter_rule    then "REWRITER RULE"
+      when :oast_provider    then "OAST PROVIDER"
+      when :ca_import        then "IMPORT CA"
       else
         case @focus
         when :menu    then "TABS"
@@ -3835,35 +3842,35 @@ module Gori::Tui
       return "↑/↓ select · ↵ copy · key picks · esc cancel" if copy_as_shown?
       return "↑/↓ select · ↵ send · key picks · esc cancel" if send_to_shown?
       case @overlay
-      when :palette       then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when :issue_new   then "type title · ↵ create · esc cancel"
-      when :confirm       then "←/→ choose · y confirm · n/esc cancel · ↵ select"
-      when :browser       then "↑/↓ select · ↵ open · esc cancel"
-      when :choice        then "↑/↓ select · ↵ set · key picks · esc cancel"
-      when :tabs_more     then "↑/↓ select · ↵ open tab · ←/esc close"
-      when :comparer_pick then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
-      when :repeater_subtab then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
-      when :links         then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
-      when :issue_pick  then "type to filter · ↑/↓ select · ↵ link · esc cancel"
-      when :note_pick     then "type to filter · ↑/↓ select · ↵ link · esc cancel"
-      when :settings      then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
-      when :tabs          then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
-      when :hosts         then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
-      when :env           then env_overlay_hints
-      when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
-      when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
-      when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
-      when :probe_active  then "↑/↓ field · ←/→ notify · ↵ run · esc cancel"
-      when :sequence_config then "↑/↓ field · type to edit selector · ←/→ cycle · ↵ start · esc cancel"
-      when :discover_config then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
+      when :palette          then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
+      when :issue_new        then "type title · ↵ create · esc cancel"
+      when :confirm          then "←/→ choose · y confirm · n/esc cancel · ↵ select"
+      when :browser          then "↑/↓ select · ↵ open · esc cancel"
+      when :choice           then "↑/↓ select · ↵ set · key picks · esc cancel"
+      when :tabs_more        then "↑/↓ select · ↵ open tab · ←/esc close"
+      when :comparer_pick    then "type to filter · ↑/↓ select · ↵ choose · esc cancel"
+      when :repeater_subtab  then "type to filter · ↑/↓ select · ↵ #{@subtab_picker.try(&.action) || "jump"} · esc cancel"
+      when :links            then @links_overlay.try(&.adding?) ? "f/r/z/m pick type · esc back" : "↑/↓ · ↵/o open · a add · d remove · esc close"
+      when :issue_pick       then "type to filter · ↑/↓ select · ↵ link · esc cancel"
+      when :note_pick        then "type to filter · ↑/↓ select · ↵ link · esc cancel"
+      when :settings         then "↑/↓ field · type to edit · ↵ save · ^R reset · esc close"
+      when :tabs             then "↑/↓ select · space show/hide · K/J reorder · r reset · ↵ save · esc cancel"
+      when :hosts            then @hosts_overlay.adding? ? "type \"IP host\" · ↵ save · esc cancel" : "↑/↓ select · a add · ↵/e edit · d delete · esc close"
+      when :env              then env_overlay_hints
+      when :hotkeys          then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
+      when :notifications    then "↑/↓ select · ↵ open · c clear · esc close"
+      when :mine_config      then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
+      when :probe_active     then "↑/↓ field · ←/→ notify · ↵ run · esc cancel"
+      when :sequence_config  then "↑/↓ field · type to edit selector · ←/→ cycle · ↵ start · esc cancel"
+      when :discover_config  then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
       when :discover_headers then "one header per line · Host/Connection ignored · esc saves & closes"
-      when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
-      when :fuzz_advanced then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
-      when :scope_rule    then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
-      when :rewriter_rule then "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
-      when :oast_provider then "↑/↓ field · ←/→ type · type name/host/token · ↵ save · esc cancel"
-      when :ca_import     then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
-      when :detail        then history_controller.body_hint(:body)
+      when :fuzz_set         then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
+      when :fuzz_advanced    then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
+      when :scope_rule       then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
+      when :rewriter_rule    then "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
+      when :oast_provider    then "↑/↓ field · ←/→ type · type name/host/token · ↵ save · esc cancel"
+      when :ca_import        then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
+      when :detail           then history_controller.body_hint(:body)
       else
         # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
         return "↵/↓ show hidden tabs · ← back · ^P cmds · q projects" if @focus == :menu && @menu_more
@@ -4147,13 +4154,13 @@ module Gori::Tui
     # redirect it.
     private def open_rename(idx : Int32) : Nil
       view = case @active_tab
-             when :repeater   then repeater_controller.view_at(idx)
-             when :fuzzer   then fuzzer_controller.view_at(idx)
-             when :decoder  then decoder_controller.view_at(idx)
-             when :jwt      then jwt_controller.view_at(idx)
-             when :miner    then miner_controller.view_at(idx)
+             when :repeater  then repeater_controller.view_at(idx)
+             when :fuzzer    then fuzzer_controller.view_at(idx)
+             when :decoder   then decoder_controller.view_at(idx)
+             when :jwt       then jwt_controller.view_at(idx)
+             when :miner     then miner_controller.view_at(idx)
              when :sequencer then sequencer_controller.view_at(idx)
-             when :comparer then comparer_controller.view_at(idx)
+             when :comparer  then comparer_controller.view_at(idx)
              end
       return unless view
       @rename_view = view
@@ -4174,13 +4181,13 @@ module Gori::Tui
     # (the chip reverts to the request/template-derived summary).
     private def apply_rename(name : String) : Nil
       case v = @rename_view
-      when RepeaterView   then repeater_controller.apply_rename(v, name)
-      when FuzzerView   then fuzzer_controller.apply_rename(v, name)
-      when DecoderView  then decoder_controller.apply_rename(v, name)
-      when JwtView      then jwt_controller.apply_rename(v, name)
-      when MinerView    then miner_controller.apply_rename(v, name)
+      when RepeaterView  then repeater_controller.apply_rename(v, name)
+      when FuzzerView    then fuzzer_controller.apply_rename(v, name)
+      when DecoderView   then decoder_controller.apply_rename(v, name)
+      when JwtView       then jwt_controller.apply_rename(v, name)
+      when MinerView     then miner_controller.apply_rename(v, name)
       when SequencerView then sequencer_controller.apply_rename(v, name)
-      when ComparerView then comparer_controller.apply_rename(v, name)
+      when ComparerView  then comparer_controller.apply_rename(v, name)
       end
     end
 
@@ -4600,141 +4607,6 @@ module Gori::Tui
 
     # --- issues ExecContext ---
 
-    def issue_create : Nil
-      id = history_target_flow_id
-      return unless id
-      if row = @session.store.flow_row(id)
-        @issue_form = IssueForm.new("#{row.method} #{row.target}", row.host, id)
-        @overlay = :issue_new
-      end
-    end
-
-    def issues_new : Nil
-      @issue_form = IssueForm.new
-      @overlay = :issue_new
-    end
-
-    def issues_query : Nil
-      issues_controller.view.start_query
-    end
-
-    def issues_move(delta : Int32) : Nil
-      issues_controller.issues_move(delta)
-    end
-
-    def issues_open : Nil
-      issues_controller.issues_open
-    end
-
-    def issue_close : Nil
-      issues_controller.issue_close
-    end
-
-    def issues_delete : Nil
-      issues_controller.issues_delete
-    end
-
-    def issue_severity(delta : Int32) : Nil
-      issues_controller.issue_severity(delta)
-    end
-
-    def issue_status(delta : Int32) : Nil
-      issues_controller.issue_status(delta)
-    end
-
-    # Open the colour pickers for the issue currently in the detail view. The
-    # picker (a shell overlay) applies the chosen value on commit (apply_choice).
-    def issue_set_severity : Nil
-      return unless f = issues_controller.view.detail_issue
-      @choice_picker = ChoicePicker.for_severity(f.severity.value)
-      @overlay = :choice
-    end
-
-    def issue_set_status : Nil
-      return unless f = issues_controller.view.detail_issue
-      @choice_picker = ChoicePicker.for_status(f.status.value)
-      @overlay = :choice
-    end
-
-    def issue_edit_notes : Nil
-      issues_controller.issue_edit_notes
-    end
-
-    def issues_notes_read_mode? : Bool
-      issues_controller.issues_notes_read_mode?
-    end
-
-    def issues_copy : Nil
-      issues_controller.issues_copy
-    end
-
-    def issues_copy_all : Nil
-      issues_controller.issues_copy_all
-    end
-
-    def issue_hscroll(delta : Int32) : Nil
-      issues_controller.issue_hscroll(delta)
-    end
-
-    # Re-open the create form seeded from the open issue (title + severity), in
-    # edit mode — commit updates instead of inserting (create_issue_from_form).
-    # Stays in the shell: it opens the issue-form OVERLAY (shell-owned).
-    def issue_edit_title : Nil
-      return unless f = issues_controller.view.detail_issue
-      @issue_form = IssueForm.new(f.title, f.host, f.flow_id, f.severity, edit_id: f.id, heading: "EDIT ISSUE")
-      @overlay = :issue_new
-    end
-
-    # Jump from an issue to its linked flow's request/response in History. CROSS-TAB
-    # mediator: reads the Issues controller, drives the History controller + overlay.
-    def issue_open_flow : Nil
-      return unless f = issues_controller.view.detail_issue
-      return (@toast = "this issue has no linked flow") unless fid = f.flow_id
-      if history_controller.view.open_detail_id(fid, @session.store)
-        @active_tab = :history
-        @focus = :body
-        @overlay = :detail
-      else
-        @toast = "evidence no longer captured (pruned)"
-      end
-    end
-
-    # Send an issue's linked flow to the Repeater tab to re-test the evidence. CROSS-TAB
-    # mediator: reads the Issues controller, opens a Repeater tab.
-    def issue_repeater_flow : Nil
-      return unless f = issues_controller.view.detail_issue
-      return (@toast = "this issue has no linked flow") unless fid = f.flow_id
-      if @session.store.get_flow(fid)
-        repeater_flow(fid)
-      else
-        @toast = "evidence no longer captured (pruned)"
-      end
-    end
-
-    def issue_links : Nil
-      return unless f = issues_controller.view.detail_issue
-      open_links_overlay(Store::LinkOwnerKind::Issue, f.id)
-    end
-
-    def issue_open_link : Nil
-      if res = issues_controller.view.selected_resolved_link
-        navigate_link_ref(res.link.ref_kind, res.link.ref_id)
-      else
-        @toast = "no related link selected"
-      end
-    end
-
-    def issue_link_move(delta : Int32) : Nil
-      issues_controller.issue_link_move(delta)
-    end
-
-    def notes_links : Nil
-      notes_controller.save_notes
-      id = notes_controller.view.current_note_id
-      refresh_note_link_preview(id)
-      open_links_overlay(Store::LinkOwnerKind::Note, id)
-    end
-
     def link_flow_id : Int64?
       return unless @active_tab == :history
       if @overlay == :detail
@@ -4805,128 +4677,10 @@ module Gori::Tui
       end
     end
 
-    def issues_export(format : Symbol) : Nil
-      issues_controller.issues_export(format)
-    end
-
-    # --- probe ExecContext ---
-
-    def probe_move(delta : Int32) : Nil
-      probe_controller.probe_move(delta)
-    end
-
-    def probe_open : Nil
-      probe_controller.probe_open
-    end
-
-    def probe_close : Nil
-      probe_controller.probe_close
-    end
-
-    def probe_query : Nil
-      probe_controller.view.start_query
-    end
-
-    def probe_clear : Nil
-      probe_controller.probe_clear
-    end
-
-    def probe_delete : Nil
-      probe_controller.probe_delete
-    end
-
-    # Open the MODE picker (a shell overlay); apply_choice applies it to the analyzer.
-    def probe_set_mode : Nil
-      @choice_picker = ChoicePicker.for_probe_mode(@session.probe.mode.value)
-      @overlay = :choice
-    end
-
-    def probe_dismiss : Nil
-      probe_controller.probe_dismiss
-    end
-
-    def probe_toggle_closed : Nil
-      probe_controller.probe_toggle_closed
-    end
-
-    def probe_dismiss_code : Nil
-      probe_controller.probe_dismiss_code
-    end
-
-    def probe_dismiss_host : Nil
-      probe_controller.probe_dismiss_host
-    end
-
-    # Jump from an issue to its sample evidence: History flow when present, else the
-    # Repeater tab that first produced the hit (Repeater-sourced passive issues).
-    def probe_open_flow : Nil
-      return unless i = probe_controller.view.target_issue
-      if fid = i.sample_flow_id
-        if history_controller.view.open_detail_id(fid, @session.store)
-          @active_tab = :history
-          @focus = :body
-          @overlay = :detail
-        else
-          @toast = "evidence no longer captured (pruned)"
-        end
-        return
-      end
-      if rid = i.sample_repeater_id
-        navigate_link_ref(Store::LinkRefKind::Repeater, rid)
-        return
-      end
-      @toast = "this issue has no sample evidence"
-    end
-
-    # Send an issue's sample flow to Repeater to re-test it (mirrors issue_repeater_flow).
-    # When the only evidence is a Repeater tab, jump there instead of re-spawning.
-    def probe_repeater_flow : Nil
-      return unless i = probe_controller.view.target_issue
-      if fid = i.sample_flow_id
-        if @session.store.get_flow(fid)
-          repeater_flow(fid)
-        else
-          @toast = "evidence no longer captured (pruned)"
-        end
-        return
-      end
-      if rid = i.sample_repeater_id
-        navigate_link_ref(Store::LinkRefKind::Repeater, rid)
-        return
-      end
-      @toast = "this issue has no sample evidence"
-    end
-
     # --- manual active scan (History list / detail, Probe findings, Repeater) ---
     # On-demand run of the Probe ACTIVE checks against one flow, regardless of the Probe mode.
     # Each source resolves a FlowDetail, then open_probe_active_overlay shows the expected
     # request count before anything is sent.
-
-    # History list / open detail → the selected (or open) flow.
-    def probe_active_selected : Nil
-      id = history_target_flow_id
-      return (@toast = "select a flow first") unless id
-      detail = @session.store.get_flow(id)
-      return (@toast = "flow no longer available") unless detail
-      open_probe_active_overlay(detail)
-    end
-
-    # Probe findings list → the selected issue's sample flow (re-test the evidence in place).
-    def probe_active_rescan : Nil
-      return (@toast = "select an issue first") unless i = probe_controller.view.target_issue
-      fid = i.sample_flow_id
-      return (@toast = "this issue has no captured flow to re-scan") unless fid
-      detail = @session.store.get_flow(fid)
-      return (@toast = "evidence no longer captured (pruned)") unless detail
-      open_probe_active_overlay(detail)
-    end
-
-    # Repeater → the current session's last HTTP send (request as edited + its response).
-    def probe_active_from_repeater : Nil
-      detail = repeater_controller.active_scan_detail
-      return (@toast = "send the request first (an active scan needs a response)") unless detail
-      open_probe_active_overlay(detail, repeater_id: repeater_controller.current_session_db_id)
-    end
 
     # Estimate the active-scan request count for `detail`, then open the "Run active scan" popup
     # (per-rule breakdown + total + a notification-mode cycler). Running is deferred to
@@ -4958,63 +4712,6 @@ module Gori::Tui
       @probe_active_overlay = nil
     end
 
-    # Promote a machine-found Probe issue to a human-confirmed Issue (the bridge to the
-    # Issues report). Reuses Store#insert_issue; the issue's severity/host/sample flow carry over.
-    def probe_promote : Nil
-      return unless i = probe_controller.view.target_issue
-      # Promotion marks the source issue Confirmed; a second press would otherwise mint a
-      # duplicate Issue for the same issue. Already-Confirmed ⇒ already promoted.
-      if i.status.confirmed?
-        @toast = "already promoted to an issue"
-        return
-      end
-      fid = @session.store.insert_issue(i.title, i.severity, i.host, i.sample_flow_id)
-      # Preserve Repeater-only evidence: with no source flow, link the Issue to the Repeater tab
-      # that produced the issue so the evidence pointer survives promotion (insert_issue only
-      # carries a flow id).
-      if i.sample_flow_id.nil? && (rid = i.sample_repeater_id)
-        @session.store.add_link(Store::LinkOwnerKind::Issue, fid, Store::LinkRefKind::Repeater, rid)
-      end
-      # Mark the source confirmed (= "promoted to an Issue") so it leaves the default
-      # open-only lens instead of lingering as unreviewed noise; still reachable via `a`.
-      @session.store.update_probe_issue_status(i.id, Store::Status::Confirmed)
-      probe_controller.view.reload(@session.store)
-      @toast = "promoted to issue — see the Issues tab"
-    end
-
-    # 's' / scope.edit: the Scope editor lives in the Project tab now, so jump there
-    # and focus its SCOPE pane (saving the outgoing tab, like any tab switch).
-    def scope_open : Nil
-      focus_tab(:project)
-      project_controller.focus_scope
-    end
-
-    # Legacy "Match & Replace" entry: the editor is now the Rewriter tab.
-    def rules_open : Nil
-      focus_tab(:rewriter)
-    end
-
-    def scope_add_host : Nil
-      id = history_target_flow_id
-      return unless id
-      if row = @session.store.flow_row(id)
-        @scope.add("include", "host", row.host)
-        @scope.enable
-        history_controller.view.reload(@session.store)
-        @toast = "added #{row.host} to scope (#{@scope.size})"
-      end
-    end
-
-    # Toggle the scope display lens (in-scope-only ⇄ all flows) right from History —
-    # the lens filters History/Sitemap, so reload the active list and confirm the state.
-    def scope_toggle_lens : Nil
-      @scope.toggle
-      history_controller.view.reload(@session.store)
-      sitemap_controller.reload if @active_tab == :target && target_controller.sitemap_active?
-      probe_controller.view.reload(@session.store) if @active_tab == :probe
-      project_controller.toast_scope_state
-    end
-
     # Host-facade alias so a TabController (the Project settings pane's lens row + click) flips
     # the lens through the same reload+toast path a keybind/menu uses.
     def toggle_scope_lens : Nil
@@ -5039,155 +4736,7 @@ module Gori::Tui
       end
     end
 
-    # Project SCOPE-pane rule editing (a/e/d + space menu → popup overlay).
-    def scope_add_rule : Nil
-      project_controller.scope_add_rule
-    end
-
-    def scope_edit_rule : Nil
-      project_controller.scope_edit_rule
-    end
-
-    def scope_delete_rule : Nil
-      project_controller.scope_delete_rule
-    end
-
-    def scope_rule_selected? : Bool
-      @scope.size > 0
-    end
-
-    def probe_rule_toggle : Nil
-      probe_controller.rules_toggle_selected
-    end
-
-    def probe_rule_add : Nil
-      probe_controller.rules_add
-    end
-
-    def probe_rule_edit : Nil
-      probe_controller.rules_edit
-    end
-
-    def probe_rule_delete : Nil
-      probe_controller.rules_delete
-    end
-
-    def probe_custom_rule_selected? : Bool
-      probe_controller.rules_custom_selected?
-    end
-
-    # --- rewriter (Match & Replace rule list) ---
-    def rewriter_add : Nil
-      rewriter_controller.rewriter_add
-    end
-
-    def rewriter_edit : Nil
-      rewriter_controller.rewriter_edit
-    end
-
-    def rewriter_toggle : Nil
-      rewriter_controller.rewriter_toggle
-    end
-
-    def rewriter_delete : Nil
-      rewriter_controller.rewriter_delete
-    end
-
-    def rewriter_move(dir : Int32) : Nil
-      rewriter_controller.rewriter_move(dir)
-    end
-
-    def rewriter_duplicate : Nil
-      rewriter_controller.rewriter_duplicate
-    end
-
-    def rewriter_reload : Nil
-      rewriter_controller.rewriter_reload
-    end
-
-    def rewriter_rule_selected? : Bool
-      !rewriter_controller.selected_rule.nil?
-    end
-
-    def hostov_add_entry : Nil
-      project_controller.hostov_add_entry
-    end
-
-    def hostov_edit_entry : Nil
-      project_controller.hostov_edit_entry
-    end
-
-    def hostov_delete_entry : Nil
-      project_controller.hostov_delete_entry
-    end
-
-    def hostov_entry_selected? : Bool
-      @session.host_overrides.size > 0
-    end
-
-    # Project ENV-pane var editing (the inline a/e/d keys + its space menu both route here).
-    def env_add_var : Nil
-      project_controller.env_add_var
-    end
-
-    def env_edit_var : Nil
-      project_controller.env_edit_var
-    end
-
-    def env_delete_var : Nil
-      project_controller.env_delete_var
-    end
-
-    def env_edit_prefix : Nil
-      project_controller.env_edit_prefix
-    end
-
-    def env_var_selected? : Bool
-      project_controller.env_var_selected?
-    end
-
-    def sitemap_move(delta : Int32) : Nil
-      sitemap_controller.sitemap_move(delta)
-    end
-
-    def sitemap_toggle : Nil
-      sitemap_controller.sitemap_toggle
-    end
-
-    def sitemap_expand : Nil
-      sitemap_controller.sitemap_expand
-    end
-
-    def sitemap_collapse : Nil
-      sitemap_controller.sitemap_collapse
-    end
-
-    def sitemap_query : Nil
-      sitemap_controller.sitemap_query
-    end
-
-    def sitemap_tag : Nil
-      sitemap_controller.sitemap_tag
-    end
-
-    def sitemap_toggle_grouping : Nil
-      sitemap_controller.sitemap_toggle_grouping
-    end
-
     # --- Discover ExecContext ---
-    # Seed a discovery run from the selected Sitemap node — offering the path subtree AND the
-    # host root as start-target choices in the config popup.
-    def sitemap_discover : Nil
-      ep = sitemap_controller.view.selected_endpoint
-      unless ep
-        @toast = "select a host or path to discover"
-        return
-      end
-      id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
-      base = id.try { |i| @session.store.flow_row(i).try(&.url) }
-      origin = base.try { |u| Discover::Url.parse(u).try { |p| Discover::Url.origin(p) } } || "https://#{ep[:host]}"
-      open_discover_config(build_discover_seed(origin, ep[:host], ep[:target]))
-    end
 
     # Candidate start targets for the Discover popup: the path subtree first (the likely
     # intent), then the whole host — so `/notes` offers both `/notes/` and `/`.
@@ -5200,34 +4749,6 @@ module Gori::Tui
       end
       choices << {"/", "#{origin}/"}
       DiscoverSeed.new(choices, host)
-    end
-
-    def sitemap_repeater : Nil
-      ep = sitemap_controller.view.selected_endpoint
-      unless ep
-        @toast = "select an endpoint to send"
-        return
-      end
-      if id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
-        repeater_flow(id)
-      else
-        @toast = "no captured request for this path — capture it, or use Discover"
-      end
-    end
-
-    def history_discover : Nil
-      id = history_target_flow_id
-      # get_flow (not flow_row) so we also have the request head to offer its headers.
-      unless id && (detail = @session.store.get_flow(id))
-        @toast = "select a flow to discover"
-        return
-      end
-      unless p = Discover::Url.parse(detail.row.url)
-        @toast = "flow has no discoverable URL"
-        return
-      end
-      open_discover_config(build_discover_seed(Discover::Url.origin(p), p.host, p.path))
-      offer_flow_headers(id, detail.request_head)
     end
 
     # After the config popup opens on a History flow, offer to reuse that flow's own
@@ -5246,184 +4767,12 @@ module Gori::Tui
         danger: false, return_to: :discover_config) { ov.try(&.set_headers(hdrs)) }
     end
 
-    def discover_run : Nil
-      discover_controller.discover_run
-    end
-
-    def discover_stop : Nil
-      discover_controller.discover_stop
-    end
-
-    def discover_toggle_pause : Nil
-      discover_controller.discover_toggle_pause
-    end
-
-    # --- OAST tab (delegated to OastController) ---
-    def oast_listen : Nil
-      oast_controller.start_listening_action
-    end
-
-    def oast_stop : Nil
-      oast_controller.stop_listening
-    end
-
-    def oast_generate : Nil
-      oast_controller.generate_payload
-    end
-
-    def oast_copy : Nil
-      oast_controller.copy_payload
-    end
-
-    def oast_filter : Nil
-      oast_controller.start_cb_filter
-    end
-
-    def oast_add_provider : Nil
-      oast_controller.open_add_provider
-    end
-
-    def oast_edit_provider : Nil
-      oast_controller.open_edit_provider
-    end
-
-    def oast_toggle_provider : Nil
-      oast_controller.toggle_provider
-    end
-
-    def oast_delete_provider : Nil
-      oast_controller.delete_provider
-    end
-
     # --- OAST cross-tab payload insertion (mediated in the shell) ---
-    def oast_payload_available? : Bool
-      oast_controller.has_active_listener?
-    end
-
-    def oast_insert_payload : Nil
-      url = oast_controller.generate_for_insert
-      unless url
-        @toast = "no OAST listener — start one in the OAST tab (^R)"
-        return
-      end
-      ok = case @active_tab
-           when :repeater then repeater_controller.insert_oast_payload(url)
-           when :fuzzer   then fuzzer_controller.insert_oast_payload(url)
-           else                false
-           end
-      @toast = ok ? "inserted OAST payload: #{url}" : "focus the request/template editor first"
-    end
-
-    def oast_copy_payload : Nil
-      url = oast_controller.generate_for_insert
-      unless url
-        @toast = "no OAST listener — start one in the OAST tab (^R)"
-        return
-      end
-      Clipboard.copy(url)
-      @toast = "copied OAST payload: #{url}"
-    end
-
-    def goto_discover : Nil
-      focus_tab(:target)
-      target_controller.select_discover
-    end
-
-    # --- History / detail ExecContext --- (delegated to HistoryController)
-    def move_selection(delta : Int32) : Nil
-      history_controller.move_selection(delta)
-    end
-
-    def open_detail : Nil
-      history_controller.open_detail
-    end
-
-    def close_detail : Nil
-      history_controller.close_detail
-    end
-
-    def toggle_follow : Nil
-      history_controller.toggle_follow
-    end
-
-    def selected_flow_id : Int64?
-      history_controller.selected_flow_id
-    end
-
-    def copy_selection : Nil
-      history_controller.copy_selection(history_target_flow_id)
-    end
-
-    def history_query : Nil
-      history_controller.history_query
-    end
-
-    def history_delete : Nil
-      history_controller.history_delete
-    end
-
-    def history_clear : Nil
-      history_controller.history_clear
-    end
-
-    def scroll_detail(delta : Int32) : Nil
-      # The two-level detail (HistoryController#handle_detail_body_key/strip_key) now owns
-      # the ↑/↓ ladder — ↑-at-top-of-body ascends to the STRIP, ↑-on-strip closes to the
-      # tab bar — so this ExecContext method (kept for the abstract def + the shadowed
-      # detail.up/down verbs) is a plain delegate. PageUp/Down still route here via the
-      # controller directly.
-      history_controller.scroll_detail(delta)
-    end
-
-    def detail_copy_selection : Nil
-      history_controller.detail_copy_selection
-    end
-
-    def hscroll_detail(delta : Int32) : Nil
-      history_controller.hscroll_detail(delta)
-    end
-
-    def toggle_detail_pane : Nil
-      history_controller.toggle_detail_pane
-    end
-
-    def move_detail_pane(dir : Int32) : Nil
-      history_controller.move_detail_pane(dir)
-    end
-
-    def toggle_detail_hex : Nil
-      history_controller.toggle_detail_hex
-    end
-
-    # --- Repeater ExecContext --- (delegated to RepeaterController; cross-tab mediators kept)
-    # CROSS-TAB mediator: load History's selection into a new Repeater tab.
-    def repeater_selected : Nil
-      id = history_target_flow_id
-      repeater_controller.repeater_flow(id) if id
-    end
 
     # Open flow `id` as a new Repeater tab. Shared by History's ^R + Issues' "send to
     # Repeater" mediator. Public so those mediators can drive it.
     def repeater_flow(id : Int64) : Nil
       repeater_controller.repeater_flow(id)
-    end
-
-    def repeater_new : Nil
-      repeater_controller.repeater_new
-    end
-
-    def repeater_send : Nil
-      repeater_controller.repeater_send
-    end
-
-    def repeater_send_group : Nil
-      repeater_controller.repeater_send_group
-    end
-
-    # Open the Repeater sub-tab search picker (space → s). Snapshots the open
-    # sessions; the picker filters them in memory and jumps on ↵.
-    def repeater_find_subtab : Nil
-      subtab_search_open
     end
 
     # Generic sub-tab search — opens the fuzzy picker over the ACTIVE tab's sub-tabs
@@ -5448,231 +4797,11 @@ module Gori::Tui
       @tabs[@active_tab]?.try(&.start_subtab_filter)
     end
 
-    def repeater_subtab_count : Int32
-      repeater_controller.count
-    end
-
-    # Space-menu (:subtab) counterparts of the strip's `r` rename chord / ^W close —
-    # reuse the SAME shell-owned rename prompt / confirm-gated close, not a new path.
-    def repeater_rename_subtab : Nil
-      open_rename(current_subtab_index)
-    end
-
-    # Space-menu counterparts of the strip's `t` tag chord / `/` filter chord (issue
-    # #121) — reuse the SAME shell-owned tag prompt / controller-owned filter bar.
-    def repeater_tag_subtab : Nil
-      open_tag_edit(current_subtab_index)
-    end
-
-    def repeater_filter_subtabs : Nil
-      repeater_controller.start_subtab_filter
-    end
-
-    def repeater_close_subtab : Nil
-      repeater_controller.request_close
-    end
-
-    def repeater_duplicate_subtab : Nil
-      repeater_controller.repeater_duplicate
-    end
-
-    def repeater_toggle_hex : Nil
-      repeater_controller.repeater_toggle_hex
-    end
-
-    def repeater_toggle_decoded : Nil
-      repeater_controller.repeater_toggle_decoded
-    end
-
-    def repeater_toggle_sni : Nil
-      repeater_controller.repeater_toggle_sni
-    end
-
-    def repeater_toggle_auto_content_length : Nil
-      repeater_controller.repeater_toggle_auto_content_length
-    end
-
-    def repeater_toggle_http2 : Nil
-      repeater_controller.repeater_toggle_http2
-    end
-
-    # Space-menu (:response) counterparts of the response pane's raw `d`/`x` keys —
-    # same RepeaterView toggles, just reachable without memorizing the key.
-    def repeater_toggle_resp_diff : Nil
-      # Pane-gated: plain `d` is a response-only tool (request has other uses).
-      return unless (v = repeater_controller.current_view) && v.focus == :response
-      v.toggle_resp_mode
-    end
-
-    def repeater_toggle_resp_hex : Nil
-      return unless (v = repeater_controller.current_view) && v.focus == :response
-      v.toggle_resp_hex
-    end
-
-    def repeater_pretty_request : Nil
-      repeater_controller.repeater_pretty_request
-    end
-
-    def repeater_minimize : Nil
-      repeater_controller.repeater_minimize
-    end
-
-    def repeater_auto_mark : Nil
-      repeater_controller.repeater_auto_mark
-    end
-
-    def repeater_mark_word : Nil
-      repeater_controller.repeater_mark_word
-    end
-
-    def repeater_insert_marker : Nil
-      repeater_controller.repeater_insert_marker
-    end
-
-    def repeater_clear_marks : Nil
-      repeater_controller.repeater_clear_marks
-    end
-
-    # ^Y: jump focus DOWN into the visible CHAIN pane (the marker under the cursor). The
-    # controller gates on the request pane + cursor-in-marker and toasts otherwise.
-    def repeater_attach_chain : Nil
-      repeater_controller.repeater_focus_chain_pane
-    end
-
-    def repeater_copy : Nil
-      repeater_controller.repeater_copy
-    end
-
-    def repeater_copy_all : Nil
-      repeater_controller.repeater_copy_all
-    end
-
-    def repeater_read_mode? : Bool
-      repeater_controller.repeater_read_mode?
-    end
-
     def close_repeater_tab : Nil
       repeater_controller.close_repeater_tab
     end
 
-    # --- Fuzzer ExecContext / cross-tab mediators ---
-    # CROSS-TAB: open History's selection as a new Fuzzer session (⇧I).
-    def fuzz_selected : Nil
-      id = history_target_flow_id
-      fuzzer_controller.fuzz_flow(id) if id
-    end
-
-    # CROSS-TAB: turn the current Repeater request into a Fuzzer template.
-    def fuzz_from_repeater : Nil
-      return unless v = repeater_controller.current_view
-      v.flush_decoded_edits # a split-decode tab: fold a pending payload edit into the envelope first
-      fuzzer_controller.fuzz_from_request(v.target, v.request_text, v.http2?, v.sni_override)
-    end
-
-    def fuzz_run : Nil
-      fuzzer_controller.fuzz_run
-    end
-
-    def fuzz_stop : Nil
-      fuzzer_controller.fuzz_stop
-    end
-
-    def fuzz_new : Nil
-      fuzzer_controller.fuzz_new
-    end
-
-    def fuzz_automark : Nil
-      (v = fuzzer_controller.current_view) && (@toast = v.auto_mark)
-    end
-
-    # ^Y: jump focus DOWN into the visible CHAIN pane (the marker under the template
-    # cursor). The controller gates on cursor-in-marker and toasts otherwise.
-    def fuzz_attach_chain : Nil
-      fuzzer_controller.fuzz_focus_chain_pane
-    end
-
-    # ^L: open the multi-line paste popup for the List payload's values (again = apply + close).
-    def fuzz_list_paste : Nil
-      fuzzer_controller.fuzz_list_paste
-    end
-
-    def fuzz_pretty_template : Nil
-      fuzzer_controller.fuzz_pretty_template
-    end
-
-    def fuzz_toggle_http2 : Nil
-      fuzzer_controller.fuzz_toggle_http2
-    end
-
-    def fuzz_clear_marks : Nil
-      fuzzer_controller.fuzz_clear_marks
-    end
-
-    # Space-menu (:subtab) counterparts of the strip's `r` rename chord / ^W close —
-    # reuse the SAME shell-owned rename prompt / confirm-gated close, not a new path.
-    def fuzzer_rename_subtab : Nil
-      open_rename(current_subtab_index)
-    end
-
-    def fuzzer_close_subtab : Nil
-      fuzzer_controller.request_close
-    end
-
-    def fuzzer_duplicate_subtab : Nil
-      fuzzer_controller.fuzz_duplicate
-    end
-
-    def fuzzer_copy : Nil
-      fuzzer_controller.fuzzer_copy
-    end
-
-    def fuzzer_copy_all : Nil
-      fuzzer_controller.fuzzer_copy_all
-    end
-
-    def fuzzer_read_mode? : Bool
-      fuzzer_controller.fuzzer_read_mode?
-    end
-
     # --- Miner ExecContext / cross-tab mediators ---
-    # CROSS-TAB: open the config popup for History's selected flow (space → Mine params).
-    def mine_selected : Nil
-      id = history_target_flow_id
-      return (@toast = "select a flow first") unless id
-      open_mine_config(miner_controller.build_seed_from_flow(id))
-    end
-
-    # CROSS-TAB: open the config popup for the current Repeater request.
-    def mine_from_repeater : Nil
-      return unless v = repeater_controller.current_view
-      v.flush_decoded_edits # fold a pending split-decode payload edit into the envelope first
-      open_mine_config(miner_controller.build_seed_from_request(v.target, v.request_text, v.http2?, v.sni_override))
-    end
-
-    def mine_run : Nil
-      miner_controller.mine_run
-    end
-
-    def mine_stop : Nil
-      miner_controller.mine_stop
-    end
-
-    def miner_duplicate_subtab : Nil
-      miner_controller.miner_duplicate
-    end
-
-    def miner_finding_selected? : Bool
-      miner_controller.finding_selected?
-    end
-
-    # CROSS-TAB: inject the selected Miner finding into the session request and open Repeater.
-    def mine_repeater_selected : Nil
-      seed = miner_controller.selected_repeater_seed
-      return (@toast = "select a finding first") unless seed
-      repeater_controller.repeater_from_request(seed.target, seed.request_text, seed.http2, seed.sni,
-        name: seed.label)
-      @toast = "repeater ← miner: #{seed.label}"
-    end
 
     private def open_mine_config(seed : MineSeed?) : Nil
       unless seed
@@ -5704,42 +4833,6 @@ module Gori::Tui
     end
 
     # --- Sequencer ExecContext / cross-tab mediators ---
-    # CROSS-TAB: open the config popup for History's selected flow (space → Send to Sequencer).
-    def sequence_selected : Nil
-      id = history_target_flow_id
-      return (@toast = "select a flow first") unless id
-      open_sequence_config(sequencer_controller.build_seed_from_flow(id))
-    end
-
-    # CROSS-TAB: open the config popup for the current Repeater request.
-    def sequence_from_repeater : Nil
-      return unless v = repeater_controller.current_view
-      v.flush_decoded_edits
-      open_sequence_config(sequencer_controller.build_seed_from_request(v.target, v.request_text, v.http2?, v.sni_override))
-    end
-
-    # CROSS-TAB: open the config popup for the selected Sitemap endpoint's captured flow.
-    def sequence_from_sitemap : Nil
-      ep = sitemap_controller.view.selected_endpoint
-      return (@toast = "select an endpoint to send") unless ep
-      if id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
-        open_sequence_config(sequencer_controller.build_seed_from_flow(id))
-      else
-        @toast = "no captured request for this path — capture it, or use Discover"
-      end
-    end
-
-    def sequence_run : Nil
-      sequencer_controller.sequence_run
-    end
-
-    def sequence_stop : Nil
-      sequencer_controller.sequence_stop
-    end
-
-    def sequence_configure : Nil
-      reconfigure_sequence
-    end
 
     # Reconfigure the CURRENT session's token descriptor/goal (Sequencer `c` / verb). Opens
     # the same overlay with the reconfigure flag so Start applies to the open session.
@@ -5910,36 +5003,6 @@ module Gori::Tui
       @toast = "can't start capture: #{ex.message} — free the port in settings (^P)"
     end
 
-    # --- intercept (hold-and-decide) ExecContext --- (delegated to InterceptController)
-
-    def intercept_toggle : Nil
-      intercept_controller.intercept_toggle
-    end
-
-    def intercept_forward : Nil
-      intercept_controller.intercept_forward
-    end
-
-    def intercept_drop : Nil
-      intercept_controller.intercept_drop
-    end
-
-    def intercept_forward_all : Nil
-      intercept_controller.intercept_forward_all
-    end
-
-    def intercept_query : Nil
-      intercept_controller.intercept_query
-    end
-
-    def intercept_cycle_direction : Nil
-      intercept_controller.intercept_cycle_direction
-    end
-
-    def selected_intercept_id : Int64?
-      intercept_controller.selected_intercept_id
-    end
-
     def export_ca : Nil
       # Copy the path so it's actionable (paste into `--cacert`, a cert import, or a
       # file manager) — a transient toast you can't select is useless for the one
@@ -5994,204 +5057,6 @@ module Gori::Tui
 
     # --- comparer (diff two arbitrary flows) ---
 
-    # Open the flow picker to choose the flow for slot :a / :b. Snapshots recent
-    # flows; the picker filters them in memory.
-    def comparer_pick(slot : Symbol) : Nil
-      @flow_picker = FlowPicker.new(@session.store.recent_flows(2000), slot)
-      @overlay = :comparer_pick
-    end
-
-    def comparer_swap : Nil
-      comparer_controller.view.swap
-      @toast = "comparer: swapped A ⇄ B"
-    end
-
-    def comparer_toggle_pane : Nil
-      view = comparer_controller.view
-      view.toggle_pane
-      @toast = "comparer: comparing #{view.pane}s"
-    end
-
-    def comparer_new : Nil
-      comparer_controller.comparer_new
-    end
-
-    def comparer_close_subtab : Nil
-      comparer_controller.comparer_close
-      resolve_subtab_focus_after_close
-    end
-
-    def comparer_rename_subtab : Nil
-      open_rename(current_subtab_index)
-    end
-
-    def comparer_duplicate_subtab : Nil
-      comparer_controller.comparer_duplicate
-    end
-
-    # CROSS-TAB mediator: send History's selected flow to the next Comparer slot
-    # on the *active* comparison sub-tab (rings A → B → A).
-    def comparer_add_selected : Nil
-      id = history_target_flow_id
-      return (@toast = "select a flow first") unless id
-      detail = @session.store.get_flow(id)
-      return (@toast = "flow no longer available") unless detail
-      slot = comparer_controller.view.add_flow(detail)
-      @toast = "comparer: set #{slot.to_s.upcase} — open Comparer (^P) to view the diff"
-    end
-
-    # --- decoder workbench (sub-tab + output actions). The body's text editing +
-    # focus nav stay inline in DecoderController; these power the space menu (reachable
-    # from the sub-tab strip) + the palette. decoder_new already drops to the body; the
-    # save/load prompts are serviced by the body editor, so focus there first. ---
-    def decoder_new : Nil
-      decoder_controller.decoder_new
-    end
-
-    def decoder_close : Nil
-      decoder_controller.decoder_close
-      resolve_subtab_focus_after_close # don't strand on a now-hidden strip
-    end
-
-    # Space-menu (:subtab) counterpart of the strip's `r` rename chord — reuses the
-    # SAME shell-owned rename prompt as Repeater/Fuzzer (open_rename already handles
-    # Decoder generically via view_at).
-    def decoder_rename_subtab : Nil
-      open_rename(current_subtab_index)
-    end
-
-    def decoder_duplicate_subtab : Nil
-      decoder_controller.decoder_duplicate
-    end
-
-    def decoder_clear : Nil
-      decoder_controller.clear_all
-    end
-
-    def decoder_copy : Nil
-      decoder_controller.copy_output
-    end
-
-    def decoder_copy_selection : Nil
-      decoder_controller.decoder_copy_selection
-    end
-
-    def decoder_copy_all : Nil
-      decoder_controller.decoder_copy_all
-    end
-
-    def decoder_read_mode? : Bool
-      decoder_controller.decoder_read_mode?
-    end
-
-    def decoder_cycle_mode : Nil
-      decoder_controller.cycle_output_mode
-    end
-
-    def decoder_save : Nil
-      focus_pane(:body)
-      decoder_controller.open_prompt(:save_as)
-    end
-
-    def decoder_load : Nil
-      focus_pane(:body)
-      decoder_controller.open_prompt(:load)
-    end
-
-    # --- jwt workbench (sub-tab + lens actions). The body's text editing + focus nav
-    # stay inline in JwtController; these power the space menu + palette. ---
-    def jwt_new : Nil
-      jwt_controller.jwt_new
-    end
-
-    def jwt_close : Nil
-      jwt_controller.jwt_close
-      resolve_subtab_focus_after_close # don't strand on a now-hidden strip
-    end
-
-    def jwt_rename_subtab : Nil
-      open_rename(current_subtab_index)
-    end
-
-    def jwt_duplicate_subtab : Nil
-      jwt_controller.jwt_duplicate
-    end
-
-    def jwt_clear : Nil
-      jwt_controller.clear_all
-    end
-
-    def jwt_toggle_mode : Nil
-      jwt_controller.toggle_mode
-    end
-
-    def jwt_cycle_alg : Nil
-      jwt_controller.cycle_alg
-    end
-
-    def jwt_load_decoded : Nil
-      jwt_controller.load_decoded
-    end
-
-    def jwt_copy : Nil
-      jwt_controller.jwt_copy
-    end
-
-    def jwt_copy_all : Nil
-      jwt_controller.jwt_copy_all
-    end
-
-    def jwt_copy_token : Nil
-      jwt_controller.jwt_copy_token
-    end
-
-    def jwt_copy_attack : Nil
-      jwt_controller.jwt_copy_attack
-    end
-
-    def jwt_read_mode? : Bool
-      jwt_controller.jwt_read_mode?
-    end
-
-    # --- notes scratchpad (sub-tab actions). The body's text editing stays inline
-    # in NotesController; these power the space menu reachable from the sub-tab strip. ---
-    def notes_new : Nil
-      notes_controller.notes_new
-    end
-
-    def notes_close : Nil
-      notes_controller.notes_close
-      resolve_subtab_focus_after_close
-    end
-
-    def notes_duplicate_subtab : Nil
-      notes_controller.notes_duplicate
-    end
-
-    def notes_copy : Nil
-      notes_controller.notes_copy
-    end
-
-    def notes_copy_all : Nil
-      notes_controller.notes_copy_all
-    end
-
-    def notes_read_mode? : Bool
-      notes_controller.notes_read_mode?
-    end
-
-    def project_desc_read_mode? : Bool
-      project_controller.project_desc_read_mode?
-    end
-
-    def project_copy : Nil
-      project_controller.project_copy
-    end
-
-    def project_copy_all : Nil
-      project_controller.project_copy_all
-    end
-
     # The unified Copy verbs whose base title is now plain "Copy" (routed through
     # read_copy — selection if active, else the whole focused pane; copy-all is
     # gone). detail.copy is DELIBERATELY excluded: History detail has no whole-pane
@@ -6211,11 +5076,11 @@ module Gori::Tui
     def read_selection_active? : Bool
       case @active_tab
       when :notes    then notes_controller.view.selection?
-      when :repeater   then repeater_controller.repeater_selection_active?
+      when :repeater then repeater_controller.repeater_selection_active?
       when :fuzzer   then fuzzer_controller.fuzzer_selection_active?
       when :decoder  then decoder_controller.decoder_selection_active?
       when :jwt      then jwt_controller.jwt_selection_active?
-      when :issues then issues_controller.issues_notes_selection_active?
+      when :issues   then issues_controller.issues_notes_selection_active?
       when :project  then project_controller.project_desc_selection_active?
       when :history
         @overlay == :detail && history_controller.detail_selection_active?
@@ -6247,11 +5112,11 @@ module Gori::Tui
     def read_select_line : Nil
       case @active_tab
       when :notes    then notes_controller.view.select_line
-      when :repeater   then repeater_controller.repeater_select_line
+      when :repeater then repeater_controller.repeater_select_line
       when :fuzzer   then fuzzer_controller.fuzzer_select_line
       when :decoder  then decoder_controller.decoder_select_line
       when :jwt      then jwt_controller.jwt_select_line
-      when :issues then issues_controller.issues_notes_select_line
+      when :issues   then issues_controller.issues_notes_select_line
       when :project  then project_controller.project_desc_select_line
       when :history
         history_controller.detail_select_line if @overlay == :detail
@@ -6261,11 +5126,11 @@ module Gori::Tui
     def read_clear_selection : Nil
       case @active_tab
       when :notes    then notes_controller.view.clear_selection
-      when :repeater   then repeater_controller.repeater_clear_selection
+      when :repeater then repeater_controller.repeater_clear_selection
       when :fuzzer   then fuzzer_controller.fuzzer_clear_selection
       when :decoder  then decoder_controller.decoder_clear_selection
       when :jwt      then jwt_controller.jwt_clear_selection
-      when :issues then issues_controller.issues_notes_clear_selection
+      when :issues   then issues_controller.issues_notes_clear_selection
       when :project  then project_controller.project_desc_clear_selection
       when :history
         history_controller.detail_clear_selection if @overlay == :detail
@@ -6279,11 +5144,11 @@ module Gori::Tui
     def read_copy : Nil
       case @active_tab
       when :notes    then read_selection_active? ? notes_copy : notes_copy_all
-      when :repeater   then read_selection_active? ? repeater_copy : repeater_copy_all
+      when :repeater then read_selection_active? ? repeater_copy : repeater_copy_all
       when :fuzzer   then read_selection_active? ? fuzzer_copy : fuzzer_copy_all
       when :decoder  then read_selection_active? ? decoder_copy_selection : decoder_copy_all
       when :jwt      then jwt_copy
-      when :issues then read_selection_active? ? issues_copy : issues_copy_all
+      when :issues   then read_selection_active? ? issues_copy : issues_copy_all
       when :project  then read_selection_active? ? project_copy : project_copy_all
       when :history
         # No whole-rendered-pane delegator exists for the detail text pane — both
@@ -6294,25 +5159,6 @@ module Gori::Tui
 
     def detail_navigable? : Bool
       @active_tab == :history && @overlay == :detail && history_controller.view.detail_navigable?
-    end
-
-    def notes_clear : Nil
-      notes_controller.notes_clear
-    end
-
-    def notes_edit : Nil
-      focus_pane(:body)
-      run_external_editor(notes_controller.view.current_text, :notes) { |t| notes_controller.view.replace_current(t) }
-    end
-
-    def notes_goto : Nil
-      focus_pane(:body)
-      open_goto(:notes)
-    end
-
-    def notes_find : Nil
-      focus_pane(:body)
-      open_search(:notes)
     end
 
     # --- settings (config control) ---
