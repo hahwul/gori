@@ -10,6 +10,7 @@ require "./theme"
 require "./frame"
 require "./confirm_dialog"
 require "./settings_view"
+require "./compact_overlay"
 
 module Gori::Tui
   # The startup screen: choose a project to open. New + Temp are always shown at
@@ -34,6 +35,7 @@ module Gori::Tui
     SPACE_ENTRIES = [
       SpaceEntry.new('o', "Open", :open),
       SpaceEntry.new('r', "Rename", :rename),
+      SpaceEntry.new('c', "Compress", :compress),
       SpaceEntry.new('d', "Delete", :delete),
     ]
 
@@ -44,7 +46,7 @@ module Gori::Tui
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
       @results_scroll = 0
-      @mode = :list # :list | :new | :confirm | :space | :rename | :settings
+      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :compress | :compressing
       @name = ""
       @desc = ""
       @new_field = :name # :name | :desc (only in :new mode)
@@ -53,9 +55,20 @@ module Gori::Tui
       # Delete confirmation (project deletion is irreversible — wipes its dir).
       @confirm = nil.as(ConfirmDialog?)
       @pending_delete = nil.as(Project?)
-      # Space menu over a project row (open/rename/delete).
+      # Space menu over a project row (open/rename/compress/delete).
       @space_selected = 0
       @space_project = nil.as(Project?)
+      # Compress scope popup (space → Compress): choose what to strip, confirm, VACUUM.
+      # The picker holds no open Store, so it acts on the project's db file directly.
+      @compact = nil.as(CompactOverlay?)
+      @compact_project = nil.as(Project?)
+      @pending_compact = nil.as(Store::CompactPlan?)
+      # Which action a shared ConfirmDialog commits (:delete wipes the dir, :compress runs Store.compact).
+      @confirm_kind = :delete
+      # Transient one-line result shown above the hint after a compaction (green ok / red fail),
+      # cleared on the next list keystroke.
+      @flash = nil.as(String?)
+      @flash_ok = true
       # Rename prompt (display name only — directory slug stays put).
       @pending_rename = nil.as(Project?)
       @rename_name = ""
@@ -84,6 +97,7 @@ module Gori::Tui
                    when :settings then handle_settings(ev)
                    when :space    then handle_space(ev)
                    when :rename   then handle_rename(ev)
+                   when :compress then handle_compress(ev)
                    else                handle_list(ev)
                    end
           case result
@@ -130,6 +144,7 @@ module Gori::Tui
     private def handle_list(ev : Termisu::Event::Key) : Project | Symbol | Nil
       key = ev.key
       @preedit = "" # any committed key ends an in-progress IME composition
+      @flash = nil  # a fresh keystroke dismisses the last compaction result line
       # Arrows are pure navigation (never filter). Typing a printable key jumps into
       # the Search row and filters — matching the "type to search" hint + the universal
       # picker expectation — so a user who lands on New/Temp and types a project name to
@@ -224,12 +239,21 @@ module Gori::Tui
       key = ev.key
       case
       when key.escape?, key.n?, ev.ctrl_c?                then cancel_confirm
-      when key.y?                                         then commit_delete
+      when key.y?                                         then commit_confirmed
       when key.left?, key.right?, key.tab?, key.back_tab? then dlg.try(&.move)
       when key.enter?
-        (dlg.try(&.confirm_selected?)) ? commit_delete : cancel_confirm
+        (dlg.try(&.confirm_selected?)) ? commit_confirmed : cancel_confirm
       end
       nil
+    end
+
+    # Runs the action the shared ConfirmDialog was opened for — delete wipes the
+    # project dir, compress strips + VACUUMs its db in place.
+    private def commit_confirmed : Nil
+      case @confirm_kind
+      when :compress then commit_compress
+      else                commit_delete
+      end
     end
 
     # Project-row space menu: ↑/↓ move, mnemonic key or ↵ run, esc dismiss.
@@ -330,6 +354,7 @@ module Gori::Tui
         %(Delete "#{target.name}"?\nThis permanently removes all of its captured data.),
         confirm_label: "delete", cancel_label: "cancel", danger: true)
       @pending_delete = target
+      @confirm_kind = :delete
       @mode = :confirm
     end
 
@@ -355,7 +380,10 @@ module Gori::Tui
     private def cancel_confirm : Nil
       @mode = :list
       @confirm = nil
+      @confirm_kind = :delete
       @pending_delete = nil
+      @pending_compact = nil
+      @compact_project = nil
     end
 
     # --- space menu (project row actions) ------------------------------------
@@ -387,6 +415,9 @@ module Gori::Tui
         project
       when :rename
         start_rename(project)
+        nil
+      when :compress
+        start_compress(project)
         nil
       when :delete
         request_delete(project)
@@ -429,6 +460,108 @@ module Gori::Tui
       @pending_rename = nil
       @rename_name = ""
       @preedit = ""
+    end
+
+    # --- compress (space → Compress) -----------------------------------------
+
+    # Open the compress-scope popup for `project`. Refuses one another live
+    # instance is capturing into (VACUUM/deletes would race its writer — the green
+    # "● on" dot already flags it), flashing why. Measures reclaimable sizes up
+    # front so each option shows roughly what it would free.
+    private def start_compress(project : Project) : Nil
+      if probe_running(project)[0]
+        set_flash(%(can't compress "#{project.name}" — it's open in another window), ok: false)
+        return
+      end
+      stats = begin
+        Store.measure(project.db_path)
+      rescue Gori::Error | IO::Error | DB::Error | SQLite3::Exception
+        set_flash(%(can't read "#{project.name}" to compress), ok: false)
+        return
+      end
+      @compact_project = project
+      @compact = CompactOverlay.new(project.name, stats)
+      @mode = :compress
+    end
+
+    # Compress popup: ↑/↓ move, ‹/› cycle keep-flows, space toggle, ↵/space on the
+    # Compress row opens the confirm (else toggles the focused row), esc dismiss.
+    private def handle_compress(ev : Termisu::Event::Key) : Project | Symbol | Nil
+      ov = @compact
+      return nil unless ov
+      key = ev.key
+      @preedit = ""
+      if key.escape? || ev.ctrl_c?
+        close_compact
+      elsif key.up?
+        ov.move(-1)
+      elsif key.down?
+        ov.move(1)
+      elsif key.left?
+        ov.adjust(-1)
+      elsif key.right?
+        ov.adjust(1)
+      elsif (key.enter? || key.space?) && !ev.ctrl? && !ev.alt?
+        ov.on_run_row? ? request_compress(ov) : ov.toggle
+      end
+      nil
+    end
+
+    # Confirm before the destructive run (compaction can't be undone). Stashes the
+    # plan, then reuses the shared danger ConfirmDialog (committed via @confirm_kind).
+    private def request_compress(ov : CompactOverlay) : Nil
+      return unless @compact_project
+      plan = ov.plan
+      est = ov.estimated_bytes
+      detail = if plan.removes_data?
+                 amount = est > 0 ? "~#{Fmt.size(est)} of data" : "the selected data"
+                 "Remove #{amount} and reclaim disk?"
+               else
+                 "Reclaim free space (VACUUM only)?"
+               end
+      @pending_compact = plan
+      @confirm = ConfirmDialog.new("COMPRESS PROJECT",
+        %(#{detail}\nThis permanently drops the selected data.),
+        confirm_label: "compress", cancel_label: "cancel", danger: true)
+      @confirm_kind = :compress
+      @compact = nil
+      @mode = :confirm
+    end
+
+    # Run the compaction synchronously (the picker has no background jobs — mirrors
+    # the synchronous delete). Paints a brief "Compressing …" frame first since a
+    # VACUUM on a large db can block, then flashes the reclaimed size (or failure).
+    private def commit_compress : Nil
+      project = @compact_project
+      plan = @pending_compact
+      if project && plan
+        @mode = :compressing
+        render # paint the busy card before the blocking VACUUM
+        begin
+          if result = Store.compact(project.db_path, plan)
+            reclaimed = result.reclaimed_bytes > 0 ? "  (−#{Fmt.size(result.reclaimed_bytes)})" : ""
+            set_flash(%(compressed "#{project.name}"  #{Fmt.size(result.before_bytes)} → #{Fmt.size(result.after_bytes)}#{reclaimed}), ok: true)
+          else
+            set_flash(%(can't compress "#{project.name}" — it's open in another window), ok: false)
+          end
+        rescue ex : Gori::Error | IO::Error | DB::Error | SQLite3::Exception
+          set_flash("compress failed: #{ex.message}", ok: false)
+        end
+        @projects = @registry.list
+        invalidate_running_cache
+      end
+      cancel_confirm # resets mode → :list and clears the confirm/compress state
+    end
+
+    private def close_compact : Nil
+      @mode = :list
+      @compact = nil
+      @compact_project = nil
+    end
+
+    private def set_flash(msg : String, *, ok : Bool) : Nil
+      @flash = msg
+      @flash_ok = ok
     end
 
     private def handle_new(ev : Termisu::Event::Key) : Project | Symbol | Nil
@@ -499,9 +632,28 @@ module Gori::Tui
       when :confirm  then handle_confirm_mouse(w, h, mx, my)
       when :settings then handle_settings_mouse(w, h, mx, my)
       when :space    then handle_space_mouse(w, h, mx, my)
+      when :compress then handle_compress_mouse(w, h, mx, my)
+      when :compressing  then nil # blocking VACUUM in progress — ignore clicks
       when :new, :rename then nil # text form — keyboard only (cursor placement is Phase 2)
       else                handle_list_mouse(mx, my)
       end
+    end
+
+    # Click a compress-popup row to focus + toggle it (or open the confirm on the
+    # Compress row); a click outside the card dismisses, like the other overlays.
+    private def handle_compress_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Project | Symbol | Nil
+      ov = @compact
+      return nil if ov.nil?
+      box = ov.overlay_box(Rect.new(0, 0, w, h))
+      if box.nil? || !box.contains?(mx, my)
+        close_compact
+        return nil
+      end
+      if idx = ov.row_at(box, mx, my)
+        ov.set_selected(idx)
+        ov.on_run_row? ? request_compress(ov) : ov.toggle
+      end
+      nil
     end
 
     # List click: SELECT-FIRST — first click highlights the entry, a second click on
@@ -521,7 +673,8 @@ module Gori::Tui
       case @mode
       when :settings                then @settings.move_field(delta)
       when :space                   then @space_selected = (@space_selected + delta.sign).clamp(0, SPACE_ENTRIES.size - 1)
-      when :new, :confirm, :rename then nil # nothing to scroll
+      when :compress                then @compact.try(&.move(delta.sign))
+      when :new, :confirm, :rename, :compressing then nil # nothing to scroll
       else                              @selected = (@selected + delta).clamp(0, entry_count - 1)
       end
     end
@@ -532,7 +685,7 @@ module Gori::Tui
       box = dlg.overlay_box(Rect.new(0, 0, w, h))
       return cancel_confirm unless box.contains?(mx, my) # click away → cancel
       case dlg.button_at(box, mx, my)
-      when :confirm then commit_delete
+      when :confirm then commit_confirmed
       when :cancel  then cancel_confirm
       end
     end
@@ -647,6 +800,8 @@ module Gori::Tui
         @confirm.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :confirm
         @settings.render(screen, Rect.new(0, 0, w, h)) if @mode == :settings
         render_space_menu(screen, w, h) if @mode == :space
+        @compact.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :compress
+        render_compressing(screen, w, h) if @mode == :compressing
       end
       # Sync the terminal hardware cursor to the focused caret so the terminal's
       # own IME composition UI (jamo/candidate popup) anchors at the right cell —
@@ -755,9 +910,19 @@ module Gori::Tui
         end
       end
 
-      hint = if @mode == :space
-               "↑/↓ select   ↵ run   o open   r rename   d delete   esc close"
-             elsif @selected >= 3
+      # Transient result of the last compaction, one row above the hint.
+      if flash = @flash
+        centered(screen, h - 3, flash, @flash_ok ? Theme.green : Theme.red, w)
+      end
+
+      hint = case
+             when @mode == :compress
+               "↑/↓ select   ‹/› keep   space toggle   ↵ compress   esc close"
+             when @mode == :compressing
+               "compressing …"
+             when @mode == :space
+               "↑/↓ select   ↵ run   o open   r rename   c compress   d delete   esc close"
+             when @selected >= 3
                "↑/↓ select   ↵ open   space actions   type to search   ctrl-d delete   ctrl-, settings   ctrl-c quit"
              else
                "↑/↓ select   ↵ open   type to search   ctrl-n new   ctrl-t temp   ctrl-d delete   ctrl-, settings   ctrl-c quit"
@@ -796,6 +961,17 @@ module Gori::Tui
         screen.text(box.x + 4, ry, entry.label, active ? Theme.text_bright : Theme.text, bg,
           width: {box.w - 5, 0}.max)
       end
+    end
+
+    # A small centered "Compressing …" card painted while the synchronous VACUUM
+    # runs (the picker has no background jobs / spinner), so the freeze reads as work.
+    private def render_compressing(screen : Screen, w : Int32, h : Int32) : Nil
+      msg = " Compressing … "
+      bw = {msg.size + 4, 22}.max
+      bh = 3
+      box = Rect.new({(w - bw) // 2, 0}.max, {(h - bh) // 2, 0}.max, bw, bh)
+      Frame.card(screen, box, border: Theme.border_focus)
+      screen.text(box.x + (box.w - msg.size) // 2, box.y + 1, msg, Theme.text_bright, Theme.panel, Attribute::Bold)
     end
 
     private def render_rename(screen : Screen, cx : Int32, cw : Int32, w : Int32, h : Int32) : Nil
