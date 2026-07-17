@@ -68,6 +68,13 @@ module Gori::Tui
       Verb::Scope::Jwt
     end
 
+    # The focused pane, so section-tagged verbs (jwt.copy-token on :output, jwt.copy-attack
+    # on :attacks, jwt.select-line on :input) surface in the space menu's CONTEXT group.
+    # Without this the default :common hides every pane-scoped verb (mirrors DecoderController).
+    def command_section : Symbol
+      cur.pane
+    end
+
     # INS editors (input-insert / header / payload / secret) show the EDITOR badge;
     # everything else is navigable body.
     def body_badge : Symbol

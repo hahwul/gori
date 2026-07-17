@@ -290,7 +290,12 @@ module Gori::Tui
     def report : Sequencer::Stats::Report
       cached = @report
       return cached if cached && @report_rev == @samples_rev
-      return cached if cached && @running && (@samples_rev - @report_rev) < REPORT_THROTTLE
+      # Analyze is O(n) with large transient allocations (a full symbol bitstream), so scale
+      # the mid-run recompute cadence with corpus size: a several-thousand-token paste rebuilds
+      # only a handful of times instead of every 25 samples. The post-run path (!@running) below
+      # still recomputes an exact final report.
+      throttle = {REPORT_THROTTLE, @samples.size // 20}.max
+      return cached if cached && @running && (@samples_rev - @report_rev) < throttle
       fresh = Sequencer::Stats.analyze(@samples.compact_map(&.token))
       @report = fresh
       @report_rev = @samples_rev

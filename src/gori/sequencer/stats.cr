@@ -146,6 +146,11 @@ module Gori::Sequencer
       idx_of = Hash(UInt8, Int32).new
       present.each_with_index { |b, i| idx_of[b] = i }
       bps = charset_size <= 1 ? 0 : Math.log2(charset_size.to_f).ceil.to_i
+      # The fixed-width symbol-bit encoding is only unbiased when the alphabet size is a
+      # power of two (hex=16, base64=64). For a non-power-of-2 alphabet (decimal=10,
+      # base62, …) the unused high index bits are structurally starved of 1s, so the raw
+      # bit tests would FAIL a genuinely-random token. Gate their FAIL contribution below.
+      pow2 = charset_size > 0 && (charset_size & (charset_size - 1)) == 0
 
       # Per-symbol-bit bias over the fixed common prefix (feeds the chart + a test).
       prefix_bits = min_len * bps
@@ -169,14 +174,14 @@ module Gori::Sequencer
       tests << uniqueness_test(unique, n, duplicate_count)
       tests << TestRow.new("Sequential", seq ? "detected" : "none", seq_detail,
         seq ? Verdict::Fail : Verdict::Pass)
-      tests << monobit_test(bits, small)
-      tests << poker_test(bits, small)
-      tests << runs_test(bits, small)
-      tests << longrun_test(bits, small)
+      tests << gate_bits(monobit_test(bits, small), pow2)
+      tests << gate_bits(poker_test(bits, small), pow2)
+      tests << gate_bits(runs_test(bits, small), pow2)
+      tests << gate_bits(longrun_test(bits, small), pow2)
       tests << chi_square_test(gcounts, present, total_bytes, small)
       tests << serial_test(sym_seq, small)
       tests << compression_test(usable, total_bytes, charset_size, small)
-      tests << bit_bias_test(ones_at, n, small)
+      tests << gate_bits(bit_bias_test(ones_at, n, small), pow2)
 
       rating = rate(effective, duplicate_count, seq, tests, small)
 
@@ -190,6 +195,17 @@ module Gori::Sequencer
         sequential: seq, rating: rating, tests: tests,
         char_counts: char_counts, len_hist: len_hist, len_min: len_min, len_max: len_max,
         per_pos_entropy: per_pos, bit_bias: bit_bias)
+    end
+
+    # A raw fixed-width bit test (monobit/poker/runs/long-run/bit-bias) only measures true
+    # randomness for a power-of-two alphabet. For any other alphabet a genuinely-random token
+    # fails spuriously, so a FAIL is downgraded to INFO — it no longer penalizes the rating
+    # (rate counts only .fail?) and is labelled as not applicable. The encoding-neutral tests
+    # (chi-square on byte frequencies, serial on symbol indices, compression vs the log2(charset)
+    # floor) stay active, so real weakness is still caught.
+    private def self.gate_bits(row : TestRow, pow2 : Bool) : TestRow
+      return row if pow2 || !row.verdict.fail?
+      TestRow.new(row.name, row.value, "#{row.detail} · n/a for non-power-of-2 alphabet", Verdict::Info)
     end
 
     # ── rating ────────────────────────────────────────────────────────────────────

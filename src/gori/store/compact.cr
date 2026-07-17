@@ -47,8 +47,11 @@ class Gori::Store
     fuzz_bytes : Int64,
     flow_count : Int64
 
-  # On-disk size before and after a compaction, for the picker's result line.
-  record CompactResult, before_bytes : Int64, after_bytes : Int64 do
+  # On-disk size before and after a compaction, for the picker's result line. `vacuumed`
+  # is false when the strip committed but VACUUM (which needs ~db-size scratch) failed — the
+  # data WAS removed, only the OS-level reclaim was skipped, so the caller must not report
+  # "compress failed".
+  record CompactResult, before_bytes : Int64, after_bytes : Int64, vacuumed : Bool = true do
     def reclaimed_bytes : Int64
       {before_bytes - after_bytes, 0_i64}.max
     end
@@ -68,12 +71,15 @@ class Gori::Store
     return CompactStats.new(db_bytes, 0, 0, 0, 0, 0, 0) unless File.exists?(path)
     db = DB.open(compact_url(path))
     begin
-      resp = sum_len(db, "SELECT COALESCE(SUM(LENGTH(response_body)), 0) FROM flows")
-      req = sum_len(db, "SELECT COALESCE(SUM(LENGTH(request_body)), 0) FROM flows")
+      # One scan of the (large) flows table for both body sums + the count, instead of three.
+      resp, req, flows = begin
+        db.query_one("SELECT COALESCE(SUM(LENGTH(response_body)), 0), COALESCE(SUM(LENGTH(request_body)), 0), COUNT(*) FROM flows", as: {Int64, Int64, Int64})
+      rescue
+        {0_i64, 0_i64, 0_i64}
+      end
       h2 = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM h2_frames")
       ws = sum_len(db, "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM ws_messages WHERE repeater_id IS NULL")
       fuzz = sum_len(db, "SELECT COALESCE(SUM(COALESCE(LENGTH(request), 0) + COALESCE(LENGTH(response_head), 0) + COALESCE(LENGTH(response_body), 0)), 0) FROM fuzz_results")
-      flows = sum_len(db, "SELECT COUNT(*) FROM flows")
       CompactStats.new(db_bytes, resp, req, h2, ws, fuzz, flows)
     ensure
       db.close
@@ -90,9 +96,12 @@ class Gori::Store
 
   # Strip the selected data and VACUUM. Returns the before/after on-disk sizes, or
   # nil when another live instance holds the capture lock (the project is being
-  # captured into — compaction would race its writer). Best-effort and atomic:
-  # every deletion runs in one transaction; a failure rolls it back and re-raises
-  # so the caller can surface it (the file is left fully usable).
+  # captured into — compaction would race its writer). The DELETE step is atomic:
+  # every deletion runs in one transaction; a failure there rolls it back and re-raises
+  # so the caller can surface it (the file is left fully usable). VACUUM runs AFTER that
+  # commit (it is illegal inside a transaction) and CANNOT be rolled back, so its failure
+  # is caught and reported via CompactResult#vacuumed=false rather than re-raised — the
+  # data is already gone, only the disk reclaim was skipped.
   def self.compact(path : String, plan : CompactPlan) : CompactResult?
     return nil unless File.exists?(path)
     dir = File.dirname(path)
@@ -110,14 +119,21 @@ class Gori::Store
           apply_plan(tx.connection, plan)
         end
         # VACUUM rewrites the whole file to reclaim freed pages; it is ILLEGAL
-        # inside a transaction (see schema.cr) so it runs after the commit.
-        db.exec("VACUUM")
+        # inside a transaction (see schema.cr) so it runs after the commit. The strip
+        # is now durable, so a VACUUM failure (e.g. SQLITE_FULL — it needs ~db-size
+        # scratch) must NOT re-raise as "compress failed": the data is already removed.
+        vacuumed = true
+        begin
+          db.exec("VACUUM")
+        rescue
+          vacuumed = false
+        end
       ensure
         db.close
       end
       # VACUUM may recreate the -wal/-shm sidecars; re-tighten them to 0600.
       harden_permissions(path)
-      CompactResult.new(before, File.info(path).size)
+      CompactResult.new(before, File.info(path).size, vacuumed)
     ensure
       lock.close
     end

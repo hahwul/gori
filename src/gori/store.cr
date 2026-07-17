@@ -1827,10 +1827,10 @@ module Gori
     end
 
     # Hard-delete one History flow and its captured dependents (WS messages, FTS row,
-    # entity_links that pointed at it). Issues/Probe/Repeater that referenced the id keep
-    # the dangling cross-ref — their resolvers already surface "gone". Writer-fiber only
-    # so it races cleanly with live capture; orphaned h2 frame logs are reaped by the
-    # retention prune (same as a single-id miss in keep_flows).
+    # entity_links that pointed at it, and its h2 frame log when no sibling flow still shares
+    # the connection). Issues/Probe/Repeater that referenced the id keep the dangling
+    # cross-ref — their resolvers already surface "gone". Writer-fiber only so it races
+    # cleanly with live capture.
     def delete_flow(id : Int64) : Nil
       exec_task ->(c : DB::Connection) {
         delete_flow_one(c, id)
@@ -1862,7 +1862,18 @@ module Gori
       conn.exec("DELETE FROM ws_messages WHERE flow_id = ? AND repeater_id IS NULL", id)
       conn.exec("DELETE FROM flows_fts WHERE rowid = ?", id)
       conn.exec("DELETE FROM entity_links WHERE ref_kind = 'flow' AND ref_id = ?", id)
+      # The h2 frame log (often the flow's bulk bytes) — capture the conn BEFORE deleting
+      # the flow row so we can reclaim it if this was the last flow on that connection.
+      h2_conn = conn.query_one?("SELECT h2_conn_id FROM flows WHERE id = ?", id, as: Int64?)
       conn.exec("DELETE FROM flows WHERE id = ?", id)
+      # An HTTP/2 connection multiplexes many flows/streams, so only drop its log once NO
+      # surviving flow still references it. The retention prune's activity gate would keep
+      # a recent flow's log unreclaimed until later captures advance the floor, so an
+      # explicit user delete reclaims it directly here (no activity gate — this flow is gone).
+      if cid = h2_conn
+        conn.exec("DELETE FROM h2_frames WHERE conn_id = ? AND ? NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)", cid, cid)
+        conn.exec("DELETE FROM h2_connections WHERE id = ? AND id NOT IN (SELECT h2_conn_id FROM flows WHERE h2_conn_id IS NOT NULL)", cid, cid)
+      end
       @pending_req_fts.delete(id)
     end
 

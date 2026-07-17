@@ -30,6 +30,7 @@ module Gori
         @client_body_text : String?
         @client_body_text_done = false
         @client_scripts : Array(String)?
+        @client_scripts_nocomment : Array(String)?
         @client_code : Array(String)?
 
         def initialize(@detail : Store::FlowDetail, @ws_messages = [] of Store::WsMessage)
@@ -154,6 +155,14 @@ module Gori
         # string or comment. Memoised so the lex runs at most once per flow.
         def client_code : Array(String)
           @client_code ||= client_scripts.map { |s| JsScan.strip(s) }
+        end
+
+        # The fragments with ONLY comments blanked (string/template CONTENTS kept). The
+        # string-literal-keyed rules (postMessage, prototype pollution) scan these so a
+        # "message"/"__proto__" inside a live string is still seen, but the same keyword in a
+        # commented-out example/debug line no longer false-matches. Memoised per flow.
+        def client_scripts_nocomment : Array(String)
+          @client_scripts_nocomment ||= client_scripts.map { |s| JsScan.strip_comments(s) }
         end
 
         # --- region text for user-defined custom match rules ---------------------------------

@@ -43,7 +43,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       return "start from Sitemap/History (space → \"Discover here\")" if @view.empty?
-      "↑/↓ nav · [ / ] runs · ^R run · ^X stop · ^P pause · space cmds · esc tabs"
+      "↑/↓ nav · [ / ] runs · ^R run · ^X stop · p pause · space cmds · esc tabs"
     end
 
     # --- rendering (frameless seam for TargetController) ---
@@ -69,7 +69,7 @@ module Gori::Tui
       key = ev.key
       if @view.empty?
         if key.escape? || key.up? || key.lower_k?
-          @host.request_focus(:menu)
+          @host.request_focus(:subtabs) # pop to Target's Sitemap|Discover strip (self-downgrades to :menu with no strip)
           return true
         end
         return false
@@ -81,8 +81,8 @@ module Gori::Tui
       return false if (ev.ctrl? || ev.alt?) && !key.escape? # ^R/^X/^P fall through to the verb keymap
       c = ev.char || key.to_char
       case
-      when key.escape?             then @host.request_focus(:menu)
-      when key.up?, key.lower_k?   then @view.at_top? ? @host.request_focus(:menu) : @view.move(-1)
+      when key.escape?             then @host.request_focus(:subtabs)
+      when key.up?, key.lower_k?   then @view.at_top? ? @host.request_focus(:subtabs) : @view.move(-1)
       when key.down?, key.lower_j? then @view.move(1)
       when c == '['                then @view.switch(-1)
       when c == ']'                then @view.switch(1)
@@ -130,7 +130,7 @@ module Gori::Tui
         @host.status("resumed")
       elsif run.running?
         run.pause
-        @host.status("paused — ^P to resume")
+        @host.status("paused — p to resume")
       end
     end
 

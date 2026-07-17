@@ -47,7 +47,7 @@ module Gori::Tui
     # the main fiber; persistence + poller start happen here on drain).
     record RegOk, session : Oast::Session, provider : Oast::Provider, provider_id : Int64?,
       provider_label : String, want_payload : Bool
-    record RegErr, message : String, provider_label : String
+    record RegErr, message : String, provider_label : String, provider_id : Int64?
     alias RegResult = RegOk | RegErr
 
     def initialize(host : Host)
@@ -65,10 +65,12 @@ module Gori::Tui
       @filter = TextField.new       # Callbacks free-text filter (`/`)
       @filter_editing = false
       @prov_sel = 0
+      @prov_scroll = 0
       @payload_pick = 0
       @last_payload = nil.as(String?)
       @oast_events = Channel(Oast::Event).new(256)
       @reg_events = Channel(RegResult).new(16)
+      @registering = Set(Int64).new # provider ids with a register round-trip in flight (dedup g/^R)
       reload
     end
 
@@ -239,19 +241,25 @@ module Gori::Tui
     end
 
     private def start_listening(prov : Store::OastProviderRecord, want_payload : Bool) : Nil
+      # A register round-trip takes a few seconds and only appends the Listener on the
+      # drain tick AFTER it returns, so listener_for is nil the whole time. Without an
+      # in-flight guard a second g/^R spawns a duplicate register → two sessions, two
+      # Listeners and two poller fibers for one provider. Dedup on the provider id.
+      pid = prov.id
+      return @host.status("already registering with #{prov.name}…") if pid && @registering.includes?(pid)
       kind = Oast::ProviderKind.parse?(prov.kind)
       return @host.status("unknown provider type #{prov.kind}") unless kind
       provider = Oast::Provider.build(kind, prov.host, prov.token)
       http = Oast::HttpClient.new(verify_tls: !@host.session.config.insecure_upstream?)
       reg = @reg_events
       label = prov.name
-      pid = prov.id
+      @registering << pid if pid
       spawn(name: "gori-oast-register") do
         begin
           session = provider.register(http)
           reg.send(RegOk.new(session, provider, pid, label, want_payload))
         rescue ex
-          reg.send(RegErr.new(ex.message || "register failed", label))
+          reg.send(RegErr.new(ex.message || "register failed", label, pid))
         end
       end
       @host.status("registering with #{label}…")
@@ -430,6 +438,11 @@ module Gori::Tui
       screen.text(inner.right - 18, header_y, "PROVIDER", Theme.muted, Theme.bg)
       rows_rect = Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)
       visible = rows_rect.h
+      return if visible <= 0 # a collapsed pane (tiny terminal) has no rows to draw; a negative slice count would raise
+      # Keep the selection in view in BOTH directions (@cb_sel may have moved via keys or
+      # the wheel, neither of which advances the viewport downward on its own).
+      @cb_scroll = @cb_sel if @cb_sel < @cb_scroll
+      @cb_scroll = @cb_sel - visible + 1 if @cb_sel >= @cb_scroll + visible
       @cb_scroll = @cb_scroll.clamp(0, {ordered.size - visible, 0}.max)
       ordered[@cb_scroll, visible]?.try &.each_with_index do |row, i|
         py = rows_rect.y + i
@@ -465,6 +478,7 @@ module Gori::Tui
       meta = "from #{row.source || "?"} · provider #{row.provider} · #{row.at.to_rfc3339}"
       screen.text(inner.x + 1, inner.y, meta, Theme.muted, Theme.bg, width: inner.w - 2)
       body = Rect.new(inner.x, inner.y + 2, inner.w, inner.h - 2)
+      return if body.h <= 0 # collapsed pane (tiny terminal): a negative slice count would raise
       text = row.raw_response ? "#{row.raw_request}\n\n--- response ---\n#{row.raw_response}" : row.raw_request
       lines = text.split('\n')
       @cb_detail_scroll = @cb_detail_scroll.clamp(0, {lines.size - body.h, 0}.max)
@@ -485,10 +499,12 @@ module Gori::Tui
       screen.text(inner.x + 38, inner.y, "HOST", Theme.muted, Theme.bg)
       screen.text(inner.right - 8, inner.y, "ENABLED", Theme.muted, Theme.bg)
       rows = Rect.new(inner.x, inner.y + 1, inner.w, inner.h - 1)
-      @providers.each_with_index do |p, i|
-        break if i >= rows.h
+      return if rows.h <= 0 # collapsed pane (tiny terminal): a negative slice count would raise
+      sync_prov_scroll(rows.h)
+      @providers[@prov_scroll, rows.h]?.try &.each_with_index do |p, i|
         py = rows.y + i
-        sel = i == @prov_sel
+        abs = @prov_scroll + i
+        sel = abs == @prov_sel
         bg = sel ? (focused ? Theme.accent_bg : Theme.selection_dim) : Theme.bg
         screen.fill(Rect.new(rows.x, py, rows.w, 1), bg)
         screen.cell(rows.x, py, sel ? '▎' : ' ', Theme.accent, bg)
@@ -501,6 +517,16 @@ module Gori::Tui
         badge = p.enabled? ? (listening ? "● live" : "on") : "off"
         screen.text(rows.right - 8, py, badge, p.enabled? ? Theme.green : Theme.muted, bg)
       end
+    end
+
+    # Keep @prov_sel within the visible provider window (both directions), then clamp — so a
+    # selection taller than the pane scrolls into view instead of vanishing off the bottom.
+    private def sync_prov_scroll(visible : Int32) : Nil
+      if visible > 0
+        @prov_scroll = @prov_sel if @prov_sel < @prov_scroll
+        @prov_scroll = @prov_sel - visible + 1 if @prov_sel >= @prov_scroll + visible
+      end
+      @prov_scroll = @prov_scroll.clamp(0, {@providers.size - visible, 0}.max)
     end
 
     private def selected_callback : CbRow?
@@ -716,6 +742,9 @@ module Gori::Tui
     end
 
     private def apply_registration(reg : RegResult) : Nil
+      if pid = reg.provider_id
+        @registering.delete(pid) # registration resolved (ok or err) — clear the in-flight guard
+      end
       case reg
       when RegErr
         @host.status("OAST register failed (#{reg.provider_label}): #{reg.message}")

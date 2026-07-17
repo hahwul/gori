@@ -390,6 +390,7 @@ module Gori::Tui
           @status = "invalid preview limit"
           return "settings: invalid preview body limit #{@values[3].inspect} (KiB, min 1)"
         end
+        kib = kib.clamp(1, Settings::MAX_PREVIEW_BODY_KIB) # keep kib*1024 within Int32
         Settings.default_detail_pane = @values[0] == "response" ? "response" : "request"
         Settings.history_time_format = @values[1] == "relative" ? "relative" : "absolute"
         Settings.show_gutter = @values[2] == "on"
@@ -440,6 +441,7 @@ module Gori::Tui
         @status = "invalid capture limit"
         return "settings: invalid capture limit #{@values[7].inspect} (MiB, min 1)"
       end
+      cap = cap.clamp(1, Settings::MAX_CAPTURE_MAX_MIB) # keep cap*1024*1024 within Int32 (never break the proxy)
       Settings.bind_host = @values[0].strip
       Settings.bind_port = port
       Settings.upstream_proxy = up

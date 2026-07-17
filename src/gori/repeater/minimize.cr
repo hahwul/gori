@@ -69,7 +69,11 @@ module Gori::Repeater
     private record Baseline,
       status : Int32?,
       length : Int64, words : Int32, lines : Int32,
-      length_tol : Int64, words_tol : Int32, lines_tol : Int32
+      length_tol : Int64, words_tol : Int32, lines_tol : Int32,
+      # Behavior-relevant response headers that stayed STABLE across the calibration rounds.
+      # A variant that changes any of these is treated as CHANGED (kept), so a param whose
+      # only effect is on headers (redirect target, Set-Cookie, CORS, auth) is not false-stripped.
+      stable_headers : Hash(String, String)
 
     # One removable item + how to excise it from the working text (nil = it no longer
     # applies, e.g. an earlier removal already took it). Holding the excision as a closure
@@ -94,10 +98,14 @@ module Gori::Repeater
       sends = 0
       # --- calibrate a FROZEN baseline from the original request ---
       metrics = [] of Fuzz::Metrics
+      sigs = [] of Hash(String, String)
       CALIBRATION_ROUNDS.times do
         r = backend.send(resolve.call(base_text))
         sends += 1
-        metrics << Miner::Fingerprint.probe(r).metrics if r.error.nil? && !r.incomplete?
+        if r.error.nil? && !r.incomplete?
+          metrics << Miner::Fingerprint.probe(r).metrics
+          sigs << behavior_signature(r.head)
+        end
       end
       return Report.new(base_text, [] of Removed, sends, true, "baseline unreachable — request left unchanged") if metrics.empty?
       statuses = metrics.compact_map(&.status).uniq!
@@ -105,7 +113,7 @@ module Gori::Repeater
         return Report.new(base_text, [] of Removed, sends, true,
           "baseline response unstable (status #{statuses.join("/")}) — request left unchanged")
       end
-      baseline = calibrate(metrics)
+      baseline = calibrate(metrics, sigs)
 
       # --- greedy: try each candidate against the CURRENT working text, keep the removal
       # only if the response is still within tolerance of the frozen baseline ---
@@ -232,7 +240,46 @@ module Gori::Repeater
 
     # ── comparison ─────────────────────────────────────────────────────────────────────
 
-    private def self.calibrate(metrics : Array(Fuzz::Metrics)) : Baseline
+    # Behavior-relevant response headers whose value carries request semantics beyond the
+    # body — a param that only moves these (a redirect target, a Set-Cookie, CORS/auth) must
+    # not be silently stripped. Set-Cookie is handled separately (by cookie NAME, since its
+    # value rotates); the rest compare by value. Only ones stable across calibration are used.
+    BEHAVIOR_HEADERS = %w(location content-type content-disposition
+      access-control-allow-origin access-control-allow-credentials www-authenticate)
+
+    # Normalized signature of a response's behavior-relevant headers (empty when the head
+    # can't be parsed). Set-Cookie reduces to its sorted cookie NAMES so a rotating session/
+    # CSRF value doesn't itself read as a change.
+    private def self.behavior_signature(head : Bytes) : Hash(String, String)
+      sig = {} of String => String
+      return sig if head.empty?
+      resp = (Proxy::Codec::Http1.parse_response_head(head) rescue nil)
+      return sig unless resp
+      BEHAVIOR_HEADERS.each do |h|
+        if v = resp.headers.get?(h)
+          sig[h] = v.strip
+        end
+      end
+      names = resp.headers.get_all("set-cookie").compact_map { |sc| (eq = sc.index('=')) ? sc[0...eq].strip : nil }
+      sig["set-cookie-names"] = names.uniq!.sort!.join(",") unless names.empty?
+      sig
+    end
+
+    # The subset of behavior headers that held an identical value across EVERY calibration
+    # round — a naturally-rotating header (per-request token in Location, a Date-y header)
+    # varies across rounds and is dropped, so it can't cause a false "changed". Require ≥2
+    # successful samples: a single sample would mark EVERY header "stable" (all? is vacuously
+    # true), gating a rotating header as changed and regressing minimize to remove-nothing.
+    private def self.stable_headers(sigs : Array(Hash(String, String))) : Hash(String, String)
+      return {} of String => String if sigs.size < 2
+      stable = {} of String => String
+      sigs.first.each do |k, v|
+        stable[k] = v if sigs.all? { |s| s[k]? == v }
+      end
+      stable
+    end
+
+    private def self.calibrate(metrics : Array(Fuzz::Metrics), sigs : Array(Hash(String, String))) : Baseline
       base = metrics.first
       lengths = metrics.map(&.length)
       words = metrics.map(&.words)
@@ -242,19 +289,24 @@ module Gori::Repeater
       length_tol = {(lengths.max - lengths.min) * 2, {8_i64, base.length // 100}.max}.max
       words_tol = {(words.max - words.min) * 2, {3, base.words // 100}.max}.max
       lines_tol = {(lines.max - lines.min) * 2, {2, base.lines // 100}.max}.max
-      Baseline.new(base.status, base.length, base.words, base.lines, length_tol, words_tol, lines_tol)
+      Baseline.new(base.status, base.length, base.words, base.lines, length_tol, words_tol, lines_tol, stable_headers(sigs))
     end
 
-    # A variant's response is "unchanged" when the status matches and every metric is within
-    # its tolerance band. An errored or truncated send is treated as CHANGED (its metrics are
-    # unreliable), so the candidate is kept.
+    # A variant's response is "unchanged" when the status matches, every body metric is within
+    # its tolerance band, AND every stable behavior header still holds its baseline value. An
+    # errored or truncated send is treated as CHANGED (its metrics are unreliable), so the
+    # candidate is kept.
     private def self.unchanged?(r : Result, b : Baseline) : Bool
       return false unless r.error.nil? && !r.incomplete?
       m = Miner::Fingerprint.probe(r).metrics
-      m.status == b.status &&
-        (m.length - b.length).abs <= b.length_tol &&
-        (m.words - b.words).abs <= b.words_tol &&
-        (m.lines - b.lines).abs <= b.lines_tol
+      return false unless m.status == b.status &&
+                          (m.length - b.length).abs <= b.length_tol &&
+                          (m.words - b.words).abs <= b.words_tol &&
+                          (m.lines - b.lines).abs <= b.lines_tol
+      # A variant that moved any stable behavior header (redirect target, Set-Cookie set,
+      # CORS/auth) is CHANGED — keep the param even though the body/status matched.
+      sig = behavior_signature(r.head)
+      b.stable_headers.all? { |k, v| sig[k]? == v }
     end
 
     # ── text helpers (operate on the LF editor form; resolve() handles CRLF for the wire) ─

@@ -252,9 +252,13 @@ module Gori
       h = host.downcase
       g = glob.downcase
       if g.includes?('*')
+        # Compile the glob→regex ONCE per distinct glob, not per proxied head. host_matches?
+        # runs on the hot path for EVERY request/response head while any head rule is active
+        # (including messages the rule doesn't target — the scope test is what decides that),
+        # so an uncached Regex.new here was a PCRE2 compile per message. SafeRegexp memoises.
         rx = "^#{Regex.escape(g).gsub("\\*", ".*")}$"
         begin
-          Regex.new(rx).matches?(h)
+          SafeRegexp.compile(rx).matches?(h)
         rescue
           false
         end
@@ -267,6 +271,12 @@ module Gori
 
     RULE_PREVIEW_SCAN = 500
 
+    # Cap the body bytes pulled per flow for a BODY rule preview: this runs on the
+    # interactive keystroke path, so never fetch multi-MiB bodies. Head/header rules read
+    # no body at all (body_max: 0). A body match past the cap is missed — acceptable since
+    # the preview is already documented as approximate.
+    RULE_PREVIEW_BODY_MAX = 64 * 1024
+
     record Preview, scanned : Int32, matched : Int32, total : Int64
 
     # How many of up to `limit` recent stored flows a candidate rule WOULD affect, by
@@ -276,8 +286,12 @@ module Gori
     def preview(rule : Store::MatchRule, limit : Int32 = RULE_PREVIEW_SCAN) : Preview
       scanned = 0
       matched = 0
+      # Head/header rules never touch the body, so fetch head-only; body rules cap the
+      # fetched bytes. Without this the preview pulled every flow's FULL request+response
+      # body into memory per keystroke, stalling proportionally to stored body size.
+      body_max = rule.part.body? ? RULE_PREVIEW_BODY_MAX : 0
       @store.recent_flows(limit, nil).each do |row|
-        detail = @store.get_flow(row.id)
+        detail = @store.get_flow(row.id, body_max: body_max)
         next unless detail
         scanned += 1
         matched += 1 if rule_affects?(rule, detail)

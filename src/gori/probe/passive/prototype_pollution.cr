@@ -9,9 +9,10 @@ module Gori
       #     that is classically pollution-prone ($.extend(true,…), lodash merge/set); and
       #   * a request whose query/body carries a `__proto__` / `constructor[prototype]` key — a
       #     real pollution surface, or an in-flight probe against a nested-param parser.
-      # Scans the RAW fragments (Context#client_scripts) because the string-key form keeps the
-      # "__proto__" inside a string literal. Kept Low: the JS shapes appear in benign library
-      # code too, so these are leads, not confirmations.
+      # Scans the comment-stripped fragments (Context#client_scripts_nocomment): string literals
+      # stay visible so the "__proto__" string-key form is kept, but a commented-out example
+      # no longer false-matches. Kept Low: the JS shapes appear in benign library code too, so
+      # these are leads, not confirmations.
       class PrototypePollution < Rule
         def info : RuleInfo
           RuleInfo.new("prototype_pollution", "Prototype pollution (suspected)",
@@ -36,7 +37,7 @@ module Gori
         def check(ctx : Context, acc : Array(Detection)) : Nil
           check_request(ctx, acc)
           seen = Set(String).new
-          ctx.client_scripts.each do |code|
+          ctx.client_scripts_nocomment.each do |code| # keep string keys, drop comments (no commented-out-code FPs)
             SINK_PATTERNS.each do |(re, label)|
               next unless re.matches?(code)
               next unless seen.add?(label)

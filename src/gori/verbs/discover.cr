@@ -20,8 +20,8 @@ module Gori
         Verb::Scope::Discover, [] of Verb::Chord, mnemonic: 'p') { |ctx| ctx.discover_toggle_pause; nil }
 
       r.register Verb::Definition.new(
-        "discover.to-menu", "Back to menu", "Move focus up to the tab menu", Verb::Scope::Discover,
-        [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:menu); nil }
+        "discover.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover strip", Verb::Scope::Discover,
+        [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:subtabs); nil }
     end
   end
 end

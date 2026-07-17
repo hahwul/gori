@@ -3622,7 +3622,10 @@ module Gori
         when Sequencer::DoneEvent
           sjob.collected = ev.collected
           sjob.sent = ev.sent
-          sjob.status = ev.stopped ? :stopped : :done
+          # A prior ErrorEvent (e.g. an invalid token regex) already set :error; the engine
+          # still emits a trailing DoneEvent, so preserve :error rather than reverting to :done
+          # (mirrors Fuzz/Miner terminal_status's `return :error if current == :error`).
+          sjob.status = ev.stopped ? :stopped : :done unless sjob.status == :error
           sjob.ended_at_ms = Time.utc.to_unix_ms
         when Sequencer::ErrorEvent
           sjob.status = :error

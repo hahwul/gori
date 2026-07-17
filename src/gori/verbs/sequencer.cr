@@ -11,7 +11,6 @@ module Gori
       history_selected = ->(ctx : Verb::ExecContext) { ctx.current_tab == :history && !ctx.selected_flow_id.nil? }
       in_sequencer = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sequencer }
       in_repeater = ->(ctx : Verb::ExecContext) { ctx.current_tab == :repeater }
-      in_sitemap = ->(ctx : Verb::ExecContext) { ctx.current_tab == :sitemap }
 
       r.register Verb::Definition.new(
         "history.sequence", "Send to Sequencer", "Collect this flow's token and analyze its randomness",
@@ -22,9 +21,12 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.sequence", "Send to Sequencer", "Collect this request's token repeatedly and analyze randomness",
         Verb::Scope::Repeater, available: in_repeater, mnemonic: 'q') { |ctx| ctx.sequence_from_repeater; nil }
+      # Scope::Sitemap already gates this to the Target/Sitemap sub-tab (command_scope
+      # returns Sitemap only then) — no current_tab predicate, which would check the
+      # retired :sitemap top-level symbol and never fire (Sitemap is now a Target sub-tab).
       r.register Verb::Definition.new(
         "sitemap.sequence", "Send to Sequencer", "Collect the selected endpoint's token and analyze randomness",
-        Verb::Scope::Sitemap, available: in_sitemap, mnemonic: 'q') { |ctx| ctx.sequence_from_sitemap; nil }
+        Verb::Scope::Sitemap, mnemonic: 'q') { |ctx| ctx.sequence_from_sitemap; nil }
 
       r.register Verb::Definition.new(
         "sequence.run", "Run collection", "Re-run token collection for this session", Verb::Scope::Sequencer,

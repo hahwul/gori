@@ -113,11 +113,18 @@ module Gori::Tui
 
     # The column width termisu will render `g` at (1 or 2), or 0 if termisu's set_cell would
     # REJECT it — mirroring its guards so our grid only ever holds cells termisu accepts. A
-    # single ASCII byte is always a width-1 printable (Screen already mapped controls to a
-    # space). A multibyte grapheme is rejected when it is a C1 control, a width-0 combining
-    # mark, or a 2-column glyph with no room at the last column.
+    # single byte is width-1 EXCEPT a C0 control / DEL, which termisu rejects (buffer's
+    # control_char? guard); returning 0 there leaves the fill's space in @back so no stale
+    # ghost cell survives when a raw control byte is drawn (e.g. an embedded tab in a body
+    # line via the String-grapheme path, which is NOT space-substituted like the Char path).
+    # A multibyte grapheme is rejected when it is a C1 control, a width-0 combining mark, or a
+    # 2-column glyph with no room at the last column.
     private def accepted_width(g : String, x : Int32) : Int32
-      return 1 if g.bytesize == 1
+      if g.bytesize == 1
+        b = g.to_slice[0]
+        return 0 if b < 0x20_u8 || b == 0x7f_u8 # C0 control / DEL — termisu rejects it
+        return 1
+      end
       cp = g[0].ord
       return 0 if cp >= 0x7f && cp <= 0x9f # C1 control (a C0 can't lead a multibyte sequence)
       w = Termisu::UnicodeWidth.grapheme_width(g).to_i32

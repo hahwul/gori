@@ -41,8 +41,10 @@ module Gori::Tui
     # Open the OAST provider add/edit popup (nil edit_id = add; else edit that provider).
     # `kind` is a ProviderKind label; seeds the form when editing (defaults for add).
     abstract def open_oast_provider_editor(edit_id : Int64?, name : String, kind : String, host : String, token : String) : Nil
-    # Destructive-action confirmation modal; `action` runs on confirm.
-    abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, &action : -> Nil) : Nil
+    # Destructive-action confirmation modal; `action` runs on confirm. `return_to` is the
+    # overlay restored on cancel/accept (default :none) — pass the launching overlay (e.g.
+    # :detail) when raising the confirm from inside another overlay so cancel returns there.
+    abstract def confirm(title : String, message : String, *, confirm_label : String, danger : Bool, return_to : Symbol = :none, &action : -> Nil) : Nil
     abstract def session : Session             # store / scope / proxy / registry / interceptor
     abstract def overlay : Symbol              # read the overlay state (e.g. History reads :detail)
     abstract def active_tab : Symbol           # read the active tab (Repeater reconcile gates on it)

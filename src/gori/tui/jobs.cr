@@ -61,6 +61,8 @@ module Gori::Tui
 
     def finish(id : Int32, state : Symbol, summary : String? = nil) : Nil
       return unless j = find(id)
+      return unless j.running? # first terminal state wins: an engine that emits ErrorEvent
+      #                          then a trailing DoneEvent must stay :error, not flip to :done
       j.state = state
       j.note = summary if summary
     end

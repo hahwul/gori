@@ -11,12 +11,14 @@ module Gori::Sequencer
   # miss (no match / out of range / no such header) rather than raising, so one bad
   # descriptor yields empty samples instead of killing the collection fiber.
   module Extract
-    def self.extract(raw : Repeater::Result, loc : TokenLoc) : String?
+    # `re` is the token regex compiled ONCE by the engine (see Engine#run_live); when given
+    # it is reused per response instead of recompiling the pattern every sample.
+    def self.extract(raw : Repeater::Result, loc : TokenLoc, re : Regex? = nil) : String?
       return nil unless raw.error.nil?
       case loc.kind
       in ExtractKind::Cookie   then cookie(raw, loc.selector)
       in ExtractKind::Header   then header(raw, loc.selector)
-      in ExtractKind::Regex    then regex(raw, loc.selector)
+      in ExtractKind::Regex    then regex(raw, loc.selector, re)
       in ExtractKind::Position then position(raw, loc.pos_start, loc.pos_end)
       in ExtractKind::JsonPath then json_path(raw, loc.selector)
       end
@@ -45,16 +47,20 @@ module Gori::Sequencer
     end
 
     # Capture group 1 (else the whole match) of `pattern` over the decoded body —
-    # same semantics as Fuzz::Matcher#extract_value. A runaway regex yields nil.
-    def self.regex(raw : Repeater::Result, pattern : String) : String?
+    # same semantics as Fuzz::Matcher#extract_value. `re`, when passed, is the pattern
+    # precompiled once by the engine; otherwise it is compiled here (fallback path for
+    # any direct caller). A malformed pattern raises ArgumentError (not only Regex::Error)
+    # on Crystal — catch both so one bad descriptor yields empty samples, never a crash,
+    # honouring this module's "returns nil on a miss rather than raising" contract.
+    def self.regex(raw : Repeater::Result, pattern : String, re : Regex? = nil) : String?
       return nil if pattern.empty?
-      re = Regex.new(pattern)
+      re ||= Regex.new(pattern)
       text = decoded_text(raw)
       return nil if text.empty?
       md = re.match(text)
       return nil unless md
       md[1]? || md[0]
-    rescue Regex::Error
+    rescue ArgumentError | Regex::Error
       nil
     end
 

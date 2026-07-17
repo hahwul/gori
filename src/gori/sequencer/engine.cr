@@ -35,6 +35,7 @@ module Gori::Sequencer
     @idx : Int32
     @dispatched : Int32
     @last_dispatch : Time::Instant
+    @token_re : Regex? = nil # Regex token descriptor compiled ONCE per run (see run_live)
 
     def initialize(@request : Bytes, @http2 : Bool, backend : Fuzz::Backend, @config : Config)
       @backend = Fuzz::CappedBackend.new(backend, @config.max_requests)
@@ -112,6 +113,20 @@ module Gori::Sequencer
     end
 
     private def run_live : Nil
+      # Compile the Regex token descriptor ONCE up front instead of per response. A bad
+      # pattern is reported to the operator as a clean error (via orchestrate's ErrorEvent
+      # + DoneEvent) rather than raising per-sample inside a worker fiber — which would dump
+      # an "Unhandled exception in spawn" trace over the TUI alt-screen and leak the
+      # dispatcher fiber blocked on `jobs.send`. Crystal raises ArgumentError (not only
+      # Regex::Error) for an invalid pattern, so catch both.
+      if @config.token_loc.kind.regex? && !@config.token_loc.selector.empty?
+        begin
+          @token_re = Regex.new(@config.token_loc.selector)
+        rescue ex : ArgumentError | Regex::Error
+          @events.send(ErrorEvent.new("invalid token regex: #{ex.message}"))
+          return
+        end
+      end
       interval = pace_interval
       # Int32 job tokens (not Channel(Nil)): with a Nil channel, `receive?` returns nil
       # for BOTH a sent value and a closed channel, so the worker loop can't tell a job
@@ -157,7 +172,7 @@ module Gori::Sequencer
     private def process_one : Nil
       raw = send_with_retries(@request)
       @sent += 1
-      token = Extract.extract(raw, @config.token_loc)
+      token = Extract.extract(raw, @config.token_loc, @token_re)
       idx = (@idx += 1)
       status = raw.response.try(&.status)
       len = token.try(&.bytesize) || 0

@@ -21,7 +21,12 @@ module Gori
         end
 
         # Named member access into a live collection that HTML id/name attributes populate.
-        NAMED_COLLECTION = /\bdocument\.(?:forms|images|embeds|links|anchors|scripts|applets|all)\s*(?:\[|\.namedItem\b)/
+        # The bracket form requires a QUOTED string key (`['login']`) — a numeric/variable
+        # index (`[0]`, `[i]`) cannot be shadowed by an id/name element, so matching bare `[`
+        # fired on ubiquitous benign iteration like `document.images[0]`. Runs over stripped
+        # client_code, which blanks a string's contents but KEEPS its opening quote, so the
+        # quoted form still matches post-strip (`document.forms['x']` → `document.forms['']`).
+        NAMED_COLLECTION = /\bdocument\.(?:forms|images|embeds|links|anchors|scripts|applets|all)\s*(?:\[\s*["'`]|\.namedItem\b)/
         # `window.foo = window.foo || …` — reads a global back before defining it; a clobbering
         # element with that id/name can have already set it. Backreference pins both sides.
         CLOBBER_GUARD = /\bwindow\.([A-Za-z_$][\w$]*)\s*=\s*window\.\1\s*\|\|/
