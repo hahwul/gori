@@ -31,4 +31,11 @@ describe Gori::Discover::Extract do
     links.should contain("http://h/page1")
     links.should contain("http://h/page2")
   end
+
+  it "sniffs sitemap bodies (urlset / sitemapindex / loc) apart from html and robots" do
+    E.sitemap_body?(%(<?xml version="1.0"?><urlset><url><loc>http://h/p</loc></url></urlset>).to_slice).should be_true
+    E.sitemap_body?(%(<sitemapindex><sitemap><loc>http://h/sm2.xml</loc></sitemap></sitemapindex>).to_slice).should be_true
+    E.sitemap_body?(%(<html><body><a href="/loc">not a sitemap</a></body></html>).to_slice).should be_false
+    E.sitemap_body?("User-agent: *\nDisallow: /admin\n".to_slice).should be_false
+  end
 end

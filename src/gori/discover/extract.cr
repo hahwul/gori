@@ -42,7 +42,8 @@ module Gori::Discover
       out
     end
 
-    # sitemap.xml <loc> URLs.
+    # sitemap.xml <loc> URLs. Handles both a <urlset> (page URLs) and a <sitemapindex>
+    # (child-sitemap URLs) — both use <loc>, so index recursion falls out for free.
     def self.from_sitemap(body : Bytes) : Array(String)
       out = [] of String
       scan_text(body).scan(LOC) do |m|
@@ -50,6 +51,18 @@ module Gori::Discover
         out << v if v && !v.empty?
       end
       out
+    end
+
+    SNIFF_MAX     = 8192 # a sitemap's root element sits at the top; no need to read further
+    SITEMAP_ROOT = /<(?:urlset|sitemapindex|loc)\b/i
+
+    # Does this body look like an XML sitemap? Lets the engine pick the sitemap parser from
+    # the RESPONSE rather than from how the URL was found — so a sitemap served off the
+    # well-known /sitemap.xml path (a robots.txt `Sitemap:` URL, or a <sitemapindex> child)
+    # still gets its <loc> URLs extracted instead of being wrongly parsed as HTML/robots.
+    def self.sitemap_body?(body : Bytes) : Bool
+      slice = body.size > SNIFF_MAX ? body[0, SNIFF_MAX] : body
+      String.new(slice).scrub.matches?(SITEMAP_ROOT)
     end
 
     private def self.scan_text(body : Bytes) : String

@@ -172,6 +172,24 @@ describe Gori::Discover::Engine do
     kinds.should_not contain(:done) # a trailing Done would let a consumer settle "0 found" over the error
   end
 
+  it "follows a robots.txt Sitemap: URL at a non-standard path and extracts its <loc>s" do
+    cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 5, concurrency: 1, retries: 0)
+    findings, _ = run_discover("http://t/", %w(), cfg) do |t|
+      case t
+      when "/"           then html("home, no links")
+      when "/robots.txt" then make(200, "User-agent: *\nSitemap: http://t/custom/sm.xml\n", "text/plain")
+      when "/sitemap.xml" then notfound # the well-known path is absent; only robots knows the real one
+      when "/custom/sm.xml"
+        make(200, %(<?xml version="1.0"?><urlset><url><loc>http://t/only-in-sitemap</loc></url></urlset>), "application/xml")
+      when "/only-in-sitemap" then html("the page only the sitemap knew about")
+      else                    notfound
+      end
+    end
+    # Under source-label parsing the custom sitemap was parsed as robots (no <loc>s) and this
+    # URL was lost; content-aware parsing recovers it.
+    findings.map(&.url).should contain("http://t/only-in-sitemap")
+  end
+
   it "confines a path-scoped run to the seed subtree" do
     cfg = D::Config.new(spider: true, bruteforce: false, max_depth: 4, concurrency: 1, retries: 0)
     findings, _ = run_discover("http://t/app/", %w(), cfg) do |t|
