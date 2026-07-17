@@ -99,19 +99,27 @@ module Gori::Tui
     end
 
     # The rendered/navigation strip: visible, ordered {symbol, label}. `force` (the active
-    # tab) is ALWAYS present at its catalog-relative position even when hidden — so a jump
-    # to a hidden tab is never stranded off-bar and menu_layout's active_idx lookup always
-    # succeeds (instead of silently falling back to 0).
+    # tab) is ALWAYS present even when hidden — so a jump to a hidden tab is never stranded
+    # off-bar and menu_layout's active_idx lookup always succeeds (instead of silently
+    # falling back to 0). A force-shown hidden tab is APPENDED at the far right (just left of
+    # the ⋯ list), not spliced into its catalog position mid-strip.
     def self.visible_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : Array({Symbol, String})
       ann = reconcile(prefs)
       vis = ann.select { |(_, _, v)| v }.map { |(s, l, _)| {s, l} }
-      if force && vis.none? { |(s, _)| s == force }
-        if idx = ann.index { |(s, _, _)| s == force }
-          at = ann[0...idx].count { |(_, _, v)| v }
-          vis.insert(at, {ann[idx][0], ann[idx][1]})
-        end
-      end
+      append_forced(ann, vis, force)
       vis
+    end
+
+    # Append the force-shown active tab (a hidden tab jumped to) to the far right of the
+    # visible strip — right next to the ⋯ hidden list — so opening a hidden tab reveals it at
+    # the end of the bar rather than splicing it into the middle at its catalog position. A
+    # no-op when `force` is absent or the tab is already on the bar. Shared by visible_tabs
+    # and split_tabs so the render strip and the nav strip can never drift.
+    private def self.append_forced(ann : Array({Symbol, String, Bool}), vis : Array({Symbol, String}), force : Symbol?) : Nil
+      return unless force && vis.none? { |(s, _)| s == force }
+      if idx = ann.index { |(s, _, _)| s == force }
+        vis << {ann[idx][0], ann[idx][1]}
+      end
     end
 
     # The tabs NOT on the bar — hidden via settings:tabs (Miner by default) — for the
@@ -130,12 +138,7 @@ module Gori::Tui
     def self.split_tabs(prefs : Array({String, Bool}), force : Symbol? = nil) : {Array({Symbol, String}), Array({Symbol, String})}
       ann = reconcile(prefs)
       vis = ann.select { |(_, _, v)| v }.map { |(s, l, _)| {s, l} }
-      if force && vis.none? { |(s, _)| s == force }
-        if idx = ann.index { |(s, _, _)| s == force }
-          at = ann[0...idx].count { |(_, _, v)| v }
-          vis.insert(at, {ann[idx][0], ann[idx][1]})
-        end
-      end
+      append_forced(ann, vis, force)
       hidden = ann.reject { |(s, _, v)| v || s == force }.map { |(s, l, _)| {s, l} }
       {vis, hidden}
     end
