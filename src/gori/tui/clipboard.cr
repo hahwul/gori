@@ -1,4 +1,5 @@
 require "base64"
+require "../settings"
 
 module Gori::Tui
   # System-clipboard access via the OSC 52 terminal escape. Unlike shelling out
@@ -31,6 +32,8 @@ module Gori::Tui
     # Returns the number of bytes actually placed on the clipboard (≤ MAX_CLIP), so
     # callers can compare against the source size and report when the copy was clipped.
     def self.copy(data : String, io : IO = STDOUT) : Int32
+      # Clipboard disabled by the user: write nothing to the tty, report 0 copied.
+      return 0 unless Settings.clipboard_osc52?
       # Clip by BYTES (not chars): MAX_CLIP bounds the OSC 52 tty write, and the
       # returned count is a byte count the caller compares to the source byte size.
       # `byte_slice` may sever a trailing multi-byte codepoint, but the sequence is

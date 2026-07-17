@@ -703,7 +703,7 @@ module Gori
         # Content-Length to the stored bytes so the request stays well-formed, but warn that
         # the resent body differs from what the origin originally received.
         if detail.request_body_truncated?
-          cap_mib = Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)
+          cap_mib = Settings.capture_max_mib
           STDERR.puts "gori run repeater: request body was truncated at the #{cap_mib} MiB capture cap — resending the stored (shorter) body with a corrected Content-Length"
         end
 

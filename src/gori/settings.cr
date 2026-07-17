@@ -22,6 +22,14 @@ module Gori
     DEFAULT_UPSTREAM_PROXY  = ""
     DEFAULT_VERIFY_UPSTREAM = true
     DEFAULT_SERVE_LANDING   = true
+    # Outbound dial timeouts (settings:network). connect = how long a TCP/upstream connect
+    # may take; io = the initial read/write timeout on the upstream socket (relaxed to nil
+    # for long-lived streaming tunnels — that clearing is orthogonal). Seconds, min 1.
+    DEFAULT_CONNECT_TIMEOUT_SECS = 30
+    DEFAULT_IO_TIMEOUT_SECS      = 30
+    # How many body bytes the proxy CAPTURES + stores per request/response (settings:network).
+    # A change only affects flows captured AFTER it (buffers allocate at request start). MiB, min 1.
+    DEFAULT_CAPTURE_MAX_MIB = 2
     DEFAULT_EDITOR          = ""
     DEFAULT_EDITOR_MARKDOWN = true
     DEFAULT_THEME           = "goridark"
@@ -39,6 +47,25 @@ module Gori
     DEFAULT_STATUSLINE_ENABLED  = false
     DEFAULT_STATUSLINE_COMMAND  = ""
     DEFAULT_STATUSLINE_INTERVAL = 3 # seconds between runs (min 1)
+    # Display (settings:display): message-body rendering prefs. detail_pane = which pane a
+    # freshly-opened History flow shows first; history_time_format = list time column;
+    # show_gutter = line-number gutter on the message body views; preview_body_kib = how many
+    # body bytes the History list PREVIEW reads/shows (display-only, not the capture limit).
+    DEFAULT_DETAIL_PANE         = "request"  # "request" | "response"
+    DEFAULT_HISTORY_TIME_FORMAT = "absolute" # "absolute" | "relative"
+    DEFAULT_SHOW_GUTTER         = true
+    DEFAULT_PREVIEW_BODY_KIB    = 64
+    # Notifications (settings:notifications): bell = terminal beep on a background result/alert;
+    # toast = also flash a bottom-bar toast for fuzzer/probe/discover results; retention = ring
+    # buffer size. All opt-in-friendly defaults (bell off; toast on; 100 kept).
+    DEFAULT_NOTIFY_BELL      = false
+    DEFAULT_NOTIFY_TOAST     = true
+    DEFAULT_NOTIFY_RETENTION = 100
+    # General (settings:general): clipboard_osc52 = OSC 52 terminal clipboard integration (the
+    # only copy mechanism — off means copies no-op); confirm_quit = require a confirm modal to
+    # quit instead of the double-press ^D.
+    DEFAULT_CLIPBOARD_OSC52 = true
+    DEFAULT_CONFIRM_QUIT    = false
 
     class_property bind_host : String = DEFAULT_BIND_HOST
     class_property bind_port : Int32 = DEFAULT_BIND_PORT
@@ -53,6 +80,26 @@ module Gori
     # refusal. Global-only; the settings:network editor toggles it live via
     # Session#set_serve_landing (pushed to the TLS tunnel, read per-request).
     class_property? serve_landing : Bool = DEFAULT_SERVE_LANDING
+    # Outbound dial timeouts, stored in seconds; read live by Upstream.dial (and the repeater/
+    # fuzz/discover engines) via the connect_timeout/io_timeout helpers below. Global-only.
+    class_property connect_timeout_secs : Int32 = DEFAULT_CONNECT_TIMEOUT_SECS
+    class_property io_timeout_secs : Int32 = DEFAULT_IO_TIMEOUT_SECS
+    # Body capture cap, stored in MiB; the proxy/import read it in bytes via capture_max. Global-only.
+    class_property capture_max_mib : Int32 = DEFAULT_CAPTURE_MAX_MIB
+
+    # The dial timeouts as a Time::Span (what Upstream/the engines actually pass to the socket).
+    def self.connect_timeout : Time::Span
+      connect_timeout_secs.seconds
+    end
+
+    def self.io_timeout : Time::Span
+      io_timeout_secs.seconds
+    end
+
+    # The capture cap in BYTES — the value CaptureBuffer/import bound a body to.
+    def self.capture_max : Int32
+      capture_max_mib * 1024 * 1024
+    end
 
     # Per-project network overrides — a RUNTIME layer set by Session.open from the OPEN
     # project's DB and NEVER persisted to settings.json (the project's own DB is the source
@@ -128,6 +175,26 @@ module Gori
     class_property? statusline_enabled : Bool = DEFAULT_STATUSLINE_ENABLED
     class_property statusline_command : String = DEFAULT_STATUSLINE_COMMAND
     class_property statusline_interval : Int32 = DEFAULT_STATUSLINE_INTERVAL
+    # Display prefs (settings:display). detail_pane/history_time_format are validated to their
+    # two-value sets on load; show_gutter follows the LAYOUT bools (plain accessor); the History
+    # list preview reads preview_body_cap (bytes) so the preview never pulls a multi-MiB body.
+    class_property default_detail_pane : String = DEFAULT_DETAIL_PANE
+    class_property history_time_format : String = DEFAULT_HISTORY_TIME_FORMAT
+    class_property show_gutter : Bool = DEFAULT_SHOW_GUTTER
+    class_property preview_body_kib : Int32 = DEFAULT_PREVIEW_BODY_KIB
+    # Notification prefs (settings:notifications). bell/toast are `?` toggles read live at the
+    # emit sites; retention bounds the ring buffer (read live by Notifications#push).
+    class_property? notify_bell : Bool = DEFAULT_NOTIFY_BELL
+    class_property? notify_toast : Bool = DEFAULT_NOTIFY_TOAST
+    class_property notify_retention : Int32 = DEFAULT_NOTIFY_RETENTION
+    # General prefs (settings:general). Both `?` toggles read live (Clipboard.copy / quit handler).
+    class_property? clipboard_osc52 : Bool = DEFAULT_CLIPBOARD_OSC52
+    class_property? confirm_quit : Bool = DEFAULT_CONFIRM_QUIT
+
+    # The History-list preview body cap in BYTES (stored as KiB above).
+    def self.preview_body_cap : Int32
+      preview_body_kib * 1024
+    end
 
     def self.history_newest_first? : Bool
       history_list_order != "oldest"
@@ -199,6 +266,9 @@ module Gori
         self.upstream_proxy = net["upstream_proxy"]?.try(&.as_s?) || upstream_proxy
         self.verify_upstream = load_bool(net, "verify_upstream", verify_upstream?)
         self.serve_landing = load_bool(net, "serve_landing", serve_landing?)
+        net["connect_timeout_secs"]?.try(&.as_i?).try { |v| self.connect_timeout_secs = {v, 1}.max }
+        net["io_timeout_secs"]?.try(&.as_i?).try { |v| self.io_timeout_secs = {v, 1}.max }
+        net["capture_max_mib"]?.try(&.as_i?).try { |v| self.capture_max_mib = {v, 1}.max }
       end
       self.theme = root["theme"]?.try(&.as_s?) || theme # validated against the known themes by Theme.apply
       self.mouse = load_bool(root, "mouse", mouse)
@@ -222,6 +292,9 @@ module Gori
       parse_discover_prefs(root["discover"]?)
       parse_layout(root["layout"]?)
       parse_statusline(root["statusline"]?)
+      parse_display(root["display"]?)
+      parse_notifications(root["notifications"]?)
+      parse_general(root["general"]?)
       Env.bump_highlight_rev
     rescue
       # no file yet / unreadable / bad JSON — keep current values
@@ -252,6 +325,39 @@ module Gori
       if iv = o["interval"]?.try(&.as_i?)
         self.statusline_interval = {iv, 1}.max
       end
+    end
+
+    # Tolerant display section: absent/non-object keeps current; enums clamped to their
+    # two-value sets; preview cap floored at 1 KiB.
+    private def self.parse_display(node : JSON::Any?) : Nil
+      return unless o = node.try(&.as_h?)
+      if v = o["detail_pane"]?.try(&.as_s?)
+        self.default_detail_pane = v == "response" ? "response" : "request"
+      end
+      if v = o["history_time_format"]?.try(&.as_s?)
+        self.history_time_format = v == "relative" ? "relative" : "absolute"
+      end
+      self.show_gutter = load_bool_h(o, "show_gutter", show_gutter)
+      if v = o["preview_body_kib"]?.try(&.as_i?)
+        self.preview_body_kib = {v, 1}.max
+      end
+    end
+
+    # Tolerant notifications section: absent/non-object keeps current; retention floored at 1.
+    private def self.parse_notifications(node : JSON::Any?) : Nil
+      return unless o = node.try(&.as_h?)
+      self.notify_bell = load_bool_h(o, "bell", notify_bell?)
+      self.notify_toast = load_bool_h(o, "toast", notify_toast?)
+      if v = o["retention"]?.try(&.as_i?)
+        self.notify_retention = {v, 1}.max
+      end
+    end
+
+    # Tolerant general section: absent/non-object keeps current.
+    private def self.parse_general(node : JSON::Any?) : Nil
+      return unless o = node.try(&.as_h?)
+      self.clipboard_osc52 = load_bool_h(o, "clipboard_osc52", clipboard_osc52?)
+      self.confirm_quit = load_bool_h(o, "confirm_quit", confirm_quit?)
     end
 
     # Allowed depths: -1 (all) or 0..3. Anything else falls back to default.
@@ -617,6 +723,40 @@ module Gori
               end
             end
           end
+          # Omit each opt-in section when every field is factory default (quiet install; merge-safe).
+          unless default_detail_pane == DEFAULT_DETAIL_PANE &&
+                 history_time_format == DEFAULT_HISTORY_TIME_FORMAT &&
+                 show_gutter == DEFAULT_SHOW_GUTTER &&
+                 preview_body_kib == DEFAULT_PREVIEW_BODY_KIB
+            j.field "display" do
+              j.object do
+                j.field "detail_pane", default_detail_pane
+                j.field "history_time_format", history_time_format
+                j.field "show_gutter", show_gutter
+                j.field "preview_body_kib", preview_body_kib
+              end
+            end
+          end
+          unless notify_bell? == DEFAULT_NOTIFY_BELL &&
+                 notify_toast? == DEFAULT_NOTIFY_TOAST &&
+                 notify_retention == DEFAULT_NOTIFY_RETENTION
+            j.field "notifications" do
+              j.object do
+                j.field "bell", notify_bell?
+                j.field "toast", notify_toast?
+                j.field "retention", notify_retention
+              end
+            end
+          end
+          unless clipboard_osc52? == DEFAULT_CLIPBOARD_OSC52 &&
+                 confirm_quit? == DEFAULT_CONFIRM_QUIT
+            j.field "general" do
+              j.object do
+                j.field "clipboard_osc52", clipboard_osc52?
+                j.field "confirm_quit", confirm_quit?
+              end
+            end
+          end
           j.field "network" do
             j.object do
               j.field "bind_host", bind_host
@@ -624,6 +764,9 @@ module Gori
               j.field "upstream_proxy", upstream_proxy
               j.field "verify_upstream", verify_upstream?
               j.field "serve_landing", serve_landing?
+              j.field "connect_timeout_secs", connect_timeout_secs
+              j.field "io_timeout_secs", io_timeout_secs
+              j.field "capture_max_mib", capture_max_mib
             end
           end
           j.field "editor" do

@@ -873,7 +873,12 @@ module Gori::Tui
       # quit-arm so a stray ^D during a rebind can't silently arm an app quit.
       capturing_hotkey = @overlay == :hotkeys && @hotkeys_overlay.capturing?
       if (ev.ctrl_c? || (ev.ctrl? && ev.key.lower_d?)) && !capturing_hotkey
-        if @quit_armed
+        if Settings.confirm_quit?
+          # Opt-in (settings:general): a confirm modal replaces the double-press arm. Skip
+          # re-opening if the quit confirm is already up (^D then just waits for y/n/esc).
+          confirm("QUIT GORI", "Quit gori? (pending edits are committed first)",
+            confirm_label: "quit", danger: true) { quit! } unless @overlay == :confirm
+        elsif @quit_armed
           quit!
         else
           @quit_armed = true
@@ -2538,6 +2543,7 @@ module Gori::Tui
                  when :network then apply_settings(msg).tap { @session.set_verify_upstream(Settings.verify_upstream?); @session.set_serve_landing(Settings.serve_landing?); project_controller.refresh_network } # push the verify + info-page toggles to the live proxy/probe, then re-sync the Project pane's inherited fields to the new global
                  when :theme   then apply_theme(msg)
                  when :layout  then apply_layout(msg)
+                 when :display then apply_display(msg)
                  else               msg
                  end
         @theme_restore = Settings.theme if @settings_view.section == :theme # saved → don't revert this on esc
@@ -5655,7 +5661,7 @@ module Gori::Tui
 
     def open_settings(section : Symbol) : Nil
       case section
-      when :network, :editor, :theme, :layout, :statusline
+      when :network, :editor, :theme, :layout, :statusline, :display, :notifications, :general
         @settings_view.reload(section)       # :theme reloads custom themes — may reconcile the live palette
         @resized = true if section == :theme # so force a full repaint (an edited/removed active theme just changed)
         @overlay = :settings
@@ -5683,6 +5689,14 @@ module Gori::Tui
       history_controller.view.reload(@session.store)
       history_controller.refresh_preview
       sitemap_controller.view.reload(@session.store) if sitemap_controller.view.loaded?
+      save_msg
+    end
+
+    # Display prefs apply live on the next frame — the gutter, list time format and default
+    # pane are read at render time. Only the preview body cap needs a nudge: refresh the
+    # History preview so a new cap (or default pane) is reflected on the current selection now.
+    private def apply_display(save_msg : String) : String
+      history_controller.refresh_preview
       save_msg
     end
 

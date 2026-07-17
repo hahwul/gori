@@ -2139,6 +2139,7 @@ module Gori::Tui
     end
 
     private def resp_gutter_w(body : Rect) : Int32
+      return 0 unless Settings.show_gutter # keep click→cursor mapping aligned with the gutter-less render
       {Gutter.width(resp_line_count), body.w}.min
     end
 
@@ -2512,11 +2513,11 @@ module Gori::Tui
       body = rect.inset(1, 1)
       rv = resp_view
       total = rv.total
-      gw = {Gutter.width(total), body.w}.min
+      gw = Settings.show_gutter ? {Gutter.width(total), body.w}.min : 0
       cw = {body.w - gw, 0}.max
       rows = (0...body.h).compact_map { |i| i < total ? styled_resp_line(rv, i) : nil }
       rows.each_with_index do |styled, i|
-        Gutter.draw(screen, body.x, body.y + i, i, gw)
+        Gutter.draw(screen, body.x, body.y + i, i, gw) if gw > 0
         shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
         Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
       end
@@ -2571,7 +2572,7 @@ module Gori::Tui
         screen.text(body.x, body.y, "— not sent — press ^R to resend —", Theme.muted)
         return
       end
-      gw = {Gutter.width(lines.size), body.w}.min
+      gw = Settings.show_gutter ? {Gutter.width(lines.size), body.w}.min : 0
       cw = {body.w - gw, 0}.max
       widest = (0...body.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |(t, _)| Screen.display_width(t) } || 0
       @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
@@ -2581,7 +2582,7 @@ module Gori::Tui
         li = @scroll + i
         break if li >= lines.size
         text, color = lines[li]
-        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @resp_cursor.cy)
+        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @resp_cursor.cy) if gw > 0
         shown = @xscroll > 0 ? Highlight.slice_left_text(text, @xscroll) : text
         screen.text(body.x + gw, body.y + i, shown, color, width: cw)
         paint_resp_line_chrome(screen, body.x + gw, body.y + i, li, text, focused, sel_spans)
@@ -2724,7 +2725,7 @@ module Gori::Tui
     private def render_reveal(screen : Screen, rect : Rect, lines : Array(String), focused : Bool) : Nil
       total = lines.size
       @resp_last_h = rect.h
-      gw = {Gutter.width(total), rect.w}.min
+      gw = Settings.show_gutter ? {Gutter.width(total), rect.w}.min : 0
       cw = {rect.w - gw, 0}.max
       widest = (0...rect.h).compact_map { |i| lines[@scroll + i]? }.max_of? { |l| Screen.display_width_upto(l, @xscroll + cw + 1) } || 0
       @xscroll = @xscroll.clamp(0, {widest - cw, 0}.max)
@@ -2732,7 +2733,7 @@ module Gori::Tui
       (0...rect.h).each do |i|
         li = @scroll + i
         break if li >= total
-        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @resp_cursor.cy)
+        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @resp_cursor.cy) if gw > 0
         styled = Reveal.styled(lines[li], li < total - 1, cw + @xscroll)
         styled = Highlight.slice_left(styled, @xscroll) if @xscroll > 0
         Highlight.draw(screen, rect.x + gw, rect.y + i, styled, width: cw)
@@ -2774,7 +2775,7 @@ module Gori::Tui
       rv = resp_view
       total = rv.total
       @resp_last_h = rect.h
-      gw = {Gutter.width(total), rect.w}.min
+      gw = Settings.show_gutter ? {Gutter.width(total), rect.w}.min : 0
       cw = {rect.w - gw, 0}.max
       rows = (0...rect.h).compact_map { |i| (li = @scroll + i) < total ? styled_resp_line(rv, li) : nil }
       @xscroll = @xscroll.clamp(0, {(rows.max_of? { |l| Highlight.line_width_upto(l, @xscroll + cw + 1) } || 0) - cw, 0}.max)
@@ -2783,7 +2784,7 @@ module Gori::Tui
         li = @scroll + i
         need_plain = (focused && resp_navigable? && (li == @resp_cursor.cy || sel_spans)) || !@search_hl.empty?
         text = need_plain ? rv.line_text(li) : nil
-        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @resp_cursor.cy)
+        Gutter.draw(screen, rect.x, rect.y + i, li, gw, current: focused && li == @resp_cursor.cy) if gw > 0
         shown = @xscroll > 0 ? Highlight.slice_left(styled, @xscroll) : styled
         Highlight.draw(screen, rect.x + gw, rect.y + i, shown, width: cw)
         paint_resp_line_chrome(screen, rect.x + gw, rect.y + i, li, text, focused, sel_spans) if text
@@ -2819,7 +2820,7 @@ module Gori::Tui
 
     private def render_diff(screen : Screen, rect : Rect, focused : Bool) : Nil
       data = diff_lines
-      gw = {Gutter.width(data.size), rect.w}.min
+      gw = Settings.show_gutter ? {Gutter.width(data.size), rect.w}.min : 0
       cw = {rect.w - gw, 0}.max
       rows = (0...rect.h).compact_map do |i|
         di = @scroll + i
@@ -2836,7 +2837,7 @@ module Gori::Tui
       @resp_last_h = rect.h
       sel_spans = resp_sel_spans_if(focused)
       rows.each_with_index do |(di, full, color, text), i|
-        Gutter.draw(screen, rect.x, rect.y + i, di, gw, current: focused && di == @resp_cursor.cy)
+        Gutter.draw(screen, rect.x, rect.y + i, di, gw, current: focused && di == @resp_cursor.cy) if gw > 0
         shown = @xscroll > 0 ? Highlight.slice_left_text(full, @xscroll) : full
         screen.text(rect.x + gw, rect.y + i, shown, color, width: cw)
         paint_resp_line_chrome(screen, rect.x + gw + 2, rect.y + i, di, text, focused, sel_spans)

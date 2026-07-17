@@ -660,8 +660,9 @@ describe Gori::Tui::HistoryView do
         backend.contains?("REQUEST").should be_true
         backend.contains?("RESPONSE").should be_true
         # Cap invariant: store API used by preview is body_max-aware
-        d = store.get_flow(id, body_max: HistoryView::PREVIEW_BODY_CAP + 1).not_nil!
-        d.response_body.not_nil!.size.should eq(HistoryView::PREVIEW_BODY_CAP + 1)
+        cap = Gori::Settings.preview_body_cap
+        d = store.get_flow(id, body_max: cap + 1).not_nil!
+        d.response_body.not_nil!.size.should eq(cap + 1)
       end
     ensure
       Gori::Settings.history_preview = prev

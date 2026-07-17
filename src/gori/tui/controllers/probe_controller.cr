@@ -257,7 +257,7 @@ module Gori::Tui
             @host.session.store.insert_event("probe", "issue_found", "success", "Probe: #{summary}", goto_tab: "probe")
             @host.notifications.push(:success, "Probe: #{summary}", source: "probe")
             # Status toast is visible on every tab and pairs with the list paint.
-            @host.status("Probe: #{summary}")
+            @host.status("Probe: #{summary}") if Settings.notify_toast?
           end
         when Probe::ErrorEvent
           # Bottom bar only — a scan error is operational noise, not a result to push

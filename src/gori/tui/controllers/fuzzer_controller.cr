@@ -764,7 +764,7 @@ module Gori::Tui
       msg = "Fuzzer: #{n} hit#{n == 1 ? "" : "s"} / #{v.result_count} sent on #{v.summary}#{ev.stopped ? " (stopped)" : ""}"
       log_event(v, level, msg)
       @host.notifications.push(level, msg, goto_for(v), source: "fuzzer")
-      @host.status(msg)
+      @host.status(msg) if Settings.notify_toast?
     end
 
     # #124: append every fuzz completion/error to the store event feed UNCONDITIONALLY

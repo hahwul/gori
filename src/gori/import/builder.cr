@@ -14,7 +14,7 @@ module Gori
       def self.capped(body : Bytes?) : {Bytes?, Bool, Int64?}
         return {nil, false, nil} unless body
         size = body.size.to_i64
-        max = Proxy::Codec::Body::CAPTURE_MAX
+        max = Settings.capture_max
         return {body, false, size} if body.size <= max
         {body[0, max].dup, true, size}
       end
