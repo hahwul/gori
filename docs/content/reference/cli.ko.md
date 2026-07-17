@@ -62,6 +62,7 @@ gori run <subcommand> [options]
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
 | `notes [<n>]` | 프로젝트 노트 읽기 |
 | `issues` · `create` · `update` | 이슈 목록 / 내보내기, 또는 이슈 작성 |
+| `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
 | `project [list]` | 알려진 프로젝트 목록 |
 | `project scope` | 스코프 규칙 목록 / 추가 / 삭제 / 활성화 / 비활성화 |
 | `project env` | 프로젝트 env 변수 목록 / 설정 / 삭제 (`$KEY` 치환) |

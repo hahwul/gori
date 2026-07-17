@@ -19,7 +19,7 @@ describe Gori::Rules do
       rules = Gori::Rules.load(store)
       rules.active?.should be_false
       head = "GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice
-      rules.rewrite_request(head).should eq(head)
+      rules.rewrite_request(head, "").should eq(head)
     end
   end
 
@@ -32,11 +32,11 @@ describe Gori::Rules do
       rules.enabled_count.should eq(2)
 
       req = "GET / HTTP/1.1\r\nHost: acme.test\r\n\r\n".to_slice
-      String.new(rules.rewrite_request(req)).should contain("Host: evil.test")
+      String.new(rules.rewrite_request(req, "acme.test")).should contain("Host: evil.test")
 
       # the request rule must not touch the response head
       resp = "HTTP/1.1 200 OK\r\nServer: nginx\r\nX-Echo: acme.test\r\n\r\n".to_slice
-      out = String.new(rules.rewrite_response(resp))
+      out = String.new(rules.rewrite_response(resp, "acme.test"))
       out.should contain("Server: gori")
       out.should contain("X-Echo: acme.test")
     end
@@ -53,13 +53,13 @@ describe Gori::Rules do
 
       # a body rule never touches the head seam...
       head = "POST / HTTP/1.1\r\nX-Note: password\r\n\r\n".to_slice
-      rules.rewrite_request(head).should eq(head)
+      rules.rewrite_request(head, "").should eq(head)
       # ...and rewrites the entity body
-      String.new(rules.rewrite_request_body("user=admin&password=x".to_slice)).should eq("user=admin&hunter2=x")
-      String.new(rules.rewrite_response_body("the SECRET value".to_slice)).should eq("the REDACT value")
+      String.new(rules.rewrite_request_body("user=admin&password=x".to_slice, "")).should eq("user=admin&hunter2=x")
+      String.new(rules.rewrite_response_body("the SECRET value".to_slice, "")).should eq("the REDACT value")
 
       # each side's body rule stays on its own side
-      rules.rewrite_response_body("password".to_slice).should eq("password".to_slice)
+      rules.rewrite_response_body("password".to_slice, "").should eq("password".to_slice)
     end
   end
 
@@ -70,7 +70,7 @@ describe Gori::Rules do
       rules.rewrites_request_body?.should be_false
       rules.rewrites_response_body?.should be_false
       body = "A body with A".to_slice
-      rules.rewrite_request_body(body).should eq(body) # inert fast path
+      rules.rewrite_request_body(body, "").should eq(body) # inert fast path
     end
   end
 
@@ -79,7 +79,7 @@ describe Gori::Rules do
       rules = Gori::Rules.load(store)
       rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "absent", "x")
       head = "GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice
-      rules.rewrite_request(head).should eq(head)
+      rules.rewrite_request(head, "").should eq(head)
     end
   end
 
@@ -100,12 +100,69 @@ describe Gori::Rules do
       r2.active?.should be_false # disabled → lens inert
       r2.rewrites_response_body?.should be_false
       body = "A".to_slice
-      r2.rewrite_response_body(body).should eq(body)
+      r2.rewrite_response_body(body, "").should eq(body)
       Gori::Rules.load(store).rules.first.enabled?.should be_false
 
       r2.remove(id)
       r2.rules.should be_empty
       Gori::Rules.load(store).rules.should be_empty
+    end
+  end
+
+  it "replaces with a regex and $1 capture-group interpolation" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Response, Gori::Store::RulePart::Head,
+        "Server: (\\S+)", "Server: gori-$1", match_kind: Gori::Store::MatchKind::Regex)
+      resp = "HTTP/1.1 200 OK\r\nServer: nginx\r\n\r\n".to_slice
+      String.new(rules.rewrite_response(resp, "")).should contain("Server: gori-nginx")
+    end
+  end
+
+  it "adds, sets, and removes headers by name" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "X-Trace", "on", op: Gori::Store::RuleOp::AddHeader)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "user-agent", "gori", op: Gori::Store::RuleOp::SetHeader)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "Cookie", "", op: Gori::Store::RuleOp::RemoveHeader)
+
+      req = "GET / HTTP/1.1\r\nHost: a\r\nUser-Agent: curl/8\r\nCookie: sid=1\r\n\r\n".to_slice
+      out = String.new(rules.rewrite_request(req, ""))
+      out.should contain("X-Trace: on")       # added before the blank line
+      out.should contain("User-Agent: gori")  # value replaced, original name casing kept
+      out.should_not contain("Cookie:")        # removed
+      out.should contain("Host: a")            # untouched
+    end
+  end
+
+  it "reorders rules in apply order" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "A", "1")
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "B", "2")
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head, "C", "3")
+      rules.rules.map(&.pattern).should eq(%w[A B C])
+
+      last = rules.rules.last.id
+      rules.move(last, -1) # C moves up one
+      rules.rules.map(&.pattern).should eq(%w[A C B])
+      # order survives a reload
+      Gori::Rules.load(store).rules.map(&.pattern).should eq(%w[A C B])
+    end
+  end
+
+  it "scopes a rule to a matching host glob" do
+    with_store do |store|
+      rules = Gori::Rules.load(store)
+      rules.add(Gori::Store::RuleTarget::Request, Gori::Store::RulePart::Head,
+        "X-Env", "prod", op: Gori::Store::RuleOp::AddHeader, host: "*.example.com")
+      req = "GET / HTTP/1.1\r\nHost: a\r\n\r\n".to_slice
+      String.new(rules.rewrite_request(req, "api.example.com")).should contain("X-Env: prod")
+      # a non-matching host is byte-identical (same slice returned)
+      rules.rewrite_request(req, "other.test").should eq(req)
     end
   end
 end

@@ -83,27 +83,28 @@ History 필터 바에 쿼리를 입력하거나, 헤드리스로 실행하세요
 gori run history -q 'status:5xx host:api.example.com'
 ```
 
-## Match & Replace {#match-replace}
+## Match & Replace (Rewriter 탭) {#match-replace}
 
-커맨드 팔레트에서 **Match & Replace**를 엽니다(`Ctrl-P` → **Match & Replace**; Global 코드를 원하면 `settings:hotkeys`에서 재지정하세요). 규칙은 이동 중인 요청/응답의 **헤드**(요청 줄 + 헤더)나 **본문**을 재작성합니다. 실시간 트래픽에 적용되는 리터럴 부분 문자열 치환입니다.
+**Rewriter** 탭이 Match & Replace 편집기입니다. 이동 중인 요청/응답을 재작성하는 규칙을 관리합니다. 기본적으로 숨김 상태이므로 탭 바의 `⋯` 메뉴나 커맨드 팔레트(`Ctrl-P` → **Match & Replace** 또는 **Go to Rewriter**)로 엽니다.
 
-문법은 규칙 하나당 한 줄입니다.
+각 규칙에는 동작이 있습니다.
 
-```text
-req: User-Agent: x => User-Agent: gori
-resp: Set-Cookie => X-Stripped
-reqbody: password => hunter2
-respbody: "debug":false => "debug":true
-```
+| 동작 | 하는 일 |
+|------|---------|
+| **Replace** | 헤드나 본문의 텍스트를 리터럴 부분 문자열 또는 정규식으로 찾아 치환 |
+| **Add header** | `Name: value` 헤더를 추가 |
+| **Set header** | 이름으로 헤더 값을 교체(없으면 추가) |
+| **Remove header** | 이름으로 헤더를 제거 |
 
-| 접두사 | 대상 |
-|--------|--------|
-| `req:` (기본값) | 요청 헤드 |
-| `resp:` | 응답 헤드 |
-| `reqbody:` | 요청 본문 |
-| `respbody:` | 응답 본문 |
+**Replace** 규칙은 요청이나 응답의 **헤드**(요청/상태 줄 + 헤더) 또는 **본문**(엔티티)을 대상으로 합니다. 리터럴과 정규식 중에서 고르며, 정규식 치환은 `$1`/`$2` 캡처 그룹 삽입을 지원합니다(리터럴 `$`는 `$$`). 헤더 동작은 항상 헤드에 적용되고, 헤더 이름을 대소문자 구분 없이 매칭합니다. 값이 비어 있으면 매칭된 텍스트를 삭제하거나 헤더를 제거합니다.
 
-치환값이 비어 있으면 매칭된 텍스트를 삭제합니다. **본문** 규칙은 메시지를 버퍼링해 재작성하고 `Content-Length`를 자동으로 다시 맞춥니다(청크 본문은 de-chunk 후 재프레이밍됩니다). 헤드 규칙은 본문을 손대지 않고 계속 스트리밍합니다. 본문 재작성은 디코드된 전송 형태에서 동작합니다. 압축된(`Content-Encoding: gzip`/`br`/…) 본문은 압축을 풀지 않으므로 리터럴 패턴이 매칭되지 않습니다. 스트리밍 응답(SSE, close로 구분되는 응답, WebSocket 업그레이드)은 그대로 흘려보냅니다. 규칙은 프로젝트별이며, 개별로 켜고 끌 수 있고, 추가하는 즉시 적용됩니다. 재시작은 필요 없습니다. 트래픽이 History나 스캐너에 닿기 전에 쿠키를 제거하거나, 헤더를 주입하거나, 본문 값을 재작성할 때 사용하세요.
+어떤 규칙이든 **호스트** 글롭으로 범위를 좁혀 매칭되는 트래픽에만 적용할 수 있습니다. 일반 문자열은 부분 문자열로 매칭되고(`example.com`은 `api.example.com`에 매칭), `*`는 와일드카드입니다(`*.example.com`). 비워 두면 모든 호스트에 적용됩니다.
+
+목록은 `a` 추가, `e`/`Enter` 편집, `x` 켜기/끄기, `d` 삭제, `Shift-J`/`Shift-K` 순서 변경(규칙은 위에서 아래로 적용), `space`로 전체 메뉴를 다룹니다. 편집기는 규칙이 최근 몇 개의 플로에 영향을 줄지 실시간 미리보기로 보여 줍니다. 규칙은 프로젝트별이며 저장 즉시 적용되고 재시작은 필요 없습니다.
+
+**본문** 규칙은 메시지를 버퍼링해 재작성하고 `Content-Length`를 자동으로 다시 맞춥니다(청크 본문은 de-chunk 후 재프레이밍됩니다). 헤드 규칙은 본문을 손대지 않고 계속 스트리밍합니다. 압축된(`Content-Encoding: gzip`/`br`/…) 본문은 압축을 풀지 않으므로 리터럴 패턴이 매칭되지 않고, 스트리밍 응답(SSE, close로 구분되는 응답, WebSocket 업그레이드)은 그대로 흘려보냅니다. 규칙을 하나라도 켜면 매칭되는 호스트는 HTTP/1.1로 내려갑니다. HTTP/2 헤드는 재작성 지점에 닿지 않기 때문입니다.
+
+같은 규칙을 헤드리스에서도 다룰 수 있습니다. `gori run rewriter`(list / add / rm / enable / disable / preview)와 MCP의 `create_rule` / `update_rule` / `list_rules` / `preview_rule` 도구입니다.
 
 ## 임포트 {#import}
 

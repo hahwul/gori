@@ -28,7 +28,7 @@ module Gori::Tui
         Item.new("c", "toggle capture", "capture.toggle"),
         Item.new("i", "toggle intercept", "intercept.toggle"),
         Item.new("s", "toggle scope lens (or click scope:N)", "scope.toggle-lens"),
-        Item.new("^P", "Match & Replace (palette; rebindable)", "rules.edit"),
+        Item.new("^P", "Match & Replace → Rewriter tab (palette)", "rules.edit"),
         Item.new("badge / ^P", "notification center (palette; rebindable)", "app.notifications"),
         Item.new("^B", "reveal whitespace (·→␍␊)", "view.reveal-ws"),
         Item.new("^D / ^C ×2", "quit gori"),

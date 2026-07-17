@@ -310,11 +310,69 @@ module Gori
       end
     end
 
-    # A Match&Replace rule: a literal substring rewrite of a request/response HEAD
-    # (request line + headers) or BODY (the entity body). Human-authored (P4),
-    # persisted per project. `replacement` may be empty (delete `pattern`). A body
-    # rule buffers + re-frames the message in flight (Content-Length synced); a head
-    # rule streams the body untouched (P6). See `Rules` / `ClientConn`.
+    # What a Match&Replace rule DOES. `Replace` is the classic find/replace over the
+    # selected PART (head or body). The three header ops act on the HEAD by header NAME
+    # (case-insensitive), so a user never has to hand-craft a substring that spans the
+    # exact header text: `AddHeader` appends a `Name: value` line, `SetHeader` replaces
+    # an existing header's value (or appends when absent), `RemoveHeader` drops every
+    # matching header line. Header ops carry the header NAME in `pattern` and the value
+    # in `replacement` (empty for `RemoveHeader`). Stored lowercase; default `replace`
+    # so every pre-op rule keeps its exact meaning.
+    enum RuleOp
+      Replace
+      AddHeader
+      SetHeader
+      RemoveHeader
+
+      def label : String
+        case self
+        in RuleOp::Replace      then "replace"
+        in RuleOp::AddHeader    then "add_header"
+        in RuleOp::SetHeader    then "set_header"
+        in RuleOp::RemoveHeader then "remove_header"
+        end
+      end
+
+      def self.from_label(s : String) : RuleOp
+        case s
+        when "add_header"    then AddHeader
+        when "set_header"    then SetHeader
+        when "remove_header" then RemoveHeader
+        else                      Replace
+        end
+      end
+
+      # A header-name-keyed op (mutates the HEAD by name, not a substring gsub). Header
+      # ops are head-only regardless of a rule's `part`.
+      def header? : Bool
+        !replace?
+      end
+    end
+
+    # How a `Replace` rule matches: a `Literal` substring or a `Regex` (with $1/\1
+    # capture-group interpolation in the replacement). Stored lowercase; default
+    # `literal` so pre-regex rules keep their exact meaning. Ignored by header ops.
+    enum MatchKind
+      Literal
+      Regex
+
+      def label : String
+        to_s.downcase
+      end
+
+      def self.from_label(s : String) : MatchKind
+        s == "regex" ? Regex : Literal
+      end
+    end
+
+    # A Match&Replace rule (the "Rewriter" tab): rewrites a request/response HEAD
+    # (request line + headers) or BODY (the entity body) in flight. Human-authored (P4),
+    # persisted per project. `op` selects the action (replace / add-set-remove header);
+    # for `Replace`, `match_kind` picks literal vs regex and `part` picks head vs body.
+    # `replacement` may be empty (delete `pattern` / remove header). `name` is an optional
+    # label; `host` is an optional glob that scopes the rule to matching hosts ("" = all).
+    # A body rule buffers + re-frames the message in flight (Content-Length synced); a
+    # head rule streams the body untouched (P6). See `Rules` / `ClientConn`.
     struct MatchRule
       getter id : Int64
       getter? enabled : Bool
@@ -322,8 +380,14 @@ module Gori
       getter part : RulePart
       getter pattern : String
       getter replacement : String
+      getter op : RuleOp
+      getter match_kind : MatchKind
+      getter name : String
+      getter host : String
 
-      def initialize(@id, @enabled, @target, @part, @pattern, @replacement)
+      def initialize(@id, @enabled, @target, @part, @pattern, @replacement,
+                     @op = RuleOp::Replace, @match_kind = MatchKind::Literal,
+                     @name = "", @host = "")
       end
     end
 

@@ -7,7 +7,7 @@ module Gori
     # (FTS5 for QL, a tags table, a connections table) arrive as *later*
     # migrations — which is exactly why none of them exist in v1 (P0).
     module Schema
-      VERSION = 38
+      VERSION = 39
 
       # The migration that reclaims duplicated/low-value bytes already on disk (see V25).
       # Store.open runs a one-time VACUUM after an EXISTING db crosses this version so the
@@ -664,7 +664,19 @@ module Gori
         SQL
       ]
 
-      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34, V35, V36, V37, V38]
+      # Match&Replace rules grow to the level of a dedicated rewrite tool (the "Rewriter"
+      # tab). Four additive axes: an OPERATION (replace / add-header / set-header /
+      # remove-header), a MATCH KIND (literal / regex, for replace), an optional NAME, and
+      # an optional HOST glob that scopes the rule to matching hosts. Backfilled so every
+      # existing rule keeps its exact meaning: a literal replace, unnamed, over all hosts.
+      V39 = [
+        "ALTER TABLE match_rules ADD COLUMN op TEXT NOT NULL DEFAULT 'replace'",
+        "ALTER TABLE match_rules ADD COLUMN match_kind TEXT NOT NULL DEFAULT 'literal'",
+        "ALTER TABLE match_rules ADD COLUMN name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE match_rules ADD COLUMN host TEXT NOT NULL DEFAULT ''",
+      ]
+
+      MIGRATIONS = [V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V22, V23, V24, V25, V26, V27, V28, V29, V30, V31, V32, V33, V34, V35, V36, V37, V38, V39]
 
       def self.migrate!(db : DB::Database) : Nil
         db.using_connection do |conn|

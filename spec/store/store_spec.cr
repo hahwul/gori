@@ -58,6 +58,10 @@ describe Gori::Store do
       store.@db.exec("DROP TABLE intercept_held")                        # V36
       store.@db.exec("DROP TABLE intercept_commands")                    # V36
       store.@db.exec("DROP TABLE probe_custom_rules")                    # V38
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN op")           # V39
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN match_kind")    # V39
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN name")          # V39
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN host")          # V39
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 
@@ -103,6 +107,10 @@ describe Gori::Store do
       db.exec("DROP TABLE intercept_held")     # V36
       db.exec("DROP TABLE intercept_commands") # V36
       db.exec("DROP TABLE probe_custom_rules") # V38
+      db.exec("ALTER TABLE match_rules DROP COLUMN op")         # V39
+      db.exec("ALTER TABLE match_rules DROP COLUMN match_kind")  # V39
+      db.exec("ALTER TABLE match_rules DROP COLUMN name")        # V39
+      db.exec("ALTER TABLE match_rules DROP COLUMN host")        # V39
       db.exec("PRAGMA user_version = 31")
       store.close
 

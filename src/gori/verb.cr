@@ -23,6 +23,7 @@ module Gori
       ProbeDetail    # a Probe issue's detail is open
       ProbeRules     # the Probe tab's Rules sub-tab has focus (built-in + custom rule list)
       Intercept      # the Intercept queue tab has focus
+      Rewriter       # the Rewriter (Match & Replace rules) tab has focus
       Comparer       # the Comparer tab has focus
       Decoder        # the Decoder tab has focus
       Jwt            # the JWT workbench tab has focus
