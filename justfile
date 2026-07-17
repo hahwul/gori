@@ -25,6 +25,52 @@ build:
 test:
     crystal spec
 
+# Run one spec file (or dir), e.g. `just test-file spec/store_spec.cr`.
+[group('development')]
+test-file path:
+    crystal spec {{path}}
+
+# Run every spec under one `spec/<area>` dir for fast feedback while iterating.
+[group('development')]
+test-tui:
+    crystal spec spec/tui
+
+[group('development')]
+test-store:
+    crystal spec spec/store
+
+[group('development')]
+test-proxy:
+    crystal spec spec/proxy
+
+[group('development')]
+test-verb:
+    crystal spec spec/verb
+
+[group('development')]
+test-repeater:
+    crystal spec spec/repeater
+
+[group('development')]
+test-discover:
+    crystal spec spec/discover
+
+[group('development')]
+test-miner:
+    crystal spec spec/miner
+
+[group('development')]
+test-oast:
+    crystal spec spec/oast
+
+[group('development')]
+test-sequencer:
+    crystal spec spec/sequencer
+
+[group('development')]
+test-import:
+    crystal spec spec/import
+
 # Check code format and lint without changing files.
 [group('development')]
 check:
