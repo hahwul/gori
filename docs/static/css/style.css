@@ -254,8 +254,8 @@ img {
    theme (warmer leaf on dark, deepened gold on light), so the mark stays legible
    in both. --logo-src is set inline in the template to carry base_url. */
 .logo-mark {
-  width: 2rem;
-  height: 1.8rem;
+  width: 2.75rem;
+  height: 2.5rem;
   background: var(--grad-gold-leaf);
   -webkit-mask: var(--logo-src) center / contain no-repeat;
   mask: var(--logo-src) center / contain no-repeat;
@@ -929,7 +929,7 @@ kbd {
   border-radius: 50%;
   background:
     radial-gradient(circle at 50% 46%, transparent 30%, rgb(4 5 10 / 0.55) 78%),
-    #0a0a0b url("../images/wallpaper.jpg") center / cover;
+    #0a0a0b url("../images/wallpaper.jpg") left / cover;
   box-shadow: var(--shadow-soft);
   outline: 1px solid rgb(var(--accent-rgb) / 0.2);
   outline-offset: 1.5rem;
