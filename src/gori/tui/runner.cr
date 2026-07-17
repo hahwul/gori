@@ -5364,18 +5364,11 @@ module Gori::Tui
     end
 
     def scroll_detail(delta : Int32) : Nil
-      # ↑ at the very top of the open detail pops focus up to the tab bar, mirroring
-      # the list's ↑-at-top → TABS. current_scope keys off @overlay before @focus, so
-      # the menu isn't reachable while :detail is open — close the detail first, then
-      # land on the bar. ↑ and ↓ aren't inverses here: ↵/↓ from the bar re-enters the
-      # LIST (not the detail), but the row selection is kept so re-opening is one key.
-      # Only the single-step detail.up/down verbs route here; PageUp (Runner) and the
-      # wheel (controller/view) bypass this, so paging/scrolling never ejects to TABS.
-      if delta < 0 && @overlay == :detail && history_controller.detail_at_top?
-        history_controller.close_detail
-        focus_pane(:menu)
-        return
-      end
+      # The two-level detail (HistoryController#handle_detail_body_key/strip_key) now owns
+      # the ↑/↓ ladder — ↑-at-top-of-body ascends to the STRIP, ↑-on-strip closes to the
+      # tab bar — so this ExecContext method (kept for the abstract def + the shadowed
+      # detail.up/down verbs) is a plain delegate. PageUp/Down still route here via the
+      # controller directly.
       history_controller.scroll_detail(delta)
     end
 
