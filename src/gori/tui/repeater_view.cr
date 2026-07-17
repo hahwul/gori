@@ -1170,6 +1170,17 @@ module Gori::Tui
       {String.new(res.head), (b = res.body) ? String.new(b) : ""}
     end
 
+    # The last HTTP response's raw {head, body} bytes — for the manual "Run active scan" action,
+    # which rebuilds a synthetic flow from the current request + this response. nil until a send
+    # lands (a response head is required), or in WS/gRPC mode where the active rules don't apply.
+    def last_http_response : {Bytes, Bytes?}?
+      return nil if @ws_mode || @grpc_mode
+      res = @result
+      return nil unless res
+      return nil if res.head.empty?
+      {res.head, res.body}
+    end
+
     def request_bytes : Bytes
       return grpc_request_bytes if @grpc_mode                  # edited head + reframed body (owns its own hex buffer)
       return @req_hex_edit.not_nil!.to_bytes if @req_hex_edit  # byte-exact; NO auto-CL in hex mode

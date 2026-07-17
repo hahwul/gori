@@ -2020,3 +2020,70 @@ describe "Gori::Probe::Passive::SecretInUrl (JWT tightening)" do
     end
   end
 end
+
+describe "Gori::Probe::Active (manual run estimate)" do
+  it "requests_per_flow is 1..1 for every built-in active rule" do
+    Gori::Probe::Active::RULES.each(&.requests_per_flow.should(eq(1..1)))
+  end
+
+  it "estimate_label renders a fixed count and a range" do
+    Gori::Probe::Active.estimate_label(1..1).should eq("1 req/flow")
+    Gori::Probe::Active.estimate_label(1..3).should eq("1–3 req/flow")
+  end
+
+  it "estimates one request per applicable rule (reflected param + CORS = 2)" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://evil.test\r\nContent-Type: text/html\r\n\r\n",
+        target: "/search?q=hi", body: "<p>hi</p>")
+      a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
+        Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
+      est = a.active_estimate(detail)
+      est.map(&.info.id).sort.should eq(["cors_reflection", "reflected_param"])
+      est.sum { |e| e.requests.end }.should eq(2)
+    end
+  end
+
+  it "omits a disabled active rule from the estimate" do
+    with_store do |store|
+      store.set_probe_disabled_rules(Set{"cors_reflection"})
+      detail = capture_flow(store,
+        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://evil.test\r\nContent-Type: text/html\r\n\r\n",
+        target: "/search?q=hi")
+      a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
+        Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
+      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param"])
+    end
+  end
+
+  it "estimates zero for an unsafe-method / paramless / non-CORS flow" do
+    with_store do |store|
+      a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
+        Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
+      # POST is never probed (no safe method).
+      post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/x?q=1", method: "POST")
+      a.active_estimate(post).should be_empty
+      # GET with no params + no ACAO has nothing to test.
+      bare = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/nothing")
+      a.active_estimate(bare).should be_empty
+    end
+  end
+
+  it "run_active_now runs regardless of mode / notify choice without raising" do
+    with_store do |store|
+      detail = capture_flow(store,
+        "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://evil.test\r\n\r\n",
+        target: "/search?q=hi")
+      scope = Gori::Scope.load(store)
+      {Gori::Probe::Mode::Passive, Gori::Probe::Mode::Off}.each do |mode|
+        a = Gori::Probe::Analyzer.new(store, scope, Channel(Gori::Store::FlowEvent).new(1), mode, true)
+        a.start
+        # Every notify mode; sends to acme.test won't resolve, so the error is swallowed and the
+        # Always completion is suppressed (errored run — verified by not raising).
+        Gori::Miner::NotifyMode.values.each { |n| a.run_active_now(detail, notify: n) }
+        sleep 50.milliseconds
+        a.stop
+      end
+    end
+  end
+end

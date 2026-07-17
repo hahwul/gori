@@ -43,7 +43,7 @@ module Gori::Tui
       rows << Row.new(:header, "PASSIVE RULES")
       Probe::Passive::RULES.each { |r| rows << builtin_row(r.info, disabled) }
       rows << Row.new(:header, "ACTIVE RULES")
-      Probe::Active::RULES.each { |r| rows << builtin_row(r.info, disabled) }
+      Probe::Active::RULES.each { |r| rows << active_builtin_row(r, disabled) }
       rows << Row.new(:header, "CUSTOM RULES")
       custom = Probe.custom_rules(store)
       if custom.empty?
@@ -57,6 +57,14 @@ module Gori::Tui
 
     private def builtin_row(info : Probe::RuleInfo, disabled : Set(String)) : Row
       Row.new(:builtin, info.name, info.category, !disabled.includes?(info.id), info.id)
+    end
+
+    # An active rule's row carries its per-flow request estimate next to the category, e.g.
+    # "active · 1 req/flow" — the request cost the user asked to see for each active-scan item.
+    private def active_builtin_row(rule : Probe::Active::Rule, disabled : Set(String)) : Row
+      info = rule.info
+      meta = "#{info.category} · #{Probe::Active.estimate_label(rule.requests_per_flow)}"
+      Row.new(:builtin, info.name, meta, !disabled.includes?(info.id), info.id)
     end
 
     private def custom_row(c : Probe::CustomRule) : Row

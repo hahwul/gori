@@ -341,6 +341,12 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def probe_promote : Nil; end
 
+  def probe_active_selected : Nil; end
+
+  def probe_active_rescan : Nil; end
+
+  def probe_active_from_repeater : Nil; end
+
   def toggle_capture : Nil; end
 
   def intercept_toggle : Nil; end
