@@ -62,6 +62,7 @@ gori run <subcommand> [options]
 | `sitemap [QL]` | Host → path endpoint tree |
 | `notes [<n>]` | Read project notes |
 | `issues` · `create` · `update` | List / export issues, or write issues |
+| `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `project [list]` | List known projects |
 | `project scope` | List / add / delete / enable / disable scope rules |
 | `project env` | List / set / delete project env vars (`$KEY` substitution) |

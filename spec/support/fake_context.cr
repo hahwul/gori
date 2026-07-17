@@ -491,6 +491,26 @@ class FakeExecContext < Gori::Verb::ExecContext
     @jwt_read_mode
   end
 
+  property rewriter_rule_selected : Bool = false # settable so the has-rule gate can be exercised
+
+  def rewriter_add : Nil; end
+
+  def rewriter_edit : Nil; end
+
+  def rewriter_toggle : Nil; end
+
+  def rewriter_delete : Nil; end
+
+  def rewriter_move(dir : Int32) : Nil; end
+
+  def rewriter_duplicate : Nil; end
+
+  def rewriter_reload : Nil; end
+
+  def rewriter_rule_selected? : Bool
+    @rewriter_rule_selected
+  end
+
   def notes_new : Nil; end
 
   def notes_close : Nil; end

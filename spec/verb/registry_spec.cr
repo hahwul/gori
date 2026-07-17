@@ -936,6 +936,38 @@ private class FakeContext < ExecContext
     false
   end
 
+  def rewriter_add : Nil
+    @calls << :rewriter_add
+  end
+
+  def rewriter_edit : Nil
+    @calls << :rewriter_edit
+  end
+
+  def rewriter_toggle : Nil
+    @calls << :rewriter_toggle
+  end
+
+  def rewriter_delete : Nil
+    @calls << :rewriter_delete
+  end
+
+  def rewriter_move(dir : Int32) : Nil
+    @calls << :rewriter_move
+  end
+
+  def rewriter_duplicate : Nil
+    @calls << :rewriter_duplicate
+  end
+
+  def rewriter_reload : Nil
+    @calls << :rewriter_reload
+  end
+
+  def rewriter_rule_selected? : Bool
+    true
+  end
+
   def notes_new : Nil
     @calls << :notes_new
   end

@@ -86,7 +86,7 @@ end
 describe "Chrome.hidden_tabs" do
   it "returns the tabs hidden from the bar (Miner + Sequencer + JWT by default) on empty prefs" do
     hid = Chrome.hidden_tabs([] of {String, Bool}).map(&.first)
-    hid.should eq([:miner, :sequencer, :jwt]) # the default-hidden tabs, in catalog order
+    hid.should eq([:rewriter, :miner, :sequencer, :jwt]) # the default-hidden tabs, in catalog order
   end
 
   it "excludes the active tab even when its stored visibility is false (it's force-shown)" do

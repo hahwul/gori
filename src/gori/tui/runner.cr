@@ -23,6 +23,7 @@ require "./controllers/sequencer_controller"
 require "./controllers/comparer_controller"
 require "./controllers/decoder_controller"
 require "./controllers/jwt_controller"
+require "./controllers/rewriter_controller"
 require "./controllers/statusline_controller"
 require "./history_view"
 require "./repeater_view"
@@ -32,7 +33,7 @@ require "./issues_view"
 require "./notes_view"
 require "./project_view"
 require "./intercept_view"
-require "./rules_overlay"
+require "./rewriter_rule_overlay"
 require "./confirm_dialog"
 require "./browser_picker"
 require "./choice_picker"
@@ -89,7 +90,6 @@ module Gori::Tui
       @backend = TermisuBackend.new(@term).as(Backend)
       @keymap = Hotkeys.build_keymap(@session.registry) # base verbs + OS profile + user overrides
       @scope = @session.scope
-      @rules_overlay = RulesOverlay.new(@session.rules)
       @issue_form = IssueForm.new
       @palette = PaletteState.new(@session.registry)
       @space_menu = SpaceMenu.new(@session.registry)
@@ -97,7 +97,7 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :sequence_config | :probe_active | :fuzz_set | :fuzz_advanced | :scope_rule | :probe_rule | :ca_import
+      @overlay = :none # :none | :palette | :detail | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :sequence_config | :probe_active | :fuzz_set | :fuzz_advanced | :scope_rule | :probe_rule | :rewriter_rule | :ca_import
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -231,6 +231,10 @@ module Gori::Tui
       # Project SCOPE add/edit popup (a/e on the rule list). Built fresh each open.
       @scope_rule_overlay = nil.as(ScopeRuleOverlay?)
       @custom_rule_overlay = nil.as(CustomRuleOverlay?)
+      # Rewriter (Match & Replace) add/edit popup (a/e on the rule list). Built fresh each
+      # open; @rewriter_preview_sig gates the live match-preview rescan to real changes.
+      @rewriter_rule_overlay = nil.as(RewriterRuleOverlay?)
+      @rewriter_preview_sig = ""
       # OAST provider add/edit popup (a/e on the Providers sub-tab). Built fresh each open.
       @oast_provider_overlay = nil.as(OastProviderOverlay?)
       # The "Import CA certificate" popup (palette → ca.import): collects the cert +
@@ -270,6 +274,7 @@ module Gori::Tui
         ComparerController.new(self),
         DecoderController.new(self),
         JwtController.new(self),
+        RewriterController.new(self),
       ].each { |c| @tabs[c.tab] = c }
     end
 
@@ -350,6 +355,10 @@ module Gori::Tui
 
     private def jwt_controller : JwtController
       @tabs[:jwt].as(JwtController)
+    end
+
+    private def rewriter_controller : RewriterController
+      @tabs[:rewriter].as(RewriterController)
     end
 
     def run : Symbol
@@ -883,7 +892,6 @@ module Gori::Tui
       # composition preview, not just the Notes/Project/Repeater editors.
       case @overlay
       when :palette       then @palette.set_preedit(text)
-      when :rules         then @rules_overlay.set_preedit(text)
       when :issue_new   then @issue_form.set_preedit(text)
       when :comparer_pick then @flow_picker.try(&.set_preedit(text))
       when :repeater_subtab then @subtab_picker.try(&.set_preedit(text))
@@ -898,6 +906,7 @@ module Gori::Tui
       when :scope_rule    then @scope_rule_overlay.try(&.set_preedit(text))
       when :oast_provider then @oast_provider_overlay.try(&.set_preedit(text))
       when :probe_rule    then @custom_rule_overlay.try(&.set_preedit(text))
+      when :rewriter_rule then @rewriter_rule_overlay.try(&.set_preedit(text))
       when :ca_import     then @ca_import_overlay.try(&.set_preedit(text))
       when :none          then apply_preedit_body(text)
       end
@@ -965,7 +974,6 @@ module Gori::Tui
         return
       end
       return handle_palette_key(ev) if @overlay == :palette
-      return handle_rules_key(ev) if @overlay == :rules
       return handle_issue_new_key(ev) if @overlay == :issue_new
       return handle_confirm_key(ev) if @overlay == :confirm
       return handle_browser_key(ev) if @overlay == :browser
@@ -992,6 +1000,7 @@ module Gori::Tui
       return handle_scope_rule_key(ev) if @overlay == :scope_rule
       return handle_oast_provider_key(ev) if @overlay == :oast_provider
       return handle_custom_rule_key(ev) if @overlay == :probe_rule
+      return handle_rewriter_rule_key(ev) if @overlay == :rewriter_rule
       return handle_ca_import_key(ev) if @overlay == :ca_import
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
@@ -1241,7 +1250,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :ca_import then true
+      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :rewriter_rule, :ca_import then true
       else                                                                                                                                                                                                                                                               false
       end
     end
@@ -1330,7 +1339,6 @@ module Gori::Tui
       area = layout.body
       case @overlay
       when :palette       then click_palette(area, mx, my)
-      when :rules         then click_rules(area, mx, my)
       when :browser       then click_browser(area, mx, my)
       when :choice        then click_choice(area, mx, my)
       when :tabs_more     then click_more_menu(layout, mx, my)
@@ -1356,6 +1364,7 @@ module Gori::Tui
       when :scope_rule    then click_scope_rule(area, mx, my)
       when :oast_provider then click_oast_provider(area, mx, my)
       when :probe_rule    then click_custom_rule(area, mx, my)
+      when :rewriter_rule then click_rewriter_rule(area, mx, my)
       when :ca_import     then click_ca_import(area, mx, my)
         # :issue_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
@@ -1507,11 +1516,13 @@ module Gori::Tui
       end
     end
 
-    private def click_rules(area : Rect, mx : Int32, my : Int32) : Nil
-      box = @rules_overlay.overlay_box(area)
-      return (@overlay = :none) if box.nil? || dismiss_zone?(box, mx, my)
-      if idx = @rules_overlay.row_at(box, mx, my)
-        @rules_overlay.set_selected(idx)
+    private def click_rewriter_rule(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @rewriter_rule_overlay || return
+      box = ov.overlay_box(area)
+      return close_rewriter_rule if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
+      if idx = ov.row_at(box, mx, my)
+        ov.set_selected(idx)
+        commit_rewriter_rule_overlay(ov) if ov.on_save_row?
       end
     end
 
@@ -1629,7 +1640,6 @@ module Gori::Tui
     private def wheel_overlay(step : Int32) : Nil
       case @overlay
       when :palette       then @palette.move(step)
-      when :rules         then @rules_overlay.select_move(step)
       when :browser       then @browser_picker.try(&.move(step))
       when :choice        then @choice_picker.try(&.move(step))
       when :tabs_more     then @more_menu.try(&.move(step))
@@ -1653,6 +1663,7 @@ module Gori::Tui
       when :scope_rule    then @scope_rule_overlay.try(&.move(step))
       when :oast_provider then @oast_provider_overlay.try(&.move(step))
       when :probe_rule    then @custom_rule_overlay.try(&.move(step))
+      when :rewriter_rule then @rewriter_rule_overlay.try(&.move(step))
       when :ca_import     then @ca_import_overlay.try(&.move(step))
       end
     end
@@ -1915,6 +1926,44 @@ module Gori::Tui
       end
     end
 
+    # Rewriter (Match & Replace) add/edit popup: same interaction as the custom-rule form,
+    # plus a live match PREVIEW refreshed after each key (only rescanning when the
+    # match-relevant fields actually changed). Commit persists via the controller.
+    private def handle_rewriter_rule_key(ev : Termisu::Event::Key) : Nil
+      ov = @rewriter_rule_overlay || return
+      case ov.handle_key(ev)
+      when :cancel then close_rewriter_rule
+      when :commit then commit_rewriter_rule_overlay(ov)
+      else              refresh_rewriter_preview(ov)
+      end
+    end
+
+    # Recompute the "N of M recent flows" preview when the candidate rule's match-relevant
+    # fields changed. Bounded so a keystroke stays responsive; nothing is written.
+    private def refresh_rewriter_preview(ov : RewriterRuleOverlay) : Nil
+      sig = ov.preview_signature
+      return if sig == @rewriter_preview_sig
+      @rewriter_preview_sig = sig
+      if ov.pattern.empty?
+        ov.set_preview("enter a #{ov.header_op? ? "header name" : "pattern"} to preview")
+        return
+      end
+      pv = @session.rules.preview(ov.candidate_rule, 200)
+      more = pv.total > pv.scanned ? " (of #{pv.total})" : ""
+      ov.set_preview("affects #{pv.matched} of #{pv.scanned} recent flows#{more}")
+    end
+
+    private def commit_rewriter_rule_overlay(ov : RewriterRuleOverlay) : Nil
+      return unless rewriter_controller.apply_rewriter_rule(ov)
+      close_rewriter_rule
+    end
+
+    private def close_rewriter_rule : Nil
+      @overlay = :none
+      @rewriter_rule_overlay = nil
+      @rewriter_preview_sig = ""
+    end
+
     private def apply_close_fuzz_set(ov : FuzzSetOverlay) : Nil
       fuzzer_controller.apply_fuzz_set(ov.edit_index, ov.build_spec)
       @overlay = :none
@@ -1925,30 +1974,6 @@ module Gori::Tui
       fuzzer_controller.apply_fuzz_advanced(ov.snapshot)
       @overlay = :none
       @fuzz_advanced_overlay = nil
-    end
-
-    # Match&Replace overlay: type a `[req:|resp:|reqbody:|respbody:] pattern => replacement` rule;
-    # ↵ add, ⌫ edit/remove, ↑/↓ select, tab on/off, esc close. No view reload —
-    # rules act on the live proxy, not on already-captured flows.
-    private def handle_rules_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      case
-      when key.escape? then @overlay = :none
-      when key.enter?  then (@toast = "rule needs a pattern — e.g. resp: Old => New" unless @rules_overlay.submit)
-      when key.tab?    then @rules_overlay.toggle_selected
-      when key.up?     then @rules_overlay.select_move(-1)
-      when key.down?   then @rules_overlay.select_move(1)
-      when key.left?   then @rules_overlay.move_cursor(-1)
-      when key.right?  then @rules_overlay.move_cursor(1)
-      when key.backspace?
-        @rules_overlay.remove_selected unless @rules_overlay.backspace
-      else
-        if c && !ev.ctrl? && !ev.alt?
-          @rules_overlay.insert(c)
-          @rules_overlay.set_preedit("") # commit any preedit
-        end
-      end
     end
 
     # New-issue form: type a title; ↵ create, esc cancel.
@@ -3646,7 +3671,6 @@ module Gori::Tui
         activity: activity_chip)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay == :palette
-      @rules_overlay.render(screen, layout.body) if @overlay == :rules
       @issue_form.render(screen, layout.body) if @overlay == :issue_new
       @confirm.try(&.render(screen, layout.body)) if @overlay == :confirm
       @browser_picker.try(&.render(screen, layout.body)) if @overlay == :browser
@@ -3673,6 +3697,7 @@ module Gori::Tui
       @scope_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :scope_rule
       @oast_provider_overlay.try(&.render(screen, layout.body)) if @overlay == :oast_provider
       @custom_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :probe_rule
+      @rewriter_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :rewriter_rule
       @ca_import_overlay.try(&.render(screen, layout.body)) if @overlay == :ca_import
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
@@ -3760,7 +3785,6 @@ module Gori::Tui
       return "SEND TO" if send_to_shown?                              # ditto
       case @overlay
       when :palette       then "PALETTE"
-      when :rules         then "RULES"
       when :issue_new   then "ISSUE"
       when :detail        then "DETAIL"
       when :confirm       then "CONFIRM"
@@ -3785,6 +3809,7 @@ module Gori::Tui
       when :fuzz_set      then "PAYLOAD SET"
       when :fuzz_advanced then "ADVANCED"
       when :scope_rule    then "SCOPE RULE"
+      when :rewriter_rule then "REWRITER RULE"
       when :oast_provider then "OAST PROVIDER"
       when :ca_import     then "IMPORT CA"
       else
@@ -3814,7 +3839,6 @@ module Gori::Tui
       return "↑/↓ select · ↵ send · key picks · esc cancel" if send_to_shown?
       case @overlay
       when :palette       then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
-      when :rules         then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
       when :issue_new   then "type title · ↵ create · esc cancel"
       when :confirm       then "←/→ choose · y confirm · n/esc cancel · ↵ select"
       when :browser       then "↑/↓ select · ↵ open · esc cancel"
@@ -3839,6 +3863,7 @@ module Gori::Tui
       when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
       when :fuzz_advanced then "↑/↓/⇥ field · ←/→ edit · ␣ toggle · ↵ next · esc applies & closes"
       when :scope_rule    then "↑/↓ field · ←/→ kind·type · type pattern · ↵ save · esc cancel"
+      when :rewriter_rule then "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
       when :oast_provider then "↑/↓ field · ←/→ type · type name/host/token · ↵ save · esc cancel"
       when :ca_import     then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
       when :detail        then history_controller.body_hint(:body)
@@ -4962,9 +4987,9 @@ module Gori::Tui
       project_controller.focus_scope
     end
 
+    # Legacy "Match & Replace" entry: the editor is now the Rewriter tab.
     def rules_open : Nil
-      @rules_overlay.reset
-      @overlay = :rules
+      focus_tab(:rewriter)
     end
 
     def scope_add_host : Nil
@@ -5047,6 +5072,39 @@ module Gori::Tui
 
     def probe_custom_rule_selected? : Bool
       probe_controller.rules_custom_selected?
+    end
+
+    # --- rewriter (Match & Replace rule list) ---
+    def rewriter_add : Nil
+      rewriter_controller.rewriter_add
+    end
+
+    def rewriter_edit : Nil
+      rewriter_controller.rewriter_edit
+    end
+
+    def rewriter_toggle : Nil
+      rewriter_controller.rewriter_toggle
+    end
+
+    def rewriter_delete : Nil
+      rewriter_controller.rewriter_delete
+    end
+
+    def rewriter_move(dir : Int32) : Nil
+      rewriter_controller.rewriter_move(dir)
+    end
+
+    def rewriter_duplicate : Nil
+      rewriter_controller.rewriter_duplicate
+    end
+
+    def rewriter_reload : Nil
+      rewriter_controller.rewriter_reload
+    end
+
+    def rewriter_rule_selected? : Bool
+      !rewriter_controller.selected_rule.nil?
     end
 
     def hostov_add_entry : Nil
@@ -5825,6 +5883,13 @@ module Gori::Tui
     def open_custom_rule_editor(rule : Probe::CustomRule?) : Nil
       @custom_rule_overlay = rule ? CustomRuleOverlay.editing(rule) : CustomRuleOverlay.adding
       @overlay = :probe_rule
+    end
+
+    # Host: open the Rewriter (Match & Replace) rule popup (nil rule = add; else edit).
+    def open_rewriter_rule_editor(rule : Store::MatchRule?) : Nil
+      @rewriter_rule_overlay = rule ? RewriterRuleOverlay.editing(rule) : RewriterRuleOverlay.adding
+      @rewriter_preview_sig = ""
+      @overlay = :rewriter_rule
     end
 
     # Notes must not be reloaded out from under in-progress typing. Focus alone is

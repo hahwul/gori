@@ -167,11 +167,11 @@ module Gori
         Verb::Scope::Body,
         available: in_project_desc_read, mnemonic: 'Y') { |ctx| ctx.read_copy; nil }
 
-      # Match & Replace is session setup, not per-flow breath — palette-only by
-      # default (L4). Rebind via settings:hotkeys if you want a Global chord.
+      # Match & Replace now lives in the Rewriter tab; this palette entry jumps there
+      # (kept under the familiar "Match & Replace" name so a search still finds it).
       r.register Verb::Definition.new(
-        "rules.edit", "Match & Replace", "Edit in-flight request/response head rewrite rules", Verb::Scope::Global,
-        category: Verb::Category::Settings) { |ctx| ctx.rules_open; nil }
+        "rules.edit", "Match & Replace", "Open the Rewriter tab (in-flight request/response rewrite rules)", Verb::Scope::Global,
+        category: Verb::Category::Navigation) { |ctx| ctx.focus_tab(:rewriter); nil }
 
       # --- intercept (hold-and-decide; P4) ---
       r.register Verb::Definition.new(
@@ -233,6 +233,7 @@ module Gori
         :repeater => "Repeater", :fuzzer => "Fuzzer", :miner => "Miner", :oast => "OAST",
         :sequencer => "Sequencer", :decoder => "Decoder", :jwt => "JWT", :comparer => "Comparer",
         :probe => "Probe", :issues => "Issues", :notes => "Notes",
+        :rewriter => "Rewriter",
       }.each do |tab, label|
         r.register Verb::Definition.new(
           "tab.#{tab}", "Go to #{label}", "Focus the #{label} tab", Verb::Scope::Global,

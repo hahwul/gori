@@ -36,6 +36,8 @@ module Gori::Tui
     abstract def open_scope_rule_editor(edit_id : Int64?, kind : String, match_type : String, pattern : String) : Nil
     # Open the Probe custom-rule popup (nil = add a new rule; else edit the given rule).
     abstract def open_custom_rule_editor(rule : Probe::CustomRule?) : Nil
+    # Open the Rewriter (Match & Replace) rule popup (nil = add; else edit the given rule).
+    abstract def open_rewriter_rule_editor(rule : Store::MatchRule?) : Nil
     # Open the OAST provider add/edit popup (nil edit_id = add; else edit that provider).
     # `kind` is a ProviderKind label; seeds the form when editing (defaults for add).
     abstract def open_oast_provider_editor(edit_id : Int64?, name : String, kind : String, host : String, token : String) : Nil

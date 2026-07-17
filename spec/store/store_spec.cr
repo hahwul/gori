@@ -62,6 +62,10 @@ describe Gori::Store do
       store.@db.exec("DROP TABLE oast_callbacks")                        # V40
       store.@db.exec("DROP TABLE oast_sessions")                         # V40
       store.@db.exec("DROP TABLE oast_providers")                        # V40
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN op")           # V41
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN match_kind")    # V41
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN name")          # V41
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN host")          # V41
       store.@db.exec("PRAGMA user_version = 17")
       store.close
 
@@ -111,6 +115,10 @@ describe Gori::Store do
       db.exec("DROP TABLE oast_callbacks")     # V40
       db.exec("DROP TABLE oast_sessions")      # V40
       db.exec("DROP TABLE oast_providers")     # V40
+      db.exec("ALTER TABLE match_rules DROP COLUMN op")         # V41
+      db.exec("ALTER TABLE match_rules DROP COLUMN match_kind")  # V41
+      db.exec("ALTER TABLE match_rules DROP COLUMN name")        # V41
+      db.exec("ALTER TABLE match_rules DROP COLUMN host")        # V41
       db.exec("PRAGMA user_version = 31")
       store.close
 

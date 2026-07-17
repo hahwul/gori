@@ -97,6 +97,10 @@ describe "entity_links (V21)" do
       store.@db.exec("DROP TABLE oast_callbacks")                               # V40
       store.@db.exec("DROP TABLE oast_sessions")                                # V40
       store.@db.exec("DROP TABLE oast_providers")                               # V40
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN op")                  # V41
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN match_kind")           # V41
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN name")                 # V41
+      store.@db.exec("ALTER TABLE match_rules DROP COLUMN host")                 # V41
       store.@db.exec("PRAGMA user_version = 20")
       store.close
 

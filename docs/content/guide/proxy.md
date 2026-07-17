@@ -83,27 +83,28 @@ Type a query in the History filter bar, or run it headless:
 gori run history -q 'status:5xx host:api.example.com'
 ```
 
-## Match & Replace
+## Match & Replace (Rewriter tab)
 
-Open **Match & Replace** from the command palette (`Ctrl-P` → **Match & Replace**; rebind it in `settings:hotkeys` if you want a Global chord). Rules rewrite the **head** (request line + headers) or the **body** of a request/response in flight. Each rule is a literal substring swap applied to live traffic.
+The **Rewriter** tab is the Match & Replace editor: rules that rewrite requests and responses in flight. It is hidden by default, so reach it from the tab-bar `⋯` menu or the command palette (`Ctrl-P` → **Match & Replace**, or **Go to Rewriter**).
 
-Syntax is one line per rule:
+Each rule has an operation:
 
-```text
-req: User-Agent: x => User-Agent: gori
-resp: Set-Cookie => X-Stripped
-reqbody: password => hunter2
-respbody: "debug":false => "debug":true
-```
+| Operation | What it does |
+|-----------|--------------|
+| **Replace** | Find and replace text in the head or body, by literal substring or regex |
+| **Add header** | Append a `Name: value` header |
+| **Set header** | Replace a header's value by name, or add it if absent |
+| **Remove header** | Drop a header by name |
 
-| Prefix | Target |
-|--------|--------|
-| `req:` (default) | Request head |
-| `resp:` | Response head |
-| `reqbody:` | Request body |
-| `respbody:` | Response body |
+A **Replace** rule targets the request or response, and the **head** (request/status line + headers) or **body** (the entity). Choose literal or regex matching; a regex replacement supports `$1`/`$2` capture-group interpolation (write `$$` for a literal `$`). Header operations always act on the head and match by header name, case-insensitively. An empty value deletes the matched text or removes the header.
 
-An empty replacement deletes the matched text. A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. Body rewriting works on the decoded transfer form. A compressed (`Content-Encoding: gzip`/`br`/…) body isn't decompressed, so a literal pattern simply won't match it, and streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. Rules are per-project, can be toggled on and off individually, and apply as soon as you add them, with no restart. Use them to strip cookies, inject headers, or rewrite body values before traffic hits History or the scanners.
+Scope any rule to a **host** glob so it only fires for matching traffic: a plain string matches as a substring (`example.com` matches `api.example.com`), and `*` is a wildcard (`*.example.com`). Leave it empty to apply to every host.
+
+Manage the list with `a` add, `e`/`Enter` edit, `x` enable/disable, `d` delete, `Shift-J`/`Shift-K` reorder (rules apply top to bottom), and `space` for the full menu. The editor shows a live preview of how many recent flows a rule would affect. Rules are per-project and take effect as soon as you save, with no restart.
+
+A **body** rule buffers the message to rewrite it and re-syncs `Content-Length` automatically (a chunked body is de-chunked and re-framed); head rules keep the body streaming untouched. A compressed (`Content-Encoding: gzip`/`br`/…) body isn't decompressed, so a literal pattern won't match it, and streaming responses (SSE, close-delimited, WebSocket upgrades) are left to stream. Enabling any rule forces matching hosts to HTTP/1.1, since HTTP/2 heads never reach the rewrite seam.
+
+The same rules are scriptable headless: `gori run rewriter` (list / add / rm / enable / disable / preview) and the MCP `create_rule` / `update_rule` / `list_rules` / `preview_rule` tools.
 
 ## Import
 

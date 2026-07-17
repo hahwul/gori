@@ -487,8 +487,8 @@ module Gori
           end
 
           tool j, "list_rules",
-            "List the project's Match & Replace rules (literal substring rewrites applied to " \
-            "in-flight request/response HEAD or BODY), in apply order." { }
+            "List the project's Match & Replace rules (the Rewriter tab — literal/regex replace or " \
+            "add/set/remove header, applied to in-flight request/response HEAD or BODY), in apply order." { }
 
           tool j, "list_projects",
             "List gori projects on this host (name, slug, db_path, db_size, last_modified, " \
@@ -572,35 +572,46 @@ module Gori
             end
 
             tool j, "create_rule",
-              "Add a Match & Replace rule (a literal substring rewrite applied to in-flight traffic). " \
+              "Add a Match & Replace rule (the Rewriter tab) applied to in-flight traffic. " \
               "Persisted to the project. Note: a gori TUI already running applies it only after its " \
-              "rules reload (reopen the rules editor or restart); `gori run` and newly opened TUIs " \
+              "rules reload (reopen the Rewriter tab or restart); `gori run` and newly opened TUIs " \
               "pick it up immediately." do |s|
-              s.field "pattern", strprop("literal substring to match"), required: true
-              s.field "replacement", strprop("literal replacement (empty = delete the pattern; default empty)")
+              s.field "pattern", strprop("for replace: the substring/regex to match; for a header op: the HEADER NAME"), required: true
+              s.field "replacement", strprop("for replace: the replacement (empty = delete; supports $1 capture refs when match=regex); for add/set header: the header VALUE (default empty)")
               s.field "target", strprop("request|response (default request)")
-              s.field "part", strprop("head|body — head = request/status line + headers, body = entity body (default head)")
+              s.field "part", strprop("head|body — head = request/status line + headers, body = entity body (default head; ignored by header ops, which are head-only)")
+              s.field "op", strprop("replace | add_header | set_header | remove_header (default replace)")
+              s.field "match", strprop("for replace: literal | regex (default literal). Regex supports $1/\\1 capture groups")
+              s.field "name", strprop("optional label for the rule")
+              s.field "host", strprop("optional host glob scoping the rule (e.g. 'example.com' substring, '*.example.com' wildcard; empty = all hosts)")
               s.field "enabled", boolprop("create the rule already enabled (default true); pass false for an atomic disabled creation (no live window before you can preview/adjust it)")
             end
 
             tool j, "update_rule",
-              "Update an existing Match & Replace rule's target/part/pattern/replacement/enabled by id. " \
-              "Omitted fields are left unchanged." do |s|
+              "Update an existing Match & Replace rule by id. Omitted fields are left unchanged." do |s|
               s.field "id", intprop("rule id from list_rules"), required: true
-              s.field "pattern", strprop("new literal substring to match")
-              s.field "replacement", strprop("new literal replacement")
+              s.field "pattern", strprop("new match substring/regex, or header name")
+              s.field "replacement", strprop("new replacement / header value")
               s.field "target", strprop("request|response")
               s.field "part", strprop("head|body")
+              s.field "op", strprop("replace | add_header | set_header | remove_header")
+              s.field "match", strprop("literal | regex")
+              s.field "name", strprop("rule label")
+              s.field "host", strprop("host glob ('' = all hosts)")
               s.field "enabled", boolprop("enable/disable the rule")
             end
 
             tool j, "preview_rule",
-              "Estimate how many captured flows a rule WOULD match (literal-substring scan of the " \
-              "relevant part over recent flows) WITHOUT creating it. Use before create_rule to size a rule. " \
+              "Estimate how many captured flows a rule WOULD affect (by replaying the same transform " \
+              "over recent flows) WITHOUT creating it. Use before create_rule to size a rule. " \
               "Approximate: response bodies are scanned as stored wire bytes." do |s|
-              s.field "pattern", strprop("literal substring to match"), required: true
+              s.field "pattern", strprop("the substring/regex to match, or header name"), required: true
+              s.field "replacement", strprop("replacement / header value (matters for header ops, which change the head regardless of match)")
               s.field "target", strprop("request|response (default request)")
               s.field "part", strprop("head|body (default head)")
+              s.field "op", strprop("replace | add_header | set_header | remove_header (default replace)")
+              s.field "match", strprop("literal | regex (default literal)")
+              s.field "host", strprop("host glob ('' = all hosts)")
             end
 
             tool j, "set_rule_enabled", "Enable or disable a Match & Replace rule by id." do |s|
@@ -2773,8 +2784,12 @@ module Gori
                   j.object do
                     j.field "id", r.id
                     j.field "enabled", r.enabled?
+                    j.field "name", r.name
                     j.field "target", r.target.label
                     j.field "part", r.part.label
+                    j.field "op", r.op.label
+                    j.field "match", r.match_kind.label
+                    j.field "host", r.host
                     j.field "pattern", r.pattern
                     j.field "replacement", r.replacement
                   end
@@ -2791,17 +2806,25 @@ module Gori
         tp = rule_target_part(h, Store::RuleTarget::Request, Store::RulePart::Head)
         return tp if tp.is_a?(Result)
         target, part = tp
+        ok = rule_op_kind(h, Store::RuleOp::Replace, Store::MatchKind::Literal)
+        return ok if ok.is_a?(Result)
+        op, match_kind = ok
+        part = Store::RulePart::Head if op.header? # header ops are head-only
         replacement = str(h, "replacement") || ""
+        name = str(h, "name") || ""
+        host = str(h, "host") || ""
         # Atomic disabled creation: insert already-disabled so there is no window
         # where a just-created rule is live before a follow-up disable call.
         enabled = bool_arg(h, "enabled", true)
-        id = @store.insert_rule(target, part, pattern, replacement, enabled)
+        id = @store.insert_rule(target, part, pattern, replacement, op, match_kind, name, host, enabled)
         return busy("failed to persist rule (store busy or unwritable)") if id == 0
         Result.new(JSON.build do |j|
           j.object do
             j.field "id", id
             j.field "target", target.label
             j.field "part", part.label
+            j.field "op", op.label
+            j.field "match", match_kind.label
             j.field "enabled", enabled
           end
         end)
@@ -2817,10 +2840,16 @@ module Gori
         tp = rule_target_part(h, existing.target, existing.part)
         return tp if tp.is_a?(Result)
         target, part = tp
+        ok = rule_op_kind(h, existing.op, existing.match_kind)
+        return ok if ok.is_a?(Result)
+        op, match_kind = ok
+        part = Store::RulePart::Head if op.header?
         pattern = present?(h, "pattern") ? str(h, "pattern") : existing.pattern
         return err("pattern must not be empty", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
         replacement = present?(h, "replacement") ? (str(h, "replacement") || "") : existing.replacement
-        @store.update_rule(id, target, part, pattern, replacement)
+        name = present?(h, "name") ? (str(h, "name") || "") : existing.name
+        host = present?(h, "host") ? (str(h, "host") || "") : existing.host
+        @store.update_rule(id, target, part, pattern, replacement, op, match_kind, name, host)
         if present?(h, "enabled")
           en = bool_arg(h, "enabled", existing.enabled?)
           @store.set_rule_enabled(id, en)
@@ -2831,44 +2860,44 @@ module Gori
             j.field "updated", true
             j.field "target", target.label
             j.field "part", part.label
+            j.field "op", op.label
           end
         end)
       rescue ex : Gori::Error
         err(ex.message || "invalid rule arguments", "INVALID_ARGUMENT")
       end
 
-      RULE_PREVIEW_SCAN = 500
-
-      # Estimate how many captured flows a rule WOULD match, by literal-substring
-      # scanning the relevant part of up to RULE_PREVIEW_SCAN recent flows. Nothing
-      # is written. Approximate: response bodies are scanned as STORED (possibly
-      # compressed) wire bytes, so a text pattern mainly reflects head/text matches.
+      # Estimate how many captured flows a rule WOULD affect by replaying the SAME
+      # transform the live proxy uses (regex / header ops / host-scope all reflected)
+      # over recent flows. Nothing is written. Approximate: response bodies are scanned
+      # as STORED (possibly compressed) wire bytes.
       private def preview_rule(h) : Result
         pattern = str(h, "pattern")
         return err("missing required 'pattern'", "INVALID_ARGUMENT", field: "pattern") if pattern.nil? || pattern.empty?
         tp = rule_target_part(h, Store::RuleTarget::Request, Store::RulePart::Head)
         return tp if tp.is_a?(Result)
         target, part = tp
-        scanned = 0
-        matched = 0
-        @store.recent_flows(RULE_PREVIEW_SCAN, nil).each do |row|
-          detail = @store.get_flow(row.id)
-          next unless detail
-          scanned += 1
-          bytes = rule_part_bytes(detail, target, part)
-          matched += 1 if bytes && String.new(bytes).scrub.includes?(pattern)
-        end
-        total = @store.count
+        ok = rule_op_kind(h, Store::RuleOp::Replace, Store::MatchKind::Literal)
+        return ok if ok.is_a?(Result)
+        op, match_kind = ok
+        part = Store::RulePart::Head if op.header?
+        replacement = str(h, "replacement") || ""
+        host = str(h, "host") || ""
+        candidate = Store::MatchRule.new(0_i64, true, target, part, pattern, replacement, op, match_kind, "", host)
+        # Reuse the engine's preview over a throwaway Rules bound only to the store.
+        pv = Gori::Rules.new(@store, [] of Store::MatchRule).preview(candidate)
         Result.new(JSON.build do |j|
           j.object do
             j.field "target", target.label
             j.field "part", part.label
+            j.field "op", op.label
+            j.field "match", match_kind.label
             j.field "pattern", pattern
-            j.field "would_match", matched
-            j.field "scanned", scanned
-            j.field "total_flows", total
-            j.field "scan_capped", total > scanned
-            j.field "note", "Literal substring over stored flows (bounded to #{RULE_PREVIEW_SCAN}); response bodies are matched as stored wire bytes."
+            j.field "would_match", pv.matched
+            j.field "scanned", pv.scanned
+            j.field "total_flows", pv.total
+            j.field "scan_capped", pv.total > pv.scanned
+            j.field "note", "Replays the rule transform over recent flows (bounded to #{Gori::Rules::RULE_PREVIEW_SCAN}); response bodies are matched as stored wire bytes."
           end
         end)
       end
@@ -2885,12 +2914,25 @@ module Gori
         {target, part}
       end
 
-      private def rule_part_bytes(detail : Store::FlowDetail, target : Store::RuleTarget, part : Store::RulePart) : Bytes?
-        if target.request?
-          part.head? ? detail.request_head : detail.request_body
-        else
-          part.head? ? detail.response_head : detail.response_body
-        end
+      # Parse op/match from args, defaulting to the given fallbacks. Returns the pair or
+      # an error Result. Shared by create/update/preview_rule.
+      private def rule_op_kind(h, dft_op : Store::RuleOp, dft_kind : Store::MatchKind) : {Store::RuleOp, Store::MatchKind} | Result
+        op_s = str(h, "op").try(&.strip)
+        op = if op_s.nil? || op_s.empty?
+               dft_op
+             else
+               case op_s.downcase
+               when "replace"       then Store::RuleOp::Replace
+               when "add_header"    then Store::RuleOp::AddHeader
+               when "set_header"    then Store::RuleOp::SetHeader
+               when "remove_header" then Store::RuleOp::RemoveHeader
+               else                      nil
+               end
+             end
+        return err("invalid 'op' (expected replace|add_header|set_header|remove_header)", "INVALID_ARGUMENT", field: "op") unless op
+        kind_s = str(h, "match").try(&.strip)
+        kind = kind_s.nil? || kind_s.empty? ? dft_kind : Store::MatchKind.from_label(kind_s.downcase)
+        {op, kind}
       end
 
       private def set_rule_enabled(h) : Result

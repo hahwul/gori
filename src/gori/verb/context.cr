@@ -330,6 +330,17 @@ module Gori
       abstract def jwt_copy_attack : Nil       # copy the selected ATTACK payload's token
       abstract def jwt_read_mode? : Bool       # focused pane is READ (gates y/copy/select verbs)
 
+      # rewriter: the Match & Replace rule list (the Rewriter tab). The body is a
+      # navigable list, so these back both the space menu/palette AND the list's keys.
+      abstract def rewriter_add : Nil             # open the editor to add a rule
+      abstract def rewriter_edit : Nil            # edit the selected rule
+      abstract def rewriter_toggle : Nil          # enable/disable the selected rule
+      abstract def rewriter_delete : Nil          # delete the selected rule (confirms)
+      abstract def rewriter_move(dir : Int32) : Nil # reorder the selected rule ±1 in apply order
+      abstract def rewriter_duplicate : Nil       # copy the selected rule
+      abstract def rewriter_reload : Nil          # re-read rules from the DB (external edits)
+      abstract def rewriter_rule_selected? : Bool # a rule is selected (gates edit/delete/… verbs)
+
       # notes: the multi-note scratchpad (sub-tab actions; the body's text editing
       # stays inline, these power the space menu reachable from the sub-tab strip)
       abstract def notes_new : Nil              # open a fresh blank note sub-tab

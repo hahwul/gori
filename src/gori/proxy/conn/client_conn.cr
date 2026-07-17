@@ -155,7 +155,7 @@ module Gori::Proxy
       sent_req = req
       sent_head = forward_head
       if rw = @rewriter
-        rewritten = rw.rewrite_request(forward_head)
+        rewritten = rw.rewrite_request(forward_head, host)
         if rewritten != forward_head
           sent_head = rewritten
           sent_req = Codec::Http1.parse_request_head(rewritten)
@@ -261,7 +261,7 @@ module Gori::Proxy
       # already M&R'd into `sent_head`. A body rule re-frames to Content-Length, so re-parse
       # the (possibly rewritten) head for the hold metadata + capture.
       if (rw = @rewriter) && rw.rewrites_request_body?
-        sent_head, buffered = apply_body_rewrite(sent_head, buffered, req_framing) { |e| rw.rewrite_request_body(e) }
+        sent_head, buffered = apply_body_rewrite(sent_head, buffered, req_framing) { |e| rw.rewrite_request_body(e, host) }
         sent_req = Codec::Http1.parse_request_head(sent_head)
       end
       decision = ic.hold_request(build_message(sent_head, buffered),
@@ -313,7 +313,7 @@ module Gori::Proxy
         record_error(sent_req, scheme, host, port, created_at, "client truncated request body")
         return false
       end
-      sent_head, fwd_body = apply_body_rewrite(sent_head, buffered, req_framing) { |e| rw.rewrite_request_body(e) }
+      sent_head, fwd_body = apply_body_rewrite(sent_head, buffered, req_framing) { |e| rw.rewrite_request_body(e, host) }
       sent_req = Codec::Http1.parse_request_head(sent_head) # head may have been re-framed
       upstream, reused, sent = acquire_and_send(host, port, false) { |up| write_request(up, sent_head, fwd_body) }
       unless upstream && sent
@@ -394,7 +394,7 @@ module Gori::Proxy
 
       # Match&Replace (response head). Framing/keep-alive/upgrade stay on the
       # ORIGINAL response so the upstream body is read correctly.
-      sent_resp_head, sent_resp = apply_response_rewrite(resp_head, resp)
+      sent_resp_head, sent_resp = apply_response_rewrite(resp_head, resp, host)
       # Body framing must reflect the method the ORIGIN actually received (HEAD/CONNECT
       # are bodyless per RFC 7230 §3.3.3). A Match&Replace / intercept edit can rewrite
       # the request-line method, so key off sent_req, not the client's original req.
@@ -590,7 +590,7 @@ module Gori::Proxy
                                                 ttfb : Int64, started : Time::Instant) : Bool
       buf = IO::Memory.new
       resp_complete = Codec::Body.stream(upstream, buf, resp_framing, resp_len, Codec::DiscardIO.new, copy_buf)
-      sent_resp_head, fwd_body = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing) { |e| rw.rewrite_response_body(e) }
+      sent_resp_head, fwd_body = apply_body_rewrite(sent_resp_head, buf.to_slice, resp_framing) { |e| rw.rewrite_response_body(e, host) }
       sent_resp = Codec::Http1.parse_response_head(sent_resp_head) # head may have been re-framed
       stored, trunc, size = capped(fwd_body)
       state = resp_complete ? Store::FlowState::Complete : Store::FlowState::Aborted
@@ -637,10 +637,10 @@ module Gori::Proxy
 
     # Apply response-head Match&Replace; returns the (possibly rewritten) head +
     # its parsed projection. Unchanged bytes keep the original (P7).
-    private def apply_response_rewrite(resp_head : Bytes, resp : Codec::RawResponse) : {Bytes, Codec::RawResponse}
+    private def apply_response_rewrite(resp_head : Bytes, resp : Codec::RawResponse, host : String) : {Bytes, Codec::RawResponse}
       rw = @rewriter
       return {resp_head, resp} unless rw
-      rewritten = rw.rewrite_response(resp_head)
+      rewritten = rw.rewrite_response(resp_head, host)
       return {resp_head, resp} if rewritten == resp_head
       {rewritten, Codec::Http1.parse_response_head(rewritten)}
     end
@@ -669,7 +669,7 @@ module Gori::Proxy
       # re-frames the head to Content-Length; `resp` (status/version/Connection) is
       # untouched by that, so keep it as the origin's framing/keep-alive truth.
       if (rw = @rewriter) && rw.rewrites_response_body?
-        sent_resp_head, body = apply_body_rewrite(sent_resp_head, body, resp_framing) { |e| rw.rewrite_response_body(e) }
+        sent_resp_head, body = apply_body_rewrite(sent_resp_head, body, resp_framing) { |e| rw.rewrite_response_body(e, host) }
       end
       decision = ic.hold_response(build_message(sent_resp_head, body),
         flow_id: flow_id, method: req.method, target: "#{resp.status} #{resp.reason}",

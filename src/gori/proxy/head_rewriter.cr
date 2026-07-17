@@ -10,8 +10,8 @@ module Gori::Proxy
   # when it changes nothing, so the caller can tell a rewrite happened and preserve
   # byte-fidelity (P7) for unmodified flows.
   abstract class HeadRewriter
-    abstract def rewrite_request(head : Bytes) : Bytes
-    abstract def rewrite_response(head : Bytes) : Bytes
+    abstract def rewrite_request(head : Bytes, host : String) : Bytes
+    abstract def rewrite_response(head : Bytes, host : String) : Bytes
 
     # Whether any rewrite is actually configured. The TLS MITM uses this to decide
     # NOT to advertise h2 (forcing the client to HTTP/1.1) when rules are live — h2's
@@ -35,11 +35,12 @@ module Gori::Proxy
     # Rewrite the ENTITY body (de-chunked, not decompressed). MUST return the SAME
     # bytes when nothing matched so ClientConn can passthrough byte-exact (P7); a
     # compressed body simply won't match a literal pattern and returns unchanged.
-    def rewrite_request_body(entity : Bytes) : Bytes
+    # `host` lets a rule scope itself to matching hosts (empty glob = all).
+    def rewrite_request_body(entity : Bytes, host : String) : Bytes
       entity
     end
 
-    def rewrite_response_body(entity : Bytes) : Bytes
+    def rewrite_response_body(entity : Bytes, host : String) : Bytes
       entity
     end
   end

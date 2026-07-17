@@ -561,6 +561,7 @@ module Gori
       register_comparer(r)
       register_decoder(r)
       register_jwt(r)
+      register_rewriter(r)
       register_notes(r)
       register_host_overrides(r)
       register_env(r)

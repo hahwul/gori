@@ -27,11 +27,11 @@ end
 # A fixed Match&Replace rewriter for exercising the ClientConn head-rewrite hook
 # without a Store/Rules engine.
 private class StubRewriter < Gori::Proxy::HeadRewriter
-  def rewrite_request(head : Bytes) : Bytes
+  def rewrite_request(head : Bytes, host : String) : Bytes
     String.new(head).gsub("/hello", "/hi").to_slice
   end
 
-  def rewrite_response(head : Bytes) : Bytes
+  def rewrite_response(head : Bytes, host : String) : Bytes
     String.new(head).gsub("200 OK", "200 YO").to_slice
   end
 end
@@ -40,11 +40,11 @@ end
 # form), for exercising the buffer + re-frame path. Both replacements CHANGE the
 # body length so the test can prove Content-Length is re-synced. Heads pass through.
 private class BodyRewriter < Gori::Proxy::HeadRewriter
-  def rewrite_request(head : Bytes) : Bytes
+  def rewrite_request(head : Bytes, host : String) : Bytes
     head
   end
 
-  def rewrite_response(head : Bytes) : Bytes
+  def rewrite_response(head : Bytes, host : String) : Bytes
     head
   end
 
@@ -56,11 +56,11 @@ private class BodyRewriter < Gori::Proxy::HeadRewriter
     true
   end
 
-  def rewrite_request_body(entity : Bytes) : Bytes
+  def rewrite_request_body(entity : Bytes, host : String) : Bytes
     String.new(entity).gsub("ping", "PONG!").to_slice
   end
 
-  def rewrite_response_body(entity : Bytes) : Bytes
+  def rewrite_response_body(entity : Bytes, host : String) : Bytes
     String.new(entity).gsub("SECRET", "[HIDDEN]").to_slice
   end
 end
