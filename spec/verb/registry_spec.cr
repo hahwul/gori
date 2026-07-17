@@ -660,6 +660,18 @@ private class FakeContext < ExecContext
     @calls << :probe_promote
   end
 
+  def probe_active_selected : Nil
+    @calls << :probe_active_selected
+  end
+
+  def probe_active_rescan : Nil
+    @calls << :probe_active_rescan
+  end
+
+  def probe_active_from_repeater : Nil
+    @calls << :probe_active_from_repeater
+  end
+
   def toggle_capture : Nil
     @calls << :toggle_capture
   end

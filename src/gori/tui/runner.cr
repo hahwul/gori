@@ -58,6 +58,7 @@ require "./fuzz_set_overlay"
 require "./fuzz_advanced_overlay"
 require "./discover_config_overlay"
 require "./discover_headers_overlay"
+require "./probe_active_overlay"
 require "./scope_rule_overlay"
 require "./custom_rule_overlay"
 require "./ca_import_overlay"
@@ -92,7 +93,7 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :rules | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :fuzz_set | :fuzz_advanced | :scope_rule | :probe_rule | :ca_import
+      @overlay = :none # :none | :palette | :detail | :rules | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :probe_active | :fuzz_set | :fuzz_advanced | :scope_rule | :probe_rule | :ca_import
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -210,6 +211,8 @@ module Gori::Tui
       @mine_config_overlay = nil.as(MineConfigOverlay?)
       @discover_config_overlay = nil.as(DiscoverConfigOverlay?)
       @discover_headers_overlay = nil.as(DiscoverHeadersOverlay?)
+      # :probe_active while the "Run active scan" popup is up (holds the seed flow + estimate).
+      @probe_active_overlay = nil.as(ProbeActiveOverlay?)
       # The Fuzzer config overlays (CONFIG pane → ↵ on a set / Add / Advanced): a payload-set
       # editor and the advanced-settings form. @overlay is :fuzz_set / :fuzz_advanced while up;
       # built fresh from the current fuzz session each time they open.
@@ -948,6 +951,7 @@ module Gori::Tui
       return handle_hotkeys_key(ev) if @overlay == :hotkeys
       return handle_notifications_key(ev) if @overlay == :notifications
       return handle_mine_config_key(ev) if @overlay == :mine_config
+      return handle_probe_active_key(ev) if @overlay == :probe_active
       return handle_discover_config_key(ev) if @overlay == :discover_config
       return handle_discover_headers_key(ev) if @overlay == :discover_headers
       return handle_fuzz_set_key(ev) if @overlay == :fuzz_set
@@ -1200,7 +1204,7 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :probe_rule, :ca_import then true
+      when :palette, :rules, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :settings, :tabs, :hotkeys, :notifications, :mine_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :probe_rule, :ca_import then true
       else                                                                                                                                                                                                                                                               false
       end
     end
@@ -1306,6 +1310,7 @@ module Gori::Tui
       when :hotkeys       then click_hotkeys(area, mx, my)
       when :notifications then click_notifications(area, mx, my)
       when :mine_config   then click_mine_config(area, mx, my)
+      when :probe_active  then click_probe_active(area, mx, my)
       when :discover_config then click_discover_config(area, mx, my)
       when :discover_headers then click_discover_headers(area, mx, my)
       when :fuzz_set      then click_fuzz_set(area, mx, my)
@@ -1373,6 +1378,17 @@ module Gori::Tui
       if idx = ov.row_at(box, mx, my)
         ov.set_selected(idx)
         ov.on_start_row? ? start_mining(ov) : ov.toggle
+      end
+    end
+
+    private def click_probe_active(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @probe_active_overlay
+      return unless ov
+      box = ov.overlay_box(area)
+      return close_probe_active if box.nil? || dismiss_zone?(box, mx, my)
+      if idx = ov.row_at(box, mx, my)
+        ov.set_selected(idx)
+        ov.on_run_row? ? start_probe_active(ov) : ov.toggle
       end
     end
 
@@ -1579,6 +1595,7 @@ module Gori::Tui
       when :hotkeys       then @hotkeys_overlay.select_move(step)
       when :notifications then @notifications_overlay.select_move(step)
       when :mine_config   then @mine_config_overlay.try(&.move(step))
+      when :probe_active  then @probe_active_overlay.try(&.move(step))
       when :discover_config then @discover_config_overlay.try(&.move(step))
       when :fuzz_set      then @fuzz_set_overlay.try(&.move(step))
       when :fuzz_advanced then @fuzz_advanced_overlay.try(&.move(step))
@@ -1626,6 +1643,26 @@ module Gori::Tui
         ov.adjust(1)
       elsif key.enter? || key.space?
         ov.on_start_row? ? start_mining(ov) : ov.toggle
+      end
+    end
+
+    # Run-active-scan popup: ↑/↓ field · ←/→ notify · ↵ run · esc cancel.
+    private def handle_probe_active_key(ev : Termisu::Event::Key) : Nil
+      ov = @probe_active_overlay
+      return unless ov
+      key = ev.key
+      if key.escape?
+        close_probe_active
+      elsif key.up?
+        ov.move(-1)
+      elsif key.down?
+        ov.move(1)
+      elsif key.left?
+        ov.adjust(-1)
+      elsif key.right?
+        ov.adjust(1)
+      elsif key.enter? || key.space?
+        ov.on_run_row? ? start_probe_active(ov) : ov.toggle
       end
     end
 
@@ -3503,6 +3540,7 @@ module Gori::Tui
       @hotkeys_overlay.render(screen, layout.body) if @overlay == :hotkeys
       @notifications_overlay.render(screen, layout.body) if @overlay == :notifications
       @mine_config_overlay.try(&.render(screen, layout.body)) if @overlay == :mine_config
+      @probe_active_overlay.try(&.render(screen, layout.body)) if @overlay == :probe_active
       @discover_config_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_config
       @discover_headers_overlay.try(&.render(screen, layout.body)) if @overlay == :discover_headers
       @fuzz_set_overlay.try(&.render(screen, layout.body)) if @overlay == :fuzz_set
@@ -3614,6 +3652,7 @@ module Gori::Tui
       when :hotkeys       then "HOTKEYS"
       when :notifications then "NOTIFICATIONS"
       when :mine_config   then "MINE PARAMS"
+      when :probe_active  then "ACTIVE SCAN"
       when :discover_config then "DISCOVER"
       when :discover_headers then "CUSTOM HEADERS"
       when :fuzz_set      then "PAYLOAD SET"
@@ -3665,6 +3704,7 @@ module Gori::Tui
       when :hotkeys       then @hotkeys_overlay.capturing? ? "press a key to bind · esc cancel" : "↑/↓ select · e/␣ rebind · x unbind · r reset · ⇧R reset all · ←/→ profile · ↵ save · esc"
       when :notifications then "↑/↓ select · ↵ open · c clear · esc close"
       when :mine_config   then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start · esc cancel"
+      when :probe_active  then "↑/↓ field · ←/→ notify · ↵ run · esc cancel"
       when :discover_config then "↑/↓ field · ←/→ adjust · ␣ toggle · ↵ start/edit · esc cancel"
       when :discover_headers then "one header per line · Host/Connection ignored · esc saves & closes"
       when :fuzz_set      then "↑/↓/⇥ field · ←/→ type/caret · ↵ new value/next · esc applies & closes"
@@ -4692,6 +4732,67 @@ module Gori::Tui
         return
       end
       @toast = "this issue has no sample evidence"
+    end
+
+    # --- manual active scan (History list / detail, Probe findings, Repeater) ---
+    # On-demand run of the Probe ACTIVE checks against one flow, regardless of the Probe mode.
+    # Each source resolves a FlowDetail, then open_probe_active_overlay shows the expected
+    # request count before anything is sent.
+
+    # History list / open detail → the selected (or open) flow.
+    def probe_active_selected : Nil
+      id = history_target_flow_id
+      return (@toast = "select a flow first") unless id
+      detail = @session.store.get_flow(id)
+      return (@toast = "flow no longer available") unless detail
+      open_probe_active_overlay(detail)
+    end
+
+    # Probe findings list → the selected issue's sample flow (re-test the evidence in place).
+    def probe_active_rescan : Nil
+      return (@toast = "select an issue first") unless i = probe_controller.view.target_issue
+      fid = i.sample_flow_id
+      return (@toast = "this issue has no captured flow to re-scan") unless fid
+      detail = @session.store.get_flow(fid)
+      return (@toast = "evidence no longer captured (pruned)") unless detail
+      open_probe_active_overlay(detail)
+    end
+
+    # Repeater → the current session's last HTTP send (request as edited + its response).
+    def probe_active_from_repeater : Nil
+      detail = repeater_controller.active_scan_detail
+      return (@toast = "send the request first (an active scan needs a response)") unless detail
+      open_probe_active_overlay(detail, repeater_id: repeater_controller.current_session_db_id)
+    end
+
+    # Estimate the active-scan request count for `detail`, then open the "Run active scan" popup
+    # (per-rule breakdown + total + a notification-mode cycler). Running is deferred to
+    # start_probe_active so the operator can pick the notify mode first.
+    private def open_probe_active_overlay(detail : Store::FlowDetail, repeater_id : Int64? = nil) : Nil
+      est = @session.probe.active_estimate(detail)
+      if est.empty?
+        @toast = "no active checks apply (needs a GET/HEAD with reflectable params, or a CORS response)"
+        return
+      end
+      @probe_active_overlay = ProbeActiveOverlay.new(detail, est, repeater_id)
+      @overlay = :probe_active
+    end
+
+    # Confirm the popup: run the probes in the BACKGROUND (mode-independent), persist the chosen
+    # notify mode as the next default, and toast the request count. Findings land in the Probe tab
+    # via the usual probe_generation poll + event drain.
+    private def start_probe_active(ov : ProbeActiveOverlay) : Nil
+      notify = ov.notify_mode
+      Settings.save_probe_active_notify(notify.token)
+      host = ov.detail.row.host
+      @session.probe.run_active_now(ov.detail, repeater_id: ov.repeater_id, notify: notify)
+      @toast = "active scan → #{host}: #{ov.total_label} sent (see the Probe tab)"
+      close_probe_active
+    end
+
+    private def close_probe_active : Nil
+      @overlay = :none
+      @probe_active_overlay = nil
     end
 
     # Promote a machine-found Probe issue to a human-confirmed Issue (the bridge to the

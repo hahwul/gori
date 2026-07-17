@@ -235,6 +235,13 @@ module Gori
       abstract def probe_repeater_flow : Nil   # send the issue's sample flow to Repeater
       abstract def probe_promote : Nil       # create a Issue from the open issue
 
+      # probe active scan — manual, on-demand run of the request-sending active rules against ONE
+      # flow, regardless of the current Probe mode. Each opens a confirm dialog showing the
+      # expected request count, then runs the probes in the background.
+      abstract def probe_active_selected : Nil      # active-scan History's selected (or open) flow
+      abstract def probe_active_rescan : Nil        # re-active-scan the selected Probe issue's sample flow
+      abstract def probe_active_from_repeater : Nil # active-scan the current Repeater session's last send
+
       # intercept (hold-and-decide; P4)
       abstract def intercept_toggle : Nil          # toggle the hold queue on/off
       abstract def intercept_forward : Nil         # forward the selected held message (edited bytes)

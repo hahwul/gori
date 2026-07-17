@@ -104,6 +104,25 @@ describe Gori::Settings do
     end
   end
 
+  it "persists and reloads the active-scan notification mode" do
+    dir = File.tempname("gori-settings-probe")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.save_probe_active_notify("off")
+      File.read(Gori::Settings.path).should contain(%("active_notify"))
+
+      Gori::Settings.probe_active_notify = "when-found"
+      Gori::Settings.load
+      Gori::Settings.probe_active_notify.should eq("off")
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.probe_active_notify = "when-found"
+    end
+  end
+
   it "persists and reloads layout prefs; omits the layout section at factory defaults" do
     dir = File.tempname("gori-settings-layout")
     Dir.mkdir_p(dir)

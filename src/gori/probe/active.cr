@@ -27,6 +27,12 @@ module Gori
       def self.detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
         PRIMARY.detections(plan, result, detail)
       end
+
+      # Compact per-flow request-count label for the Rules sub-tab + manual-run estimate:
+      # "1 req/flow" for the fixed-cost rules today, "1–3 req/flow" for a future multi-probe rule.
+      def self.estimate_label(rng : Range(Int32, Int32)) : String
+        rng.begin == rng.end ? "#{rng.begin} req/flow" : "#{rng.begin}–#{rng.end} req/flow"
+      end
     end
   end
 end
