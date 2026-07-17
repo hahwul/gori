@@ -705,13 +705,28 @@ module Gori::Tui
     def drain_events : Bool
       applied = false
       applied = true if drain_registrations
+      # Pin the callback selection to the SAME callback across live inserts: each new callback
+      # prepends to the newest-first display and shifts every index down, so a bare @cb_sel would
+      # silently slide onto a neighbor (and flip an open detail). Capture its stable key, re-resolve.
+      sel_key = selected_callback.try { |c| {c.session_id, c.uid} }
       n = 0
+      inserted = false
       while n < DRAIN_CAP && (ev = nonblocking_callback)
         n += 1
         apply_callback(ev)
         applied = true
+        inserted = true
       end
+      reanchor_callback_selection(sel_key) if inserted && sel_key
       applied
+    end
+
+    # Move @cb_sel back onto the callback identified by `key` after live inserts shifted the
+    # display indices. No-op if it was filtered out (the clamp in render keeps @cb_sel in range).
+    private def reanchor_callback_selection(key : {Int64, String}) : Nil
+      if idx = ordered_callbacks.index { |c| {c.session_id, c.uid} == key }
+        @cb_sel = idx
+      end
     end
 
     private def drain_registrations : Bool

@@ -368,7 +368,10 @@ module Gori::Tui
     def sequence_from_text(payload : String) : Nil
       tokens = payload.split(/\r?\n/).map(&.strip).reject(&.empty?)
       return @host.status("nothing to analyze") if tokens.empty?
-      if (v = current_view) && v.config.mode.manual? && @host.active_tab == :sequencer
+      # Append into the current manual session only when it is NOT still collecting — starting
+      # a run under a live fiber would spawn a second concurrent engine feeding the same view
+      # (corrupted stats + orphaned job). A running session instead gets a fresh session below.
+      if (v = current_view) && v.config.mode.manual? && !v.running? && @host.active_tab == :sequencer
         v.append_manual_tokens(tokens)
         save_current
         drain_events
@@ -395,6 +398,12 @@ module Gori::Tui
 
     def reconfigure_current(config : Sequencer::Config) : Nil
       return unless v = current_view
+      # Restarting under a live collection would spawn a second engine fiber feeding the same
+      # view (interleaved samples → corrupted randomness stats, orphaned job). Require a stop first.
+      if v.running?
+        @host.status("stop the collection first (^X) to reconfigure")
+        return
+      end
       v.set_config(config)
       save_current
       drain_events
