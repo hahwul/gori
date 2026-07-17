@@ -864,6 +864,10 @@ private class FakeContext < ExecContext
     @calls << :copy_as_open
   end
 
+  def send_to_open : Nil
+    @calls << :send_to_open
+  end
+
   def detail_navigable? : Bool
     false
   end

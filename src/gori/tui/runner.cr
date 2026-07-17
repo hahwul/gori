@@ -35,6 +35,7 @@ require "./browser_picker"
 require "./choice_picker"
 require "./more_menu"
 require "./copy_picker"
+require "./send_picker"
 require "./flow_picker"
 require "./subtab_picker"
 require "./links_overlay"
@@ -157,6 +158,9 @@ module Gori::Tui
       # Repeater body (@overlay :none) OR the History detail drill-in (@overlay :detail) —
       # without disturbing that state. Non-nil ⇔ shown (see copy_as_shown?).
       @copy_picker = nil.as(CopyPicker?)
+      # The "send selection to X" destination picker (space → S); same orthogonal-to-
+      # @overlay lifetime as @copy_picker. Non-nil ⇔ shown (see send_to_shown?).
+      @send_picker = nil.as(SendPicker?)
       # The Comparer flow picker (a/b → choose flow A/B); @overlay is :comparer_pick.
       @flow_picker = nil.as(FlowPicker?)
       # The Repeater sub-tab search picker (space → s); @overlay is :repeater_subtab.
@@ -894,6 +898,7 @@ module Gori::Tui
       return handle_hotkeys_key(ev) if @overlay == :hotkeys && @hotkeys_overlay.capturing?
       return handle_space_menu_key(ev) if @space_menu_open # the space menu is modal while up
       return handle_copy_as_key(ev) if copy_as_shown?      # the copy-as picker is modal while up
+      return handle_send_to_key(ev) if send_to_shown?      # the send-to picker is modal while up
       return handle_goto_key(ev) if @goto_open             # the ^G line prompt is modal while up
       return handle_search_key(ev) if @search_open         # the ^F find prompt is modal while up
       return handle_rename_key(ev) if @rename_open         # the sub-tab rename prompt is modal while up
@@ -1164,6 +1169,7 @@ module Gori::Tui
     private def dispatch_click(layout : Layout, mx : Int32, my : Int32) : Nil
       return if @space_menu_open && click_space_menu(layout, mx, my)
       return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
+      return if send_to_shown? && click_send_to(layout.body, mx, my) # ditto
       if @goto_open || @search_open || @rename_open || @tag_edit_open || @import_open
         close_goto if @goto_open # a click anywhere dismisses the bottom prompt (like esc)
         close_search if @search_open
@@ -1523,6 +1529,7 @@ module Gori::Tui
       step = dir * 3
       return @space_menu.move(step) if @space_menu_open
       return @copy_picker.try(&.move(step)) if copy_as_shown?
+      return @send_picker.try(&.move(step)) if send_to_shown?
       return wheel_overlay(step) if modal_overlay?
       return unless layout.body.contains?(mx, my)
       # Pass the pointer + body rect so a multi-pane tab (Project) scrolls the pane
@@ -2009,6 +2016,87 @@ module Gori::Tui
     # exactly where they invoked it.
     private def close_copy_picker : Nil
       @copy_picker = nil
+    end
+
+    # Non-nil ⇔ the send-to picker is up (orthogonal to @overlay, mirrors copy_as_shown?).
+    private def send_to_shown? : Bool
+      !@send_picker.nil?
+    end
+
+    # "Send selection to X" (space → S): capture the focused pane's current selection
+    # and open a centered picker of string-handling destinations (Decoder for now).
+    # Gated upstream by read_selection_active?, so a selection is normally present; if
+    # it came back empty the verb just no-ops with a toast rather than opening an empty
+    # send.
+    def send_to_open : Nil
+      payload = read_selection_text
+      if payload.empty?
+        @toast = "nothing selected to send"
+        return
+      end
+      @send_picker = SendPicker.new("Send selection to", payload, SendMenu.destinations)
+    end
+
+    # Send-to picker input: ↑/↓ move, ↵ or a row mnemonic sends, esc cancels (mirrors
+    # the copy-as picker so the two feel identical).
+    private def handle_send_to_key(ev : Termisu::Event::Key) : Nil
+      key = ev.key
+      p = @send_picker
+      return close_send_picker unless p
+      case
+      when key.escape? then close_send_picker
+      when key.up?     then p.move(-1)
+      when key.down?   then p.move(1)
+      when key.enter?  then apply_send_to
+      else
+        if (c = ev.char) && !ev.ctrl? && !ev.alt?
+          if idx = p.index_for(c)
+            p.set_selected(idx)
+            apply_send_to
+          elsif c == 'j'
+            p.move(1)
+          elsif c == 'k'
+            p.move(-1)
+          end
+        end
+      end
+    end
+
+    # Always consumes the click (returns true) so it never leaks to the pane below —
+    # a click on a row sends, a click outside dismisses.
+    private def click_send_to(area : Rect, mx : Int32, my : Int32) : Bool
+      p = @send_picker
+      box = p.try(&.overlay_box(area))
+      if p.nil? || box.nil? || dismiss_zone?(box, mx, my)
+        close_send_picker
+        return true
+      end
+      if idx = p.row_at(box, mx, my)
+        p.set_selected(idx)
+        apply_send_to
+      end
+      true
+    end
+
+    # Route the captured selection to the chosen destination, then close. Each
+    # destination controller owns the seeding (a new pre-filled session + goto_tab), so
+    # adding a target is a `when` branch here plus a SendMenu.destinations entry.
+    private def apply_send_to : Nil
+      p = @send_picker
+      return close_send_picker unless p
+      if dest = p.selected_destination
+        payload = p.payload
+        case dest.tab
+        when :decoder then decoder_controller.decoder_from_text(payload)
+        end
+      end
+      close_send_picker
+    end
+
+    # Orthogonal to @overlay — closing just drops the picker; whatever was underneath
+    # is untouched, so the user returns exactly where they invoked it.
+    private def close_send_picker : Nil
+      @send_picker = nil
     end
 
     # Comparer flow picker (a/b → choose flow A/B): type to filter, ↑/↓ select,
@@ -3406,6 +3494,7 @@ module Gori::Tui
     # they float over whatever's underneath (a tab body or the History detail).
     private def render_prompts(screen : Screen, layout : Layout) : Nil
       @copy_picker.try(&.render(screen, layout.body)) if copy_as_shown?
+      @send_picker.try(&.render(screen, layout.body)) if send_to_shown?
       @space_menu.render(screen, layout.body) if @space_menu_open
       render_goto_prompt(screen, layout.status) if @goto_open
       render_search_prompt(screen, layout.status) if @search_open
@@ -3463,6 +3552,7 @@ module Gori::Tui
     private def focus_label : String
       return "SPACE" if @space_menu_open                              # orthogonal to @overlay — floats over it
       return @copy_picker.try(&.title) || "COPY AS" if copy_as_shown? # ditto
+      return "SEND TO" if send_to_shown?                              # ditto
       case @overlay
       when :palette       then "PALETTE"
       when :rules         then "RULES"
@@ -3512,6 +3602,7 @@ module Gori::Tui
     private def key_hints : String
       return "press a key · ↑/↓ select · ↵ run · esc close" if @space_menu_open
       return "↑/↓ select · ↵ copy · key picks · esc cancel" if copy_as_shown?
+      return "↑/↓ select · ↵ send · key picks · esc cancel" if send_to_shown?
       case @overlay
       when :palette       then "↑/↓ select · ↵ run · ⌫ · esc close · type to filter"
       when :rules         then "type rule · ↵ add · ⌫ del · ↑/↓ select · tab on/off · esc done"
@@ -5527,6 +5618,25 @@ module Gori::Tui
         @overlay == :detail && history_controller.detail_selection_active?
       else
         false
+      end
+    end
+
+    # The focused pane's current selection (or current line) as a string, without the
+    # clipboard write — the payload for "Send selection to". Mirrors
+    # read_selection_active?'s per-@active_tab dispatch, reusing each controller's
+    # *_selection_text getter. "" when the active tab has no selection surface.
+    def read_selection_text : String
+      case @active_tab
+      when :notes    then notes_controller.notes_selection_text
+      when :repeater then repeater_controller.repeater_selection_text
+      when :fuzzer   then fuzzer_controller.fuzzer_selection_text
+      when :decoder  then decoder_controller.decoder_selection_text
+      when :issues   then issues_controller.issues_notes_selection_text
+      when :project  then project_controller.project_desc_selection_text
+      when :history
+        @overlay == :detail ? history_controller.detail_selection_text : ""
+      else
+        ""
       end
     end
 

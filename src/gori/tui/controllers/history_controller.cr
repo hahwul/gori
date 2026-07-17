@@ -349,6 +349,11 @@ module Gori::Tui
       @host.status("copied #{written}b to clipboard")
     end
 
+    # The detail pane's selection (or current line) text without copying — "Send selection to".
+    def detail_selection_text : String
+      @history.detail_copy_text
+    end
+
     # The focus-aware "copy as X" menu for the open detail pane ({title, options}).
     def detail_copy_as_menu : {String, Array(CopyMenu::Option)}
       @history.detail_copy_as_menu

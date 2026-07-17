@@ -26,6 +26,9 @@ module Gori
       r.register Verb::Definition.new(
         "notes.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Notes, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "notes.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::Notes, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       # Plain 'x' = select-line in every Repeater read-mode pane (request/target/response),
       # now that hex is ^X everywhere (the old x=resp-hex collision is gone). Tagged
@@ -40,6 +43,15 @@ module Gori
       r.register Verb::Definition.new(
         "repeater.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Repeater, available: in_sel, mnemonic: 'v', section: :response) { |ctx| ctx.read_clear_selection; nil }
+      # send-to stays in COMMON (not :response like clear-selection): it's menu-only
+      # (no keybinding fallback), so it must be listed in EVERY read pane's space menu.
+      # command_section is the focused pane (:request/:response/:target), and the menu
+      # shows only COMMON ∪ that one section — a :response tag would hide send-to while
+      # selecting in the request pane, leaving no way to invoke it. in_sel keeps COMMON
+      # uncluttered when nothing is selected.
+      r.register Verb::Definition.new(
+        "repeater.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::Repeater, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       # Tagged :input (Decoder's read-mode panes are INPUT-read and OUTPUT; :input is
       # the more relevant "editing" pane — OUTPUT keeps 'x' reachable by keybinding).
@@ -51,6 +63,11 @@ module Gori
       r.register Verb::Definition.new(
         "decoder.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Decoder, available: in_sel, mnemonic: 'v', section: :input) { |ctx| ctx.read_clear_selection; nil }
+      # COMMON, not :input — menu-only verb must show in both the INPUT and OUTPUT read
+      # panes (command_section is cur.pane); see the repeater.send-to note above.
+      r.register Verb::Definition.new(
+        "decoder.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::Decoder, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       # Tagged :template (Fuzzer's only section named for this in Round 5's spec —
       # :target/:results/:detail are also read-mode-gated, but :template is the one
@@ -63,6 +80,11 @@ module Gori
       r.register Verb::Definition.new(
         "fuzzer.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Fuzzer, available: in_sel, mnemonic: 'v', section: :template) { |ctx| ctx.read_clear_selection; nil }
+      # COMMON, not :template — menu-only verb must show in every Fuzzer read pane
+      # (command_section follows the focused pane); see the repeater.send-to note above.
+      r.register Verb::Definition.new(
+        "fuzzer.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::Fuzzer, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       in_issues_notes = ->(ctx : Verb::ExecContext) { ctx.issues_notes_read_mode? }
       r.register Verb::Definition.new(
@@ -72,6 +94,9 @@ module Gori
       r.register Verb::Definition.new(
         "issue.clear-selection", "Clear selection", "Clear the notes text selection",
         Verb::Scope::IssuesDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "issue.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::IssuesDetail, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       in_project_desc = ->(ctx : Verb::ExecContext) { ctx.project_desc_read_mode? }
       r.register Verb::Definition.new(
@@ -81,6 +106,9 @@ module Gori
       r.register Verb::Definition.new(
         "project.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::Body, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "project.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::Body, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
 
       in_detail_nav = ->(ctx : Verb::ExecContext) { ctx.detail_navigable? }
       r.register Verb::Definition.new(
@@ -90,6 +118,9 @@ module Gori
       r.register Verb::Definition.new(
         "detail.clear-selection", "Clear selection", "Clear the text selection",
         Verb::Scope::HistoryDetail, available: in_sel, mnemonic: 'v') { |ctx| ctx.read_clear_selection; nil }
+      r.register Verb::Definition.new(
+        "detail.send-to", "Send selection to…", "Send the selected text to another tool (Decoder, …)",
+        Verb::Scope::HistoryDetail, available: in_sel, mnemonic: 'S') { |ctx| ctx.send_to_open; nil }
     end
   end
 end
