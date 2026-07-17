@@ -141,6 +141,142 @@ describe Gori::Settings do
     end
   end
 
+  it "persists and reloads the network dial timeouts + capture cap; exposes the byte/span helpers" do
+    dir = File.tempname("gori-settings-net-dial")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_net = {Gori::Settings.connect_timeout_secs, Gori::Settings.io_timeout_secs, Gori::Settings.capture_max_mib}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.connect_timeout_secs = 5
+      Gori::Settings.io_timeout_secs = 7
+      Gori::Settings.capture_max_mib = 9
+      Gori::Settings.save.should be_true
+
+      Gori::Settings.connect_timeout_secs = 1
+      Gori::Settings.io_timeout_secs = 1
+      Gori::Settings.capture_max_mib = 1
+      Gori::Settings.load
+      Gori::Settings.connect_timeout_secs.should eq(5)
+      Gori::Settings.io_timeout_secs.should eq(7)
+      Gori::Settings.capture_max_mib.should eq(9)
+      # byte/span helpers derive from the stored ints
+      Gori::Settings.capture_max.should eq(9 * 1024 * 1024)
+      Gori::Settings.connect_timeout.should eq(5.seconds)
+      Gori::Settings.io_timeout.should eq(7.seconds)
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.connect_timeout_secs, Gori::Settings.io_timeout_secs, Gori::Settings.capture_max_mib = prev_net
+    end
+  end
+
+  it "persists and reloads display prefs; omits the display section at factory defaults" do
+    dir = File.tempname("gori-settings-display")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_display = {Gori::Settings.default_detail_pane, Gori::Settings.history_time_format,
+                    Gori::Settings.show_gutter, Gori::Settings.preview_body_kib}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.default_detail_pane = "response"
+      Gori::Settings.history_time_format = "relative"
+      Gori::Settings.show_gutter = false
+      Gori::Settings.preview_body_kib = 128
+      Gori::Settings.save.should be_true
+      raw = File.read(Gori::Settings.path)
+      raw.should contain(%("display"))
+      raw.should contain(%("detail_pane":"response"))
+
+      Gori::Settings.default_detail_pane = "request"
+      Gori::Settings.history_time_format = "absolute"
+      Gori::Settings.show_gutter = true
+      Gori::Settings.preview_body_kib = 64
+      Gori::Settings.load
+      Gori::Settings.default_detail_pane.should eq("response")
+      Gori::Settings.history_time_format.should eq("relative")
+      Gori::Settings.show_gutter.should be_false # a stored false survives the reload
+      Gori::Settings.preview_body_kib.should eq(128)
+      Gori::Settings.preview_body_cap.should eq(128 * 1024) # byte helper derives from the KiB int
+
+      # Back to defaults → section omitted
+      Gori::Settings.default_detail_pane = Gori::Settings::DEFAULT_DETAIL_PANE
+      Gori::Settings.history_time_format = Gori::Settings::DEFAULT_HISTORY_TIME_FORMAT
+      Gori::Settings.show_gutter = Gori::Settings::DEFAULT_SHOW_GUTTER
+      Gori::Settings.preview_body_kib = Gori::Settings::DEFAULT_PREVIEW_BODY_KIB
+      Gori::Settings.save
+      File.read(Gori::Settings.path).should_not contain(%("display"))
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.default_detail_pane, Gori::Settings.history_time_format, Gori::Settings.show_gutter, Gori::Settings.preview_body_kib = prev_display
+    end
+  end
+
+  it "persists and reloads notification prefs; omits the section at factory defaults (false survives)" do
+    dir = File.tempname("gori-settings-notif")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_notif = {Gori::Settings.notify_bell?, Gori::Settings.notify_toast?, Gori::Settings.notify_retention}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.notify_bell = true
+      Gori::Settings.notify_toast = false
+      Gori::Settings.notify_retention = 25
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).should contain(%("notifications"))
+
+      Gori::Settings.notify_bell = false
+      Gori::Settings.notify_toast = true
+      Gori::Settings.notify_retention = 100
+      Gori::Settings.load
+      Gori::Settings.notify_bell?.should be_true
+      Gori::Settings.notify_toast?.should be_false # a stored false survives the reload
+      Gori::Settings.notify_retention.should eq(25)
+
+      # Back to defaults → section omitted
+      Gori::Settings.notify_bell = Gori::Settings::DEFAULT_NOTIFY_BELL
+      Gori::Settings.notify_toast = Gori::Settings::DEFAULT_NOTIFY_TOAST
+      Gori::Settings.notify_retention = Gori::Settings::DEFAULT_NOTIFY_RETENTION
+      Gori::Settings.save
+      File.read(Gori::Settings.path).should_not contain(%("notifications"))
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.notify_bell, Gori::Settings.notify_toast, Gori::Settings.notify_retention = prev_notif
+    end
+  end
+
+  it "persists and reloads general prefs; omits the section at factory defaults (false survives)" do
+    dir = File.tempname("gori-settings-general")
+    Dir.mkdir_p(dir)
+    prev = ENV["GORI_HOME"]?
+    prev_gen = {Gori::Settings.clipboard_osc52?, Gori::Settings.confirm_quit?}
+    begin
+      ENV["GORI_HOME"] = dir
+      Gori::Settings.clipboard_osc52 = false
+      Gori::Settings.confirm_quit = true
+      Gori::Settings.save.should be_true
+      File.read(Gori::Settings.path).should contain(%("general"))
+
+      Gori::Settings.clipboard_osc52 = true
+      Gori::Settings.confirm_quit = false
+      Gori::Settings.load
+      Gori::Settings.clipboard_osc52?.should be_false # a stored false survives the reload
+      Gori::Settings.confirm_quit?.should be_true
+
+      # Back to defaults → section omitted
+      Gori::Settings.clipboard_osc52 = Gori::Settings::DEFAULT_CLIPBOARD_OSC52
+      Gori::Settings.confirm_quit = Gori::Settings::DEFAULT_CONFIRM_QUIT
+      Gori::Settings.save
+      File.read(Gori::Settings.path).should_not contain(%("general"))
+    ensure
+      prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
+      FileUtils.rm_rf(dir)
+      Gori::Settings.clipboard_osc52, Gori::Settings.confirm_quit = prev_gen
+    end
+  end
+
   it "normalizes invalid sitemap expand depths to the default" do
     Gori::Settings.normalize_sitemap_depth(-1).should eq(-1)
     Gori::Settings.normalize_sitemap_depth(0).should eq(0)

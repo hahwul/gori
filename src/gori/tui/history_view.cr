@@ -90,7 +90,7 @@ module Gori::Tui
       @decoded_id = nil.as(Int64?)                   # flow the decoded panes above were parsed from (skip re-decode)
       @detail_scroll = 0
       @detail_xscroll = 0 # horizontal scroll offset for the detail body (shift+←/→)
-      @detail_pane = :request
+      @detail_pane = initial_detail_pane
       @search_hl = ""                        # active ^F query → highlight in the detail body
       @reveal = false                        # 'w' shows whitespace/CR/LF as glyphs (smuggling)
       @reveal_lines = nil.as(Array(String)?) # cached revealed lines, keyed on the pane bytes ptr
@@ -132,7 +132,7 @@ module Gori::Tui
     getter preview_focus : Symbol
 
     # Load/refresh the preview cache for the selected flow (no-op when preview is off).
-    # Uses a capped body read (PREVIEW_BODY_CAP+1) so selecting through the list never
+    # Uses a capped body read (Settings.preview_body_cap+1) so selecting through the list never
     # pulls multi-MiB BLOBs from SQLite for a pane that only shows a short prefix.
     def refresh_preview(store : Store) : Nil
       return clear_preview unless preview_enabled?
@@ -148,7 +148,7 @@ module Gori::Tui
         # (mirrors refresh_detail's guard). A pending / 101 / h2 flow still re-fetches.
         return
       end
-      detail = store.get_flow(id, body_max: PREVIEW_BODY_CAP + 1)
+      detail = store.get_flow(id, body_max: Settings.preview_body_cap + 1)
       @preview_detail = detail
       @preview_id = id
       # Split the (bounded) preview text once, here — render reads the cached arrays.
@@ -510,6 +510,11 @@ module Gori::Tui
 
     # --- detail view ---------------------------------------------------------
 
+    # settings:display — which detail pane opens first: request (default) or response.
+    private def initial_detail_pane : Symbol
+      Settings.default_detail_pane == "response" ? :response : :request
+    end
+
     def open_detail(store : Store) : Bool
       id = selected_id
       return false unless id
@@ -534,7 +539,7 @@ module Gori::Tui
       load_detail_logs(store)
       @detail_scroll = 0
       @detail_xscroll = 0
-      @detail_pane = :request
+      @detail_pane = initial_detail_pane
       drop_detail_cache
       @detail_hex = false # hex is a deliberate per-open peek — don't carry it into the next flow
       @detail_hex_bytes = nil
@@ -811,6 +816,7 @@ module Gori::Tui
     end
 
     private def detail_gutter_w(body : Rect, total : Int32) : Int32
+      return 0 unless Settings.show_gutter # keep click→cursor mapping aligned with the gutter-less render
       {Gutter.width(total), body.w}.min
     end
 
@@ -1196,24 +1202,39 @@ module Gori::Tui
       end
     end
 
-    PREVIEW_BODY_CAP = 64 * 1024
-
     private def preview_text_lines(head : Bytes?, body : Bytes?) : Array(String)
       return ["(empty)"] if head.nil? || head.empty?
+      cap = Settings.preview_body_cap
       io = IO::Memory.new
       io.write(head)
       if body && !body.empty?
-        n = {body.size, PREVIEW_BODY_CAP}.min
+        n = {body.size, cap}.min
         io.write(body[0, n])
-        io << "\n… [truncated]" if body.size > PREVIEW_BODY_CAP
+        io << "\n… [truncated]" if body.size > cap
       end
       String.new(io.to_slice).scrub.split('\n').map(&.rstrip('\r'))
     end
 
-    # Local MM-DD HH:MM:SS for the captured-at micros (created_at is unix microseconds).
-    # The brief date makes flows captured across days/sessions legible at a glance.
+    # The captured-at column: an absolute local MM-DD HH:MM:SS timestamp, or a compact
+    # relative age per Settings.history_time_format. The absolute date makes flows
+    # captured across days/sessions legible at a glance; relative is handier during a
+    # live session. created_at is unix microseconds.
     private def fmt_time(created_at : Int64) : String
-      Time.unix(created_at // 1_000_000).to_local.to_s("%m-%d %H:%M:%S")
+      t = Time.unix(created_at // 1_000_000)
+      return fmt_time_relative(t) if Settings.history_time_format == "relative"
+      t.to_local.to_s("%m-%d %H:%M:%S")
+    end
+
+    # Compact relative age from now: "3s" / "5m" / "2h" / "1d" (mirrors
+    # notifications_overlay#ago). Clamped at 0 so clock skew never shows a negative age.
+    private def fmt_time_relative(t : Time) : String
+      secs = {(Time.local - t).total_seconds.to_i, 0}.max
+      return "#{secs}s" if secs < 60
+      mins = secs // 60
+      return "#{mins}m" if mins < 60
+      hours = mins // 60
+      return "#{hours}h" if hours < 24
+      "#{hours // 24}d"
     end
 
     # Compact response size (B/KB/MB/GB), bounded to ≤6 cols. "—" until the response
@@ -1362,7 +1383,7 @@ module Gori::Tui
       dv = detail_view
       total = dv.total
       @detail_last_h = body.h
-      gw = {Gutter.width(total), body.w}.min
+      gw = Settings.show_gutter ? {Gutter.width(total), body.w}.min : 0
       cw = {body.w - gw, 0}.max
       # Styles each visible line ONCE (into `rows`), then clamps/slices from that —
       # never re-styles just to measure width (mirrors RepeaterView#render_response_body).
@@ -1378,7 +1399,7 @@ module Gori::Tui
                   end
       rows.each_with_index do |styled, i|
         li = @detail_scroll + i
-        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @detail_read.cy)
+        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @detail_read.cy) if gw > 0
         shown = @detail_xscroll > 0 ? Highlight.slice_left(styled, @detail_xscroll) : styled
         Highlight.draw(screen, body.x + gw, body.y + i, shown, width: cw)
         need_plain = (focused && detail_navigable? && (li == @detail_read.cy || sel_spans)) || !@search_hl.empty?
@@ -1398,7 +1419,7 @@ module Gori::Tui
     private def render_reveal(screen : Screen, body : Rect, lines : Array(String), focused : Bool = true) : Nil
       total = lines.size
       @detail_last_h = body.h
-      gw = {Gutter.width(total), body.w}.min
+      gw = Settings.show_gutter ? {Gutter.width(total), body.w}.min : 0
       cw = {body.w - gw, 0}.max
       widest = (0...body.h).compact_map { |i| lines[@detail_scroll + i]? }.max_of? { |l| Screen.display_width_upto(l, @detail_xscroll + cw + 1) } || 0
       @detail_xscroll = @detail_xscroll.clamp(0, {widest - cw, 0}.max)
@@ -1406,7 +1427,7 @@ module Gori::Tui
       (0...body.h).each do |i|
         li = @detail_scroll + i
         break if li >= total
-        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @detail_read.cy)
+        Gutter.draw(screen, body.x, body.y + i, li, gw, current: focused && li == @detail_read.cy) if gw > 0
         styled = Reveal.styled(lines[li], li < total - 1, cw + @detail_xscroll)
         styled = Highlight.slice_left(styled, @detail_xscroll) if @detail_xscroll > 0
         Highlight.draw(screen, body.x + gw, body.y + i, styled, width: cw)
@@ -1698,7 +1719,7 @@ module Gori::Tui
       trailer = [] of Highlight::Line
       if truncated
         trailer << Highlight::Line.new
-        trailer << [Highlight::Span.new("— body truncated at capture limit (#{Proxy::Codec::Body::CAPTURE_MAX // (1024 * 1024)} MiB); full size in the list —", Theme.yellow)]
+        trailer << [Highlight::Span.new("— body truncated at capture limit (#{Settings.capture_max_mib} MiB); full size in the list —", Theme.yellow)]
       end
 
       # gRPC: bounded framed hex view — style eagerly into `head`. Flagged binary so the

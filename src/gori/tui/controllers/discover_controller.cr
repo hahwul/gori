@@ -256,7 +256,7 @@ module Gori::Tui
       level = n > 0 ? :success : :info
       log_event(run, level, msg)
       push_notification(run, level, msg)
-      @host.status(msg)
+      @host.status(msg) if Settings.notify_toast?
     end
 
     private def push_notification(run : DiscoverRun, level : Symbol, msg : String) : Nil

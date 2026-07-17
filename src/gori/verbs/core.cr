@@ -101,6 +101,15 @@ module Gori
       r.register Verb::Definition.new(
         "settings.statusline", "Settings: Statusline", "Run a command periodically and show its output as a bottom status line",
         Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:statusline); nil }
+      r.register Verb::Definition.new(
+        "settings.display", "Settings: Display", "Message-body rendering: default detail pane, list time format, line numbers, preview size",
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:display); nil }
+      r.register Verb::Definition.new(
+        "settings.notifications", "Settings: Notifications", "Terminal bell + toast on background results, and how many notifications are kept",
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:notifications); nil }
+      r.register Verb::Definition.new(
+        "settings.general", "Settings: General", "Clipboard (OSC 52) integration and confirm-before-quit",
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:general); nil }
 
       # `s` toggles the scope lens from anywhere (its original behavior — this used to jump to
       # the Project scope editor). Jumping there is now the palette-only `scope.edit` below.

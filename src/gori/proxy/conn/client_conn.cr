@@ -215,7 +215,7 @@ module Gori::Proxy
       # Repeater-safety keys on the ACTUALLY-SENT method (sent_req): an M&R rule that rewrites
       # the request line GET→POST must not leave a non-idempotent request marked retryable.
       retryable = retryable_request?(sent_req, req_framing.none?)
-      req_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX, capture_hint(req_framing, req_len))
+      req_capture = Codec::CaptureBuffer.new(Settings.capture_max, capture_hint(req_framing, req_len))
       req_complete = true
       upstream, reused, sent = acquire_and_send(host, port, retryable) do |up|
         up.write(sent_head)
@@ -343,12 +343,12 @@ module Gori::Proxy
       # Re-arm the per-request upstream timeout: a REUSED socket may carry a relaxed (untimed)
       # state from a prior streamed (SSE/chunked) response. A freshly dialed one already has it
       # (direct_dial), so this is an idempotent set there.
-      SocketTuning.arm(upstream, Upstream::IO_TIMEOUT)
+      SocketTuning.arm(upstream, Settings.io_timeout)
       ok = send_guard { yield upstream }
       if !ok && reused && retryable
         release_upstream
         upstream, reused = acquire_upstream(host, port)
-        SocketTuning.arm(upstream, Upstream::IO_TIMEOUT) if upstream
+        SocketTuning.arm(upstream, Settings.io_timeout) if upstream
         ok = upstream ? send_guard { yield upstream } : false
       end
       {upstream, reused, ok}
@@ -433,7 +433,7 @@ module Gori::Proxy
       # Non-hold path: stream the response body byte-for-byte (P6) and record the
       # flow. `completed` is true only when the whole body was delivered cleanly; a
       # client abort or upstream truncation is recorded Aborted (see the helper).
-      resp_capture = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX, capture_hint(resp_framing, resp_len))
+      resp_capture = Codec::CaptureBuffer.new(Settings.capture_max, capture_hint(resp_framing, resp_len))
       completed = stream_nonhold_response(upstream, sent_resp, sent_resp_head,
         resp_framing, resp_len, resp_capture, flow_id, ttfb, started)
 
@@ -883,8 +883,8 @@ module Gori::Proxy
     # in-scope giant body can't bloat its row. Returns {stored, truncated, size}.
     private def capped(body : Bytes?) : {Bytes?, Bool, Int64?}
       return {nil, false, nil} unless body
-      return {body, false, nil} if body.size <= Codec::Body::CAPTURE_MAX
-      {body[0, Codec::Body::CAPTURE_MAX].dup, true, body.size.to_i64}
+      return {body, false, nil} if body.size <= Settings.capture_max
+      {body[0, Settings.capture_max].dup, true, body.size.to_i64}
     end
 
     private def record_error(req, scheme, host, port, created_at, message) : Nil

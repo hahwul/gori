@@ -27,6 +27,9 @@ module Gori::Tui
       Field.new("Upstream proxy", "host:port — blank = connect directly; projects may override"),
       Field.new("Verify upstream TLS", "check the upstream server's certificate — off accepts any cert (MITM/testing); ←/→/space toggles", bool: true),
       Field.new("Info page on direct access", "serve a gori welcome + CA-download page to browsers that hit the listen address directly — ←/→/space toggles", bool: true),
+      Field.new("Connect timeout (s)", "how long an upstream TCP/proxy connect may take before giving up — seconds (min 1)"),
+      Field.new("Idle timeout (s)", "initial read/write timeout on the upstream socket — seconds (min 1)"),
+      Field.new("Capture body limit (MiB)", "max body bytes captured + stored per flow — MiB (min 1); applies to NEW flows only"),
       Field.new("Hostname overrides", "↵ to edit the global IP→host map (a /etc/hosts for this proxy)", opener: :hosts),
     ]
     EDITOR_FIELDS = [
@@ -72,12 +75,51 @@ module Gori::Tui
       Field.new("Interval (s)",
         "how often to re-run the command — seconds (min 1)"),
     ]
+    # Display: message-body rendering prefs (two choice fields + a bool + a text cap).
+    DISPLAY_PANE_CHOICES = ["request", "response"]
+    DISPLAY_TIME_CHOICES = ["absolute", "relative"]
+    DISPLAY_FIELDS       = [
+      Field.new("Default detail pane",
+        "which pane a freshly-opened History flow shows first — ←/→ cycles",
+        choices: DISPLAY_PANE_CHOICES),
+      Field.new("History list time",
+        "list time column: absolute (MM-DD HH:MM:SS) or relative (3s/5m/2h) — ←/→ cycles",
+        choices: DISPLAY_TIME_CHOICES),
+      Field.new("Line numbers",
+        "show the line-number gutter on the message body views — ←/→/space toggles",
+        bool: true),
+      Field.new("Preview body limit (KiB)",
+        "how many body bytes the History list preview reads/shows — KiB (min 1)"),
+    ]
+    # Notifications: bell/toast toggles + ring-buffer retention.
+    NOTIFICATIONS_FIELDS = [
+      Field.new("Bell on result",
+        "ring the terminal bell on a background result/alert (miner/fuzzer/probe/discover) — ←/→/space toggles",
+        bool: true),
+      Field.new("Toast on result",
+        "also flash a bottom-bar toast for fuzzer/probe/discover results — ←/→/space toggles",
+        bool: true),
+      Field.new("Retention (count)",
+        "how many notifications the ring buffer keeps — count (min 1)"),
+    ]
+    # General: clipboard + quit-confirm toggles.
+    GENERAL_FIELDS = [
+      Field.new("Clipboard (OSC 52)",
+        "copy to the system clipboard via the OSC 52 terminal escape — off makes copies no-op — ←/→/space toggles",
+        bool: true),
+      Field.new("Confirm before quit",
+        "require a confirm modal to quit (instead of double-press ^D) — ←/→/space toggles",
+        bool: true),
+    ]
     SECTIONS = {
-      :network    => NETWORK_FIELDS,
-      :editor     => EDITOR_FIELDS,
-      :theme      => THEME_FIELDS,
-      :layout     => LAYOUT_FIELDS,
-      :statusline => STATUSLINE_FIELDS,
+      :network       => NETWORK_FIELDS,
+      :editor        => EDITOR_FIELDS,
+      :theme         => THEME_FIELDS,
+      :layout        => LAYOUT_FIELDS,
+      :statusline    => STATUSLINE_FIELDS,
+      :display       => DISPLAY_FIELDS,
+      :notifications => NOTIFICATIONS_FIELDS,
+      :general       => GENERAL_FIELDS,
     }
 
     # Max theme rows shown at once before the list scrolls (the box also shrinks to the
@@ -107,11 +149,14 @@ module Gori::Tui
       @section = section
       Theme.load_custom if section == :theme # pick up theme files dropped since startup
       @values = case section
-                when :editor     then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
-                when :theme      then [Theme.canonical(Settings.theme)]
-                when :layout     then layout_values
-                when :statusline then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
-                else                  [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", Settings.serve_landing? ? "on" : "off", hostnames_summary]
+                when :editor        then [Settings.editor, Settings.editor_markdown ? "on" : "off", Settings.mouse ? "on" : "off", Settings.pretty_bodies_default ? "on" : "off"]
+                when :theme         then [Theme.canonical(Settings.theme)]
+                when :layout        then layout_values
+                when :statusline    then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
+                when :display       then [Settings.default_detail_pane, Settings.history_time_format, Settings.show_gutter ? "on" : "off", Settings.preview_body_kib.to_s]
+                when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
+                when :general       then [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off"]
+                else                     [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", Settings.serve_landing? ? "on" : "off", Settings.connect_timeout_secs.to_s, Settings.io_timeout_secs.to_s, Settings.capture_max_mib.to_s, hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -141,7 +186,22 @@ module Gori::Tui
                   Settings::DEFAULT_STATUSLINE_COMMAND,
                   Settings::DEFAULT_STATUSLINE_INTERVAL.to_s,
                 ]
-                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", hostnames_summary]
+                when :display then [
+                  Settings::DEFAULT_DETAIL_PANE,
+                  Settings::DEFAULT_HISTORY_TIME_FORMAT,
+                  Settings::DEFAULT_SHOW_GUTTER ? "on" : "off",
+                  Settings::DEFAULT_PREVIEW_BODY_KIB.to_s,
+                ]
+                when :notifications then [
+                  Settings::DEFAULT_NOTIFY_BELL ? "on" : "off",
+                  Settings::DEFAULT_NOTIFY_TOAST ? "on" : "off",
+                  Settings::DEFAULT_NOTIFY_RETENTION.to_s,
+                ]
+                when :general then [
+                  Settings::DEFAULT_CLIPBOARD_OSC52 ? "on" : "off",
+                  Settings::DEFAULT_CONFIRM_QUIT ? "on" : "off",
+                ]
+                else [Settings::DEFAULT_BIND_HOST, Settings::DEFAULT_BIND_PORT.to_s, Settings::DEFAULT_UPSTREAM_PROXY, Settings::DEFAULT_VERIFY_UPSTREAM ? "on" : "off", Settings::DEFAULT_SERVE_LANDING ? "on" : "off", Settings::DEFAULT_CONNECT_TIMEOUT_SECS.to_s, Settings::DEFAULT_IO_TIMEOUT_SECS.to_s, Settings::DEFAULT_CAPTURE_MAX_MIB.to_s, hostnames_summary]
                 end
       @focused = 0
       @cursor = @values[0].size
@@ -324,6 +384,37 @@ module Gori::Tui
         @values = [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, iv.to_s]
         return persist
       end
+      if @section == :display
+        kib = @values[3].strip.to_i?
+        unless kib && kib >= 1
+          @status = "invalid preview limit"
+          return "settings: invalid preview body limit #{@values[3].inspect} (KiB, min 1)"
+        end
+        Settings.default_detail_pane = @values[0] == "response" ? "response" : "request"
+        Settings.history_time_format = @values[1] == "relative" ? "relative" : "absolute"
+        Settings.show_gutter = @values[2] == "on"
+        Settings.preview_body_kib = kib
+        @values = [Settings.default_detail_pane, Settings.history_time_format, Settings.show_gutter ? "on" : "off", Settings.preview_body_kib.to_s]
+        return persist
+      end
+      if @section == :notifications
+        ret = @values[2].strip.to_i?
+        unless ret && ret >= 1
+          @status = "invalid retention"
+          return "settings: invalid notification retention #{@values[2].inspect} (count, min 1)"
+        end
+        Settings.notify_bell = @values[0] == "on"
+        Settings.notify_toast = @values[1] == "on"
+        Settings.notify_retention = ret
+        @values = [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", ret.to_s]
+        return persist
+      end
+      if @section == :general
+        Settings.clipboard_osc52 = @values[0] == "on"
+        Settings.confirm_quit = @values[1] == "on"
+        @values = [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off"]
+        return persist
+      end
       port = @values[1].strip.to_i?
       unless port && 0 <= port <= 65535
         @status = "invalid port"
@@ -334,12 +425,30 @@ module Gori::Tui
         @status = "invalid upstream port"
         return err
       end
+      ct = @values[5].strip.to_i?
+      unless ct && ct >= 1
+        @status = "invalid connect timeout"
+        return "settings: invalid connect timeout #{@values[5].inspect} (seconds, min 1)"
+      end
+      it = @values[6].strip.to_i?
+      unless it && it >= 1
+        @status = "invalid idle timeout"
+        return "settings: invalid idle timeout #{@values[6].inspect} (seconds, min 1)"
+      end
+      cap = @values[7].strip.to_i?
+      unless cap && cap >= 1
+        @status = "invalid capture limit"
+        return "settings: invalid capture limit #{@values[7].inspect} (MiB, min 1)"
+      end
       Settings.bind_host = @values[0].strip
       Settings.bind_port = port
       Settings.upstream_proxy = up
       Settings.verify_upstream = @values[3] == "on"
       Settings.serve_landing = @values[4] == "on"
-      @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", Settings.serve_landing? ? "on" : "off", hostnames_summary]
+      Settings.connect_timeout_secs = ct
+      Settings.io_timeout_secs = it
+      Settings.capture_max_mib = cap
+      @values = [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", Settings.serve_landing? ? "on" : "off", Settings.connect_timeout_secs.to_s, Settings.io_timeout_secs.to_s, Settings.capture_max_mib.to_s, hostnames_summary]
       persist
     end
 

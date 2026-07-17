@@ -62,8 +62,8 @@ module Gori
 
       private def self.open(scheme : String, host : String, port : Int32, verify : Bool,
                             sni : String? = nil, timeout : Time::Span? = nil) : IO?
-        ct = timeout || Proxy::Upstream::CONNECT_TIMEOUT
-        it = timeout || Proxy::Upstream::IO_TIMEOUT
+        ct = timeout || Settings.connect_timeout
+        it = timeout || Settings.io_timeout
         if scheme == "https"
           ssl = Proxy::Upstream.dial_tls(host, port, verify: verify, alpn: "h2", sni: sni, connect_timeout: ct, io_timeout: it)
           return nil unless ssl

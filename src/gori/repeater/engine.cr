@@ -38,8 +38,8 @@ module Gori
         # `timeout` is a PER-OPERATION bound (connect, and idle between reads/writes),
         # not a total request deadline — same model as the proxy's IO_TIMEOUT. A true
         # whole-request deadline would need a timer fiber racing a socket close.
-        ct = timeout || Proxy::Upstream::CONNECT_TIMEOUT
-        it = timeout || Proxy::Upstream::IO_TIMEOUT
+        ct = timeout || Settings.connect_timeout
+        it = timeout || Settings.io_timeout
         upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it)
         return error(connect_error(scheme, host, port, verify_upstream), started) unless upstream
 
@@ -66,8 +66,8 @@ module Gori
                              timeout : Time::Span? = nil) : Array(Result)
         results = [] of Result
         return results if requests.empty?
-        ct = timeout || Proxy::Upstream::CONNECT_TIMEOUT
-        it = timeout || Proxy::Upstream::IO_TIMEOUT
+        ct = timeout || Settings.connect_timeout
+        it = timeout || Settings.io_timeout
         upstream = scheme == "https" ? Proxy::Upstream.dial_tls(host, port, verify: verify_upstream, sni: sni, connect_timeout: ct, io_timeout: it) : Proxy::Upstream.dial(host, port, connect_timeout: ct, io_timeout: it)
         unless upstream
           msg = connect_error(scheme, host, port, verify_upstream)

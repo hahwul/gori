@@ -37,7 +37,7 @@ module Gori::Proxy::H2
       getter header_buf = IO::Memory.new
       # DATA frames accumulate here, capped (like h1) so a huge streamed body
       # can't grow per-connection memory without bound. Raw frames stay the truth.
-      getter body = Codec::CaptureBuffer.new(Codec::Body::CAPTURE_MAX)
+      getter body = Codec::CaptureBuffer.new(Settings.capture_max)
       property headers : Array({String, String})? = nil
       # Cumulative decoded-header bytesize across all merged blocks on this side, so a
       # flood of repeated non-status HEADERS blocks (fake trailers, never END_STREAM)

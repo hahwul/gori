@@ -41,7 +41,16 @@ module Gori::Tui
     def push(level : Symbol, message : String, goto : Jobs::Goto? = nil, source : String = "app") : Note
       n = Note.new((@next_id += 1), level, message, goto, source)
       @notes << n
-      @notes.shift if @notes.size > CAP
+      # Drain to the live retention setting (CAP is the default; user may lower it).
+      while @notes.size > Settings.notify_retention
+        @notes.shift
+      end
+      # Terminal bell on non-info notes when enabled — a state-neutral `\a` tty write,
+      # like the clipboard's OSC52. This is the app's only bell emit point.
+      if Settings.notify_bell? && level != :info
+        STDOUT.print("\a")
+        STDOUT.flush
+      end
       n
     end
 

@@ -18,8 +18,8 @@ module Gori::Proxy
     # tunnel). The returned socket is positioned at the start of the origin stream
     # either way, so callers (dial_tls / the request forwarder) are unaffected.
     def self.dial(host : String, port : Int32,
-                  connect_timeout : Time::Span = CONNECT_TIMEOUT,
-                  io_timeout : Time::Span = IO_TIMEOUT,
+                  connect_timeout : Time::Span = Settings.connect_timeout,
+                  io_timeout : Time::Span = Settings.io_timeout,
                   *, overrides : Gori::HostOverrides? = nil) : TCPSocket?
       target = connect_target(host, overrides)
       if proxy = Settings.upstream_proxy_addr
@@ -80,8 +80,8 @@ module Gori::Proxy
     end
 
     private def self.direct_dial(host : String, port : Int32,
-                                 connect_timeout : Time::Span = CONNECT_TIMEOUT,
-                                 io_timeout : Time::Span = IO_TIMEOUT) : TCPSocket?
+                                 connect_timeout : Time::Span = Settings.connect_timeout,
+                                 io_timeout : Time::Span = Settings.io_timeout) : TCPSocket?
       sock = TCPSocket.new(host, port, connect_timeout: connect_timeout)
       begin
         sock.sync = true # flush writes immediately (P6)
@@ -108,8 +108,8 @@ module Gori::Proxy
     # CONNECT to the target port.
     private def self.dial_via_proxy(proxy_host : String, proxy_port : Int32,
                                     host : String, port : Int32,
-                                    connect_timeout : Time::Span = CONNECT_TIMEOUT,
-                                    io_timeout : Time::Span = IO_TIMEOUT) : TCPSocket?
+                                    connect_timeout : Time::Span = Settings.connect_timeout,
+                                    io_timeout : Time::Span = Settings.io_timeout) : TCPSocket?
       sock = direct_dial(proxy_host, proxy_port, connect_timeout, io_timeout)
       return nil unless sock
       # An IPv6 literal host must be bracketed in the CONNECT request-target / Host header
@@ -179,8 +179,8 @@ module Gori::Proxy
     # the repeater workbench uses it for domain-fronting / vhost-confusion / IP-direct
     # sends. nil → the dialed host is used (the usual case).
     def self.dial_tls(host : String, port : Int32, verify : Bool, alpn : String? = nil, sni : String? = nil,
-                      connect_timeout : Time::Span = CONNECT_TIMEOUT,
-                      io_timeout : Time::Span = IO_TIMEOUT,
+                      connect_timeout : Time::Span = Settings.connect_timeout,
+                      io_timeout : Time::Span = Settings.io_timeout,
                       *, overrides : Gori::HostOverrides? = nil) : OpenSSL::SSL::Socket::Client?
       tcp = dial(host, port, connect_timeout, io_timeout, overrides: overrides)
       return nil unless tcp
