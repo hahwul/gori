@@ -65,6 +65,7 @@ describe Gori::Probe::Passive do
       found.should contain("missing_x_frame_options")
       found.should contain("missing_x_content_type_options")
       found.should contain("missing_referrer_policy")
+      found.should contain("missing_permissions_policy")
       found.should contain("cookie_no_secure")
       found.should contain("cookie_no_httponly")
       found.should contain("cookie_no_samesite")
@@ -1104,6 +1105,83 @@ describe "Gori::Probe::Passive (round-2 detection fixes)" do
       deny = analyze(store, content_type: "text/html",
         resp_head: "HTTP/1.1 200 OK\r\nX-Frame-Options: DENY\r\n\r\n")
       codes_of(deny).should_not contain("missing_x_frame_options")
+    end
+  end
+
+  it "flags CSP-Report-Only without an enforcing CSP as csp_report_only (not missing_csp)" do
+    with_store do |store|
+      only_ro = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy-Report-Only: default-src 'self'\r\n\r\n")
+      codes_of(only_ro).should contain("csp_report_only")
+      codes_of(only_ro).should_not contain("missing_csp")
+      # Enforcing CSP present → no report-only-only finding (even if R-O is also sent).
+      both = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nContent-Security-Policy: default-src 'self'\r\n" \
+                   "Content-Security-Policy-Report-Only: default-src 'self'\r\n\r\n")
+      codes_of(both).should_not contain("csp_report_only")
+      codes_of(both).should_not contain("missing_csp")
+    end
+  end
+
+  it "flags Referrer-Policy: unsafe-url as weak, not a strong policy" do
+    with_store do |store|
+      weak = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nReferrer-Policy: unsafe-url\r\n\r\n")
+      codes_of(weak).should contain("weak_referrer_policy")
+      codes_of(weak).should_not contain("missing_referrer_policy")
+      ok = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nReferrer-Policy: strict-origin-when-cross-origin\r\n\r\n")
+      codes_of(ok).should_not contain("weak_referrer_policy")
+      codes_of(ok).should_not contain("missing_referrer_policy")
+      # Browser default is ubiquitous — do not flag as weak.
+      defaultish = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nReferrer-Policy: no-referrer-when-downgrade\r\n\r\n")
+      codes_of(defaultish).should_not contain("weak_referrer_policy")
+    end
+  end
+
+  it "flags missing Permissions-Policy and high-risk features allowed for all origins" do
+    with_store do |store|
+      missing = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\n\r\n")
+      codes_of(missing).should contain("missing_permissions_policy")
+      # Restrictive modern policy → neither missing nor weak.
+      ok = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nPermissions-Policy: camera=(), geolocation=(self)\r\n\r\n")
+      codes_of(ok).should_not contain("missing_permissions_policy")
+      codes_of(ok).should_not contain("weak_permissions_policy")
+      # camera=* (and Feature-Policy geolocation *) → weak, with feature names as evidence.
+      weak_pp = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nPermissions-Policy: camera=*, microphone=()\r\n\r\n")
+      hit = weak_pp.find(&.code.==("weak_permissions_policy")).not_nil!
+      hit.evidence.should eq("camera")
+      weak_fp = analyze(store, content_type: "text/html",
+        resp_head: "HTTP/1.1 200 OK\r\nFeature-Policy: geolocation *; camera 'none'\r\n\r\n")
+      codes_of(weak_fp).should contain("weak_permissions_policy")
+      weak_fp.find(&.code.==("weak_permissions_policy")).not_nil!.evidence.should eq("geolocation")
+      # Document-only: a 302 must not fire missing Permissions-Policy.
+      redirect = analyze(store, content_type: "text/html", status: 302,
+        resp_head: "HTTP/1.1 302 Found\r\nLocation: /home\r\n\r\n")
+      codes_of(redirect).should_not contain("missing_permissions_policy")
+    end
+  end
+
+  it "flags HSTS max-age under 1 day as short_hsts but not as missing" do
+    with_store do |store|
+      short = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nStrict-Transport-Security: max-age=60\r\n\r\n",
+        content_type: "text/html")
+      codes_of(short).should contain("short_hsts")
+      codes_of(short).should_not contain("missing_hsts")
+      short.find(&.code.==("short_hsts")).not_nil!.evidence.should eq("max-age=60")
+      long = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nStrict-Transport-Security: max-age=31536000\r\n\r\n",
+        content_type: "text/html")
+      codes_of(long).should_not contain("short_hsts")
+      codes_of(long).should_not contain("missing_hsts")
+      # max-age=0 remains missing/disabled, not short.
+      disabled = analyze(store, resp_head: "HTTP/1.1 200 OK\r\nStrict-Transport-Security: max-age=0\r\n\r\n",
+        content_type: "text/html")
+      codes_of(disabled).should contain("missing_hsts")
+      codes_of(disabled).should_not contain("short_hsts")
     end
   end
 end
