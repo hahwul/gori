@@ -5107,6 +5107,14 @@ module Gori::Tui
       history_controller.history_query
     end
 
+    def history_delete : Nil
+      history_controller.history_delete
+    end
+
+    def history_clear : Nil
+      history_controller.history_clear
+    end
+
     def scroll_detail(delta : Int32) : Nil
       # ↑ at the very top of the open detail pops focus up to the tab bar, mirroring
       # the list's ↑-at-top → TABS. current_scope keys off @overlay before @focus, so

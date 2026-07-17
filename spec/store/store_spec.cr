@@ -255,6 +255,51 @@ describe Gori::Store do
     end
   end
 
+  it "delete_flow removes one flow and its captured WS/FTS/link dependents" do
+    with_store do |store|
+      keep = store.insert_flow(sample_request(target: "/keep"))
+      gone = store.insert_flow(sample_request(target: "/gone"))
+      store.insert_ws_message(gone, "client", 1, "hi".to_slice)
+      issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, nil)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
+        Gori::Store::LinkRefKind::Flow, gone)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
+        Gori::Store::LinkRefKind::Flow, keep)
+
+      store.delete_flow(gone)
+
+      store.get_flow(gone).should be_nil
+      store.get_flow(keep).should_not be_nil
+      store.count.should eq(1)
+      store.count_ws_messages(gone).should eq(0)
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id)
+        .map(&.ref_id).should eq([keep])
+    end
+  end
+
+  it "clear_flows wipes every History flow while sparing repeater-owned WS rows" do
+    with_store do |store|
+      a = store.insert_flow(sample_request(target: "/a"))
+      b = store.insert_flow(sample_request(target: "/b"))
+      store.insert_ws_message(a, "client", 1, "cap".to_slice)
+      # WebSocket-Repeater output: sentinel flow_id=0, keyed by repeater_id.
+      store.insert_ws_message(0_i64, "client", 1, "rep".to_slice, repeater_id: 9_i64)
+      issue_id = store.insert_issue("t", Gori::Store::Severity::Info, nil, nil)
+      store.add_link(Gori::Store::LinkOwnerKind::Issue, issue_id,
+        Gori::Store::LinkRefKind::Flow, a)
+
+      store.clear_flows
+
+      store.count.should eq(0)
+      store.get_flow(a).should be_nil
+      store.get_flow(b).should be_nil
+      store.count_ws_messages(a).should eq(0)
+      # Repeater-owned WS row survives (not keyed by a History flow).
+      store.@db.scalar("SELECT COUNT(*) FROM ws_messages WHERE repeater_id = 9").as(Int64).should eq(1)
+      store.list_links(Gori::Store::LinkOwnerKind::Issue, issue_id).should be_empty
+    end
+  end
+
   it "records a truncated body flag while keeping the TRUE wire size" do
     with_store do |store|
       stored = Bytes.new(8) { |i| (65 + i).to_u8 } # the capped 8-byte capture
