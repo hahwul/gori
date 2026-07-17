@@ -71,6 +71,12 @@ module Gori::Tui
       @oast_events = Channel(Oast::Event).new(256)
       @reg_events = Channel(RegResult).new(16)
       @registering = Set(Int64).new # provider ids with a register round-trip in flight (dedup g/^R)
+      @max_cb_id = 0_i64            # highest callback row id folded in (watermark for reconcile)
+      @cb_version = 0               # bumped on any @callbacks mutation → invalidates the view caches
+      @ordered_cache = nil.as(Array(CbRow)?)
+      @ordered_cache_key = nil.as({Int32, String}?)
+      @filtered_cache = nil.as(Array(CbRow)?)
+      @filtered_cache_key = nil.as({Int32, String}?)
       reload
     end
 
@@ -141,29 +147,53 @@ module Gori::Tui
     end
 
     # --- data ---
+    # Authoritative full rebuild (init + on_enter): re-read providers/sessions, then fold the
+    # whole callback table in one rowid-ordered query (id order == chronological, so no sort).
+    # Also reflects any peer-process deletions. Live/soft-sync updates go through reconcile.
     def reload : Nil
       store = @host.session.store
       @providers = store.oast_providers
       @callbacks.clear
       @seen.clear
       @session_label.clear
+      @max_cb_id = 0_i64
       store.oast_sessions.each do |s|
-        label = provider_label_for(s)
-        @session_label[s.id] = label
-        seen = (@seen[s.id] ||= Set(String).new)
-        store.oast_callbacks(s.id).each do |cb|
-          next if seen.includes?(cb.provider_uid)
-          seen << cb.provider_uid
-          @callbacks << cb_row(cb, label)
-        end
+        @session_label[s.id] = provider_label_for(s)
+        @seen[s.id] ||= Set(String).new
       end
-      @callbacks.sort_by!(&.at)
+      store.oast_callbacks_since(0_i64).each { |cb| fold_callback(cb) }
+      @cb_version += 1
       clamp_selection
     end
 
-    # Soft-sync on an external DB change: reload config + history, keep live pollers.
+    # Soft-sync on an external DB change (own commits OR a peer process): refresh the cheap
+    # config (providers/sessions/labels), then fold in ONLY callbacks past the watermark. This
+    # runs on every data_version bump — up to ~1.3×/sec during capture, even off-tab — so it
+    # must stay incremental; the full-table reload lives in reload (init + on_enter).
     def reconcile : Nil
-      reload
+      store = @host.session.store
+      @providers = store.oast_providers
+      store.oast_sessions.each do |s|
+        @session_label[s.id] = provider_label_for(s)
+        @seen[s.id] ||= Set(String).new
+      end
+      inserted = false
+      store.oast_callbacks_since(@max_cb_id).each { |cb| inserted = true if fold_callback(cb) }
+      @cb_version += 1 if inserted
+      clamp_selection
+    end
+
+    # Add one persisted callback to the in-memory view, advancing the watermark. Returns true
+    # if it was new (not a dedup hit). Rows arrive id-ascending, so the watermark only grows;
+    # a callback the live drain already appended is read once here, skipped, and its id clears
+    # the watermark so it is never re-read again (bounds reconcile to new-since-last rows).
+    private def fold_callback(cb : Store::OastCallbackRecord) : Bool
+      @max_cb_id = cb.id if cb.id > @max_cb_id
+      seen = (@seen[cb.session_id] ||= Set(String).new)
+      return false if seen.includes?(cb.provider_uid)
+      seen << cb.provider_uid
+      @callbacks << cb_row(cb, @session_label[cb.session_id]? || "oast")
+      true
     end
 
     def on_enter : Nil
@@ -533,16 +563,31 @@ module Gori::Tui
       ordered_callbacks[@cb_sel]?
     end
 
-    # The callbacks in display order (newest first), narrowed by the filter. `@callbacks`
-    # stays the master store so live inserts still land and simply re-filter next render.
+    # The callbacks in display order (newest first), narrowed by the filter. Memoized on
+    # (callbacks version, filter) so the per-render reverse — and the filter scan below — run
+    # once per change instead of several times each render frame + drain tick. `@callbacks`
+    # stays the master store so live inserts still land and simply re-filter next version.
     private def ordered_callbacks : Array(CbRow)
-      filtered_callbacks.reverse
+      key = {@cb_version, @filter.value}
+      if (cached = @ordered_cache) && @ordered_cache_key == key
+        return cached
+      end
+      result = filtered_callbacks.reverse
+      @ordered_cache = result
+      @ordered_cache_key = key
+      result
     end
 
     private def filtered_callbacks : Array(CbRow)
+      key = {@cb_version, @filter.value}
+      if (cached = @filtered_cache) && @filtered_cache_key == key
+        return cached
+      end
       q = @filter.value.strip.downcase
-      return @callbacks if q.empty?
-      @callbacks.select { |r| callback_matches?(r, q) }
+      result = q.empty? ? @callbacks : @callbacks.select { |r| callback_matches?(r, q) }
+      @filtered_cache = result
+      @filtered_cache_key = key
+      result
     end
 
     private def callback_matches?(r : CbRow, q : String) : Bool
@@ -809,10 +854,13 @@ module Gori::Tui
         seen << i.unique_id
         label = @session_label[sid]? || "oast"
         store = @host.session.store
+        # Persist the interaction's OWN time (not now) so a callback shows the same timestamp
+        # live and after a reload (created_at is microseconds; cb_row divides back to seconds).
         store.insert_oast_callback(sid, i.unique_id, i.protocol, i.method, i.source_ip,
-          i.full_id, i.raw_request.to_slice, i.raw_response.try(&.to_slice), now_us)
+          i.full_id, i.raw_request.to_slice, i.raw_response.try(&.to_slice), i.at.to_unix_ms * 1000)
         @callbacks << CbRow.new(sid, i.unique_id, i.protocol, i.method, i.source_ip, i.full_id,
           label, i.at, i.raw_request, i.raw_response)
+        @cb_version += 1
         n = @listeners.find { |l| l.session.id == sid }
         @host.jobs.progress(n.job_id, nil, nil, "#{callbacks_for(sid)} hits") if n
         @host.notifications.push(:success, "OAST #{i.protocol.upcase} hit on #{label} (#{i.source_ip || "?"})",
@@ -820,16 +868,14 @@ module Gori::Tui
       end
     end
 
+    # @seen[sid] holds exactly the distinct provider_uids folded in for that session (one per
+    # CbRow), so its size is the hit count — O(1), vs. an O(n) scan of the whole list per hit.
     private def callbacks_for(sid : Int64) : Int32
-      @callbacks.count { |c| c.session_id == sid }
+      @seen[sid]?.try(&.size) || 0
     end
 
     private def poll_http : Oast::Http
       Oast::HttpClient.new(verify_tls: !@host.session.config.insecure_upstream?)
-    end
-
-    private def now_us : Int64
-      Time.utc.to_unix_ms * 1000
     end
 
     # Notification "jump to result" lands on this tab (no per-row reveal needed).

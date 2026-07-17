@@ -83,4 +83,24 @@ describe "OAST persistence (V39)" do
       store.oast_callbacks(sid, since_id: first_id).map(&.provider_uid).should eq(["uid-2"])
     end
   end
+
+  it "folds all sessions' new callbacks in one watermark query (oast_callbacks_since)" do
+    with_store do |store|
+      s1 = store.insert_oast_session(nil, "custom-http", "https://a/log", "c1", "", nil, nil)
+      s2 = store.insert_oast_session(nil, "custom-http", "https://b/log", "c2", "", nil, nil)
+      store.insert_oast_callback(s1, "u1", "http", "GET", "10.0.0.1", "a", "a".to_slice, nil, 10_i64)
+      store.insert_oast_callback(s2, "u2", "http", "GET", "10.0.0.2", "b", "b".to_slice, nil, 11_i64)
+
+      # from 0: both sessions' callbacks, oldest id first
+      first = store.oast_callbacks_since(0_i64)
+      first.map(&.provider_uid).should eq(["u1", "u2"])
+      first.map(&.session_id).should eq([s1, s2])
+
+      # watermark past the last row → nothing, until a new callback lands on EITHER session
+      watermark = first.last.id
+      store.oast_callbacks_since(watermark).should be_empty
+      store.insert_oast_callback(s1, "u3", "dns", "A", "10.0.0.3", "a", "c".to_slice, nil, 12_i64)
+      store.oast_callbacks_since(watermark).map(&.provider_uid).should eq(["u3"])
+    end
+  end
 end
