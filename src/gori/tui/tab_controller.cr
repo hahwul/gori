@@ -89,9 +89,9 @@ module Gori::Tui
 
     # Frame the tab body, carve the sub-tab strip from the interior top when
     # `labels` is given, then yield the remaining content rect.
-    # `strip_divider: false` carves chips only (height 1) so a sibling row — e.g.
-    # Repeater's always-visible filter bar — can own the hairline underneath the
-    # whole chrome group instead of splitting chips from that row.
+    # `strip_divider: false` carves chips only (height 1), leaving a sibling row to own
+    # the hairline underneath instead of splitting chips from that row. All current tabs
+    # pass `true` (see subtab_strip_divider?); the false path is kept for flexibility.
     def framed_body(screen : Screen, rect : Rect, shell_focused : Bool,
                     subtabs_focused : Bool, labels : Array(String)?, active : Int32,
                     prev_start : Int32 = 0, hidden : Set(Int32)? = nil, *,
@@ -288,11 +288,14 @@ module Gori::Tui
       (0...subtab_count).reject { |i| h.includes?(i) }
     end
 
-    # Whether BodyChrome carves the hairline under the chip row. When a filter bar is
-    # shown the bar owns the hairline (draws it under chips+filter as one chrome group),
-    # so this is false; otherwise true. Runner strip hit-tests read the same flag.
+    # The sub-tab strip always carves its own hairline under the chip row. When a filter
+    # bar is also shown it draws a SECOND hairline below itself, so the chrome reads
+    # chips › ─── › filter › ─── › body (matching Target/Sitemap) instead of gluing the
+    # chips straight onto the filter. Render (framed_body), body geometry
+    # (body_rect_below_filter), and the Runner's strip hit-tests all read this one flag,
+    # so they stay in sync.
     def subtab_strip_divider? : Bool
-      !subtab_filter_shown?
+      true
     end
 
     # ===== sub-tab filter subsystem (issue #121) =============================
@@ -469,8 +472,8 @@ module Gori::Tui
       (!filter_suggestions.empty? || filter_token_empty?) ? base + 1 : base
     end
 
-    # History-style 3-state bar under the sub-tab chips, with the strip hairline drawn
-    # BELOW the filter so chips+filter read as one chrome group:
+    # History-style 3-state bar, sitting under the chips + their own hairline, with its
+    # own hairline drawn BELOW it (chips ─── filter ─── body, matching Target/Sitemap):
     #   editing  → `filter › <input>` [+ `↹ name:…` suggestions]
     #   active   → `: <query>`
     #   idle     → `/ filter  ·  name:  host:  method:` (this tab's advertised fields)
