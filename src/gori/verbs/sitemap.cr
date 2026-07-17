@@ -58,8 +58,8 @@ module Gori
         Verb::Scope::Sitemap, [Verb::Chord.new("r")], mnemonic: 'r') { |ctx| ctx.sitemap_repeater; nil }
 
       r.register Verb::Definition.new(
-        "sitemap.to-menu", "Back to menu", "Move focus up to the tab menu", Verb::Scope::Sitemap,
-        [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:menu); nil }
+        "sitemap.to-menu", "Back to sub-tabs", "Move focus up to the Sitemap/Discover strip", Verb::Scope::Sitemap,
+        [Verb::Chord.new("escape")], hidden: true) { |ctx| ctx.focus_pane(:subtabs); nil }
     end
   end
 end

@@ -485,6 +485,8 @@ module Gori::Tui
     end
 
     private def finish_job(v : MinerView, ev : Miner::DoneEvent) : Nil
+      return if @host.jobs.errored?(v.job_id) # an ErrorEvent already finalized this run — the
+      #                                         engine's trailing DoneEvent must not log/notify success
       n = v.found_count
       @host.jobs.finish(v.job_id, :done, "#{n} found")
       msg = "Miner: #{n} param#{n == 1 ? "" : "s"} found on #{v.summary}#{ev.stopped ? " (stopped)" : ""}"

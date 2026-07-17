@@ -1429,7 +1429,7 @@ describe "Gori::Probe::Active::ForbiddenBypass" do
     end
   end
 
-  it "flags High only when the denied response flips to 2xx" do
+  it "flags a possible bypass (Medium) only when the denied response flips to 2xx" do
     with_store do |store|
       forbidden = capture_flow(store, "HTTP/1.1 403 Forbidden\r\n\r\n", target: "/admin", status: 403, content_type: nil)
       plan = probe.plan(forbidden).not_nil!
@@ -1438,7 +1438,8 @@ describe "Gori::Probe::Active::ForbiddenBypass" do
       dets = probe.detections(plan, bypassed, forbidden)
       dets.size.should eq(1)
       dets.first.code.should eq("forbidden_bypass")
-      dets.first.severity.should eq(Gori::Store::Severity::High)
+      # Single-shot flip vs the captured baseline (no control re-send) → Medium "possible", not High.
+      dets.first.severity.should eq(Gori::Store::Severity::Medium)
 
       # Still denied → the gate held → not flagged.
       still_denied = Gori::Repeater::Result.new("HTTP/1.1 403 Forbidden\r\n\r\n".to_slice, Bytes.empty, nil, 1_i64)

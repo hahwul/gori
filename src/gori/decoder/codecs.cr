@@ -122,6 +122,11 @@ module Gori::Decoder
 
     def base32_decode(s : String) : Bytes
       bytes = s.to_slice
+      # A non-ASCII byte means the input may carry Unicode whitespace (nbsp, line/para
+      # separators) that the pre-rewrite char decoder skipped via Char#whitespace?. Take the
+      # tolerant char scan then, so a base32 blob pasted from a PDF/doc still decodes rather
+      # than raising on the whitespace's UTF-8 lead byte. Pure-ASCII keeps the fast byte loop.
+      return base32_decode_chars(s) if bytes.any? { |b| b >= 0x80 }
       buf = Bytes.new((bytes.size * 5) // 8 + 1) # upper bound (padding/ws over-counts)
       n = 0
       acc = 0_u32
@@ -130,6 +135,29 @@ module Gori::Decoder
         next if b == 0x3d_u8 || ascii_ws?(b) # '=' padding / whitespace
         v = B32_DEC[b]
         raise DecoderError.new("invalid base32 char: #{b.chr}") if v == 0xff_u8
+        acc = (acc << 5) | v.to_u32
+        bits += 5
+        if bits >= 8
+          bits -= 8
+          buf[n] = ((acc >> bits) & 0xff).to_u8
+          n += 1
+        end
+      end
+      buf[0, n]
+    end
+
+    # Unicode-whitespace-tolerant base32 decode (rare path): skips ANY whitespace char, not
+    # just ASCII, matching the decoder's behavior before the byte-level rewrite.
+    private def base32_decode_chars(s : String) : Bytes
+      buf = Bytes.new((s.bytesize * 5) // 8 + 1)
+      n = 0
+      acc = 0_u32
+      bits = 0
+      s.each_char do |c|
+        next if c == '=' || c.whitespace?
+        o = c.ord
+        v = o < 256 ? B32_DEC[o.to_u8] : 0xff_u8
+        raise DecoderError.new("invalid base32 char: #{c}") if v == 0xff_u8
         acc = (acc << 5) | v.to_u32
         bits += 5
         if bits >= 8

@@ -333,11 +333,15 @@ module Gori::Tui
     # confirm dialog open and confirm can't retarget the delete (same pattern as
     # ProbeController#probe_delete). Works from the list or the open detail.
     def history_delete : Nil
-      id = @host.overlay == :detail ? @history.detail_flow_id : @history.selected_id
+      from_detail = @host.overlay == :detail
+      id = from_detail ? @history.detail_flow_id : @history.selected_id
       return unless id
       label = @history.flow_summary(id)
+      # return_to: :detail when launched from the open flow detail, so CANCEL restores the
+      # detail (instead of dropping to the list) and the guard below still fires on accept
+      # (the flow is gone, so :detail → :none).
       @host.confirm("DELETE FLOW", "Delete \"#{label}\"?\nThis can't be undone.",
-        confirm_label: "delete", danger: true) do
+        confirm_label: "delete", danger: true, return_to: from_detail ? :detail : :none) do
         @history.delete_by_id(@host.session.store, id)
         @host.request_overlay(:none) if @host.overlay == :detail
         @host.status("deleted #{label}")
@@ -352,7 +356,7 @@ module Gori::Tui
       return if n <= 0
       @host.confirm("CLEAR HISTORY",
         "Delete ALL #{n} History flow#{n == 1 ? "" : "s"} for this project?\nThis can't be undone.",
-        confirm_label: "clear", danger: true) do
+        confirm_label: "clear", danger: true, return_to: @host.overlay == :detail ? :detail : :none) do
         @history.clear(@host.session.store)
         @host.request_overlay(:none) if @host.overlay == :detail
         @host.status("history cleared")

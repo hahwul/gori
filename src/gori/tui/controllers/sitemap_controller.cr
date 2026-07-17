@@ -209,7 +209,7 @@ module Gori::Tui
     # --- verbs (delegated from the Runner's ExecContext) ---
     def sitemap_move(delta : Int32) : Nil
       if delta < 0 && @sitemap.at_top?
-        @host.request_focus(:menu) # ↑ at the top node pops up to the tab bar
+        @host.request_focus(:subtabs) # ↑ at the top node pops to Target's Sitemap|Discover strip (downgrades to :menu with no strip)
       else
         @sitemap.move(delta)
       end

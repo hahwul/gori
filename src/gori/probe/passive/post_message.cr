@@ -4,8 +4,9 @@ module Gori
   module Probe
     module Passive
       # Cross-origin messaging weaknesses (category "client") — the "other client-side sink
-      # points" family, centred on window.postMessage. Three signals, over the RAW fragments
-      # (Context#client_scripts) because two of them key on string literals ("message", "*"):
+      # points" family, centred on window.postMessage. Three signals, over the comment-stripped
+      # fragments (Context#client_scripts_nocomment): string literals ("message", "*") stay
+      # visible for the string-key form, but commented-out example code no longer false-matches:
       #   * a message handler that never consults an origin (no `.origin` anywhere in the
       #     script) — the classic missing sender check that lets any frame drive the handler;
       #   * postMessage(data, "*") — a wildcard target origin, leaking the message to any
@@ -29,7 +30,7 @@ module Gori
         DOMAIN_SET = /\bdocument\.domain\s*=(?!=)/
 
         def check(ctx : Context, acc : Array(Detection)) : Nil
-          scripts = ctx.client_scripts
+          scripts = ctx.client_scripts_nocomment # keep string literals, drop comments (no commented-out-code FPs)
           return if scripts.empty?
           emitted = Set(String).new
           scripts.each do |code|

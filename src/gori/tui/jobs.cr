@@ -61,8 +61,16 @@ module Gori::Tui
 
     def finish(id : Int32, state : Symbol, summary : String? = nil) : Nil
       return unless j = find(id)
+      return unless j.running? # first terminal state wins: an engine that emits ErrorEvent
+      #                          then a trailing DoneEvent must stay :error, not flip to :done
       j.state = state
       j.note = summary if summary
+    end
+
+    # True once a job has been finished with :error — lets a controller's DoneEvent handler
+    # skip its success side effects (log/notification/status) when an ErrorEvent already fired.
+    def errored?(id : Int32) : Bool
+      (j = find(id)) ? j.state == :error : false
     end
 
     def active : Array(Job)

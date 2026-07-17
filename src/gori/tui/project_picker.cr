@@ -46,7 +46,7 @@ module Gori::Tui
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
       @results_scroll = 0
-      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :compress | :compressing
+      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :compress | :measuring | :compressing
       @name = ""
       @desc = ""
       @new_field = :name # :name | :desc (only in :new mode)
@@ -473,9 +473,15 @@ module Gori::Tui
         set_flash(%(can't compress "#{project.name}" — it's open in another window), ok: false)
         return
       end
+      # measure runs several full-table scans synchronously on this event loop; on a large
+      # project that blocks repaint/input for a beat, so paint a busy card first (mirrors the
+      # VACUUM path) instead of freezing on the stale frame.
+      @mode = :measuring
+      render
       stats = begin
         Store.measure(project.db_path)
       rescue Gori::Error | IO::Error | DB::Error | SQLite3::Exception
+        @mode = :list
         set_flash(%(can't read "#{project.name}" to compress), ok: false)
         return
       end
@@ -539,8 +545,14 @@ module Gori::Tui
         render # paint the busy card before the blocking VACUUM
         begin
           if result = Store.compact(project.db_path, plan)
-            reclaimed = result.reclaimed_bytes > 0 ? "  (−#{Fmt.size(result.reclaimed_bytes)})" : ""
-            set_flash(%(compressed "#{project.name}"  #{Fmt.size(result.before_bytes)} → #{Fmt.size(result.after_bytes)}#{reclaimed}), ok: true)
+            if result.vacuumed
+              reclaimed = result.reclaimed_bytes > 0 ? "  (−#{Fmt.size(result.reclaimed_bytes)})" : ""
+              set_flash(%(compressed "#{project.name}"  #{Fmt.size(result.before_bytes)} → #{Fmt.size(result.after_bytes)}#{reclaimed}), ok: true)
+            else
+              # The strip committed but VACUUM failed (often low disk — it needs ~db-size
+              # scratch). Data WAS removed; only the OS reclaim was skipped.
+              set_flash(%(compressed "#{project.name}" — data removed, but disk not reclaimed (free up space and compress again)), ok: true)
+            end
           else
             set_flash(%(can't compress "#{project.name}" — it's open in another window), ok: false)
           end
@@ -801,7 +813,7 @@ module Gori::Tui
         @settings.render(screen, Rect.new(0, 0, w, h)) if @mode == :settings
         render_space_menu(screen, w, h) if @mode == :space
         @compact.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :compress
-        render_compressing(screen, w, h) if @mode == :compressing
+        render_compressing(screen, w, h) if @mode == :compressing || @mode == :measuring
       end
       # Sync the terminal hardware cursor to the focused caret so the terminal's
       # own IME composition UI (jamo/candidate popup) anchors at the right cell —
@@ -963,10 +975,11 @@ module Gori::Tui
       end
     end
 
-    # A small centered "Compressing …" card painted while the synchronous VACUUM
-    # runs (the picker has no background jobs / spinner), so the freeze reads as work.
+    # A small centered busy card painted while a synchronous blocking step runs (the picker
+    # has no background jobs / spinner), so the freeze reads as work — the measure scan on a
+    # multi-GB project, then the VACUUM.
     private def render_compressing(screen : Screen, w : Int32, h : Int32) : Nil
-      msg = " Compressing … "
+      msg = @mode == :measuring ? " Measuring … " : " Compressing … "
       bw = {msg.size + 4, 22}.max
       bh = 3
       box = Rect.new({(w - bw) // 2, 0}.max, {(h - bh) // 2, 0}.max, bw, bh)

@@ -30,7 +30,11 @@ module Gori
     # How many body bytes the proxy CAPTURES + stores per request/response (settings:network).
     # A change only affects flows captured AFTER it (buffers allocate at request start). MiB, min 1.
     DEFAULT_CAPTURE_MAX_MIB = 2
-    DEFAULT_EDITOR          = ""
+    # Upper bound on the capture cap: the byte product (mib*1024*1024) MUST stay within
+    # Int32 or every read on the proxy hot path raises OverflowError and drops the
+    # connection. 2047 MiB = 2_146_435_072 bytes < Int32::MAX. Clamped at read AND input.
+    MAX_CAPTURE_MAX_MIB = 2047
+    DEFAULT_EDITOR      = ""
     DEFAULT_EDITOR_MARKDOWN = true
     DEFAULT_THEME           = "goridark"
     DEFAULT_MOUSE           = true
@@ -55,6 +59,9 @@ module Gori
     DEFAULT_HISTORY_TIME_FORMAT = "absolute" # "absolute" | "relative"
     DEFAULT_SHOW_GUTTER         = true
     DEFAULT_PREVIEW_BODY_KIB    = 64
+    # Upper bound on the preview cap (KiB): kib*1024 must stay within Int32 or
+    # preview_body_cap raises on the History navigation path. 65536 KiB = 64 MiB.
+    MAX_PREVIEW_BODY_KIB = 65536
     # Notifications (settings:notifications): bell = terminal beep on a background result/alert;
     # toast = also flash a bottom-bar toast for fuzzer/probe/discover results; retention = ring
     # buffer size. All opt-in-friendly defaults (bell off; toast on; 100 kept).
@@ -97,8 +104,10 @@ module Gori
     end
 
     # The capture cap in BYTES — the value CaptureBuffer/import bound a body to.
+    # Clamped so a large (or hand-edited) MiB value can never overflow Int32 and break
+    # the proxy hot path (see MAX_CAPTURE_MAX_MIB).
     def self.capture_max : Int32
-      capture_max_mib * 1024 * 1024
+      capture_max_mib.clamp(1, MAX_CAPTURE_MAX_MIB) * 1024 * 1024
     end
 
     # Per-project network overrides — a RUNTIME layer set by Session.open from the OPEN
@@ -191,9 +200,10 @@ module Gori
     class_property? clipboard_osc52 : Bool = DEFAULT_CLIPBOARD_OSC52
     class_property? confirm_quit : Bool = DEFAULT_CONFIRM_QUIT
 
-    # The History-list preview body cap in BYTES (stored as KiB above).
+    # The History-list preview body cap in BYTES (stored as KiB above). Clamped so a
+    # large (or hand-edited) KiB value can never overflow Int32 (see MAX_PREVIEW_BODY_KIB).
     def self.preview_body_cap : Int32
-      preview_body_kib * 1024
+      preview_body_kib.clamp(1, MAX_PREVIEW_BODY_KIB) * 1024
     end
 
     def self.history_newest_first? : Bool
@@ -272,7 +282,7 @@ module Gori
         self.serve_landing = load_bool(net, "serve_landing", serve_landing?)
         net["connect_timeout_secs"]?.try(&.as_i?).try { |v| self.connect_timeout_secs = {v, 1}.max }
         net["io_timeout_secs"]?.try(&.as_i?).try { |v| self.io_timeout_secs = {v, 1}.max }
-        net["capture_max_mib"]?.try(&.as_i?).try { |v| self.capture_max_mib = {v, 1}.max }
+        net["capture_max_mib"]?.try(&.as_i?).try { |v| self.capture_max_mib = v.clamp(1, MAX_CAPTURE_MAX_MIB) }
       end
       self.theme = root["theme"]?.try(&.as_s?) || theme # validated against the known themes by Theme.apply
       self.mouse = load_bool(root, "mouse", mouse)
@@ -346,7 +356,7 @@ module Gori
       end
       self.show_gutter = load_bool_h(o, "show_gutter", show_gutter)
       if v = o["preview_body_kib"]?.try(&.as_i?)
-        self.preview_body_kib = {v, 1}.max
+        self.preview_body_kib = v.clamp(1, MAX_PREVIEW_BODY_KIB)
       end
     end
 

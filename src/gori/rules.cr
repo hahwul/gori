@@ -17,10 +17,12 @@ module Gori
       @mutex = Mutex.new
       # Lock-free fast-path flags: rewrite_* run on EVERY message, but the common case
       # is no rule for that side/part. These let the hot path skip the mutex + select-
-      # array allocation entirely when nothing would match. `@head_count` gates the head
-      # rewrite (replace-head AND the header ops, which all act on the head); the two body
-      # counts also gate whether ClientConn buffers a body at all.
-      @head_count = Atomic(Int32).new(active_count(@rules, part: Store::RulePart::Head))
+      # array allocation entirely when nothing would match. The head counts gate the head
+      # rewrite (replace-head AND the header ops, which all act on the head), split PER
+      # DIRECTION like the body counts so a request-only rule doesn't tax every response
+      # (and vice versa); the body counts also gate whether ClientConn buffers a body at all.
+      @req_head_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Request, part: Store::RulePart::Head))
+      @resp_head_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Head))
       @req_body_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Request, part: Store::RulePart::Body))
       @resp_body_count = Atomic(Int32).new(active_count(@rules, Store::RuleTarget::Response, part: Store::RulePart::Body))
     end
@@ -98,11 +100,11 @@ module Gori
     # --- HeadRewriter (called from proxy fibers) -----------------------------
 
     def rewrite_request(head : Bytes, host : String) : Bytes
-      apply(head, Store::RuleTarget::Request, Store::RulePart::Head, @head_count, host)
+      apply(head, Store::RuleTarget::Request, Store::RulePart::Head, @req_head_count, host)
     end
 
     def rewrite_response(head : Bytes, host : String) : Bytes
-      apply(head, Store::RuleTarget::Response, Store::RulePart::Head, @head_count, host)
+      apply(head, Store::RuleTarget::Response, Store::RulePart::Head, @resp_head_count, host)
     end
 
     # A body rule is live iff at least one enabled, non-empty rule targets that side's
@@ -252,9 +254,13 @@ module Gori
       h = host.downcase
       g = glob.downcase
       if g.includes?('*')
+        # Compile the glob→regex ONCE per distinct glob, not per proxied head. host_matches?
+        # runs on the hot path for EVERY request/response head while any head rule is active
+        # (including messages the rule doesn't target — the scope test is what decides that),
+        # so an uncached Regex.new here was a PCRE2 compile per message. SafeRegexp memoises.
         rx = "^#{Regex.escape(g).gsub("\\*", ".*")}$"
         begin
-          Regex.new(rx).matches?(h)
+          SafeRegexp.compile(rx).matches?(h)
         rescue
           false
         end
@@ -267,6 +273,12 @@ module Gori
 
     RULE_PREVIEW_SCAN = 500
 
+    # Cap the body bytes pulled per flow for a BODY rule preview: this runs on the
+    # interactive keystroke path, so never fetch multi-MiB bodies. Head/header rules read
+    # no body at all (body_max: 0). A body match past the cap is missed — acceptable since
+    # the preview is already documented as approximate.
+    RULE_PREVIEW_BODY_MAX = 64 * 1024
+
     record Preview, scanned : Int32, matched : Int32, total : Int64
 
     # How many of up to `limit` recent stored flows a candidate rule WOULD affect, by
@@ -276,8 +288,12 @@ module Gori
     def preview(rule : Store::MatchRule, limit : Int32 = RULE_PREVIEW_SCAN) : Preview
       scanned = 0
       matched = 0
+      # Head/header rules never touch the body, so fetch head-only; body rules cap the
+      # fetched bytes. Without this the preview pulled every flow's FULL request+response
+      # body into memory per keystroke, stalling proportionally to stored body size.
+      body_max = rule.part.body? ? RULE_PREVIEW_BODY_MAX : 0
       @store.recent_flows(limit, nil).each do |row|
-        detail = @store.get_flow(row.id)
+        detail = @store.get_flow(row.id, body_max: body_max)
         next unless detail
         scanned += 1
         matched += 1 if rule_affects?(rule, detail)
@@ -305,7 +321,8 @@ module Gori
     private def refresh : Nil
       fresh = @store.match_rules
       @mutex.synchronize { @rules = fresh }
-      @head_count.set(active_count(fresh, part: Store::RulePart::Head))
+      @req_head_count.set(active_count(fresh, Store::RuleTarget::Request, part: Store::RulePart::Head))
+      @resp_head_count.set(active_count(fresh, Store::RuleTarget::Response, part: Store::RulePart::Head))
       @req_body_count.set(active_count(fresh, Store::RuleTarget::Request, part: Store::RulePart::Body))
       @resp_body_count.set(active_count(fresh, Store::RuleTarget::Response, part: Store::RulePart::Body))
     end

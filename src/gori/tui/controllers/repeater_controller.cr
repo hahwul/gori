@@ -70,7 +70,9 @@ module Gori::Tui
       # pings and one terminal Report back here (a union type — Progress or Report), drained
       # by drain_results. Only one minimize runs at a time (tracked by @minimize_job).
       @minimize_events = Channel({RepeaterView, Repeater::Minimize::Progress | Repeater::Minimize::Report}).new(256)
-      @minimize_job = nil.as({RepeaterView, Int32}?) # the {view, Jobs id} of a running minimize
+      # {view, Jobs id, start-of-run request snapshot} of a running minimize. The snapshot
+      # guards the writeback: if the user edited the request mid-run we must not overwrite it.
+      @minimize_job = nil.as({RepeaterView, Int32, String}?)
     end
 
     def tab : Symbol
@@ -828,17 +830,30 @@ module Gori::Tui
     # already dropped by the drain, and close_repeater_tab finished its job.
     private def apply_minimize_report(tab : RepeaterTab, report : Repeater::Minimize::Report) : Nil
       view = tab.view
-      job = (mj = @minimize_job) && mj[0].same?(view) ? mj[1] : nil
-      @minimize_job = nil if job
-      unless report.aborted || report.removed.empty?
+      mj = @minimize_job
+      if mj && mj[0].same?(view)
+        job = mj[1]
+        snapshot = mj[2]
+        @minimize_job = nil
+      else
+        job = nil
+        snapshot = nil
+      end
+      # The run does NOT lock the editor, so the user may have typed into the request while
+      # it ran. Only auto-install the trimmed request when the editor still holds the exact
+      # bytes the run started from; otherwise skip the overwrite and surface the result so
+      # the user's mid-run edits are never silently discarded.
+      edited_mid_run = snapshot && view.request_text != snapshot
+      if !report.aborted && !report.removed.empty? && !edited_mid_run
         view.replace_request(report.minimized_text)
         persist_repeater_tab(tab) # persist even if the user switched sub-tabs while it ran
       end
-      level = report.aborted ? :warning : (report.removed.empty? ? :info : :success)
-      @host.jobs.finish(job, report.aborted ? :error : :done, report.note) if job
-      @host.notifications.push(level, "Minimize: #{report.note} on #{view.summary}",
+      note = edited_mid_run ? "#{report.note} — request edited meanwhile, not applied" : report.note
+      level = edited_mid_run ? :warning : (report.aborted ? :warning : (report.removed.empty? ? :info : :success))
+      @host.jobs.finish(job, report.aborted ? :error : :done, note) if job
+      @host.notifications.push(level, "Minimize: #{note} on #{view.summary}",
         Jobs::Goto.new(:repeater, tab.db_id), source: "minimize")
-      @host.status(report.note)
+      @host.status(note)
     end
 
     # Persist a specific tab's request edits (minimize can land on a tab that isn't current).
@@ -1235,7 +1250,7 @@ module Gori::Tui
           !@host.session.config.insecure_upstream?, view.sni_override, timeout: 10.seconds),
         MINIMIZE_SEND_CAP)
       job = @host.jobs.start(:minimize, view.summary, goto: Jobs::Goto.new(:repeater, tab.db_id))
-      @minimize_job = {view, job}
+      @minimize_job = {view, job, text} # `text` is the snapshot the run minimizes; see apply_minimize_report
       events = @minimize_events
       @host.status("minimizing #{view.summary} in the background — watch the bottom bar / notifications")
       spawn(name: "gori-minimize") do
@@ -1367,6 +1382,11 @@ module Gori::Tui
     # round-trip, or holding unsaved local edits.
     private def repeater_tab_locked?(tab : RepeaterTab) : Bool
       v = tab.view
+      # A running minimize tracks its tab only by @minimize_job (not view.inflight?), so a
+      # clean minimizing tab would otherwise be droppable/overwritable by a cross-session
+      # reconcile — orphaning @minimize_job (phantom spinner + minimize blocked until restart).
+      # Lock it until the terminal Report lands and clears @minimize_job.
+      return true if (mj = @minimize_job) && mj[0].same?(v)
       # request_hex? too: a hex-edit session isn't necessarily dirty, and request_text
       # reads CRLF in hex mode vs the LF-persisted row, so the reconcile compare would
       # wrongly see a change and restore() — wiping the hex buffer. Lock it.

@@ -2257,15 +2257,12 @@ module Gori::Tui
       when key.down?   then p.move(1)
       when key.enter?  then apply_send_to
       else
-        if (c = ev.char) && !ev.ctrl? && !ev.alt?
-          if idx = p.index_for(c)
-            p.set_selected(idx)
-            apply_send_to
-          elsif c == 'j'
-            p.move(1)
-          elsif c == 'k'
-            p.move(-1)
-          end
+        # Mnemonic → immediate send. No j/k vim fallback: destination mnemonics now
+        # include 'j' (JWT), so a j/k nav fallback both shadowed that mnemonic and was
+        # asymmetric (k moved up, j sent). Arrows handle navigation.
+        if (c = ev.char) && !ev.ctrl? && !ev.alt? && (idx = p.index_for(c))
+          p.set_selected(idx)
+          apply_send_to
         end
       end
     end
@@ -3998,6 +3995,8 @@ module Gori::Tui
       flush_active_tab_edits # cross-tab "open this and land in it" jumps must persist the outgoing edit too
       @active_tab = tab
       @focus = :body
+      @overlay = :none # clear any launching overlay (e.g. History :detail) so the destination
+      #                  tab's body keys/scope aren't deadened by a stale overlay gate
     end
 
     def session : Session
@@ -6456,6 +6455,12 @@ module Gori::Tui
         status
       end
       @resized = true # alt-screen re-entered → force a full repaint via the resize path
+      # The child editor may have set its own OS window title. termisu memoizes the last
+      # title it wrote (still "Gori - <tab>"), so a plain re-emit is suppressed — bust its
+      # memo with a throwaway write, then invalidate gori's memo so the next render
+      # re-emits "Gori - <tab>" and restores our title over whatever the editor left.
+      @term.title = ""
+      @title_tab = nil
       case result.outcome
       in ExternalEditor::Outcome::Changed
         yield result.text.not_nil!
