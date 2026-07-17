@@ -61,13 +61,13 @@ describe "Chrome.visible_tabs" do
     vis.size.should eq(Chrome::TABS.size - Chrome::DEFAULT_HIDDEN.size)
   end
 
-  it "force-includes a hidden active tab at its catalog-relative position" do
-    # Miner hidden by default; forcing it must slot it where it sits in the catalog
-    # (between Fuzzer and Decoder).
+  it "force-includes a hidden active tab at the far right of the strip" do
+    # Miner hidden by default; forcing it (a jump to a hidden tab) must append it at the
+    # END of the visible strip — right next to the ⋯ list — not splice it mid-strip at its
+    # catalog position between Fuzzer and Decoder.
     vis = Chrome.visible_tabs([] of {String, Bool}, force: :miner).map(&.first)
-    vis.includes?(:miner).should be_true
-    vis.index(:miner).not_nil!.should be > vis.index(:fuzzer).not_nil!
-    vis.index(:miner).not_nil!.should be < vis.index(:decoder).not_nil!
+    vis.last.should eq(:miner)
+    vis.index(:miner).not_nil!.should be > vis.index(:decoder).not_nil!
   end
 
   it "places the default-visible Decoder tab between Fuzzer and Comparer" do
