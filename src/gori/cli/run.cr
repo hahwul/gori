@@ -124,7 +124,7 @@ module Gori
         {"oast", "Listen for out-of-band callbacks (interactsh & friends); print payload + hits"},
         {"sitemap", "Print the host → path endpoint tree (text, json, paths)"},
         {"probe [QL]", "Passively scan captured flows for issues (zero requests)"},
-        {"notes [<n>]", "Read the project's notes (list, show one, or --all)"},
+        {"notes [<n>]", "Read or write the project's notes (list, show, --all, create, delete)"},
         {"issues", "List, export, create, or update issues (text, json, markdown)"},
         {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
         {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview)"},
