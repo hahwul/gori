@@ -10,6 +10,9 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 - **[Proxy & History](/guide/proxy/)**: capture, intercept, scope, import, match & replace, host overrides.
 - **[Repeater & Fuzzer](/guide/repeater-and-fuzzer/)**: the request workbench, env tokens, and the Intruder-style fuzzer.
 - **[Decoder](/guide/decoder/)**: encode / decode / hash pipeline in the TUI.
+- **[JWT](/guide/jwt/)**: decode, re-sign, and attack JSON Web Tokens.
+- **[Sequencer](/guide/sequencer/)**: grade the randomness of session and CSRF tokens.
+- **[OAST](/guide/oast/)**: catch out-of-band callbacks to confirm blind vulnerabilities.
 - **[Scanning & Issues](/guide/scanning/)**: Probe, Param Miner, Discover (spider & brute-force), Issues, Notes, Comparer.
 - **[MCP Server](/guide/mcp/)**: drive gori from an AI agent or script.
 - **[Themes](/guide/themes/)**: switch between built-in colour themes or create your own.
@@ -25,14 +28,18 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Target** | Sitemap (host → path endpoint tree) + Discover (spider & directory brute-force) |
 | **History** | Captured (and imported) flows with full request/response detail |
 | **Intercept** | Hold requests/responses for a manual decision |
+| **Rewriter** | Match & Replace rules that rewrite traffic in flight (hidden by default) |
 | **Repeater** | Request workbench (incl. WebSocket & gRPC modes) |
 | **Fuzzer** | Intruder-style fuzzer with four attack modes |
 | **Miner** | Hidden-parameter discovery (hidden by default) |
+| **OAST** | Out-of-band callback listener for blind vulnerabilities |
+| **Sequencer** | Token randomness / predictability analysis (hidden by default) |
 | **Decoder** | Encode / decode / hash pipeline |
+| **JWT** | Decode, re-sign, and attack JSON Web Tokens (hidden by default) |
 | **Comparer** | Side-by-side diff of two flows |
 | **Probe** | Passive & light-touch active security scanner |
 | **Issues** | Triage results by severity and status |
 | **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links |
 
-Global lenses that are not tabs: **Match & Replace** (`m`) rewrites request/response heads and bodies in flight; **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.
+Some tabs are hidden on a fresh install (Rewriter, Miner, Sequencer, JWT) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or **Settings: Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.

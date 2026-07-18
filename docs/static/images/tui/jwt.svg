@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1206" height="520" viewBox="0 0 1206.0 520.0" font-family="ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="15.0px" role="img" aria-label="gori · JWT">
+<rect x="0.5" y="0.5" width="1205.0" height="519.0" rx="10" ry="10" fill="#0a0a0b" stroke="#313132" stroke-width="1"/>
+<rect x="1" y="1" width="1204.0" height="34.0" rx="10" ry="10" fill="#19191a"/>
+<rect x="1" y="24.0" width="1204.0" height="10" fill="#19191a"/>
+<circle cx="18.0" cy="17.0" r="5.5" fill="#e0645f"/>
+<circle cx="34.0" cy="17.0" r="5.5" fill="#e0b24f"/>
+<circle cx="50.0" cy="17.0" r="5.5" fill="#4fb06a"/>
+<text x="603.0" y="22.0" text-anchor="middle" fill="#919191" font-size="12.3px">gori · JWT</text>
+<rect x="1044.00" y="106.00" width="45.00" height="18.00" fill="#19191c"/>
+<rect x="54.00" y="142.00" width="117.00" height="18.00" fill="#8b7342"/>
+<rect x="36.00" y="484.00" width="54.00" height="18.00" fill="#1b1b1f"/>
+<rect x="90.00" y="484.00" width="1098.00" height="18.00" fill="#141417"/>
+<text x="45.00" y="83.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" font-weight="700" xml:space="preserve">𝓰𝓸𝓻𝓲</text>
+<text x="90.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="108.00" y="83.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">default</text>
+<text x="792.00" y="83.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">scope:off</text>
+<text x="882.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="900.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">●</text>
+<text x="918.00" y="83.68" textLength="126.00" lengthAdjust="spacingAndGlyphs" fill="#52c77a" xml:space="preserve">127.0.0.1:8070</text>
+<text x="1053.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="1071.00" y="83.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">08:02</text>
+<text x="1125.00" y="83.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">pm</text>
+<text x="1152.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="1170.00" y="83.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">⌘</text>
+<text x="36.00" y="101.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="36.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">‹</text>
+<text x="54.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Target</text>
+<text x="135.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">History</text>
+<text x="225.00" y="119.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Intercept</text>
+<text x="333.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Repeater</text>
+<text x="432.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Fuzzer</text>
+<text x="513.00" y="119.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">OAST</text>
+<text x="576.00" y="119.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Decoder</text>
+<text x="666.00" y="119.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Comparer</text>
+<text x="765.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Probe</text>
+<text x="837.00" y="119.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Issues</text>
+<text x="918.00" y="119.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Notes</text>
+<text x="990.00" y="119.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">Help</text>
+<text x="1053.00" y="119.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" font-weight="700" xml:space="preserve">JWT</text>
+<text x="1152.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">⋯</text>
+<text x="1170.00" y="119.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">3</text>
+<text x="36.00" y="137.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+<text x="36.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="63.00" y="155.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">1:jwt</text>
+<text x="117.00" y="155.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">HS256</text>
+<text x="1179.00" y="155.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="173.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│</text>
+<text x="36.00" y="191.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="45.00" y="191.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">╭─</text>
+<text x="72.00" y="191.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">INPUT</text>
+<text x="126.00" y="191.68" textLength="981.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">─────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="1116.00" y="191.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">i:NOR</text>
+<text x="1170.00" y="191.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">╮</text>
+<text x="1179.00" y="191.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="45.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="54.00" y="209.68" textLength="1116.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOT…</text>
+<text x="1170.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">│</text>
+<text x="1179.00" y="209.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="45.00" y="227.68" textLength="1134.00" lengthAdjust="spacingAndGlyphs" fill="#c2a05a" xml:space="preserve">╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="1179.00" y="227.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="245.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│╭─</text>
+<text x="72.00" y="245.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">DECODED</text>
+<text x="144.00" y="245.68" textLength="1044.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮│</text>
+<text x="36.00" y="263.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">││</text>
+<text x="54.00" y="263.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">//</text>
+<text x="81.00" y="263.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header</text>
+<text x="1170.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">┃</text>
+<text x="1179.00" y="263.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="281.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">││</text>
+<text x="54.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">{</text>
+<text x="1170.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1a1a1e" xml:space="preserve">│</text>
+<text x="1179.00" y="281.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="299.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">││</text>
+<text x="72.00" y="299.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">&quot;alg&quot;:</text>
+<text x="135.00" y="299.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">&quot;HS256&quot;,</text>
+<text x="1170.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1a1a1e" xml:space="preserve">│</text>
+<text x="1179.00" y="299.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="317.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">││</text>
+<text x="72.00" y="317.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">&quot;typ&quot;:</text>
+<text x="135.00" y="317.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">&quot;JWT&quot;</text>
+<text x="1170.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1a1a1e" xml:space="preserve">│</text>
+<text x="1179.00" y="317.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="335.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯│</text>
+<text x="36.00" y="353.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│╭─</text>
+<text x="72.00" y="353.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">ATTACKS</text>
+<text x="144.00" y="353.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">·</text>
+<text x="162.00" y="353.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">23</text>
+<text x="189.00" y="353.68" textLength="999.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮│</text>
+<text x="36.00" y="371.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">││</text>
+<text x="63.00" y="371.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">alg=none</text>
+<text x="153.00" y="371.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">unsigned;</text>
+<text x="243.00" y="371.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">accepted</text>
+<text x="324.00" y="371.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">if</text>
+<text x="351.00" y="371.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">the</text>
+<text x="387.00" y="371.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">server</text>
+<text x="450.00" y="371.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">trusts</text>
+<text x="513.00" y="371.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">alg=none</text>
+<text x="594.00" y="371.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">from</text>
+<text x="639.00" y="371.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">the</text>
+<text x="675.00" y="371.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">token</text>
+<text x="1170.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">┃</text>
+<text x="1179.00" y="371.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="389.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">││</text>
+<text x="63.00" y="389.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">alg=None</text>
+<text x="153.00" y="389.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">unsigned;</text>
+<text x="243.00" y="389.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">accepted</text>
+<text x="324.00" y="389.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">if</text>
+<text x="351.00" y="389.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">the</text>
+<text x="387.00" y="389.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">server</text>
+<text x="450.00" y="389.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">trusts</text>
+<text x="513.00" y="389.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">alg=None</text>
+<text x="594.00" y="389.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">from</text>
+<text x="639.00" y="389.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">the</text>
+<text x="675.00" y="389.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">token</text>
+<text x="1170.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1a1a1e" xml:space="preserve">│</text>
+<text x="1179.00" y="389.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="407.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">││</text>
+<text x="63.00" y="407.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">alg=NONE</text>
+<text x="153.00" y="407.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">unsigned;</text>
+<text x="243.00" y="407.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">accepted</text>
+<text x="324.00" y="407.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">if</text>
+<text x="351.00" y="407.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">the</text>
+<text x="387.00" y="407.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">server</text>
+<text x="450.00" y="407.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">trusts</text>
+<text x="513.00" y="407.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">alg=NONE</text>
+<text x="594.00" y="407.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">from</text>
+<text x="639.00" y="407.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">the</text>
+<text x="675.00" y="407.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">token</text>
+<text x="1170.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1a1a1e" xml:space="preserve">│</text>
+<text x="1179.00" y="407.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="425.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">││</text>
+<text x="63.00" y="425.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">alg=nOnE</text>
+<text x="153.00" y="425.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">unsigned;</text>
+<text x="243.00" y="425.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">accepted</text>
+<text x="324.00" y="425.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">if</text>
+<text x="351.00" y="425.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">the</text>
+<text x="387.00" y="425.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">server</text>
+<text x="450.00" y="425.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">trusts</text>
+<text x="513.00" y="425.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">alg=nOnE</text>
+<text x="594.00" y="425.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">from</text>
+<text x="639.00" y="425.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">the</text>
+<text x="675.00" y="425.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">token</text>
+<text x="1170.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1a1a1e" xml:space="preserve">│</text>
+<text x="1179.00" y="425.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="443.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">││</text>
+<text x="63.00" y="443.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">signature</text>
+<text x="153.00" y="443.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#c8c8cc" xml:space="preserve">stripped</text>
+<text x="243.00" y="443.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">original</text>
+<text x="324.00" y="443.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">header,</text>
+<text x="396.00" y="443.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">empty</text>
+<text x="450.00" y="443.68" textLength="81.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">signature</text>
+<text x="540.00" y="443.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">segment</text>
+<text x="612.00" y="443.68" textLength="72.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">(3-part)</text>
+<text x="1170.00" y="443.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#1a1a1e" xml:space="preserve">│</text>
+<text x="1179.00" y="443.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│</text>
+<text x="36.00" y="461.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">│╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯│</text>
+<text x="36.00" y="479.68" textLength="1152.00" lengthAdjust="spacingAndGlyphs" fill="#2a2a30" xml:space="preserve">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="45.00" y="497.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#fafafa" font-weight="700" xml:space="preserve">BODY</text>
+<text x="99.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">i/↵</text>
+<text x="135.00" y="497.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">edit</text>
+<text x="180.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="198.00" y="497.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">⇧arrows</text>
+<text x="270.00" y="497.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">select</text>
+<text x="333.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="351.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">y</text>
+<text x="369.00" y="497.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">copy</text>
+<text x="414.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="432.00" y="497.68" textLength="45.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">space</text>
+<text x="486.00" y="497.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">cmds</text>
+<text x="531.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="549.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">↓</text>
+<text x="567.00" y="497.68" textLength="63.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">decoded</text>
+<text x="639.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="657.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">^E</text>
+<text x="684.00" y="497.68" textLength="54.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">encode</text>
+<text x="747.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="765.00" y="497.68" textLength="18.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">^N</text>
+<text x="792.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">new</text>
+<text x="828.00" y="497.68" textLength="9.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">·</text>
+<text x="846.00" y="497.68" textLength="27.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">esc</text>
+<text x="882.00" y="497.68" textLength="36.00" lengthAdjust="spacingAndGlyphs" fill="#6e6e76" xml:space="preserve">tabs</text>
+</svg>

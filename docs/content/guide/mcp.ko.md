@@ -85,6 +85,10 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |
 | `list_rules` | 프로젝트의 Match & Replace 규칙을 적용 순서로 나열 |
 | `decode` | `input`에 대해 인코드/디코드/해시/압축 체인을 실행(순수 변환; 네트워크나 상태 없음) |
+| `jwt_decode` / `jwt_encode` / `jwt_attacks` | JWT 디코드, 재서명, 공격 페이로드 생성(순수 계산; `--read-only`에서도 사용 가능) |
+| `sequence_analyze` | 붙여넣은 토큰 목록의 무작위성 / 예측 가능성 평가(순수) |
+| `oast_presets` / `oast_payload` / `oast_poll` | OAST 프로바이더 나열, 현재 페이로드 조회, 실행 중인 리스너의 콜백 폴링 |
+| `discover_status` / `discover_results` | Discover 실행의 진행 상황과 결과 |
 | `project_info` | 플로우 / 이슈 개수, 데이터베이스, 워크스페이스 바인딩, 선택 출처 |
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것 |
 | `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션 |
@@ -101,8 +105,11 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 | `create_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 토글, 삭제(이동 중인 요청/응답 헤드 또는 본문에 대한 리터럴 재작성) |
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동 |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
+| `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |
+| `discover_start` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스(`discover_status` / `discover_results`로 폴링) |
+| `oast_start` / `oast_stop` | OAST 페이로드 등록 후 콜백 폴링(`oast_poll`로 히트 조회) |
 
-> 액션 도구는 안전을 위해 상한이 있습니다: fuzz와 mine 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 TUI는 규칙을 다시 로드한 뒤에만 적용합니다.
+> 액션 도구는 안전을 위해 상한이 있습니다: fuzz, mine, sequence, discover 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 TUI는 규칙을 다시 로드한 뒤에만 적용합니다.
 
 ## MCP 이음새인 이유 {#why-an-mcp-seam}
 

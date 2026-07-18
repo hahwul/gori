@@ -1,41 +1,45 @@
 +++
 title = "Quick Start"
-description = "Start the proxy, trust the CA, capture your first flows, and learn the Day-1 keys."
+description = "A hands-on walkthrough: trust the CA, capture a real request, inspect it, and replay it in Repeater."
 +++
 
-Get from a fresh build to a full capture → inspect → repeater loop in a few minutes. This page is the shortest path through gori's basics; the [Guide](/guide/) goes deeper once traffic is flowing.
+This is a follow-along tutorial. Work through it top to bottom and you'll go from a fresh install to a captured HTTPS request that you have inspected, sent to **Repeater**, edited, and re-sent, all without leaving the terminal. Set aside about ten minutes.
+
+Each step ends with a **Checkpoint**: what you should see before moving on. If something looks different, that line is where to stop and fix it.
+
+> **Before you begin.** [Install gori](/getting-started/installation/) and have a browser installed. You'll capture your own browsing, so pick a site you are authorized to test (your own app, a staging box, or a deliberately vulnerable practice target). The examples use a stable throwaway target, `example.com`, for the parts that need an exact result.
 
 ## 1. Start gori
 
-Launch the TUI. With no subcommand, gori starts the proxy and opens the interface:
+With no subcommand, gori starts the proxy and opens the interface:
 
 ```bash
 gori
 ```
 
-By default the proxy listens on `127.0.0.1:8070`. The first launch runs a short [setup wizard](#first-run-wizard) to pick the global default bind and theme, then offers the interactive [UI tour](#guided-ui-tour). Individual projects can pin a different bind later in the Project tab.
+The first launch runs a short [setup wizard](#first-run-wizard) (global bind and theme), then offers a [guided UI tour](#guided-ui-tour). You can take the tour now or skip it and come back; this page covers the same ground against live traffic.
 
-Override the global bind for a single run with flags (not written to disk; a project's own bind still wins when set):
+By default the proxy listens on `127.0.0.1:8070`. Override it for a single run (a project's own bind still wins when set):
 
 ```bash
 gori --listen 0.0.0.0 --port 8080
 ```
 
-## 2. Trust the CA and get traffic in
+**Checkpoint.** You're looking at the gori TUI: a row of tabs down the side (Project, Target, History, …) and a top bar showing the proxy address, `127.0.0.1:8070`.
 
-To intercept HTTPS, clients must trust gori's root certificate (generated on first run under `~/.gori/ca`). Two common paths:
+## 2. Trust the CA and capture your first flow
+
+To read HTTPS, the client has to trust gori's root certificate (generated on first run under `~/.gori/ca`). The fastest path is a pre-trusted browser.
 
 ### Option A: Open a pre-trusted browser (recommended)
 
 Inside the TUI:
 
 1. Press `Ctrl-P` to open the **command palette**.
-2. Run **Open browser**.
+2. Type `browser` and run **Open browser**.
 3. Pick an installed browser (Chrome, Chromium, Brave, Edge, Firefox, …).
 
-gori launches it with an isolated profile that already trusts the CA and routes HTTP/HTTPS through the proxy. Browse a site. Flows should land in **History** without a separate system trust step.
-
-Empty History also hints at this path (`^P → Open browser`).
+gori launches it with a throwaway profile that already trusts the CA and routes HTTP/HTTPS through the proxy. In that browser, visit a site (try `https://example.com`, then a site you're testing).
 
 ### Option B: Point any client yourself
 
@@ -45,44 +49,45 @@ Print the CA path and import that file into your system or browser trust store a
 gori ca
 ```
 
-Then set the client to use `127.0.0.1:8070` as its HTTP **and** HTTPS proxy. For a quick smoke test:
+Then set the client's HTTP **and** HTTPS proxy to `127.0.0.1:8070`. Quick smoke test from another terminal:
 
 ```bash
 curl -x http://127.0.0.1:8070 https://example.com
 ```
 
-gori mints per-host leaf certificates from the root on demand, so you only trust the root once.
+gori mints per-host leaf certificates from the root on demand, so you trust the root only once.
 
-> gori's private key is a machine secret. It is written with `0600` permissions and never leaves your machine. Rotate it from the palette (**Regenerate CA certificate**) only when you mean to invalidate every prior trust.
+> gori's private key is a machine secret, written with `0600` permissions, and never leaves your machine. Rotate it from the palette (**Regenerate CA certificate**) only when you mean to invalidate every prior trust.
+
+**Checkpoint.** Switch to **History** (press `3`). You should see at least one row: your `GET https://example.com/` request with a `200` status. If History is empty, capture isn't reaching gori: recheck the proxy setting (Option B) or use **Open browser** (Option A).
 
 ## 3. Learn the two discovery surfaces
 
-Almost everything is reachable from two places. Learn these before memorizing tab-specific keys.
+Before memorizing tab-specific keys, learn the two places almost everything lives.
 
 | Surface | Key | What it is for |
 |---------|-----|----------------|
 | **Command palette** | `Ctrl-P` | App-wide control: settings, Open browser, Export CA, jump actions, anything global |
 | **Space menu** | `Space` | Actions for whatever has focus right now (History row, detail pane, Repeater, …) |
 
-The palette is the map of the whole tool. The space menu is the map of *this* pane. Both show key hints; if you forget a chord, open one of them.
+The palette is the map of the whole tool. The space menu is the map of *this* pane. Both show key hints, so if you forget a chord, open one of them.
 
 <figure class="tui-shot">
   <img src="/images/tui/command-palette.svg" alt="gori command palette open over the History tab, listing settings, navigation and export actions with a filter box">
   <figcaption>The command palette (<kbd>Ctrl-P</kbd>): fuzzy-filter every app-wide action, from settings to <em>Open browser</em> to tab jumps.</figcaption>
 </figure>
 
-Capture and intercept still have global toggles:
+Three global toggles are worth knowing from the start:
 
 | Key | Action |
 |-----|--------|
 | `c` | Toggle **capture** (off = traffic passes through without being stored) |
-| `i` | Toggle **intercept** (hold matching requests for forward / drop / edit) |
+| `i` | Toggle **intercept** (hold matching requests to forward / drop / edit) |
 | `s` | Toggle the **scope lens** (filter views to in-scope traffic) |
-| `Ctrl-P` → Match & Replace | In-flight request/response rewrite rules (palette; rebindable) |
 
 ## 4. Move around the TUI
 
-gori is a row of **tabs**. Default order starts with Project → Sitemap → **History** → Intercept → Repeater → Fuzzer → …
+gori is a row of tabs. The default order starts Project → Target → **History** → Intercept → Repeater → Fuzzer → …
 
 | Key | Action |
 |-----|--------|
@@ -92,18 +97,18 @@ gori is a row of **tabs**. Default order starts with Project → Sitemap → **H
 | `Esc` | Pop focus back toward the tab bar |
 | `Tab` / `Shift-Tab` | Move focus between the tab bar and panes |
 
-Mouse works when enabled (settings): click a tab, click a row to select, click again to open.
+Mouse works when enabled (Settings): click a tab, click a row to select, click again to open. The **Help** tab is a full key cheatsheet inside the app when this page isn't open.
 
-The **Help** tab is a full key cheatsheet inside the app. Use it when this page is not open.
+## 5. Read a flow in History
 
-## 5. Watch flows in History
-
-Switch to **History** (`3`, or `[` / `]` until History is active). Every request/response is a *flow*: start line, headers, body (stored up to 2 MiB), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.
+Make sure History is active (`3`). Every request/response is a *flow*: start line, headers, body (stored up to 2 MiB), plus HTTP/2 frames, WebSocket messages, and decoded JWT / SAML / GraphQL when present.
 
 <figure class="tui-shot">
   <img src="/images/tui/history.svg" alt="gori History tab listing captured HTTP flows with time, method, protocol, host, path, status, type, size and duration columns">
   <figcaption>The <strong>History</strong> tab: every captured flow with method, status, size and timing, filterable with the query language.</figcaption>
 </figure>
+
+Try each of these:
 
 | Key | Action |
 |-----|--------|
@@ -113,47 +118,50 @@ Switch to **History** (`3`, or `[` / `]` until History is active). Every request
 | `f` | Toggle follow-newest (tail) |
 | `y` | Copy the selected flow |
 
-Filter examples once `/` is open:
+Press `/` and type a filter, then `Enter`:
+
+```text
+host:example.com
+```
+
+History narrows to that host. Clear the filter (`/`, erase, `Enter`) to see everything again. A few more to try later:
 
 ```text
 status:5xx
-host:api.example.com
 method:POST body:password
 ```
 
-In detail: scroll with `↑` / `↓`, copy with `y`, and use `x` / `b` / `p` for hex / whitespace / pretty bodies. `Space` still opens the action menu for the focused pane.
+Now select your `example.com` flow and press `Enter`. In the detail view, scroll with `↑` / `↓`, copy with `y`, and toggle `x` / `b` / `p` for hex / whitespace / pretty bodies. `Esc` returns to the list.
 
-## 6. Do something with a flow
+**Checkpoint.** You can filter History down to one host and open a flow to read its full request and response.
 
-Select a flow in History (list or detail), then:
+## 6. Send it to Repeater and re-send (the core loop)
 
-| Key | Action |
-|-----|--------|
-| `Ctrl-R` | Send the flow to **Repeater** (edit and re-send) |
-| `Shift-I` | Send the flow to the **Fuzzer** |
-| `Shift-F` | Create a **Issue** from it |
-| `Space` | Other actions (Comparer, copy, scope host, …) |
+This is the loop you'll spend most of your time in: take a captured request, change something, send it again, and compare.
 
-### Minimal Repeater loop
-
-1. In History, select a flow → `Ctrl-R` (lands in Repeater).
-2. `Enter` or `i` on the request to edit (INS mode); `Esc` back to READ.
-3. `Ctrl-R` again to **send**; inspect the response (timing and diff against the previous reply).
-4. `Tab` cycles target → request → response.
+1. In **History**, select your `example.com` flow.
+2. Press `Ctrl-R`. gori copies it into the **Repeater** tab and switches you there.
+3. Press `Enter` or `i` on the request pane to edit (INS mode). Change something small, for example add a header line:
+   ```http
+   X-Gori-Test: 1
+   ```
+4. Press `Esc` to leave edit mode, then `Ctrl-R` to **send**.
+5. The response, its timing, and a diff against the previous reply appear on the right. `Tab` cycles target → request → response.
 
 <figure class="tui-shot">
   <img src="/images/tui/repeater.svg" alt="gori Repeater tab showing an editable request pane beside the response pane, with a status line reading replayed 200 in 1152ms">
   <figcaption><strong>Repeater</strong> edits any part of a request and re-sends it; the response, timing, and a diff against the last reply sit side by side.</figcaption>
 </figure>
 
-### Minimal Fuzzer loop
+**Checkpoint.** The Repeater status line reads something like `replayed 200 in … ms`, and you can re-send with `Ctrl-R` as many times as you like. That is the full capture → inspect → replay loop.
 
-1. In History, select a flow → `Shift-I`.
-2. Mark positions (`Ctrl-A` auto-marks common params, or mark by hand with `§…§`).
-3. Attach a wordlist or list in the config pane (`Ctrl-O` focuses it).
-4. `Ctrl-R` to run; `Ctrl-X` to stop.
+## 7. Where to go next
 
-While you browse, **Probe** flags passive issues with no extra traffic. Promote anything worth tracking into **Issues**. Full detail is in [Repeater & Fuzzer](/guide/repeater-and-fuzzer/) and [Scanning & Issues](/guide/scanning/).
+You now have the core loop. A few directions from here, each covered in depth in the [Guide](/guide/):
+
+- **Fuzz a parameter.** Select a flow, press `Shift-I` to send it to the **Fuzzer**, mark a position (`Ctrl-A` auto-marks common params), attach a wordlist, and `Ctrl-R` to run. See [Repeater & Fuzzer](/guide/repeater-and-fuzzer/).
+- **Intercept and edit in flight.** Press `i` to hold matching requests and forward, drop, or modify them before they continue. See [Proxy & History](/guide/proxy/#intercept).
+- **Track what you find.** Turn anything worth reporting into an **Issue** with `Shift-F`, and read passive findings on the **Probe** tab as you browse. See [Scanning & Issues](/guide/scanning/).
 
 ## Day-1 key map
 
@@ -202,6 +210,5 @@ It is also offered at the end of the first-run wizard.
 - [Configuration](/getting-started/configuration/): storage layout, network settings, and the CA
 - [Proxy & History](/guide/proxy/): capture, intercept, scope, import, match & replace
 - [Repeater & Fuzzer](/guide/repeater-and-fuzzer/): the testing workbench and env tokens
-- [Decoder](/guide/decoder/): encode, decode, and hash pipeline
 - [Query Language](/reference/query-language/): full filter syntax
 - [Hotkeys](/guide/hotkeys/): rebind any of the chords above
