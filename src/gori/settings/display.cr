@@ -26,11 +26,15 @@ module Gori::Settings
   # show_gutter = line-number gutter on the message body views; preview_body_kib = how many
   # body bytes the History list PREVIEW reads/shows (display-only, not the capture limit).
   # resource_meter = the bottom bar's far-right CPU/MEM readout for gori's own process.
+  # terminal_title = what gori writes into the OS terminal-window title (OSC): the project
+  # and active tab, the tab alone, or nothing at all ("off" leaves the title untouched,
+  # for shells/multiplexers that manage it themselves).
   DEFAULT_DETAIL_PANE         = "request"  # "request" | "response"
   DEFAULT_HISTORY_TIME_FORMAT = "absolute" # "absolute" | "relative"
   DEFAULT_SHOW_GUTTER         = true
   DEFAULT_PREVIEW_BODY_KIB    = 64
   DEFAULT_RESOURCE_METER      = true
+  DEFAULT_TERMINAL_TITLE      = "project" # "project" | "tab" | "off"
   # Upper bound on the preview cap (KiB): kib*1024 must stay within Int32 or
   # preview_body_cap raises on the History navigation path. 65536 KiB = 64 MiB.
   MAX_PREVIEW_BODY_KIB = 65536
@@ -72,6 +76,8 @@ module Gori::Settings
   class_property preview_body_kib : Int32 = DEFAULT_PREVIEW_BODY_KIB
   # `?` toggle read live by the status bar's ResourceMeter; off means it never samples.
   class_property? resource_meter : Bool = DEFAULT_RESOURCE_METER
+  # Read live by the Runner's sync_terminal_title; validated to its three-value set on load.
+  class_property terminal_title : String = DEFAULT_TERMINAL_TITLE
   # Notification prefs (settings:notifications). bell/toast are `?` toggles read live at the
   # emit sites; retention bounds the ring buffer (read live by Notifications#push).
   class_property? notify_bell : Bool = DEFAULT_NOTIFY_BELL
@@ -137,6 +143,14 @@ module Gori::Settings
       self.preview_body_kib = v.clamp(1, MAX_PREVIEW_BODY_KIB)
     end
     self.resource_meter = load_bool_h(o, "resource_meter", resource_meter?)
+    if v = o["terminal_title"]?.try(&.as_s?)
+      self.terminal_title = normalize_terminal_title(v)
+    end
+  end
+
+  # Allowed terminal-title modes; anything else falls back to the default.
+  def self.normalize_terminal_title(s : String) : String
+    {"project", "tab", "off"}.includes?(s) ? s : DEFAULT_TERMINAL_TITLE
   end
 
   # Tolerant notifications section: absent/non-object keeps current; retention floored at 1.
@@ -208,7 +222,8 @@ module Gori::Settings
            history_time_format == DEFAULT_HISTORY_TIME_FORMAT &&
            show_gutter == DEFAULT_SHOW_GUTTER &&
            preview_body_kib == DEFAULT_PREVIEW_BODY_KIB &&
-           resource_meter? == DEFAULT_RESOURCE_METER
+           resource_meter? == DEFAULT_RESOURCE_METER &&
+           terminal_title == DEFAULT_TERMINAL_TITLE
       j.field "display" do
         j.object do
           j.field "detail_pane", default_detail_pane
@@ -216,6 +231,7 @@ module Gori::Settings
           j.field "show_gutter", show_gutter
           j.field "preview_body_kib", preview_body_kib
           j.field "resource_meter", resource_meter?
+          j.field "terminal_title", terminal_title
         end
       end
     end

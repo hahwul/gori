@@ -75,10 +75,12 @@ module Gori::Tui
       Field.new("Interval (s)",
         "how often to re-run the command — seconds (min 1)"),
     ]
-    # Display: message-body rendering prefs (two choice fields + a bool + a text cap).
-    DISPLAY_PANE_CHOICES = ["request", "response"]
-    DISPLAY_TIME_CHOICES = ["absolute", "relative"]
-    DISPLAY_FIELDS       = [
+    # Display: message-body + chrome prefs (three choice fields, two bools, a text cap).
+    DISPLAY_PANE_CHOICES  = ["request", "response"]
+    DISPLAY_TIME_CHOICES  = ["absolute", "relative"]
+    # Kept short: all three render inline on one row inside the settings box.
+    DISPLAY_TITLE_CHOICES = ["project + tab", "tab", "off"]
+    DISPLAY_FIELDS        = [
       Field.new("Default detail pane",
         "which pane a freshly-opened History flow shows first — ←/→ cycles",
         choices: DISPLAY_PANE_CHOICES),
@@ -93,6 +95,9 @@ module Gori::Tui
       Field.new("Resource meter",
         "show gori's own CPU/memory at the far right of the bottom bar — ←/→/space toggles",
         bool: true),
+      Field.new("Terminal title",
+        "what gori writes into the terminal window title — off leaves it to your shell/tmux — ←/→ cycles",
+        choices: DISPLAY_TITLE_CHOICES),
     ]
     # Notifications: bell/toast toggles + ring-buffer retention.
     NOTIFICATIONS_FIELDS = [
@@ -156,7 +161,7 @@ module Gori::Tui
                 when :theme         then [Theme.canonical(Settings.theme)]
                 when :layout        then layout_values
                 when :statusline    then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
-                when :display       then [Settings.default_detail_pane, Settings.history_time_format, Settings.show_gutter ? "on" : "off", Settings.preview_body_kib.to_s, Settings.resource_meter? ? "on" : "off"]
+                when :display       then display_values
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
                 when :general       then [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off"]
                 else                     [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", Settings.serve_landing? ? "on" : "off", Settings.connect_timeout_secs.to_s, Settings.io_timeout_secs.to_s, Settings.capture_max_mib.to_s, hostnames_summary]
@@ -195,6 +200,7 @@ module Gori::Tui
                   Settings::DEFAULT_SHOW_GUTTER ? "on" : "off",
                   Settings::DEFAULT_PREVIEW_BODY_KIB.to_s,
                   Settings::DEFAULT_RESOURCE_METER ? "on" : "off",
+                  title_label(Settings::DEFAULT_TERMINAL_TITLE),
                 ]
                 when :notifications then [
                   Settings::DEFAULT_NOTIFY_BELL ? "on" : "off",
@@ -237,6 +243,27 @@ module Gori::Tui
 
     private def order_from_label(s : String) : String
       s.starts_with?("oldest") ? "oldest" : "newest"
+    end
+
+    private def display_values : Array(String)
+      [
+        Settings.default_detail_pane,
+        Settings.history_time_format,
+        Settings.show_gutter ? "on" : "off",
+        Settings.preview_body_kib.to_s,
+        Settings.resource_meter? ? "on" : "off",
+        title_label(Settings.terminal_title),
+      ]
+    end
+
+    # "tab"/"off" label as themselves; only the default mode reads differently in the UI
+    # ("project" stored, "project + tab" shown) since the title carries both.
+    private def title_label(mode : String) : String
+      mode == "project" ? "project + tab" : mode
+    end
+
+    private def title_from_label(s : String) : String
+      DISPLAY_TITLE_CHOICES.includes?(s) && s != "project + tab" ? s : "project"
     end
 
     # ↑/↓: move between fields — except in the THEME section, whose single field IS a
@@ -412,7 +439,8 @@ module Gori::Tui
         Settings.show_gutter = @values[2] == "on"
         Settings.preview_body_kib = kib
         Settings.resource_meter = @values[4] == "on"
-        @values = [Settings.default_detail_pane, Settings.history_time_format, Settings.show_gutter ? "on" : "off", Settings.preview_body_kib.to_s, Settings.resource_meter? ? "on" : "off"]
+        Settings.terminal_title = title_from_label(@values[5])
+        @values = display_values
         return persist
       end
       if @section == :notifications
