@@ -7,6 +7,7 @@ require "digest/sha1"
 require "digest/sha256"
 require "digest/sha512"
 require "digest/crc32"
+require "openssl"
 
 module Gori::Decoder
   # Builds the default registry — every v1 converter, in autocomplete display
@@ -107,7 +108,9 @@ module Gori::Decoder
     # ---------------- HASH ----------------
     r.register encode("md5", category: Category::Hash, direction: Direction::Hash, description: "MD5 digest (hex)") { |b| Digest::MD5.hexdigest(b) }
     r.register encode("sha1", category: Category::Hash, direction: Direction::Hash, description: "SHA-1 digest (hex)") { |b| Digest::SHA1.hexdigest(b) }
+    r.register encode("sha224", category: Category::Hash, direction: Direction::Hash, description: "SHA-224 digest (hex)") { |b| OpenSSL::Digest.new("SHA224").update(b).final.hexstring }
     r.register encode("sha256", category: Category::Hash, direction: Direction::Hash, description: "SHA-256 digest (hex)") { |b| Digest::SHA256.hexdigest(b) }
+    r.register encode("sha384", category: Category::Hash, direction: Direction::Hash, description: "SHA-384 digest (hex)") { |b| OpenSSL::Digest.new("SHA384").update(b).final.hexstring }
     r.register encode("sha512", category: Category::Hash, direction: Direction::Hash, description: "SHA-512 digest (hex)") { |b| Digest::SHA512.hexdigest(b) }
     r.register encode("crc32", category: Category::Hash, direction: Direction::Hash, description: "CRC-32 checksum (hex)") { |b| Digest::CRC32.checksum(b).to_s(16).rjust(8, '0') }
 

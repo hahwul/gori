@@ -74,9 +74,9 @@ module Gori::Tui
       @max_cb_id = 0_i64            # highest callback row id folded in (watermark for reconcile)
       @cb_version = 0               # bumped on any @callbacks mutation → invalidates the view caches
       @ordered_cache = nil.as(Array(CbRow)?)
-      @ordered_cache_key = nil.as({Int32, String}?)
+      @ordered_cache_key = nil.as({Int32, String, Int32}?)
       @filtered_cache = nil.as(Array(CbRow)?)
-      @filtered_cache_key = nil.as({Int32, String}?)
+      @filtered_cache_key = nil.as({Int32, String, Int32}?)
       reload
     end
 
@@ -221,8 +221,8 @@ module Gori::Tui
 
     private def picked_provider : Store::OastProviderRecord?
       ep = enabled_providers
-      return nil if ep.empty?
-      ep[@payload_pick.clamp(0, ep.size - 1)]?
+      return nil if ep.empty? || @payload_pick == 0
+      ep[(@payload_pick - 1).clamp(0, ep.size - 1)]?
     end
 
     # =========================================================================
@@ -232,6 +232,9 @@ module Gori::Tui
     # Get an OAST payload for the picked provider: generate locally if a listener already
     # exists, else start listening (register off-fiber) and deliver the payload when ready.
     def generate_payload : Nil
+      if @payload_pick == 0 && !enabled_providers.empty?
+        return @host.status("select a specific provider to generate payload (use ‹/› to cycle)")
+      end
       prov = picked_provider
       return @host.status("no enabled provider — add one in the Providers tab") unless prov
       if listener = listener_for(prov.id)
@@ -252,6 +255,9 @@ module Gori::Tui
     end
 
     def start_listening_action : Nil
+      if @payload_pick == 0 && !enabled_providers.empty?
+        return @host.status("select a specific provider to listen (use ‹/› to cycle)")
+      end
       prov = picked_provider
       return @host.status("no enabled provider to listen with") unless prov
       if listener_for(prov.id)
@@ -262,6 +268,9 @@ module Gori::Tui
     end
 
     def stop_listening : Nil
+      if @payload_pick == 0 && !enabled_providers.empty?
+        return @host.status("select a specific provider to stop listening (use ‹/› to cycle)")
+      end
       prov = picked_provider
       return @host.status("no provider selected") unless prov
       listener = listener_for(prov.id)
@@ -434,11 +443,23 @@ module Gori::Tui
 
     private def render_payload_bar(screen : Screen, rect : Rect) : Nil
       screen.fill(Rect.new(rect.x, rect.y, rect.w, 1), Theme.panel)
-      prov = picked_provider
+      ep = enabled_providers
       x = rect.x + 1
       x = screen.text(x, rect.y, "provider ", Theme.muted, Theme.panel)
-      name = prov ? "‹ #{prov.name} ›" : "‹ none — add one › "
-      listening = prov && listener_for(prov.id) ? "  ●listening" : ""
+      name = if ep.empty?
+        "‹ none — add one › "
+      elsif @payload_pick == 0
+        "‹ All ›"
+      else
+        prov = ep[@payload_pick - 1]?
+        prov ? "‹ #{prov.name} ›" : "‹ unknown ›"
+      end
+      listening = if @payload_pick == 0
+        @listeners.any?(&.active?) ? "  ●listening" : ""
+      else
+        prov = ep[@payload_pick - 1]?
+        prov && listener_for(prov.id) ? "  ●listening" : ""
+      end
       x = screen.text(x, rect.y, name, Theme.accent, Theme.panel)
       screen.text(x, rect.y, listening, Theme.green, Theme.panel) unless listening.empty?
       # payload row
@@ -568,7 +589,7 @@ module Gori::Tui
     # once per change instead of several times each render frame + drain tick. `@callbacks`
     # stays the master store so live inserts still land and simply re-filter next version.
     private def ordered_callbacks : Array(CbRow)
-      key = {@cb_version, @filter.value}
+      key = {@cb_version, @filter.value, @payload_pick}
       if (cached = @ordered_cache) && @ordered_cache_key == key
         return cached
       end
@@ -579,12 +600,19 @@ module Gori::Tui
     end
 
     private def filtered_callbacks : Array(CbRow)
-      key = {@cb_version, @filter.value}
+      key = {@cb_version, @filter.value, @payload_pick}
       if (cached = @filtered_cache) && @filtered_cache_key == key
         return cached
       end
+      ep = enabled_providers
+      selected_prov = (@payload_pick > 0 && @payload_pick <= ep.size) ? ep[@payload_pick - 1] : nil
+      base_list = if prov = selected_prov
+        @callbacks.select { |r| r.provider == prov.name }
+      else
+        @callbacks
+      end
       q = @filter.value.strip.downcase
-      result = q.empty? ? @callbacks : @callbacks.select { |r| callback_matches?(r, q) }
+      result = q.empty? ? base_list : base_list.select { |r| callback_matches?(r, q) }
       @filtered_cache = result
       @filtered_cache_key = key
       result
@@ -721,7 +749,9 @@ module Gori::Tui
     private def cycle_provider(dir : Int32) : Nil
       ep = enabled_providers
       return if ep.empty?
-      @payload_pick = (@payload_pick + dir) % ep.size
+      total_choices = ep.size + 1
+      @payload_pick = (@payload_pick + dir) % total_choices
+      clamp_selection
     end
 
     private def sync_scroll : Nil
@@ -735,6 +765,8 @@ module Gori::Tui
     private def clamp_selection : Nil
       @cb_sel = @cb_sel.clamp(0, {filtered_callbacks.size - 1, 0}.max)
       @prov_sel = @prov_sel.clamp(0, {@providers.size - 1, 0}.max)
+      ep = enabled_providers
+      @payload_pick = @payload_pick.clamp(0, ep.empty? ? 0 : ep.size)
     end
 
     def handle_click(rect : Rect, mx : Int32, my : Int32) : Bool

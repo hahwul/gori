@@ -73,6 +73,7 @@ module Gori
       "cors_reflected_origin"          => "Don't blindly reflect the Origin with Allow-Credentials: true; validate it against a strict allowlist.",
       "cors_arbitrary_origin"          => "A probe confirmed the server echoes ANY Origin with Allow-Credentials: true — any site can read authenticated responses. Validate the Origin against a strict allowlist.",
       "forbidden_bypass"               => "A probe turned a 401/403 into a 2xx by forging client-IP headers (X-Forwarded-For, X-Real-IP, …). Derive the client IP from the trusted socket peer / a fixed number of known proxy hops, not from arbitrary request headers, and strip these headers at the edge.",
+      "nginx_alias_traversal"          => "A probe re-fetched the same file through a folded `..` (e.g. /static../static/app.js returned byte-identical content), confirming an NGINX alias-traversal misconfiguration that reads files above the intended directory. Give the `location` a trailing slash (location /static/ { alias …; }) or use `root` instead of `alias`, and reject/normalize `..` in request paths at the edge.",
       "private_ip_leak"                => "Strip internal hostnames/IPs from responses; they aid network reconnaissance.",
       "error_stack_leak"               => "Return generic errors to clients; log stack traces server-side only.",
       "secret_in_body"                 => "Rotate the exposed credential and remove it from the response; never ship keys/tokens to clients.",

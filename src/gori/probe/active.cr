@@ -2,6 +2,7 @@ require "./active/types"
 require "./active/reflected_param"
 require "./active/cors_reflection"
 require "./active/forbidden_bypass"
+require "./active/nginx_alias_traversal"
 require "./active/backslash_powered"
 
 module Gori
@@ -13,7 +14,8 @@ module Gori
       # The primary rule, reused for the registry AND the module-level facade.
       PRIMARY = ReflectedParam.new
 
-      RULES = [PRIMARY, CorsReflection.new, ForbiddenBypass.new, BackslashPowered.new] of Rule
+      RULES = [PRIMARY, CorsReflection.new, ForbiddenBypass.new,
+               NginxAliasTraversal.new, BackslashPowered.new] of Rule
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.

@@ -201,7 +201,9 @@ describe Gori::Decoder do
     it "matches NIST/RFC vectors" do
       conv("md5", "").should eq "d41d8cd98f00b204e9800998ecf8427e"
       conv("sha1", "").should eq "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+      conv("sha224", "abc").should eq "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7"
       conv("sha256", "abc").should eq "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+      conv("sha384", "abc").should eq "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7"
       conv("sha512", "abc").should start_with "ddaf35a193617aba"
       conv("crc32", "hello world").should eq "0d4a1185"
       conv("crc32", "").should eq "00000000" # empty input → zero, left-padded to 8 hex
