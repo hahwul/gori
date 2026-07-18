@@ -2878,6 +2878,8 @@ module Gori::Tui
         preview_theme
       elsif key.backspace?
         @settings_view.backspace
+      elsif key.delete?
+        @settings_view.delete
       elsif ev.ctrl? && key.lower_r?
         # ^R (not a bare letter — those are typed into the focused field) reverts the
         # section to its factory defaults, gated behind a confirm like the tab-bar reset.

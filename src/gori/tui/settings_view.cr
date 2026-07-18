@@ -278,6 +278,18 @@ module Gori::Tui
       @status = nil
     end
 
+    # Forward-delete (the Del key): remove the character UNDER the caret, leaving the
+    # caret where it is — the natural complement to backspace after ←/→ caret moves.
+    # No-op on toggle/choice/action rows or with the caret already at end-of-line.
+    def delete : Nil
+      return if bool_field? || choice_field? || opener_field?
+      v = @values[@focused]
+      c = @cursor.clamp(0, v.size)
+      return if c >= v.size
+      @values[@focused] = "#{v[0, c]}#{v[(c + 1)..]}"
+      @status = nil
+    end
+
     # ←/→: a toggle field flips, a choice field cycles, a text field moves the caret.
     def toggle_or_move(delta : Int32) : Nil
       if bool_field?
