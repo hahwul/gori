@@ -428,6 +428,10 @@ module Gori::Tui
         @values = [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off"]
         return persist
       end
+      if err = Settings.bind_host_error(@values[0])
+        @status = "invalid bind IP"
+        return err
+      end
       port = @values[1].strip.to_i?
       unless port && 0 <= port <= 65535
         @status = "invalid port"

@@ -1,4 +1,5 @@
 require "json"
+require "socket"
 
 # NETWORK section (settings:network): proxy bind, upstream proxy, dial timeouts,
 # body capture cap, and per-project overrides of the same. See settings.cr for the
@@ -125,6 +126,28 @@ module Gori::Settings
     return nil if host.empty?
     return {value, 8080} if host.includes?(':') # unbracketed IPv6 literal → no port
     {host, value[(idx + 1)..].to_i? || 8080}
+  end
+
+  # nil if `host` is an acceptable proxy BIND address; an error message otherwise. Accepts
+  # any IPv4/IPv6 literal (0.0.0.0, ::, 127.0.0.1, ::1, a specific NIC address) and a
+  # plausible hostname (localhost, a.example.com); rejects a malformed IP typo like
+  # "999.999.999.999" and a string carrying characters no host can hold ("invalid_ip").
+  # Blank is caller-defaulted (SetupWizard#effective_ip → 127.0.0.1), so it passes here.
+  # Shared by settings:network AND the setup wizard so a bad address is caught at save
+  # time instead of surfacing later as an opaque bind/socket failure at launch.
+  def self.bind_host_error(host : String) : String?
+    h = host.strip
+    return nil if h.empty?
+    return nil if Socket::IPAddress.valid_v4?(h) || Socket::IPAddress.valid_v6?(h)
+    # Looks like an IP literal attempt (only digits+dots, or an unbracketed hex+colon
+    # v6) yet didn't parse as one → a typo'd address, not a hostname.
+    if h.matches?(/\A[0-9.]+\z/) || (h.includes?(':') && h.matches?(/\A[0-9a-fA-F:.]+\z/))
+      return "settings: invalid bind IP #{h.inspect}"
+    end
+    # Otherwise treat it as a hostname; reject anything a DNS label may not contain
+    # (underscores, spaces, …) — labels are alphanumeric, dot/hyphen separated.
+    return nil if h.matches?(/\A[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?\z/)
+    "settings: invalid bind address #{h.inspect}"
   end
 
   # nil if `value` is an acceptable upstream-proxy string; an error message if its explicit

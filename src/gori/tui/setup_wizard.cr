@@ -164,6 +164,10 @@ module Gori::Tui
     end
 
     private def advance_from_bind : Nil
+      if Settings.bind_host_error(@ip)
+        @status = "invalid bind IP (e.g. 127.0.0.1)"
+        return
+      end
       unless valid_port?(@port)
         @status = "invalid port (0-65535)"
         return

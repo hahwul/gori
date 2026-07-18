@@ -763,4 +763,23 @@ describe Gori::Settings do
       Gori::Settings.upstream_proxy_port_error("proxy:99999").should_not be_nil
     end
   end
+
+  describe ".bind_host_error" do
+    it "accepts blank, IPv4/IPv6 literals, and plausible hostnames" do
+      Gori::Settings.bind_host_error("").should be_nil          # caller defaults blank
+      Gori::Settings.bind_host_error("127.0.0.1").should be_nil
+      Gori::Settings.bind_host_error("0.0.0.0").should be_nil
+      Gori::Settings.bind_host_error("::").should be_nil
+      Gori::Settings.bind_host_error("::1").should be_nil
+      Gori::Settings.bind_host_error("localhost").should be_nil
+      Gori::Settings.bind_host_error("proxy.example.com").should be_nil
+    end
+
+    it "rejects a malformed IP typo and a string no host can contain" do
+      Gori::Settings.bind_host_error("999.999.999.999").should_not be_nil
+      Gori::Settings.bind_host_error("invalid_ip").should_not be_nil
+      Gori::Settings.bind_host_error("1.2.3").should_not be_nil
+      Gori::Settings.bind_host_error("gg::1").should_not be_nil
+    end
+  end
 end
