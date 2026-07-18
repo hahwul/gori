@@ -17,7 +17,10 @@ module Gori
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("-qQL", "--query=QL", "Filter with a QL query (host: status:>=500 size:>10000 dur:>500 header: body~rx …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max rows, newest first (default 50)") { |v| limit = parse_count(v, "--limit") }
-          p.on("--format=FMT", "Output: text (default) | json (JSON-Lines)") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("--format=FMT", "Output: text (default) | json | jsonl (both emit JSON-Lines)") do |v|
+            format = parse_format(v, [:text, :json, :jsonl])
+            format = :json if format == :jsonl # this listing's json IS JSON-Lines; accept the standard name too
+          end
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
           p.invalid_option { |f| abort "gori run history: unknown option: #{f}\n#{p}" }

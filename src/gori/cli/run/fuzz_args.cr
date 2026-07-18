@@ -6,9 +6,12 @@ module Gori
     module Run
       private def self.parse_numbers(v : String) : Fuzz::NumberRange
         range_part, _, step_part = v.partition(':')
-        from_s, _, to_s = range_part.partition('-')
-        from = from_s.to_i64?
-        to = to_s.to_i64?
+        # A plain `partition('-')` splits on the FIRST hyphen, so a negative FROM
+        # (e.g. `-10--5`) would leave an empty `from_s`. Match both bounds — each
+        # optionally signed — so negative ranges (common in offset/ID fuzzing) work.
+        m = range_part.match(/\A(-?\d+)-(-?\d+)\z/)
+        from = m.try(&.[1].to_i64?)
+        to = m.try(&.[2].to_i64?)
         abort "gori run fuzz: invalid --numbers '#{v}' (use FROM-TO[:STEP])" unless from && to
         step = step_part.empty? ? 1_i64 : (step_part.to_i64? || abort("gori run fuzz: invalid --numbers step '#{step_part}'"))
         Fuzz::NumberRange.new(from, to, step)
@@ -72,9 +75,15 @@ module Gori
       private def self.parse_regex_replace(v : String) : Fuzz::RegexReplace
         abort "gori run fuzz: --regex-replace needs /pattern/replacement/" if v.size < 3
         delim = v[0]
-        parts = v[1..].split(delim)
-        abort "gori run fuzz: --regex-replace must be #{delim}pattern#{delim}replacement#{delim}" if parts.size < 2
-        Fuzz::RegexReplace.new(parse_regex(parts[0]), parts[1])
+        # Splitting on every delimiter dropped any part of the replacement past a
+        # second delimiter (e.g. `/foo//bar/` lost `/bar`). Take the pattern up to
+        # the first delimiter, then treat the REST as the replacement — stripping one
+        # trailing delimiter (the documented `/pattern/replacement/` terminator) so a
+        # delimiter inside the replacement survives.
+        pattern, sep, rest = v[1..].partition(delim)
+        abort "gori run fuzz: --regex-replace must be #{delim}pattern#{delim}replacement#{delim}" if sep.empty?
+        replacement = rest.ends_with?(delim) ? rest[0...-1] : rest
+        Fuzz::RegexReplace.new(parse_regex(pattern), replacement)
       end
     end
   end

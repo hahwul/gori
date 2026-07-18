@@ -20,7 +20,10 @@ module Gori
           p.on("--project=NAME", "Capture into project NAME (created if missing; default 'default')") { |v| project_name = v }
           p.on("--db=PATH", "Capture into an explicit SQLite db file") { |v| db_path = v }
           p.on("-k", "--insecure-upstream", "Do not verify upstream TLS certificates") { insecure = true }
-          p.on("--format=FMT", "Output: text (default) | json (JSON-Lines)") { |v| format = parse_format(v, [:text, :json]) }
+          p.on("--format=FMT", "Output: text (default) | json | jsonl (both emit JSON-Lines)") do |v|
+            format = parse_format(v, [:text, :json, :jsonl])
+            format = :json if format == :jsonl # streamed output is JSON-Lines; accept the standard name too
+          end
           p.on("--for=DURATION", "Stop after DURATION (e.g. 30s, 5m, 1h)") { |v| every = parse_duration(v) }
           p.on("--max=N", "Stop after N completed flows") { |v| max = parse_count(v, "--max") }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }

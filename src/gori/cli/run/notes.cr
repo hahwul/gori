@@ -1,8 +1,20 @@
-# `gori run notes` — read the project's notes (list, show one, or --all).
+# `gori run notes` — read the project's notes (list, show one, or --all),
+# or write them (create, delete). Notes are addressed by their 1-based list
+# position <n> (the same number `notes <n>` and the listing show), not the
+# internal stable id.
 module Gori
   module CLI
     module Run
       private def self.cmd_notes(args : Array(String)) : Nil
+        case args.first?
+        when "create"       then cmd_notes_create(args[1..])
+        when "delete", "rm" then cmd_notes_delete(args[1..])
+        when "list"         then cmd_notes_read(args[1..])
+        else                     cmd_notes_read(args)
+        end
+      end
+
+      private def self.cmd_notes_read(args : Array(String)) : Nil
         db_path : String? = nil
         project_name : String? = nil
         format = :text
@@ -40,6 +52,77 @@ module Gori
           show_all_notes(doc, format)
         else
           list_notes(doc, format)
+        end
+      end
+
+      private def self.cmd_notes_create(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        text : String? = nil
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run notes create [--text TEXT] [options]\n\n" \
+                     "Create a note. Body comes from --text, else the positional args,\n" \
+                     "else STDIN (e.g. `some-tool | gori run notes create`)."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("--text=TEXT", "Note body (else positional args, else STDIN)") { |v| text = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run notes create: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run notes create: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        body = text || (positional.empty? ? nil : positional.join(' '))
+        body ||= STDIN.gets_to_end unless STDIN.tty?
+        abort "gori run notes create: no note text (use --text, positional args, or pipe via STDIN)" if body.nil? || body.empty?
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          doc = Notes.load(store)
+          new_id = doc.next_id
+          new_notes = doc.notes + [Notes::NoteEntry.new(new_id, body)]
+          store.set_setting(Notes::DOCS_KEY, Notes.serialize(new_notes.size - 1, new_notes, new_id + 1))
+          puts "Note ##{new_notes.size} created."
+        ensure
+          store.close
+        end
+      end
+
+      private def self.cmd_notes_delete(args : Array(String)) : Nil
+        db_path : String? = nil
+        project_name : String? = nil
+        positional = [] of String
+
+        parser = OptionParser.new do |p|
+          p.banner = "Usage: gori run notes delete <n> [options]\n\n" \
+                     "Delete the note at 1-based list position <n> (as shown by `notes`)."
+          p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
+          p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
+          p.on("-h", "--help", "Show this help") { puts p; exit 0 }
+          p.unknown_args { |rest, _| positional = rest }
+          p.invalid_option { |f| abort "gori run notes delete: unknown option: #{f}\n#{p}" }
+          p.missing_option { |f| abort "gori run notes delete: missing value for #{f}" }
+        end
+        parser.parse(args)
+
+        abort "gori run notes delete: missing <n>" if positional.empty?
+        abort "gori run notes delete: too many arguments (expected one note number)" if positional.size > 1
+        n = parse_note_index(positional.first).not_nil!
+
+        store = open_store(resolve_read_project(project_name, db_path))
+        begin
+          doc = Notes.load(store)
+          abort "gori run notes delete: no note ##{n} (this project has #{doc.size} note#{doc.size == 1 ? "" : "s"})" unless n <= doc.size
+          new_notes = doc.notes.dup
+          new_notes.delete_at(n - 1)
+          new_cur = doc.cur.clamp(0, {new_notes.size - 1, 0}.max)
+          store.set_setting(Notes::DOCS_KEY, Notes.serialize(new_cur, new_notes, doc.next_id))
+          puts "Note ##{n} deleted."
+        ensure
+          store.close
         end
       end
 
