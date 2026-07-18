@@ -15,6 +15,15 @@ module Gori::Tui
     MED_MIN_H  =  5
     MED_MIN_W  = 30
 
+    # Set once per frame by the Runner (render_body), true while a body-centred modal is
+    # open. These cards are box art, and a dialog SHORTER than the card only covers part
+    # of it — the NEW ISSUE form (6 rows) over the Issues card (9) left the card's divider
+    # and bottom border orphaned below the dialog, reading as a corrupted frame. Gating
+    # the whole module here fixes every card/dialog pairing at one point instead of
+    # teaching 12 call sites about overlays, and is the right UX regardless: the card is
+    # a "how to start" hint, and a dialog means the user already has.
+    class_property? suppressed : Bool = false
+
     def render(screen : Screen, rect : Rect, *,
                variant : Symbol,
                listen : String? = nil,
@@ -23,6 +32,7 @@ module Gori::Tui
                running : Bool = false,
                scan_on : Bool = true,
                title : String? = nil) : Nil
+      return if suppressed?
       return if rect.empty?
 
       addr = listen || "#{Settings.effective_bind_host}:#{Settings.effective_bind_port}"

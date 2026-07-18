@@ -657,8 +657,16 @@ module Gori::Tui
       screen.cell(x + 6, ry, ' ', pal.bg, pal.bg)
     end
 
+    # The two-row footer block: the note (save status / focused field's hint) on its OWN
+    # row, the keybind hint right-aligned on the row below. They MUST NOT share a row —
+    # a field hint is routinely wider than the gap left by the right-aligned keybinds, so
+    # drawing both on one row painted the hint under the keybind text and the two read as
+    # one garbled string ("which pane a fresh↑/↓ field · ↵ save · …"). overlay_box already
+    # budgets 3 footer rows (blank + note + keybinds — see content_rows + 6), so the note
+    # row costs no extra height and gets the full interior width.
     private def render_footer(screen : Screen, box : Rect) : Nil
-      note_y = box.bottom - 2
+      note_y = box.bottom - 3
+      hint_y = box.bottom - 2
       iw = {box.right - (box.x + 3) - 1, 0}.max # interior width so long hints can't bleed past the box border
       if status = @status
         color = status.starts_with?("invalid") || status.starts_with?("save failed") ? Theme.yellow : Theme.green
@@ -671,7 +679,7 @@ module Gori::Tui
       end
       hint = @section == :theme ? "↑/↓ select · ↵ apply · ^R reset · esc close" : "↑/↓ field · ↵ save · ^R reset · esc close"
       hx = {box.right - hint.size - 2, box.x + 1}.max # never start left of the box interior
-      screen.text(hx, note_y, hint, Theme.muted, Theme.panel, width: {box.right - hx - 1, 0}.max)
+      screen.text(hx, hint_y, hint, Theme.muted, Theme.panel, width: {box.right - hx - 1, 0}.max)
     end
   end
 end
