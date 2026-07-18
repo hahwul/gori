@@ -1015,7 +1015,11 @@ module Gori
         prov = Oast::Provider.build(kind, host, str(h, "token"))
         http = Oast::HttpClient.new(@verify_upstream)
         session = prov.register(http)
-        sid = "oast-#{@job_seq += 1}"
+        # Unpredictable session id: a sequential "oast-N" is trivially guessable, so
+        # a co-tenant sharing this process could poll another agent's out-of-band
+        # callbacks. Secure-random hex removes the guessing surface (mirrors the
+        # delete_project confirmation tokens).
+        sid = "oast_#{Random::Secure.hex(8)}"
         @oast_mcp[sid] = OastMcpSession.new(prov, session, http, kind.label)
         payload = prov.generate_payload(session)
         Result.new({session_id: sid, provider: kind.label, payload_url: payload}.to_json)
