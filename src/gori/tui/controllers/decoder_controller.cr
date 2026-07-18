@@ -639,8 +639,12 @@ module Gori::Tui
         @popup.close
       when key.down?
         if @popup.open?
-          @popup_engaged = true # dive into the passively-shown list; ↓ now navigates it
-          @popup.move(1)
+          # Dive into the passively-shown list. The engaging press must NOT also step:
+          # set() already selected row 0 and the popup renders it highlighted, so moving
+          # here skipped the very item the user can see picked ("↓ then ↵" handed back
+          # the SECOND converter). Once engaged, completing? routes further ↓ to
+          # handle_complete_key → @popup.move.
+          @popup_engaged = true
         else
           s.pane = :output # down from CHAIN drops into the OUTPUT pane
           @popup.close

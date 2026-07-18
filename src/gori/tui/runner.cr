@@ -3911,6 +3911,12 @@ module Gori::Tui
 
     private def render_body(screen : Screen, rect : Rect) : Nil
       @body_h = rect.h # remembered for PageUp/PageDown's screenful step (see page_nav_delta)
+      # Onboarding empty-state cards are drawn by the body but a modal lands on top of
+      # them a few lines later, so a dialog shorter than the card leaves its tail poking
+      # out (see TrafficEmptyState.suppressed?). Every overlay but the ⋯ dropdown centres
+      # itself in this same rect; tabs_more is anchored to its tab-bar chip and doesn't
+      # cover the card, so it keeps it.
+      TrafficEmptyState.suppressed = @overlay != :none && @overlay != :tabs_more
       # Every catalog tab has a controller that owns its body render; the `?` guard is
       # defensive (a blank body beats a crash if the active tab ever lacks one).
       @tabs[@active_tab]?.try(&.render_body(screen, rect, @focus))
