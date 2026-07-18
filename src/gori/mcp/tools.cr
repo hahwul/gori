@@ -780,7 +780,7 @@ module Gori
               s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
               s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template")
               s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
-              s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string))
+              s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}))
               s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string))
               s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))
               s.field "extract", strprop("regex; grep a value (capture group 1) from each response")

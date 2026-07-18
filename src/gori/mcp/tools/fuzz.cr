@@ -318,19 +318,43 @@ module Gori
           Fuzz::InlineList.new(list.map { |x| x.as_s? || x.to_s })
         elsif wl = obj["wordlist"]?.try(&.as_s?)
           Fuzz::WordlistFile.new(wl)
-        elsif nums = obj["numbers"]?.try(&.as_s?)
+        elsif nums = obj["numbers"]?
           fuzz_numbers(nums)
         elsif (nul = obj["null"]?) && (n = (nul.as_i64? || nul.as_s?.try(&.to_i64?)))
           Fuzz::NullPayloads.new(n.clamp(0_i64, FUZZ_MAX_REQUESTS).to_i) # clamp before .to_i so a huge count can't OverflowError past the clean-error handler
-        elsif br = obj["brute"]?.try(&.as_s?)
+        elsif br = obj["brute"]?
           fuzz_brute(br)
         else
           raise FuzzArgError.new("unknown payload set #{spec} (use list/wordlist/numbers/null/brute)")
         end
       end
 
-      private def fuzz_numbers(v : String) : Fuzz::NumberRange
-        range_part, _, step_part = v.partition(':')
+      # An integer from a JSON scalar — a real number, or a numeric string (LLMs
+      # sometimes quote numbers). nil when it is neither.
+      private def fuzz_int(v : JSON::Any?) : Int64?
+        return nil unless v
+        v.as_i64? || v.as_s?.try(&.to_i64?)
+      end
+
+      # Clamp a length to Int32 so an absurd value from the object form can't
+      # OverflowError past the clean-error handler (the run is still capped by
+      # FUZZ_MAX_REQUESTS regardless).
+      private def clamp_brute_len(n : Int64) : Int32
+        n.clamp(0_i64, Int64.new(Int32::MAX)).to_i
+      end
+
+      # numbers set: the compact "FROM-TO[:STEP]" string OR a structured object
+      # {"from":N,"to":N,"step":N}. Agents emit structured JSON more reliably than
+      # partitioned strings, so both are accepted (#4).
+      private def fuzz_numbers(v : JSON::Any) : Fuzz::NumberRange
+        if obj = v.as_h?
+          from = fuzz_int(obj["from"]?)
+          to = fuzz_int(obj["to"]?)
+          raise FuzzArgError.new(%(numbers object needs integer 'from' and 'to', e.g. {"from":1,"to":100,"step":2})) unless from && to
+          return Fuzz::NumberRange.new(from, to, fuzz_int(obj["step"]?) || 1_i64)
+        end
+        s = v.as_s? || raise FuzzArgError.new(%('numbers' must be a string 'FROM-TO[:STEP]' or an object {from,to,step}))
+        range_part, _, step_part = s.partition(':')
         if md = range_part.match(/^(-?\d+)-(-?\d+)$/)
           from = md[1].to_i64?
           to = md[2].to_i64?
@@ -338,14 +362,25 @@ module Gori
           from = nil
           to = nil
         end
-        raise FuzzArgError.new("invalid numbers '#{v}' (use FROM-TO[:STEP])") unless from && to
+        raise FuzzArgError.new("invalid numbers '#{s}' (use FROM-TO[:STEP])") unless from && to
         step = step_part.empty? ? 1_i64 : (step_part.to_i64? || raise FuzzArgError.new("invalid numbers step '#{step_part}'"))
         Fuzz::NumberRange.new(from, to, step)
       end
 
-      private def fuzz_brute(v : String) : Fuzz::BruteForce
-        charset, _, lens = v.rpartition(':')
-        raise FuzzArgError.new("invalid brute '#{v}' (use CHARSET:MIN-MAX)") if charset.empty? || lens.empty?
+      # brute set: the compact "CHARSET:MIN-MAX" string OR a structured object
+      # {"charset":"abc","min":1,"max":3} (max defaults to min).
+      private def fuzz_brute(v : JSON::Any) : Fuzz::BruteForce
+        if obj = v.as_h?
+          charset = obj["charset"]?.try(&.as_s?)
+          raise FuzzArgError.new(%(brute object needs a non-empty 'charset', e.g. {"charset":"abc","min":1,"max":3})) if charset.nil? || charset.empty?
+          min = fuzz_int(obj["min"]?)
+          raise FuzzArgError.new("brute object needs an integer 'min'") unless min
+          max = fuzz_int(obj["max"]?) || min
+          return Fuzz::BruteForce.new(charset, clamp_brute_len(min), clamp_brute_len(max))
+        end
+        s = v.as_s? || raise FuzzArgError.new(%('brute' must be a string 'CHARSET:MIN-MAX' or an object {charset,min,max}))
+        charset, _, lens = s.rpartition(':')
+        raise FuzzArgError.new("invalid brute '#{s}' (use CHARSET:MIN-MAX)") if charset.empty? || lens.empty?
         min_s, _, max_s = lens.partition('-')
         min = min_s.to_i?
         max = max_s.empty? ? min : max_s.to_i?
