@@ -120,6 +120,45 @@ describe Gori::Tui::TextArea do
     end
   end
 
+  describe "#match_count / #replace_matches (^F find&replace)" do
+    it "counts and replaces every occurrence, case-insensitively like the search" do
+      ta = TextArea.new("Admin admin\nADMIN x")
+      ta.match_count("admin").should eq(3) # per occurrence, not per line
+      ta.replace_matches("admin", "root").should eq(3)
+      ta.text.should eq("root root\nroot x")
+    end
+
+    it "is one undo step" do
+      ta = TextArea.new("a a a")
+      ta.replace_matches("a", "b")
+      ta.text.should eq("b b b")
+      ta.undo
+      ta.text.should eq("a a a")
+    end
+
+    it "treats the replacement literally (no backreference expansion)" do
+      ta = TextArea.new("hello")
+      ta.replace_matches("hello", "\\1$0").should eq(1)
+      ta.text.should eq("\\1$0")
+    end
+
+    it "escapes regex metacharacters in the query" do
+      ta = TextArea.new("a.c abc")
+      ta.match_count("a.c").should eq(1) # the '.' is literal, so "abc" must not match
+      ta.replace_matches("a.c", "z").should eq(1)
+      ta.text.should eq("z abc")
+    end
+
+    it "deletes matches on an empty replacement, and no-ops when nothing matches" do
+      ta = TextArea.new("foo bar foo baz")
+      ta.replace_matches("foo ", "").should eq(2)
+      ta.text.should eq("bar baz")
+      ta.replace_matches("nope", "x").should eq(0)
+      ta.match_count("").should eq(0) # an empty query never matches
+      ta.text.should eq("bar baz")
+    end
+  end
+
   describe "#home / #end_of_line" do
     it "jumps the caret to the start / end of the current line (insert lands there)" do
       ta = TextArea.new("abc")

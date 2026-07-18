@@ -420,6 +420,35 @@ module Gori::Tui
       @lc_lines
     end
 
+    # ^F find&replace: how many times `query` occurs — same matching as search_lines
+    # but counted per OCCURRENCE, not per line (a line with three hits counts three).
+    # The confirm prompt quotes this before the edit commits.
+    def match_count(query : String) : Int32
+      return 0 if query.empty?
+      text.scan(search_regex(query)).size
+    end
+
+    # Swap every occurrence of `query` for `replacement` as ONE undoable edit (so a
+    # surprise result is one ^Z away), returning how many landed. `replacement` is
+    # inserted literally — the block form of gsub skips \1 backreference expansion,
+    # which the user did not ask for by typing a `\1`. The caret keeps its old offset
+    # (clamped): a bulk edit has no single site to land on.
+    def replace_matches(query : String, replacement : String) : Int32
+      return 0 if query.empty?
+      n = 0
+      swapped = text.gsub(search_regex(query)) { n += 1; replacement }
+      return 0 if n == 0
+      replace_all(swapped, cursor_offset)
+      n
+    end
+
+    # Literal `query`, matched case-insensitively to mirror what ^F highlights. Regex
+    # rather than a downcase scan because downcasing can change a string's LENGTH for
+    # some Unicode (e.g. 'İ'), which would skew the offsets a manual scan splices on.
+    private def search_regex(query : String) : Regex
+      Regex.new(Regex.escape(query), Regex::Options::IGNORE_CASE)
+    end
+
     # `highlight` overlays request/response syntax colours on the buffer while
     # keeping it fully editable: pass `:request` or `:response` for the held
     # HTTP message editors (Repeater, Intercept), nil for plain prose (Notes,

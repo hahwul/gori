@@ -275,6 +275,17 @@ module Gori::Tui
       @editing ? @editor.search_lines(query) : [] of Int32
     end
 
+    def edit_match_count(query : String) : Int32
+      @editing ? @editor.match_count(query) : 0
+    end
+
+    def edit_replace_matches(query : String, replacement : String) : Int32
+      return 0 unless @editing
+      n = @editor.replace_matches(query, replacement)
+      @editor_dirty = true if n > 0
+      n
+    end
+
     def search_hl=(q : String) : Nil
       @editor.search_hl = q
     end

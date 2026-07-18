@@ -129,12 +129,17 @@ module Gori::Tui
       @goto_target = :none
       # The ^F incremental search prompt — sibling of ^G; finds matching lines in the
       # focused view and steps through them (↑/↓/↵). @search_preedit carries IME text.
+      # Tab flips it into find&replace on the editable targets: a second row appears,
+      # typing feeds @search_replace_buffer, and ↵ swaps every match behind a confirm.
+      # ↑/↓ keep stepping in BOTH modes — that's why Tab, not an arrow, is the toggle.
       @search_open = false
       @search_buffer = ""
       @search_preedit = ""
       @search_target = :none
       @search_hits = [] of Int32
       @search_idx = 0
+      @search_replace = false
+      @search_replace_buffer = ""
       # The sub-tab rename prompt (Repeater + Fuzzer + Decoder + Miner) — orthogonal to
       # @overlay (floats over the bottom status row, like ^G/^F).
       @rename_open = false
@@ -982,10 +987,13 @@ module Gori::Tui
       return handle_copy_as_key(ev) if copy_as_shown?      # the copy-as picker is modal while up
       return handle_send_to_key(ev) if send_to_shown?      # the send-to picker is modal while up
       return handle_goto_key(ev) if @goto_open             # the ^G line prompt is modal while up
-      return handle_search_key(ev) if @search_open         # the ^F find prompt is modal while up
-      return handle_rename_key(ev) if @rename_open         # the sub-tab rename prompt is modal while up
-      return handle_tag_edit_key(ev) if @tag_edit_open     # the Repeater tag editor is modal while up
-      return handle_import_key(ev) if @import_open         # the import path prompt is modal while up
+      # The ^F find prompt is modal while up — EXCEPT under its own replace confirm,
+      # which must get the keys (the prompt stays open behind it so cancelling doesn't
+      # cost you the query you just typed).
+      return handle_search_key(ev) if @search_open && @overlay != :confirm
+      return handle_rename_key(ev) if @rename_open     # the sub-tab rename prompt is modal while up
+      return handle_tag_edit_key(ev) if @tag_edit_open # the Repeater tag editor is modal while up
+      return handle_import_key(ev) if @import_open     # the import path prompt is modal while up
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
       # multi-line view (editors move the cursor, read-only panes scroll). Modifier
       # keys, so they work inside text editors without conflicting with typing.
@@ -3517,26 +3525,112 @@ module Gori::Tui
       end
     end
 
-    # ^F incremental search: text input (IME via @search_preedit); ↑/↓/↵ step through
+    # ^F incremental search: text input (IME via @search_preedit); ↑/↓ step through
     # matching lines (wraps); esc closes. Recomputes + jumps on each edit.
+    # Tab flips to find&replace, where typing feeds the replacement row and ↵ swaps
+    # every match (behind a confirm) instead of stepping. ↑/↓ step in both modes.
     private def handle_search_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       c = ev.char || key.to_char
       if key.escape?
         close_search
-      elsif key.enter? || key.down?
+      elsif key.tab? || key.back_tab?
+        toggle_search_replace
+      elsif key.enter?
+        @search_replace ? request_replace_confirm : search_step(1)
+      elsif key.down?
         search_step(1)
       elsif key.up?
         search_step(-1)
       elsif key.backspace?
-        @search_buffer = @search_buffer[0, {@search_buffer.size - 1, 0}.max]
-        @search_preedit = ""
-        search_refresh
+        if @search_replace
+          @search_replace_buffer = @search_replace_buffer[0, {@search_replace_buffer.size - 1, 0}.max]
+          @search_preedit = ""
+        else
+          @search_buffer = @search_buffer[0, {@search_buffer.size - 1, 0}.max]
+          @search_preedit = ""
+          search_refresh
+        end
       elsif c && !c.control? && !ev.ctrl? && !ev.alt? # control? drops Tab/\n etc. (Space stays)
-        @search_buffer += c
-        @search_preedit = ""
-        search_refresh
+        if @search_replace
+          @search_replace_buffer += c
+          @search_preedit = ""
+        else
+          @search_buffer += c
+          @search_preedit = ""
+          search_refresh
+        end
       end
+    end
+
+    # Tab: find ⇄ find&replace. Only the TextArea-backed targets can be written to; on a
+    # read-only pane this is a no-op, and the prompt never offered it (see the hint in
+    # render_search_prompt) — a toast can't explain the refusal because the prompt is
+    # drawn OVER the status row that toasts render on.
+    private def toggle_search_replace : Nil
+      return unless @search_replace || replace_target?
+      @search_replace = !@search_replace
+      @search_preedit = "" # the composing text belongs to the row we just left
+    end
+
+    # Targets whose backing view is an editable TextArea. The read-only panes
+    # (:repeater_response, :detail) have no mutation path at all.
+    private def replace_target? : Bool
+      case @search_target
+      when :repeater_request, :notes, :project, :intercept then true
+      else                                                      false
+      end
+    end
+
+    # Occurrence count (not line count — a line with three hits counts three), so the
+    # confirm can quote exactly how much is about to change.
+    private def search_match_count : Int32
+      case @search_target
+      when :repeater_request then repeater_controller.current_view.try(&.request_match_count(@search_buffer)) || 0
+      when :notes            then notes_controller.view.match_count(@search_buffer)
+      when :project          then project_controller.view.match_count(@search_buffer)
+      when :intercept        then intercept_controller.view.edit_match_count(@search_buffer)
+      else                        0
+      end
+    end
+
+    # ↵ in replace mode: gate the bulk edit behind the standard confirm (the same
+    # pattern as the REMOVE MARKER guard). An empty replacement is a legitimate
+    # "delete every match", so it's worded that way rather than rejected.
+    private def request_replace_confirm : Nil
+      return unless replace_target?
+      # Nothing to confirm with an empty query or zero hits — and no toast to explain it,
+      # because the prompt covers the status row. The find row above already says so: it
+      # shows a blank count for an empty query and "no matches" for a fruitless one.
+      return if @search_buffer.empty?
+      n = search_match_count
+      return if n == 0
+      q, r = @search_buffer, @search_replace_buffer
+      plural = n == 1 ? "" : "s"
+      msg = if r.empty?
+              "Delete #{n} occurrence#{plural} of \"#{q}\"?"
+            else
+              "Replace #{n} occurrence#{plural} of \"#{q}\" with \"#{r}\"?"
+            end
+      confirm("REPLACE ALL", "#{msg}\nOne undo step — ^Z puts it back.",
+        confirm_label: r.empty? ? "delete" : "replace", danger: true) do
+        run_replace(q, r)
+      end
+    end
+
+    private def run_replace(query : String, replacement : String) : Nil
+      n = case @search_target
+          when :repeater_request then repeater_controller.current_view.try(&.request_replace_matches(query, replacement)) || 0
+          when :notes            then notes_controller.view.replace_matches(query, replacement)
+          when :project          then project_controller.view.replace_matches(query, replacement)
+          when :intercept        then intercept_controller.view.edit_replace_matches(query, replacement)
+          else                        0
+          end
+      # The replace is done, so drop the prompt: it would otherwise sit there advertising
+      # a now-stale query as "no matches", AND it covers the status row the toast needs.
+      # ^F reopens in one keystroke.
+      close_search
+      @toast = "replaced #{n} occurrence#{n == 1 ? "" : "s"}"
     end
 
     private def search_refresh : Nil
@@ -3572,6 +3666,8 @@ module Gori::Tui
       @search_preedit = ""
       @search_hits = [] of Int32
       @search_idx = 0
+      @search_replace = false
+      @search_replace_buffer = ""
       @search_open = true
     end
 
@@ -3579,6 +3675,7 @@ module Gori::Tui
       set_search_hl("") # clear the match highlight on the target view
       @search_open = false
       @search_preedit = ""
+      @search_replace = false
     end
 
     private def current_scope : Verb::Scope
@@ -4398,23 +4495,65 @@ module Gori::Tui
 
     private def render_search_prompt(screen : Screen, rect : Rect) : Nil
       return if rect.w < 8
+      # Replace mode needs a second row, taken from the body ABOVE the status row (the
+      # prompts float over whatever's underneath). If there's no row to take, fall back
+      # to the one-row find bar rather than drawing off-screen.
+      return render_replace_prompt(screen, rect) if @search_replace && rect.y > 0
       screen.fill(rect, Theme.panel)
       prefix = "find: "
       screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
       x = rect.x + prefix.size
-      # match count (or "no matches") right-aligned; dim "esc done · ↑↓ next" hint after the input
-      count = if @search_buffer.empty? && @search_preedit.empty?
+      # match count (or "no matches") right-aligned; dim "esc done · ↑↓ next" hint after
+      # the input. Only advertise tab where replace can actually commit — on the
+      # read-only panes the key is a no-op, so offering it would just mislead.
+      suffix = hint_with_count(replace_target? ? "↵/↑↓ step · tab replace · esc done" : "↵/↑↓ step · esc done")
+      sx = {rect.right - suffix.size, x}.max
+      iw = {sx - x - 1, 0}.max
+      screen.input_line(x, rect.y, @search_buffer, @search_buffer.size, @search_preedit, Theme.text_bright, Theme.panel, width: iw)
+      screen.text(sx, rect.y, suffix, no_matches? ? Theme.yellow : Theme.muted, Theme.panel)
+    end
+
+    # find&replace: the query row (read-only here — tab back to edit it) stacked over
+    # the replacement row, which owns the caret. ↵ commits, ↑/↓ still step matches.
+    private def render_replace_prompt(screen : Screen, rect : Rect) : Nil
+      top = Rect.new(rect.x, rect.y - 1, rect.w, 1)
+      screen.fill(top, Theme.panel)
+      screen.fill(rect, Theme.panel)
+      screen.text(rect.x, top.y, "find:    ", Theme.muted, Theme.panel)
+      screen.text(rect.x, rect.y, "replace: ", Theme.accent, Theme.panel)
+      x = rect.x + 9 # both labels padded to the same width so the two fields line up
+
+      # Top row: the query plus the live match count, dimmed — it isn't focused.
+      qsuffix = hint_with_count("↑↓ step · tab edit find")
+      qsx = {top.right - qsuffix.size, x}.max
+      screen.text(x, top.y, @search_buffer, Theme.text, Theme.panel, width: {qsx - x - 1, 0}.max)
+      screen.text(qsx, top.y, qsuffix, no_matches? ? Theme.yellow : Theme.muted, Theme.panel)
+
+      # Bottom row: the focused field — input_line syncs the hardware cursor here.
+      rsuffix = "↵ replace all · esc done"
+      rsx = {rect.right - rsuffix.size, x}.max
+      screen.input_line(x, rect.y, @search_replace_buffer, @search_replace_buffer.size, @search_preedit, Theme.text_bright, Theme.panel, width: {rsx - x - 1, 0}.max)
+      screen.text(rsx, rect.y, rsuffix, Theme.muted, Theme.panel)
+    end
+
+    private def no_matches? : Bool
+      @search_hits.empty? && !@search_buffer.empty?
+    end
+
+    # Blank until something is typed, then the hit count (or "no matches"). @search_preedit
+    # counts as typing ONLY in find mode — in replace mode the composing text belongs to
+    # the replacement row, so an empty query must not read "no matches" just because
+    # you're mid-Hangul in the box below.
+    private def hint_with_count(hint : String) : String
+      pending = @search_replace ? "" : @search_preedit
+      count = if @search_buffer.empty? && pending.empty?
                 ""
               elsif @search_hits.empty?
                 "no matches"
               else
                 "#{@search_idx + 1}/#{@search_hits.size}"
               end
-      suffix = count.empty? ? "↵/↑↓ step · esc done" : "#{count}  ↵/↑↓ step · esc done"
-      sx = {rect.right - suffix.size, x}.max
-      iw = {sx - x - 1, 0}.max
-      screen.input_line(x, rect.y, @search_buffer, @search_buffer.size, @search_preedit, Theme.text_bright, Theme.panel, width: iw)
-      screen.text(sx, rect.y, suffix, @search_hits.empty? && !@search_buffer.empty? ? Theme.yellow : Theme.muted, Theme.panel)
+      count.empty? ? hint : "#{count}  #{hint}"
     end
 
     def current_tab : Symbol

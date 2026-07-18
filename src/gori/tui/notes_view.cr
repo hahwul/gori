@@ -273,6 +273,16 @@ module Gori::Tui
       current.area.search_lines(query)
     end
 
+    def match_count(query : String) : Int32
+      current.area.match_count(query)
+    end
+
+    def replace_matches(query : String, replacement : String) : Int32
+      n = current.area.replace_matches(query, replacement)
+      @dirty = true if n > 0
+      n
+    end
+
     def search_hl=(q : String) : Nil
       current.area.search_hl = q
     end

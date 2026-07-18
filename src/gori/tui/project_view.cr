@@ -838,6 +838,16 @@ module Gori::Tui
       @desc_area.search_lines(query)
     end
 
+    def match_count(query : String) : Int32
+      @desc_area.match_count(query)
+    end
+
+    def replace_matches(query : String, replacement : String) : Int32
+      n = @desc_area.replace_matches(query, replacement)
+      @desc_dirty = true if n > 0
+      n
+    end
+
     def search_hl=(q : String) : Nil
       @desc_area.search_hl = q
     end
