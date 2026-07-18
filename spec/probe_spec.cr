@@ -1474,6 +1474,104 @@ describe "Gori::Probe::Active::ForbiddenBypass" do
   end
 end
 
+describe "Gori::Probe::Active::NginxAliasTraversal" do
+  probe = Gori::Probe::Active::NginxAliasTraversal.new
+
+  it "only probes a 2xx non-HTML GET whose path is /<seg>/<more>" do
+    with_store do |store|
+      # The classic case: a static asset under a leading location segment.
+      css = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/static/main.css",
+        status: 200, content_type: "text/css")
+      probe.plan(css).should_not be_nil
+
+      # HTML baseline is skipped (a SPA catch-all would byte-match the traversal probe with no bug).
+      html = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/app/index",
+        status: 200, content_type: "text/html")
+      probe.plan(html).should be_nil
+      # A non-2xx resource has nothing to re-fetch.
+      missing = capture_flow(store, "HTTP/1.1 404 Not Found\r\n\r\n", target: "/static/x.js",
+        status: 404, content_type: "application/javascript")
+      probe.plan(missing).should be_nil
+      # Single-segment / directory paths have no resource under a location to fold `..` after.
+      root = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/favicon.ico",
+        status: 200, content_type: "image/x-icon")
+      probe.plan(root).should be_nil
+      dir = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/static/",
+        status: 200, content_type: "text/css")
+      probe.plan(dir).should be_nil
+      # HEAD is excluded — the confirmation compares bodies and HEAD returns none.
+      head = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/static/main.css",
+        status: 200, method: "HEAD", content_type: "text/css")
+      probe.plan(head).should be_nil
+    end
+  end
+
+  it "folds `..` after the leading segment, keeping the query, and stays origin-form" do
+    with_store do |store|
+      css = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/static/js/app.js?v=3",
+        status: 200, content_type: "application/javascript")
+      plan = probe.plan(css).not_nil!
+      String.new(plan.request).each_line.first.should start_with("GET /static../static/js/app.js?v=3 ")
+
+      # A forward-proxy absolute-form flow is normalized to origin-form before the fold.
+      abs = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", scheme: "http", host: "t.example",
+        target: "http://t.example/assets/style.css", status: 200, content_type: "text/css")
+      line = String.new(probe.plan(abs).not_nil!.request).each_line.first
+      line.should start_with("GET /assets../assets/style.css ")
+      line.should_not contain("http://t.example")
+    end
+  end
+
+  it "flags High only when the folded path returns byte-identical content" do
+    with_store do |store|
+      css = capture_flow(store, "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\n\r\n",
+        target: "/static/main.css", status: 200, content_type: "text/css", body: "body{color:red}")
+      plan = probe.plan(css).not_nil!
+
+      # Vulnerable: the same file comes back through the fold → confirmed.
+      hit = Gori::Repeater::Result.new(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/css\r\n\r\n".to_slice, "body{color:red}".to_slice, nil, 1_i64)
+      dets = probe.detections(plan, hit, css)
+      dets.size.should eq(1)
+      dets.first.code.should eq("nginx_alias_traversal")
+      dets.first.severity.should eq(Gori::Store::Severity::High)
+
+      # Not vulnerable: the folded path 404s → not flagged.
+      not_found = Gori::Repeater::Result.new(
+        "HTTP/1.1 404 Not Found\r\n\r\n".to_slice, "nope".to_slice, nil, 1_i64)
+      probe.detections(plan, not_found, css).should be_empty
+      # A 200 with a DIFFERENT body (e.g. a catch-all page) is not the same resource → not flagged.
+      other = Gori::Repeater::Result.new(
+        "HTTP/1.1 200 OK\r\n\r\n".to_slice, "something else".to_slice, nil, 1_i64)
+      probe.detections(plan, other, css).should be_empty
+      # A send failure never flags.
+      errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
+      probe.detections(plan, errored, css).should be_empty
+    end
+  end
+
+  it "dedup_key equals plan.dedup_key across eligible/ineligible flows" do
+    with_store do |store|
+      cases = [
+        {target: "/static/main.css", method: "GET", status: 200, ct: "text/css"},       # eligible
+        {target: "/static/main.css?v=1", method: "GET", status: 200, ct: "text/css"},    # query stripped in key
+        {target: "/a/b/c.js", method: "GET", status: 200, ct: "application/javascript"}, # deep path
+        {target: "/static/main.css", method: "GET", status: 200, ct: "text/html"},       # HTML → nil
+        {target: "/static/main.css", method: "GET", status: 404, ct: "text/css"},        # non-2xx → nil
+        {target: "/static/main.css", method: "HEAD", status: 200, ct: "text/css"},       # HEAD → nil
+        {target: "/favicon.ico", method: "GET", status: 200, ct: "image/x-icon"},        # single segment → nil
+        {target: "/has space", method: "GET", status: 200, ct: "text/css"},              # malformed → nil
+      ]
+      cases.each do |c|
+        d = capture_flow(store, "HTTP/1.1 #{c[:status]} X\r\n\r\n", scheme: "http", host: "t.example",
+          target: c[:target], method: c[:method], status: c[:status], content_type: c[:ct])
+        probe.dedup_key(d).should eq(probe.plan(d).try(&.dedup_key)),
+          "nginx_alias_traversal #{c[:target]} #{c[:method]} #{c[:status]} #{c[:ct]}"
+      end
+    end
+  end
+end
+
 describe "Gori::Probe::Active (safety + coverage)" do
   it "does not probe mutating methods (POST), only safe ones (GET)" do
     with_store do |store|
