@@ -74,7 +74,8 @@ module Gori::Tui
       @rename_name = ""
       @settings = SettingsView.new # the config editor (ctrl-, → :settings mode)
       @running_cache = {} of String => RunningProbe
-      @art_frame = 0 # entrance-animation clock for the brand art; advances each frame until ART_ANIM_DONE
+      @art_frame = 0  # entrance-animation clock for the brand art; advances each frame until ART_ANIM_DONE
+      @star_frame = 0 # starfield twinkle clock; unlike @art_frame it never freezes (wraps via &+)
     end
 
     def run : Project?
@@ -84,6 +85,7 @@ module Gori::Tui
         # the loop re-renders whenever poll_event times out, so bumping the clock
         # here plays the reveal once, then freezes at ART_ANIM_DONE (static after).
         @art_frame += 1 if @art_frame < ART_ANIM_DONE
+        @star_frame &+= 1
         case ev = @term.poll_event(50)
         when Termisu::Event::Resize
           # termisu already resized its buffer to these dims; re-fit the backend grids in
@@ -796,10 +798,62 @@ module Gori::Tui
       art_shown?(w, h) ? ART_H + ART_GAP + 3 : 3
     end
 
+    # --- starfield ------------------------------------------------------------
+    # A sparse field of stars behind the picker — the space backdrop the gold
+    # mark floats on. Whether a cell holds a star (and its glyph + twinkle
+    # phase) is a pure hash of (x, y), so the field is stable across frames and
+    # resizes with no stored state; everything drawn later (card, logo,
+    # overlays) simply paints over it. Twinkle steps once per
+    # 2^STAR_TWINKLE_SHIFT frames, so a star's cell changes colour well under
+    # twice a second and the per-frame diff flush stays tiny.
+    STAR_DENSITY       = 61_u32                                # ~1 star per this many cells (prime → no visible lattice)
+    STAR_TWINKLE_SHIFT = 4                                     # frames per twinkle step (2^4 ≈ 0.8 s at the 50 ms poll)
+    STAR_LEVELS        = {0.18, 0.30, 0.42, 0.55, 0.42, 0.30}  # blend ratios toward the star hue: dim → bright → dim
+    STAR_FADE          = 8                                     # frames the field takes to fade in with the entrance
+    STAR_GOLD_BOOST    = 0.15                                  # extra brightness for the rare gold ✦ so it reads as a glint
+
+    # Deterministic per-cell mix deciding star existence, glyph, and phase.
+    # Wrapping ops only — must be pure and total for any cell at any size.
+    private def star_hash(x : Int32, y : Int32) : UInt32
+      h = (x.to_u32! &* 0x9E3779B1_u32) ^ (y.to_u32! &* 0x85EBCA77_u32)
+      h ^= h >> 15
+      h &*= 0xC2B2AE3D_u32
+      h ^ (h >> 13)
+    end
+
+    # Paint the starfield across the whole canvas (right after the bg fill,
+    # before any content). Mostly muted '·' dots; ~1 in 8 is a gold '✦' echoing
+    # the mark. Colours blend toward Theme.bg so the field stays subtle on
+    # every palette, light themes included. The fade-in rides the entrance
+    # clock, so the sky appears just before the logo materialises.
+    private def draw_starfield(screen : Screen, w : Int32, h : Int32) : Nil
+      intro = (@art_frame / STAR_FADE.to_f).clamp(0.0, 1.0)
+      return if intro <= 0
+      step = @star_frame.to_u32! >> STAR_TWINKLE_SHIFT
+      y = 0
+      while y < h
+        x = 0
+        while x < w
+          hash = star_hash(x, y)
+          if hash % STAR_DENSITY == 0
+            phase = ((step &+ (hash >> 5)) % STAR_LEVELS.size.to_u32).to_i
+            gold = ((hash >> 8) & 7_u32) == 0
+            t = STAR_LEVELS[phase]
+            t += STAR_GOLD_BOOST if gold
+            hue = gold ? Theme.focus_gold : Theme.muted
+            screen.cell(x, y, gold ? '✦' : '·', Theme.blend(hue, Theme.bg, {t * intro, 1.0}.min), Theme.bg)
+          end
+          x += 1
+        end
+        y += 1
+      end
+    end
+
     private def render : Nil
       screen = Screen.new(@backend)
       w, h = screen.width, screen.height
       screen.fill(Rect.new(0, 0, w, h), Theme.bg)
+      draw_starfield(screen, w, h)
       cw = {w - 4, MENU_WIDTH}.min
       cx = {(w - cw) // 2, 0}.max
       case @mode
@@ -875,12 +929,9 @@ module Gori::Tui
 
       # The decorative art (when it fits) sits ART_GAP rows above the wordmark;
       # card_metrics reserved ART_H + ART_GAP rows above `top` for exactly this.
-      # Keep the whole logo stack (art + wordmark + tagline) on the canvas bg — no
-      # lifted panel band — so the mark reads against the same field as the body.
-      hero_top = art_shown?(w, h) ? top - ART_H - ART_GAP : top
-      if hero_top < box.y
-        screen.fill(Rect.new(0, hero_top, w, box.y - hero_top), Theme.bg)
-      end
+      # The logo stack (art + wordmark + tagline) draws straight on the starred
+      # canvas — no lifted panel band, and no band re-fill, which would punch a
+      # starless hole across the backdrop render already painted.
       draw_brand_art(screen, top - ART_H - ART_GAP, w, @art_frame) if art_shown?(w, h)
       render_hero_text(screen, top, w, h)
 
