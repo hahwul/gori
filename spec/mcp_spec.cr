@@ -849,6 +849,25 @@ describe Gori::MCP::Server do
       end
     end
 
+    it "rejects an unrecognized match kind instead of silently coercing to literal" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"x","match":"regex-ignorecase"}}})
+        resp = drive(store, call)[0]["result"]
+        resp["isError"].as_bool.should be_true
+        resp["structuredContent"]["error_code"].as_s.should eq("INVALID_ARGUMENT")
+        resp["structuredContent"]["field"].as_s.should eq("match")
+        store.match_rules.should be_empty # not coerced into a stray literal rule
+      end
+    end
+
+    it "still accepts the valid regex/literal match kinds" do
+      with_store do |store|
+        call = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"a\\\\d+","replacement":"x","match":"regex"}}})
+        tool_payload(drive(store, call)[0])["match"].as_s.should eq("regex")
+        store.match_rules[0].match_kind.regex?.should be_true
+      end
+    end
+
     it "creates a rule already disabled (atomic) with enabled:false" do
       with_store do |store|
         create = %({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_rule","arguments":{"pattern":"x","enabled":false}}})
