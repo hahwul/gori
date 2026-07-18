@@ -185,7 +185,11 @@ module Gori
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run repeater <flow-id> [options]"
+          p.banner = "Usage: gori run repeater <flow-id> [options]\n\n" \
+                     "Re-send a captured flow. Or manage repeater sessions:\n" \
+                     "  gori run repeater list                List repeater sessions in the workbench\n" \
+                     "  gori run repeater create [options]    Create a repeater session (--flow/--request-file/--request-raw)\n\n" \
+                     "Options (single-flow replay):"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--target=URL", "Send to this origin (scheme://host[:port]) instead of the captured one; path/query kept") { |v| target_override = v }
