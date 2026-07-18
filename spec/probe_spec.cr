@@ -2023,8 +2023,18 @@ describe "Gori::Probe::Passive::SecretInUrl (JWT tightening)" do
 end
 
 describe "Gori::Probe::Active (manual run estimate)" do
-  it "requests_per_flow is 1..1 for every built-in active rule" do
-    Gori::Probe::Active::RULES.each(&.requests_per_flow.should(eq(1..1)))
+  it "requests_per_flow is a sane bounded range for every built-in active rule" do
+    Gori::Probe::Active::RULES.each do |rule|
+      r = rule.requests_per_flow
+      r.begin.should be >= 1
+      r.end.should be >= r.begin
+      r.end.should be <= 7 # nothing floods a single flow with probes
+    end
+    # BackslashPowered is the only DIFFERENTIAL (multi-probe) rule: a baseline plus a `\`/`\\`
+    # pair per param, capped at 3 params (3..7). Every other built-in sends exactly one request.
+    by_id = Gori::Probe::Active::RULES.to_h { |rule| {rule.info.id, rule.requests_per_flow} }
+    by_id["backslash_powered"].should eq(3..7)
+    ["reflected_param", "cors_reflection", "forbidden_bypass"].each { |id| by_id[id].should eq(1..1) }
   end
 
   it "estimate_label renders a fixed count and a range" do
@@ -2032,7 +2042,7 @@ describe "Gori::Probe::Active (manual run estimate)" do
     Gori::Probe::Active.estimate_label(1..3).should eq("1–3 req/flow")
   end
 
-  it "estimates one request per applicable rule (reflected param + CORS = 2)" do
+  it "estimates the applicable rules for a GET with a reflectable query param + CORS" do
     with_store do |store|
       detail = capture_flow(store,
         "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: https://evil.test\r\nContent-Type: text/html\r\n\r\n",
@@ -2040,8 +2050,9 @@ describe "Gori::Probe::Active (manual run estimate)" do
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
       est = a.active_estimate(detail)
-      est.map(&.info.id).sort.should eq(["cors_reflection", "reflected_param"])
-      est.sum { |e| e.requests.end }.should eq(2)
+      est.map(&.info.id).sort.should eq(["backslash_powered", "cors_reflection", "reflected_param"])
+      # reflected_param (1) + cors_reflection (1) + backslash_powered (≤7 for one param) = 9
+      est.sum { |e| e.requests.end }.should eq(9)
     end
   end
 
@@ -2053,7 +2064,8 @@ describe "Gori::Probe::Active (manual run estimate)" do
         target: "/search?q=hi")
       a = Gori::Probe::Analyzer.new(store, Gori::Scope.load(store),
         Channel(Gori::Store::FlowEvent).new(1), Gori::Probe::Mode::Passive, true)
-      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param"])
+      # RULES order: reflected_param, then backslash_powered (cors_reflection is disabled).
+      a.active_estimate(detail).map(&.info.id).should eq(["reflected_param", "backslash_powered"])
     end
   end
 
@@ -2085,6 +2097,120 @@ describe "Gori::Probe::Active (manual run estimate)" do
         sleep 50.milliseconds
         a.stop
       end
+    end
+  end
+end
+
+describe "Gori::Probe::Active::BackslashPowered" do
+  probe = Gori::Probe::Active::BackslashPowered.new
+  # A probe response with a given status + optional body (bodies drive error-signature classing).
+  resp = ->(status : Int32, body : String) do
+    head = "HTTP/1.1 #{status} X\r\nContent-Type: text/html\r\n\r\n"
+    Gori::Repeater::Result.new(head.to_slice, body.empty? ? Bytes.empty : body.to_slice, nil, 1_i64)
+  end
+
+  it "plans a GET query param into a baseline + a `\\` / `\\\\` follow-up pair" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      plan.params.map(&.name).should eq(["q"])
+      plan.followups.size.should eq(2)
+      String.new(plan.request).should contain("/s?q=hi ")         # baseline: value unchanged
+      String.new(plan.followups[0]).should contain("q=hi%5C ")    # single: value\
+      String.new(plan.followups[1]).should contain("q=hi%5C%5C ") # double: value\\
+    end
+  end
+
+  it "caps the probed params at MAX_PROBE_PARAMS (in query order)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?a=1&b=2&c=3&d=4")
+      plan = probe.plan(detail).not_nil!
+      plan.params.map(&.name).should eq(["a", "b", "c"])
+      plan.followups.size.should eq(6)                            # 2 per probed param
+      String.new(plan.request).should contain("/s?a=1&b=2&c=3&d=4 ") # every param kept in the baseline
+    end
+  end
+
+  it "does not plan a POST, a HEAD, or a paramless GET" do
+    with_store do |store|
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "POST")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "HEAD")).should be_nil
+      probe.plan(capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s")).should be_nil
+    end
+  end
+
+  it "dedup_key stays identical to plan.dedup_key (equivalence invariant)" do
+    with_store do |store|
+      ["/s?q=1", "/s?a=1&b=2&c=3&d=4", "/s?flag&x=9", "/s"].each do |t|
+        detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: t)
+        probe.dedup_key(detail).should eq(probe.plan(detail).try(&.dedup_key))
+      end
+      post = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=1", method: "POST")
+      probe.dedup_key(post).should be_nil
+      probe.plan(post).should be_nil
+    end
+  end
+
+  it "flags a param whose lone `\\` breaks but doubled `\\\\` does not" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      dets = probe.detections_all(plan, [resp.call(200, ""), resp.call(500, ""), resp.call(200, "")], detail)
+      dets.size.should eq(1)
+      dets.first.code.should eq("backslash_powered")
+      dets.first.category.should eq(Gori::Probe::Category::ACTIVE)
+      dets.first.severity.should eq(Gori::Store::Severity::Medium)
+      dets.first.evidence.not_nil!.should contain("q")
+    end
+  end
+
+  it "fires on an interpreter error surfaced only by the lone backslash (status unchanged)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      results = [resp.call(200, "welcome"), resp.call(200, "You have an error in your SQL syntax"), resp.call(200, "welcome")]
+      dets = probe.detections_all(plan, results, detail)
+      dets.size.should eq(1)
+      dets.first.evidence.not_nil!.downcase.should contain("sql")
+    end
+  end
+
+  it "does not fire when BOTH `\\` and `\\\\` change the response (generic rejection, not escaping)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      probe.detections_all(plan, [resp.call(200, ""), resp.call(500, ""), resp.call(500, "")], detail).should be_empty
+    end
+  end
+
+  it "does not fire when nothing changed" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      probe.detections_all(plan, [resp.call(200, ""), resp.call(200, ""), resp.call(200, "")], detail).should be_empty
+    end
+  end
+
+  it "skips a param whose probe leg failed to send (incomplete comparison)" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?q=hi")
+      plan = probe.plan(detail).not_nil!
+      errored = Gori::Repeater::Result.new(Bytes.empty, nil, nil, 1_i64, "connection refused")
+      probe.detections_all(plan, [resp.call(200, ""), errored, resp.call(200, "")], detail).should be_empty
+    end
+  end
+
+  it "flags only the affected param when several are probed" do
+    with_store do |store|
+      detail = capture_flow(store, "HTTP/1.1 200 OK\r\n\r\n", target: "/s?a=1&b=2")
+      plan = probe.plan(detail).not_nil!
+      # baseline, a\, a\\, b\, b\\  — only `a` shows the escape asymmetry
+      results = [resp.call(200, ""), resp.call(500, ""), resp.call(200, ""), resp.call(200, ""), resp.call(200, "")]
+      dets = probe.detections_all(plan, results, detail)
+      dets.size.should eq(1)
+      ev = dets.first.evidence.not_nil!
+      ev.should contain("a")
+      ev.should_not contain("b")
     end
   end
 end

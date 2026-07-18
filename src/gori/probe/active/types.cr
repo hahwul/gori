@@ -20,9 +20,13 @@ module Gori
 
       record Param, location : String, name : String, canary : String
 
-      # A built probe: the canary-stuffed request bytes, the canary↔param map, and the dedup key
-      # the analyzer uses to probe each (rule, host, method, path, param-set) only once.
-      record Plan, request : Bytes, params : Array(Param), dedup_key : String
+      # A built probe: the (primary) request bytes, the canary↔param map, the dedup key the analyzer
+      # uses to probe each (rule, host, method, path, param-set) only once, and — for a differential
+      # rule — any FOLLOW-UP requests. The analyzer sends `request` first, then each entry of
+      # `followups` in order, and hands every response to `detections_all` (primary first). Single-
+      # probe rules leave `followups` empty, so exactly one request is sent (the historic behaviour).
+      record Plan, request : Bytes, params : Array(Param), dedup_key : String,
+        followups : Array(Bytes) = [] of Bytes
 
       # Strip a scheme://authority prefix so an absolute-form (forward-proxy) target becomes
       # origin-form; an already-origin-form target passes through unchanged. The authority
@@ -54,6 +58,18 @@ module Gori
         abstract def dedup_key(detail : Store::FlowDetail) : String?
         abstract def plan(detail : Store::FlowDetail) : Plan?
         abstract def detections(plan : Plan, result : Repeater::Result, detail : Store::FlowDetail) : Array(Detection)
+
+        # Interpret ALL of a plan's probe responses at once: the primary (`plan.request`) first,
+        # then one per `plan.followups` entry, in the SAME order they were built. The analyzer calls
+        # this after sending them all. The default ignores follow-ups and interprets only the primary
+        # via `detections`, so a single-probe rule (no follow-ups) implements just `detections` and
+        # behaves exactly as before. A DIFFERENTIAL rule (non-empty `plan.followups`) overrides this
+        # to compare the responses (e.g. baseline vs `\` vs `\\`); its `detections` stays a thin
+        # single-response fallback. `results` is never empty when the primary send succeeded.
+        def detections_all(plan : Plan, results : Array(Repeater::Result), detail : Store::FlowDetail) : Array(Detection)
+          first = results.first?
+          first ? detections(plan, first, detail) : [] of Detection
+        end
 
         # Static identity for the Rules sub-tab (list + per-rule enable/disable). One RuleInfo
         # per class; the analyzer skips a rule when its `info.id` is in the project disabled set.

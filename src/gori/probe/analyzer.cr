@@ -423,8 +423,8 @@ module Gori
         execute_active(task.rule, task.plan, task.detail)
       end
 
-      # Send ONE built probe and fold its response into issues + a notification. Shared by the
-      # automatic queue worker (run_active) and the manual run_active_now — so both paths dedup,
+      # Send a rule's built probe(s) and fold the response(s) into issues + a notification. Shared by
+      # the automatic queue worker (run_active) and the manual run_active_now — so both paths dedup,
       # persist, and notify identically. Stamps flow/repeater source like the passive `persist`,
       # so a Repeater-sourced manual run links its findings back to the Repeater tab (flow id 0 →
       # nil), while a History flow keeps its real flow id. Returns the number of issues written
@@ -447,7 +447,13 @@ module Gori
           emit_active_error(row.host, result.error || "send failed")
           return nil
         end
-        detections = rule.detections(plan, result, detail)
+        # A differential rule also needs its follow-up probes (baseline vs `\` vs `\\`, …); a
+        # single-probe rule has none, so this sends exactly the one request as before. Only the
+        # PRIMARY failure aborts+notifies — a follow-up that errors is passed through as its errored
+        # Result so the rule bails on the incomplete comparison without a second tray post.
+        results = [result]
+        plan.followups.each { |req| results << sender.send(req) }
+        detections = rule.detections_all(plan, results, detail)
         return 0 if detections.empty?
         wrote = 0
         detections.each do |d|

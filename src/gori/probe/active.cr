@@ -2,6 +2,7 @@ require "./active/types"
 require "./active/reflected_param"
 require "./active/cors_reflection"
 require "./active/forbidden_bypass"
+require "./active/backslash_powered"
 
 module Gori
   module Probe
@@ -12,7 +13,7 @@ module Gori
       # The primary rule, reused for the registry AND the module-level facade.
       PRIMARY = ReflectedParam.new
 
-      RULES = [PRIMARY, CorsReflection.new, ForbiddenBypass.new] of Rule
+      RULES = [PRIMARY, CorsReflection.new, ForbiddenBypass.new, BackslashPowered.new] of Rule
 
       # Convenience facade over the primary (reflected-param) rule. The analyzer drives the
       # whole RULES list; these keep a stable single-rule entry point for callers/tests.
@@ -29,7 +30,7 @@ module Gori
       end
 
       # Compact per-flow request-count label for the Rules sub-tab + manual-run estimate:
-      # "1 req/flow" for the fixed-cost rules today, "1–3 req/flow" for a future multi-probe rule.
+      # "1 req/flow" for the fixed-cost rules, "3–7 req/flow" for the differential BackslashPowered.
       def self.estimate_label(rng : Range(Int32, Int32)) : String
         rng.begin == rng.end ? "#{rng.begin} req/flow" : "#{rng.begin}–#{rng.end} req/flow"
       end
