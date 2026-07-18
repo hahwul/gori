@@ -802,9 +802,10 @@ module Gori
             end
 
             tool j, "fuzz_results",
-              "Paged matched results for a fuzz job (metrics only — status/length/words/" \
-              "extracted; no raw bodies and no per-result flow id). To inspect a hit, " \
-              "re-issue it with send_request, substituting the payload into your template." do |s|
+              "Paged matched results for a fuzz job (status/length/words/lines/duration/" \
+              "extracted, plus a per-result flow_id when the run used record_history). No raw " \
+              "bodies are inlined: fetch a hit's full request+response with get_flow(flow_id), " \
+              "or re-issue it with send_request by substituting the payload into your template." do |s|
               s.field "job_id", strprop("id from fuzz_start"), required: true
               s.field "offset", intprop("start row (default 0)")
               s.field "limit", intprop("max rows (default 100, max 1000)")
