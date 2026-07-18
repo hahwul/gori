@@ -214,11 +214,11 @@ module Gori::Tui
     # NETWORK pane rows: two toggles (scope-lens, sandbox) over the three inline network
     # fields. The toggle/field boundary is FIELD_BASE — every field access is @set_sel minus
     # it (the fields still live in the 3-slot @set_values, indexed @set_sel - FIELD_BASE).
-    SETTINGS_LABELS       = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Upstream proxy"]
-    SETTINGS_SCOPE_ROW    = 0
-    SETTINGS_SANDBOX_ROW  = 1
-    SETTINGS_FIELD_BASE   = 2 # first inline-editable network-field row
-    SETTINGS_LABEL_W      = 14 # value column starts past the widest label ("Upstream proxy")
+    SETTINGS_LABELS      = ["Scope lens", "Sandbox", "Bind IP", "Bind Port", "Upstream proxy"]
+    SETTINGS_SCOPE_ROW   =  0
+    SETTINGS_SANDBOX_ROW =  1
+    SETTINGS_FIELD_BASE  =  2 # first inline-editable network-field row
+    SETTINGS_LABEL_W     = 14 # value column starts past the widest label ("Upstream proxy")
 
     def focus_first : Nil
       @pane = :scope
@@ -898,7 +898,7 @@ module Gori::Tui
 
     private def render_overview(screen : Screen, rect : Rect) : Nil
       return if rect.h < 2 || rect.w < 2
-      Frame.card(screen, rect, "OVERVIEW", bg: Theme.bg, border: Theme.border)
+      Frame.card(screen, rect, nil, bg: Theme.bg, border: Theme.border)
       p = @project
       return unless p
       inner = rect.inset(1, 1)
