@@ -217,11 +217,14 @@ module Gori::Tui
     # lessons can never trap the user. Uses letter keys every keyboard has:
     #   n = next · b = back · ⇧⇥ = back
     # (⇥ alone stays free for pane cycle in the mock.)
-    # While typing in INS or the palette filter, n/b are normal characters.
+    # While typing in INS or with ANY overlay open (palette filter, or the space
+    # menu that owns its own keys), n/b are NOT tour nav — the overlay consumes
+    # them (the palette types them; the space menu ignores non-mnemonics) instead
+    # of snapping the lesson forward/back. ⇧⇥ still escapes (checked first).
     private def tour_nav_key?(ev : Termisu::Event::Key) : Bool
       return true if ev.key.back_tab?
       return false if @edit_insert
-      return false if @overlay == :palette
+      return false unless @overlay == :none
       return false if ev.ctrl? || ev.alt? # leave ^P etc. alone
       ch = ev.char
       ch == 'n' || ch == 'N' || ch == 'b' || ch == 'B'
