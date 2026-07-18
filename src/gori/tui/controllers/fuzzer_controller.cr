@@ -218,7 +218,7 @@ module Gori::Tui
     end
 
     private def handle_escape(v : FuzzerView) : Nil
-      return v.commit_chain_pane if v.chain_pane_active? # esc in the CHAIN pane → save + back
+      return v.discard_chain_pane if v.chain_pane_active? # esc in the CHAIN pane → cancel + back (^Y again saves)
       if v.focus == :template && v.template_insert?
         v.exit_template_insert!
       elsif v.focus == :target && v.target_insert?
@@ -239,7 +239,7 @@ module Gori::Tui
         @host.status("chain saved")
       else
         msg = view.focus_chain_pane
-        @host.status(msg || "type the chain · Tab completes · ↵/esc saves")
+        @host.status(msg || "type the chain · Tab completes · ↵ saves · esc cancels")
       end
     end
 

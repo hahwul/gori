@@ -307,7 +307,7 @@ module Gori::Tui
         view.edit_undo
       elsif key.escape?
         if (view = current_view) && view.chain_pane_active?
-          view.commit_chain_pane # esc in the CHAIN pane → save + back to the request editor
+          view.discard_chain_pane # esc in the CHAIN pane → cancel + back to the request editor (^Y again saves)
         elsif (view = current_view) && view.focus == :target && view.editing_sni?
           view.exit_sni_field # leave the SNI field, back to the URL (value kept)
         elsif (view = current_view) && view.focus == :request && view.request_hex?
@@ -412,7 +412,7 @@ module Gori::Tui
         @host.status("chain saved")
       else
         msg = view.focus_chain_pane
-        @host.status(msg || "type the chain · Tab completes · ↵/esc saves")
+        @host.status(msg || "type the chain · Tab completes · ↵ saves · esc cancels")
       end
     end
 
