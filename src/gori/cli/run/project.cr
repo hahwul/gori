@@ -97,12 +97,14 @@ module Gori
         case sub
         when "add"
           cmd_scope_add(args[1..])
-        when "delete"
+        when "delete", "rm"
           cmd_scope_delete(args[1..])
         when "enable"
           cmd_scope_set_enabled(true, args[1..])
         when "disable"
           cmd_scope_set_enabled(false, args[1..])
+        when "list"
+          cmd_scope_list(args[1..])
         when nil
           cmd_scope_list(args)
         else
@@ -110,7 +112,7 @@ module Gori
             cmd_scope_list(args)
           else
             STDERR.puts "gori run project scope: unknown subcommand '#{sub}'"
-            STDERR.puts "Usage: gori run project scope [list options] | add | delete | enable | disable"
+            STDERR.puts "Usage: gori run project scope [list options] | add | delete|rm | enable | disable"
             exit 1
           end
         end
@@ -125,7 +127,7 @@ module Gori
           p.banner = "Usage: gori run project scope [options]\n\n" \
                      "Or run with a subcommand:\n" \
                      "  gori run project scope add --kind=include/exclude --type=host/string/regex --pattern=...\n" \
-                     "  gori run project scope delete <rule-id>\n" \
+                     "  gori run project scope delete|rm <rule-id>\n" \
                      "  gori run project scope enable\n" \
                      "  gori run project scope disable"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
@@ -218,7 +220,7 @@ module Gori
         project_name : String? = nil
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run project scope delete <rule-id> [options]"
+          p.banner = "Usage: gori run project scope delete|rm <rule-id> [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -285,8 +287,10 @@ module Gori
         case sub
         when "set"
           cmd_env_set(args[1..])
-        when "delete"
+        when "delete", "rm"
           cmd_env_delete(args[1..])
+        when "list"
+          cmd_env_list(args[1..])
         when nil
           cmd_env_list(args)
         else
@@ -294,7 +298,7 @@ module Gori
             cmd_env_list(args)
           else
             STDERR.puts "gori run project env: unknown subcommand '#{sub}'"
-            STDERR.puts "Usage: gori run project env [list options] | set KEY=value | delete KEY"
+            STDERR.puts "Usage: gori run project env [list options] | set KEY=value | delete|rm KEY"
             exit 1
           end
         end
@@ -311,7 +315,7 @@ module Gori
                      "Or run with a subcommand:\n" \
                      "  gori run project env set KEY=value\n" \
                      "  gori run project env set KEY value\n" \
-                     "  gori run project env delete KEY"
+                     "  gori run project env delete|rm KEY"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -391,7 +395,7 @@ module Gori
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run project env delete KEY [options]"
+          p.banner = "Usage: gori run project env delete|rm KEY [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -430,8 +434,10 @@ module Gori
           cmd_host_override_add(args[1..])
         when "update"
           cmd_host_override_update(args[1..])
-        when "delete"
+        when "delete", "rm"
           cmd_host_override_delete(args[1..])
+        when "list"
+          cmd_host_override_list(args[1..])
         when nil
           cmd_host_override_list(args)
         else
@@ -439,7 +445,7 @@ module Gori
             cmd_host_override_list(args)
           else
             STDERR.puts "gori run project host-override: unknown subcommand '#{sub}'"
-            STDERR.puts "Usage: gori run project host-override [list options] | add | update | delete"
+            STDERR.puts "Usage: gori run project host-override [list options] | add | update | delete|rm"
             exit 1
           end
         end
@@ -458,7 +464,7 @@ module Gori
                      "  gori run project host-override add --host=api.example.com --ip=10.0.0.1\n" \
                      "  gori run project host-override add 10.0.0.1 api.example.com\n" \
                      "  gori run project host-override update <id> --host=... --ip=...\n" \
-                     "  gori run project host-override delete <id>"
+                     "  gori run project host-override delete|rm <id>"
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -602,7 +608,7 @@ module Gori
         positional = [] of String
 
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run project host-override delete <id> [options]"
+          p.banner = "Usage: gori run project host-override delete|rm <id> [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
