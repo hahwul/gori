@@ -371,6 +371,19 @@ describe Gori::Tui::RepeaterView do
     view.request_text.should contain("§v¦md5§")
   end
 
+  it "CHAIN pane: esc discards the edit instead of committing it" do
+    view = RepeaterView.new
+    view.restore("https://a.test", "§v§ HTTP/1.1\nHost: a.test\n\n", false, false)
+    view.focus_pane(:request)
+    view.focus_chain_pane.should be_nil
+    view.chain_pane_active?.should be_true
+    "md5".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+    view.discard_chain_pane # esc path
+    view.chain_pane_active?.should be_false
+    view.request_text.should contain("§v§")     # unchanged — no ¦chain written
+    view.request_text.should_not contain("md5") # the typed chain was dropped
+  end
+
   describe "marker structure guard (INS editing)" do
     it "auto-escapes a § typed inside a marker so the ¦chain never leaks" do
       view = RepeaterView.new

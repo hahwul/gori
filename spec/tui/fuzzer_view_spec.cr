@@ -43,6 +43,19 @@ describe Gori::Tui::FuzzerView do
     grid2.should_not contain("§x¦rot13§")
   end
 
+  it "CHAIN pane: esc discards the edit instead of committing it" do
+    view = FuzzerView.new
+    view.load_request("https://h", "§x§ HTTP/1.1\r\nHost: h\r\n\r\n", false, "")
+    view.focus_pane(:template)
+    view.focus_chain_pane.should be_nil
+    view.chain_pane_active?.should be_true
+    "rot13".each_char { |c| view.handle_chain_pane_key(Termisu::Event::Key.new(Termisu::Input::Key::LowerA, char: c)) }
+    view.discard_chain_pane # esc path
+    view.chain_pane_active?.should be_false
+    view.template_text.should contain("§x§")       # unchanged — no ¦chain written
+    view.template_text.should_not contain("rot13") # the typed chain was dropped
+  end
+
   describe "marker structure guard (INS editing)" do
     it "auto-escapes a § typed inside a template marker (structure survives)" do
       view = FuzzerView.new

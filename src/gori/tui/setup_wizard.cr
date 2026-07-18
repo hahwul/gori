@@ -116,6 +116,8 @@ module Gori::Tui
         move_cursor(1)
       elsif key.backspace?
         bind_backspace
+      elsif key.delete?
+        bind_delete
       elsif c = typed_char(ev)
         bind_insert(c)
       end
@@ -162,6 +164,10 @@ module Gori::Tui
     end
 
     private def advance_from_bind : Nil
+      if Settings.bind_host_error(@ip)
+        @status = "invalid bind IP (e.g. 127.0.0.1)"
+        return
+      end
       unless valid_port?(@port)
         @status = "invalid port (0-65535)"
         return
@@ -207,6 +213,16 @@ module Gori::Tui
       c = @cursor.clamp(0, v.size)
       set_bind_value("#{v[0, c - 1]}#{v[c..]}")
       @cursor = c - 1
+      @status = nil
+    end
+
+    # Forward-delete (the Del key): drop the character under the caret, caret unmoved.
+    # No-op with the caret at end-of-line — complements bind_backspace after caret moves.
+    private def bind_delete : Nil
+      v = bind_value
+      c = @cursor.clamp(0, v.size)
+      return if c >= v.size
+      set_bind_value("#{v[0, c]}#{v[(c + 1)..]}")
       @status = nil
     end
 

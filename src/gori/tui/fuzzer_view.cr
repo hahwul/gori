@@ -483,12 +483,27 @@ module Gori::Tui
       @chain_focused = false
     end
 
-    # Route a key while the CHAIN pane is focused (typing/autocomplete stays; a focus-exit
-    # key commits + returns to the template editor).
+    # Leave the CHAIN pane WITHOUT writing its edits back to the marker (esc = cancel,
+    # matching the pane's own "esc cancel" hint). The template text is only touched by
+    # commit_chain_pane, so dropping focus is a clean discard; restore the cursor onto
+    # the marker so its tooltip stays up.
+    def discard_chain_pane : Nil
+      return unless @chain_focused
+      anchor = Fuzz::Template.marker_start_at(@editor.text, @chain_marker_cursor) || @chain_marker_cursor
+      @editor.place_at_offset(anchor)
+      @chain_focused = false
+    end
+
+    # Route a key while the CHAIN pane is focused (typing/autocomplete stays; ↵/tab/↑
+    # commit + return to the template editor, while esc cancels — discards the edit).
     def handle_chain_pane_key(ev : Termisu::Event::Key) : Nil
       return if @chain_pane.handle_key(ev)
       key = ev.key
-      commit_chain_pane if key.escape? || key.enter? || key.tab? || key.up?
+      if key.escape?
+        discard_chain_pane
+      elsif key.enter? || key.tab? || key.up?
+        commit_chain_pane
+      end
     end
 
     # "§N" label for the marker under the template cursor (1-based), or "§" when not in one.
