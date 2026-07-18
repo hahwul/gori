@@ -44,6 +44,7 @@ require "./run/notes"
 require "./run/sitemap"
 require "./run/issues"
 require "./run/jwt"
+require "./run/convert"
 require "./run/rewriter"
 require "./run/project"
 
@@ -100,6 +101,7 @@ module Gori
         when "notes"    then cmd_notes(rest)
         when "issues"   then cmd_issues(rest)
         when "jwt"      then cmd_jwt(rest)
+        when "convert"  then cmd_convert(rest)
         when "rewriter" then cmd_rewriter(rest)
         when "project"  then cmd_project(rest)
         else
@@ -127,6 +129,7 @@ module Gori
         {"notes [<n>]", "Read or write the project's notes (list, show, --all, create, delete)"},
         {"issues", "List, export, create, or update issues (text, json, markdown)"},
         {"jwt [<token>]", "Decode, re-sign, or generate testing payloads for a JWT"},
+        {"convert <chain>", "Encode/decode/hash via the Decoder engine (base64, hex, url, gzip …)"},
         {"rewriter", "Manage Match & Replace rules (list, add, rm, enable/disable, preview)"},
         {"project [list]", "List known projects"},
         {"project scope", "Manage scope rules (list, add, delete, enable/disable)"},
