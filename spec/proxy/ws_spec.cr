@@ -364,9 +364,13 @@ describe "WebSocket through the proxy (end-to-end)" do
     # so it never reached the origin and no SRV:PING ever came back.
     client.write("PING".to_slice)
     client.flush
-    buf = Bytes.new(64)
-    n = client.read(buf)
-    String.new(buf[0, n]).should eq("SRV:PING")
+    # read_fully, not read: the origin answers with TWO writes ("SRV:" then the echo), and
+    # nothing guarantees they land in one segment. macOS usually coalesces them, Linux
+    # reliably does not — a single read there returns just "SRV:". The 3s read_timeout above
+    # still makes a genuinely broken tunnel fail fast rather than hang.
+    buf = Bytes.new("SRV:PING".bytesize)
+    client.read_fully(buf)
+    String.new(buf).should eq("SRV:PING")
 
     client.close
     proxy.stop
