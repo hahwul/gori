@@ -162,6 +162,7 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (커맨드 팔레트
 | `decoder` / `mine` | Decoder 도구와 Param Miner의 저장된 기본값 |
 | `layout` | History / Probe / Issues 미리보기 + Sitemap 펼침 깊이. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
+| `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, 미리보기 본문 상한, 그리고 `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐) |
 
 ## 프로젝트별 오버라이드 {#per-project-overrides}
 

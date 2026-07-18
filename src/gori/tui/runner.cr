@@ -229,6 +229,9 @@ module Gori::Tui
       # Optional bottom statusline: runs a user script on an interval and shows its
       # ANSI-coloured stdout. Disabled by default (no fiber, no reserved row until on).
       @statusline = StatuslineController.new(@session)
+      # Far-right status-bar readout of gori's own CPU/RSS (settings:display → Resource meter).
+      # Samples nothing while disabled; see ResourceMeter for the idle-repaint discipline.
+      @resource = ResourceMeter.new
       @spinner_frame = 0
       # The Miner config popup (History/Repeater → space → "Mine parameters"); @overlay is
       # :mine_config while it's up. Built fresh each time it opens (holds the seed request).
@@ -529,6 +532,10 @@ module Gori::Tui
           # Statusline: drain a finished script result and (re-)launch on its interval.
           # Self-gated on Settings.statusline_enabled? — a no-op (zero cost) while disabled.
           dirty = true if @statusline.tick(now)
+          # Resource meter: re-sample CPU/RSS on its own interval. Like the clock below, it
+          # only reports true when the RENDERED string changes, so a parked gori doesn't
+          # repaint on a timer just to redraw the same "CPU 0%".
+          dirty = true if @resource.tick(now)
           # Debounced QL filter: fire the deferred search once typing has paused.
           dirty = true if history_controller.flush_query_reload_if_due(now)
           dirty = true if sitemap_controller.flush_query_reload_if_due(now)
@@ -3674,7 +3681,7 @@ module Gori::Tui
         hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
-        activity: activity_chip)
+        activity: activity_chip, resource: @resource.label)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay == :palette
       @issue_form.render(screen, layout.body) if @overlay == :issue_new

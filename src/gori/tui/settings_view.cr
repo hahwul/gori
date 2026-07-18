@@ -90,6 +90,9 @@ module Gori::Tui
         bool: true),
       Field.new("Preview body limit (KiB)",
         "how many body bytes the History list preview reads/shows — KiB (min 1)"),
+      Field.new("Resource meter",
+        "show gori's own CPU/memory at the far right of the bottom bar — ←/→/space toggles",
+        bool: true),
     ]
     # Notifications: bell/toast toggles + ring-buffer retention.
     NOTIFICATIONS_FIELDS = [
@@ -153,7 +156,7 @@ module Gori::Tui
                 when :theme         then [Theme.canonical(Settings.theme)]
                 when :layout        then layout_values
                 when :statusline    then [Settings.statusline_enabled? ? "on" : "off", Settings.statusline_command, Settings.statusline_interval.to_s]
-                when :display       then [Settings.default_detail_pane, Settings.history_time_format, Settings.show_gutter ? "on" : "off", Settings.preview_body_kib.to_s]
+                when :display       then [Settings.default_detail_pane, Settings.history_time_format, Settings.show_gutter ? "on" : "off", Settings.preview_body_kib.to_s, Settings.resource_meter? ? "on" : "off"]
                 when :notifications then [Settings.notify_bell? ? "on" : "off", Settings.notify_toast? ? "on" : "off", Settings.notify_retention.to_s]
                 when :general       then [Settings.clipboard_osc52? ? "on" : "off", Settings.confirm_quit? ? "on" : "off"]
                 else                     [Settings.bind_host, Settings.bind_port.to_s, Settings.upstream_proxy, Settings.verify_upstream? ? "on" : "off", Settings.serve_landing? ? "on" : "off", Settings.connect_timeout_secs.to_s, Settings.io_timeout_secs.to_s, Settings.capture_max_mib.to_s, hostnames_summary]
@@ -191,6 +194,7 @@ module Gori::Tui
                   Settings::DEFAULT_HISTORY_TIME_FORMAT,
                   Settings::DEFAULT_SHOW_GUTTER ? "on" : "off",
                   Settings::DEFAULT_PREVIEW_BODY_KIB.to_s,
+                  Settings::DEFAULT_RESOURCE_METER ? "on" : "off",
                 ]
                 when :notifications then [
                   Settings::DEFAULT_NOTIFY_BELL ? "on" : "off",
@@ -407,7 +411,8 @@ module Gori::Tui
         Settings.history_time_format = @values[1] == "relative" ? "relative" : "absolute"
         Settings.show_gutter = @values[2] == "on"
         Settings.preview_body_kib = kib
-        @values = [Settings.default_detail_pane, Settings.history_time_format, Settings.show_gutter ? "on" : "off", Settings.preview_body_kib.to_s]
+        Settings.resource_meter = @values[4] == "on"
+        @values = [Settings.default_detail_pane, Settings.history_time_format, Settings.show_gutter ? "on" : "off", Settings.preview_body_kib.to_s, Settings.resource_meter? ? "on" : "off"]
         return persist
       end
       if @section == :notifications

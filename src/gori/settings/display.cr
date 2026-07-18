@@ -25,10 +25,12 @@ module Gori::Settings
   # freshly-opened History flow shows first; history_time_format = list time column;
   # show_gutter = line-number gutter on the message body views; preview_body_kib = how many
   # body bytes the History list PREVIEW reads/shows (display-only, not the capture limit).
+  # resource_meter = the bottom bar's far-right CPU/MEM readout for gori's own process.
   DEFAULT_DETAIL_PANE         = "request"  # "request" | "response"
   DEFAULT_HISTORY_TIME_FORMAT = "absolute" # "absolute" | "relative"
   DEFAULT_SHOW_GUTTER         = true
   DEFAULT_PREVIEW_BODY_KIB    = 64
+  DEFAULT_RESOURCE_METER      = true
   # Upper bound on the preview cap (KiB): kib*1024 must stay within Int32 or
   # preview_body_cap raises on the History navigation path. 65536 KiB = 64 MiB.
   MAX_PREVIEW_BODY_KIB = 65536
@@ -68,6 +70,8 @@ module Gori::Settings
   class_property history_time_format : String = DEFAULT_HISTORY_TIME_FORMAT
   class_property show_gutter : Bool = DEFAULT_SHOW_GUTTER
   class_property preview_body_kib : Int32 = DEFAULT_PREVIEW_BODY_KIB
+  # `?` toggle read live by the status bar's ResourceMeter; off means it never samples.
+  class_property? resource_meter : Bool = DEFAULT_RESOURCE_METER
   # Notification prefs (settings:notifications). bell/toast are `?` toggles read live at the
   # emit sites; retention bounds the ring buffer (read live by Notifications#push).
   class_property? notify_bell : Bool = DEFAULT_NOTIFY_BELL
@@ -132,6 +136,7 @@ module Gori::Settings
     if v = o["preview_body_kib"]?.try(&.as_i?)
       self.preview_body_kib = v.clamp(1, MAX_PREVIEW_BODY_KIB)
     end
+    self.resource_meter = load_bool_h(o, "resource_meter", resource_meter?)
   end
 
   # Tolerant notifications section: absent/non-object keeps current; retention floored at 1.
@@ -202,13 +207,15 @@ module Gori::Settings
     unless default_detail_pane == DEFAULT_DETAIL_PANE &&
            history_time_format == DEFAULT_HISTORY_TIME_FORMAT &&
            show_gutter == DEFAULT_SHOW_GUTTER &&
-           preview_body_kib == DEFAULT_PREVIEW_BODY_KIB
+           preview_body_kib == DEFAULT_PREVIEW_BODY_KIB &&
+           resource_meter? == DEFAULT_RESOURCE_METER
       j.field "display" do
         j.object do
           j.field "detail_pane", default_detail_pane
           j.field "history_time_format", history_time_format
           j.field "show_gutter", show_gutter
           j.field "preview_body_kib", preview_body_kib
+          j.field "resource_meter", resource_meter?
         end
       end
     end

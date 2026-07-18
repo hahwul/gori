@@ -162,6 +162,7 @@ See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables).
 | `decoder` / `mine` | Saved defaults for the Decoder tool and Param Miner |
 | `layout` | History / Probe / Issues previews + Sitemap expand depth. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
+| `display` | Default detail pane, list time format, line-number gutter, preview body cap, and `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default) |
 
 ## Per-Project Overrides
 
