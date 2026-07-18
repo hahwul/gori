@@ -98,6 +98,30 @@ describe "MCP fuzz tools" do
     end
   end
 
+  it "accepts structured object payload sets for numbers and brute" do
+    port = start_origin
+    with_store do |store|
+      tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)
+      base = {
+        "template"       => "GET /?q=§x§ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+        "url"            => "http://127.0.0.1:#{port}",
+        "allow_unscoped" => true,
+      }
+      # numbers {from,to,step} == the "1-100:2" string form (50 candidates).
+      nums = call_json(tools, "fuzz_start",
+        base.merge({"payloads" => [{"numbers" => {"from" => 1, "to" => 100, "step" => 2}}]}).to_json)
+      nums["total"].as_i.should eq(50)
+      # brute {charset,min,max} == the "ab:1-2" string form (2 + 4 = 6 candidates).
+      brute = call_json(tools, "fuzz_start",
+        base.merge({"payloads" => [{"brute" => {"charset" => "ab", "min" => 1, "max" => 2}}]}).to_json)
+      brute["total"].as_i.should eq(6)
+      # A malformed object fails cleanly (is_error), not a generic "tool error".
+      _, bad = call_raw(tools, "fuzz_start",
+        base.merge({"payloads" => %([{"numbers":{"to":100}}])}).to_json)
+      bad.should be_true
+    end
+  end
+
   it "rejects bad args, and gates the tool under --read-only" do
     with_store do |store|
       tools = Gori::MCP::Tools.new(store, allow_actions: true, verify_upstream: false)

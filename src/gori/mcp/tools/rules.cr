@@ -180,8 +180,21 @@ module Gori
                end
              end
         return err("invalid 'op' (expected replace|add_header|set_header|remove_header)", "INVALID_ARGUMENT", field: "op") unless op
+        # Validate `match` explicitly instead of leaning on MatchKind.from_label
+        # (which coerces any unknown label to Literal). A silent literal fallback
+        # would mislead a caller into thinking a `regex` rule was applied while the
+        # proxy actually did a literal match — so an unrecognized label is rejected.
         kind_s = str(h, "match").try(&.strip)
-        kind = kind_s.nil? || kind_s.empty? ? dft_kind : Store::MatchKind.from_label(kind_s.downcase)
+        kind = if kind_s.nil? || kind_s.empty?
+                 dft_kind
+               else
+                 case kind_s.downcase
+                 when "literal" then Store::MatchKind::Literal
+                 when "regex"   then Store::MatchKind::Regex
+                 else                nil
+                 end
+               end
+        return err("invalid 'match' (expected literal|regex)", "INVALID_ARGUMENT", field: "match") unless kind
         {op, kind}
       end
 

@@ -780,7 +780,7 @@ module Gori
               s.field "auto", boolprop("auto-mark every query/cookie/body param when the template has no § markers")
               s.field "marks", strarrprop("literal tokens to mark as §…§ positions (each occurrence, mirrors CLI --mark); alternative to embedding §…§ in template")
               s.field "mode", strprop("sniper (default) | batteringram | pitchfork | clusterbomb")
-              s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string))
+              s.field "payloads", arrprop(%(array of payload sets, e.g. [{"list":["a","b"]},{"numbers":"1-100"},{"wordlist":"/p.txt"},{"null":5},{"brute":"abc:1-3"}] — JSON array, NOT a string. numbers/brute also accept a structured object: {"numbers":{"from":1,"to":100,"step":2}}, {"brute":{"charset":"abc","min":1,"max":3}}))
               s.field "match", jsonprop(%(keep only responses matching, e.g. {"status":"200,500-599","size":">1000","regex":"err"} — object or JSON string))
               s.field "filter", jsonprop(%(drop responses matching, same shape as match — object or JSON string))
               s.field "extract", strprop("regex; grep a value (capture group 1) from each response")
@@ -802,9 +802,10 @@ module Gori
             end
 
             tool j, "fuzz_results",
-              "Paged matched results for a fuzz job (metrics only — status/length/words/" \
-              "extracted; no raw bodies and no per-result flow id). To inspect a hit, " \
-              "re-issue it with send_request, substituting the payload into your template." do |s|
+              "Paged matched results for a fuzz job (status/length/words/lines/duration/" \
+              "extracted, plus a per-result flow_id when the run used record_history). No raw " \
+              "bodies are inlined: fetch a hit's full request+response with get_flow(flow_id), " \
+              "or re-issue it with send_request by substituting the payload into your template." do |s|
               s.field "job_id", strprop("id from fuzz_start"), required: true
               s.field "offset", intprop("start row (default 0)")
               s.field "limit", intprop("max rows (default 100, max 1000)")
@@ -1015,7 +1016,11 @@ module Gori
         prov = Oast::Provider.build(kind, host, str(h, "token"))
         http = Oast::HttpClient.new(@verify_upstream)
         session = prov.register(http)
-        sid = "oast-#{@job_seq += 1}"
+        # Unpredictable session id: a sequential "oast-N" is trivially guessable, so
+        # a co-tenant sharing this process could poll another agent's out-of-band
+        # callbacks. Secure-random hex removes the guessing surface (mirrors the
+        # delete_project confirmation tokens).
+        sid = "oast_#{Random::Secure.hex(8)}"
         @oast_mcp[sid] = OastMcpSession.new(prov, session, http, kind.label)
         payload = prov.generate_payload(session)
         Result.new({session_id: sid, provider: kind.label, payload_url: payload}.to_json)
