@@ -111,6 +111,32 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (커맨드 팔레트
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | 프록시가 실제로 리스닝 중인 주소 |
 | `upstream` | string | 업스트림 프록시 `host:port`, 직접 연결이면 비어 있음 |
 
+### display {#display}
+
+메시지 본문과 화면 요소 설정입니다 (커맨드 팔레트 → **Settings: Display**). 모든 값이 기본값이면 섹션이 생략됩니다.
+
+```json
+{
+  "display": {
+    "detail_pane": "request",
+    "history_time_format": "absolute",
+    "show_gutter": true,
+    "preview_body_kib": 64,
+    "resource_meter": true,
+    "terminal_title": "project"
+  }
+}
+```
+
+| 키 | 타입 | 기본값 | 설명 |
+|-----|------|---------|-------------|
+| `detail_pane` | string | `"request"` | History 플로우를 열었을 때 먼저 보여줄 페인: `"request"` 또는 `"response"` |
+| `history_time_format` | string | `"absolute"` | History 목록의 시간 열: `"absolute"`(MM-DD HH:MM:SS) 또는 `"relative"`(3s/5m/2h) |
+| `show_gutter` | bool | `true` | 메시지 본문 뷰의 줄번호 거터 |
+| `preview_body_kib` | integer | `64` | History 목록 미리보기가 읽는 본문 바이트 수 (표시 전용이며 캡처 상한과는 별개) |
+| `resource_meter` | bool | `true` | 하단 바 맨 오른쪽에 표시되는 gori 자신의 CPU/메모리 |
+| `terminal_title` | string | `"project"` | 터미널 창 제목: `"project"` → `Gori - <프로젝트> - <탭>`, `"tab"` → `Gori - <탭>`, `"off"` → gori가 제목을 건드리지 않음 (셸이나 tmux에 맡김) |
+
 ### hostname_overrides {#hostname-overrides}
 
 전역 다이얼 맵(충돌 시 프로젝트 레벨 오버라이드가 우선). `/etc/hosts`와 같은 개념입니다:
@@ -162,7 +188,7 @@ TUI 맨 아래에 선택적으로 추가되는 행입니다 (커맨드 팔레트
 | `decoder` / `mine` | Decoder 도구와 Param Miner의 저장된 기본값 |
 | `layout` | History / Probe / Issues 미리보기 + Sitemap 펼침 깊이. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
-| `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, 미리보기 본문 상한, 그리고 `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐) |
+| `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |
 
 ## 프로젝트별 오버라이드 {#per-project-overrides}
 

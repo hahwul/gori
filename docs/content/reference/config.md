@@ -111,6 +111,32 @@ Each run receives a JSON context on stdin describing the live session, so script
 | `proxy.host` / `proxy.port` / `proxy.addr` | string / integer / string | The address the proxy is actually listening on |
 | `upstream` | string | Upstream proxy `host:port`, or empty when connecting directly |
 
+### display
+
+Message-body and chrome prefs (command palette → **Settings: Display**). Omitted when every value is a factory default.
+
+```json
+{
+  "display": {
+    "detail_pane": "request",
+    "history_time_format": "absolute",
+    "show_gutter": true,
+    "preview_body_kib": 64,
+    "resource_meter": true,
+    "terminal_title": "project"
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `detail_pane` | string | `"request"` | Which pane a freshly-opened History flow shows first: `"request"` or `"response"` |
+| `history_time_format` | string | `"absolute"` | History list time column: `"absolute"` (MM-DD HH:MM:SS) or `"relative"` (3s/5m/2h) |
+| `show_gutter` | bool | `true` | Line-number gutter on the message body views |
+| `preview_body_kib` | integer | `64` | How many body bytes the History list preview reads (display only, not the capture limit) |
+| `resource_meter` | bool | `true` | CPU/memory readout for gori's own process, at the far right of the bottom bar |
+| `terminal_title` | string | `"project"` | Terminal window title: `"project"` → `Gori - <project> - <tab>`, `"tab"` → `Gori - <tab>`, `"off"` → gori never writes the title (leave it to your shell or tmux) |
+
 ### hostname_overrides
 
 Global dial map (project-level overrides win on collision). Same idea as `/etc/hosts`:
@@ -162,7 +188,7 @@ See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables).
 | `decoder` / `mine` | Saved defaults for the Decoder tool and Param Miner |
 | `layout` | History / Probe / Issues previews + Sitemap expand depth. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
-| `display` | Default detail pane, list time format, line-number gutter, preview body cap, and `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default) |
+| `display` | Default detail pane, list time format, line-number gutter, preview body cap, `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default), and `terminal_title` |
 
 ## Per-Project Overrides
 

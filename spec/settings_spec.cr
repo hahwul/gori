@@ -195,40 +195,52 @@ describe Gori::Settings do
     Dir.mkdir_p(dir)
     prev = ENV["GORI_HOME"]?
     prev_display = {Gori::Settings.default_detail_pane, Gori::Settings.history_time_format,
-                    Gori::Settings.show_gutter, Gori::Settings.preview_body_kib}
+                    Gori::Settings.show_gutter, Gori::Settings.preview_body_kib,
+                    Gori::Settings.terminal_title}
     begin
       ENV["GORI_HOME"] = dir
       Gori::Settings.default_detail_pane = "response"
       Gori::Settings.history_time_format = "relative"
       Gori::Settings.show_gutter = false
       Gori::Settings.preview_body_kib = 128
+      Gori::Settings.terminal_title = "off"
       Gori::Settings.save.should be_true
       raw = File.read(Gori::Settings.path)
       raw.should contain(%("display"))
       raw.should contain(%("detail_pane":"response"))
+      raw.should contain(%("terminal_title":"off"))
 
       Gori::Settings.default_detail_pane = "request"
       Gori::Settings.history_time_format = "absolute"
       Gori::Settings.show_gutter = true
       Gori::Settings.preview_body_kib = 64
+      Gori::Settings.terminal_title = "project"
       Gori::Settings.load
       Gori::Settings.default_detail_pane.should eq("response")
       Gori::Settings.history_time_format.should eq("relative")
       Gori::Settings.show_gutter.should be_false # a stored false survives the reload
       Gori::Settings.preview_body_kib.should eq(128)
       Gori::Settings.preview_body_cap.should eq(128 * 1024) # byte helper derives from the KiB int
+      Gori::Settings.terminal_title.should eq("off")
+
+      # An unknown mode (hand-edited config) falls back to the default rather than
+      # leaving the Runner with a value it has no branch for.
+      File.write(Gori::Settings.path, %({"display":{"terminal_title":"bogus"}}))
+      Gori::Settings.load
+      Gori::Settings.terminal_title.should eq(Gori::Settings::DEFAULT_TERMINAL_TITLE)
 
       # Back to defaults → section omitted
       Gori::Settings.default_detail_pane = Gori::Settings::DEFAULT_DETAIL_PANE
       Gori::Settings.history_time_format = Gori::Settings::DEFAULT_HISTORY_TIME_FORMAT
       Gori::Settings.show_gutter = Gori::Settings::DEFAULT_SHOW_GUTTER
       Gori::Settings.preview_body_kib = Gori::Settings::DEFAULT_PREVIEW_BODY_KIB
+      Gori::Settings.terminal_title = Gori::Settings::DEFAULT_TERMINAL_TITLE
       Gori::Settings.save
       File.read(Gori::Settings.path).should_not contain(%("display"))
     ensure
       prev ? (ENV["GORI_HOME"] = prev) : ENV.delete("GORI_HOME")
       FileUtils.rm_rf(dir)
-      Gori::Settings.default_detail_pane, Gori::Settings.history_time_format, Gori::Settings.show_gutter, Gori::Settings.preview_body_kib = prev_display
+      Gori::Settings.default_detail_pane, Gori::Settings.history_time_format, Gori::Settings.show_gutter, Gori::Settings.preview_body_kib, Gori::Settings.terminal_title = prev_display
     end
   end
 

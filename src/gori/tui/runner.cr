@@ -271,7 +271,8 @@ module Gori::Tui
       @quit_armed = false              # first ^D/^C arms quit; second confirms (avoids accidental exit)
       @resized = false                 # set on a Resize event → next frame full-repaints
       @body_h = 24                     # last body rect height (captured at render); drives PageUp/Down step size
-      @title_tab = nil.as(Symbol?)     # last tab reflected into the terminal-window title (memo; see sync_terminal_title)
+      @title_text = nil.as(String?)    # last string emitted as the terminal-window title (memo; see sync_terminal_title)
+      @title_written = false           # have we ever written a title? gates the neutral restore on leave when the pref is "off"
 
       # Per-tab controllers (strangler-fig: tabs migrate into this registry one at a
       # time; an unmigrated tab is absent and still runs through the case ladders
@@ -562,8 +563,10 @@ module Gori::Tui
         @statusline.stop
         # Drop the per-tab window title back to a neutral "gori" on leave — the shared term
         # outlives this Runner (project picker + the next session reuse it), so a stale
-        # "Gori - Notes" mustn't linger. The shell's prompt overwrites it again after quit.
-        @term.title = "gori"
+        # "Gori - acme - Notes" mustn't linger. The shell's prompt overwrites it again after
+        # quit. Skipped when we never wrote a title (pref "off"), so gori leaves the
+        # terminal's own title alone end to end.
+        @term.title = "gori" if @title_written
       end
       @outcome
     end
@@ -3641,15 +3644,38 @@ module Gori::Tui
       Settings.statusline_enabled?
     end
 
-    # Reflect the active tab in the terminal-window title ("Gori - History"), so a
-    # terminal tab/window running gori is identifiable at a glance (and multiple open
-    # projects can be told apart by which tab each is on). Driven from render — not
-    # threaded through each @active_tab write site — so every switch path is covered;
-    # memoized on the tab so the OSC sequence is emitted only when it actually changes.
+    # Reflect the open project and active tab in the terminal-window title
+    # ("Gori - acme - History"), so a terminal tab/window running gori is identifiable at
+    # a glance and several concurrently open projects can be told apart. Driven from
+    # render — not threaded through each @active_tab write site — so every switch path is
+    # covered (a project rename lands the same way); memoized on the composed string so
+    # the OSC sequence is emitted only when it actually changes.
+    #
+    # Mode comes from settings:display (`terminal_title`). "off" writes nothing at all —
+    # for shells and multiplexers that own the title themselves — so we must not even
+    # emit the neutral title on leave unless we've previously written one (@title_written).
+    # Switching to "off" mid-session is the one exception: a title we put there would
+    # otherwise freeze on whatever tab was active, so we release it to the neutral "gori"
+    # once and go quiet from there.
     private def sync_terminal_title : Nil
-      return if @title_tab == @active_tab
-      @title_tab = @active_tab
-      @term.title = "Gori - #{Chrome.tab_label(@active_tab)}"
+      title = case Settings.terminal_title
+              when "off" then @title_text.nil? ? return : "gori"
+              when "tab" then "Gori - #{Chrome.tab_label(@active_tab)}"
+              else            "Gori - #{title_safe(@session.project.name)} - #{Chrome.tab_label(@active_tab)}"
+              end
+      return if @title_text == title
+      @title_text = title
+      @title_written = true
+      @term.title = title
+    end
+
+    # Project names are user-supplied and go out inside an OSC string, where a raw ESC or
+    # BEL would terminate the sequence early and let the rest through as terminal input.
+    # Drop the control bytes and cap the length so a pathological name can't eat the title.
+    private def title_safe(name : String) : String
+      cleaned = name.gsub { |c| c.control? ? "" : c }.strip
+      return "untitled" if cleaned.empty?
+      cleaned.size > 40 ? "#{cleaned[0, 39]}…" : cleaned
     end
 
     private def render : Nil
@@ -5313,11 +5339,14 @@ module Gori::Tui
       end
       @resized = true # alt-screen re-entered → force a full repaint via the resize path
       # The child editor may have set its own OS window title. termisu memoizes the last
-      # title it wrote (still "Gori - <tab>"), so a plain re-emit is suppressed — bust its
-      # memo with a throwaway write, then invalidate gori's memo so the next render
-      # re-emits "Gori - <tab>" and restores our title over whatever the editor left.
-      @term.title = ""
-      @title_tab = nil
+      # title it wrote (still "Gori - <project> - <tab>"), so a plain re-emit is suppressed
+      # — bust its memo with a throwaway write, then invalidate gori's memo so the next
+      # render re-emits our title over whatever the editor left. Skipped when we own no
+      # title (pref "off"): there's nothing of ours to restore, so leave the editor's be.
+      if @title_written && Settings.terminal_title != "off"
+        @term.title = ""
+        @title_text = nil
+      end
       case result.outcome
       in ExternalEditor::Outcome::Changed
         yield result.text.not_nil!
