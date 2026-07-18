@@ -58,8 +58,13 @@ gori run <subcommand> [options]
 | `repeater <flow-id>` · `list` · `create` | 캡처한 플로우 재전송, 또는 Repeater 워크벤치 세션 목록 / 생성 |
 | `fuzz [<flow-id>]` | Intruder 스타일 퍼저 |
 | `mine [<flow-id>]` | 숨은 파라미터 탐색 |
+| `sequence` (`seq`) `[<flow-id>]` | 토큰 무작위성 평가 (라이브 리플레이, 또는 붙여넣은 목록은 `--tokens`) |
 | `probe [QL]` | 패시브 보안 스캔 (요청 없음) |
+| `discover` | 엔드포인트를 스파이더링 & 브루트포스하여 Sitemap으로 반영 |
 | `sitemap [QL]` | 호스트 → 경로 엔드포인트 트리 |
+| `oast listen` · `presets` | 아웃오브밴드 콜백 리스너 (interactsh 및 유사 서비스) |
+| `jwt [<token>]` | JWT 디코드, 재서명, 또는 공격 페이로드 생성 |
+| `convert <chain> [input]` | Decoder 인코드 / 디코드 / 해시 체인 실행 |
 | `notes [<n>]` | 프로젝트 노트 읽기 |
 | `issues` · `create` · `update` | 이슈 목록 / 내보내기, 또는 이슈 작성 |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
@@ -171,6 +176,25 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | 속도 제어 |
 | `--format` | `text`, `json`, 또는 `jsonl` |
 
+### run sequence {#run-sequence}
+
+토큰의 무작위성을 평가합니다. **라이브**: 요청을 리플레이하며 각 응답에서 토큰을 추출합니다. **수동**: `--tokens`로 붙여넣은 목록을 분석합니다(네트워크 없음). 별칭 `seq`.
+
+```bash
+gori run sequence 42 --cookie SESSIONID --count 500
+gori run sequence --tokens tokens.txt          # '-' reads stdin
+```
+
+| Option | Description |
+|--------|-------------|
+| `--flow=ID`, `--request=FILE`, stdin | 라이브 리플레이의 요청 소스(또는 맨 앞의 `<flow-id>`) |
+| `--tokens=FILE` | 붙여넣은 토큰 목록 분석(한 줄에 하나, `-`=stdin), 네트워크 없음 |
+| 토큰 위치(하나만 선택) | `--cookie=NAME`, `--header=NAME`, `--regex=RE`, `--position=A:B`, `--jsonpath=EXPR` |
+| `--count=N` | 목표 토큰 개수(기본값 500) |
+| `--target`, `--http2`, `--sni`, `-k` | 트랜스포트(`--request`/stdin에는 target 필요) |
+| `--concurrency` (1), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | 속도 제어(상태 기반 토큰을 위해 concurrency는 1 유지) |
+| `--format` | `text`, `json`, 또는 `jsonl` |
+
 ### run probe {#run-probe}
 
 ```bash
@@ -179,6 +203,30 @@ gori run probe --severity high --category cors
 
 `--severity`는 `info`\|`low`\|`medium`\|`high`\|`critical` 중 하나입니다. `--category`는 `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors`이며, 여기서는 패시브 검사만 다룹니다. `active` 프로브는 TUI에서 실행합니다. `-q`/`--query`로 QL 필터를 겁니다.
 
+### run discover {#run-discover}
+
+대상을 스파이더링하고 링크되지 않은 경로를 브루트포스합니다. `--no-store`가 아니면 결과는 Sitemap으로 반영됩니다. 실제 요청을 무단으로 보내므로 권한이 있는 대상에만 실행하세요.
+
+```bash
+gori run discover --target https://target.example --max-depth 3 --extensions php,json,bak --format jsonl
+```
+
+| Option | Description |
+|--------|-------------|
+| `--target=URL` | 탐색할 시드 origin 또는 경로 하위 트리(필수) |
+| `--max-depth=N` | 시드로부터의 스파이더 깊이(기본값 4) |
+| `--no-spider` / `--no-bruteforce` | 링크 크롤링 / 디렉터리 브루트포스 비활성화 |
+| `--wordlist=PATH` | 내장 목록과 병합할 추가 경로 워드리스트 |
+| `--extensions=LIST` | 이 확장자도 프로브(예: `php,json,bak`) |
+| `-H`, `--header=HEADER` | 모든 프로브에 붙일 커스텀 헤더(반복 가능) |
+| `--containment=MODE` | `same-origin` \| `scope-aware`(기본) \| `host+subdomains` |
+| `--concurrency` (20), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | 속도 제어 |
+| `-k`, `--insecure-upstream` | 업스트림 TLS 검증 생략 |
+| `--allow-unscoped` | 대상이 프로젝트 스코프 밖이어도 실행 |
+| `--force` | 무제한 실행 안전 게이트 우회 |
+| `--no-store` | 결과를 프로젝트에 기록하지 않음 |
+| `--format` | `text`, `json`, 또는 `jsonl` |
+
 ### run sitemap {#run-sitemap}
 
 ```bash
@@ -186,6 +234,62 @@ gori run sitemap --in-scope --format paths
 ```
 
 `-q`/`--query=QL`는 history와 같은 QL로 엔드포인트를 거릅니다(위치 인자로도 넘길 수 있습니다). `-n`/`--limit=N`은 스캔할 엔드포인트 수를 제한합니다(기본값 `SITEMAP_MAX`). `--in-scope`는 스코프 내 호스트로 한정하고, `--no-group`은 숫자 경로 접기를 끕니다. `--format`은 `text`(트리), `json`, `paths` 중에서 고릅니다.
+
+### run oast {#run-oast}
+
+즉석에서 쓰는, 저장소 없는 아웃오브밴드 리스너입니다. 페이로드를 등록하고 출력한 뒤 콜백을 스트리밍합니다.
+
+```bash
+gori run oast presets                          # list built-in public providers
+gori run oast listen                           # interactsh, poll until Ctrl-C
+gori run oast listen --provider webhook.site --once --json
+```
+
+`presets`는 공개 프로바이더를 나열합니다. `listen` 옵션:
+
+| Option | Description |
+|--------|-------------|
+| `--provider=KIND` | `interactsh`(기본) \| `custom-http` \| `webhook.site` \| `BOAST` \| `postbin` |
+| `--server=URL` | 프로바이더 서버 / 베이스 URL(기본값: 프로바이더의 공개 프리셋) |
+| `--token=TOK` | 선택적 프로바이더 인증 토큰 |
+| `--interval=SEC` | 폴링 간격(기본값 5) |
+| `--once` | 한 번만 폴링하고 종료 |
+| `--json` | 각 콜백을 JSON 라인으로 출력(MCP와 동일한 형태) |
+
+### run jwt {#run-jwt}
+
+JWT를 디코드, 재서명, 또는 공격 페이로드를 생성합니다. 저장소 없는 계산이며, 토큰은 `<token>` 인자나 stdin에서 받습니다.
+
+```bash
+gori run jwt eyJhbGci...                        # decode (default)
+gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
+gori run jwt eyJhbGci... --attacks
+```
+
+| Option | Description |
+|--------|-------------|
+| `--decode` | header / payload / signature 디코드(기본) |
+| `--encode` | `--alg` / `--secret`로 토큰 클레임 재서명 |
+| `--attacks` | 테스트 페이로드 생성(alg:none, weak-secret, header injection) |
+| `--alg=ALG` | `--encode`용 서명 alg: `HS256`(기본) \| `HS384` \| `HS512` \| `none` |
+| `--secret=SECRET` | HS 알고리즘 `--encode`용 HMAC 시크릿 |
+| `--format` | `text`(기본) 또는 `json` |
+
+### run convert {#run-convert}
+
+값에 대해 [Decoder](/ko/guide/decoder/) 체인을 실행합니다. 단계는 `|`, `>`, `,`로 구분합니다.
+
+```bash
+gori run convert 'base64-decode | jwt-decode' "$TOKEN"
+echo -n secret | gori run convert 'sha256 | hex-encode'
+gori run convert list                           # every converter (name, category, direction)
+```
+
+| Option | Description |
+|--------|-------------|
+| `--input=STR` | 변환할 값(없으면 두 번째 위치 인자, 그것도 없으면 stdin) |
+| `-o`, `--output=MODE` | 최종 바이트 렌더링: `auto`(기본) \| `text` \| `base64` \| `hex` |
+| `--format` | `text`(기본) 또는 `json`(단계별 상세) |
 
 ### run issues / notes {#run-issues-notes}
 

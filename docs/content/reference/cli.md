@@ -58,8 +58,13 @@ gori run <subcommand> [options]
 | `repeater <flow-id>` · `list` · `create` | Re-send a captured flow, or list / create Repeater workbench sessions |
 | `fuzz [<flow-id>]` | Intruder-style fuzzer |
 | `mine [<flow-id>]` | Hidden-parameter discovery |
+| `sequence` (`seq`) `[<flow-id>]` | Grade token randomness (live replay, or `--tokens` for a pasted list) |
 | `probe [QL]` | Passive security scan (no requests) |
+| `discover` | Spider and brute-force endpoints into the Sitemap |
 | `sitemap [QL]` | Host → path endpoint tree |
+| `oast listen` · `presets` | Out-of-band callback listener (interactsh & friends) |
+| `jwt [<token>]` | Decode, re-sign, or generate attack payloads for a JWT |
+| `convert <chain> [input]` | Run a Decoder encode / decode / hash chain |
 | `notes [<n>]` | Read project notes |
 | `issues` · `create` · `update` | List / export issues, or write issues |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
@@ -171,6 +176,25 @@ gori run mine <flow-id> --locations query,headers --wordlist params.txt
 | `--concurrency` (10), `--rate`, `--throttle`, `--timeout`, `--retries` (1), `--max-requests=N` | Rate control |
 | `--format` | `text`, `json`, or `jsonl` |
 
+### run sequence
+
+Grade the randomness of a token. **Live**: replay a request and extract the token from each response. **Manual**: analyze a pasted list with `--tokens` (no network). Alias `seq`.
+
+```bash
+gori run sequence 42 --cookie SESSIONID --count 500
+gori run sequence --tokens tokens.txt          # '-' reads stdin
+```
+
+| Option | Description |
+|--------|-------------|
+| `--flow=ID`, `--request=FILE`, stdin | Request source for live replay (or a bare `<flow-id>`) |
+| `--tokens=FILE` | Analyze a pasted token list (one per line, `-` = stdin); no network |
+| Token location (pick one) | `--cookie=NAME`, `--header=NAME`, `--regex=RE`, `--position=A:B`, `--jsonpath=EXPR` |
+| `--count=N` | Target token count (default 500) |
+| `--target`, `--http2`, `--sni`, `-k` | Transport (target required for `--request`/stdin) |
+| `--concurrency` (1), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | Rate control (concurrency stays 1 for stateful tokens) |
+| `--format` | `text`, `json`, or `jsonl` |
+
 ### run probe
 
 ```bash
@@ -179,6 +203,30 @@ gori run probe --severity high --category cors
 
 `--severity` is `info`\|`low`\|`medium`\|`high`\|`critical`; `--category` is `headers`\|`cookies`\|`tech`\|`infoleak`\|`cors` (passive only, `active` probes run in the TUI); `-q`/`--query` filters with QL.
 
+### run discover
+
+Spider a target and brute-force unlinked paths; findings flow into the Sitemap unless `--no-store`. Sends real, unsolicited traffic, so only run it against authorized targets.
+
+```bash
+gori run discover --target https://target.example --max-depth 3 --extensions php,json,bak --format jsonl
+```
+
+| Option | Description |
+|--------|-------------|
+| `--target=URL` | Seed origin or path subtree to explore (required) |
+| `--max-depth=N` | Spider depth from the seed (default 4) |
+| `--no-spider` / `--no-bruteforce` | Disable link crawling / directory brute-forcing |
+| `--wordlist=PATH` | Extra path wordlist, merged with the built-in list |
+| `--extensions=LIST` | Also probe these extensions (e.g. `php,json,bak`) |
+| `-H`, `--header=HEADER` | Custom header on every probe (repeatable) |
+| `--containment=MODE` | `same-origin` \| `scope-aware` (default) \| `host+subdomains` |
+| `--concurrency` (20), `--rate`, `--throttle`, `--timeout`, `--retries`, `--max-requests=N` | Rate control |
+| `-k`, `--insecure-upstream` | Skip upstream TLS verification |
+| `--allow-unscoped` | Run even if the target is outside the project scope |
+| `--force` | Bypass the unbounded-run safety gate |
+| `--no-store` | Do not write findings into the project |
+| `--format` | `text`, `json`, or `jsonl` |
+
 ### run sitemap
 
 ```bash
@@ -186,6 +234,62 @@ gori run sitemap --in-scope --format paths
 ```
 
 `-q`/`--query=QL` filters endpoints with the same QL as history (also positional), `-n`/`--limit=N` caps the endpoints scanned (default `SITEMAP_MAX`), `--in-scope` limits to in-scope hosts, `--no-group` disables numeric path folding, `--format` is `text` (tree), `json`, or `paths`.
+
+### run oast
+
+Ad-hoc, store-free out-of-band listener: register a payload, print it, then stream callbacks.
+
+```bash
+gori run oast presets                          # list built-in public providers
+gori run oast listen                           # interactsh, poll until Ctrl-C
+gori run oast listen --provider webhook.site --once --json
+```
+
+`presets` lists the public providers. `listen` options:
+
+| Option | Description |
+|--------|-------------|
+| `--provider=KIND` | `interactsh` (default) \| `custom-http` \| `webhook.site` \| `BOAST` \| `postbin` |
+| `--server=URL` | Provider server / base URL (default: the provider's public preset) |
+| `--token=TOK` | Optional provider auth token |
+| `--interval=SEC` | Poll interval (default 5) |
+| `--once` | Poll once and exit |
+| `--json` | Emit each callback as a JSON line (same shape as MCP) |
+
+### run jwt
+
+Decode, re-sign, or generate attack payloads for a JWT. Store-free compute; the token comes from the `<token>` argument or stdin.
+
+```bash
+gori run jwt eyJhbGci...                        # decode (default)
+gori run jwt eyJhbGci... --encode --alg HS256 --secret s3cret
+gori run jwt eyJhbGci... --attacks
+```
+
+| Option | Description |
+|--------|-------------|
+| `--decode` | Decode header / payload / signature (default) |
+| `--encode` | Re-sign the token's claims with `--alg` / `--secret` |
+| `--attacks` | Generate testing payloads (alg:none, weak-secret, header injection) |
+| `--alg=ALG` | Signing alg for `--encode`: `HS256` (default) \| `HS384` \| `HS512` \| `none` |
+| `--secret=SECRET` | HMAC secret for `--encode` with an HS algorithm |
+| `--format` | `text` (default) or `json` |
+
+### run convert
+
+Run a [Decoder](/guide/decoder/) chain over a value. Steps are separated by `|`, `>`, or `,`.
+
+```bash
+gori run convert 'base64-decode | jwt-decode' "$TOKEN"
+echo -n secret | gori run convert 'sha256 | hex-encode'
+gori run convert list                           # every converter (name, category, direction)
+```
+
+| Option | Description |
+|--------|-------------|
+| `--input=STR` | Value to convert (else the 2nd positional arg, else stdin) |
+| `-o`, `--output=MODE` | Render final bytes: `auto` (default) \| `text` \| `base64` \| `hex` |
+| `--format` | `text` (default) or `json` (per-step detail) |
 
 ### run issues / notes
 
@@ -256,7 +360,7 @@ gori run project env delete TOKEN
 
 #### project host-override
 
-Manage **project** host overrides — `/etc/hosts`-style maps that change only the TCP dial target (SNI, certificate hostname, and `Host` header stay the original name). Project entries win over global `Settings: Hostnames` on collision. Alias: `host-overrides`.
+Manage **project** host overrides: `/etc/hosts`-style maps that change only the TCP dial target (SNI, certificate hostname, and `Host` header stay the original name). Project entries win over global `Settings: Hostnames` on collision. Alias: `host-overrides`.
 
 ```bash
 gori run project host-override                              # list

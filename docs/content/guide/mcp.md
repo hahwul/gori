@@ -85,6 +85,10 @@ If a client starts MCP outside your repository directory, pin the installation t
 | `list_notes` / `get_note` | Read project notes |
 | `list_rules` | List the project's Match & Replace rules in apply order |
 | `decode` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
+| `jwt_decode` / `jwt_encode` / `jwt_attacks` | Decode, re-sign, or generate attack payloads for a JWT (pure compute; available even under `--read-only`) |
+| `sequence_analyze` | Grade a pasted token list for randomness / predictability (pure) |
+| `oast_presets` / `oast_payload` / `oast_poll` | List OAST providers, read the active payload, and poll a running listener for callbacks |
+| `discover_status` / `discover_results` | Progress and findings of a Discover run |
 | `project_info` | Flow / issue counts, database, workspace binding, and selection source |
 | `get_current_context` | What the user is viewing in the TUI right now |
 | `get_repeater_context` | Repeater workbench state and saved sessions |
@@ -101,8 +105,11 @@ If a client starts MCP outside your repository directory, pin the installation t
 | `create_rule` / `set_rule_enabled` / `delete_rule` | Create, toggle, and delete Match & Replace rules (literal rewrites on in-flight request/response head or body) |
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
+| `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | Collect tokens by live replay and grade them (results return the report, never the tokens) |
+| `discover_start` / `discover_stop` | Spider and brute-force endpoints (poll with `discover_status` / `discover_results`) |
+| `oast_start` / `oast_stop` | Register an OAST payload and poll for callbacks (read the hits with `oast_poll`) |
 
-> Action tools are capped for safety: fuzz and mine jobs are limited in total requests, concurrency, and stored results. A rule created via `create_rule` is picked up by `gori run` and newly opened TUIs; an already-running TUI applies it only after its rules reload.
+> Action tools are capped for safety: fuzz, mine, sequence, and discover jobs are limited in total requests, concurrency, and stored results. A rule created via `create_rule` is picked up by `gori run` and newly opened TUIs; an already-running TUI applies it only after its rules reload.
 
 ## Why an MCP Seam
 
