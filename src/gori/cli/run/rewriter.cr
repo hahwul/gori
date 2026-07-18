@@ -9,13 +9,14 @@ module Gori
         when "enable"       then cmd_rewriter_set_enabled(true, args[1..])
         when "disable"      then cmd_rewriter_set_enabled(false, args[1..])
         when "preview"      then cmd_rewriter_preview(args[1..])
+        when "list"         then cmd_rewriter_list(args[1..])
         when nil            then cmd_rewriter_list(args)
         else
           if (s = sub) && s.starts_with?('-')
             cmd_rewriter_list(args)
           else
             STDERR.puts "gori run rewriter: unknown subcommand '#{sub}'"
-            STDERR.puts "Usage: gori run rewriter [list options] | add | rm <id> | enable <id> | disable <id> | preview"
+            STDERR.puts "Usage: gori run rewriter [list options] | add | rm|delete <id> | enable <id> | disable <id> | preview"
             exit 1
           end
         end
@@ -47,7 +48,7 @@ module Gori
                      "Or run with a subcommand:\n" \
                      "  gori run rewriter add --op=replace --target=request --find=OLD --value=NEW\n" \
                      "  gori run rewriter add --op=add_header --find=X-Trace --value=on\n" \
-                     "  gori run rewriter rm <id> | enable <id> | disable <id> | preview ..."
+                     "  gori run rewriter rm|delete <id> | enable <id> | disable <id> | preview ..."
           p.on("--project=NAME", "Project to read (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to read") { |v| db_path = v }
           p.on("--format=FMT", "Output: text (default) | json") { |v| format = parse_format(v, [:text, :json]) }
@@ -167,7 +168,7 @@ module Gori
         db_path : String? = nil
         project_name : String? = nil
         parser = OptionParser.new do |p|
-          p.banner = "Usage: gori run rewriter rm <id> [options]"
+          p.banner = "Usage: gori run rewriter rm|delete <id> [options]"
           p.on("--project=NAME", "Project to update (default: most-recently-active)") { |v| project_name = v }
           p.on("--db=PATH", "Explicit SQLite db file to update") { |v| db_path = v }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
@@ -177,6 +178,7 @@ module Gori
         parser.unknown_args { |rest, _| positional = rest }
         parser.parse(args)
         abort "gori run rewriter rm: missing <id>" if positional.empty?
+        abort "gori run rewriter rm: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run rewriter rm: invalid rule id '#{positional[0]}'")
 
         project = resolve_read_project(project_name, db_path)
@@ -208,6 +210,7 @@ module Gori
         parser.unknown_args { |rest, _| positional = rest }
         parser.parse(args)
         abort "gori run rewriter #{action}: missing <id>" if positional.empty?
+        abort "gori run rewriter #{action}: too many arguments (expected one <id>)" if positional.size > 1
         id = positional[0].to_i64? || abort("gori run rewriter #{action}: invalid rule id '#{positional[0]}'")
 
         project = resolve_read_project(project_name, db_path)
@@ -259,6 +262,12 @@ module Gori
         target = Store::RuleTarget.parse?(target_s) || abort("gori run rewriter preview: invalid --target '#{target_s}'")
         part = Store::RulePart.parse?(part_s) || abort("gori run rewriter preview: invalid --part '#{part_s}'")
         match = Store::MatchKind.parse?(match_s) || abort("gori run rewriter preview: invalid --match '#{match_s}' (literal|regex)")
+        # Validate the regex up front (like `add` does) — otherwise a bad pattern is
+        # swallowed and reported as "0 flows", indistinguishable from a valid rule
+        # that simply matched nothing.
+        if op.replace? && match.regex? && !valid_regex?(f)
+          abort "gori run rewriter preview: invalid regex --find (failed to compile)"
+        end
         part = Store::RulePart::Head if op.header?
 
         project = resolve_read_project(project_name, db_path)
