@@ -17,7 +17,7 @@ module Gori
     enum Category
       Encoding    # base64, url, hex, base32, ascii85, base58
       Compression # gzip, zlib
-      Hash        # md5, sha1, sha256, sha512
+      Hash        # md5, sha1, sha224, sha256, sha384, sha512
       Token       # jwt-decode
       Escape      # html, json-string, unicode
       Text        # rot13, upper, lower, reverse
