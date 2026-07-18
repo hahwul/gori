@@ -33,7 +33,7 @@ module Gori::Tui
       @host = TextField.new(host)
       @token = TextField.new(token)
       @host_dirty = !@edit_id.nil? # editing keeps its host; adding auto-syncs to the type default
-      @sel = 0 # 0 name · 1 type · 2 host · 3 token · 4 save
+      @sel = 0                     # 0 name · 1 type · 2 host · 3 token · 4 save
     end
 
     def self.adding : OastProviderOverlay
@@ -180,13 +180,9 @@ module Gori::Tui
       when 0 then draw_field(screen, box, py, "name:", @name, sel, bg, fg)
       when 1
         screen.text(x, py, "type:", Theme.muted, bg)
-        tx = x + 6
-        KINDS.each_with_index do |k, ki|
-          lit = ki == @kind_idx
-          col = lit ? (sel ? Theme.text_bright : Theme.accent) : Theme.muted
-          tx = screen.text(tx, py, " #{k.label} ", col, bg, lit ? Attribute::Bold : Attribute::None)
-        end
-        screen.text(tx, py, " ‹/›", Theme.muted, bg)
+        col = sel ? Theme.text_bright : Theme.accent
+        tx = screen.text(x + 6, py, kind.label, col, bg, Attribute::Bold)
+        screen.text(tx, py, "  ‹/›", Theme.muted, bg)
       when 2 then draw_field(screen, box, py, "host:", @host, sel, bg, fg)
       when 3 then draw_field(screen, box, py, "token:", @token, sel, bg, fg)
       else
