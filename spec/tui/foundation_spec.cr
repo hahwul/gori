@@ -171,6 +171,29 @@ describe Gori::Tui::Chrome do
     backend.contains?("scanning").should be_true # chip still present (floored at the hint start, truncated at the right edge)
   end
 
+  it "anchors the resource readout to the right of the activity chip" do
+    # The resource chip is fixed-width and drawn LAST so it owns the right edge: a job
+    # starting or ending must not slide the readout around under the operator's eye.
+    backend = MemoryBackend.new(90, 1)
+    Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
+      focus: "BODY", hints: "↹ pane · esc tabs",
+      activity: {"scanning", Theme.accent}, resource: "CPU  12% MEM 48M")
+    row = backend.row(0)
+    res_x = row.index("CPU  12%").not_nil!
+    row.index("scanning").not_nil!.should be < res_x # activity sits to its left
+    # …and the readout ends flush against render_chips' one-column right pad.
+    (res_x + "CPU  12% MEM 48M".size).should eq(90 - 1)
+    backend.fg_at(res_x, 0).should eq(Theme.muted) # a passive readout, not an alert
+  end
+
+  it "leaves the status bar chip-free when the resource meter is off" do
+    backend = MemoryBackend.new(90, 1)
+    Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
+      focus: "BODY", hints: "↹ pane · esc tabs", resource: nil)
+    backend.contains?("CPU").should be_false
+    backend.contains?("MEM").should be_false
+  end
+
   it "gilds the shell only for single-pane body focus" do
     BodyChrome.shell_focused(:body, multi_pane: false).should be_true
     BodyChrome.shell_focused(:body, multi_pane: true).should be_false

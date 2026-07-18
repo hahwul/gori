@@ -492,20 +492,20 @@ module Gori::Tui
       ""
     end
 
-    # Bottom row: a focus-area badge (far left) + contextual key hints + an optional
-    # background-activity chip (right). The badge — TABS / BODY / an overlay name — is a
-    # lifted chip so the user always knows which region the keys drive. (The notification
-    # unread badge lives on the top bar, next to scope; capture on/off/failing rides the
-    # top bar's listen chip; upstream TLS verification is now a settings:network toggle,
-    # not a status chip.)
+    # Bottom row: a focus-area badge (far left) + contextual key hints + optional right-hand
+    # chips (background activity, then gori's own CPU/MEM readout). The badge — TABS / BODY /
+    # an overlay name — is a lifted chip so the user always knows which region the keys drive.
+    # (The notification unread badge lives on the top bar, next to scope; capture on/off/failing
+    # rides the top bar's listen chip; upstream TLS verification is now a settings:network
+    # toggle, not a status chip.)
     def self.render_status(screen : Screen, rect : Rect, *, focus : String, hints : String,
-                           activity : {String, Color}? = nil) : Nil
+                           activity : {String, Color}? = nil, resource : String? = nil) : Nil
       screen.fill(rect, Theme.panel)
       badge = " #{focus} "
       screen.text(rect.x, rect.y, badge, Theme.text_bright, Theme.elevated, Attribute::Bold)
       hint_x = rect.x + badge.size + 1
 
-      chips = status_chips(activity: activity).map { |(_, l, c)| {l, c} }
+      chips = status_chips(activity: activity, resource: resource).map { |(_, l, c)| {l, c} }
       hint_w = {rect.right - hint_x - chips_width(chips) - 2, 1}.max
       screen.text(hint_x, rect.y, hints, Theme.muted, Theme.panel, width: hint_w)
       # Floor the chips at the hint start so they can never overwrite the badge.
@@ -531,12 +531,15 @@ module Gori::Tui
     end
 
     # The right-aligned status chips, TAGGED so render and (were there a clickable
-    # chip here) a hit-test would share one ordered source. Currently just the optional
-    # background-activity chip (spinner + label); the tagged-tuple shape is kept so more
-    # chips can be added later without touching the render / hit-test split.
-    private def self.status_chips(*, activity : {String, Color}?) : Array({Symbol, String, Color})
+    # chip here) a hit-test would share one ordered source. The resource readout is drawn
+    # LAST (rightmost) on purpose: it is fixed-width, so anchoring it to the right edge keeps
+    # the transient activity chip from shifting the readout every time a job starts or ends.
+    # It renders in `muted` — a passive readout, not a state the operator must act on.
+    private def self.status_chips(*, activity : {String, Color}?,
+                                  resource : String? = nil) : Array({Symbol, String, Color})
       chips = [] of {Symbol, String, Color}
       chips << {:activity, activity[0], activity[1]} if activity
+      chips << {:resource, resource, Theme.muted} if resource
       chips
     end
 

@@ -229,13 +229,14 @@ describe SettingsView do
     end
   end
 
-  it "saves and resets the DISPLAY section (detail pane, time format, gutter, preview cap)" do
+  it "saves and resets the DISPLAY section (detail pane, time format, gutter, preview cap, resource meter)" do
     dir = File.tempname("gori-settings-display-view")
     Dir.mkdir_p(dir)
     prev_home = ENV["GORI_HOME"]?
     prev = {
       Gori::Settings.default_detail_pane, Gori::Settings.history_time_format,
       Gori::Settings.show_gutter, Gori::Settings.preview_body_kib,
+      Gori::Settings.resource_meter?,
     }
     begin
       ENV["GORI_HOME"] = dir
@@ -243,6 +244,7 @@ describe SettingsView do
       Gori::Settings.history_time_format = "absolute"
       Gori::Settings.show_gutter = true
       Gori::Settings.preview_body_kib = 64
+      Gori::Settings.resource_meter = true
       v = SettingsView.new
       v.reload(:display)
       v.section.should eq(:display)
@@ -253,11 +255,14 @@ describe SettingsView do
       v.toggle_or_move(1) # line numbers: on → off (bool)
       v.move_field(1)
       set_text(v, "128") # preview body limit (text)
+      v.move_field(1)
+      v.toggle_or_move(1) # resource meter: on → off (bool)
       v.save
       Gori::Settings.default_detail_pane.should eq("response")
       Gori::Settings.history_time_format.should eq("relative")
       Gori::Settings.show_gutter.should be_false
       Gori::Settings.preview_body_kib.should eq(128)
+      Gori::Settings.resource_meter?.should be_false
 
       v.reset_to_defaults
       v.save
@@ -265,9 +270,10 @@ describe SettingsView do
       Gori::Settings.history_time_format.should eq(Gori::Settings::DEFAULT_HISTORY_TIME_FORMAT)
       Gori::Settings.show_gutter.should eq(Gori::Settings::DEFAULT_SHOW_GUTTER)
       Gori::Settings.preview_body_kib.should eq(Gori::Settings::DEFAULT_PREVIEW_BODY_KIB)
+      Gori::Settings.resource_meter?.should eq(Gori::Settings::DEFAULT_RESOURCE_METER)
     ensure
       prev_home ? (ENV["GORI_HOME"] = prev_home) : ENV.delete("GORI_HOME")
-      Gori::Settings.default_detail_pane, Gori::Settings.history_time_format, Gori::Settings.show_gutter, Gori::Settings.preview_body_kib = prev
+      Gori::Settings.default_detail_pane, Gori::Settings.history_time_format, Gori::Settings.show_gutter, Gori::Settings.preview_body_kib, Gori::Settings.resource_meter = prev
       FileUtils.rm_rf(dir)
     end
   end
