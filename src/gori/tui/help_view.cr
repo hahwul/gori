@@ -122,7 +122,8 @@ module Gori::Tui
         Item.new("Send to Comparer", "from History (space menu) — fills the active sub-tab"),
       ]},
       {"EDITORS", [
-        Item.new("^G · ^F", "go to line · find"),
+        Item.new("^G · ^F", "go to line · find (↵/↑↓ step)"),
+        Item.new("^F then tab", "find & replace — ↵ swaps every match (one undo step)"),
         Item.new("^E", "open the field in $EDITOR"),
         Item.new("^B", "reveal whitespace"),
       ]},

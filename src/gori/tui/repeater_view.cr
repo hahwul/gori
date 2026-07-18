@@ -1841,6 +1841,20 @@ module Gori::Tui
       req_editor.search_lines(query)
     end
 
+    # ^F find&replace over the request editor. Hex mode is excluded like the search
+    # above (the TextArea is stale there, so a write would clobber the real bytes).
+    def request_match_count(query : String) : Int32
+      return 0 if request_hex?
+      req_editor.match_count(query)
+    end
+
+    def request_replace_matches(query : String, replacement : String) : Int32
+      return 0 if request_hex?
+      n = req_editor.replace_matches(query, replacement)
+      mark_req_edit if n > 0
+      n
+    end
+
     # Whitespace reveal toggle — response renders from raw bytes; the request editor
     # shows within-line whitespace too.
     def reveal=(on : Bool) : Nil
