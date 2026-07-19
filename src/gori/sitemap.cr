@@ -269,7 +269,16 @@ module Gori
       s = (qi = label.index('?')) ? label[0, qi] : label
       return nil if s.empty? # a bare-root request with a query → the leaf label is "?q=1"
       return nil if numeric_label?(s)
-      # Size gates first: most real segments ("api", "users") never reach a regex.
+      # A captured target is raw bytes off the wire — `Http1.parse_request_head` builds it
+      # with `String.new(Bytes)`, which does NOT validate — so a legacy-encoded (EUC-KR,
+      # latin-1) or fuzzed path reaches here as invalid UTF-8. PCRE2 RAISES on such a
+      # subject rather than returning false, and this runs on the sitemap poll with no
+      # rescue between here and the run loop, so one such request tore down the TUI. All
+      # three patterns below are ASCII-only, so a non-ASCII segment could never match
+      # anyway: the guard is exact, and it also keeps every CJK path off PCRE2 entirely.
+      # (`Gori::SafeRegexp` exists for this same reason on the store side.)
+      return nil unless s.ascii_only?
+      # Size gates next: most real segments ("api", "users") never reach a regex.
       return "{date}" if s.size == DATE_LEN && Discover::Url::DATE.matches?(s)
       return "{uuid}" if s.size == UUID_LEN && Discover::Url::UUID.matches?(s)
       return "{hex}" if s.size >= HEX_MIN && Discover::Url::HEX.matches?(s)

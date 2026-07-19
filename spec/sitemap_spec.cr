@@ -101,6 +101,27 @@ describe Gori::Sitemap do
     it "does not downcase-merge (the reason Url.fold_segment is not reused)" do
       Gori::Sitemap.template_class("Users").should be_nil
     end
+
+    it "survives a segment that is not valid UTF-8" do
+      # A captured target is raw bytes: a legacy-encoded (EUC-KR, latin-1) or fuzzed path
+      # arrives as invalid UTF-8, and PCRE2 RAISES on such a subject instead of returning
+      # false. Unguarded, one such request crashed the whole TUI from the sitemap poll.
+      # Each of these is sized to clear a different regex's length gate.
+      Gori::Sitemap.template_class(String.new(Bytes.new(10) { 0xFF_u8 })).should be_nil  # {date}
+      Gori::Sitemap.template_class(String.new(Bytes.new(36) { 0xFF_u8 })).should be_nil  # {uuid}
+      Gori::Sitemap.template_class(String.new(Bytes.new(12) { 0xFF_u8 })).should be_nil  # {hex}
+      latin1 = Bytes[0x63, 0x61, 0x66, 0xE9, 0x63, 0x61, 0x66, 0xE9, 0x63, 0x61, 0x66, 0xE9]
+      Gori::Sitemap.template_class(String.new(latin1)).should be_nil # "café" ×3, latin-1
+    end
+
+    it "still classifies through a whole-tree fold when a host serves invalid UTF-8" do
+      # The end-to-end path the crash actually took: build → fold_templates!.
+      bad = String.new(Bytes.new(12) { 0xFF_u8 })
+      rows = (1..4).map { |i| {"https", "acme.test", 443, "h2", "GET", "/a/#{bad}/#{i}"} }
+      hosts = Gori::Sitemap.build(rows.map { |r| {r[1], r[4], r[5]} })
+      Gori::Sitemap.fold_templates!(hosts.first)
+      hosts.first.children.map(&.label).should contain("a")
+    end
   end
 
   describe ".fold_templates!" do
