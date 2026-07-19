@@ -1084,11 +1084,11 @@ describe Gori::Verb do
       keymap = Keymap.build(reg)
 
       # keybinding path: ctrl-p (Global) -> app.palette
-      via_key = keymap.lookup(Chord.new("p", ctrl: true), Scope::Body)
+      via_key = keymap.lookup(Chord.new("p", ctrl: true), Gori::Verb::Scope::Body)
       via_key.should eq("app.palette")
 
       # palette path: the Ctrl-P palette is the Global (app-control) surface
-      via_palette = reg.for_scope(Scope::Global, FakeContext.new, "palette").map(&.id)
+      via_palette = reg.for_scope(Gori::Verb::Scope::Global, FakeContext.new, "palette").map(&.id)
       via_palette.should contain("app.palette")
     end
   end
@@ -1099,43 +1099,43 @@ describe Gori::Verb do
       keymap = Keymap.build(reg)
 
       # escape in PaletteOpen -> palette.close (scope-specific)
-      keymap.lookup(Chord.new("escape"), Scope::PaletteOpen).should eq("palette.close")
+      keymap.lookup(Chord.new("escape"), Gori::Verb::Scope::PaletteOpen).should eq("palette.close")
       # escape in HistoryDetail -> detail.close (different verb, same chord)
-      keymap.lookup(Chord.new("escape"), Scope::HistoryDetail).should eq("detail.close")
+      keymap.lookup(Chord.new("escape"), Gori::Verb::Scope::HistoryDetail).should eq("detail.close")
       # ←/→ in HistoryDetail walk the panes (left no longer just closes)
-      keymap.lookup(Chord.new("right"), Scope::HistoryDetail).should eq("detail.next-pane")
-      keymap.lookup(Chord.new("left"), Scope::HistoryDetail).should eq("detail.prev-pane")
-      keymap.lookup(Chord.new("x"), Scope::HistoryDetail).should eq("detail.select-line")
-      keymap.lookup(Chord.new("x", ctrl: true), Scope::HistoryDetail).should eq("detail.toggle-hex")
+      keymap.lookup(Chord.new("right"), Gori::Verb::Scope::HistoryDetail).should eq("detail.next-pane")
+      keymap.lookup(Chord.new("left"), Gori::Verb::Scope::HistoryDetail).should eq("detail.prev-pane")
+      keymap.lookup(Chord.new("x"), Gori::Verb::Scope::HistoryDetail).should eq("detail.select-line")
+      keymap.lookup(Chord.new("x", ctrl: true), Gori::Verb::Scope::HistoryDetail).should eq("detail.toggle-hex")
       # ^U in the Fuzzer pretty-prints the template (must NOT be intercepted as clear-marks
       # anymore — clear-marks moved to the space menu as fuzz.clear-marks).
-      keymap.lookup(Chord.new("u", ctrl: true), Scope::Fuzzer).should eq("fuzz.pretty-template")
+      keymap.lookup(Chord.new("u", ctrl: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.pretty-template")
       # a Global chord (^P palette) resolves from ANY scope
-      keymap.lookup(Chord.new("p", ctrl: true), Scope::Body).should eq("app.palette")
+      keymap.lookup(Chord.new("p", ctrl: true), Gori::Verb::Scope::Body).should eq("app.palette")
       # 'q' (back to projects) is bound only on the tab bar (Sidebar), not in a body —
       # as a Global chord it used to dump you to the picker mid-browse.
-      keymap.lookup(Chord.new("q"), Scope::Sidebar).should eq("app.back-key")
-      keymap.lookup(Chord.new("q"), Scope::Body).should be_nil
+      keymap.lookup(Chord.new("q"), Gori::Verb::Scope::Sidebar).should eq("app.back-key")
+      keymap.lookup(Chord.new("q"), Gori::Verb::Scope::Body).should be_nil
       # an unbound chord
-      keymap.lookup(Chord.new("z"), Scope::Body).should be_nil
+      keymap.lookup(Chord.new("z"), Gori::Verb::Scope::Body).should be_nil
       # scope-specific: the top menu navigates horizontally, the body vertically
-      keymap.lookup(Chord.new("right"), Scope::Sidebar).should eq("sidebar.next")
-      keymap.lookup(Chord.new("down"), Scope::Sidebar).should eq("sidebar.enter")
-      keymap.lookup(Chord.new("down"), Scope::Body).should eq("body.down")
+      keymap.lookup(Chord.new("right"), Gori::Verb::Scope::Sidebar).should eq("sidebar.next")
+      keymap.lookup(Chord.new("down"), Gori::Verb::Scope::Sidebar).should eq("sidebar.enter")
+      keymap.lookup(Chord.new("down"), Gori::Verb::Scope::Body).should eq("body.down")
     end
 
     it "supports multiple chords per verb" do
       reg = Gori::Verbs.registry
       keymap = Keymap.build(reg)
-      keymap.lookup(Chord.new("j"), Scope::Body).should eq("body.down")
-      keymap.lookup(Chord.new("down"), Scope::Body).should eq("body.down")
+      keymap.lookup(Chord.new("j"), Gori::Verb::Scope::Body).should eq("body.down")
+      keymap.lookup(Chord.new("down"), Gori::Verb::Scope::Body).should eq("body.down")
     end
 
     it "binds bare 's' to the scope-lens toggle from any scope (was jump-to-editor)" do
       reg = Gori::Verbs.registry
       keymap = Keymap.build(reg)
-      keymap.lookup(Chord.new("s"), Scope::Body).should eq("scope.toggle-lens")
-      keymap.lookup(Chord.new("s"), Scope::Sitemap).should eq("scope.toggle-lens")
+      keymap.lookup(Chord.new("s"), Gori::Verb::Scope::Body).should eq("scope.toggle-lens")
+      keymap.lookup(Chord.new("s"), Gori::Verb::Scope::Sitemap).should eq("scope.toggle-lens")
 
       ctx = FakeContext.new
       reg["scope.toggle-lens"].call(ctx)
@@ -1149,7 +1149,7 @@ describe Gori::Verb do
     it "binds ctrl-n to a new blank repeater in the Repeater scope" do
       reg = Gori::Verbs.registry
       keymap = Keymap.build(reg)
-      keymap.lookup(Chord.new("n", ctrl: true), Scope::Repeater).should eq("repeater.new")
+      keymap.lookup(Chord.new("n", ctrl: true), Gori::Verb::Scope::Repeater).should eq("repeater.new")
 
       ctx = FakeContext.new
       reg["repeater.new"].call(ctx)
@@ -1160,8 +1160,8 @@ describe Gori::Verb do
       reg = Gori::Verbs.registry
       keymap = Keymap.build(reg)
       # ↓/↵/j on the tab bar resolve to sidebar.enter…
-      keymap.lookup(Chord.new("down"), Scope::Sidebar).should eq("sidebar.enter")
-      keymap.lookup(Chord.new("enter"), Scope::Sidebar).should eq("sidebar.enter")
+      keymap.lookup(Chord.new("down"), Gori::Verb::Scope::Sidebar).should eq("sidebar.enter")
+      keymap.lookup(Chord.new("enter"), Gori::Verb::Scope::Sidebar).should eq("sidebar.enter")
 
       # …which descends through enter_content (NOT focus_pane), letting the Runner
       # route Repeater/Notes onto their sub-tab strip before the body.
@@ -1175,26 +1175,26 @@ describe Gori::Verb do
   describe "migrated tab-local chords resolve in their per-tab scope" do
     it "binds the Repeater request-pane toggles + send in Repeater scope" do
       km = Keymap.build(Gori::Verbs.registry)
-      km.lookup(Chord.new("r", ctrl: true), Scope::Repeater).should eq("repeater.send")
-      km.lookup(Chord.new("x", ctrl: true), Scope::Repeater).should eq("repeater.toggle-hex")
-      km.lookup(Chord.new("s", ctrl: true), Scope::Repeater).should eq("repeater.toggle-sni")
-      km.lookup(Chord.new("l", ctrl: true), Scope::Repeater).should eq("repeater.toggle-auto-content-length")
+      km.lookup(Chord.new("r", ctrl: true), Gori::Verb::Scope::Repeater).should eq("repeater.send")
+      km.lookup(Chord.new("x", ctrl: true), Gori::Verb::Scope::Repeater).should eq("repeater.toggle-hex")
+      km.lookup(Chord.new("s", ctrl: true), Gori::Verb::Scope::Repeater).should eq("repeater.toggle-sni")
+      km.lookup(Chord.new("l", ctrl: true), Gori::Verb::Scope::Repeater).should eq("repeater.toggle-auto-content-length")
     end
 
     it "binds the Fuzzer run/stop/automark chords in Fuzzer scope" do
       km = Keymap.build(Gori::Verbs.registry)
-      km.lookup(Chord.new("r", ctrl: true), Scope::Fuzzer).should eq("fuzz.run")
-      km.lookup(Chord.new("x", ctrl: true), Scope::Fuzzer).should eq("fuzz.stop")
-      km.lookup(Chord.new("a", ctrl: true), Scope::Fuzzer).should eq("fuzz.automark")
+      km.lookup(Chord.new("r", ctrl: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.run")
+      km.lookup(Chord.new("x", ctrl: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.stop")
+      km.lookup(Chord.new("a", ctrl: true), Gori::Verb::Scope::Fuzzer).should eq("fuzz.automark")
     end
 
     it "binds the Intercept catch chords in Intercept scope, shadowing the Global/Body keys" do
       km = Keymap.build(Gori::Verbs.registry)
-      km.lookup(Chord.new("c"), Scope::Intercept).should eq("intercept.direction")
-      km.lookup(Chord.new("/"), Scope::Intercept).should eq("intercept.filter")
+      km.lookup(Chord.new("c"), Gori::Verb::Scope::Intercept).should eq("intercept.direction")
+      km.lookup(Chord.new("/"), Gori::Verb::Scope::Intercept).should eq("intercept.filter")
       # …without breaking capture (`c`) elsewhere or History's `/` filter
-      km.lookup(Chord.new("c"), Scope::Body).should eq("capture.toggle")
-      km.lookup(Chord.new("/"), Scope::Body).should eq("history.query")
+      km.lookup(Chord.new("c"), Gori::Verb::Scope::Body).should eq("capture.toggle")
+      km.lookup(Chord.new("/"), Gori::Verb::Scope::Body).should eq("history.query")
     end
 
     it "routes the new Repeater toggle verbs through the matching ExecContext methods" do
@@ -1270,10 +1270,10 @@ describe Gori::Verb do
       ctx = FakeContext.new
       ctx.selected = 5_i64 # so the flow-gated Body actions are available
 
-      body = reg.for_scope(Scope::Body, ctx)
+      body = reg.for_scope(Gori::Verb::Scope::Body, ctx)
       body.each do |v|
         v.hidden?.should be_false
-        v.scope.should eq(Scope::Body) # strictly Body — Global app-control stays out of ":"
+        v.scope.should eq(Gori::Verb::Scope::Body) # strictly Body — Global app-control stays out of ":"
       end
       ids = body.map(&.id)
       ids.should contain("history.repeater") # an area action surfaces
@@ -1281,20 +1281,20 @@ describe Gori::Verb do
       ids.should_not contain("nav.next-tab")
 
       # The palette source is the Global slice (app control) — and it has NO area actions.
-      gids = reg.for_scope(Scope::Global, ctx).map(&.id)
+      gids = reg.for_scope(Gori::Verb::Scope::Global, ctx).map(&.id)
       gids.should contain("app.quit")
       gids.should contain("nav.next-tab") # tab navigation lives in Ctrl-P
       gids.any?(&.starts_with?("history.")).should be_false
 
       # fuzzy query narrows within the scope (same ranking as #search)
-      reg.for_scope(Scope::Body, ctx, "repeater").first.id.should eq("history.repeater")
+      reg.for_scope(Gori::Verb::Scope::Body, ctx, "repeater").first.id.should eq("history.repeater")
     end
 
     it "rejects duplicate ids" do
       reg = Registry.new
-      reg.register(Definition.new("dup", "A", "", Scope::Global) { |_| nil })
+      reg.register(Definition.new("dup", "A", "", Gori::Verb::Scope::Global) { |_| nil })
       expect_raises(Gori::Error, /duplicate/) do
-        reg.register(Definition.new("dup", "B", "", Scope::Global) { |_| nil })
+        reg.register(Definition.new("dup", "B", "", Gori::Verb::Scope::Global) { |_| nil })
       end
     end
   end
@@ -1302,7 +1302,7 @@ describe Gori::Verb do
   describe "handler execution" do
     it "runs through Definition#call and returns the handler's status message" do
       ctx = FakeContext.new
-      verb = Definition.new("t.msg", "T", "", Scope::Global) { |_c| "did it" }
+      verb = Definition.new("t.msg", "T", "", Gori::Verb::Scope::Global) { |_c| "did it" }
       verb.call(ctx).should eq("did it")
 
       reg = Gori::Verbs.registry
