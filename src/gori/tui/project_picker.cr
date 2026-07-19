@@ -47,7 +47,7 @@ module Gori::Tui
       @query = "" # current search filter; only editable when Search row selected
       @selected = 0
       @results_scroll = 0
-      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :compress | :measuring | :compressing
+      @mode = :list # :list | :new | :confirm | :space | :rename | :settings | :theme | :compress | :measuring | :compressing
       @name = ""
       @desc = ""
       @new_field = :name # :name | :desc (only in :new mode)
@@ -74,9 +74,12 @@ module Gori::Tui
       @pending_rename = nil.as(Project?)
       @rename_name = ""
       # The SAME unified Preferences modal used in-app (Ctrl+,), so pre-project settings
-      # aren't a separate surface. allow_openers: false — the picker has none of the
-      # dedicated editors (theme/tabs/env/hotkeys), so those rows are hidden here.
-      @preferences = PreferencesView.new(allow_openers: false)
+      # aren't a separate surface. Only :theme is allowed as an opener here — the picker
+      # can host the theme card (below); it has no tabs/hosts/env/hotkeys editors, so those
+      # rows stay hidden.
+      @preferences = PreferencesView.new(Set{:theme})
+      @theme_card = SettingsView.new # the theme picker opened from the modal's Theme row
+      @theme_restore = ""            # active theme name to revert to on esc (live preview)
       @running_cache = {} of String => RunningProbe
       @art_frame = 0  # entrance-animation clock for the brand art; advances each frame until ART_ANIM_DONE
       @star_frame = 0 # starfield twinkle clock; unlike @art_frame it never freezes (wraps via &+)
@@ -101,6 +104,7 @@ module Gori::Tui
                    when :new      then handle_new(ev)
                    when :confirm  then handle_confirm(ev)
                    when :settings then handle_preferences(ev)
+                   when :theme    then handle_theme(ev)
                    when :space    then handle_space(ev)
                    when :rename   then handle_rename(ev)
                    when :compress then handle_compress(ev)
@@ -210,12 +214,55 @@ module Gori::Tui
     end
 
     # The unified Preferences modal (Ctrl+,). The view handles editing/navigation itself;
-    # we only act on its Outcome — :close pops back to the list, a save just persists (no
-    # live proxy to re-apply pre-project). ^C still quits the picker.
+    # we act on its Outcome — :close pops back to the list, :open (only :theme is allowed
+    # here) opens the theme card, a save just persists (no live proxy to re-apply
+    # pre-project). ^C still quits the picker.
     private def handle_preferences(ev : Termisu::Event::Key) : Project | Symbol | Nil
       return :quit if ev.ctrl_c?
-      @mode = :list if @preferences.handle_key(ev).kind == :close
+      outcome = @preferences.handle_key(ev)
+      case outcome.kind
+      when :close then @mode = :list
+      when :open
+        if outcome.section == :theme
+          @theme_card.reload(:theme)
+          @theme_restore = Settings.theme # revert target if the user cancels
+          @mode = :theme
+        end
+      end
       nil
+    end
+
+    # The theme card opened from the modal's Theme row: ↑/↓ preview, ↵ apply + persist,
+    # esc reverts. Mirrors the in-app theme editor, minus the proxy/toast.
+    private def handle_theme(ev : Termisu::Event::Key) : Project | Symbol | Nil
+      key = ev.key
+      return :quit if ev.ctrl_c?
+      if key.escape?
+        Theme.apply(@theme_restore) # drop the live preview
+        @resized = true
+        @mode = :settings # back to the modal (still on the Appearance/Theme row)
+      elsif key.enter?
+        @theme_card.save # persists Settings.theme = selection
+        Theme.apply(Settings.theme)
+        @theme_restore = Settings.theme
+        @resized = true
+        @mode = :settings
+      elsif key.up?
+        @theme_card.move_field(-1)
+        preview_theme
+      elsif key.down?
+        @theme_card.move_field(1)
+        preview_theme
+      end
+      nil
+    end
+
+    # Live-apply the highlighted theme so the whole picker previews it before committing.
+    private def preview_theme : Nil
+      if name = @theme_card.theme_value
+        Theme.apply(name)
+        @resized = true
+      end
     end
 
     # Delete confirmation: ←/→ or Tab choose, `y` delete, `n`/esc cancel, ↵ acts
@@ -628,13 +675,14 @@ module Gori::Tui
         return picker_wheel(ev.button.wheel_up? ? -3 : 3)
       end
       case @mode
-      when :confirm  then handle_confirm_mouse(w, h, mx, my)
-      when :settings then handle_preferences_mouse(w, h, mx, my)
-      when :space    then handle_space_mouse(w, h, mx, my)
-      when :compress then handle_compress_mouse(w, h, mx, my)
+      when :confirm      then handle_confirm_mouse(w, h, mx, my)
+      when :settings     then handle_preferences_mouse(w, h, mx, my)
+      when :theme        then handle_theme_mouse(w, h, mx, my)
+      when :space        then handle_space_mouse(w, h, mx, my)
+      when :compress     then handle_compress_mouse(w, h, mx, my)
       when :compressing  then nil # blocking VACUUM in progress — ignore clicks
       when :new, :rename then nil # text form — keyboard only (cursor placement is Phase 2)
-      else                handle_list_mouse(mx, my)
+      else                    handle_list_mouse(mx, my)
       end
     end
 
@@ -670,11 +718,12 @@ module Gori::Tui
 
     private def picker_wheel(delta : Int32) : Nil
       case @mode
-      when :settings                then @preferences.wheel(delta)
-      when :space                   then @space_selected = (@space_selected + delta.sign).clamp(0, SPACE_ENTRIES.size - 1)
-      when :compress                then @compact.try(&.move(delta.sign))
+      when :settings                             then @preferences.wheel(delta)
+      when :theme                                then (@theme_card.move_field(delta); preview_theme)
+      when :space                                then @space_selected = (@space_selected + delta.sign).clamp(0, SPACE_ENTRIES.size - 1)
+      when :compress                             then @compact.try(&.move(delta.sign))
       when :new, :confirm, :rename, :compressing then nil # nothing to scroll
-      else                              @selected = (@selected + delta).clamp(0, entry_count - 1)
+      else                                            @selected = (@selected + delta).clamp(0, entry_count - 1)
       end
     end
 
@@ -692,6 +741,20 @@ module Gori::Tui
     private def handle_preferences_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
       # click outside the card → the view returns :close, which pops back to the list
       @mode = :list if @preferences.click(Rect.new(0, 0, w, h), mx, my).kind == :close
+    end
+
+    private def handle_theme_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Nil
+      box = @theme_card.overlay_box(Rect.new(0, 0, w, h))
+      if box.contains?(mx, my)
+        if idx = @theme_card.field_at(box, mx, my)
+          @theme_card.set_field(idx)
+          preview_theme
+        end
+      else
+        Theme.apply(@theme_restore) # click outside → cancel the preview, back to the modal
+        @resized = true
+        @mode = :settings
+      end
     end
 
     private def handle_space_mouse(w : Int32, h : Int32, mx : Int32, my : Int32) : Project | Symbol | Nil
@@ -784,11 +847,11 @@ module Gori::Tui
     # overlays) simply paints over it. Twinkle steps once per
     # 2^STAR_TWINKLE_SHIFT frames, so a star's cell changes colour well under
     # twice a second and the per-frame diff flush stays tiny.
-    STAR_DENSITY       = 61_u32                                # ~1 star per this many cells (prime → no visible lattice)
-    STAR_TWINKLE_SHIFT = 4                                     # frames per twinkle step (2^4 ≈ 0.8 s at the 50 ms poll)
-    STAR_LEVELS        = {0.18, 0.30, 0.42, 0.55, 0.42, 0.30}  # blend ratios toward the star hue: dim → bright → dim
-    STAR_FADE          = 8                                     # frames the field takes to fade in with the entrance
-    STAR_GOLD_BOOST    = 0.15                                  # extra brightness for the rare gold ✦ so it reads as a glint
+    STAR_DENSITY       = 61_u32                               # ~1 star per this many cells (prime → no visible lattice)
+    STAR_TWINKLE_SHIFT =      4                               # frames per twinkle step (2^4 ≈ 0.8 s at the 50 ms poll)
+    STAR_LEVELS        = {0.18, 0.30, 0.42, 0.55, 0.42, 0.30} # blend ratios toward the star hue: dim → bright → dim
+    STAR_FADE          =    8                                 # frames the field takes to fade in with the entrance
+    STAR_GOLD_BOOST    = 0.15                                 # extra brightness for the rare gold ✦ so it reads as a glint
 
     # Deterministic per-cell mix deciding star existence, glyph, and phase.
     # Wrapping ops only — must be pure and total for any cell at any size.
@@ -843,6 +906,7 @@ module Gori::Tui
         render_list(screen, cx, cw, w, h)
         @confirm.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :confirm
         @preferences.render(screen, Rect.new(0, 0, w, h)) if @mode == :settings
+        @theme_card.render(screen, Rect.new(0, 0, w, h)) if @mode == :theme
         render_space_menu(screen, w, h) if @mode == :space
         @compact.try(&.render(screen, Rect.new(0, 0, w, h))) if @mode == :compress
         render_compressing(screen, w, h) if @mode == :compressing || @mode == :measuring

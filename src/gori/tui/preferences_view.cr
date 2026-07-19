@@ -16,8 +16,9 @@ module Gori::Tui
   # :opener section (theme list, tabs/hosts/env/hotkeys editors) is a single "↵ open" row
   # whose action the HOST performs — the view stays self-contained and returns an Outcome
   # the caller acts on, so the SAME view works in the Runner (opens the dedicated overlay,
-  # live-applies a save) and the picker (allow_openers: false → openers are hidden and a
-  # save just persists, there being no live proxy).
+  # live-applies a save) and the picker. `allowed_openers` gates which opener sections show
+  # + fire: nil = all (in-app); the picker passes a small set (just :theme, which it can
+  # host as a card) so tabs/hosts/env/hotkeys stay hidden there.
   class PreferencesView
     # What a keystroke asks the host to do. :saved / :open carry the section symbol;
     # :saved also carries the toast the host shows after its own live-apply.
@@ -33,7 +34,7 @@ module Gori::Tui
     @strip_start : Int32 = 0
     @status : String? = nil
 
-    def initialize(@allow_openers : Bool = true)
+    def initialize(@allowed_openers : Set(Symbol)? = nil)
       # One SettingsView per form section, reloaded from live Settings.
       @forms = {} of Symbol => SettingsView
       SettingsCatalog.all.each do |s|
@@ -194,12 +195,16 @@ module Gori::Tui
       Outcome.new(:saved, sec.sym, msg)
     end
 
-    # An opener is actionable only where the dedicated overlay exists (in-app). In the
-    # picker (allow_openers: false) it's a no-op with a hint instead.
+    # An opener is actionable only where its editor exists. Where it isn't allowed (the
+    # picker has no tabs/hosts/env/hotkeys editors) it's a no-op with a hint instead.
     private def open_or_block(sym : Symbol) : Outcome
-      return Outcome.new(:open, sym) if @allow_openers
+      return Outcome.new(:open, sym) if opener_allowed?(sym)
       @status = "open a project to edit this"
       NONE
+    end
+
+    private def opener_allowed?(sym : Symbol) : Bool
+      (ao = @allowed_openers).nil? || ao.includes?(sym)
     end
 
     private def reset_focused : Nil
@@ -276,11 +281,33 @@ module Gori::Tui
       bg = focused ? Theme.accent_bg : Theme.panel
       screen.fill(Rect.new(content.x, y, content.w, 1), bg)
       screen.cell(content.x, y, focused ? '▎' : ' ', Theme.accent, bg)
-      cue = "↵ open"
       lx = content.x + 2
+      cue = "↵ open"
       cx = {content.right - cue.size, lx + sec.title.size + 1}.max
-      screen.text(lx, y, sec.title, focused ? Theme.text_bright : Theme.text, bg, width: {cx - lx, 1}.max)
+      screen.text(lx, y, sec.title, focused ? Theme.text_bright : Theme.text, bg)
+      # Theme row: preview the CURRENT theme inline — its name + a swatch of its palette —
+      # so you see what's selected without opening the card.
+      if sec.sym == :theme
+        name = Theme.canonical(Settings.theme)
+        sx = {cx - 1 - SWATCH_W, lx + sec.title.size + 2}.max
+        name_x = lx + sec.title.size + 2
+        screen.text(name_x, y, name, focused ? Theme.text_bright : Theme.muted, bg, width: {sx - name_x - 1, 1}.max)
+        draw_swatch(screen, sx, y, name)
+      end
       screen.text(cx, y, cue, focused ? Theme.accent : Theme.muted, bg, width: {content.right - cx, 1}.max)
+    end
+
+    # A tiny preview strip in the theme's OWN palette (its canvas colour framing 5 accent
+    # ticks) — the same swatch the theme card draws per row. Width == SWATCH_W.
+    SWATCH_W = 7
+
+    private def draw_swatch(screen : Screen, x : Int32, ry : Int32, name : String) : Nil
+      pal = Theme.palette(name)
+      return unless pal
+      ticks = {pal.accent, pal.green, pal.yellow, pal.red, pal.syn_header}
+      screen.cell(x, ry, ' ', pal.bg, pal.bg)
+      ticks.each_with_index { |c, i| screen.cell(x + 1 + i, ry, '█', c, pal.bg) }
+      screen.cell(x + 6, ry, ' ', pal.bg, pal.bg)
     end
 
     private def render_footer(screen : Screen, box : Rect) : Nil
@@ -321,10 +348,10 @@ module Gori::Tui
       SettingsCatalog::GROUPS[@group][0]
     end
 
-    # The group's sections, honouring allow_openers (the picker hides :opener rows it has
+    # The group's sections, honouring allowed_openers (the picker hides :opener rows it has
     # no editor for).
     private def sections_of(gsym : Symbol) : Array(SettingsCatalog::Section)
-      SettingsCatalog.sections_in(gsym).select { |s| @allow_openers || s.kind == :form }
+      SettingsCatalog.sections_in(gsym).select { |s| s.kind == :form || opener_allowed?(s.sym) }
     end
 
     private def group_sections : Array(SettingsCatalog::Section)
