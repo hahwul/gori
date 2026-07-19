@@ -592,3 +592,43 @@ describe "FuzzerView pretty-printing" do
     view.dirty?.should be_true
   end
 end
+
+describe "Gori::Tui::FuzzerView matched_count accounting" do
+  it "tracks matched results as they stream in" do
+    view = loaded_fuzzer
+    view.matched_count.should eq(0)
+    view.append_result(fuzz_result(0, 200, 100, matched: true))
+    view.append_result(fuzz_result(1, 404, 100, matched: false))
+    view.append_result(fuzz_result(2, 200, 100, matched: true))
+    view.matched_count.should eq(2)
+    view.result_count.should eq(3)
+  end
+
+  it "decrements when the ring evicts a matched row past RESULT_CAP" do
+    view = loaded_fuzzer
+    cap = Gori::Tui::FuzzerView::RESULT_CAP
+    # Fill exactly to the cap with matched rows, then push unmatched ones in: each append
+    # past the cap evicts a matched row off the front, so the count must fall in step.
+    cap.times { |i| view.append_result(fuzz_result(i, 200, 100, matched: true)) }
+    view.matched_count.should eq(cap)
+    view.result_count.should eq(cap)
+
+    10.times { |i| view.append_result(fuzz_result(cap + i, 404, 100, matched: false)) }
+    view.result_count.should eq(cap) # ring stays pinned
+    view.matched_count.should eq(cap - 10)
+
+    # Drain the rest of the matched rows out of the ring: the count must reach exactly 0 and
+    # not undershoot, which is what a decrement on the wrong branch would do.
+    (cap - 10).times { |i| view.append_result(fuzz_result(cap + 10 + i, 404, 100, matched: false)) }
+    view.matched_count.should eq(0)
+    view.result_count.should eq(cap)
+  end
+
+  it "resets on a new run" do
+    view = loaded_fuzzer
+    3.times { |i| view.append_result(fuzz_result(i, 200, 100, matched: true)) }
+    view.matched_count.should eq(3)
+    view.begin_run(10_i64)
+    view.matched_count.should eq(0)
+  end
+end

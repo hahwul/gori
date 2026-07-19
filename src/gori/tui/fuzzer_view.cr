@@ -138,6 +138,13 @@ module Gori::Tui
       # ran EVERY frame — the busiest moment is a live run streaming results, each of
       # which forces a redraw). matched_count is rev-only; the sorted view also keys on
       # the sort order + matched-only toggle.
+      #
+      # NOTE on matched_count: during a live run @results_rev bumps per appended result, so
+      # this key never hits and the count(&.matched?) scan does run every frame. Maintaining
+      # the count incrementally in append_result instead was tried and benched at RESULT_CAP
+      # (bench/fuzz_view_frame_bench.cr) — no measurable difference, the frame is dominated by
+      # cell drawing. Left as a memo rather than trade a self-correcting recompute for state
+      # that three mutation sites must keep in sync for no gain.
       @matched_count_cache = 0
       @matched_count_rev = -1_i64
       @sorted_cache = nil.as(Array(Fuzz::Result)?)
@@ -1981,6 +1988,10 @@ module Gori::Tui
       cw = {inner.w - gw, 0}.max
       rows = (0...inner.h).compact_map { |i| lines[@detail_scroll + i]? }
       @detail_xscroll = @detail_xscroll.clamp(0, {(rows.max_of? { |l| Screen.display_width_upto(l, @detail_xscroll + cw + 1) } || 0) - cw, 0}.max)
+      # Selection spans for the WHOLE buffer, built once per frame. This used to sit inside
+      # paint_detail_line_chrome, i.e. rebuilt and thrown away once per drawn row — O(rows ×
+      # selection length) tuple appends, plus a fresh Array per row even with nothing selected.
+      spans = focused && detail_navigable? ? @detail_cursor.highlight_spans(lines) : nil
       rows.each_with_index do |line, i|
         li = @detail_scroll + i
         Gutter.draw(screen, inner.x, inner.y + i, li, gw, current: focused && li == @detail_cursor.cy)
@@ -1988,15 +1999,17 @@ module Gori::Tui
         sline = styled[li]? || [Highlight::Span.new(line, Theme.text)]
         sline = Highlight.slice_left(sline, @detail_xscroll) if @detail_xscroll > 0
         Highlight.draw(screen, inner.x + gw, inner.y + i, sline, bg: Theme.bg, width: cw)
-        paint_detail_line_chrome(screen, inner.x + gw, inner.y + i, li, line, focused, lines)
+        paint_detail_line_chrome(screen, inner.x + gw, inner.y + i, li, line, spans)
       end
       Frame.scroll_gauge(screen, inner, lines.size, @detail_scroll, focused)
     end
 
+    # `spans` is the frame's selection-span list (nil when the pane isn't focused/navigable),
+    # built once by render_detail rather than per row.
     private def paint_detail_line_chrome(screen : Screen, x : Int32, y : Int32, li : Int32, line : String,
-                                         focused : Bool, lines : Array(String)) : Nil
-      return unless focused && detail_navigable?
-      @detail_cursor.highlight_spans(lines).each do |(l, x0, x1)|
+                                         spans : Array({Int32, Int32, Int32})?) : Nil
+      return unless spans
+      spans.each do |(l, x0, x1)|
         paint_char_span_bg(screen, x, y, line, x0, x1, Theme.accent_bg) if l == li
       end
       return unless li == @detail_cursor.cy
