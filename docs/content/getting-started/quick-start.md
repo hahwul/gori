@@ -97,7 +97,7 @@ gori is a row of tabs. The default order starts Project → Target → **History
 | `Esc` | Pop focus back toward the tab bar |
 | `Tab` / `Shift-Tab` | Move focus between the tab bar and panes |
 
-Mouse works when enabled (Settings): click a tab, click a row to select, click again to open. The **Help** tab is a full key cheatsheet inside the app when this page isn't open.
+Mouse works when enabled (Preferences → **Editor & Keys** → **Editor**): click a tab, click a row to select, click again to open. The **Help** tab is a full key cheatsheet inside the app when this page isn't open.
 
 ## 5. Read a flow in History
 
@@ -170,6 +170,7 @@ Keep this table nearby until the chords stick:
 | Key | Where | Action |
 |-----|--------|--------|
 | `Ctrl-P` | Anywhere | Command palette (settings, Match & Replace, notifications, …) |
+| `Ctrl-,` | Anywhere | Preferences (all settings in one modal) |
 | `Space` | Focused pane | Area action menu |
 | `c` / `i` / `s` | Anywhere | Capture / intercept / scope lens |
 | `[` `]` · `1`-`9` | Anywhere | Switch tabs |
@@ -188,7 +189,7 @@ Re-run the guided setup (global proxy bind default, then theme) at any time:
 gori wizard
 ```
 
-The bind step sets the shared default in `settings.json`, the same layer as **Settings: Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed.
+The bind step sets the shared default in `settings.json`, the same layer as Preferences → **Network & Tabs** → **Network**. It is not a per-project lock; pin a different address per engagement from the Project tab when needed.
 
 ## Guided UI tour
 

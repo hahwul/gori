@@ -35,7 +35,7 @@ Define variables in two places (project wins on a key collision):
 
 | Layer | Where |
 |-------|-------|
-| **Global** | `Ctrl-P` → **Settings: Env**, or the `env` section of `settings.json` |
+| **Global** | Preferences (`Ctrl-,`) → **Editor & Keys** → **Env**, `Ctrl-P` → **Settings: Env**, or the `env` section of `settings.json` |
 | **Project** | **Project** tab → **ENV** pane (`a` add, `e` edit, `d` delete) |
 
 Default prefix is `$` (changeable via **Change prefix** in the ENV space menu, or `env.prefix` in settings). Keys are `A-Z a-z _` followed by `A-Z a-z 0-9 _`. Unknown tokens are left unchanged.

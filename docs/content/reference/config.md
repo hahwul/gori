@@ -69,7 +69,7 @@ Per-area TUI layout prefs (command palette → **Settings: Layout**). Omitted wh
 
 ### statusline
 
-An opt-in extra row at the very bottom of the TUI (command palette → **Settings: Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row. Think of it as a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from `settings.json` until you change it.
+An opt-in extra row at the very bottom of the TUI (Preferences → **General** → **Statusline**). When enabled, gori runs a shell command on an interval and renders its stdout as that row. Think of it as a customizable status bar, inspired by Claude Code's status line. Disabled by default; the section is omitted from `settings.json` until you change it.
 
 ```json
 {
@@ -149,7 +149,7 @@ Global dial map (project-level overrides win on collision). Same idea as `/etc/h
 }
 ```
 
-Edit from `Ctrl-P` → **Settings: Hostnames**, or the Project tab for per-project entries. See [Proxy & History](/guide/proxy/#host-overrides).
+Edit from Preferences → **Network & Tabs** → **Network** → **Hostname overrides**, or the Project tab for per-project entries. See [Proxy & History](/guide/proxy/#host-overrides).
 
 ### env
 

@@ -15,6 +15,7 @@ In-depth guides to working with gori. Each tab in the TUI is a focused tool; tog
 - **[OAST](/guide/oast/)**: catch out-of-band callbacks to confirm blind vulnerabilities.
 - **[Scanning & Issues](/guide/scanning/)**: Probe, Param Miner, Discover (spider & brute-force), Issues, Notes, Comparer.
 - **[MCP Server](/guide/mcp/)**: drive gori from an AI agent or script.
+- **[Settings](/guide/settings/)**: the Preferences modal and every section in it.
 - **[Themes](/guide/themes/)**: switch between built-in colour themes or create your own.
 - **[Hotkeys](/guide/hotkeys/)**: rebind gori's keyboard shortcuts.
 
@@ -42,4 +43,4 @@ gori is organized into tabs; move between them with `[` / `]` or jump with numbe
 | **Notes** | Per-project Markdown notes |
 | **Help** | Key bindings and links |
 
-Some tabs are hidden on a fresh install (Rewriter, Miner, Sequencer, JWT) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or **Settings: Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.
+Some tabs are hidden on a fresh install (Rewriter, Miner, Sequencer, JWT) to keep the bar uncluttered; reveal any of them from the tab-bar `⋯` menu, the command palette, or Preferences (`Ctrl-,`) → **Network & Tabs** → **Tabs**. Global lenses that are not tabs: **capture** (`c`), **intercept** (`i`), and the **scope lens** (`s`) toggle from anywhere.

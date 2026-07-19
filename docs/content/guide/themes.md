@@ -7,7 +7,11 @@ gori ships twenty-six built-in colour themes: `goridark` (the default), `goriday
 
 ## Switching Themes
 
-Open **`settings:theme`** from the command palette (`Ctrl-P`). The picker is a vertical, scrollable list; each row shows a small swatch of the theme's own palette, and selecting a row previews it live. `Enter` applies and persists the choice, `Esc` reverts.
+Open Preferences with `Ctrl-,` (or the `⚙` chip in the top bar), go to **Appearance**, and press `↵` on the **Theme** row. The row previews the current theme inline: its name and a small swatch of its palette. `Ctrl-P` → **`settings:theme`** opens the same picker in one step.
+
+The picker is a vertical, scrollable list; each row shows a small swatch of the theme's own palette, and selecting a row previews it live. `Enter` applies and persists the choice, `Esc` reverts.
+
+`Ctrl-,` works in the project picker too, so you can set your theme on first launch before opening a project. Theme is the only section editable there; the rest need a project open.
 
 The same History view across four of the built-ins:
 
@@ -38,7 +42,7 @@ You can add your own themes as JSON files, dropped into:
 ~/.gori/themes/<name>.json
 ```
 
-(`~/.gori` is the gori home directory; override it with `$GORI_HOME`.) The file name is the theme name. `ocean.json` becomes the theme `ocean`. Custom themes appear in the picker after the built-ins, in file-name order. gori loads them at startup and again each time you open `settings:theme`, so you can drop a file in and reopen the picker without restarting.
+(`~/.gori` is the gori home directory; override it with `$GORI_HOME`.) The file name is the theme name. `ocean.json` becomes the theme `ocean`. Custom themes appear in the picker after the built-ins, in file-name order. gori loads them at startup and again each time you open the theme picker, so you can drop a file in and reopen it without restarting.
 
 ### Format
 
@@ -118,4 +122,5 @@ Every field, all inheriting from `base` when omitted:
 ## Next Steps
 
 - [Hotkeys](/guide/hotkeys/): rebind gori's keyboard shortcuts the same way
+- [Settings](/guide/settings/): the Preferences modal and every section in it
 - [Configuration](/getting-started/configuration/): where `settings.json` lives and what else it holds

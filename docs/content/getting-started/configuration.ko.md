@@ -37,6 +37,18 @@ gori settings --edit   # open it in your editor
 
 지속되는 섹션에는 `network`, `theme`(기본값 `goridark`), `mouse`, `editor`, `tabs`, `layout`, `statusline`, `hostname_overrides`, `env`, `hotkeys`, `decoder`, `mine`이 있습니다. 전체 키 목록은 [설정 레퍼런스](/ko/reference/config/)를 참고하세요.
 
+### Preferences 모달 {#the-preferences-modal}
+
+파일을 직접 편집할 일은 거의 없습니다. 파일에 담기는 모든 항목은 하나의 화면, **Preferences** 모달에서 편집할 수 있으며, 네 개의 서브탭(General, Appearance, Editor & Keys, Network & Tabs)으로 묶여 있습니다.
+
+| 여는 방법 | 도착 지점 |
+|-----------|-----------|
+| 어디서나 `Ctrl-,` | 그룹 스트립. 그룹을 먼저 고릅니다 |
+| 상단 바의 `⚙` 칩 | `Ctrl-,`와 동일 |
+| `Ctrl-P` → **Settings: …** 항목 | 해당 섹션의 필드로 바로 |
+
+`Ctrl-,`는 프로젝트 선택기에서도, 즉 프로젝트를 열기 전에도 동작하므로 첫 실행에서 테마를 정할 수 있습니다. 저장한 변경은 재시작 없이 즉시 적용됩니다. 모든 섹션과 필드는 [설정 가이드](/ko/guide/settings/)를 참고하세요.
+
 ### Network {#network}
 
 `network` 섹션은 프록시가 어떻게 바인딩되는지, 그리고 트래픽을 업스트림 프록시로 전달할지에 대한 전역 기본값입니다. 자체 네트워크 재정의가 없는 프로젝트는 이 값을 상속합니다:
@@ -61,20 +73,20 @@ gori settings --edit   # open it in your editor
 
 1. **프로젝트별 재정의**(프로젝트 DB의 `net.bind_*`): 설정되어 있으면 해당 프로젝트에 한해 우선합니다.
 2. **CLI 플래그**(`--listen` / `--port`): 현재 프로세스에 한해 `settings.json`을 재정의하며 디스크에 기록되지 않습니다.
-3. **`settings.json`의 `network`**: 공유되는 기본값(첫 실행 마법사와 Settings: Network가 편집하는 것).
+3. **`settings.json`의 `network`**: 공유되는 기본값(첫 실행 마법사와 Preferences → **Network**가 편집하는 것).
 4. **공장 기본값**: 다른 값이 없으면 `127.0.0.1:8070`.
 
 ### Theme {#theme}
 
-gori는 21개의 내장 색상 테마(기본값은 `goridark`)를 제공하며 여러분의 JSON 테마도 지원합니다. 커맨드 팔레트(`Ctrl-P` → `settings:theme`)에서 전환하거나 `settings.json`의 `theme`을 설정하세요. [테마 가이드](/ko/guide/themes/)를 참고하세요.
+gori는 26개의 내장 색상 테마(기본값은 `goridark`)를 제공하며 여러분의 JSON 테마도 지원합니다. Preferences(`Ctrl-,` → **Appearance** → **Theme**)나 팔레트(`Ctrl-P` → `settings:theme`)에서 전환하거나 `settings.json`의 `theme`을 설정하세요. [테마 가이드](/ko/guide/themes/)를 참고하세요.
 
 ### Hotkeys {#hotkeys}
 
-모든 단축키는 커맨드 팔레트(`Ctrl-P` → `settings:hotkeys`)에서 재지정할 수 있으며 `hotkeys` 키 아래에 지속됩니다. [단축키 가이드](/ko/guide/hotkeys/)를 참고하세요.
+모든 단축키는 Preferences(`Ctrl-,` → **Editor & Keys** → **Hotkeys**)나 팔레트(`Ctrl-P` → `settings:hotkeys`)에서 재지정할 수 있으며 `hotkeys` 키 아래에 지속됩니다. [단축키 가이드](/ko/guide/hotkeys/)를 참고하세요.
 
 ### Statusline {#statusline}
 
-TUI 하단에 옵트인으로 추가되는 한 줄입니다(커맨드 팔레트 → **Settings: Statusline**, 또는 `statusline` 키). 활성화하면 gori가 셸 명령을 일정 간격으로 실행하고 그 (ANSI 색상) stdout를 표시합니다. Claude Code의 상태 줄에서 영감을 받은 커스터마이즈 가능한 상태 표시줄입니다. 명령은 실시간 세션의 JSON 스냅샷(프로젝트, 캡처 상태, 플로우 수, 프록시 주소)을 stdin으로 받습니다. 기본적으로 비활성화되어 있으며, 키와 stdin 규약은 [설정 레퍼런스](/ko/reference/config/#statusline)를 참고하세요.
+TUI 하단에 옵트인으로 추가되는 한 줄입니다(Preferences → **General** → **Statusline**, 또는 `statusline` 키). 활성화하면 gori가 셸 명령을 일정 간격으로 실행하고 그 (ANSI 색상) stdout를 표시합니다. Claude Code의 상태 줄에서 영감을 받은 커스터마이즈 가능한 상태 표시줄입니다. 명령은 실시간 세션의 JSON 스냅샷(프로젝트, 캡처 상태, 플로우 수, 프록시 주소)을 stdin으로 받습니다. 기본적으로 비활성화되어 있으며, 키와 stdin 규약은 [설정 레퍼런스](/ko/reference/config/#statusline)를 참고하세요.
 
 ## 프로젝트별 네트워크 재정의 {#per-project-network-overrides}
 

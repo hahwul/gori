@@ -360,7 +360,7 @@ gori run project env delete TOKEN
 
 #### project host-override {#run-project-host-override}
 
-**프로젝트** 호스트 오버라이드를 관리합니다. `/etc/hosts`처럼 호스트명에 대해 dial할 IP만 바꾸고, SNI·인증서 호스트·`Host` 헤더는 원래 이름을 유지합니다. 충돌 시 프로젝트 항목이 전역 `Settings: Hostnames`보다 우선합니다. 별칭: `host-overrides`.
+**프로젝트** 호스트 오버라이드를 관리합니다. `/etc/hosts`처럼 호스트명에 대해 dial할 IP만 바꾸고, SNI·인증서 호스트·`Host` 헤더는 원래 이름을 유지합니다. 충돌 시 프로젝트 항목이 전역 호스트네임 오버라이드보다 우선합니다. 별칭: `host-overrides`.
 
 ```bash
 gori run project host-override                              # list
