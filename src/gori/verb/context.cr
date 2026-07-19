@@ -111,6 +111,10 @@ module Gori
       # :tabs | :hotkeys). :tabs opens the tab-bar customizer overlay.
       abstract def open_settings(section : Symbol) : Nil
 
+      # settings: open the unified Preferences modal at its group picker (Ctrl+, / the ⚙
+      # top-bar chip do the same). The per-section open_settings jumps straight to one.
+      abstract def open_preferences : Nil
+
       # import: palette-only bulk importers — each opens a path prompt, parses the
       # file, and inserts flows into History (Sitemap derives from the same store).
       abstract def import_har : Nil

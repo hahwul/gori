@@ -21,9 +21,10 @@ describe Gori::Tui::SettingsCatalog do
       registry[s.id]?.should_not be_nil # the loop in verbs/core.cr must have registered it
       registry[s.id].category.should eq(Gori::Verb::Category::Settings)
     end
-    # …and no stray settings.* verb exists that the catalog doesn't back.
+    # …and the only Settings-category verbs are the catalog sections + the generic
+    # "settings.open" (opens the modal at its group picker), nothing stray.
     settings_ids = registry.select(&.category.settings?).map(&.id).sort
-    settings_ids.should eq(SettingsCatalog.all.map(&.id).sort)
+    (settings_ids - ["settings.open"]).should eq(SettingsCatalog.all.map(&.id).sort)
   end
 
   it "only names sections open_settings can actually dispatch" do

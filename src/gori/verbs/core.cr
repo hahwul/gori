@@ -73,10 +73,13 @@ module Gori
         "browser.open", "Open browser", "Launch a browser pre-trusting gori's CA, routed via the proxy",
         Verb::Scope::Global) { |ctx| ctx.open_browser_picker; nil }
 
-      # Settings (config control) — one palette verb per catalog section. The SAME
-      # Tui::SettingsCatalog drives the Settings tab's grouped sub-tabs, so the palette
-      # and the tab can't list different sections. Each verb opens its section editor
-      # via open_settings(sym) — behaviour is unchanged from the old hand-written block.
+      # Settings (config control). The generic entry opens the unified Preferences modal
+      # at its group picker (same as Ctrl+, / the ⚙ top-bar chip); the per-section entries
+      # below jump straight to one section. Both the palette list and the modal's groups
+      # come from the SAME Tui::SettingsCatalog, so they can't list different sections.
+      r.register Verb::Definition.new(
+        "settings.open", "Settings", "Open Settings — the preferences modal (all sections)",
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_preferences; nil }
       Tui::SettingsCatalog.all.each do |s|
         r.register Verb::Definition.new(
           s.id, "Settings: #{s.title}", s.desc,
