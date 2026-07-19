@@ -14,6 +14,11 @@ module Gori::Sequencer
     # FAIL softens to WARN and the rating can't certify Secure (clamped ≤ Moderate).
     SMALL_SAMPLE = 20
 
+    # Bytes of concatenated token text fed to the compression test. The deflate ratio settles
+    # well before a full sample, and analyze is re-run on a UI throttle, so this bounds the
+    # single largest allocation in the report.
+    COMPRESS_SCAN_CAP = 256 * 1024
+
     enum Verdict
       Pass
       Warn
@@ -130,7 +135,9 @@ module Gori::Sequencer
       lengths.each { |l| lcounts[l] += 1 }
       length_entropy = shannon_hash(lcounts, n)
 
-      unique = usable.uniq.size
+      # to_set.size, not uniq.size: Array#uniq is `to_set.to_a` for a sample this size, so it
+      # built an n-element Array purely to read .size off it.
+      unique = usable.to_set.size
       duplicate_count = n - unique
       uniqueness = unique.to_f / n
 
@@ -143,7 +150,12 @@ module Gori::Sequencer
       # ceil(log2(charset)) bits. This measures the token's real entropy rather than its
       # encoding — a hex token's ASCII bytes are structurally non-uniform (0x30-0x66) and
       # would fail every bit test even when the underlying value is perfectly random.
-      idx_of = Hash(UInt8, Int32).new
+      # Byte → alphabet index as a flat 256-entry LUT rather than a Hash. This is probed once
+      # per sample byte by three separate loops below (the bit-bias scan, symbol_bits and
+      # symbol_seq), and the sample reaches millions of bytes, so a direct index beats hashing
+      # every one of them. -1 marks a byte absent from the alphabet (never hit: the table is
+      # built from the bytes actually present).
+      idx_of = Array(Int32).new(256, -1)
       present.each_with_index { |b, i| idx_of[b] = i }
       bps = charset_size <= 1 ? 0 : Math.log2(charset_size.to_f).ceil.to_i
       # The fixed-width symbol-bit encoding is only unbiased when the alphabet size is a
@@ -159,15 +171,15 @@ module Gori::Sequencer
         usable.each do |t|
           sl = t.to_slice
           (0...min_len).each do |p|
-            v = idx_of[sl[p]]
+            v = idx_of.unsafe_fetch(sl[p])
             (0...bps).each { |k| ones_at[p * bps + k] += 1 if (v >> (bps - 1 - k)) & 1 == 1 }
           end
         end
       end
       bit_bias = ones_at.map { |c| (c.to_f / n - 0.5).abs }
 
-      bits = symbol_bits(usable, idx_of, bps)
-      sym_seq = symbol_seq(usable, idx_of)
+      bits = symbol_bits(usable, idx_of, bps, total_bytes)
+      sym_seq = symbol_seq(usable, idx_of, total_bytes)
       seq, seq_detail = detect_sequential(usable)
 
       tests = [] of TestRow
@@ -350,8 +362,13 @@ module Gori::Sequencer
     private def self.compression_test(tokens : Array(String), bytes : Int64,
                                       charset_size : Int32, small : Bool) : TestRow
       return insufficient("Compression", "#{bytes} bytes") if bytes < 64
-      raw = tokens.join.to_slice
-      io = IO::Memory.new
+      # Cap the deflate input. The ratio is a stable statistic long before the whole sample is
+      # consumed, but `tokens.join` over a full 50k-token sample built a multi-MB String (from
+      # a String.build starting at capacity 64, so a realloc chain on top) and then deflated
+      # every byte of it — on a path the TUI re-runs on a throttle and every MCP poll re-runs
+      # from scratch. Whole tokens only, so a token is never split mid-value.
+      raw = join_capped(tokens, COMPRESS_SCAN_CAP)
+      io = IO::Memory.new(raw.size // 2)
       Compress::Deflate::Writer.open(io, &.write(raw))
       ratio = io.size.to_f / raw.size
       floor = charset_size <= 1 ? 0.0 : Math.log2(charset_size.to_f) / 8.0
@@ -362,7 +379,10 @@ module Gori::Sequencer
                 else
                   Verdict::Pass
                 end
-      TestRow.new("Compression", fmt(ratio), "floor #{fmt(floor)}", verdict)
+      # Say so when the ratio came from a prefix rather than the whole sample, so the number is
+      # never silently a different measurement from the one the sample size implies.
+      detail = raw.size < bytes ? "floor #{fmt(floor)} · first #{raw.size // 1024} KB" : "floor #{fmt(floor)}"
+      TestRow.new("Compression", fmt(ratio), detail, verdict)
     end
 
     private def self.bit_bias_test(ones_at : Array(Int32), n : Int32, small : Bool) : TestRow
@@ -431,22 +451,48 @@ module Gori::Sequencer
 
     # The concatenated symbol bitstream: each byte → its alphabet index → `bps` bits
     # (MSB-first). Empty when the alphabet has ≤ 1 symbol (no bits to test).
-    private def self.symbol_bits(tokens : Array(String), idx_of : Hash(UInt8, Int32), bps : Int32) : Array(UInt8)
-      bits = [] of UInt8
-      return bits if bps <= 0
+    # Concatenated token bytes, stopping at the first WHOLE token that would cross `cap` (so a
+    # token is never split mid-value). Presized, unlike `tokens.join`.
+    private def self.join_capped(tokens : Array(String), cap : Int32) : Bytes
+      total = 0
+      taken = 0
+      tokens.each do |t|
+        break if total + t.bytesize > cap && taken > 0
+        total += t.bytesize
+        taken += 1
+      end
+      buf = Bytes.new(total)
+      off = 0
+      taken.times do |i|
+        sl = tokens.unsafe_fetch(i).to_slice
+        sl.copy_to(buf.to_unsafe + off, sl.size)
+        off += sl.size
+      end
+      buf
+    end
+
+    # Presized: the final length is known exactly (total sample bytes × bps), and growing from
+    # capacity 0 to the millions of elements a full sample produces means ~20 doubling reallocs,
+    # each copying everything written so far.
+    private def self.symbol_bits(tokens : Array(String), idx_of : Array(Int32), bps : Int32,
+                                 total_bytes : Int64) : Array(UInt8)
+      return [] of UInt8 if bps <= 0
+      bits = Array(UInt8).new((total_bytes * bps).to_i)
       tokens.each do |t|
         t.to_slice.each do |b|
-          v = idx_of[b]
+          v = idx_of.unsafe_fetch(b)
           (bps - 1).downto(0) { |k| bits << ((v >> k) & 1).to_u8 }
         end
       end
       bits
     end
 
-    # The concatenated sequence of alphabet indices (for serial correlation).
-    private def self.symbol_seq(tokens : Array(String), idx_of : Hash(UInt8, Int32)) : Array(Int32)
-      seq = [] of Int32
-      tokens.each { |t| t.to_slice.each { |b| seq << idx_of[b] } }
+    # The concatenated sequence of alphabet indices (for serial correlation). Presized for the
+    # same reason as symbol_bits.
+    private def self.symbol_seq(tokens : Array(String), idx_of : Array(Int32),
+                                total_bytes : Int64) : Array(Int32)
+      seq = Array(Int32).new(total_bytes.to_i)
+      tokens.each { |t| t.to_slice.each { |b| seq << idx_of.unsafe_fetch(b) } }
       seq
     end
 
