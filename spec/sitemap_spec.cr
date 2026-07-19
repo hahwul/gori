@@ -98,8 +98,39 @@ describe Gori::Sitemap do
       Gori::Sitemap.template_class("?q=1").should be_nil # bare root + query
     end
 
+    it "does not label a date-shaped non-date {date}" do
+      # Url::DATE checks the SHAPE only, so these matched and got a label that lied about
+      # what the segment is. They are still opaque ids — just not dates.
+      Gori::Sitemap.template_class("1234-56-78").should be_nil
+      Gori::Sitemap.template_class("9999-99-99").should be_nil
+      Gori::Sitemap.template_class("2026-00-10").should be_nil
+      Gori::Sitemap.template_class("2026-07-19").should eq("{date}") # still a real one
+      Gori::Sitemap.template_class("2026-12-31").should eq("{date}")
+    end
+
     it "does not downcase-merge (the reason Url.fold_segment is not reused)" do
       Gori::Sitemap.template_class("Users").should be_nil
+    end
+
+    it "survives a segment that is not valid UTF-8" do
+      # A captured target is raw bytes: a legacy-encoded (EUC-KR, latin-1) or fuzzed path
+      # arrives as invalid UTF-8, and PCRE2 RAISES on such a subject instead of returning
+      # false. Unguarded, one such request crashed the whole TUI from the sitemap poll.
+      # Each of these is sized to clear a different regex's length gate.
+      Gori::Sitemap.template_class(String.new(Bytes.new(10) { 0xFF_u8 })).should be_nil  # {date}
+      Gori::Sitemap.template_class(String.new(Bytes.new(36) { 0xFF_u8 })).should be_nil  # {uuid}
+      Gori::Sitemap.template_class(String.new(Bytes.new(12) { 0xFF_u8 })).should be_nil  # {hex}
+      latin1 = Bytes[0x63, 0x61, 0x66, 0xE9, 0x63, 0x61, 0x66, 0xE9, 0x63, 0x61, 0x66, 0xE9]
+      Gori::Sitemap.template_class(String.new(latin1)).should be_nil # "café" ×3, latin-1
+    end
+
+    it "still classifies through a whole-tree fold when a host serves invalid UTF-8" do
+      # The end-to-end path the crash actually took: build → fold_templates!.
+      bad = String.new(Bytes.new(12) { 0xFF_u8 })
+      rows = (1..4).map { |i| {"https", "acme.test", 443, "h2", "GET", "/a/#{bad}/#{i}"} }
+      hosts = Gori::Sitemap.build(rows.map { |r| {r[1], r[4], r[5]} })
+      Gori::Sitemap.fold_templates!(hosts.first)
+      hosts.first.children.map(&.label).should contain("a")
     end
   end
 
@@ -252,6 +283,21 @@ describe Gori::Sitemap do
   end
 
   describe ".group_sequences!" do
+    it "folds numeric ids that carry a query, and labels the group by the path part" do
+      # `add` appends the query to the LAST segment, so a listing page's links arrive as
+      # `7?ref=home`. Both passes tested the raw label, so precisely the case that
+      # explodes the tree — a paginated list — was the one that never folded.
+      rows = (1..12).map { |i| {"acme.test", "GET", "/items/#{i}?ref=home"} }
+      hosts = Gori::Sitemap.build(rows)
+      Gori::Sitemap.group_sequences!(hosts.first)
+      items = hosts.first.children.first
+      items.children.size.should eq(1)
+      fold = items.children.first
+      fold.grouped.should be_true
+      fold.label.should eq("[1, 2, 3 … +9]") # not "[1?ref=home, 2?ref=home, …]"
+      fold.children.size.should eq(12)
+    end
+
     it "folds a pure-numeric run beyond the threshold into one collapsed group" do
       hosts = Gori::Sitemap.build((1001..1012).map { |i| {"h", "GET", "/p/#{i}"} })
       Gori::Sitemap.group_sequences!(hosts.first)

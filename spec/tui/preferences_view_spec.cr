@@ -1,4 +1,5 @@
 require "../spec_helper"
+require "../support/memory_backend"
 
 include Gori::Tui
 
@@ -75,6 +76,46 @@ describe Gori::Tui::PreferencesView do
     v = PreferencesView.new
     v.open_default
     v.handle_key(pctrl(Termisu::Input::Key::LowerP)).kind.should eq(:palette)
+  end
+
+  it "puts ^P through the same unsaved-edit guard as esc" do
+    # ^P closes the modal just as surely (the host sets @overlay = :none), so skipping the
+    # guard meant this one exit silently discarded pending edits at the next reload_all.
+    v = PreferencesView.new
+    v.open_default
+    into_fields(v)
+    v.handle_key(pkey(RIGHT))
+    v.dirty?.should be_true
+
+    v.handle_key(pctrl(Termisu::Input::Key::LowerP)).kind.should eq(:none) # warns first
+    v.handle_key(pctrl(Termisu::Input::Key::LowerP)).kind.should eq(:palette)
+  end
+
+  it "does not report a rejected save as saved" do
+    # A failed validation persists nothing, so a :saved outcome would have the host
+    # live-apply — rebinding the proxy — for input that was just refused.
+    v = PreferencesView.new
+    v.open(:network)
+    v.handle_key(pkey(DOWN)) # Bind Host -> Bind Port
+    8.times { v.handle_key(pkey(Termisu::Input::Key::Backspace)) }
+    "abc".each_char { |ch| v.handle_key(pkey(Termisu::Input::Key::Space, ch)) }
+    v.handle_key(pkey(Termisu::Input::Key::Enter)).kind.should eq(:none)
+  end
+
+  it "keeps the modal's focus and the section's focus together across ^R" do
+    # `reset_to_defaults` snaps the FORM's own cursor back to field 0 while the modal keeps
+    # its separate flat index, so without a re-sync the row drawn as focused and the row
+    # that receives the next keystroke are different rows. Typing after ^R proves which.
+    v = PreferencesView.new
+    v.open(:network)
+    v.handle_key(pkey(DOWN)) # Bind Host -> Bind Port
+    v.handle_key(pctrl(Termisu::Input::Key::LowerR))
+    v.handle_key(pkey(Termisu::Input::Key::Space, '9'))
+
+    backend = MemoryBackend.new(100, 40)
+    v.render(Screen.new(backend), Rect.new(0, 0, 100, 40))
+    backend.contains?("#{Gori::Settings::DEFAULT_BIND_PORT}9").should be_true
+    backend.contains?("#{Gori::Settings::DEFAULT_BIND_HOST}9").should be_false
   end
 
   it "closes on Ctrl+, — the chord that opened it" do

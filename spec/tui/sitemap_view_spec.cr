@@ -470,6 +470,66 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  it "cuts tag: terms with the shared lexer, so quoting and NOT work" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      capture(store, "acme.test", "GET", "/static/app.js")
+      store.set_sitemap_tag("acme.test", "/api", "my flow")
+
+      # `String#split` tore this into `tag:"my` + `flow"`, so the tag never matched.
+      view = SitemapView.new
+      view.reload(store)
+      view.start_query
+      %(tag:"my flow").each_char { |c| view.query_insert(c) }
+      view.reload(store)
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("users").should be_true
+      b.contains?("static").should be_false
+    end
+  end
+
+  it "treats NOT tag:x as exclusion, like -tag:x" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      capture(store, "acme.test", "GET", "/static/app.js")
+      store.set_sitemap_tag("acme.test", "/api", "done")
+
+      # Hand-tokenising filed `tag:done` as a POSITIVE and then blanked the tree on the
+      # leftover bare `NOT` — the exact inverse of what was asked.
+      view = SitemapView.new
+      view.reload(store)
+      view.start_query
+      "NOT tag:done".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("static").should be_true # the untagged sibling survives
+      b.contains?("users").should be_false # the tagged subtree is excluded
+    end
+  end
+
+  it "does not blank the tree when cutting tags leaves only an operator" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/api/users")
+      store.set_sitemap_tag("acme.test", "/api", "payment")
+
+      # `tag:a OR tag:b` hands QL the residual `OR`. That has no terms, so it cannot be
+      # "every term was invalid" — it used to blank the whole sitemap behind that note.
+      view = SitemapView.new
+      view.reload(store)
+      view.start_query
+      "tag:payment OR tag:payment".each_char { |c| view.query_insert(c) }
+      view.reload(store)
+
+      b = MemoryBackend.new(70, 20)
+      view.render(Screen.new(b), Rect.new(0, 0, 70, 20))
+      b.contains?("users").should be_true
+    end
+  end
+
   it "re-anchors selection, scroll, and manual collapse across reload (live capture poll)" do
     # Regression: data_version polls used to zero @selected/@scroll every rebuild,
     # so navigating deep under live traffic kept jumping back to the top host.

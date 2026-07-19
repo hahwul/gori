@@ -148,9 +148,9 @@ module Gori
       # must not fabricate path-tree nodes. The query rides on the leaf so /x?a=1 and
       # /x?a=2 stay distinct endpoints without corrupting the tree.
       qidx = path.index('?')
-      path_part = qidx ? path[0...qidx] : path
+      path_only = qidx ? path[0...qidx] : path # local, not the `path_part` helper below
       suffix = qidx ? path[qidx..] : ""
-      segments = path_part.split('/')
+      segments = path_only.split('/')
       segments.shift if segments.first? == "" # the mandatory leading-slash empty
       segments.pop if segments.last? == ""    # a trailing slash → same endpoint (normalized)
       # An INTERIOR empty (a literal "//") is kept, so //dup/a stays distinct from /dup/a.
@@ -266,14 +266,33 @@ module Gori
     # `group_sequences!` — `fold_segment` only escapes that by testing NUM first.
     def self.template_class(label : String) : String?
       # A leaf carries its query on the last segment (see `add`), so classify the path part.
-      s = (qi = label.index('?')) ? label[0, qi] : label
+      s = path_part(label)
       return nil if s.empty? # a bare-root request with a query → the leaf label is "?q=1"
       return nil if numeric_label?(s)
-      # Size gates first: most real segments ("api", "users") never reach a regex.
-      return "{date}" if s.size == DATE_LEN && Discover::Url::DATE.matches?(s)
+      # A captured target is raw bytes off the wire — `Http1.parse_request_head` builds it
+      # with `String.new(Bytes)`, which does NOT validate — so a legacy-encoded (EUC-KR,
+      # latin-1) or fuzzed path reaches here as invalid UTF-8. PCRE2 RAISES on such a
+      # subject rather than returning false, and this runs on the sitemap poll with no
+      # rescue between here and the run loop, so one such request tore down the TUI. All
+      # three patterns below are ASCII-only, so a non-ASCII segment could never match
+      # anyway: the guard is exact, and it also keeps every CJK path off PCRE2 entirely.
+      # (`Gori::SafeRegexp` exists for this same reason on the store side.)
+      return nil unless s.ascii_only?
+      # Size gates next: most real segments ("api", "users") never reach a regex.
+      return "{date}" if s.size == DATE_LEN && Discover::Url::DATE.matches?(s) && real_date?(s)
       return "{uuid}" if s.size == UUID_LEN && Discover::Url::UUID.matches?(s)
       return "{hex}" if s.size >= HEX_MIN && Discover::Url::HEX.matches?(s)
       nil
+    end
+
+    # `Url::DATE` is only a SHAPE (\d{4}-\d{2}-\d{2}), so `1234-56-78` and `9999-99-99`
+    # matched it. Folding those is arguably right — they are opaque ids — but labelling
+    # them `{date}` tells the reader something false about the route. Range-check the
+    # parts and let a non-date fall through to `{hex}`/literal instead.
+    private def self.real_date?(s : String) : Bool
+      month = s[5, 2].to_i
+      day = s[8, 2].to_i
+      1 <= month <= 12 && 1 <= day <= 31
     end
 
     # Fold a node's pure-numeric children into one collapsed `[1, 2, 3 … +N]` group
@@ -288,7 +307,7 @@ module Gori
       return if node.grouped
       numeric = node.children.select { |c| !c.grouped && numeric_label?(c.label) }
       return if numeric.size <= SEQUENCE_GROUP_THRESHOLD
-      numeric.sort_by! { |c| {c.label.size, c.label} }
+      numeric.sort_by! { |c| p = path_part(c.label); {p.size, p} }
       rest = node.children.select { |c| c.grouped || !numeric_label?(c.label) }
       group = Node.new(group_label(numeric))
       group.grouped = true
@@ -301,13 +320,22 @@ module Gori
       node.children << group
     end
 
+    # The path side of a leaf label. `add` appends the query to the LAST segment, so
+    # `/items/7?ref=home` arrives here as the label `7?ref=home`. Every classifier has to
+    # look past that or an id stops being recognisable the moment it carries a query —
+    # which is exactly when a listing page explodes the tree.
+    def self.path_part(label : String) : String
+      (qi = label.index('?')) ? label[0, qi] : label
+    end
+
     def self.numeric_label?(label : String) : Bool
-      !label.empty? && label.each_char.all?(&.ascii_number?)
+      s = path_part(label)
+      !s.empty? && s.each_char.all?(&.ascii_number?)
     end
 
     # "[1, 2, 3 … +47]" — the first three values then a remainder count.
     def self.group_label(nodes : Array(Node)) : String
-      head = nodes.first(3).map(&.label).join(", ")
+      head = nodes.first(3).map { |n| path_part(n.label) }.join(", ")
       nodes.size > 3 ? "[#{head} … +#{nodes.size - 3}]" : "[#{head}]"
     end
 

@@ -51,6 +51,8 @@ describe Gori::InterceptFilter do
     Gori::InterceptFilter.new("status:>=500").matches?(res(404)).should be_false
     Gori::InterceptFilter.new("status:5xx").matches?(res(500)).should be_true
     Gori::InterceptFilter.new("status:5xx").matches?(res(499)).should be_false
+    # status_match? tests a literal lowercase 'x', so an upcased class used to match nothing.
+    Gori::InterceptFilter.new("status:5XX").matches?(res(500)).should be_true
     Gori::InterceptFilter.new("status:<400").matches?(res(200)).should be_true
   end
 

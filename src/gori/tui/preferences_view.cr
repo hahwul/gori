@@ -33,6 +33,12 @@ module Gori::Tui
     @on_strip : Bool = false # true = the group strip holds focus (←/→ switch groups)
     @strip_start : Int32 = 0
     @status : String? = nil
+    # Whether @status reports a FAILURE (rejected save, blocked opener, unsaved-edit
+    # warning) rather than a success. Kept as a flag rather than re-sniffing the string:
+    # SettingsView can match on its own short internal status ("invalid port"), but what
+    # lands here is `save`'s RETURN message ("settings: invalid bind port …"), so the
+    # prefixes it looks for are not present and every failure rendered green.
+    @status_warn : Bool = false
     @confirm_discard : Bool = false # an esc landed on unsaved edits; the next one discards
 
     def initialize(@allowed_openers : Set(Symbol)? = nil)
@@ -107,12 +113,19 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       @status = nil # clear stale save/reset feedback; activate_focus/reset_focused re-set it
+      @status_warn = false
       # A discard warning survives exactly one keystroke: the esc that would confirm it.
       confirming, @confirm_discard = @confirm_discard, false
       # Modal-wide chords, claimed before the strip/body split so they work on both:
       # ^P jumps to the palette (as it does from every other overlay), Ctrl+, closes the
       # modal the same chord opened.
-      return Outcome.new(:palette) if ev.ctrl? && key.lower_p?
+      # ^P leaves the modal just as surely as esc does — the host sets @overlay = :none —
+      # so it has to pass the same unsaved-edits guard. It was the one exit that didn't,
+      # and the pending edits then died silently at the next open's reload_all.
+      if ev.ctrl? && key.lower_p?
+        return NONE unless close_or_warn(confirming).kind == :close
+        return Outcome.new(:palette)
+      end
       return close_or_warn(confirming) if ev.ctrl? && key.comma?
       return handle_strip_key(key, confirming) if @on_strip
 
@@ -174,6 +187,7 @@ module Gori::Tui
       return Outcome.new(:close) if confirming || dirty.empty?
       @confirm_discard = true
       @status = "unsaved: #{dirty.join(", ")} — ↵ saves the focused section, esc again discards"
+      @status_warn = true
       NONE
     end
 
@@ -240,6 +254,12 @@ module Gori::Tui
       end
       msg = form.save
       @status = msg # reflect the save in the footer (self-contained feedback for the picker)
+      @status_warn = !form.saved?
+      # `save` returns its error message and persists NOTHING when validation fails, so a
+      # :saved outcome there would be a lie the host acts on — apply_settings_saved
+      # rebinds the live proxy and re-pushes upstream/landing settings for input that was
+      # just rejected. Report the failure in the footer only.
+      return NONE unless form.saved?
       Outcome.new(:saved, sec.sym, msg)
     end
 
@@ -248,6 +268,7 @@ module Gori::Tui
     private def open_or_block(sym : Symbol) : Outcome
       return Outcome.new(:open, sym) if opener_allowed?(sym)
       @status = "open a project to edit this"
+      @status_warn = true
       NONE
     end
 
@@ -258,6 +279,10 @@ module Gori::Tui
     private def reset_focused : Nil
       if f = focused_form
         f.reset_to_defaults # working copy only — still needs ↵ to persist, so no confirm
+        # reset_to_defaults snaps the FORM's own cursor back to field 0, but the modal
+        # tracks focus in its own flat index. Without this the highlighted row and the
+        # row that actually receives edits drift apart until the next ↑/↓/click.
+        sync_focus
         @status = "section reset to defaults — ↵ to save"
       end
     end
@@ -376,7 +401,10 @@ module Gori::Tui
       hint_y = box.bottom - 2
       iw = {box.w - 4, 0}.max
       note = @status || focused_hint
-      screen.text(box.x + 2, note_y, note, @status ? Theme.green : Theme.muted, Theme.panel, width: iw)
+      # Same green/yellow split SettingsView uses — a rejected save must not read as a
+      # successful one just because it came through the modal.
+      note_fg = @status ? (@status_warn ? Theme.yellow : Theme.green) : Theme.muted
+      screen.text(box.x + 2, note_y, note, note_fg, Theme.panel, width: iw)
       hint = @on_strip ? "←/→ group · ↓/↵ enter · esc close" : "↑/↓ field · ←/→ edit · ↵ save · ^R reset · esc close"
       hx = {box.right - hint.size - 2, box.x + 2}.max
       screen.text(hx, hint_y, hint, Theme.muted, Theme.panel, width: {box.right - hx - 1, 0}.max)

@@ -35,16 +35,22 @@ module Gori
         negate ? !hit : hit
       end
 
+      # `value` arrives already case-folded from `parse_term` (downcased, or UPCASED for
+      # :method), so nothing here re-folds the pattern. It used to `.downcase` it on every
+      # call — allocating a fresh String per in-flight message on the proxy hold path, for
+      # a pattern that cannot change after parse. The two equality fields compare
+      # case-insensitively so the SUBJECT need not be folded either; the substring fields
+      # still fold their subject, which is why `matches?` no longer claims zero allocation.
       private def raw_match?(s : Subject) : Bool
         case field
-        when :host   then s.host.downcase.includes?(value.downcase)
-        when :path   then s.target.downcase.includes?(value.downcase)
-        when :method then s.method.upcase == value.upcase
-        when :scheme then s.scheme.downcase == value.downcase
+        when :host   then s.host.downcase.includes?(value)
+        when :path   then s.target.downcase.includes?(value)
+        when :method then s.method.compare(value, case_insensitive: true) == 0
+        when :scheme then s.scheme.compare(value, case_insensitive: true) == 0
         when :status then (st = s.status) ? InterceptFilter.status_match?(st, value) : false
         else # :text — free-text substring over method/host/target
-          v = value.downcase
-          s.method.downcase.includes?(v) || s.host.downcase.includes?(v) || s.target.downcase.includes?(v)
+          s.method.downcase.includes?(value) || s.host.downcase.includes?(value) ||
+            s.target.downcase.includes?(value)
         end
       end
     end
@@ -110,7 +116,8 @@ module Gori
       @tree.nil?
     end
 
-    # An empty filter matches all. Allocates nothing.
+    # An empty filter matches all. Patterns are pre-folded at parse time, so matching a
+    # host/path/free-text term costs one `downcase` of the subject and nothing else.
     def matches?(s : Subject) : Bool
       tree = @tree
       return true unless tree
@@ -137,13 +144,20 @@ module Gori
         field = field_symbol(text[0...colon].downcase)
         # An unknown field → free-text the WHOLE token (mirrors QL / Issues::Filter), so a
         # typo'd field like `hsot:evil.com` searches literally instead of silently matching "evil.com".
-        return Term.new(:text, text, term.negate?) if field == :text
+        return Term.new(:text, text.downcase, term.negate?) if field == :text
         value = text[(colon + 1)..]
         return nil if value.empty?
-        Term.new(field, value, term.negate?)
+        Term.new(field, fold(field, value), term.negate?)
       else
-        Term.new(:text, text, term.negate?)
+        Term.new(:text, text.downcase, term.negate?)
       end
+    end
+
+    # Case-fold a term's value ONCE, at parse time, into the form `raw_match?` compares
+    # against. `:status` is folded too — `status_match?` tests a literal lowercase 'x',
+    # so `status:5XX` matched nothing at all before this.
+    private def self.fold(field : Symbol, value : String) : String
+      field == :method ? value.upcase : value.downcase
     end
 
     # Map a field name to its Term symbol. An unknown field is treated as free text

@@ -30,6 +30,7 @@ module Gori::Tui
         Item.new("s", "toggle scope lens (or click scope:N)", "scope.toggle-lens"),
         Item.new("^P", "Match & Replace → Rewriter tab (palette)", "rules.edit"),
         Item.new("badge / ^P", "notification center (palette; rebindable)", "app.notifications"),
+        Item.new("^, / ⚙", "preferences — every setting (also ^P → Settings)", "settings.open"),
         Item.new("^B", "reveal whitespace (·→␍␊)", "view.reveal-ws"),
         Item.new("^D / ^C ×2", "quit gori"),
         Item.new("q", "back to projects (on the tab bar)"),

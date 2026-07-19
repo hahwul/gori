@@ -1299,8 +1299,8 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences, :settings, :tabs, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :rewriter_rule, :ca_import, :import then true
-      else                                                                                                                                                                                                                                                                                                                                                                                               false
+      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences, :settings, :tabs, :hosts, :env, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :rewriter_rule, :ca_import, :import then true
+      else                                                                                                                                                                                                                                                                                                                                                                                                             false
       end
     end
 

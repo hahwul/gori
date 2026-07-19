@@ -575,7 +575,7 @@ module Gori::Tui
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit_q, Theme.text_bright, width: {rect.w - prefix.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright))
+          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD))
         return
       end
       rx = rect.right - 1
@@ -589,7 +589,7 @@ module Gori::Tui
         # The committed query stays highlighted — this readout is what you scan to
         # check how the active filter is actually being read.
         qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text),
+        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD),
           Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         screen.text(rect.x + 1, rect.y, "/ filter  ·  severity:  status:open  status:closed  host:", Theme.muted, width: left_w)

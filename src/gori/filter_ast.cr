@@ -125,7 +125,8 @@ module Gori
         word_len = raw.size - lead - trail
         text = String.build { |io| chars[lead, chars.size - lead - trail].each { |c| io << c[0] } }
         unless text.empty?
-          acc << Lexeme.new(word_tok(text, quoted_any), word_term(text, raw[lead, word_len]),
+          acc << Lexeme.new(word_tok(text, quoted_any),
+            word_term(text, raw[lead, word_len], chars[lead][1]),
             at + lead, word_len)
         end
 
@@ -147,9 +148,15 @@ module Gori
     end
 
     # A leading `-` negates, but only with something after it — a lone `-` is a word
-    # (the backends that free-text it have always done so).
-    private def self.word_term(text : String, source : String) : Term
-      if text.starts_with?('-') && text.size > 1
+    # (the backends that free-text it have always done so) — and only when the `-`
+    # itself was typed OUTSIDE quotes, so `"-a"` searches for the literal text `-a`
+    # exactly as `"AND"` searches for the literal word. The test is the QUOTED FLAG OF
+    # THAT ONE CHARACTER, not `quoted_any`: `-host:"my host"` quotes only the value and
+    # must still negate. This is the single place negation is decided — `word_spans`
+    # paints from the Term it produces rather than re-deriving the rule, so the colour
+    # cannot drift from the parse.
+    private def self.word_term(text : String, source : String, lead_quoted : Bool) : Term
+      if !lead_quoted && text.starts_with?('-') && text.size > 1
         Term.new(text[1..], source, true)
       else
         Term.new(text, source, false)
@@ -228,9 +235,21 @@ module Gori
           pos += 1
         end
         break if pos >= lx.size || lx[pos].tok.or? || lx[pos].tok.r_paren?
+        before = pos
         node, pos = parse_unary(lx, pos)
-        break unless node
-        children << node
+        if node
+          children << node
+        elsif pos == before
+          # No node AND no progress: the dangling-`)` case parse_primary leaves for the
+          # enclosing group. Anything else would spin here.
+          break
+        end
+        # A nil node that DID consume input is an empty group (`()`, `("")`, `(AND)`) or
+        # a `NOT` over one. Skip just that group and keep going — breaking here would
+        # silently discard every remaining term in the chain, turning `host:a () x:1`
+        # into a bare `host:a` that no diagnostic could see (the dropped lexemes never
+        # reach `analyze`, so it still reported `clean?`). On a security proxy a filter
+        # that quietly BROADENS is the dangerous direction.
       end
       return {nil, pos} if children.empty?
       {children.size == 1 ? children.first : AndNode.new(children), pos}
@@ -280,6 +299,52 @@ module Gori
       end
     end
 
+    # Pull the terms a backend handles ITSELF out of a query, returning them plus the
+    # residual for the normal parser. For a surface that owns a field the shared backend
+    # knows nothing about — Sitemap's `tag:`, which has no SQL column and filters the
+    # built TREE rather than the rows — the alternative is re-tokenising with
+    # `String#split`, which sees no quotes, no parens and no `-`/`NOT`, so `tag:"my tag"`
+    # tore in half and `NOT tag:done` INCLUDED what it was asked to exclude.
+    #
+    # Cutting from the same lexer means a hand-rolled field gets the grammar's quoting
+    # and negation for free. It does NOT get the boolean structure: the residual is
+    # rejoined with spaces, so extracted terms end up ANDed with whatever is left.
+    # Callers that care must say so (see SitemapView's tag note).
+    #
+    # NOTE: iterated by index rather than `each` — `yield` inside a block is what the
+    # Crystal compiler refuses here.
+    def self.partition(query : String, & : Term -> Bool) : {Array(Term), String}
+      taken = [] of Term
+      kept = [] of String
+      lexemes = lex(query)
+      i = 0
+      while i < lexemes.size
+        # A run of NOT keywords sitting directly before a term desugars ONTO that term —
+        # `parse_unary` does exactly this — and the desugaring happens at parse time, not
+        # in the lexer, so a lexeme-level scan would hand back `tag:done` unnegated and
+        # leave a bare `NOT` dangling in the residual. Take the run with the term.
+        run = 0
+        while i + run < lexemes.size && lexemes[i + run].tok.not?
+          run += 1
+        end
+        nxt = lexemes[i + run]?
+        if run > 0 && nxt && (nt = nxt.term) && yield nt
+          taken << (run.odd? ? nt.negated : nt)
+          i += run + 1
+          next
+        end
+        lx = lexemes[i]
+        t = lx.term
+        if t && yield t
+          taken << t
+        else
+          kept << query[lx.start, lx.size]
+        end
+        i += 1
+      end
+      {taken, kept.join(' ')}
+    end
+
     # --- syntax highlighting -------------------------------------------------
 
     enum SpanKind
@@ -300,7 +365,16 @@ module Gori
     #
     # Spans are ordered and non-overlapping, but need not cover every character
     # (whitespace between terms is skipped); callers fill gaps with their base colour.
-    def self.spans(query : String) : Array(Span)
+    #
+    # `seps` is which characters this BACKEND accepts as a field separator, and it is
+    # not decoration: only QL implements the `~` regex operator, so painting `title~x`
+    # as a field in the Issues bar would advertise a match that backend will never
+    # perform (it free-texts the whole token instead). Structure is shared; the operator
+    # set is not, so the caller states it. See `SEPS_FIELD` / `SEPS_FIELD_REGEX`.
+    SEPS_FIELD       = ":"
+    SEPS_FIELD_REGEX = ":~"
+
+    def self.spans(query : String, seps : String = SEPS_FIELD_REGEX) : Array(Span)
       acc = [] of Span
       lex(query).each do |lexeme|
         case lexeme.tok
@@ -309,21 +383,21 @@ module Gori
         when .and?, .or?, .not?
           acc << Span.new(lexeme.start, lexeme.size, SpanKind::Operator)
         else
-          word_spans(query, lexeme, acc)
+          word_spans(query, lexeme, acc, seps)
         end
       end
       acc
     end
 
-    # Index of the `:`/`~` that makes `[from, to)` a field term, or nil for free text.
+    # Index of the separator that makes `[from, to)` a field term, or nil for free text.
     # Needs at least one character of field name before it, and a quote appearing first
     # means the whole thing is a quoted phrase rather than a `field:value`.
-    private def self.field_sep(query : String, from : Int32, to : Int32) : Int32?
+    private def self.field_sep(query : String, from : Int32, to : Int32, seps : String) : Int32?
       j = from
       while j < to
         ch = query[j]
         return nil if ch == '"'
-        return j if (ch == ':' || ch == '~') && j > from
+        return j if seps.includes?(ch) && j > from
         j += 1
       end
       nil
@@ -331,16 +405,19 @@ module Gori
 
     # Sub-classify one word: an optional `-`, an optional `field:`/`field~` prefix, then
     # the remainder with any quote marks called out.
-    private def self.word_spans(query : String, lexeme : Lexeme, acc : Array(Span)) : Nil
+    private def self.word_spans(query : String, lexeme : Lexeme, acc : Array(Span), seps : String) : Nil
       s = lexeme.start
       e = s + lexeme.size
       i = s
-      if query[i]? == '-' && lexeme.size > 1
+      # Ask the lexeme whether it negated rather than re-reading the `-` off the source:
+      # re-deriving is how the colour drifts from the parse (`-"` looks negated but is a
+      # literal dash; `"-a"` looks literal but used to negate).
+      if lexeme.term.try(&.negate?)
         acc << Span.new(i, 1, SpanKind::Operator) # `-x` is `NOT x`; colour them alike
         i += 1
       end
 
-      sep = field_sep(query, i, e)
+      sep = field_sep(query, i, e, seps)
       if sep
         acc << Span.new(i, sep - i + 1, SpanKind::Field)
         i = sep + 1

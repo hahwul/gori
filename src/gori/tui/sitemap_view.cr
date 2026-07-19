@@ -101,7 +101,7 @@ module Gori::Tui
       # reject it (empty tree + a note) rather than fall through to a match-all search
       # that shows the WHOLE sitemap behind an "active" filter. A tag-only query has a
       # blank residual, so reject_empty? is false and the tag filter still applies below.
-      if QL.reject_empty?(residual, residual_filter)
+      if residual_has_terms?(residual) && QL.reject_empty?(residual, residual_filter)
         @hosts = [] of Node
         @visible_cache = nil
         @selected = 0
@@ -195,13 +195,22 @@ module Gori::Tui
       return nil unless target
       want_host, want_path = target
       return nil if want_path.empty? || want_path.includes?(Sitemap::FOLD_SEP)
-      return nil unless idx = want_path.rindex('/')
-      parent = want_path[0, idx] # "" for a top-level node: its parent is the host row
       rows.each_with_index do |row, i|
-        next unless row.node.grouped && row.node.fold_parent == parent
+        # Ask which fold actually SWALLOWED this row, rather than which folds share its
+        # parent. A parent commonly holds both an id fold and a numeric fold, and
+        # `fold_templates!` appends before `group_sequences!` does — so matching on the
+        # parent alone landed the cursor on the {hex} fold when a numeric run collapsed.
+        next unless row.node.grouped && row.node.children.any? { |c| encloses?(c.path, want_path) }
         return i if host_label_for_row(rows, i) == want_host
       end
       nil
+    end
+
+    # Is `want` the folded node itself, or something beneath it? (Prefix-compared without
+    # building a "#{path}/" string per candidate — this runs per row on every reload.)
+    private def encloses?(path : String, want : String) : Bool
+      return true if path == want
+      want.starts_with?(path) && want[path.size]? == '/'
     end
 
     private def host_label_for_row(rows : Array(VisibleRow), idx : Int32) : String
@@ -219,32 +228,41 @@ module Gori::Tui
     # as "no endpoints". Operates on the residual (tag: terms are handled separately).
     private def query_note_for(residual : String, filter : QL::Filter) : String?
       return nil if residual.blank?
-      return "invalid filter — no valid terms" if QL.reject_empty?(residual, filter)
+      return "invalid filter — no valid terms" if residual_has_terms?(residual) && QL.reject_empty?(residual, filter)
       bad = QL.invalid_regex_terms(residual)
       bad.empty? ? nil : "invalid regex in #{bad.first}"
     end
 
-    # Split `tag:`/`-tag:` tokens out of the query (whitespace-tokenised, matching
-    # QL.parse). Returns positive + negative keywords (lowercased) and the residual
-    # query for QL.parse.
+    # Split `tag:` terms out of the query. Cut with the SHARED lexer, not `String#split`:
+    # hand-tokenising saw no quotes (`tag:"my tag"` became `tag:"my` + `tag"`) and no
+    # `NOT` (`NOT tag:done` filed `done` as a POSITIVE and then blanked the tree on the
+    # leftover `NOT`), while the bar above it was already highlighting all of that as
+    # real grammar. Negation now rides the same `Term#negate?` every other filter uses,
+    # so `-tag:x` and `NOT tag:x` are finally the same thing here too.
     private def split_tag_terms(query : String) : {Array(String), Array(String), String}
       positives = [] of String
       negatives = [] of String
-      residual = [] of String
-      query.split.each do |tok|
-        if (v = tag_token_value(tok, "tag:")) && !v.empty?
-          positives << v.downcase
-        elsif (v = tag_token_value(tok, "-tag:")) && !v.empty?
-          negatives << v.downcase
-        else
-          residual << tok
-        end
-      end
-      {positives, negatives, residual.join(' ')}
+      # A half-typed `tag:` (no value yet) stays in the residual, exactly as before, so
+      # the tree doesn't blank out mid-keystroke.
+      taken, residual = FilterAst.partition(query) { |t| !tag_token_value(t.text).nil? }
+      taken.each { |t| (t.negate? ? negatives : positives) << tag_token_value(t.text).not_nil! }
+      {positives, negatives, residual}
     end
 
-    private def tag_token_value(tok : String, prefix : String) : String?
-      tok.downcase.starts_with?(prefix) ? tok[prefix.size..] : nil
+    # `reject_empty?` reads a non-blank query that compiled to nothing as "every term was
+    # invalid". That is right for what the USER typed, but the residual here is what is
+    # LEFT after the tag terms were cut out, so `tag:a OR tag:b` handed it the bare word
+    # `OR` — no terms at all — and the whole sitemap blanked behind an "invalid filter"
+    # note. Only a residual that still carries a term can be invalid.
+    private def residual_has_terms?(residual : String) : Bool
+      !FilterAst.terms(FilterAst.parse(residual)).empty?
+    end
+
+    # The keyword of a `tag:x` term, or nil if this isn't one (or has no value yet).
+    private def tag_token_value(text : String) : String?
+      return nil unless text.downcase.starts_with?("tag:")
+      v = text[4..].downcase
+      v.empty? ? nil : v
     end
 
     # Prune the tree to tag matches: a node survives a positive term if it (or an

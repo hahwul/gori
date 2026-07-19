@@ -202,9 +202,13 @@ module Gori::Tui
     # preview of how the query will be PARSED: a lowercase `or`, a quoted "AND", and a
     # `(` sitting inside a value all stay plain, because none of them group anything.
     # Characters no span covers (the whitespace between terms) keep `base`.
-    def self.filter_query(query : String, base : Color = Theme.text) : Array(Color)
+    # `seps` must match what the BACKEND behind this bar actually splits on — only QL
+    # implements `~`, so the four bars that don't pass `SEPS_FIELD` and `title~admin`
+    # stays plain there, because that is how it will be matched (as free text).
+    def self.filter_query(query : String, base : Color = Theme.text,
+                          seps : String = FilterAst::SEPS_FIELD_REGEX) : Array(Color)
       colors = Array(Color).new(query.size, base)
-      FilterAst.spans(query).each do |span|
+      FilterAst.spans(query, seps).each do |span|
         fg = case span.kind
              in .operator? then Theme.syn_keyword
              in .paren?    then Theme.syn_keyword
