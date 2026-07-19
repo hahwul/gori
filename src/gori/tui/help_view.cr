@@ -128,7 +128,7 @@ module Gori::Tui
         Item.new("^B", "reveal whitespace"),
       ]},
       {"OTHER TABS", [
-        Item.new("Sitemap", "↑/↓ · / filter · ↵/→ expand · t tag · g group · ⇧S scope"),
+        Item.new("Sitemap", "↑/↓ · / filter · ↵/→ expand · t tag · g fold · ⇧S scope"),
         Item.new("Issues", "detail notes: i/↵ edit · x line · ⇧select · y copy · space cmds · ↑/↓ links"),
         Item.new("Probe", "↑/↓ ↵ open · m mode · c dismiss · a all · / filter · ⇧S scope · space cmds"),
         Item.new("Notes", "i/↵ edit · x line · ⇧arrows select · y copy · space cmds (Copy selected when highlighted)"),

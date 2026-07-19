@@ -374,6 +374,38 @@ describe Gori::CLI::Output do
     txt.should_not contain("1010") # a folded child is hidden in the collapsed text tree
   end
 
+  it "shows one representative subtree under an id fold in the text tree" do
+    # A numeric fold collapses whole; an ID fold must not, or /users/<uuid>/orders and
+    # /settings — real route structure, not noise — vanish from the default report.
+    hosts = Gori::Sitemap.build([
+      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678/orders"},
+      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678/settings"},
+      {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00/orders"},
+    ])
+    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+    txt = Gori::CLI::Output.sitemap_text(hosts)
+    # No verbs on the fold: /users/<uuid> itself was never requested here, only its
+    # children were — so the fold correctly stands for a folder, not an endpoint.
+    txt.should contain("{uuid}  (2 values)\n")
+    txt.should contain("orders")   # route shape below the id survives
+    txt.should contain("settings") # ...from ONE representative child
+    txt.should_not contain("3f2a8b1c")
+  end
+
+  it "shows the verbs a fold stands in for when the ids are themselves endpoints" do
+    hosts = Gori::Sitemap.build([
+      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
+      {"h", "PATCH", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
+      {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+    ])
+    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
+    hosts.each { |h| h.endpoints = Gori::Sitemap.endpoint_count(h) }
+    txt = Gori::CLI::Output.sitemap_text(hosts)
+    txt.should contain("{uuid}  (2 values)  [GET PATCH]")
+    txt.should contain("h  (2 paths)") # the fold did not inflate the endpoint count
+  end
+
   it "lists every endpoint flat in the paths format (numeric folding irrelevant)" do
     hosts = Gori::Sitemap.build([
       {"acme.test", "GET", "/api/users"},
@@ -397,6 +429,50 @@ describe Gori::CLI::Output do
     users["methods"].as_a.map(&.as_s).should eq(["GET"])
 
     Gori::CLI::Output.sitemap_json([] of Gori::Sitemap::Node).should eq("[]")
+  end
+
+  it "marks an id fold in JSON with a template class, omits its path, and keeps children" do
+    hosts = Gori::Sitemap.build([
+      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
+      {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+    ])
+    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
+    json = JSON.parse(Gori::CLI::Output.sitemap_json(hosts)).as_a
+    users = json[0]["children"].as_a.find! { |c| c["label"].as_s == "users" }
+    fold = users["children"].as_a.find! { |c| c["label"].as_s == "{uuid}" }
+    fold["grouped"].as_bool.should be_true
+    fold["template"].as_s.should eq("{uuid}")
+    fold["path"]?.should be_nil                         # synthetic: a fold has no path
+    fold["methods"].as_a.map(&.as_s).should eq(["GET"]) # union of its children's verbs
+    kids = fold["children"].as_a
+    kids.size.should eq(2)
+    kids.map(&.["path"].as_s).sort!.should eq([
+      "/users/3f2a8b1c-1234-5678-9abc-def012345678",
+      "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00",
+    ])
+  end
+
+  it "still lists every folded endpoint flat in the paths format" do
+    hosts = Gori::Sitemap.build([
+      {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
+      {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+    ])
+    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
+    Gori::CLI::Output.sitemap_paths(hosts).should eq(
+      "GET  h/users/3f2a8b1c-1234-5678-9abc-def012345678\n" \
+      "GET  h/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00\n")
+  end
+
+  it "does not leak a host tag onto a fold" do
+    # Host rows are taggable with path "" — the same value a synthetic fold carries.
+    hosts = Gori::Sitemap.build([
+      {"h", "GET", "/u/3f2a8b1c-1234-5678-9abc-def012345678"},
+      {"h", "GET", "/u/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+    ])
+    hosts.each { |h| Gori::Sitemap.fold_templates!(h) }
+    Gori::Sitemap.stamp_tags!(hosts, { {"h", ""} => "whole host" })
+    u = hosts.first.children.find! { |c| c.label == "u" }
+    u.children.find! { |c| c.label == "{uuid}" }.tag.should be_nil
   end
 end
 

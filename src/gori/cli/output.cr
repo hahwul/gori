@@ -333,8 +333,16 @@ module Gori
           sitemap_node_label(child, io)
           io << '\n'
           # A folded numeric group renders collapsed (its values stay in the chip),
-          # matching the TUI default; descend into every other node.
-          sitemap_text_children(child, prefix + (i == last ? "   " : "│  "), io) unless child.grouped
+          # matching the TUI default. An ID fold instead descends into ONE representative
+          # child, so route structure BELOW the id (/users/{uuid}/orders) survives — the
+          # ids are noise, but what hangs off them is the report's whole point.
+          nested = prefix + (i == last ? "   " : "│  ")
+          if child.template?
+            rep = child.children.find { |c| !c.children.empty? }
+            sitemap_text_children(rep, nested, io) if rep
+          elsif !child.grouped
+            sitemap_text_children(child, nested, io)
+          end
         end
       end
 
@@ -342,6 +350,8 @@ module Gori
         io << term_safe(node.label)
         if node.grouped
           io << "  (" << node.children.size << " values)"
+          # The verbs the fold stands in for, so a collapsed row still reads as an endpoint.
+          io << "  [" << term_safe(node.fold_methods.join(' ')) << ']' unless node.fold_methods.empty?
         elsif !node.methods.empty?
           io << "  [" << term_safe(node.methods.join(' ')) << ']'
         end
@@ -369,11 +379,13 @@ module Gori
       end
 
       # The endpoint tree as JSON: an array of host objects, each `{host, endpoints,
-      # tag?, children}`. A child node is `{label, path, methods?, grouped?, tag?,
-      # children?}`. The stable, documented machine contract. Unlike the text tree
-      # (which renders a folded `grouped` node collapsed), JSON keeps the fold's
-      # children nested under it — the complete tree, with `grouped:true` as the hint
-      # so a consumer can collapse them itself.
+      # tag?, children}`. A child node is `{label, path, methods?, tag?, children?}`,
+      # or for a synthetic fold `{label, grouped:true, template?, methods?, children}` — a
+      # fold has no path, `template` ("{uuid}"/"{hex}"/"{date}") marks an ID fold as opposed
+      # to a numeric run, and its `methods` are the UNION of its children's verbs. The stable, documented machine contract. Unlike the text tree
+      # (which collapses a numeric fold and shows one representative under an ID fold),
+      # JSON always keeps every child nested — the complete tree, with `grouped` as the
+      # hint so a consumer can collapse it itself.
       def self.sitemap_json(hosts : Array(Sitemap::Node)) : String
         JSON.build do |j|
           j.array { hosts.each { |h| sitemap_host_json(j, h) } }
@@ -394,11 +406,20 @@ module Gori
       private def self.sitemap_node_json(j : JSON::Builder, node : Sitemap::Node) : Nil
         j.object do
           j.field "label", node.label
-          j.field "path", node.path
-          unless node.methods.empty?
-            j.field("methods") { j.array { node.methods.each { |m| j.string(m) } } }
+          # A fold is synthetic — its `path` is always "" and carries no meaning, so it is
+          # omitted rather than emitted as an empty string. `template` names the id class
+          # so a consumer can tell an id fold from a numeric run without parsing labels.
+          if node.grouped
+            j.field "grouped", true
+            j.field "template", node.label if node.template?
+          else
+            j.field "path", node.path
           end
-          j.field "grouped", true if node.grouped
+          # On a fold these are the union of its children's verbs, not its own.
+          verbs = node.grouped ? node.fold_methods : node.methods
+          unless verbs.empty?
+            j.field("methods") { j.array { verbs.each { |m| j.string(m) } } }
+          end
           if t = node.tag
             j.field "tag", t
           end

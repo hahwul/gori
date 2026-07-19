@@ -284,6 +284,128 @@ describe Gori::Tui::SitemapView do
     end
   end
 
+  it "folds uuid siblings into a collapsed {uuid}; `g` unfolds it" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
+      capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
+
+      view = SitemapView.new
+      view.reload(store)
+      b = MemoryBackend.new(90, 24)
+      view.render(Screen.new(b), Rect.new(0, 0, 90, 24))
+      b.contains?("{uuid}").should be_true
+      b.contains?("2 values").should be_true
+      b.contains?("GET").should be_true       # the fold's stand-in verbs, while collapsed
+      b.contains?("3f2a8b1c").should be_false # folded away while collapsed
+
+      view.toggle_grouping
+      view.reload(store)
+      b2 = MemoryBackend.new(90, 24)
+      view.render(Screen.new(b2), Rect.new(0, 0, 90, 24))
+      b2.contains?("{uuid}").should be_false
+      b2.contains?("3f2a8b1c").should be_true # every literal id back
+    end
+  end
+
+  it "keeps an expanded fold open across reload (live capture poll)" do
+    # Regression: apply_expand_depth! force-collapses every fold on every rebuild, and the
+    # expand-state walk used to skip synthetic nodes entirely — so a fold the user opened
+    # snapped shut on the next ~750ms poll and its subtree was unreadable during capture.
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
+      capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.move(1) # users
+      view.move(1) # {uuid}
+      view.expand
+
+      b = MemoryBackend.new(90, 24)
+      view.render(Screen.new(b), Rect.new(0, 0, 90, 24))
+      b.contains?("3f2a8b1c").should be_true # open
+
+      capture(store, "acme.test", "GET", "/other") # external-change style tree growth
+      view.reload(store)
+
+      b2 = MemoryBackend.new(90, 24)
+      view.render(Screen.new(b2), Rect.new(0, 0, 90, 24))
+      b2.contains?("3f2a8b1c").should be_true # STILL open after the poll
+    end
+  end
+
+  it "keeps the cursor on a fold row across reload" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
+      capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.move(1)
+      view.move(1) # park on the {uuid} fold
+      sel = view.@selected
+
+      # Sorts AFTER /users, so the fold keeps its row index and only the anchor is on trial.
+      capture(store, "acme.test", "GET", "/zzz")
+      view.reload(store)
+
+      view.@selected.should eq(sel) # not thrown back to the host row
+    end
+  end
+
+  it "lands on the enclosing fold when a new sibling swallows the selected row" do
+    # At the id-fold threshold this fires during ordinary browsing: the SECOND uuid of a
+    # kind materialises the fold and hides the row the cursor was sitting on.
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.move(1) # users
+      view.move(1) # the literal uuid (no fold yet — one is below the threshold)
+
+      capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
+      view.reload(store)
+
+      view.@selected.should eq(2) # the {uuid} fold that swallowed it, not row 0
+    end
+  end
+
+  it "resolves a fold to a descendant for Repeater and to the container for Discover" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
+      capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.move(1)
+      view.move(1) # the {uuid} fold
+
+      # Repeater/Sequencer need a CONCRETE target (exact equality on flows.target).
+      ep = view.selected_endpoint.should_not be_nil
+      ep[:target].should start_with("/users/")
+      ep[:target].should_not eq("/users")
+      ep[:method].should eq("GET")
+
+      # Discover scans a subtree: "under /users", not under one uuid.
+      view.selected_endpoint(:container).should_not be_nil
+      view.selected_endpoint(:container).not_nil![:target].should eq("/users")
+    end
+  end
+
+  it "refuses to tag a template fold" do
+    tmp_store do |store|
+      capture(store, "acme.test", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678")
+      capture(store, "acme.test", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00")
+
+      view = SitemapView.new
+      view.reload(store)
+      view.move(1)
+      view.move(1) # the {uuid} fold
+      view.start_tag.should be_false
+    end
+  end
+
   it "leaves a short numeric sequence ungrouped" do
     tmp_store do |store|
       (1..5).each { |i| capture(store, "acme.test", "GET", "/a/#{i}") } # 5 <= threshold
