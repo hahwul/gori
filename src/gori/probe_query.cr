@@ -1,4 +1,5 @@
 require "./store"
+require "./filter_ast"
 
 module Gori
   module Probe
@@ -17,44 +18,50 @@ module Gori
       private record Term, kind : Symbol, op : Symbol, text : String, negate : Bool
 
       def self.parse(query : String) : Filter
-        terms = [] of Term
-        query.split.each do |raw|
-          next if raw.empty?
-          negate = false
-          tok = raw
-          if tok.starts_with?('-') && tok.size > 1
-            negate = true
-            tok = tok[1..]
-          end
-          terms << build_term(tok, negate)
-        end
-        new(terms)
+        new(FilterAst.build(FilterAst.parse(query)) { |t| build_term(t) })
       end
 
-      def initialize(@terms : Array(Term))
+      def initialize(@tree : FilterAst::Tree(Term)?)
       end
 
       def empty? : Bool
-        @terms.empty?
+        @tree.nil?
       end
 
       # True when the query explicitly constrains status (status:/st:, possibly negated),
       # so the list view skips its default open-only restriction and honours the user's
-      # explicit choice of statuses instead.
+      # explicit choice of statuses instead. Anywhere in the tree counts — a status term
+      # inside an OR branch is still the user asking about status.
       def has_status_term? : Bool
-        @terms.any? { |t| t.kind == :status }
+        @tree.try(&.leaves.any? { |t| t.kind == :status }) || false
       end
 
       def apply(issues : Array(Store::ProbeIssue)) : Array(Store::ProbeIssue)
-        return issues if @terms.empty?
+        return issues if @tree.nil?
         issues.select { |i| matches?(i) }
       end
 
       def matches?(i : Store::ProbeIssue) : Bool
-        @terms.all? { |t| match_term(t, i) }
+        tree = @tree
+        return true unless tree
+        eval(tree, i)
       end
 
-      private def self.build_term(tok : String, negate : Bool) : Term
+      private def eval(tree : FilterAst::Tree(Term), i : Store::ProbeIssue) : Bool
+        case tree.op
+        in .leaf? then match_term(tree.leaf, i)
+        in .not?  then !eval(tree.children.first, i)
+        in .and?  then tree.children.all? { |c| eval(c, i) }
+        in .or?   then tree.children.any? { |c| eval(c, i) }
+        end
+      end
+
+      # Never drops a term; an empty value is resolved in match_term, which here makes
+      # even a NEGATED empty term (`-host:`) filter nothing — deliberately unlike
+      # Issues::Filter, so a half-typed negation can't blank the whole list.
+      private def self.build_term(t : FilterAst::Term) : Term
+        tok = t.text
+        negate = t.negate?
         if colon = tok.index(':')
           field = tok[0...colon].downcase
           value = tok[(colon + 1)..]

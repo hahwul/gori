@@ -53,8 +53,11 @@ describe Gori::QL do
   end
 
   it "compiles OR groups and negation" do
+    # The OR now parenthesises as a whole rather than wrapping each side (a shape
+    # change from the AST compiler; the predicate is identical). Every other clause
+    # shape is byte-for-byte what the old flat parser emitted.
     f = Gori::QL.parse("method:get OR -host:cdn")
-    f.sql.should eq("(upper(method) = ?) OR (NOT (lower(host) LIKE ? ESCAPE '\\'))")
+    f.sql.should eq("(upper(method) = ? OR NOT (lower(host) LIKE ? ESCAPE '\\'))")
     f.args.should eq(["GET", "%cdn%"])
   end
 
@@ -417,6 +420,68 @@ describe "Gori::Store#search (QL)" do
 
     it "flags each bad term across OR groups" do
       Gori::QL.invalid_regex_terms("body~[a OR path~[b").should eq(["body~[a", "path~[b"])
+    end
+
+    it "reaches terms nested inside parentheses and NOT" do
+      Gori::QL.invalid_regex_terms("(host:a OR body~[bad)").should eq(["body~[bad"])
+      Gori::QL.invalid_regex_terms("NOT (path~[bad)").should eq(["path~[bad"])
+    end
+  end
+
+  describe ".analyze" do
+    it "reports terms as applied or silently ignored" do
+      a = Gori::QL.analyze("host:beta status:>=foo")
+      a.applied.should eq(["host:beta"])
+      a.ignored.should eq(["status:>=foo"]) # a bad numeric is DROPPED, broadening the result
+      a.clean?.should be_false
+    end
+
+    it "counts operators and grouping as structure, not as terms" do
+      a = Gori::QL.analyze("(host:a AND host:b) OR NOT host:c")
+      a.applied.should eq(["host:a", "host:b", "host:c"])
+      a.ignored.should be_empty
+      a.clean?.should be_true
+    end
+
+    it "echoes a term exactly as typed, quotes and all" do
+      Gori::QL.analyze(%(-host:"my host")).applied.should eq([%(-host:"my host")])
+    end
+  end
+
+  describe "boolean structure" do
+    # Grouping has to change the ANSWER, not just the SQL text: without parens AND
+    # binds tighter, so the two queries below are genuinely different predicates.
+    it "binds AND tighter than OR unless parenthesised" do
+      loose = Gori::QL.parse("host:a OR host:b status:301")
+      loose.sql.should eq("(lower(host) LIKE ? ESCAPE '\\' OR " \
+                          "(lower(host) LIKE ? ESCAPE '\\' AND status = ?))")
+      grouped = Gori::QL.parse("(host:a OR host:b) status:301")
+      grouped.sql.should eq("((lower(host) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\') " \
+                            "AND status = ?)")
+    end
+
+    it "negates a whole group with NOT" do
+      f = Gori::QL.parse("NOT (host:a OR host:b)")
+      f.sql.should eq("(NOT ((lower(host) LIKE ? ESCAPE '\\' OR lower(host) LIKE ? ESCAPE '\\')))")
+      f.args.should eq(["%a%", "%b%"])
+    end
+
+    it "spells AND explicitly for the same predicate as whitespace" do
+      Gori::QL.parse("host:a AND status:301").sql.should eq(Gori::QL.parse("host:a status:301").sql)
+    end
+
+    it "keeps a quoted value in one term, spaces included" do
+      f = Gori::QL.parse(%(host:"my host"))
+      f.sql.should eq("(lower(host) LIKE ? ESCAPE '\\')")
+      f.args.should eq(["%my host%"])
+    end
+
+    it "leaves a parenthesis inside a value literal (no escaping needed)" do
+      # Regression guard: `path:/a(b)` parsed as one token before the grammar grew
+      # parens, and must keep doing so.
+      f = Gori::QL.parse("path:/a(b)")
+      f.sql.should eq("(lower(target) LIKE ? ESCAPE '\\')")
+      f.args.should eq(["%/a(b)%"])
     end
   end
 end

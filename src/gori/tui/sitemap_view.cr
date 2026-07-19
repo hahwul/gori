@@ -34,7 +34,7 @@ module Gori::Tui
     # suggestion row at a cold start (already editing, nothing to Tab-complete yet) and
     # spells out that bare words are a free-text search. Example values double as cues.
     FILTER_HINT = "/ filter  ·  host:  method:  path:  status:>=500  proto:ws  size:>10000  dur:>500  header:  body~regex  tag:"
-    QUERY_HINT  = "fields:  host:  method:  path:  status:  proto:  scheme:  size:  dur:  header:  body:  tag:    ·    or type words to search"
+    QUERY_HINT  = "fields:  host:  method:  path:  status:  proto:  scheme:  size:  dur:  header:  body:  tag:    ·    AND OR NOT ( ) combine  ·  or type words to search"
 
     # Right-aligned column widths: path memo sits left of the method/aside cluster.
     TAG_COL_W     = 16
@@ -796,7 +796,8 @@ module Gori::Tui
         prefix = "filter › "
         screen.text(rect.x + 1, rect.y, prefix, Theme.accent)
         base = rect.x + 1 + prefix.size
-        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2)
+        screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright, width: rect.w - prefix.size - 2,
+          colors: Highlight.filter_query(@query, Theme.text_bright))
         return
       end
 
@@ -823,7 +824,11 @@ module Gori::Tui
 
       left_w = {(group_shown ? gx : scope_x) - (rect.x + 1) - 1, 0}.max
       if !@query.blank?
-        screen.text(rect.x + 1, rect.y, ": #{@query}", Theme.text, width: left_w)
+        # The committed query stays highlighted — this readout is what you scan to
+        # check how the active filter is actually being read.
+        qx = screen.text(rect.x + 1, rect.y, ": ", Theme.muted, width: left_w)
+        screen.styled_text(qx, rect.y, @query, Highlight.filter_query(@query, Theme.text),
+          Theme.text, width: {rect.x + 1 + left_w - qx, 0}.max)
       else
         # No QL query typed — whether or not a Scope lens is active. Surface the filter
         # affordance + fields rather than a bare "(in-scope only)": the Scope lens is

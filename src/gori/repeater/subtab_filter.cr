@@ -1,4 +1,5 @@
 require "uri"
+require "../filter_ast"
 
 module Gori
   module Repeater
@@ -61,35 +62,35 @@ module Gori
       private record Term, kind : Symbol, text : String, negate : Bool
 
       def self.parse(query : String) : SubtabFilter
-        terms = [] of Term
-        query.split.each do |raw|
-          next if raw.empty?
-          negate = false
-          tok = raw
-          if tok.starts_with?('-') && tok.size > 1
-            negate = true
-            tok = tok[1..]
-          end
-          terms << build_term(tok, negate)
-        end
-        new(terms)
+        new(FilterAst.build(FilterAst.parse(query)) { |t| build_term(t) })
       end
 
-      def initialize(@terms : Array(Term))
+      def initialize(@tree : FilterAst::Tree(Term)?)
       end
 
       def empty? : Bool
-        @terms.empty?
+        @tree.nil?
       end
 
-      # Keep input order; every term must match (AND). An empty filter passes all.
+      # An empty filter passes all; order is preserved.
       def apply(subjects : Array(Subject)) : Array(Subject)
-        return subjects if @terms.empty?
+        return subjects if @tree.nil?
         subjects.select { |s| matches?(s) }
       end
 
       def matches?(s : Subject) : Bool
-        @terms.all? { |t| match_term(t, s) }
+        tree = @tree
+        return true unless tree
+        eval(tree, s)
+      end
+
+      private def eval(tree : FilterAst::Tree(Term), s : Subject) : Bool
+        case tree.op
+        in .leaf? then match_term(tree.leaf, s)
+        in .not?  then !eval(tree.children.first, s)
+        in .and?  then tree.children.all? { |c| eval(c, s) }
+        in .or?   then tree.children.any? { |c| eval(c, s) }
+        end
       end
 
       # --- Tab-complete suggestions (History-style; in-memory over open sessions) ---
@@ -100,35 +101,19 @@ module Gori
       # it never suggests host:/method:); defaults to the full canonical set (Repeater).
       def self.suggestions(query : String, cx : Int32, subjects : Array(Subject),
                            fields : Array(String) = FIELDS) : Array(String)
-        token, _, _ = token_at(query, cx)
-        return [] of String if token.empty?
-        neg = token.starts_with?('-') && token.size > 1
-        core = neg ? token[1..] : token
-        neg_p = neg ? "-" : ""
-        if colon = core.index(':')
-          field_raw = core[0...colon]
+        cur = FilterAst.token_at(query, cx)
+        return [] of String if cur.core.empty?
+        if colon = cur.core.index(':')
+          field_raw = cur.core[0...colon]
           field = field_raw.downcase
-          prefix = core[(colon + 1)..]
+          prefix = FilterAst.unquote_prefix(cur.core[(colon + 1)..])
           # Strip a typed `#` on tags so `tag:#id` still suggests `tag:idor`.
           val_prefix = field == "tag" ? prefix.lstrip('#') : prefix
-          suggest_values(field, val_prefix, subjects).map { |v| "#{neg_p}#{field_raw}:#{v}" }
+          suggest_values(field, val_prefix, subjects)
+            .map { |v| "#{cur.prefix}#{field_raw}:#{FilterAst.quote(v)}" }
         else
-          fields.select(&.starts_with?(core.downcase)).map { |f| "#{neg_p}#{f}:" }
+          fields.select(&.starts_with?(cur.core.downcase)).map { |f| "#{cur.prefix}#{f}:" }
         end
-      end
-
-      # Bounds of the token under the caret (History's current_token_bounds shape).
-      def self.token_at(query : String, cx : Int32) : {String, Int32, Int32}
-        cx = cx.clamp(0, query.size)
-        s = cx
-        while s > 0 && query[s - 1] != ' '
-          s -= 1
-        end
-        e = cx
-        while e < query.size && query[e] != ' '
-          e += 1
-        end
-        {query[s...e], s, e}
       end
 
       # Host portion of a target URL for `host:` suggestions (falls back to the
@@ -157,7 +142,11 @@ module Gori
 
       # --- parsing -------------------------------------------------------------
 
-      private def self.build_term(tok : String, negate : Bool) : Term
+      # Never drops a term: an empty value (mid-typing `tag:`) stays and is handled by
+      # match_term, so the sub-tab strip doesn't blank out between keystrokes.
+      private def self.build_term(t : FilterAst::Term) : Term
+        tok = t.text
+        negate = t.negate?
         if colon = tok.index(':')
           field = tok[0...colon].downcase
           value = tok[(colon + 1)..].downcase

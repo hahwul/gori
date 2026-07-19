@@ -1,9 +1,11 @@
+require "./filter_ast"
+
 module Gori
   # An in-memory boolean filter that NARROWS what the Interceptor holds — the
-  # "conditional intercept" lens. It mirrors the QL surface (`field:value`, `OR`
-  # groups, `-`negation, bare free-text) but evaluates against a LIVE in-flight
-  # message at the hold gate, BEFORE anything is captured — so QL's SQL compilation
-  # can't be reused (there's no row to query yet). Supported fields:
+  # "conditional intercept" lens. It shares QL's grammar (FilterAst: AND/OR/NOT,
+  # parentheses, `-`negation, quoting, bare free-text) but evaluates against a LIVE
+  # in-flight message at the hold gate, BEFORE anything is captured — so QL's SQL
+  # compilation can't be reused (there's no row to query yet). Supported fields:
   #
   #   host:acme        substring of the host
   #   path:/api        substring of the request target (path+query)
@@ -49,64 +51,98 @@ module Gori
 
     EMPTY = new("")
 
+    # Completable field names, in the order the suggestion row offers them. This list is
+    # deliberately a strict SUBSET of History's QL fields — a hold gate has no row to
+    # query, so `body:`/`header:`/`size:`/`dur:` have nothing to match against. It must
+    # stay in lockstep with field_symbol below: completing a field this parser doesn't
+    # know would silently degrade the whole token to free text (see parse_term).
+    FIELDS = %w(host path method scheme status)
+
+    # Static value pools for the low-cardinality fields (mirrors History's). `host:`
+    # has no static pool — its candidates are injected by the caller (the TUI passes
+    # the store's DISTINCT hosts); `path:` has none at all, since paths are unbounded.
+    METHOD_VAL = %w(GET POST PUT PATCH DELETE HEAD OPTIONS QUERY)
+    SCHEME_VAL = %w(http https)
+    STATUS_VAL = %w(2xx 3xx 4xx 5xx >=400 >=500 200 301 302 401 403 404 500 502 503)
+
+    # Tab-complete candidates for the token under `cx`: field names until a `:` is
+    # typed, then that field's values. The grammar's punctuation is carried through by
+    # FilterAst::Cursor, so `-ho` → `-host:` and `(ho` → `(host:`. `hosts` is the
+    # caller-supplied host pool (already prefix-filtered by the store query). Empty when
+    # the caret sits on blank space, or on a token nothing matches (the human is then
+    # deliberately free-texting a word).
+    def self.suggestions(query : String, cx : Int32, hosts : Array(String) = [] of String) : Array(String)
+      cur = FilterAst.token_at(query, cx)
+      return [] of String if cur.core.empty?
+      if (colon = cur.core.index(':')) && colon > 0
+        field = cur.core[0...colon].downcase
+        prefix = FilterAst.unquote_prefix(cur.core[(colon + 1)..])
+        suggest_values(field, prefix, hosts).map { |v| "#{cur.prefix}#{field}:#{FilterAst.quote(v)}" }
+      else
+        FIELDS.select(&.starts_with?(cur.core.downcase)).map { |f| "#{cur.prefix}#{f}:" }
+      end
+    end
+
+    private def self.suggest_values(field : String, prefix : String, hosts : Array(String)) : Array(String)
+      p = prefix.downcase
+      values = case field
+               when "host"   then hosts
+               when "method" then METHOD_VAL
+               when "scheme" then SCHEME_VAL
+               when "status" then STATUS_VAL
+               else               return [] of String
+               end
+      values.select(&.downcase.starts_with?(p))
+    end
+
     getter source : String
 
+    @tree : FilterAst::Tree(Term)?
+
     def initialize(@source : String)
-      @groups = InterceptFilter.compile(@source) # OR of AND-groups (Array(Array(Term)))
+      # Compiled once here, so matching walks a ready tree — the hold gate evaluates
+      # one per in-flight message on the proxy path.
+      @tree = FilterAst.build(FilterAst.parse(@source)) { |t| InterceptFilter.parse_term(t) }
     end
 
     # No effective predicates → matches everything (the default "hold all" behaviour).
     def blank? : Bool
-      @groups.empty?
+      @tree.nil?
     end
 
-    # Match: OR across groups, AND within a group (mirrors QL.parse's grouping). An
-    # empty filter matches all. Called on the proxy hot path, so it allocates nothing.
+    # An empty filter matches all. Allocates nothing.
     def matches?(s : Subject) : Bool
-      groups = @groups
-      return true if groups.empty?
-      groups.any? { |group| group.all?(&.matches?(s)) }
+      tree = @tree
+      return true unless tree
+      eval(tree, s)
     end
 
-    # Parse a query into OR-separated AND-groups of Terms (the same shape QL.parse
-    # builds before it emits SQL). Empty-valued / unparsable terms are dropped; a
-    # group with no surviving terms is dropped; no groups → match-all.
-    protected def self.compile(query : String) : Array(Array(Term))
-      tokens = query.split
-      return [] of Array(Term) if tokens.empty?
-
-      groups = [[] of String]
-      tokens.each { |tok| tok == "OR" ? (groups << [] of String) : groups.last << tok }
-
-      compiled = [] of Array(Term)
-      groups.each do |group|
-        terms = [] of Term
-        group.each do |tok|
-          if term = parse_term(tok)
-            terms << term
-          end
-        end
-        compiled << terms unless terms.empty?
+    private def eval(tree : FilterAst::Tree(Term), s : Subject) : Bool
+      case tree.op
+      in .leaf? then tree.leaf.matches?(s)
+      in .not?  then !eval(tree.children.first, s)
+      in .and?  then tree.children.all? { |c| eval(c, s) }
+      in .or?   then tree.children.any? { |c| eval(c, s) }
       end
-      compiled
     end
 
-    private def self.parse_term(token : String) : Term?
-      negate = token.starts_with?('-')
-      token = token[1..] if negate
-      return nil if token.empty?
+    # Compile one grammar term. nil DROPS it (an empty value, e.g. `host:` mid-type),
+    # which folds up to match-all — so the queue doesn't blank out while typing.
+    protected def self.parse_term(term : FilterAst::Term) : Term?
+      text = term.text
+      return nil if text.empty?
 
-      colon = token.index(':')
+      colon = text.index(':')
       if colon && colon > 0
-        field = field_symbol(token[0...colon].downcase)
+        field = field_symbol(text[0...colon].downcase)
         # An unknown field → free-text the WHOLE token (mirrors QL / Issues::Filter), so a
         # typo'd field like `hsot:evil.com` searches literally instead of silently matching "evil.com".
-        return Term.new(:text, token, negate) if field == :text
-        value = token[(colon + 1)..]
+        return Term.new(:text, text, term.negate?) if field == :text
+        value = text[(colon + 1)..]
         return nil if value.empty?
-        Term.new(field, value, negate)
+        Term.new(field, value, term.negate?)
       else
-        Term.new(:text, token, negate)
+        Term.new(:text, text, term.negate?)
       end
     end
 

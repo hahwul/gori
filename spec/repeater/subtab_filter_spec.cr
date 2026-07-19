@@ -83,7 +83,11 @@ describe Gori::Repeater::SubtabFilter do
     it "suggests tag/name/host values from open sessions" do
       Repeater::SubtabFilter.suggestions("tag:", 4, list).should eq(["tag:idor", "tag:auth", "tag:done"])
       Repeater::SubtabFilter.suggestions("tag:i", 5, list).should eq(["tag:idor"])
-      Repeater::SubtabFilter.suggestions("name:", 5, list).should contain("name:orders probe")
+      # A value with a space is quoted, because the completion has to survive being
+      # re-parsed: bare `name:orders probe` would split into `name:orders` AND a
+      # free-text `probe` and match nothing.
+      Repeater::SubtabFilter.suggestions("name:", 5, list).should contain(%(name:"orders probe"))
+      filtered(%(name:"orders probe"), list).map(&.name).should eq(["orders probe"])
       Repeater::SubtabFilter.suggestions("host:api", 8, list).should eq(["host:api.example.com"])
     end
 

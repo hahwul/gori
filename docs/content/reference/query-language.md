@@ -60,17 +60,34 @@ header~set-cookie
 
 ## Combining Terms
 
-- Terms separated by spaces are **AND**-ed together.
-- Prefix a field with `-` to **negate** it.
-- `OR` separates alternative AND-groups.
-- A bare word (no `field:`) is free text over method, host, and path.
+- Terms separated by spaces are **AND**-ed together. `AND` may also be written out.
+- `OR` matches either side. `NOT` and a `-` prefix both negate.
+- Parentheses group. Precedence is `NOT` then `AND` then `OR`.
+- A bare word (no `field:`) is free text over method, host, and target.
 
 ```text
 host:example.com status:5xx           both must match
+host:api AND status:5xx               the same thing, spelled out
 method:POST -status:200               POST, but not 200
 host:a.com OR host:b.com              either host
+(host:a.com OR host:b.com) -path:/js  either host, no /js
+NOT (host:cdn OR host:static)         neither host
 login                                 free-text search
 ```
+
+`AND`, `OR` and `NOT` are recognised uppercase only, so searching for the words
+"and", "or" or "not" still works. Quote them to force a literal even in caps.
+
+Double quotes keep spaces inside one term:
+
+```text
+host:"my host"                        one host value, space and all
+"two words"                           free text for the whole phrase
+"OR"                                  the literal word, not the operator
+```
+
+A parenthesis inside a value stays literal, so `path:/a(b)` needs no escaping. A `(`
+only opens a group at the start of a term, and `)` only closes one at the end.
 
 ## Examples
 

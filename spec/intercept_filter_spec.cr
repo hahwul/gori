@@ -81,4 +81,58 @@ describe Gori::InterceptFilter do
     Gori::InterceptFilter.new("host:").blank?.should be_true
     Gori::InterceptFilter.new("host:").matches?(req).should be_true
   end
+
+  describe ".suggestions" do
+    it "completes field names, then that field's values" do
+      Gori::InterceptFilter.suggestions("me", 2).should eq(["method:"])
+      Gori::InterceptFilter.suggestions("s", 1).should eq(["scheme:", "status:"])
+      Gori::InterceptFilter.suggestions("method:P", 8).should eq(["method:POST", "method:PUT", "method:PATCH"])
+      Gori::InterceptFilter.suggestions("scheme:h", 8).should eq(["scheme:http", "scheme:https"])
+      Gori::InterceptFilter.suggestions("status:4", 8).should contain("status:4xx")
+    end
+
+    it "only offers fields this parser understands (no History-only body:/dur:)" do
+      Gori::InterceptFilter::FIELDS.should eq(%w(host path method scheme status))
+      Gori::InterceptFilter.suggestions("b", 1).should be_empty
+      Gori::InterceptFilter.suggestions("d", 1).should be_empty
+      # `path:` completes the field but has no value pool — paths are unbounded.
+      Gori::InterceptFilter.suggestions("pa", 2).should eq(["path:"])
+      Gori::InterceptFilter.suggestions("path:/ap", 8).should be_empty
+    end
+
+    it "takes host values from the injected pool and preserves a leading -" do
+      hosts = ["api.acme.test", "app.acme.test"]
+      Gori::InterceptFilter.suggestions("host:ap", 7, hosts).should eq(["host:api.acme.test", "host:app.acme.test"])
+      Gori::InterceptFilter.suggestions("-host:ap", 8, hosts).should eq(["-host:api.acme.test", "-host:app.acme.test"])
+      Gori::InterceptFilter.suggestions("-me", 3).should eq(["-method:"])
+    end
+
+    it "completes the token under the caret, not the whole query" do
+      # Caret sits inside "me" (offset 15), with a trailing term after it.
+      q = "host:acme.test me path:/x"
+      Gori::InterceptFilter.suggestions(q, 17).should eq(["method:"])
+      cur = Gori::FilterAst.token_at(q, 17)
+      {cur.core, cur.start, cur.stop}.should eq({"me", 15, 17})
+    end
+
+    it "carries an opening paren through the completion" do
+      # Grouping punctuation must survive Tab, or completing inside `(host:a OR (me`
+      # would silently drop the group the user just opened.
+      Gori::InterceptFilter.suggestions("(me", 3).should eq(["(method:"])
+      Gori::InterceptFilter.suggestions("(-me", 4).should eq(["(-method:"])
+      hosts = ["api.acme.test"]
+      Gori::InterceptFilter.suggestions("host:a OR (host:ap", 18, hosts).should eq(["(host:api.acme.test"])
+    end
+
+    it "completes through a half-typed opening quote" do
+      hosts = ["api.acme.test"]
+      Gori::InterceptFilter.suggestions(%(host:"ap), 8, hosts).should eq(["host:api.acme.test"])
+    end
+
+    it "stays quiet on blank space and on an unmatched free-text word" do
+      Gori::InterceptFilter.suggestions("", 0).should be_empty
+      Gori::InterceptFilter.suggestions("host:acme ", 10).should be_empty
+      Gori::InterceptFilter.suggestions("login", 5).should be_empty
+    end
+  end
 end

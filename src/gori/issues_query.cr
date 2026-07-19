@@ -1,4 +1,5 @@
 require "./store"
+require "./filter_ast"
 
 module Gori
   module Issues
@@ -16,40 +17,45 @@ module Gori
       private record Term, kind : Symbol, op : Symbol, text : String, negate : Bool
 
       def self.parse(query : String) : Filter
-        terms = [] of Term
-        query.split.each do |raw|
-          next if raw.empty?
-          negate = false
-          tok = raw
-          if tok.starts_with?('-') && tok.size > 1
-            negate = true
-            tok = tok[1..]
-          end
-          terms << build_term(tok, negate)
-        end
-        new(terms)
+        new(FilterAst.build(FilterAst.parse(query)) { |t| build_term(t) })
       end
 
-      def initialize(@terms : Array(Term))
+      def initialize(@tree : FilterAst::Tree(Term)?)
       end
 
       def empty? : Bool
-        @terms.empty?
+        @tree.nil?
       end
 
-      # Keep store order; every term must match (AND). An empty filter passes all.
+      # Keep store order. An empty filter passes all.
       def apply(issues : Array(Store::Issue)) : Array(Store::Issue)
-        return issues if @terms.empty?
+        return issues if @tree.nil?
         issues.select { |f| matches?(f) }
       end
 
       def matches?(f : Store::Issue) : Bool
-        @terms.all? { |t| match_term(t, f) }
+        tree = @tree
+        return true unless tree
+        eval(tree, f)
+      end
+
+      private def eval(tree : FilterAst::Tree(Term), f : Store::Issue) : Bool
+        case tree.op
+        in .leaf? then match_term(tree.leaf, f)
+        in .not?  then !eval(tree.children.first, f)
+        in .and?  then tree.children.all? { |c| eval(c, f) }
+        in .or?   then tree.children.any? { |c| eval(c, f) }
+        end
       end
 
       # --- parsing -------------------------------------------------------------
 
-      private def self.build_term(tok : String, negate : Bool) : Term
+      # Never drops a term: an empty value is kept and resolved in match_term, which
+      # is where this filter's "`status:` matches all, `-status:` matches none" rule
+      # lives (Probe deliberately differs — see Probe::Filter#match_term).
+      private def self.build_term(t : FilterAst::Term) : Term
+        tok = t.text
+        negate = t.negate?
         if colon = tok.index(':')
           field = tok[0...colon].downcase
           value = tok[(colon + 1)..]
