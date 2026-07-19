@@ -77,11 +77,14 @@ If a client starts MCP outside your repository directory, pin the installation t
 | Tool | Purpose |
 |------|---------|
 | `list_history` | List flows newest-first, with optional QL and pagination |
+| `list_events` | Tail an append-only feed of job lifecycle and agent activity, by forward cursor. Flows stay the firehose; this never duplicates flow rows |
 | `get_flow` | Full request + response for one flow |
 | `get_response_body_chunk` | Page through decoded (or raw) flow/Repeater responses beyond the inline 64 KiB cap |
 | `list_sitemap` | Distinct endpoints (host, method, path) |
 | `list_issues` / `get_issue` | Read triaged issues |
 | `list_scope` | Current scope include/exclude rules |
+| `intercept_list` / `intercept_get` | Inspect the live intercept queue and one held item in full |
+| `list_projects` | Every gori project on this host |
 | `list_notes` / `get_note` | Read project notes |
 | `list_rules` | List the project's Match & Replace rules in apply order |
 | `decode` | Run an encode/decode/hash/compress chain over `input` (pure transform; no network or state) |
@@ -93,23 +96,40 @@ If a client starts MCP outside your repository directory, pin the installation t
 | `get_current_context` | What the user is viewing in the TUI right now |
 | `get_repeater_context` | Repeater workbench state and saved sessions |
 | `ql_reference` | The query-language reference |
+| `ql_explain` | Diagnose a query without running it, to check a filter before spending requests on it |
 
 **Action tools** (disabled by `--read-only`):
 
 | Tool | Purpose |
 |------|---------|
 | `send_request` | Send / resend an HTTP request (active; records History by default, expands `$KEY` env tokens, and redacts sensitive response-header values unless explicitly requested) |
+| `send_websocket` | Execute a saved WebSocket Repeater session and collect the replies |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Manage Repeater sessions |
 | `create_issue` / `update_issue` | Record and update issues |
 | `create_note` / `update_note` / `delete_note` | Manage project notes |
-| `create_rule` / `set_rule_enabled` / `delete_rule` | Create, toggle, and delete Match & Replace rules (literal rewrites on in-flight request/response head or body) |
+| `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Create, edit, toggle, and delete Match & Replace rules (rewrites on in-flight request/response head or body) |
+| `preview_rule` | Estimate how many stored flows a rule would change, before creating it |
+| `create_project` / `switch_project` / `delete_project` | Create or reopen a project, point this server at another one, or delete one. Deletion is two-step: a `dry_run` first, then a confirmation token |
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Drive the fuzzer |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Drive the param miner |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | Collect tokens by live replay and grade them (results return the report, never the tokens) |
 | `discover_start` / `discover_stop` | Spider and brute-force endpoints (poll with `discover_status` / `discover_results`) |
 | `oast_start` / `oast_stop` | Register an OAST payload and poll for callbacks (read the hits with `oast_poll`) |
+| `list_jobs` / `get_job` / `stop_job` | Work across job kinds: list every fuzz and mine job this session started, or fetch and stop one by id |
+| `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | Release a held message byte-exact, release it with edited wire bytes, or drop it |
+| `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | Arm or disarm the catch, set its condition query, and choose which leg it holds |
 
 > Action tools are capped for safety: fuzz, mine, sequence, and discover jobs are limited in total requests, concurrency, and stored results. A rule created via `create_rule` is picked up by `gori run` and newly opened TUIs; an already-running TUI applies it only after its rules reload.
+
+## Live Intercept
+
+An agent can sit in the intercept loop next to you rather than reading History after the fact. The TUI session holding the capture lock mirrors held messages out to the agent and drains the commands it sends back, so `intercept_list` → `intercept_get` → `intercept_forward_edit` is the same loop you drive by hand.
+
+The mutating half (`intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction`) is disabled by `--read-only`, and every one of them refuses when no live capture session is holding the lock. There is nothing to forward without a proxy actually holding traffic.
+
+Agent actions are visible, not silent. Each one lands in the notification center tagged as coming from an agent, rendered differently from your own actions, so you can see what a co-pilot did to traffic while you were reading another tab.
+
+One safety rule is worth knowing before you leave an agent running. A held message normally waits forever for a human decision, which is what you want when you are the only one at the keyboard. Once an agent attaches to the intercept queue in that session, gori arms a 30 second auto-forward for items nobody is watching, so a client that dies mid-hold cannot wedge the connection indefinitely. A session with no agent attached never auto-forwards.
 
 ## Why an MCP Seam
 

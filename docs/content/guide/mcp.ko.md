@@ -77,11 +77,14 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 | 도구 | 용도 |
 |------|---------|
 | `list_history` | 최신순으로 플로우 나열, 선택적 QL과 페이지네이션 포함 |
+| `list_events` | 작업 수명주기와 에이전트 활동을 추가 전용 피드로 전방 커서 조회. 플로우가 여전히 전체 스트림이며, 이 피드는 플로우 행을 중복하지 않음 |
 | `get_flow` | 한 플로우의 전체 요청 + 응답 |
 | `get_response_body_chunk` | 인라인 64 KiB 상한을 넘는 디코드(또는 원시) 플로우/Repeater 응답을 페이지 단위로 조회 |
 | `list_sitemap` | 고유 엔드포인트(host, method, path) |
 | `list_issues` / `get_issue` | 트리아지된 이슈 읽기 |
 | `list_scope` | 현재 스코프 include/exclude 규칙 |
+| `intercept_list` / `intercept_get` | 라이브 인터셉트 큐와 홀드된 항목 하나의 전체 내용 조회 |
+| `list_projects` | 이 호스트의 모든 gori 프로젝트 |
 | `list_notes` / `get_note` | 프로젝트 노트 읽기 |
 | `list_rules` | 프로젝트의 Match & Replace 규칙을 적용 순서로 나열 |
 | `decode` | `input`에 대해 인코드/디코드/해시/압축 체인을 실행(순수 변환; 네트워크나 상태 없음) |
@@ -93,23 +96,40 @@ Codex와 Grok은 JSON이 아니라 `[mcp_servers.gori]` 테이블이 있는 TOML
 | `get_current_context` | 사용자가 지금 TUI에서 보고 있는 것 |
 | `get_repeater_context` | Repeater 워크벤치 상태와 저장된 세션 |
 | `ql_reference` | 쿼리 언어 레퍼런스 |
+| `ql_explain` | 쿼리를 실행하지 않고 진단. 요청을 쓰기 전에 필터를 점검할 때 사용 |
 
 **액션 도구**(`--read-only`로 비활성화됨):
 
 | 도구 | 용도 |
 |------|---------|
 | `send_request` | HTTP 요청 전송 / 재전송(액티브; 기본적으로 History에 기록, `$KEY` 환경 토큰을 확장, 명시적으로 요청하지 않는 한 민감한 응답 헤더 값을 가림) |
+| `send_websocket` | 저장된 WebSocket Repeater 세션을 실행하고 응답을 수집 |
 | `create_repeater` / `update_repeater` / `delete_repeater` | Repeater 세션 관리 |
 | `create_issue` / `update_issue` | 이슈 기록 및 갱신 |
 | `create_note` / `update_note` / `delete_note` | 프로젝트 노트 관리 |
-| `create_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 토글, 삭제(이동 중인 요청/응답 헤드 또는 본문에 대한 리터럴 재작성) |
+| `create_rule` / `update_rule` / `set_rule_enabled` / `delete_rule` | Match & Replace 규칙 생성, 편집, 토글, 삭제(이동 중인 요청/응답 헤드 또는 본문 재작성) |
+| `preview_rule` | 규칙을 만들기 전에, 저장된 플로우 중 몇 개가 바뀌었을지 추정 |
+| `create_project` / `switch_project` / `delete_project` | 프로젝트 생성 또는 다시 열기, 이 서버를 다른 프로젝트로 전환, 프로젝트 삭제. 삭제는 2단계로, `dry_run` 후 확인 토큰 필요 |
 | `fuzz_start` / `fuzz_status` / `fuzz_results` / `fuzz_stop` | Fuzzer 구동 |
 | `mine_start` / `mine_status` / `mine_results` / `mine_stop` | Param Miner 구동 |
 | `sequence_start` / `sequence_status` / `sequence_results` / `sequence_stop` | 라이브 리플레이로 토큰을 수집해 평가(결과는 리포트만 반환, 토큰은 반환하지 않음) |
 | `discover_start` / `discover_stop` | 엔드포인트 스파이더링 & 브루트포스(`discover_status` / `discover_results`로 폴링) |
 | `oast_start` / `oast_stop` | OAST 페이로드 등록 후 콜백 폴링(`oast_poll`로 히트 조회) |
+| `list_jobs` / `get_job` / `stop_job` | 작업 종류를 가로질러 처리: 이번 세션이 시작한 모든 fuzz와 mine 작업 나열, 또는 id로 하나를 조회하고 중지 |
+| `intercept_forward` / `intercept_forward_edit` / `intercept_drop` | 홀드된 메시지를 바이트 그대로 내보내거나, 수정한 와이어 바이트로 내보내거나, 드롭 |
+| `intercept_toggle` / `intercept_set_filter` / `intercept_set_direction` | 캐치 활성화 및 해제, 조건 쿼리 설정, 홀드할 방향 선택 |
 
 > 액션 도구는 안전을 위해 상한이 있습니다: fuzz, mine, sequence, discover 작업은 총 요청 수, 동시성, 저장 결과 수가 제한됩니다. `create_rule`로 생성된 규칙은 `gori run`과 새로 열린 TUI에 적용됩니다. 이미 실행 중인 TUI는 규칙을 다시 로드한 뒤에만 적용합니다.
+
+## 라이브 인터셉트 {#live-intercept}
+
+에이전트가 나중에 History를 읽는 대신, 인터셉트 루프 안에 나란히 앉을 수 있습니다. 캡처 락을 쥔 TUI 세션이 홀드된 메시지를 에이전트 쪽으로 미러링하고 에이전트가 보낸 명령을 받아 처리하므로, `intercept_list` → `intercept_get` → `intercept_forward_edit`은 직접 손으로 도는 것과 같은 루프입니다.
+
+변경을 일으키는 쪽(`intercept_forward`, `intercept_forward_edit`, `intercept_drop`, `intercept_toggle`, `intercept_set_filter`, `intercept_set_direction`)은 `--read-only`에서 비활성화되며, 라이브 캡처 세션이 락을 쥐고 있지 않으면 모두 거부합니다. 프록시가 실제로 트래픽을 홀드하고 있지 않으면 내보낼 것 자체가 없기 때문입니다.
+
+에이전트의 행동은 조용히 지나가지 않고 드러납니다. 각 행동은 에이전트에서 온 것으로 표시되어 알림 센터에 남고 사용자 본인의 행동과 다르게 렌더링되므로, 다른 탭을 보는 동안 코파일럿이 트래픽에 무엇을 했는지 확인할 수 있습니다.
+
+에이전트를 켜둔 채 자리를 뜨기 전에 알아둘 안전 규칙이 하나 있습니다. 홀드된 메시지는 원래 사람의 결정을 무한히 기다립니다. 키보드 앞에 사람만 있을 때는 그게 맞는 동작입니다. 하지만 해당 세션에서 에이전트가 인터셉트 큐에 붙고 나면, gori는 아무도 보고 있지 않은 항목에 대해 30초 자동 포워드를 켭니다. 홀드 도중 죽은 클라이언트가 연결을 영영 막아버리지 못하게 하기 위해서입니다. 에이전트가 붙지 않은 세션은 자동 포워드를 하지 않습니다.
 
 ## MCP 이음새인 이유 {#why-an-mcp-seam}
 

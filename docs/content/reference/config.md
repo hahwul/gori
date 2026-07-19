@@ -40,6 +40,11 @@ Everything lives under `GORI_HOME` (`$GORI_HOME` if set and non-empty, otherwise
 | `bind_host` | string | `127.0.0.1` | Global default listen address (used when a project has no `net.bind_host`) |
 | `bind_port` | integer | `8070` | Global default listen port (used when a project has no `net.bind_port`) |
 | `upstream_proxy` | string | `""` | Global default upstream (`host:port`); empty = direct. Project `net.upstream_proxy` wins when set |
+| `verify_upstream` | bool | `true` | Verify upstream TLS certificates. Toggling it re-syncs the running proxy, the active prober, and the Repeater / Fuzzer / Miner senders without a restart. `--insecure-upstream` seeds it off for one session |
+| `serve_landing` | bool | `true` | Serve the built-in info / CA-download page when the listen address is hit directly instead of proxied |
+| `connect_timeout_secs` | integer | `30` | Upstream connect timeout in seconds (minimum `1`) |
+| `io_timeout_secs` | integer | `30` | Upstream read / write idle timeout in seconds (minimum `1`) |
+| `capture_max_mib` | integer | `2` | Largest body stored per message, in MiB. Larger bodies still forward byte-exact; only the stored copy is truncated, and the true wire size is recorded |
 
 CLI `--listen` / `--port` override these for the current process only (not written to disk). See [Per-Project Overrides](#per-project-overrides).
 
@@ -173,6 +178,130 @@ Tokens like `$TOKEN` expand at send time in Repeater, Fuzzer, Miner, Intercept, 
 
 See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables).
 
+### general
+
+Preferences → **General** → **General**:
+
+```json
+{
+  "general": {
+    "clipboard_osc52": true,
+    "confirm_quit": false
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `clipboard_osc52` | bool | `true` | Copy through the OSC 52 terminal escape, so `y` reaches your local clipboard over SSH |
+| `confirm_quit` | bool | `false` | Ask before quitting |
+
+### notifications
+
+How background jobs (Miner, Fuzzer, Probe, Discover) announce their results. Preferences → **General** → **Notifications**:
+
+```json
+{
+  "notifications": {
+    "bell": false,
+    "toast": true,
+    "retention": 100
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `bell` | bool | `false` | Ring the terminal bell when a background job produces a result |
+| `toast` | bool | `true` | Show a transient toast for the same events |
+| `retention` | integer | `100` | How many notifications the notification center keeps |
+
+### probe
+
+```json
+{
+  "probe": {
+    "active_notify": "when-found"
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `active_notify` | string | `"when-found"` | When an active scan notifies: `"when-found"`, `"always"`, or `"off"` |
+
+### discover
+
+Saved defaults for a Discover run. Written only once you save the discover options, so the section is absent until then:
+
+```json
+{
+  "discover": {
+    "containment": "scope-aware",
+    "max_depth": 4,
+    "concurrency": 20,
+    "spider": true,
+    "bruteforce": true,
+    "extensions": false
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `containment` | string | `"scope-aware"` | How far a run may wander: `"same-origin"`, `"scope-aware"`, or `"host+subdomains"` |
+| `max_depth` | integer | `4` | Spider depth cap |
+| `concurrency` | integer | `20` | Parallel requests |
+| `spider` | bool | `true` | Follow links found in responses |
+| `bruteforce` | bool | `true` | Brute-force paths from the wordlist |
+| `extensions` | bool | `false` | Also probe extension variants of each candidate |
+
+### mine
+
+Saved Param Miner defaults, written only once you save the mine options:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `locations` | array | `[]` | Where to inject: `query`, `form`, `multipart`, `json`, `headers`, `cookies`. Empty means auto-detect per request |
+| `concurrency` | integer | `10` | Parallel requests |
+| `notify` | string | `"when-found"` | `"when-found"`, `"always"`, or `"off"` |
+
+### scan_rules
+
+Your own Probe match rules, global across every project. Project-scoped rules live in the project database instead. Edit them in Probe → **Rules** → CUSTOM:
+
+```json
+{
+  "scan_rules": [
+    {
+      "id": "a1b2c3d4",
+      "title": "Internal hostname leak",
+      "description": "Build-server hostname in a response body",
+      "side": "response",
+      "region": "body",
+      "kind": "regex",
+      "pattern": "build-\\d+\\.corp\\.internal",
+      "severity": "medium",
+      "enabled": true
+    }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `id` | string | Random hex token assigned at creation |
+| `title` | string | Finding title |
+| `description` | string | Shown in the finding detail |
+| `side` | string | `request` or `response` |
+| `region` | string | `whole`, `header`, or `body` |
+| `kind` | string | `string` or `regex` |
+| `pattern` | string | Literal or regex to match |
+| `severity` | string | `info`, `low`, `medium`, `high`, or `critical` |
+| `enabled` | bool | Whether the rule runs |
+
+Parsing is tolerant. An entry missing `id`, `title`, or `pattern` is dropped, and an out-of-range `side` / `region` / `kind` / `severity` falls back to the safest value rather than failing the load.
+
 ### Other sections
 
 | Section | Description |
@@ -185,7 +314,8 @@ See [Environment Variables](/guide/repeater-and-fuzzer/#environment-variables).
 | `hostname_overrides` | Global host → IP dial map. See [hostname_overrides](#hostname_overrides) above |
 | `env` | Env-token prefix and global values. See [env](#env) above |
 | `hotkeys` | Keybinding overrides (`os` layer + `bindings`). See the [Hotkeys guide](/guide/hotkeys/) |
-| `decoder` / `mine` | Saved defaults for the Decoder tool and Param Miner |
+| `decoder` | Last input and chain, plus saved Decoder sessions and named chains |
+| `mine` | Saved Param Miner defaults. See [mine](#mine) above |
 | `layout` | History / Probe / Issues previews + Sitemap expand depth. See [layout](#layout) above |
 | `statusline` | Bottom status row that runs a command on an interval. See [statusline](#statusline) above |
 | `display` | Default detail pane, list time format, line-number gutter, preview body cap, `resource_meter` (the CPU/memory readout at the far right of the bottom bar, on by default), and `terminal_title` |

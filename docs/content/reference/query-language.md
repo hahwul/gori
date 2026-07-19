@@ -1,6 +1,6 @@
 +++
 title = "Query Language"
-description = "The filter syntax used across History, Probe, Sitemap, and the MCP tools."
+description = "The filter syntax used across History, Sitemap, Probe, Issues, Intercept, and the MCP tools."
 +++
 
 gori has a small query language (QL) for filtering flows. The same syntax works in the TUI filter bars, in `gori run` (`-q`/`--query`, or positionally), and through the MCP tools. The built-in reference is also available as `gori run history --help` and the `ql_reference` MCP tool.
@@ -16,6 +16,7 @@ Match a field with `field:value` (substring or exact, depending on the field):
 | `url` | Full URL |
 | `method` | HTTP method |
 | `scheme` | `http` / `https` |
+| `proto` | Protocol: `http`, `ws`, `grpc`, `sse` |
 | `status` | Response status code |
 | `size` | Total request + response bytes |
 | `reqsize` / `respsize` | Per-side byte count |
@@ -88,6 +89,28 @@ host:"my host"                        one host value, space and all
 
 A parenthesis inside a value stays literal, so `path:/a(b)` needs no escaping. A `(`
 only opens a group at the start of a term, and `)` only closes one at the end.
+
+## Where It Applies
+
+Five filter bars share the grammar above (fields, comparisons, `~` regex, `AND`/`OR`/`NOT`, parentheses, quoting). What differs is the field set, because each surface filters a different kind of row.
+
+| Surface | Fields |
+|---------|--------|
+| History, `gori run history`, MCP | The full table above |
+| Sitemap | The same, plus `tag:` for per-node path memos |
+| Probe | `severity` (`sev`), `status` (`st`), `category` (`cat`), `host`, `code` |
+| Issues | `severity` (`sev`), `status` (`st`), `host`, `title` |
+| Intercept catch condition | `host`, `path`, `method`, `scheme`, `status` |
+
+Probe and Issues take severity names (`info`, `low`, `medium`/`med`, `high`, `critical`/`crit`) and triage states (`open`, `confirmed`/`conf`, `false-positive`/`fp`, `resolved`/`done`, plus `closed` for any non-open state). Severity supports comparisons, so `sev:>=high` works.
+
+```text
+sev:>=high -status:fp          Issues: high and critical, no false positives
+cat:cors sev:medium            Probe: medium CORS findings
+host:api.example.com method:POST   Intercept: hold POSTs to one host
+```
+
+The Intercept bar Tab-completes field names and known values as you type.
 
 ## Examples
 

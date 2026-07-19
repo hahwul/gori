@@ -65,7 +65,7 @@ gori run <subcommand> [options]
 | `oast listen` · `presets` | Out-of-band callback listener (interactsh & friends) |
 | `jwt [<token>]` | Decode, re-sign, or generate attack payloads for a JWT |
 | `convert <chain> [input]` | Run a Decoder encode / decode / hash chain |
-| `notes [<n>]` | Read project notes |
+| `notes [<n>]` · `create` · `delete` | Read, write, or delete project notes |
 | `issues` · `create` · `update` | List / export issues, or write issues |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Manage Match & Replace rules |
 | `project [list]` | List known projects |
@@ -146,7 +146,6 @@ gori run repeater create --flow 42 --name "clone of 42"
 | `--flow=ID` | Clone request / target / HTTP/2 from a captured flow |
 | `--name=NAME` | Custom tab name |
 | `--http2`, `--no-auto-cl`, `--sni=HOST` | HTTP/2, skip auto `Content-Length`, SNI override |
-| `--mark-transform` | Enable inline `§value¦chain§` substitution on send |
 
 ### run fuzz
 
@@ -309,6 +308,53 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 |--------|-------------|
 | `create` | `-t`/`--title` (required), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
 | `update <id>` | `-t`/`--title`, `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
+
+Notes are readable and writable too. `notes` with no argument lists them (`*` marks the active note); `notes <n>` prints one by index:
+
+```bash
+gori run notes                                  # list
+gori run notes 2                                # print note 2
+gori run notes create --text "SSRF candidate on /fetch"
+echo "pasted from a scratchpad" | gori run notes create
+gori run notes delete 2
+```
+
+| Option | Description |
+|--------|-------------|
+| `list` | `--all` prints every note in full instead of a summary line |
+| `create` | `--text=TEXT`, or a positional argument, or STDIN |
+| `delete <n>` (`rm`) | Delete the note at index `n` |
+
+### run rewriter
+
+Manage Match & Replace rules from scripts. The same rules the [Rewriter tab](/guide/proxy/) edits, applied to live proxy traffic:
+
+```bash
+gori run rewriter                                       # list rules in apply order
+gori run rewriter add --op set_header --target request \
+  --find X-Forwarded-For --value 127.0.0.1 --host '*.example.com'
+gori run rewriter add --op replace --target response --part body \
+  --match regex --find 'secret=(\w+)' --value 'secret=[redacted]'
+gori run rewriter preview --op replace --part body --find password --value hunter2
+gori run rewriter disable 3
+gori run rewriter rm 3
+```
+
+| Option | Description |
+|--------|-------------|
+| `--op=OP` | `replace` (default), `add_header`, `set_header`, `remove_header` |
+| `--target=SIDE` | `request` (default) or `response` |
+| `--part=PART` | `head` (default) or `body`. Only meaningful for `replace` |
+| `--match=MODE` | `literal` (default) or `regex`, for `replace` only. Regex replacements take `$1`, `$2`; `$$` is a literal `$` |
+| `-f`, `--find=FIND` | Required. The literal, pattern, or header name to act on |
+| `-v`, `--value=VALUE` | Replacement text or header value |
+| `--host=GLOB` | Limit the rule to matching hosts (substring, `*` wildcard). Omit to apply everywhere |
+| `--name=NAME` | Label shown in the rule list |
+| `--disabled` | Create the rule without arming it |
+
+`preview` takes the same rule flags and reports how many stored flows the rule would have changed, without writing it. `rm` (`delete`), `enable` and `disable` take a rule id from the list.
+
+Body rules re-sync `Content-Length` and de-chunk as needed, and an enabled rule forces HTTP/1.1 on hosts it matches. See [Proxy & History](/guide/proxy/) for the interactive editor.
 
 ### run project
 

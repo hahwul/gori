@@ -65,7 +65,7 @@ gori run <subcommand> [options]
 | `oast listen` · `presets` | 아웃오브밴드 콜백 리스너 (interactsh 및 유사 서비스) |
 | `jwt [<token>]` | JWT 디코드, 재서명, 또는 공격 페이로드 생성 |
 | `convert <chain> [input]` | Decoder 인코드 / 디코드 / 해시 체인 실행 |
-| `notes [<n>]` | 프로젝트 노트 읽기 |
+| `notes [<n>]` · `create` · `delete` | 프로젝트 노트 읽기, 작성, 삭제 |
 | `issues` · `create` · `update` | 이슈 목록 / 내보내기, 또는 이슈 작성 |
 | `rewriter` · `add` · `rm` · `enable` · `disable` · `preview` | Match & Replace 규칙 관리 |
 | `project [list]` | 알려진 프로젝트 목록 |
@@ -146,7 +146,6 @@ gori run repeater create --flow 42 --name "clone of 42"
 | `--flow=ID` | 캡처한 플로우에서 요청 / 대상 / HTTP/2 복제 |
 | `--name=NAME` | 사용자 지정 탭 이름 |
 | `--http2`, `--no-auto-cl`, `--sni=HOST` | HTTP/2, 자동 `Content-Length` 생략, SNI 오버라이드 |
-| `--mark-transform` | 전송 시 인라인 `§value¦chain§` 치환 활성화 |
 
 ### run fuzz {#run-fuzz}
 
@@ -309,6 +308,53 @@ gori run issues update 7 --status confirmed --notes "Verified on staging" --seve
 |--------|-------------|
 | `create` | `-t`/`--title` (필수), `-s`/`--severity` (`info`\|`low`\|`medium`\|`high`\|`critical`), `--host`, `--flow=ID` |
 | `update <id>` | `-t`/`--title`, `-s`/`--severity`, `-n`/`--notes`, `--status` (`open`\|`confirmed`\|`false-positive`\|`resolved`) |
+
+노트도 읽고 쓸 수 있습니다. 인자 없이 `notes`를 실행하면 목록을 보여주고(`*`가 활성 노트), `notes <n>`은 인덱스로 하나를 출력합니다:
+
+```bash
+gori run notes                                  # 목록
+gori run notes 2                                # 2번 노트 출력
+gori run notes create --text "SSRF candidate on /fetch"
+echo "pasted from a scratchpad" | gori run notes create
+gori run notes delete 2
+```
+
+| Option | Description |
+|--------|-------------|
+| `list` | `--all`은 요약 한 줄 대신 모든 노트를 전문으로 출력 |
+| `create` | `--text=TEXT`, 위치 인자, 또는 STDIN |
+| `delete <n>` (`rm`) | 인덱스 `n`의 노트 삭제 |
+
+### run rewriter {#run-rewriter}
+
+스크립트에서 Match & Replace 규칙을 관리합니다. [Rewriter 탭](/guide/proxy/)이 편집하는 것과 같은 규칙이며, 실시간 프록시 트래픽에 적용됩니다:
+
+```bash
+gori run rewriter                                       # 적용 순서대로 규칙 목록
+gori run rewriter add --op set_header --target request \
+  --find X-Forwarded-For --value 127.0.0.1 --host '*.example.com'
+gori run rewriter add --op replace --target response --part body \
+  --match regex --find 'secret=(\w+)' --value 'secret=[redacted]'
+gori run rewriter preview --op replace --part body --find password --value hunter2
+gori run rewriter disable 3
+gori run rewriter rm 3
+```
+
+| Option | Description |
+|--------|-------------|
+| `--op=OP` | `replace`(기본값), `add_header`, `set_header`, `remove_header` |
+| `--target=SIDE` | `request`(기본값) 또는 `response` |
+| `--part=PART` | `head`(기본값) 또는 `body`. `replace`에서만 의미가 있음 |
+| `--match=MODE` | `literal`(기본값) 또는 `regex`, `replace` 전용. 정규식 치환은 `$1`, `$2`를 쓰고 `$$`는 리터럴 `$` |
+| `-f`, `--find=FIND` | 필수. 대상이 되는 리터럴, 패턴, 또는 헤더 이름 |
+| `-v`, `--value=VALUE` | 치환할 텍스트 또는 헤더 값 |
+| `--host=GLOB` | 매칭되는 호스트로 규칙을 한정(부분 문자열, `*` 와일드카드). 생략하면 전체 적용 |
+| `--name=NAME` | 규칙 목록에 표시할 라벨 |
+| `--disabled` | 규칙을 만들되 활성화하지 않음 |
+
+`preview`는 같은 규칙 플래그를 받아, 규칙을 저장하지 않고 저장된 플로우 중 몇 개가 바뀌었을지 보고합니다. `rm`(`delete`), `enable`, `disable`은 목록의 규칙 id를 받습니다.
+
+본문 규칙은 필요에 따라 `Content-Length`를 다시 맞추고 청크를 해제하며, 활성화된 규칙은 매칭되는 호스트에서 HTTP/1.1을 강제합니다. 대화형 편집기는 [Proxy & History](/guide/proxy/)를 참고하세요.
 
 ### run project {#run-project}
 

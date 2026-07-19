@@ -40,6 +40,11 @@ gori는 전역 환경설정을 `settings.json`에, 각 프로젝트를 자체 SQ
 | `bind_host` | string | `127.0.0.1` | 전역 기본 리스닝 주소 (프로젝트에 `net.bind_host`가 없을 때 사용) |
 | `bind_port` | integer | `8070` | 전역 기본 리스닝 포트 (프로젝트에 `net.bind_port`가 없을 때 사용) |
 | `upstream_proxy` | string | `""` | 전역 기본 업스트림(`host:port`); 비어 있으면 직접 연결. 설정 시 프로젝트 `net.upstream_proxy`가 우선 |
+| `verify_upstream` | bool | `true` | 업스트림 TLS 인증서 검증. 토글하면 재시작 없이 실행 중인 프록시, 액티브 프로브, Repeater / Fuzzer / Miner 전송기에 즉시 반영됩니다. `--insecure-upstream`은 해당 세션에만 끈 상태로 시작 |
+| `serve_landing` | bool | `true` | 프록시 경유가 아니라 리슨 주소로 직접 접속했을 때 내장 안내 / CA 다운로드 페이지 제공 |
+| `connect_timeout_secs` | integer | `30` | 업스트림 연결 타임아웃(초, 최소 `1`) |
+| `io_timeout_secs` | integer | `30` | 업스트림 읽기 / 쓰기 유휴 타임아웃(초, 최소 `1`) |
+| `capture_max_mib` | integer | `2` | 메시지당 저장하는 본문의 최대 크기(MiB). 더 큰 본문도 바이트 그대로 전달되며, 잘리는 것은 저장본뿐이고 실제 전송 크기는 기록됩니다 |
 
 CLI `--listen` / `--port`는 현재 프로세스에 한해서만 이 값들을 오버라이드합니다(디스크에 기록되지 않음). [프로젝트별 오버라이드](#per-project-overrides)를 참고하세요.
 
@@ -173,6 +178,130 @@ Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에
 
 [환경 변수](/ko/guide/repeater-and-fuzzer/#environment-variables)를 참고하세요.
 
+### general {#general}
+
+Preferences → **General** → **General**:
+
+```json
+{
+  "general": {
+    "clipboard_osc52": true,
+    "confirm_quit": false
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `clipboard_osc52` | bool | `true` | OSC 52 터미널 이스케이프로 복사. SSH 너머에서도 `y`가 로컬 클립보드에 도달합니다 |
+| `confirm_quit` | bool | `false` | 종료 전에 확인 |
+
+### notifications {#notifications}
+
+백그라운드 작업(Miner, Fuzzer, Probe, Discover)이 결과를 알리는 방식입니다. Preferences → **General** → **Notifications**:
+
+```json
+{
+  "notifications": {
+    "bell": false,
+    "toast": true,
+    "retention": 100
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `bell` | bool | `false` | 백그라운드 작업이 결과를 냈을 때 터미널 벨 울림 |
+| `toast` | bool | `true` | 같은 이벤트에 대해 잠깐 나타나는 토스트 표시 |
+| `retention` | integer | `100` | 알림 센터가 보관하는 알림 개수 |
+
+### probe {#probe}
+
+```json
+{
+  "probe": {
+    "active_notify": "when-found"
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `active_notify` | string | `"when-found"` | 액티브 스캔의 알림 시점: `"when-found"`, `"always"`, `"off"` |
+
+### discover {#discover}
+
+Discover 실행의 저장된 기본값입니다. discover 옵션을 저장해야 기록되므로 그 전까지는 섹션이 없습니다:
+
+```json
+{
+  "discover": {
+    "containment": "scope-aware",
+    "max_depth": 4,
+    "concurrency": 20,
+    "spider": true,
+    "bruteforce": true,
+    "extensions": false
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `containment` | string | `"scope-aware"` | 탐색이 벗어날 수 있는 범위: `"same-origin"`, `"scope-aware"`, `"host+subdomains"` |
+| `max_depth` | integer | `4` | 스파이더 깊이 상한 |
+| `concurrency` | integer | `20` | 동시 요청 수 |
+| `spider` | bool | `true` | 응답에서 찾은 링크를 따라감 |
+| `bruteforce` | bool | `true` | 워드리스트로 경로 무차별 탐색 |
+| `extensions` | bool | `false` | 각 후보의 확장자 변형도 함께 시도 |
+
+### mine {#mine}
+
+Param Miner의 저장된 기본값입니다. mine 옵션을 저장해야 기록됩니다:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `locations` | array | `[]` | 주입 위치: `query`, `form`, `multipart`, `json`, `headers`, `cookies`. 비어 있으면 요청마다 자동 감지 |
+| `concurrency` | integer | `10` | 동시 요청 수 |
+| `notify` | string | `"when-found"` | `"when-found"`, `"always"`, `"off"` |
+
+### scan_rules {#scan-rules}
+
+직접 만든 Probe 매치 규칙으로, 모든 프로젝트에 걸쳐 전역으로 적용됩니다. 프로젝트 범위 규칙은 대신 프로젝트 데이터베이스에 저장됩니다. Probe → **Rules** → CUSTOM에서 편집합니다:
+
+```json
+{
+  "scan_rules": [
+    {
+      "id": "a1b2c3d4",
+      "title": "Internal hostname leak",
+      "description": "Build-server hostname in a response body",
+      "side": "response",
+      "region": "body",
+      "kind": "regex",
+      "pattern": "build-\\d+\\.corp\\.internal",
+      "severity": "medium",
+      "enabled": true
+    }
+  ]
+}
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `id` | string | 생성 시 부여되는 무작위 hex 토큰 |
+| `title` | string | 발견 항목 제목 |
+| `description` | string | 발견 상세에 표시 |
+| `side` | string | `request` 또는 `response` |
+| `region` | string | `whole`, `header`, `body` |
+| `kind` | string | `string` 또는 `regex` |
+| `pattern` | string | 매칭할 리터럴 또는 정규식 |
+| `severity` | string | `info`, `low`, `medium`, `high`, `critical` |
+| `enabled` | bool | 규칙 실행 여부 |
+
+파싱은 관대합니다. `id`, `title`, `pattern`이 없는 항목은 버려지고, 허용 범위를 벗어난 `side` / `region` / `kind` / `severity`는 로드를 실패시키는 대신 가장 안전한 값으로 대체됩니다.
+
 ### 그 외 섹션 {#other-sections}
 
 | Section | Description |
@@ -185,7 +314,8 @@ Preferences → **Network & Tabs** → **Network** → **Hostname overrides**에
 | `hostname_overrides` | 전역 host → IP 다이얼 맵. 위의 [hostname_overrides](#hostname_overrides) 참고 |
 | `env` | Env 토큰 접두사와 전역 값. 위의 [env](#env) 참고 |
 | `hotkeys` | 키바인딩 오버라이드 (`os` 계층 + `bindings`). [단축키 가이드](/ko/guide/hotkeys/) 참고 |
-| `decoder` / `mine` | Decoder 도구와 Param Miner의 저장된 기본값 |
+| `decoder` | 마지막 입력과 체인, 저장된 Decoder 세션과 이름 붙인 체인 |
+| `mine` | Param Miner의 저장된 기본값. 위 [mine](#mine) 참고 |
 | `layout` | History / Probe / Issues 미리보기 + Sitemap 펼침 깊이. 위의 [layout](#layout) 참고 |
 | `statusline` | 일정 간격으로 명령을 실행하는 하단 상태 행. 위의 [statusline](#statusline) 참고 |
 | `display` | 기본 상세 페인, 목록 시간 형식, 줄번호 거터, 미리보기 본문 상한, `resource_meter`(하단 바 맨 오른쪽 CPU/메모리 표시, 기본 켜짐), 그리고 `terminal_title` |
