@@ -305,10 +305,18 @@ module Gori
       # its own children (without this, a {hex} fold of long numerics grows a nested
       # [1000… +N] inside it, and a second call nests one more level).
       return if node.grouped
-      numeric = node.children.select { |c| !c.grouped && numeric_label?(c.label) }
-      return if numeric.size <= SEQUENCE_GROUP_THRESHOLD
+      # Count first, materialise second. The overwhelming majority of nodes have no numeric
+      # children at all, and `select` used to allocate the result Array for every one of them
+      # before the threshold check below could reject it — on a tree rebuilt each poll frame.
+      count = 0
+      node.children.each { |c| count += 1 if !c.grouped && numeric_label?(c.label) }
+      return if count <= SEQUENCE_GROUP_THRESHOLD
+      numeric = Array(Node).new(count)
+      rest = Array(Node).new(node.children.size - count)
+      node.children.each do |c|
+        (!c.grouped && numeric_label?(c.label)) ? (numeric << c) : (rest << c)
+      end
       numeric.sort_by! { |c| p = path_part(c.label); {p.size, p} }
-      rest = node.children.select { |c| c.grouped || !numeric_label?(c.label) }
       group = Node.new(group_label(numeric))
       group.grouped = true
       group.expanded = false
@@ -330,7 +338,14 @@ module Gori
 
     def self.numeric_label?(label : String) : Bool
       s = path_part(label)
-      !s.empty? && s.each_char.all?(&.ascii_number?)
+      return false if s.empty?
+      # Byte loop rather than `each_char.all?`: the block-less each_char returns a CharIterator,
+      # which is a CLASS, so that form heap-allocated an iterator per call — and this runs a few
+      # times per node on a tree that is rebuilt from scratch on every sitemap poll. ASCII digits
+      # are single-byte, and any multi-byte char has all bytes >= 0x80, so a byte test rejects
+      # non-digits exactly as the char test did.
+      s.each_byte { |b| return false unless 0x30_u8 <= b <= 0x39_u8 }
+      true
     end
 
     # "[1, 2, 3 … +47]" — the first three values then a remainder count.

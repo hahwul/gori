@@ -594,7 +594,11 @@ module Gori::Discover
     end
 
     private def decode_body(raw : Repeater::Result) : Bytes
-      decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body)
+      # Cap the INFLATE at MAX_BODY, not just the result. Without the cap ContentDecode expands a
+      # compressed response up to its 32 MB anti-bomb ceiling and we then throw away everything
+      # past 2 MB on the next line — so a highly-compressible response allocated and inflated up
+      # to 30 MB per request, on a path multiplied by the whole wordlist.
+      decoded, _ = Proxy::Codec::ContentDecode.decode(raw.head, raw.body, MAX_BODY)
       body = decoded || raw.body || Bytes.new(0)
       body.size > MAX_BODY ? body[0, MAX_BODY] : body
     end

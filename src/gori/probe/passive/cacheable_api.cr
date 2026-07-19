@@ -69,19 +69,22 @@ module Gori
             return nil if expires_disables?(expires) && pragma_no_cache?(pragma)
             return "missing Cache-Control"
           end
-          low = cc.downcase
-          return "Cache-Control: public" if directive?(low, "public")
-          if (n = directive_int(low, "s-maxage")) && n > 0
+          # Split the header into stripped directive tokens ONCE. directive?/directive_int each
+          # used to re-split the whole value, and this method calls them up to six times (max-age
+          # twice), so a cacheable JSON response re-split the same string six times over.
+          parts = cc.downcase.split(',').map!(&.strip)
+          return "Cache-Control: public" if directive?(parts, "public")
+          if (n = directive_int(parts, "s-maxage")) && n > 0
             return "s-maxage=#{n}"
           end
-          if (n = directive_int(low, "max-age")) && n > 0
+          max_age = directive_int(parts, "max-age")
+          if (n = max_age) && n > 0
             return "max-age=#{n}"
           end
           # private/no-cache alone still lets a browser keep a copy (must revalidate at
           # best). For JSON APIs we want no-store; flag when neither no-cache nor max-age=0
           # is present either — pure `private` or empty directives.
-          if directive?(low, "private") && !directive?(low, "no-cache") &&
-             !(directive_int(low, "max-age") == 0)
+          if directive?(parts, "private") && !directive?(parts, "no-cache") && max_age != 0
             return "private without no-store/no-cache"
           end
           nil
@@ -103,13 +106,13 @@ module Gori
         end
 
         # Token present as a full Cache-Control directive (not a substring of another word).
-        private def directive?(low : String, name : String) : Bool
-          low.split(',').any? { |part| part.strip.split('=').first?.try(&.strip) == name }
+        # `parts` are the already-stripped, already-downcased directive tokens.
+        private def directive?(parts : Array(String), name : String) : Bool
+          parts.any? { |part| part.split('=').first?.try(&.strip) == name }
         end
 
-        private def directive_int(low : String, name : String) : Int64?
-          low.split(',').each do |part|
-            p = part.strip
+        private def directive_int(parts : Array(String), name : String) : Int64?
+          parts.each do |p|
             next unless p.starts_with?("#{name}=") || p.starts_with?("#{name} =")
             eq = p.index('=')
             next unless eq
