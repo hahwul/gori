@@ -4,15 +4,21 @@ class Gori::Tui::Runner < Gori::Verb::ExecContext
   # Seed a discovery run from the selected Sitemap node — offering the path subtree AND the
   # host root as start-target choices in the config popup.
   def sitemap_discover : Nil
-    ep = sitemap_controller.view.selected_endpoint
+    view = sitemap_controller.view
+    ep = view.selected_endpoint
     unless ep
       @toast = "select a host or path to discover"
       return
     end
+    # The origin comes from a REAL captured flow (an id fold has none of its own, so that
+    # resolves to a descendant), but the scan target is the CONTAINER — on a `{uuid}` row
+    # the user means "discover under /users", not "brute-force under this one uuid".
+    # Both are identity on a normal node, so nothing changes off a fold.
     id = @session.store.representative_flow_id(ep[:host], ep[:method], ep[:target])
     base = id.try { |i| @session.store.flow_row(i).try(&.url) }
     origin = base.try { |u| Discover::Url.parse(u).try { |p| Discover::Url.origin(p) } } || "https://#{ep[:host]}"
-    open_discover_config(build_discover_seed(origin, ep[:host], ep[:target]))
+    target = view.selected_endpoint(:container).try(&.[](:target)) || ep[:target]
+    open_discover_config(build_discover_seed(origin, ep[:host], target))
   end
 
   def history_discover : Nil

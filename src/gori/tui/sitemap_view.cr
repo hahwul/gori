@@ -9,10 +9,11 @@ require "../scope"
 require "../sitemap" # the host→path tree model + builder (URI normalisation lives there now)
 
 module Gori::Tui
-  # The Sitemap tab: a literal host → path tree built from captured flows (no ID
-  # templating — every distinct segment is its own node, P3/DESIGN.md §3). Helps
-  # answer "what does this app do". Navigate with ↑/↓, expand/collapse with
-  # →/←/Enter.
+  # The Sitemap tab: a host → path tree built from captured flows. The tree is literal —
+  # every distinct segment is its own node — and `g` folds the noise on top of it: opaque
+  # ids into `{uuid}`/`{hex}`/`{date}` and long numeric runs into `[1, 2, 3 … +N]`, both
+  # WRAPPING their children rather than rewriting any path. Helps answer "what does this
+  # app do". Navigate with ↑/↓, expand/collapse with →/←/Enter.
   class SitemapView
     # The tree node + pure builder live in `Gori::Sitemap` (shared with the headless
     # `gori run sitemap`); this view layers scope markers, path-tag editing, and
@@ -86,7 +87,7 @@ module Gori::Tui
     # are re-anchored by durable (host, path) keys so a data_version poll under live
     # capture does not jump the cursor to the top host every ~750ms.
     def reload(store : Store) : Nil
-      prev_sel = resolve_target
+      prev_sel = selection_anchor
       prev_scroll = @scroll
       prev_expand = collect_expand_state
 
@@ -112,7 +113,11 @@ module Gori::Tui
       @hosts = Sitemap.build(store.sitemap_entries(combined))
       Sitemap.stamp_tags!(@hosts, store.sitemap_tags)
       filter_by_tags(positives, negatives)
-      @hosts.each { |h| Sitemap.group_sequences!(h) } if @grouping
+      if @grouping
+        # Opaque ids first, then numeric runs — the two passes partition the children.
+        @hosts.each { |h| Sitemap.fold_templates!(h) }
+        @hosts.each { |h| Sitemap.group_sequences!(h) }
+      end
       # settings:layout Sitemap expand depth seeds NEW nodes; prior session expand
       # overrides are re-applied below for keys that still exist.
       Sitemap.apply_expand_depth!(@hosts, Settings.sitemap_expand_depth)
@@ -128,18 +133,20 @@ module Gori::Tui
       end
       @visible_cache = nil
       rows = visible_rows
-      @selected =
-        if (idx = index_of_target(rows, prev_sel))
-          idx
-        else
-          0
-        end
+      # Exact row, else the fold that swallowed it, else the top.
+      @selected = index_of_target(rows, prev_sel) || index_of_enclosing_fold(rows, prev_sel) || 0
       @selected = @selected.clamp(0, {rows.size - 1, 0}.max)
       @scroll = prev_scroll.clamp(0, {rows.size - 1, 0}.max)
       @loaded = true
     end
 
-    # Snapshot expanded? for every non-group, non-leaf node keyed by (host, path).
+    # The reload-stable identity of a node: its path, or — for a synthetic fold, which has
+    # no path — its fold_key. nil only for a fold that somehow carries no parent.
+    private def expand_key(node : Node) : String?
+      node.grouped ? node.fold_key : node.path
+    end
+
+    # Snapshot expanded? for every non-leaf node keyed by (host, expand_key).
     private def collect_expand_state : Hash({String, String}, Bool)
       state = {} of {String, String} => Bool
       @hosts.each { |h| walk_collect_expand(h, h.label, state) }
@@ -147,10 +154,12 @@ module Gori::Tui
     end
 
     private def walk_collect_expand(node : Node, host : String, state : Hash({String, String}, Bool)) : Nil
-      # Skip recording only the synthetic fold node's OWN (unkeyed) state, but still recurse
-      # into its children — real descendants under a grouped numeric fold have stable keys
-      # and their expand state must survive a reload (which fires ~1.3x/sec during capture).
-      state[{host, node.path}] = node.expanded if !node.grouped && !node.leaf?
+      # A fold is KEYED, not skipped. apply_expand_depth! re-collapses every fold on every
+      # reload (~1.3x/sec during capture), so without a durable key a fold the user opened
+      # could never stay open — and with id folding that means whole subtrees are unreadable.
+      if (k = expand_key(node)) && !node.leaf?
+        state[{host, k}] = node.expanded
+      end
       node.children.each { |c| walk_collect_expand(c, host, state) }
     end
 
@@ -160,21 +169,37 @@ module Gori::Tui
     end
 
     private def walk_reapply_expand(node : Node, host : String, prev : Hash({String, String}, Bool)) : Nil
-      key = {host, node.path}
-      if !node.grouped && !node.leaf? && prev.has_key?(key)
-        node.expanded = prev[key]
+      if (k = expand_key(node)) && !node.leaf?
+        key = {host, k}
+        node.expanded = prev[key] if prev.has_key?(key)
       end
       node.children.each { |c| walk_reapply_expand(c, host, prev) }
     end
 
-    # Index of the row whose (host, path) matches `target`, or nil if gone.
+    # Index of the row whose (host, expand_key) matches `target`, or nil if gone. Folds
+    # match too — parking the cursor on a `{uuid}` row must survive the next poll.
     private def index_of_target(rows : Array(VisibleRow), target : {String, String}?) : Int32?
       return nil unless target
-      want_host, want_path = target
+      want_host, want_key = target
       rows.each_with_index do |row, i|
-        next if row.node.grouped
-        host = host_label_for_row(rows, i)
-        return i if host == want_host && row.node.path == want_path
+        next unless (k = expand_key(row.node)) && k == want_key
+        return i if host_label_for_row(rows, i) == want_host
+      end
+      nil
+    end
+
+    # The previously selected row can vanish because a NEW sibling pushed its class over
+    # the fold threshold and swallowed it into a collapsed fold. Land on that fold instead
+    # of teleporting to row 0 — at the id-fold threshold this fires on ordinary browsing.
+    private def index_of_enclosing_fold(rows : Array(VisibleRow), target : {String, String}?) : Int32?
+      return nil unless target
+      want_host, want_path = target
+      return nil if want_path.empty? || want_path.includes?(Sitemap::FOLD_SEP)
+      return nil unless idx = want_path.rindex('/')
+      parent = want_path[0, idx] # "" for a top-level node: its parent is the host row
+      rows.each_with_index do |row, i|
+        next unless row.node.grouped && row.node.fold_parent == parent
+        return i if host_label_for_row(rows, i) == want_host
       end
       nil
     end
@@ -290,12 +315,12 @@ module Gori::Tui
       @visible_cache = nil
     end
 
-    # Whether numeric-sequence folding is on (shown in the bar / used by the `g` toggle).
+    # Whether id folding is on (shown in the bar / used by the `g` toggle).
     def grouping? : Bool
       @grouping
     end
 
-    # `g` — toggle numeric-sequence folding. The caller reloads to rebuild the tree.
+    # `g` — toggle id folding (both passes). The caller reloads to rebuild the tree.
     def toggle_grouping : Nil
       @grouping = !@grouping
     end
@@ -469,8 +494,8 @@ module Gori::Tui
     end
 
     # Selection-based (host, path) for the row currently under the cursor — the LIVE
-    # target, used to seed the pin at start_tag, re-anchor selection on reload, and
-    # detect a reload in apply_tag.
+    # target, used to seed the pin at start_tag and detect a reload in apply_tag.
+    # Refuses a fold: a synthetic node has no path and is not taggable.
     private def resolve_target : {String, String}?
       rows = visible_rows
       return nil unless row = rows[@selected]?
@@ -478,15 +503,53 @@ module Gori::Tui
       {host_label_for_row(rows, @selected), row.node.path}
     end
 
-    # The selected endpoint's {host, method, target} for cross-surface actions (Send to
-    # Repeater / Discover here). GET-preferred method; nil for a grouped fold node.
-    def selected_endpoint : {host: String, method: String, target: String}?
+    # What selection is re-anchored on across a reload. Unlike resolve_target this DOES
+    # resolve a fold (to its fold_key) — the cursor has to be able to rest on a `{uuid}`
+    # row without being thrown back to the first host on the next poll.
+    private def selection_anchor : {String, String}?
       rows = visible_rows
       return nil unless row = rows[@selected]?
-      return nil if row.node.grouped
-      methods = row.node.methods
+      return nil unless k = expand_key(row.node)
+      {host_label_for_row(rows, @selected), k}
+    end
+
+    # The selected endpoint's {host, method, target} for cross-surface actions (Send to
+    # Repeater / Discover / Sequencer). GET-preferred method.
+    #
+    # A synthetic fold has no path of its own, so `prefer` decides what it resolves to:
+    #   :descendant — the first real endpoint under it. Repeater and Sequencer need a
+    #                 CONCRETE target; they look it up by exact equality on flows.target.
+    #   :container  — the fold's parent path. Discover scans a SUBTREE, and on a `{uuid}`
+    #                 row the user means "under /users", not "under this one uuid".
+    # Both are identity on a normal node.
+    def selected_endpoint(prefer : Symbol = :descendant) : {host: String, method: String, target: String}?
+      rows = visible_rows
+      return nil unless row = rows[@selected]?
+      host = host_label_for_row(rows, @selected)
+      node = row.node
+      if node.grouped
+        if prefer == :container
+          parent = node.fold_parent
+          return nil unless parent
+          return {host: host, method: "GET", target: parent.empty? ? "/" : parent}
+        end
+        return nil unless node = first_endpoint(node)
+      end
+      methods = node.methods
       method = methods.includes?("GET") ? "GET" : (methods.first? || "GET")
-      {host: host_label_for_row(rows, @selected), method: method, target: row.node.path}
+      {host: host, method: method, target: node.path}
+    end
+
+    # DFS for the first descendant carrying a method — a fold's stand-in for the actions
+    # that need a real captured request behind the selection.
+    private def first_endpoint(node : Node) : Node?
+      node.children.each do |c|
+        return c unless c.methods.empty?
+        if found = first_endpoint(c)
+          return found
+        end
+      end
+      nil
     end
 
     def render(screen : Screen, rect : Rect, focused : Bool = true, *,
@@ -619,16 +682,22 @@ module Gori::Tui
     # Screen-x where the right cluster (methods/aside) begins; nil when the row has none.
     private def cluster_start(rect : Rect, node : Node, host : Bool) : Int32?
       if node.grouped
-        txt = "#{node.children.size} values"
+        w = "#{node.children.size} values".size
+        w += methods_width(node.fold_methods) + COL_GAP unless node.fold_methods.empty?
+        return rect.right - w - 1
       elsif host && node.endpoints > 0
         txt = node.endpoints == 1 ? "1 path" : "#{node.endpoints} paths"
       elsif !node.methods.empty?
-        total = node.methods.sum(&.size) + (node.methods.size - 1)
-        return rect.right - total - 1
+        return rect.right - methods_width(node.methods) - 1
       else
         return nil
       end
       rect.right - txt.size - 1
+    end
+
+    # Rendered width of a method-chip run (chips plus their 1-col gaps).
+    private def methods_width(methods : Array(String)) : Int32
+      methods.sum(&.size) + (methods.size - 1)
     end
 
     # Faint vertical guides at each ancestor level whose branch continues below this row.
@@ -651,8 +720,8 @@ module Gori::Tui
     end
 
     # The right-aligned cluster: path memo in the tag column, then a folded-value count
-    # on group rows, an endpoint count on host rows, or colored method chips on endpoint
-    # rows (group / host / endpoint are mutually exclusive for the aside slot).
+    # (plus the fold's stand-in method chips) on group rows, an endpoint count on host
+    # rows, or method chips on endpoint rows — one of the three per row.
     private def draw_cluster(screen : Screen, rect : Rect, node : Node, host : Bool, y : Int32, bg : Color, label_end : Int32) : Nil
       cluster_x = cluster_start(rect, node, host)
       tag_right = tag_col_right(rect)
@@ -663,7 +732,16 @@ module Gori::Tui
         draw_tag_column(screen, rect, t, y, bg, label_end, tag_right) unless node.grouped
       end
       if node.grouped
-        draw_aside(screen, rect, y, bg, "#{node.children.size} values", label_end)
+        # Chips at the right edge, folded-value count to their left: a collapsed fold has
+        # to answer "which verbs" without being expanded, or the row hides what it stands for.
+        shift =
+          if node.fold_methods.empty?
+            0
+          else
+            draw_methods(screen, rect, y, bg, node.fold_methods, label_end)
+            methods_width(node.fold_methods) + COL_GAP
+          end
+        draw_aside(screen, rect, y, bg, "#{node.children.size} values", label_end, shift)
       elsif host
         draw_aside(screen, rect, y, bg, node.endpoints == 1 ? "1 path" : "#{node.endpoints} paths", label_end) if node.endpoints > 0
       elsif !node.methods.empty?
@@ -686,8 +764,10 @@ module Gori::Tui
 
     # Right-aligned muted aside ("3 paths" / "50 values"). Omitted when it would collide
     # with the label/tag to its left.
-    private def draw_aside(screen : Screen, rect : Rect, y : Int32, bg : Color, txt : String, label_end : Int32) : Nil
-      start = rect.right - txt.size - 1
+    # `right_shift` reserves columns already taken on the right (a fold's method chips).
+    private def draw_aside(screen : Screen, rect : Rect, y : Int32, bg : Color, txt : String,
+                           label_end : Int32, right_shift : Int32 = 0) : Nil
+      start = rect.right - right_shift - txt.size - 1
       screen.text(start, y, txt, Theme.muted, bg) if start >= label_end + 1
     end
 
@@ -733,10 +813,10 @@ module Gori::Tui
       end
       scope_x = {rx - chip.size, rect.x}.max
       screen.text(scope_x, rect.y, chip, chip_color)
-      # The numeric path-param grouping toggle, left of the scope chip — same fg
+      # The id-folding toggle, left of the scope chip — same fg
       # accent/muted style so the two lens toggles read as one cluster, and its `g`
-      # chord stays in view (grouping-on vs -off renders identically without sequences).
-      gchip = "g:group"
+      # chord stays in view (folding-on vs -off renders identically without ids).
+      gchip = "g:fold"
       gx = scope_x - gchip.size - 1
       group_shown = gx > rect.x + 1
       screen.text(gx, rect.y, gchip, @grouping ? Theme.accent : Theme.muted) if group_shown

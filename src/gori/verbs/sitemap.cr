@@ -34,9 +34,9 @@ module Gori
         "sitemap.tag", "Tag path", "Pin a free-text memo to the selected path (filter with tag:)",
         Verb::Scope::Sitemap, [Verb::Chord.new("t")]) { |ctx| ctx.sitemap_tag; nil }
 
-      # `g` — fold/unfold numeric path-param sequences (/users/1,2,3… → [1, 2, 3 … +N]).
+      # `g` — fold/unfold path-param ids (/users/<uuid> → {uuid}, /users/1,2,3… → [1, 2, 3 … +N]).
       r.register Verb::Definition.new(
-        "sitemap.toggle-grouping", "Group sequences", "Fold numeric path-param sequences into [1, 2, 3 …] groups",
+        "sitemap.toggle-grouping", "Fold ids", "Fold path-param ids into {uuid}/{hex}/{date} and [1, 2, 3 …] groups",
         Verb::Scope::Sitemap, [Verb::Chord.new("g")]) { |ctx| ctx.sitemap_toggle_grouping; nil }
 
       # Toggle the scope lens from the Sitemap too (History has its own ⇧S binding).

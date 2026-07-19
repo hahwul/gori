@@ -72,7 +72,7 @@ module Gori::Tui
 
     def body_hint(focus : Symbol) : String
       return "type a tag · ↵ save · esc cancel" if @sitemap.tagging?
-      @sitemap.querying? ? "type query · ↹ complete · ↵ apply · esc clear" : "↑/↓ move · / filter · t tag · g group · ↵/→ expand · ← collapse · esc tabs"
+      @sitemap.querying? ? "type query · ↹ complete · ↵ apply · esc clear" : "↑/↓ move · / filter · t tag · g fold · ↵/→ expand · ← collapse · esc tabs"
     end
 
     # Live IME composition flows to whichever text field is open (the QL filter bar or
@@ -159,7 +159,7 @@ module Gori::Tui
       if @sitemap.start_tag
         @host.status("tag: type a memo · ↵ save · esc cancel")
       else
-        @host.status("can't tag a [grouped] sequence — expand it and tag a value")
+        @host.status("can't tag a fold — expand it and tag a value")
       end
     end
 
@@ -199,11 +199,11 @@ module Gori::Tui
       end
     end
 
-    # `g` — fold/unfold numeric path-param sequences, then rebuild the tree.
+    # `g` — fold/unfold path-param ids (uuid/hex/date + numeric runs), then rebuild.
     def sitemap_toggle_grouping : Nil
       @sitemap.toggle_grouping
       reload
-      @host.status(@sitemap.grouping? ? "grouping sequences on" : "grouping sequences off")
+      @host.status(@sitemap.grouping? ? "id folding on" : "id folding off")
     end
 
     # --- verbs (delegated from the Runner's ExecContext) ---

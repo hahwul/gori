@@ -19,7 +19,7 @@ module Gori
           p.on("-qQL", "--query=QL", "Filter endpoints with a QL query (host: method: path: status: scheme: …)") { |v| query = v }
           p.on("-nN", "--limit=N", "Max distinct endpoints to scan (default #{Store::SITEMAP_MAX})") { |v| limit = parse_count(v, "--limit") }
           p.on("--in-scope", "Only hosts in the project's configured scope") { in_scope = true }
-          p.on("--no-group", "Don't fold long numeric path-segment runs (/users/1,2,3…)") { group = false }
+          p.on("--no-group", "Don't fold path-param ids (/users/<uuid>, /users/1,2,3…)") { group = false }
           p.on("--format=FMT", "Output: text (default tree) | json | paths") { |v| format = parse_format(v, [:text, :json, :paths]) }
           p.on("-h", "--help", "Show this help") { puts p; exit 0 }
           p.unknown_args { |rest, _| positional = rest }
@@ -79,7 +79,11 @@ module Gori
           STDERR.puts "gori run sitemap: --in-scope, but no scope rules are configured — nothing is in scope" unless scope.configured?
           hosts.select! { |h| scope.host_in_scope?(h.label) }
         end
-        hosts.each { |h| Sitemap.group_sequences!(h) } if group
+        if group
+          # Opaque ids first, then numeric runs — mirrors SitemapView#reload.
+          hosts.each { |h| Sitemap.fold_templates!(h) }
+          hosts.each { |h| Sitemap.group_sequences!(h) }
+        end
         hosts.each { |h| h.endpoints = Sitemap.endpoint_count(h) }
         hosts
       end

@@ -76,6 +76,181 @@ describe Gori::Sitemap do
     end
   end
 
+  describe ".template_class" do
+    it "classifies opaque ids and leaves real segments literal" do
+      Gori::Sitemap.template_class("3f2a8b1c-1234-5678-9abc-def012345678").should eq("{uuid}")
+      Gori::Sitemap.template_class("a3f2b1c9d8e7").should eq("{hex}")
+      Gori::Sitemap.template_class("2026-07-19").should eq("{date}")
+      Gori::Sitemap.template_class("users").should be_nil
+      Gori::Sitemap.template_class("v2").should be_nil
+    end
+
+    it "excludes numerics so they stay with group_sequences!" do
+      # Url::HEX is /\A[0-9a-f]{12,}\z/i, so a 13-digit ms timestamp would classify as
+      # {hex} without the explicit numeric guard — and be stolen from the numeric fold.
+      Gori::Sitemap.template_class("1737300000000").should be_nil
+      Gori::Sitemap.template_class("42").should be_nil
+    end
+
+    it "classifies the path part of a leaf that carries a query" do
+      # `add` appends the query to the LAST segment, so the anchored regexes would miss.
+      Gori::Sitemap.template_class("3f2a8b1c-1234-5678-9abc-def012345678?tab=a").should eq("{uuid}")
+      Gori::Sitemap.template_class("?q=1").should be_nil # bare root + query
+    end
+
+    it "does not downcase-merge (the reason Url.fold_segment is not reused)" do
+      Gori::Sitemap.template_class("Users").should be_nil
+    end
+  end
+
+  describe ".fold_templates!" do
+    it "folds two uuid siblings into one collapsed {uuid}, children keeping literal paths" do
+      hosts = Gori::Sitemap.build([
+        {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
+        {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+      ])
+      Gori::Sitemap.fold_templates!(hosts.first)
+      users = hosts.first.children.find! { |c| c.label == "users" }
+      users.children.size.should eq(1)
+      group = users.children.first
+      group.grouped.should be_true
+      group.expanded.should be_false
+      group.label.should eq("{uuid}")
+      group.path.should eq("") # synthetic: never a real endpoint
+      group.fold_parent.should eq("/users")
+      group.children.size.should eq(2)
+      group.children.map(&.path).sort!.should eq([
+        "/users/3f2a8b1c-1234-5678-9abc-def012345678",
+        "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00",
+      ])
+    end
+
+    it "leaves a lone uuid literal (below the threshold)" do
+      hosts = Gori::Sitemap.build([{"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"}])
+      Gori::Sitemap.fold_templates!(hosts.first)
+      users = hosts.first.children.find! { |c| c.label == "users" }
+      users.children.none?(&.grouped).should be_true
+    end
+
+    it "keeps non-id siblings put, ordered before the fold" do
+      hosts = Gori::Sitemap.build([
+        {"h", "GET", "/users/me"},
+        {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
+        {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+        {"h", "GET", "/users/settings"},
+      ])
+      Gori::Sitemap.fold_templates!(hosts.first)
+      users = hosts.first.children.find! { |c| c.label == "users" }
+      users.children.map(&.label).should eq(["me", "settings", "{uuid}"])
+    end
+
+    it "gives each id class its own fold, and holds dates to the numeric threshold" do
+      # A date is meaningful CONTENT — folding two of them would hide a real range.
+      entries = [
+        {"h", "GET", "/x/a3f2b1c9d8e7"},
+        {"h", "GET", "/x/b4e3c2d1a0f9"},
+        {"h", "GET", "/x/2026-07-18"},
+        {"h", "GET", "/x/2026-07-19"},
+      ]
+      hosts = Gori::Sitemap.build(entries)
+      Gori::Sitemap.fold_templates!(hosts.first)
+      x = hosts.first.children.find! { |c| c.label == "x" }
+      x.children.select(&.grouped).map(&.label).should eq(["{hex}"])
+      x.children.reject(&.grouped).map(&.label).sort!.should eq(["2026-07-18", "2026-07-19"])
+    end
+
+    it "folds dates once they do explode" do
+      hosts = Gori::Sitemap.build((1..11).map { |i| {"h", "GET", "/r/2026-07-%02d" % i} })
+      Gori::Sitemap.fold_templates!(hosts.first)
+      r = hosts.first.children.find! { |c| c.label == "r" }
+      r.children.find! { |c| c.label == "{date}" }.children.size.should eq(11)
+    end
+
+    it "does not merge segments that differ only by case" do
+      hosts = Gori::Sitemap.build([
+        {"h", "GET", "/Users/3f2a8b1c-1234-5678-9abc-def012345678"},
+        {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+      ])
+      Gori::Sitemap.fold_templates!(hosts.first)
+      hosts.first.children.map(&.label).sort!.should eq(["Users", "users"])
+      # one uuid under each parent ⇒ neither reaches the threshold
+      hosts.first.children.each { |c| c.children.none?(&.grouped).should be_true }
+    end
+
+    it "folds a uuid whether or not the leaf carries a query" do
+      uuid = "3f2a8b1c-1234-5678-9abc-def012345678"
+      hosts = Gori::Sitemap.build([
+        {"h", "GET", "/i/#{uuid}"},
+        {"h", "GET", "/i/#{uuid}?tab=a"},
+      ])
+      Gori::Sitemap.fold_templates!(hosts.first)
+      i = hosts.first.children.find! { |c| c.label == "i" }
+      i.children.find! { |c| c.label == "{uuid}" }.children.size.should eq(2)
+    end
+
+    it "folds at the parent level while deeper segments stay reachable" do
+      hosts = Gori::Sitemap.build([
+        {"h", "GET", "/a/3f2a8b1c-1234-5678-9abc-def012345678/b"},
+        {"h", "GET", "/a/a1b2c3d4-5566-7788-99aa-bbccddeeff00/b"},
+      ])
+      Gori::Sitemap.fold_templates!(hosts.first)
+      a = hosts.first.children.find! { |c| c.label == "a" }
+      group = a.children.find! { |c| c.label == "{uuid}" }
+      group.children.each { |c| c.children.map(&.label).should eq(["b"]) }
+    end
+
+    it "is idempotent — a second call does not nest another level" do
+      hosts = Gori::Sitemap.build([
+        {"h", "GET", "/u/3f2a8b1c-1234-5678-9abc-def012345678"},
+        {"h", "GET", "/u/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+      ])
+      Gori::Sitemap.fold_templates!(hosts.first)
+      Gori::Sitemap.fold_templates!(hosts.first)
+      u = hosts.first.children.find! { |c| c.label == "u" }
+      u.children.size.should eq(1)
+      u.children.first.children.none?(&.grouped).should be_true
+    end
+
+    it "leaves long numerics to group_sequences!, producing exactly one fold level" do
+      hosts = Gori::Sitemap.build((1..12).map { |i| {"h", "GET", "/e/173730000000#{i}"} })
+      Gori::Sitemap.fold_templates!(hosts.first)
+      Gori::Sitemap.group_sequences!(hosts.first)
+      e = hosts.first.children.find! { |c| c.label == "e" }
+      e.children.size.should eq(1)
+      group = e.children.first
+      group.label.should start_with("[")
+      group.children.none?(&.grouped).should be_true # no nested {hex} inside
+    end
+
+    it "carries the union of its children's verbs without becoming an endpoint" do
+      entries = [
+        {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
+        {"h", "PATCH", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
+        {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+        {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00/orders"},
+      ]
+      before = Gori::Sitemap.endpoint_count(Gori::Sitemap.build(entries).first)
+      hosts = Gori::Sitemap.build(entries)
+      Gori::Sitemap.fold_templates!(hosts.first)
+      group = hosts.first.children.find! { |c| c.label == "users" }.children.find!(&.grouped)
+      group.fold_methods.should eq(["GET", "PATCH"]) # direct children only, not /orders
+      group.methods.should be_empty                  # NOT methods: endpoint_count keys on that
+      Gori::Sitemap.endpoint_count(hosts.first).should eq(before)
+    end
+
+    it "does not change host endpoint counts" do
+      entries = [
+        {"h", "GET", "/users/3f2a8b1c-1234-5678-9abc-def012345678"},
+        {"h", "GET", "/users/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+        {"h", "GET", "/users/me"},
+      ]
+      before = Gori::Sitemap.endpoint_count(Gori::Sitemap.build(entries).first)
+      hosts = Gori::Sitemap.build(entries)
+      Gori::Sitemap.fold_templates!(hosts.first)
+      Gori::Sitemap.endpoint_count(hosts.first).should eq(before)
+    end
+  end
+
   describe ".group_sequences!" do
     it "folds a pure-numeric run beyond the threshold into one collapsed group" do
       hosts = Gori::Sitemap.build((1001..1012).map { |i| {"h", "GET", "/p/#{i}"} })
@@ -95,6 +270,25 @@ describe Gori::Sitemap do
       a = hosts.first.children.find! { |c| c.label == "a" }
       a.children.map(&.label).sort!.should eq(%w(1 2 3 4 5))
       a.children.none?(&.grouped).should be_true
+    end
+
+    it "carries its children's verbs too" do
+      entries = (1001..1012).map { |i| {"h", "GET", "/p/#{i}"} }.to_a
+      entries << {"h", "DELETE", "/p/1005"}
+      hosts = Gori::Sitemap.build(entries)
+      Gori::Sitemap.group_sequences!(hosts.first)
+      group = hosts.first.children.find! { |c| c.label == "p" }.children.find!(&.grouped)
+      group.fold_methods.sort!.should eq(["DELETE", "GET"])
+      group.methods.should be_empty
+    end
+
+    it "is idempotent — a second call does not nest another level" do
+      hosts = Gori::Sitemap.build((1001..1012).map { |i| {"h", "GET", "/p/#{i}"} })
+      Gori::Sitemap.group_sequences!(hosts.first)
+      Gori::Sitemap.group_sequences!(hosts.first)
+      p = hosts.first.children.find! { |c| c.label == "p" }
+      p.children.size.should eq(1)
+      p.children.first.children.none?(&.grouped).should be_true
     end
   end
 
@@ -141,6 +335,17 @@ describe Gori::Sitemap do
       p = hosts.first.children.find! { |c| c.label == "p" }
       group = p.children.find! &.grouped
       group.expanded.should be_false
+    end
+
+    it "keeps template folds collapsed" do
+      hosts = Gori::Sitemap.build([
+        {"h", "GET", "/u/3f2a8b1c-1234-5678-9abc-def012345678"},
+        {"h", "GET", "/u/a1b2c3d4-5566-7788-99aa-bbccddeeff00"},
+      ])
+      Gori::Sitemap.fold_templates!(hosts.first)
+      Gori::Sitemap.apply_expand_depth!(hosts, -1)
+      u = hosts.first.children.find! { |c| c.label == "u" }
+      u.children.find! { |c| c.label == "{uuid}" }.expanded.should be_false
     end
   end
 end
