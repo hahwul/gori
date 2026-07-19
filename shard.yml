@@ -42,3 +42,8 @@ dependencies:
 development_dependencies:
   ameba:
     github: crystal-ameba/ameba
+    branch: master
+    # master (1.7.0-dev) rather than the 1.6.4 release: 1.6.4's postinstall does not
+    # compile under Crystal 1.21 (`next_string_array_token` undefined for
+    # Crystal::Lexer), and that failure aborts `shards build` for the whole project.
+    # Move back to a version constraint once 1.7.0 is released.
