@@ -103,17 +103,47 @@ module Gori::Tui
 
     # Draw the value at (x, y) within `width`, painting the block caret + terminal
     # cursor when `focused`. `bg`/`fg` set the base colours (the caret always inverts).
+    #
+    # Focused rendering goes through `Screen#input_line`, which is what draws the IME
+    # PREEDIT (underlined, at the caret) and syncs the hardware cursor the terminal
+    # anchors its own IME UI to. Painting the value with a plain `text` call instead
+    # meant every TextField-based overlay stored composing text and never showed it —
+    # in the import popup a Hangul/CJK name stayed invisible until each syllable
+    # committed. One primitive, so the import / CA-import / fuzzer overlays are all
+    # fixed together.
+    #
+    # The view scrolls horizontally with the caret. Without it the field simply stopped
+    # at `width` (64 columns in the import card) and the caret, the tail of the path and
+    # the cursor sync all vanished past that — on a field whose whole purpose is holding
+    # a long absolute path.
     def render(screen : Screen, x : Int32, y : Int32, width : Int32, focused : Bool,
                fg : Color, bg : Color) : Nil
       return if width <= 0
-      screen.text(x, y, @value, fg, bg, width: width)
-      return unless focused
+      unless focused
+        screen.text(x, y, @value, fg, bg, width: width)
+        return
+      end
+      start = window_start(width)
+      screen.input_line(x, y, @value[start..], @caret.clamp(0, @value.size) - start,
+        @preedit, fg, bg, width: width)
+    end
+
+    # First visible character index: 0 until the caret (plus any preedit, plus the caret
+    # cell itself) would overflow `width`, then far enough right to keep it on screen.
+    # Walks by DISPLAY width so a CJK path scrolls by columns, not by characters.
+    private def window_start(width : Int32) : Int32
       c = @caret.clamp(0, @value.size)
-      cx = x + Screen.display_width(@value[0, c])
-      return if cx >= x + width
-      ch = c < @value.size ? @value[c] : ' '
-      screen.cell(cx, y, ch, Theme.bg, Theme.accent)
-      screen.cursor(cx, y)
+      used = Screen.display_width(@value[0, c]) + Screen.display_width(@preedit) + 1
+      return 0 if used <= width
+      used = Screen.display_width(@preedit) + 1 # the caret cell always stays visible
+      start = c
+      while start > 0
+        w = Screen.display_width(@value[start - 1].to_s)
+        break if used + w > width
+        used += w
+        start -= 1
+      end
+      start
     end
 
     private def push_undo : Nil
