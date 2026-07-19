@@ -360,7 +360,7 @@ gori run project env delete TOKEN
 
 #### project host-override
 
-Manage **project** host overrides: `/etc/hosts`-style maps that change only the TCP dial target (SNI, certificate hostname, and `Host` header stay the original name). Project entries win over global `Settings: Hostnames` on collision. Alias: `host-overrides`.
+Manage **project** host overrides: `/etc/hosts`-style maps that change only the TCP dial target (SNI, certificate hostname, and `Host` header stay the original name). Project entries win over the global hostname overrides on collision. Alias: `host-overrides`.
 
 ```bash
 gori run project host-override                              # list

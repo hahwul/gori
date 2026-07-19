@@ -97,7 +97,7 @@ gori는 탭의 한 줄입니다. 기본 순서는 Project → Target → **Histo
 | `Esc` | 포커스를 탭 바 쪽으로 되돌림 |
 | `Tab` / `Shift-Tab` | 탭 바와 패널 사이로 포커스 이동 |
 
-마우스는 활성화하면(설정) 동작합니다. 탭 클릭, 행 클릭으로 선택, 다시 클릭으로 열기. **Help** 탭은 이 페이지가 열려 있지 않을 때 쓸 수 있는 앱 안의 완전한 키 치트시트입니다.
+마우스는 활성화하면(Preferences → **Editor & Keys** → **Editor**) 동작합니다. 탭 클릭, 행 클릭으로 선택, 다시 클릭으로 열기. **Help** 탭은 이 페이지가 열려 있지 않을 때 쓸 수 있는 앱 안의 완전한 키 치트시트입니다.
 
 ## 5. History에서 플로우 읽기 {#5-read-a-flow-in-history}
 
@@ -170,6 +170,7 @@ method:POST body:password
 | 키 | 위치 | 동작 |
 |-----|--------|--------|
 | `Ctrl-P` | 어디서나 | 커맨드 팔레트(설정, Match & Replace, 알림, …) |
+| `Ctrl-,` | 어디서나 | Preferences(모든 설정을 담은 하나의 모달) |
 | `Space` | 포커스된 패널 | 영역 동작 메뉴 |
 | `c` / `i` / `s` | 어디서나 | 캡처 / 인터셉트 / 스코프 렌즈 |
 | `[` `]` · `1`-`9` | 어디서나 | 탭 전환 |
@@ -188,7 +189,7 @@ method:POST body:password
 gori wizard
 ```
 
-바인드 단계는 `settings.json`의 공유 기본값을 설정합니다. **Settings: Network**와 같은 계층입니다. 프로젝트별 잠금이 아니며, 필요하면 Project 탭에서 평가마다 다른 주소를 고정하세요.
+바인드 단계는 `settings.json`의 공유 기본값을 설정합니다. Preferences → **Network & Tabs** → **Network**와 같은 계층입니다. 프로젝트별 잠금이 아니며, 필요하면 Project 탭에서 평가마다 다른 주소를 고정하세요.
 
 ## 가이드 UI 투어 {#guided-ui-tour}
 

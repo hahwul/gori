@@ -1,12 +1,13 @@
 +++
 title = "Hotkeys"
-description = "Rebind gori's keyboard shortcuts from settings:hotkeys."
+description = "Rebind gori's keyboard shortcuts from the Preferences modal."
 +++
 
-gori's keyboard shortcuts are rebindable from **`settings:hotkeys`** in the command palette (`Ctrl-P`). The editor lists every rebindable action grouped by where it fires (GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …); pick a row, press a new key, done.
+gori's keyboard shortcuts are rebindable from the **Hotkeys** editor. Reach it from Preferences (`Ctrl-,` → **Editor & Keys** → **Hotkeys**, then `↵`), or jump straight there with **`settings:hotkeys`** in the command palette (`Ctrl-P`). The editor lists every rebindable action grouped by where it fires (GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …); pick a row, press a new key, done.
 
 ```text
-Ctrl-P → settings:hotkeys
+Ctrl-,  → Editor & Keys → Hotkeys
+Ctrl-P  → settings:hotkeys
 ```
 
 ## Key budget (how new shortcuts earn a key)
@@ -19,7 +20,7 @@ Bare letter keys are scarce. New actions should pick a **price tier** before tak
 | **L1 Loop** | bare letter or sticky family (`^R`) | many times / minute | History `j/k` `/` `y`, Repeater send |
 | **L2 Session breath** | Global bare (cap: `c` `i` `s` only) | many times / session | capture, intercept, scope lens |
 | **L3 Contextual** | `Space` then mnemonic | occasional, pane-local | compare, mine, send-group, copy-as |
-| **L4 Rare / config** | palette (`Ctrl-P`) only | rare | settings, Match & Replace, notifications |
+| **L4 Rare / config** | palette (`Ctrl-P`) or Preferences (`Ctrl-,`) | rare | settings, Match & Replace, notifications |
 
 Rules of thumb:
 
@@ -96,5 +97,6 @@ An absent action uses the profile default. Unknown ids and unparseable chords ar
 
 ## Next Steps
 
+- [Settings](/guide/settings/): the Preferences modal and every section in it
 - [Themes](/guide/themes/): switch or create colour themes the same way
 - [Configuration Reference](/reference/config/): the `hotkeys` key in `settings.json`

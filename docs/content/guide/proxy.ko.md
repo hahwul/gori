@@ -125,7 +125,7 @@ gori run history -q 'status:5xx host:api.example.com'
 | 레이어 | 위치 | 우선순위 |
 |-------|-------|------------|
 | **Project** | **Project** 탭 → HOST OVERRIDES 패널 (`a` / `e` / `d`) | 충돌 시 우선 |
-| **Global** | `Ctrl-P` → **Settings: Hostnames**, 또는 `settings.json`의 `hostname_overrides` | 폴백 |
+| **Global** | Preferences(`Ctrl-,`) → **Network & Tabs** → **Network** → **Hostname overrides**, `Ctrl-P` → **Settings: Hostnames**, 또는 `settings.json`의 `hostname_overrides` | 폴백 |
 
 스테이징 호스트, IP 기반 가상 호스트, 또는 `Host` 헤더를 그대로 유지하면서 프로덕션 호스트명을 랩 박스로 향하게 할 때 유용합니다.
 

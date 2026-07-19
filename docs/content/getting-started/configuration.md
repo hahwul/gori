@@ -37,6 +37,18 @@ gori settings --edit   # open it in your editor
 
 Persisted sections include `network`, `theme` (default `goridark`), `mouse`, `editor`, `tabs`, `layout`, `statusline`, `hostname_overrides`, `env`, `hotkeys`, `decoder`, and `mine`. See the [Configuration Reference](/reference/config/) for the full list of keys.
 
+### The Preferences Modal
+
+You rarely need to edit the file by hand. Everything in it is editable in-app from one surface, the **Preferences** modal, grouped into four sub-tabs (General, Appearance, Editor & Keys, Network & Tabs):
+
+| Open it with | Lands on |
+|--------------|----------|
+| `Ctrl-,` from anywhere | The group strip, so you pick a group first |
+| The `⚙` chip in the top bar | Same as `Ctrl-,` |
+| `Ctrl-P` → any **Settings: …** entry | That section's fields directly |
+
+`Ctrl-,` also works in the project picker, before any project is open, so you can set your theme on first launch. Saved changes apply live, no restart. See the [Settings guide](/guide/settings/) for every section and field.
+
 ### Network
 
 The `network` section is the global default for how the proxy binds and whether traffic is forwarded through an upstream proxy. Projects without their own network overrides inherit these values:
@@ -61,20 +73,20 @@ The `network` section is the global default for how the proxy binds and whether 
 
 1. **Per-project overrides** (`net.bind_*` in the project DB): when set, they win for that project only.
 2. **CLI flags** (`--listen` / `--port`): override `settings.json` for the current process only; not written to disk.
-3. **`settings.json` `network`**: the shared default (what the first-run wizard and Settings: Network edit).
+3. **`settings.json` `network`**: the shared default (what the first-run wizard and Preferences → **Network** edit).
 4. **Factory defaults**: `127.0.0.1:8070` when nothing else is set.
 
 ### Theme
 
-gori ships twenty-one built-in colour themes (`goridark` is the default) and supports your own JSON themes. Switch it from the command palette (`Ctrl-P` → `settings:theme`) or set `theme` in `settings.json`. See the [Themes guide](/guide/themes/).
+gori ships twenty-six built-in colour themes (`goridark` is the default) and supports your own JSON themes. Switch it from Preferences (`Ctrl-,` → **Appearance** → **Theme**), from the palette (`Ctrl-P` → `settings:theme`), or set `theme` in `settings.json`. See the [Themes guide](/guide/themes/).
 
 ### Hotkeys
 
-Every keyboard shortcut is rebindable from the command palette (`Ctrl-P` → `settings:hotkeys`) and persisted under the `hotkeys` key. See the [Hotkeys guide](/guide/hotkeys/).
+Every keyboard shortcut is rebindable from Preferences (`Ctrl-,` → **Editor & Keys** → **Hotkeys**) or the palette (`Ctrl-P` → `settings:hotkeys`), and persisted under the `hotkeys` key. See the [Hotkeys guide](/guide/hotkeys/).
 
 ### Statusline
 
-An opt-in extra row at the bottom of the TUI (command palette → **Settings: Statusline**, or the `statusline` key). When enabled, gori runs a shell command on an interval and shows its (ANSI-coloured) stdout, a customizable status bar inspired by Claude Code's status line. The command receives a JSON snapshot of the live session (project, capture state, flow count, proxy address) on stdin. Disabled by default; see the [Configuration Reference](/reference/config/#statusline) for the keys and the stdin contract.
+An opt-in extra row at the bottom of the TUI (Preferences → **General** → **Statusline**, or the `statusline` key). When enabled, gori runs a shell command on an interval and shows its (ANSI-coloured) stdout, a customizable status bar inspired by Claude Code's status line. The command receives a JSON snapshot of the live session (project, capture state, flow count, proxy address) on stdin. Disabled by default; see the [Configuration Reference](/reference/config/#statusline) for the keys and the stdin contract.
 
 ## Per-Project Network Overrides
 

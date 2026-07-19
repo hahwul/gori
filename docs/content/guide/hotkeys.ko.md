@@ -1,12 +1,13 @@
 +++
 title = "단축키"
-description = "settings:hotkeys에서 gori의 단축키를 재지정합니다."
+description = "Preferences 모달에서 gori의 단축키를 재지정합니다."
 +++
 
-gori의 단축키는 커맨드 팔레트(`Ctrl-P`)의 **`settings:hotkeys`**에서 재지정할 수 있습니다. 에디터는 재지정 가능한 모든 동작을 발생 위치별(GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …)로 묶어 나열합니다. 행을 고르고, 새 키를 누르면, 끝입니다.
+gori의 단축키는 **Hotkeys** 편집기에서 재지정합니다. Preferences(`Ctrl-,` → **Editor & Keys** → **Hotkeys**에서 `↵`)로 들어가거나, 커맨드 팔레트(`Ctrl-P`)의 **`settings:hotkeys`**로 바로 갈 수 있습니다. 에디터는 재지정 가능한 모든 동작을 발생 위치별(GLOBAL, HISTORY, REPEATER, FUZZER, INTERCEPT, …)로 묶어 나열합니다. 행을 고르고, 새 키를 누르면, 끝입니다.
 
 ```text
-Ctrl-P → settings:hotkeys
+Ctrl-,  → Editor & Keys → Hotkeys
+Ctrl-P  → settings:hotkeys
 ```
 
 ## 키 예산 (새 단축키가 키를 얻는 방식) {#key-budget-how-new-shortcuts-earn-a-key}
@@ -96,5 +97,6 @@ Ctrl-P → settings:hotkeys
 
 ## 다음 단계 {#next-steps}
 
+- [Settings](/ko/guide/settings/): Preferences 모달과 그 안의 모든 섹션
 - [Themes](/ko/guide/themes/): 같은 방식으로 컬러 테마를 전환하거나 만듭니다
 - [Configuration Reference](/ko/reference/config/): `settings.json`의 `hotkeys` 키

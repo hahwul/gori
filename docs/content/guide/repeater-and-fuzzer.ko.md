@@ -35,7 +35,7 @@ gori run repeater <flow-id> --target https://staging.example.com --diff
 
 | 레이어 | 위치 |
 |-------|-------|
-| **Global** | `Ctrl-P` → **Settings: Env**, 또는 `settings.json`의 `env` 섹션 |
+| **Global** | Preferences(`Ctrl-,`) → **Editor & Keys** → **Env**, `Ctrl-P` → **Settings: Env**, 또는 `settings.json`의 `env` 섹션 |
 | **Project** | **Project** 탭 → **ENV** 패널 (`a` 추가, `e` 편집, `d` 삭제) |
 
 기본 접두사는 `$`입니다(ENV space 메뉴의 **Change prefix**나 설정의 `env.prefix`로 변경 가능). 키는 `A-Z a-z _`로 시작해 `A-Z a-z 0-9 _`가 이어집니다. 알 수 없는 토큰은 그대로 둡니다.
