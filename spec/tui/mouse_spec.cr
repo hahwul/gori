@@ -308,17 +308,17 @@ describe "InterceptView#bar_zone_at" do
   end
 end
 
-describe "Chrome.top_bar_chip_rect" do
+describe "Chrome top-bar chip hit-testing" do
   it "returns nil for :notify when there's no unread, and a rect matching the drawn badge otherwise" do
     rect = Rect.new(0, 0, 80, 1)
     Chrome.top_bar_chip_rect(rect, :notify, scope: "scope:2", listen: "127.0.0.1:8080",
-      time: "01:37 PM", unread: 0).should be_nil
+      unread: 0).should be_nil
 
     backend = MemoryBackend.new(80, 1)
     Chrome.render_top_bar(Screen.new(backend), rect,
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2", unread: 3)
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2", unread: 3)
     nrect = Chrome.top_bar_chip_rect(rect, :notify, scope: "scope:2", listen: "127.0.0.1:8080",
-      time: "01:37 PM", unread: 3).not_nil!
+      unread: 3).not_nil!
     backend.row(0)[nrect.x, nrect.w].should eq("notify:3")
   end
 
@@ -326,62 +326,96 @@ describe "Chrome.top_bar_chip_rect" do
     rect = Rect.new(0, 0, 80, 1)
     backend = MemoryBackend.new(80, 1)
     Chrome.render_top_bar(Screen.new(backend), rect,
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2")
-    srect = Chrome.top_bar_chip_rect(rect, :scope, scope: "scope:2", listen: "127.0.0.1:8080",
-      time: "01:37 PM").not_nil!
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2")
+    srect = Chrome.top_bar_chip_rect(rect, :scope, scope: "scope:2",
+      listen: "127.0.0.1:8080").not_nil!
     backend.row(0)[srect.x, srect.w].should eq("scope:2")
 
     backend2 = MemoryBackend.new(80, 1)
     Chrome.render_top_bar(Screen.new(backend2), rect,
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:off")
-    srect2 = Chrome.top_bar_chip_rect(rect, :scope, scope: "scope:off", listen: "127.0.0.1:8080",
-      time: "01:37 PM").not_nil!
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:off")
+    srect2 = Chrome.top_bar_chip_rect(rect, :scope, scope: "scope:off",
+      listen: "127.0.0.1:8080").not_nil!
     backend2.row(0)[srect2.x, srect2.w].should eq("scope:off")
   end
 
   it "keeps notify/scope hit-test rects in sync with the drawn row even when the project name is squeezed" do
-    # Narrow rect: chips (notify:3 · scope:99 · 127.0.0.1:8080 · 01:37 PM · ⌘) leave the
+    # Narrow rect: chips (notify:3 · scope:99 · 127.0.0.1:8080 · ⌘ · ⚙) leave the
     # project name almost no room — exercises the "name squeezed to zero width" branch.
     rect = Rect.new(0, 0, 45, 1)
     backend = MemoryBackend.new(45, 1)
     Chrome.render_top_bar(Screen.new(backend), rect,
-      project: "a very long project name", listen: "127.0.0.1:8080", time: "01:37 PM",
+      project: "a very long project name", listen: "127.0.0.1:8080",
       scope: "scope:99", unread: 3)
 
     nrect = Chrome.top_bar_chip_rect(rect, :notify, scope: "scope:99", listen: "127.0.0.1:8080",
-      time: "01:37 PM", unread: 3).not_nil!
+      unread: 3).not_nil!
     backend.row(0)[nrect.x, nrect.w].should eq("notify:3")
 
     srect = Chrome.top_bar_chip_rect(rect, :scope, scope: "scope:99", listen: "127.0.0.1:8080",
-      time: "01:37 PM", unread: 3).not_nil!
+      unread: 3).not_nil!
     backend.row(0)[srect.x, srect.w].should eq("scope:99")
   end
 
-  it "returns a rect matching the drawn far-right palette chip (⌘)" do
+  it "returns a rect matching the drawn far-right palette chip (⌘), right of the listen chip" do
     rect = Rect.new(0, 0, 80, 1)
     backend = MemoryBackend.new(80, 1)
     Chrome.render_top_bar(Screen.new(backend), rect,
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2")
-    prect = Chrome.top_bar_chip_rect(rect, :palette, scope: "scope:2", listen: "127.0.0.1:8080",
-      time: "01:37 PM").not_nil!
-    backend.row(0)[prect.x, prect.w].should eq("⌘")
-    # Right of the clock chip.
-    trect = Chrome.top_bar_chip_rect(rect, :time, scope: "scope:2", listen: "127.0.0.1:8080",
-      time: "01:37 PM").not_nil!
-    prect.x.should be > trect.x
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2")
+    prect = Chrome.top_bar_chip_rect(rect, :palette, scope: "scope:2",
+      listen: "127.0.0.1:8080").not_nil!
+    backend.row(0)[prect.x, prect.w].should contain("⌘")
+    lrect = Chrome.top_bar_chip_rect(rect, :listen, scope: "scope:2",
+      listen: "127.0.0.1:8080").not_nil!
+    prect.x.should be > lrect.x
   end
 
   it "returns a rect matching the drawn far-right settings chip (⚙), right of ⌘" do
     rect = Rect.new(0, 0, 80, 1)
     backend = MemoryBackend.new(80, 1)
     Chrome.render_top_bar(Screen.new(backend), rect,
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2")
-    grect = Chrome.top_bar_chip_rect(rect, :settings, scope: "scope:2", listen: "127.0.0.1:8080",
-      time: "01:37 PM").not_nil!
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2")
+    grect = Chrome.top_bar_chip_rect(rect, :settings, scope: "scope:2",
+      listen: "127.0.0.1:8080").not_nil!
     backend.row(0)[grect.x, grect.w].should contain("⚙")
-    prect = Chrome.top_bar_chip_rect(rect, :palette, scope: "scope:2", listen: "127.0.0.1:8080",
-      time: "01:37 PM").not_nil!
+    prect = Chrome.top_bar_chip_rect(rect, :palette, scope: "scope:2",
+      listen: "127.0.0.1:8080").not_nil!
     grect.x.should be > prect.x # ⚙ sits to the right of ⌘
+  end
+
+  it "resolves a click to the chip's tag, and ignores passive readouts" do
+    # 110 cols: every optional chip is present at once here (notify + sandbox on top of the
+    # always-on ones), which overflows an 80-col bar — see the overflow spec below.
+    rect = Rect.new(0, 0, 110, 1)
+    args = {scope: "scope:2", probe: "probe:passive", sandbox: "sandbox",
+            listen: "127.0.0.1:8080", unread: 3}
+    {:notify, :scope, :probe, :listen, :palette, :settings}.each do |tag|
+      r = Chrome.top_bar_chip_rect(rect, tag, **args).not_nil!
+      Chrome.top_bar_chip_at(rect, r.x, 0, **args).should eq(tag)
+      # The whole label responds, not just its first cell.
+      Chrome.top_bar_chip_at(rect, r.right - 1, 0, **args).should eq(tag)
+    end
+    # The sandbox chip is a display-only warning — clicking it must fall through.
+    srect = Chrome.top_bar_chip_rect(rect, :sandbox, **args).not_nil!
+    Chrome.top_bar_chip_at(rect, srect.x, 0, **args).should be_nil
+    # Off the bar entirely.
+    Chrome.top_bar_chip_at(rect, 0, 1, **args).should be_nil
+  end
+
+  # The chip run is right-anchored but drawn left-to-right, so when it overflows it's the
+  # RIGHTMOST chips that fall off — i.e. ⌘ and ⚙, the two affordances a mouse user most
+  # needs. That's tolerable only because the steady state fits: this pins the everyday
+  # layout (no notify, no sandbox) inside a plain 80-col terminal.
+  it "keeps the ⌘/⚙ buttons on-bar at 80 cols in the steady state" do
+    rect = Rect.new(0, 0, 80, 1)
+    args = {scope: "scope:2", probe: "probe:passive", listen: "127.0.0.1:8080"}
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), rect, project: "acme",
+      scope: "scope:2", probe: "probe:passive", listen: "127.0.0.1:8080")
+    backend.row(0).should contain("⌘")
+    backend.row(0).should contain("⚙")
+    Chrome.top_bar_chip_at(rect, Chrome.top_bar_chip_rect(rect, :settings, **args).not_nil!.x, 0,
+      **args).should eq(:settings)
   end
 end
 

@@ -90,12 +90,15 @@ module Gori::Tui
       true
     end
 
-    # Fixed-width CPU field (`%3d`) so the chip — and therefore everything anchored to its
-    # left — never jitters as the number crosses a digit boundary.
+    # UNPADDED CPU field — one space before the number, always. Any fixed width wider than
+    # the common case leaves a gap that reads as a rendering glitch, and padding to the
+    # widest case can't be justified by stability anyway: `human_bytes` is variable-width,
+    # so MEM already shifts the right-anchored chip's left edge whenever RSS crosses a digit
+    # or 1 GiB. Let the number be its own width and accept the same shift on 9→10.
     private def format(percent : Float64, rss : UInt64) : String
       pct = percent.clamp(0.0, 100.0).round.to_i
       String.build do |io|
-        io << "CPU " << pct.to_s.rjust(3) << "% MEM " << human_bytes(rss)
+        io << "CPU " << pct << "% MEM " << human_bytes(rss)
       end
     end
 

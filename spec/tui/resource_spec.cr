@@ -28,8 +28,9 @@ describe Gori::Tui::ResourceMeter do
       m.tick(Time.instant).should be_true
       label = m.label
       label.should_not be_nil
-      # Fixed-width CPU field, integer percent, then a rounded MiB/GiB memory figure.
-      label.not_nil!.should match(/\ACPU\s{1,3}\d{1,3}% MEM \d+(\.\d)?[MG]\z/)
+      # Unpadded integer percent (one space after CPU, always), then a rounded MiB/GiB
+      # memory figure.
+      label.not_nil!.should match(/\ACPU \d{1,3}% MEM \d+(\.\d)?[MG]\z/)
     end
   end
 
@@ -39,7 +40,7 @@ describe Gori::Tui::ResourceMeter do
       m.tick(Time.instant)
       # No previous sample to difference against, so the window is undefined → 0%, not a
       # startup spike computed from process-lifetime CPU.
-      m.label.not_nil!.should start_with("CPU   0%")
+      m.label.not_nil!.should start_with("CPU 0%")
     end
   end
 
@@ -84,7 +85,7 @@ describe Gori::Tui::ResourceMeter do
     with_meter(false) { m.tick(t0 + 1.second) }
     with_meter(true) do
       m.tick(t0 + 1.hour).should be_true
-      m.label.not_nil!.should start_with("CPU   0%")
+      m.label.not_nil!.should start_with("CPU 0%")
     end
   end
 end
