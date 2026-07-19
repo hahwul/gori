@@ -2312,3 +2312,48 @@ describe "Gori::Probe::Active::BackslashPowered" do
     end
   end
 end
+
+# JsScan lexes an all-ASCII script through a zero-allocation AsciiChars view and anything else
+# through String#chars. The two must stay byte-identical — the fast path is an optimisation, not
+# a behaviour change, and a silent divergence here is a missed finding, not a crash.
+describe "Gori::Probe::Passive::JsScan (ASCII fast path)" do
+  samples = [
+    %(var a = "hello"; // comment here\nfoo.innerHTML = location.hash;),
+    %(/* block\n comment */ eval("x" + location.search);),
+    %(const t = `pre ${location.hash} post`; el.innerHTML = t;),
+    %(s = 'it\\'s escaped'; u = "http://x/y//z"; document.write(u);),
+    %(a = `outer ${ `inner ${x}` } end`;),
+    %(o = {"__proto__": 1}; window.addEventListener("message", function(e){ el.innerHTML = e.data; });),
+    %(x = 1 / 2; y = a // trailing\n + b;),
+    %(`unterminated template),
+    %("unterminated string),
+    %(/* unterminated block),
+  ]
+
+  it "produces identical output on both paths" do
+    samples.each do |src|
+      src.ascii_only?.should be_true # these drive the fast path
+
+      # Appending a non-ASCII char forces the chars path; compare the shared prefix.
+      forced_strip = Gori::Probe::Passive::JsScan.strip(src + "é")
+      forced_comments = Gori::Probe::Passive::JsScan.strip_comments(src + "é")
+
+      Gori::Probe::Passive::JsScan.strip(src).should eq(forced_strip[0, src.size])
+      Gori::Probe::Passive::JsScan.strip_comments(src).should eq(forced_comments[0, src.size])
+    end
+  end
+
+  it "preserves char count on both paths" do
+    (samples + ["日本語 = \"文字列\"; // コメント\nel.innerHTML = location.hash;"]).each do |src|
+      Gori::Probe::Passive::JsScan.strip(src).size.should eq(src.size)
+      Gori::Probe::Passive::JsScan.strip_comments(src).size.should eq(src.size)
+    end
+  end
+
+  it "still correlates source to sink, and still ignores commented-out code" do
+    code = Gori::Probe::Passive::JsScan.strip(
+      "el.innerHTML = location.hash;\n// el.innerHTML = document.cookie;\n")
+    Gori::Probe::Passive::JsScan.source_sink_pairs(code)
+      .should eq([{"location.hash", "innerHTML"}])
+  end
+end

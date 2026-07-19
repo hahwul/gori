@@ -68,6 +68,31 @@ module Gori
           {/\.html\s*\(/, "jQuery.html()"},
         ] of {Regex, String}
 
+        # A random-access `Char` view over ASCII bytes, used instead of `String#chars` on the
+        # (overwhelmingly common) all-ASCII script. `chars` builds an `Array(Char)` sized to the
+        # script — for a 256 KiB minified bundle that is a ~1 MiB heap allocation, and both strip
+        # and strip_comments used to build their own, on every HTML/JS flow, on the fiber the
+        # passive scan shares with the proxy.
+        #
+        # This is a struct wrapping a borrowed slice, so it allocates nothing. For ASCII the two
+        # are isomorphic: byte index == char index and `unsafe_chr` on a byte < 0x80 is exactly
+        # the Char `chars` would have held, so the lexers below produce byte-identical output.
+        # A script with any non-ASCII byte still takes the `chars` path, which keeps this file's
+        # char-offset-preserving invariant exactly as documented (blanking a multi-byte char to a
+        # single space) rather than trading it for a byte-offset one.
+        private struct AsciiChars
+          def initialize(@bytes : Bytes)
+          end
+
+          def size : Int32
+            @bytes.size
+          end
+
+          def [](index : Int32) : Char
+            @bytes[index].unsafe_chr
+          end
+        end
+
         # Executable JS fragments in a response body, RAW (not yet stripped). `html`/`js` come
         # from the Context content-type gates.
         def self.scripts(text : String?, html : Bool, js : Bool) : Array(String)
@@ -95,24 +120,39 @@ module Gori
         # tokens. Every consumed char emits exactly one char, so indices stay aligned.
         def self.strip(js : String) : String
           return js if js.empty?
-          chars = js.chars
-          n = chars.size
-          String.build(js.bytesize) do |io|
-            i = 0
-            while i < n
-              if j = blank_token_at(chars, i, n, io)
-                i = j
-              else
-                io << chars[i]
-                i += 1
+          scan_source(js) do |chars, n|
+            String.build(js.bytesize) do |io|
+              i = 0
+              while i < n
+                if j = blank_token_at(chars, i, n, io)
+                  i = j
+                else
+                  io << chars[i]
+                  i += 1
+                end
               end
             end
           end
         end
 
+        # Yields the random-access char source for `js` plus its length: a zero-allocation
+        # AsciiChars view when the script is all-ASCII, else the `Array(Char)` the lexers have
+        # always used. Both satisfy the same `size`/`[]` shape, so the lexers below are compiled
+        # for each and neither is special-cased. `ascii_only?` is a single byte pass, far cheaper
+        # than the array it avoids.
+        private def self.scan_source(js : String, &)
+          if js.ascii_only?
+            view = AsciiChars.new(js.to_slice)
+            yield view, view.size
+          else
+            chars = js.chars
+            yield chars, chars.size
+          end
+        end
+
         # If chars[i] starts a // or /* */ comment, blank it (→ spaces, offsets preserved) and
         # return the index just past it; else nil. Shared by the string- and comment-strip lexers.
-        private def self.blank_comment_at(chars : Array(Char), i : Int32, n : Int32, io : IO) : Int32?
+        private def self.blank_comment_at(chars, i : Int32, n : Int32, io : IO) : Int32?
           c = chars[i]
           if c == '/' && i + 1 < n && chars[i + 1] == '/'
             blank_line_comment(chars, i, n, io)
@@ -124,7 +164,7 @@ module Gori
         # If chars[i] starts a // comment, /* */ comment, or a '…'/"…"/`…` string, blank it
         # (contents → spaces, offsets preserved) and return the index just past it; else nil.
         # Shared by strip and emit_interpolation so the token lexing lives in one place.
-        private def self.blank_token_at(chars : Array(Char), i : Int32, n : Int32, io : IO) : Int32?
+        private def self.blank_token_at(chars, i : Int32, n : Int32, io : IO) : Int32?
           if j = blank_comment_at(chars, i, n, io)
             j
           else
@@ -140,22 +180,22 @@ module Gori
         # `//` or `/*` (e.g. in a URL literal) is not mistaken for a comment.
         def self.strip_comments(js : String) : String
           return js if js.empty?
-          chars = js.chars
-          n = chars.size
-          String.build(js.bytesize) do |io|
-            i = 0
-            while i < n
-              c = chars[i]
-              i = if c == '/' && i + 1 < n && chars[i + 1] == '/'
-                    blank_line_comment(chars, i, n, io)
-                  elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
-                    blank_block_comment(chars, i, n, io)
-                  elsif c == '\'' || c == '"' || c == '`'
-                    copy_string(chars, i, n, io)
-                  else
-                    io << c
-                    i + 1
-                  end
+          scan_source(js) do |chars, n|
+            String.build(js.bytesize) do |io|
+              i = 0
+              while i < n
+                c = chars[i]
+                i = if c == '/' && i + 1 < n && chars[i + 1] == '/'
+                      blank_line_comment(chars, i, n, io)
+                    elsif c == '/' && i + 1 < n && chars[i + 1] == '*'
+                      blank_block_comment(chars, i, n, io)
+                    elsif c == '\'' || c == '"' || c == '`'
+                      copy_string(chars, i, n, io)
+                    else
+                      io << c
+                      i + 1
+                    end
+              end
             end
           end
         end
@@ -166,7 +206,7 @@ module Gori
         # via copy_interpolation so a NESTED template's backtick inside ${…} is not mistaken
         # for this template's closing delimiter (which would terminate early and re-lex the
         # real remainder, blanking a URL's // as a comment).
-        private def self.copy_string(chars : Array(Char), i : Int32, n : Int32, io : IO) : Int32
+        private def self.copy_string(chars, i : Int32, n : Int32, io : IO) : Int32
           quote = chars[i]
           io << quote
           i += 1
@@ -192,7 +232,7 @@ module Gori
         # comments inside it, but COPY string literals verbatim (so their contents stay for the
         # string-key rules), tracking brace depth to find the matching `}`. Recurses through
         # copy_string for nested strings/templates. `i` points at `$`. Offset-preserving.
-        private def self.copy_interpolation(chars : Array(Char), i : Int32, n : Int32, io : IO) : Int32
+        private def self.copy_interpolation(chars, i : Int32, n : Int32, io : IO) : Int32
           io << '$' << '{'
           i += 2
           depth = 1
@@ -215,7 +255,7 @@ module Gori
         end
 
         # Blank a // comment through end-of-line (the terminating newline is left to the caller).
-        private def self.blank_line_comment(chars : Array(Char), i : Int32, n : Int32, io : IO) : Int32
+        private def self.blank_line_comment(chars, i : Int32, n : Int32, io : IO) : Int32
           io << "  "
           i += 2
           while i < n && chars[i] != '\n'
@@ -226,7 +266,7 @@ module Gori
         end
 
         # Blank a /* … */ comment, delimiters included.
-        private def self.blank_block_comment(chars : Array(Char), i : Int32, n : Int32, io : IO) : Int32
+        private def self.blank_block_comment(chars, i : Int32, n : Int32, io : IO) : Int32
           io << "  "
           i += 2
           while i < n && !(chars[i] == '*' && i + 1 < n && chars[i + 1] == '/')
@@ -245,7 +285,7 @@ module Gori
         # expression is emitted (via emit_interpolation) instead of blanked — otherwise the
         # common template-literal sink shape (innerHTML = `${location.hash}`) would lose its
         # source and DOM-XSS would miss it.
-        private def self.blank_string(chars : Array(Char), i : Int32, n : Int32, io : IO) : Int32
+        private def self.blank_string(chars, i : Int32, n : Int32, io : IO) : Int32
           quote = chars[i]
           io << quote # opening delimiter kept
           i += 1
@@ -275,7 +315,7 @@ module Gori
         # source/sink keywords inside it survive, but blank nested strings/comments (so their
         # CONTENTS can't false-match) and track brace depth to find the matching `}`. Every
         # consumed char emits exactly one char, so offsets stay aligned. `i` points at `$`.
-        private def self.emit_interpolation(chars : Array(Char), i : Int32, n : Int32, io : IO) : Int32
+        private def self.emit_interpolation(chars, i : Int32, n : Int32, io : IO) : Int32
           io << "  " # blank the '${' delimiter (2 spaces, offset-preserved): keeps the inner
           #            expression as code but removes the '{' so source_in_window's /[;{}\n]/
           #            statement-boundary scan doesn't truncate the window at the interpolation
