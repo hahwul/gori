@@ -13,6 +13,6 @@ shards:
     version: 0.23.0
 
   termisu:
-    git: https://github.com/omarluq/termisu.git
-    version: 0.5.0
+    git: https://github.com/hahwul/termisu.git
+    version: 0.5.1+git.commit.825b6f37fd550807120499334b50a3a5367b248f
 
