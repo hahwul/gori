@@ -1,0 +1,130 @@
+---
+name: Build and Release Binaries
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+permissions:
+  contents: write
+jobs:
+  build:
+    name: Build Binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: ubuntu-24.04-arm
+            platform: linux
+          - os: macos-latest
+            platform: macos
+          - os: macos-15-intel
+            platform: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+      - name: Checkout source code
+        uses: actions/checkout@v6
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v5
+      - name: Set architecture environment variable
+        run: |
+          if [ "$RUNNER_ARCH" == "X64" ]; then
+            echo "ARCH=x86_64" >> $GITHUB_ENV
+          elif [ "$RUNNER_ARCH" == "ARM64" ]; then
+            echo "ARCH=arm64" >> $GITHUB_ENV
+          else
+            echo "ARCH=unknown" >> $GITHUB_ENV
+          fi
+
+      - if: matrix.platform == 'linux'
+        name: Build binary (Linux)
+        # Alpine/musl container so `--static` yields a truly self-contained
+        # binary. Each library needs BOTH its `-dev` package (headers + the .pc
+        # file pkg-config reads) and its `-static` package (the .a archive the
+        # link actually consumes).
+        #
+        # `crystal build --static` passes `--static` to pkg-config, so
+        # `libbrotlidec` correctly pulls in `libbrotlicommon` via Requires.private.
+        #
+        # Deliberately NO `-Dpreview_mt`: Store, Fuzz::Engine, Miner::Engine and
+        # Store::SafeRegexp rely on the single-threaded fiber scheduler.
+        run: |
+          mkdir -p build
+          docker run --rm -v $(pwd):/gori -w /gori --entrypoint="" crystallang/crystal:1.21.0-alpine sh -c "
+            apk add --no-cache git curl pkgconf \
+              brotli-dev brotli-static \
+              zstd-dev zstd-static \
+              sqlite-dev sqlite-static \
+              yaml-dev yaml-static \
+              zlib-dev zlib-static \
+              openssl-dev openssl-libs-static \
+              gmp-dev gmp-static \
+              pcre2-dev gc-dev &&
+            git config --global --add safe.directory /gori &&
+            shards install --production &&
+            mkdir -p build &&
+            crystal build src/main.cr -o build/gori-${GITHUB_REF_SLUG}-linux-${ARCH} --release --no-debug --static
+          "
+
+      - if: matrix.platform == 'macos'
+        name: Install macOS build dependencies
+        # sqlite3 is intentionally absent: the sqlite3 shard links plain
+        # `@[Link("sqlite3")]`, which resolves to /usr/lib/libsqlite3.dylib —
+        # present on every macOS, so nothing to install or bundle.
+        run: brew install brotli zstd openssl@3 pkg-config
+
+      - if: matrix.platform == 'macos'
+        name: Install shards (macOS)
+        # macOS only: the Linux job runs `shards install --production` inside its
+        # Alpine container, against the same mounted workdir. Doing it here as
+        # well would leave a glibc-built lib/ for the musl container to trip
+        # over. Without this step the macOS build dies at `require "db"` — the
+        # host has no lib/ at all.
+        run: shards install --production
+
+      - if: matrix.platform == 'macos'
+        name: Build and package binary (macOS)
+        run: |
+          mkdir -p build
+          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
+          # openssl@3 is keg-only, so its .pc files are not on the default
+          # search path; brotli/zstd are linked into the prefix and found there.
+          export PKG_CONFIG_PATH="${OPENSSL_PREFIX}/lib/pkgconfig"
+          BIN="build/gori-${GITHUB_REF_SLUG}-osx-${ARCH}"
+          crystal build src/main.cr -o "$BIN" --no-debug --release
+          chmod +x scripts/package-macos.sh
+          scripts/package-macos.sh "$BIN" "build/gori-${GITHUB_REF_SLUG}-osx-${ARCH}.tar.gz" gori
+          rm -f "$BIN"
+
+      - name: Smoke-test binary (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          # The build container runs as root, so `build/` and its contents are
+          # root-owned on the host; take ownership before touching them.
+          sudo chown -R "$(id -u):$(id -g)" build
+          BIN="build/gori-${GITHUB_REF_SLUG}-linux-${ARCH}"
+          chmod +x "$BIN"
+          "./$BIN" --version
+          # Assert the musl build really is self-contained — a dynamically linked
+          # artifact would still run here but break on the user's distro.
+          file "$BIN"
+          file "$BIN" | grep -qE 'statically linked|static-pie linked'
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-${{ matrix.os }}-${{ env.ARCH }}
+          path: build
+
+      - if: startsWith(github.ref, 'refs/tags/')
+        name: Upload to GitHub Releases
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref }}
+          overwrite: true
+          file_glob: true
+          file: build/*

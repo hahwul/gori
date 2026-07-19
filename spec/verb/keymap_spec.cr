@@ -15,18 +15,18 @@ end
 describe Gori::Verb::Keymap do
   describe ".effective_chords (user > OS > base)" do
     it "returns the verb's base chords when there is no override" do
-      v = verb("t.a", Scope::Body, Chord.new("a"))
+      v = verb("t.a", Gori::Verb::Scope::Body, Chord.new("a"))
       Keymap.effective_chords(v, OsProfile::Os::Linux, Keymap::NO_OVERRIDES).should eq([Chord.new("a")])
     end
 
     it "lets a user override replace the base chords" do
-      v = verb("t.a", Scope::Body, Chord.new("a"))
+      v = verb("t.a", Gori::Verb::Scope::Body, Chord.new("a"))
       ov = {"t.a" => [Chord.new("g")]}
       Keymap.effective_chords(v, OsProfile::Os::Linux, ov).should eq([Chord.new("g")])
     end
 
     it "treats a user override of [] as an explicit unbind" do
-      v = verb("t.a", Scope::Body, Chord.new("a"))
+      v = verb("t.a", Gori::Verb::Scope::Body, Chord.new("a"))
       ov = {"t.a" => [] of Chord}
       Keymap.effective_chords(v, OsProfile::Os::Linux, ov).should be_empty
     end
@@ -34,26 +34,26 @@ describe Gori::Verb::Keymap do
 
   describe ".build with overrides" do
     it "binds the override and unbinds the base chord" do
-      r = reg_with(verb("t.a", Scope::Body, Chord.new("a")))
+      r = reg_with(verb("t.a", Gori::Verb::Scope::Body, Chord.new("a")))
       km = Keymap.build(r, OsProfile::Os::Linux, {"t.a" => [Chord.new("g")]})
-      km.lookup(Chord.new("g"), Scope::Body).should eq("t.a")
-      km.lookup(Chord.new("a"), Scope::Body).should be_nil # the old default no longer binds
+      km.lookup(Chord.new("g"), Gori::Verb::Scope::Body).should eq("t.a")
+      km.lookup(Chord.new("a"), Gori::Verb::Scope::Body).should be_nil # the old default no longer binds
     end
 
     it "drops a binding entirely on unbind ([])" do
-      r = reg_with(verb("t.a", Scope::Body, Chord.new("a")))
+      r = reg_with(verb("t.a", Gori::Verb::Scope::Body, Chord.new("a")))
       km = Keymap.build(r, OsProfile::Os::Linux, {"t.a" => [] of Chord})
-      km.lookup(Chord.new("a"), Scope::Body).should be_nil
+      km.lookup(Chord.new("a"), Gori::Verb::Scope::Body).should be_nil
     end
 
     it "preserves scope-then-Global fallback" do
       r = reg_with(
-        verb("g.x", Scope::Global, Chord.new("x", ctrl: true)),
-        verb("b.x", Scope::Body, Chord.new("y")),
+        verb("g.x", Gori::Verb::Scope::Global, Chord.new("x", ctrl: true)),
+        verb("b.x", Gori::Verb::Scope::Body, Chord.new("y")),
       )
       km = Keymap.build(r)
-      km.lookup(Chord.new("x", ctrl: true), Scope::Body).should eq("g.x") # Global fallback
-      km.lookup(Chord.new("y"), Scope::Body).should eq("b.x")
+      km.lookup(Chord.new("x", ctrl: true), Gori::Verb::Scope::Body).should eq("g.x") # Global fallback
+      km.lookup(Chord.new("y"), Gori::Verb::Scope::Body).should eq("b.x")
     end
   end
 
@@ -72,7 +72,7 @@ describe Gori::Verb::Keymap do
     # structural primary (body.open = enter) — none are editable, so they're excluded.
     it "has no two rebindable verbs claiming the same chord in the SAME scope" do
       reg = Gori::Verbs.registry
-      seen = {} of {Scope, Chord} => String
+      seen = {} of {Gori::Verb::Scope, Chord} => String
       reg.each do |v|
         next unless Gori::Hotkeys.rebindable?(v)
         v.chords.each do |c|

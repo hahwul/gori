@@ -1,0 +1,67 @@
+---
+name: Publish AUR Package
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g., 0.1.0)"
+        required: true
+        type: string
+      ref:
+        description: "Git ref (branch/tag/commit) to checkout (optional, defaults to v<version>)"
+        required: false
+        type: string
+      pkgrel:
+        description: "Package release version (pkgrel) (optional, defaults to 1)"
+        required: false
+        default: "1"
+        type: string
+  workflow_run:
+    workflows: ["Build and Release Binaries"]
+    types: [completed]
+jobs:
+  publish-aur:
+    # Only after a *release*-triggered binary build succeeds — a manual
+    # workflow_dispatch build (which produces `gori-main-*` assets, not
+    # `gori-v<version>-*`) must not publish.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'release')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.ref || (github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.event.workflow_run.head_branch) }}
+
+      - name: Get Version
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW_VERSION="$DISPATCH_VERSION"
+          else
+            RAW_VERSION="$RUN_BRANCH"
+          fi
+          VERSION="${RAW_VERSION#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Resolved version: $VERSION"
+
+      - name: Update PKGBUILD version
+        env:
+          PKGREL: ${{ github.event.inputs.pkgrel || '1' }}
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" aur/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=${PKGREL}/" aur/PKGBUILD
+          cat aur/PKGBUILD
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.2
+        with:
+          pkgname: gori
+          pkgbuild: aur/PKGBUILD
+          commit_username: hahwul
+          commit_email: hahwul@gmail.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}

@@ -4,10 +4,10 @@ include Gori::Verb
 
 private def conflict_reg : Registry
   r = Registry.new
-  r.register(Definition.new("g.cap", "g.cap", "", Scope::Global, [Chord.new("c")]) { |_| nil })
-  r.register(Definition.new("b.copy", "b.copy", "", Scope::Body, [Chord.new("y")]) { |_| nil })
-  r.register(Definition.new("rep.send", "rep.send", "", Scope::Repeater, [Chord.new("r", ctrl: true)]) { |_| nil })
-  r.register(Definition.new("cmp.swap", "cmp.swap", "", Scope::Comparer, [Chord.new("s")]) { |_| nil })
+  r.register(Definition.new("g.cap", "g.cap", "", Gori::Verb::Scope::Global, [Chord.new("c")]) { |_| nil })
+  r.register(Definition.new("b.copy", "b.copy", "", Gori::Verb::Scope::Body, [Chord.new("y")]) { |_| nil })
+  r.register(Definition.new("rep.send", "rep.send", "", Gori::Verb::Scope::Repeater, [Chord.new("r", ctrl: true)]) { |_| nil })
+  r.register(Definition.new("cmp.swap", "cmp.swap", "", Gori::Verb::Scope::Comparer, [Chord.new("s")]) { |_| nil })
   r
 end
 
@@ -16,11 +16,11 @@ describe Gori::Verb::Conflicts do
     reg = conflict_reg
     c = Conflicts.detect(reg, OsProfile::Os::Linux, Keymap::NO_OVERRIDES, "rep.send", Chord.new("r", ctrl: true))
     # rep.send already holds ctrl-r in Repeater; proposing it for a *different* Repeater verb conflicts.
-    reg.register(Definition.new("rep.other", "rep.other", "", Scope::Repeater) { |_| nil })
+    reg.register(Definition.new("rep.other", "rep.other", "", Gori::Verb::Scope::Repeater) { |_| nil })
     c2 = Conflicts.detect(reg, OsProfile::Os::Linux, Keymap::NO_OVERRIDES, "rep.other", Chord.new("r", ctrl: true))
     c2.should_not be_nil
     c2.not_nil!.verb_id.should eq("rep.send")
-    c2.not_nil!.scope.should eq(Scope::Repeater)
+    c2.not_nil!.scope.should eq(Gori::Verb::Scope::Repeater)
   end
 
   it "allows the same key across DIFFERENT scopes (incl. shadowing a Global chord)" do
@@ -39,14 +39,14 @@ describe Gori::Verb::Conflicts do
     reg = conflict_reg
     # Pending: b.copy is being rebound from `y` to `k`. Now proposing `k` for another Body
     # verb must see the pending `k`, and `y` must be free.
-    reg.register(Definition.new("b.other", "b.other", "", Scope::Body) { |_| nil })
+    reg.register(Definition.new("b.other", "b.other", "", Gori::Verb::Scope::Body) { |_| nil })
     working = {"b.copy" => [Chord.new("k")]}
     Conflicts.detect(reg, OsProfile::Os::Linux, working, "b.other", Chord.new("k")).should_not be_nil
     Conflicts.detect(reg, OsProfile::Os::Linux, working, "b.other", Chord.new("y")).should be_nil
   end
 
   it "formats a readable conflict message" do
-    msg = Conflicts::Conflict.new(Chord.new("s", shift: true), "scope.toggle", Scope::Body).message
+    msg = Conflicts::Conflict.new(Chord.new("s", shift: true), "scope.toggle", Gori::Verb::Scope::Body).message
     msg.should eq("shift-s already bound to scope.toggle in Body")
   end
 end
