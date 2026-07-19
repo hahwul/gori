@@ -589,10 +589,12 @@ module Gori::Tui
     end
 
     # The right-aligned status chips, TAGGED so render and (were there a clickable
-    # chip here) a hit-test would share one ordered source. The resource readout is drawn
-    # LAST (rightmost) on purpose: it is fixed-width, so anchoring it to the right edge keeps
-    # the transient activity chip from shifting the readout every time a job starts or ends.
-    # It renders in `muted` — a passive readout, not a state the operator must act on.
+    # chip here) a hit-test would share one ordered source. Ordered least-stable first, so
+    # the fixed-width CLOCK anchors the right edge and the transient activity chip shifts
+    # only what is to its right. The resource readout is NOT fixed-width — `human_bytes`
+    # grows on a digit or GiB boundary (see Resource#format) — so it cannot hold that
+    # anchor; it sits between the two. Both render in `muted`: passive readouts, not states
+    # the operator must act on.
     private def self.status_chips(*, activity : {String, Color}?, resource : String? = nil,
                                   time : String? = nil) : Array(Chip)
       chips = [] of Chip
