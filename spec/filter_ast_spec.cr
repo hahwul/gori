@@ -75,6 +75,17 @@ describe Gori::FilterAst do
     parse("()").should eq("nil")
   end
 
+  it "steps over an empty group instead of dropping the rest of the chain" do
+    # An empty group contributes nothing, but it must not swallow its neighbours:
+    # everything after it used to vanish, and because the lexemes never reached a
+    # term the diagnostics reported the query as clean while it matched far more.
+    parse("host:a () status:200").should eq("(and host:a status:200)")
+    parse("a (AND) b").should eq("(and a b)")
+    parse(%(a ("") b)).should eq("(and a b)")
+    parse("host:a NOT () status:200").should eq("(and host:a status:200)")
+    parse("a () () b").should eq("(and a b)")
+  end
+
   it "negates only with something after the dash" do
     parse("-host:a").should eq("-host:a")
     parse("-").should eq("-")   # a lone dash is a word, not a negation

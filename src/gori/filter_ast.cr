@@ -235,9 +235,21 @@ module Gori
           pos += 1
         end
         break if pos >= lx.size || lx[pos].tok.or? || lx[pos].tok.r_paren?
+        before = pos
         node, pos = parse_unary(lx, pos)
-        break unless node
-        children << node
+        if node
+          children << node
+        elsif pos == before
+          # No node AND no progress: the dangling-`)` case parse_primary leaves for the
+          # enclosing group. Anything else would spin here.
+          break
+        end
+        # A nil node that DID consume input is an empty group (`()`, `("")`, `(AND)`) or
+        # a `NOT` over one. Skip just that group and keep going — breaking here would
+        # silently discard every remaining term in the chain, turning `host:a () x:1`
+        # into a bare `host:a` that no diagnostic could see (the dropped lexemes never
+        # reach `analyze`, so it still reported `clean?`). On a security proxy a filter
+        # that quietly BROADENS is the dangerous direction.
       end
       return {nil, pos} if children.empty?
       {children.size == 1 ? children.first : AndNode.new(children), pos}
