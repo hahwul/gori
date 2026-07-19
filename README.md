@@ -26,9 +26,6 @@ capturing every request and response as a *flow* you can intercept, replay, fuzz
 HTTP/1.1, HTTP/2, WebSocket, gRPC, and SSE. Every action is also a `gori run` subcommand and an MCP
 tool, so scripts and AI agents can drive the same engagement.
 
-> ⚠️ **Test only what you are authorized to.** gori is for penetration testing and security
-> research against systems you own or have explicit permission to assess.
-
 <details>
 <summary><strong>Features</strong></summary>
 
