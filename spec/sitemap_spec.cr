@@ -98,6 +98,16 @@ describe Gori::Sitemap do
       Gori::Sitemap.template_class("?q=1").should be_nil # bare root + query
     end
 
+    it "does not label a date-shaped non-date {date}" do
+      # Url::DATE checks the SHAPE only, so these matched and got a label that lied about
+      # what the segment is. They are still opaque ids — just not dates.
+      Gori::Sitemap.template_class("1234-56-78").should be_nil
+      Gori::Sitemap.template_class("9999-99-99").should be_nil
+      Gori::Sitemap.template_class("2026-00-10").should be_nil
+      Gori::Sitemap.template_class("2026-07-19").should eq("{date}") # still a real one
+      Gori::Sitemap.template_class("2026-12-31").should eq("{date}")
+    end
+
     it "does not downcase-merge (the reason Url.fold_segment is not reused)" do
       Gori::Sitemap.template_class("Users").should be_nil
     end

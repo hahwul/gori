@@ -279,10 +279,20 @@ module Gori
       # (`Gori::SafeRegexp` exists for this same reason on the store side.)
       return nil unless s.ascii_only?
       # Size gates next: most real segments ("api", "users") never reach a regex.
-      return "{date}" if s.size == DATE_LEN && Discover::Url::DATE.matches?(s)
+      return "{date}" if s.size == DATE_LEN && Discover::Url::DATE.matches?(s) && real_date?(s)
       return "{uuid}" if s.size == UUID_LEN && Discover::Url::UUID.matches?(s)
       return "{hex}" if s.size >= HEX_MIN && Discover::Url::HEX.matches?(s)
       nil
+    end
+
+    # `Url::DATE` is only a SHAPE (\d{4}-\d{2}-\d{2}), so `1234-56-78` and `9999-99-99`
+    # matched it. Folding those is arguably right — they are opaque ids — but labelling
+    # them `{date}` tells the reader something false about the route. Range-check the
+    # parts and let a non-date fall through to `{hex}`/literal instead.
+    private def self.real_date?(s : String) : Bool
+      month = s[5, 2].to_i
+      day = s[8, 2].to_i
+      1 <= month <= 12 && 1 <= day <= 31
     end
 
     # Fold a node's pure-numeric children into one collapsed `[1, 2, 3 … +N]` group
