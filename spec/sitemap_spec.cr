@@ -273,6 +273,21 @@ describe Gori::Sitemap do
   end
 
   describe ".group_sequences!" do
+    it "folds numeric ids that carry a query, and labels the group by the path part" do
+      # `add` appends the query to the LAST segment, so a listing page's links arrive as
+      # `7?ref=home`. Both passes tested the raw label, so precisely the case that
+      # explodes the tree — a paginated list — was the one that never folded.
+      rows = (1..12).map { |i| {"acme.test", "GET", "/items/#{i}?ref=home"} }
+      hosts = Gori::Sitemap.build(rows)
+      Gori::Sitemap.group_sequences!(hosts.first)
+      items = hosts.first.children.first
+      items.children.size.should eq(1)
+      fold = items.children.first
+      fold.grouped.should be_true
+      fold.label.should eq("[1, 2, 3 … +9]") # not "[1?ref=home, 2?ref=home, …]"
+      fold.children.size.should eq(12)
+    end
+
     it "folds a pure-numeric run beyond the threshold into one collapsed group" do
       hosts = Gori::Sitemap.build((1001..1012).map { |i| {"h", "GET", "/p/#{i}"} })
       Gori::Sitemap.group_sequences!(hosts.first)

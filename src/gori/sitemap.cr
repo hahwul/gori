@@ -148,9 +148,9 @@ module Gori
       # must not fabricate path-tree nodes. The query rides on the leaf so /x?a=1 and
       # /x?a=2 stay distinct endpoints without corrupting the tree.
       qidx = path.index('?')
-      path_part = qidx ? path[0...qidx] : path
+      path_only = qidx ? path[0...qidx] : path # local, not the `path_part` helper below
       suffix = qidx ? path[qidx..] : ""
-      segments = path_part.split('/')
+      segments = path_only.split('/')
       segments.shift if segments.first? == "" # the mandatory leading-slash empty
       segments.pop if segments.last? == ""    # a trailing slash → same endpoint (normalized)
       # An INTERIOR empty (a literal "//") is kept, so //dup/a stays distinct from /dup/a.
@@ -266,7 +266,7 @@ module Gori
     # `group_sequences!` — `fold_segment` only escapes that by testing NUM first.
     def self.template_class(label : String) : String?
       # A leaf carries its query on the last segment (see `add`), so classify the path part.
-      s = (qi = label.index('?')) ? label[0, qi] : label
+      s = path_part(label)
       return nil if s.empty? # a bare-root request with a query → the leaf label is "?q=1"
       return nil if numeric_label?(s)
       # A captured target is raw bytes off the wire — `Http1.parse_request_head` builds it
@@ -297,7 +297,7 @@ module Gori
       return if node.grouped
       numeric = node.children.select { |c| !c.grouped && numeric_label?(c.label) }
       return if numeric.size <= SEQUENCE_GROUP_THRESHOLD
-      numeric.sort_by! { |c| {c.label.size, c.label} }
+      numeric.sort_by! { |c| p = path_part(c.label); {p.size, p} }
       rest = node.children.select { |c| c.grouped || !numeric_label?(c.label) }
       group = Node.new(group_label(numeric))
       group.grouped = true
@@ -310,13 +310,22 @@ module Gori
       node.children << group
     end
 
+    # The path side of a leaf label. `add` appends the query to the LAST segment, so
+    # `/items/7?ref=home` arrives here as the label `7?ref=home`. Every classifier has to
+    # look past that or an id stops being recognisable the moment it carries a query —
+    # which is exactly when a listing page explodes the tree.
+    def self.path_part(label : String) : String
+      (qi = label.index('?')) ? label[0, qi] : label
+    end
+
     def self.numeric_label?(label : String) : Bool
-      !label.empty? && label.each_char.all?(&.ascii_number?)
+      s = path_part(label)
+      !s.empty? && s.each_char.all?(&.ascii_number?)
     end
 
     # "[1, 2, 3 … +47]" — the first three values then a remainder count.
     def self.group_label(nodes : Array(Node)) : String
-      head = nodes.first(3).map(&.label).join(", ")
+      head = nodes.first(3).map { |n| path_part(n.label) }.join(", ")
       nodes.size > 3 ? "[#{head} … +#{nodes.size - 3}]" : "[#{head}]"
     end
 
