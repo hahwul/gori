@@ -6,7 +6,8 @@ require "benchmark"
 module Gori
   class Error < Exception; end
 end
-require "../src/gori/convert/converter"
+
+require "../src/gori/decoder/converter"
 require "../src/gori/jwt"
 
 # A 200KB JSON response body with NO JWT (the dominant shape).
