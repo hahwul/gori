@@ -12,6 +12,11 @@ require "socket"
 
 module Gori
   class Error < Exception; end
+
+  # client_conn stamps this into the CONNECT-failure page; the real value lives in
+  # src/gori.cr, which these benches deliberately do not require (they pull only the
+  # proxy, not the whole app).
+  VERSION = "0.0.0-bench"
 end
 
 require "../src/gori/proxy/server"

@@ -1,5 +1,6 @@
 require "db"
 require "./filter_ast"
+require "./proto" # Proto::Kind, used by the `proto:` term below
 
 module Gori
   # The query language (DESIGN.md §4): a Lucene/KQL-style boolean filter over the
