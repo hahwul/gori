@@ -1014,7 +1014,6 @@ kbd {
   display: grid;
   grid-template-columns: 1fr;
   gap: 0;
-  max-width: 1080px;
   margin-top: 1.6rem;
   border-top: 1px solid var(--line);
 }
