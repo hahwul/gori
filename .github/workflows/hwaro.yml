@@ -1,20 +1,12 @@
 ---
 name: Hwaro CI/CD
 
-# DISABLED FOR NOW — docs deploy is manual-only until the repo goes public.
-#
-# There is intentionally no `push` trigger: publishing docs/ to GitHub Pages
-# before the project is open would make the site public ahead of the code. To
-# turn automatic deploys back on, uncomment the `push` block below.
-#
-# on:
-#   push:
-#     branches: [main]
-#     paths:
-#       - "docs/**"
-#       - ".github/workflows/hwaro.yml"
-#   workflow_dispatch:
 on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/hwaro.yml"
   workflow_dispatch:
 
 permissions:
