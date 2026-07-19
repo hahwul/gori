@@ -319,7 +319,16 @@ module Gori
     #
     # Spans are ordered and non-overlapping, but need not cover every character
     # (whitespace between terms is skipped); callers fill gaps with their base colour.
-    def self.spans(query : String) : Array(Span)
+    #
+    # `seps` is which characters this BACKEND accepts as a field separator, and it is
+    # not decoration: only QL implements the `~` regex operator, so painting `title~x`
+    # as a field in the Issues bar would advertise a match that backend will never
+    # perform (it free-texts the whole token instead). Structure is shared; the operator
+    # set is not, so the caller states it. See `SEPS_FIELD` / `SEPS_FIELD_REGEX`.
+    SEPS_FIELD       = ":"
+    SEPS_FIELD_REGEX = ":~"
+
+    def self.spans(query : String, seps : String = SEPS_FIELD_REGEX) : Array(Span)
       acc = [] of Span
       lex(query).each do |lexeme|
         case lexeme.tok
@@ -328,21 +337,21 @@ module Gori
         when .and?, .or?, .not?
           acc << Span.new(lexeme.start, lexeme.size, SpanKind::Operator)
         else
-          word_spans(query, lexeme, acc)
+          word_spans(query, lexeme, acc, seps)
         end
       end
       acc
     end
 
-    # Index of the `:`/`~` that makes `[from, to)` a field term, or nil for free text.
+    # Index of the separator that makes `[from, to)` a field term, or nil for free text.
     # Needs at least one character of field name before it, and a quote appearing first
     # means the whole thing is a quoted phrase rather than a `field:value`.
-    private def self.field_sep(query : String, from : Int32, to : Int32) : Int32?
+    private def self.field_sep(query : String, from : Int32, to : Int32, seps : String) : Int32?
       j = from
       while j < to
         ch = query[j]
         return nil if ch == '"'
-        return j if (ch == ':' || ch == '~') && j > from
+        return j if seps.includes?(ch) && j > from
         j += 1
       end
       nil
@@ -350,7 +359,7 @@ module Gori
 
     # Sub-classify one word: an optional `-`, an optional `field:`/`field~` prefix, then
     # the remainder with any quote marks called out.
-    private def self.word_spans(query : String, lexeme : Lexeme, acc : Array(Span)) : Nil
+    private def self.word_spans(query : String, lexeme : Lexeme, acc : Array(Span), seps : String) : Nil
       s = lexeme.start
       e = s + lexeme.size
       i = s
@@ -362,7 +371,7 @@ module Gori
         i += 1
       end
 
-      sep = field_sep(query, i, e)
+      sep = field_sep(query, i, e, seps)
       if sep
         acc << Span.new(i, sep - i + 1, SpanKind::Field)
         i = sep + 1

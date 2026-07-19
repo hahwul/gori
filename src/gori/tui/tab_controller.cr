@@ -491,11 +491,11 @@ module Gori::Tui
         field_w = {count_x - 1 - px, 1}.max
         screen.input_line(px, row_y, @subtab_filter, @filter_cx, @filter_preedit,
           Theme.text_bright, Theme.panel, width: field_w,
-          colors: Highlight.filter_query(@subtab_filter, Theme.text_bright))
+          colors: Highlight.filter_query(@subtab_filter, Theme.text_bright, FilterAst::SEPS_FIELD))
       elsif !@subtab_filter.blank?
         px = screen.text(rect.x, row_y, ": ", Theme.muted, Theme.panel, width: left_w)
         screen.styled_text(px, row_y, @subtab_filter,
-          Highlight.filter_query(@subtab_filter, Theme.text),
+          Highlight.filter_query(@subtab_filter, Theme.text, FilterAst::SEPS_FIELD),
           Theme.text, Theme.panel, width: {count_x - 1 - px, 0}.max)
       else
         screen.text(rect.x, row_y, "/ filter  ·  #{filter_fields.map { |f| "#{f}:" }.join("  ")}", Theme.muted, Theme.panel, width: left_w)

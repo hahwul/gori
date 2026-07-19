@@ -495,7 +495,7 @@ module Gori::Tui
         base = rect.x + 1 + prefix.size
         screen.input_line(base, rect.y, @query, @qcx, @preedit, Theme.text_bright,
           width: {rect.w - prefix.size - 2, 0}.max,
-          colors: Highlight.filter_query(@query, Theme.text_bright))
+          colors: Highlight.filter_query(@query, Theme.text_bright, FilterAst::SEPS_FIELD))
         return
       end
 
@@ -520,7 +520,7 @@ module Gori::Tui
         # The committed condition stays highlighted — this readout is what you scan to
         # check WHY something is (or isn't) being held.
         x = screen.text(x, rect.y, ": ", Theme.muted, width: left_w)
-        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text),
+        screen.styled_text(x, rect.y, @query, Highlight.filter_query(@query, Theme.text, FilterAst::SEPS_FIELD),
           Theme.text, width: {rect.right - 1 - x, 0}.max)
       end
     end

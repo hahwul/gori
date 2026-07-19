@@ -149,6 +149,21 @@ describe Gori::FilterAst do
   end
 
   describe ".spans" do
+    it "only treats `~` as a field separator for backends that implement it" do
+      # QL has a regex operator; Issues/Probe/Intercept/Subtab do not and free-text the
+      # whole token. Painting `title~admin` as field+value there would promise a match
+      # that never happens.
+      regex_ok = Gori::FilterAst.spans("title~admin", Gori::FilterAst::SEPS_FIELD_REGEX)
+      regex_ok.map(&.kind).should eq([Gori::FilterAst::SpanKind::Field, Gori::FilterAst::SpanKind::Value])
+
+      colon_only = Gori::FilterAst.spans("title~admin", Gori::FilterAst::SEPS_FIELD)
+      colon_only.map(&.kind).should eq([Gori::FilterAst::SpanKind::Plain])
+
+      # `:` still splits for everyone.
+      both = Gori::FilterAst.spans("title:admin", Gori::FilterAst::SEPS_FIELD)
+      both.map(&.kind).should eq([Gori::FilterAst::SpanKind::Field, Gori::FilterAst::SpanKind::Value])
+    end
+
     # The promise of the highlighter is that colour is a truthful preview of the parse.
     # Negation is the one place both sides could compute the answer separately, so pin
     # the agreement rather than a hand-written span list per query. (The `NOT` KEYWORD
