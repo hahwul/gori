@@ -61,15 +61,43 @@ module Gori::Discover
       q.empty? ? base : "#{base}?#{q}"
     end
 
+    UUID_LEN = 36
+    DATE_LEN = 10
+    HEX_MIN  = 12
+
+    # NOTE the literal branch returns the DOWNCASED segment — callers rely on template_key being
+    # case-folded, so this is not display text.
+    #
+    # Gated the way Sitemap.template_class already gates the same three patterns: an ordinary
+    # segment ("api", "users", "index.html") is the overwhelming majority and now reaches no
+    # regex at all. All four patterns are ASCII-only, so a non-ASCII segment can never match and
+    # is rejected before PCRE2 sees it. Sizes are exact for UUID/DATE and a floor for HEX.
+    #
+    # ORDER IS LOAD-BEARING: HEX also matches a long run of digits, so NUM must be tested first
+    # or every long numeric id would fold to {hex}.
     def self.fold_segment(seg : String) : String
-      d = seg.downcase
-      case
-      when UUID.matches?(d) then "{uuid}"
-      when DATE.matches?(d) then "{date}"
-      when NUM.matches?(d)  then "{n}"
-      when HEX.matches?(d)  then "{hex}"
-      else                       d
-      end
+      d = ascii_downcase(seg)
+      return d unless d.ascii_only?
+      sz = d.bytesize
+      return "{uuid}" if sz == UUID_LEN && UUID.matches?(d)
+      return "{date}" if sz == DATE_LEN && DATE.matches?(d)
+      return "{n}" if all_digits?(d)
+      return "{hex}" if sz >= HEX_MIN && HEX.matches?(d)
+      d
+    end
+
+    # `seg` itself when it holds no ASCII uppercase (the common case — String#downcase builds a
+    # fresh String even when nothing changes), else a downcased copy.
+    private def self.ascii_downcase(seg : String) : String
+      seg.each_byte { |b| return seg.downcase if 0x41_u8 <= b <= 0x5a_u8 }
+      seg
+    end
+
+    # Allocation- and PCRE-free stand-in for NUM (`\A\d+\z`).
+    private def self.all_digits?(s : String) : Bool
+      return false if s.empty?
+      s.each_byte { |b| return false unless 0x30_u8 <= b <= 0x39_u8 }
+      true
     end
 
     private def self.canonical_query(query : String?, *, fold : Bool) : String
@@ -123,15 +151,17 @@ module Gori::Discover
         h = h[0, qi]
       end
 
+      # normalize_path ONCE. The relative branch used to normalize and then be normalized again
+      # by the unconditional call that followed — running the whole split/Array-of-segments/join
+      # chain twice for an identical result, on the commonest href shape there is.
       abs_path =
         if h.starts_with?('/')
-          h
+          normalize_path(h)
         elsif lower.matches?(/\A[a-z][a-z0-9+.-]*:/)
           return nil # some other scheme (ftp:, ws:, …)
         else
           normalize_path(dir_path(base.path) + h)
         end
-      abs_path = normalize_path(abs_path)
       url = "#{origin(base)}#{abs_path}"
       hq ? "#{url}?#{hq}" : url
     end

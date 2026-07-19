@@ -326,10 +326,17 @@ module Gori::Discover
       if count > @config.cluster_saturation
         @cluster_suppressed += oc.links.size # a template/listing trap — stop expanding it
       else
-        oc.links.each { |lnk| consider_link(task, lnk) }
+        # Parse the page's own URL ONCE for the whole link set: it is loop-invariant, and
+        # consider_link used to re-run URI.parse (plus the host downcase and the scheme/path
+        # substrings) for every href on the page.
+        if base = Url.parse(task.url)
+          oc.links.each { |lnk| consider_link(task, base, lnk) }
+        end
       end
       if @config.follow_redirects? && (loc = fetched.redirect_to)
-        consider_link(task, RawLink.new(loc, Source::Redirect))
+        if base = Url.parse(task.url)
+          consider_link(task, base, RawLink.new(loc, Source::Redirect))
+        end
       end
     end
 
@@ -394,9 +401,7 @@ module Gori::Discover
 
     # Resolve a discovered link against its page, dedup, template-fold, bound-check, then
     # enqueue a crawl (spider) and derive a directory (brute).
-    private def consider_link(task : Task, link : RawLink) : Nil
-      base = Url.parse(task.url)
-      return unless base
+    private def consider_link(task : Task, base : Url::Parts, link : RawLink) : Nil
       abs = Url.resolve(base, link.href)
       return unless abs
       p = Url.parse(abs)
@@ -413,11 +418,12 @@ module Gori::Discover
         @template_suppressed += 1
         return
       end
-      return unless within_bounds?(p)
+      # One normalize for both the bound check and the enqueued Task (it was built twice).
+      return unless norm = bounded_url(p)
       @seen << key
       if @config.spider? && task.depth < @config.max_depth && @crawl_enqueued < @config.max_pages
         @crawl_enqueued += 1
-        @frontier << Task.new(TaskKind::Crawl, Url.normalize(p), task.depth + 1, link.source)
+        @frontier << Task.new(TaskKind::Crawl, norm, task.depth + 1, link.source)
       end
       enqueue_dir(Url.dir_of(p), task.depth) if @config.bruteforce?
     end
@@ -435,7 +441,7 @@ module Gori::Discover
       return if depth > @config.max_depth
       return if @dirs.includes?(dir)
       dp = Url.parse(dir)
-      return unless dp && within_bounds?(dp)
+      return unless dp && bounded_url(dp)
       @dirs << dir
       @frontier << Task.new(TaskKind::Calibrate, dir, depth, Source::Bruteforced, dir: dir)
     end
@@ -463,17 +469,22 @@ module Gori::Discover
     end
 
     # Containment (origin/subdomain/scope-aware) + the injected scope policy + path confine.
-    private def within_bounds?(p : Url::Parts) : Bool
+    # Returns the normalized URL when `p` is in bounds, else nil. It has to build that string to
+    # ask the scope anyway, and consider_link needs the same one for the Task it enqueues — so
+    # hand it back rather than have the caller rebuild it. Still short-circuits on the path
+    # confine before normalizing anything.
+    private def bounded_url(p : Url::Parts) : String?
       if cp = @confine_path
-        return false unless p.path.starts_with?(cp)
+        return nil unless p.path.starts_with?(cp)
       end
       url = Url.normalize(p)
-      return false unless @scope.allowed?(url, p.host) # excludes/sandbox — every mode
-      case @config.containment
-      in Containment::SameOrigin        then same_origin?(p)
-      in Containment::HostAndSubdomains then same_or_subdomain?(p)
-      in Containment::ScopeAware        then @scope.configured? ? @scope.boundary?(url, p.host) : same_origin?(p)
-      end
+      return nil unless @scope.allowed?(url, p.host) # excludes/sandbox — every mode
+      ok = case @config.containment
+           in Containment::SameOrigin        then same_origin?(p)
+           in Containment::HostAndSubdomains then same_or_subdomain?(p)
+           in Containment::ScopeAware        then @scope.configured? ? @scope.boundary?(url, p.host) : same_origin?(p)
+           end
+      ok ? url : nil
     end
 
     private def same_origin?(p : Url::Parts) : Bool
