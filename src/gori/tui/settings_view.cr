@@ -139,6 +139,7 @@ module Gori::Tui
 
     def initialize
       @values = ["", "", ""]
+      @baseline = [] of String # last persisted/loaded values — @values != @baseline means unsaved
       @focused = 0
       @cursor = 0
       @preedit = ""
@@ -171,7 +172,15 @@ module Gori::Tui
       @preedit = ""
       @status = nil
       @saved = false
+      @baseline = @values.dup
       @theme_scroll = 0 # render scrolls to the selected theme on the first frame
+    end
+
+    # True when the working copy differs from what was last loaded/persisted. The
+    # Preferences modal stacks several sections but ↵ saves only the focused one, so it
+    # needs this to flag an edited-but-unsaved section instead of dropping it on esc.
+    def dirty? : Bool
+      @values != @baseline
     end
 
     # Revert the working copy of the CURRENT section to its factory defaults (the values a
@@ -506,6 +515,7 @@ module Gori::Tui
     private def persist : String
       ok = Settings.save
       @saved = ok
+      @baseline = @values.dup if ok # the working copy IS the persisted state now → no longer dirty
       @status = ok ? "saved" : "save failed"
       ok ? "settings saved" : "settings: save failed (could not write #{Settings.path})"
     end

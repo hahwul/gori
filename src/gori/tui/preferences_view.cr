@@ -33,6 +33,7 @@ module Gori::Tui
     @on_strip : Bool = false # true = the group strip holds focus (←/→ switch groups)
     @strip_start : Int32 = 0
     @status : String? = nil
+    @confirm_discard : Bool = false # an esc landed on unsaved edits; the next one discards
 
     def initialize(@allowed_openers : Set(Symbol)? = nil)
       # One SettingsView per form section, reloaded from live Settings.
@@ -76,6 +77,29 @@ module Gori::Tui
     private def reload_all : Nil
       @forms.each { |sym, v| v.reload(sym) }
       @status = nil
+      @confirm_discard = false
+    end
+
+    # Re-pull ONE section from Settings, leaving every other section's working copy alone.
+    # Used when a dedicated editor changed something a form row summarizes (the Hostnames
+    # editor and Network's "N entries" row), so returning to the modal doesn't show a lie.
+    def refresh(section : Symbol) : Nil
+      return unless v = @forms[section]?
+      return if v.dirty? # never clobber unsaved edits — a stale summary beats losing typed input
+      v.reload(section)
+      sync_focus
+    end
+
+    # The titles of sections edited but not yet saved (↵ saves the focused section only).
+    private def dirty_titles : Array(String)
+      SettingsCatalog.all.compact_map do |s|
+        f = @forms[s.sym]?
+        s.title if f && f.dirty?
+      end
+    end
+
+    def dirty? : Bool
+      @forms.each_value.any?(&.dirty?)
     end
 
     # --- input: returns an Outcome the host acts on ---
@@ -83,11 +107,18 @@ module Gori::Tui
       key = ev.key
       c = ev.char || key.to_char
       @status = nil # clear stale save/reset feedback; activate_focus/reset_focused re-set it
-      return handle_strip_key(key) if @on_strip
+      # A discard warning survives exactly one keystroke: the esc that would confirm it.
+      confirming, @confirm_discard = @confirm_discard, false
+      # Modal-wide chords, claimed before the strip/body split so they work on both:
+      # ^P jumps to the palette (as it does from every other overlay), Ctrl+, closes the
+      # modal the same chord opened.
+      return Outcome.new(:palette) if ev.ctrl? && key.lower_p?
+      return close_or_warn(confirming) if ev.ctrl? && key.comma?
+      return handle_strip_key(key, confirming) if @on_strip
 
       case
       when key.escape?
-        return Outcome.new(:close)
+        return close_or_warn(confirming)
       when key.up?
         if @focus <= 0
           @on_strip = true # step up to the group strip
@@ -125,13 +156,24 @@ module Gori::Tui
       NONE
     end
 
-    private def handle_strip_key(key : Termisu::Input::Key) : Outcome
+    private def handle_strip_key(key : Termisu::Input::Key, confirming : Bool) : Outcome
       case
-      when key.escape?, key.up?  then return Outcome.new(:close)
+      when key.escape?, key.up?  then return close_or_warn(confirming)
       when key.left?             then set_group(@group - 1)
       when key.right?            then set_group(@group + 1)
       when key.down?, key.enter? then @on_strip = false
       end
+      NONE
+    end
+
+    # Closing throws away every unsaved section, and the modal stacks several of them while
+    # ↵ saves only the focused one — so a first esc names what would be lost and a second
+    # esc discards. Clean (or already-warned) → close straight away.
+    private def close_or_warn(confirming : Bool) : Outcome
+      dirty = dirty_titles
+      return Outcome.new(:close) if confirming || dirty.empty?
+      @confirm_discard = true
+      @status = "unsaved: #{dirty.join(", ")} — ↵ saves the focused section, esc again discards"
       NONE
     end
 
@@ -152,7 +194,13 @@ module Gori::Tui
 
     def click(area : Rect, mx : Int32, my : Int32) : Outcome
       box = overlay_box(area)
-      return Outcome.new(:close) unless box.contains?(mx, my) # click outside the card → close
+      # Click outside the card → close, through the same unsaved-edits guard as esc (a
+      # stray click must not silently drop what was typed; the second click confirms).
+      unless box.contains?(mx, my)
+        confirming, @confirm_discard = @confirm_discard, false
+        return close_or_warn(confirming)
+      end
+      @confirm_discard = false
       strip = Rect.new(box.x + 2, box.y + 2, box.w - 4, 1)
       if strip.contains?(mx, my)
         if seg = Chrome.strip_segments(strip, GROUP_LABELS, @group, @strip_start, nil).find { |(_, r)| r.contains?(mx, my) }
@@ -217,13 +265,23 @@ module Gori::Tui
     # --- rendering ---
     def render(screen : Screen, area : Rect) : Nil
       box = overlay_box(area)
-      return if box.w < 24 || box.h < 10
+      # Too small for the grouped form. The modal still HOLDS input, so it must not render
+      # nothing — that reads as a frozen app. Say why and how to get out instead.
+      return render_too_small(screen, area) if box.w < 24 || box.h < 10
       Frame.card(screen, box, "PREFERENCES", border: Theme.border_focus)
       strip = Rect.new(box.x + 2, box.y + 2, box.w - 4, 1)
       @strip_start = Chrome.render_tab_strip(screen, strip, GROUP_LABELS, @group, @on_strip, @strip_start)
       screen.hline(box.x + 1, box.y + 3, box.w - 2, fg: @on_strip ? Theme.focus_gold : Theme.border, bg: Theme.panel)
       render_group(screen, content_rect(box), !@on_strip)
       render_footer(screen, box)
+    end
+
+    private def render_too_small(screen : Screen, area : Rect) : Nil
+      return if area.w < 4 || area.h < 3
+      w = {area.w - 2, 34}.min
+      box = Rect.new(area.x + (area.w - w) // 2, area.y + area.h // 2 - 1, w, 3)
+      Frame.card(screen, box, "PREFERENCES", border: Theme.border_focus)
+      screen.text(box.x + 2, box.y + 1, "terminal too small · esc", Theme.muted, Theme.panel, width: {w - 4, 1}.max)
     end
 
     # The centred modal card. Height fits the tallest group's content (so switching groups
@@ -255,7 +313,7 @@ module Gori::Tui
       end
       y = content.y - @scroll
       group_sections.each do |sec|
-        draw_subheader(screen, content, sec.title, y)
+        draw_subheader(screen, content, sec.title, y, dirty: @forms[sec.sym]?.try(&.dirty?) || false)
         y += 1
         if sec.kind == :form
           fc = field_count(sec.sym)
@@ -270,10 +328,13 @@ module Gori::Tui
       end
     end
 
-    private def draw_subheader(screen : Screen, content : Rect, title : String, y : Int32) : Nil
+    # `dirty` appends a ● so an edited-but-unsaved section is visible while you are still in
+    # the modal, not only in the esc warning.
+    private def draw_subheader(screen : Screen, content : Rect, title : String, y : Int32, dirty : Bool) : Nil
       return unless content.y <= y < content.bottom
       screen.fill(Rect.new(content.x, y, content.w, 1), Theme.panel)
       screen.text(content.x, y, title.upcase, Theme.focus_gold, Theme.panel, Attribute::Bold, width: content.w)
+      screen.text(content.x + title.size + 1, y, "● unsaved", Theme.yellow, Theme.panel, width: {content.right - content.x - title.size - 1, 1}.max) if dirty
     end
 
     private def draw_opener(screen : Screen, content : Rect, sec : SettingsCatalog::Section, y : Int32, focused : Bool) : Nil
