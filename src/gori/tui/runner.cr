@@ -207,6 +207,7 @@ module Gori::Tui
       # The settings editor (palette → settings:network); @overlay is :settings.
       @settings_view = SettingsView.new
       @preferences = PreferencesView.new # the unified grouped settings modal (Ctrl+, / ⚙ / palette)
+      @prefs_return = false              # a dedicated editor was opened FROM the modal → return to it on close
       # The tab-bar customizer (palette → settings:tabs); @overlay is :tabs. Distinct
       # from @tabs (the controller registry built below).
       @tabs_overlay = TabsOverlay.new
@@ -1026,11 +1027,17 @@ module Gori::Tui
       return handle_issue_picker_key(ev) if @overlay == :issue_pick
       return handle_note_picker_key(ev) if @overlay == :note_pick
       return handle_preferences_key(ev) if @overlay == :preferences
-      return handle_settings_key(ev) if @overlay == :settings
-      return handle_tabs_key(ev) if @overlay == :tabs
-      return handle_hosts_key(ev) if @overlay == :hosts
-      return handle_env_key(ev) if @overlay == :env
-      return handle_hotkeys_key(ev) if @overlay == :hotkeys
+      if PREFS_SUB_EDITORS.includes?(@overlay)
+        case @overlay
+        when :settings then handle_settings_key(ev)
+        when :tabs     then handle_tabs_key(ev)
+        when :hosts    then handle_hosts_key(ev)
+        when :env      then handle_env_key(ev)
+        when :hotkeys  then handle_hotkeys_key(ev)
+        end
+        settle_sub_editor # closing one opened from Preferences lands back in the modal
+        return
+      end
       return handle_notifications_key(ev) if @overlay == :notifications
       return handle_mine_config_key(ev) if @overlay == :mine_config
       return handle_probe_active_key(ev) if @overlay == :probe_active
@@ -1398,11 +1405,11 @@ module Gori::Tui
       when :note_pick        then click_note_picker(area, mx, my)
       when :confirm          then click_confirm(area, mx, my)
       when :preferences      then apply_preferences_outcome(@preferences.click(area, mx, my))
-      when :settings         then click_settings(area, mx, my)
-      when :tabs             then click_tabs(area, mx, my)
-      when :hosts            then click_hosts(area, mx, my)
-      when :env              then click_env(area, mx, my)
-      when :hotkeys          then click_hotkeys(area, mx, my)
+      when :settings         then (click_settings(area, mx, my); settle_sub_editor)
+      when :tabs             then (click_tabs(area, mx, my); settle_sub_editor)
+      when :hosts            then (click_hosts(area, mx, my); settle_sub_editor)
+      when :env              then (click_env(area, mx, my); settle_sub_editor)
+      when :hotkeys          then (click_hotkeys(area, mx, my); settle_sub_editor)
       when :notifications    then click_notifications(area, mx, my)
       when :mine_config      then click_mine_config(area, mx, my)
       when :probe_active     then click_probe_active(area, mx, my)
@@ -5451,6 +5458,7 @@ module Gori::Tui
     # editors from opener rows, so the picker builds its view with allow_openers: false.
     def open_preferences(section : Symbol? = nil) : Nil
       section ? @preferences.open(section) : @preferences.open_default
+      @prefs_return = false # a fresh open — not a hop out to a sub-editor and back
       @overlay = :preferences
     end
 
@@ -5458,14 +5466,35 @@ module Gori::Tui
       apply_preferences_outcome(@preferences.handle_key(ev))
     end
 
-    # Act on what the modal asked for: close, live-apply a save (via the shared
-    # apply_settings_saved seam), or open a dedicated editor (theme/tabs/hosts/env/hotkeys).
+    # Act on what the modal asked for: close, jump to the palette, live-apply a save (via
+    # the shared apply_settings_saved seam), or open a dedicated editor
+    # (theme/tabs/hosts/env/hotkeys) — flagged so that editor returns INTO the modal.
     private def apply_preferences_outcome(outcome : PreferencesView::Outcome) : Nil
       case outcome.kind
-      when :close then @overlay = :none
-      when :saved then @toast = apply_settings_saved(outcome.section.not_nil!, outcome.message || "")
-      when :open  then open_settings(outcome.section.not_nil!)
+      when :close   then @overlay = :none
+      when :palette then (@overlay = :none; open_palette)
+      when :saved   then @toast = apply_settings_saved(outcome.section.not_nil!, outcome.message || "")
+      when :open
+        @prefs_return = true
+        open_settings(outcome.section.not_nil!)
       end
+    end
+
+    # The dedicated editors reachable from a Preferences opener row. Each closes by setting
+    # @overlay = :none from a handful of places, so rather than patch every close site the
+    # dispatch chokepoints below redirect that :none back INTO the modal it was opened from
+    # — otherwise ↵-ing into Theme and pressing esc drops you out of settings entirely,
+    # while the project picker (which does return to the modal) behaves differently.
+    PREFS_SUB_EDITORS = {:settings, :tabs, :hosts, :env, :hotkeys}
+
+    private def settle_sub_editor : Nil
+      return unless @prefs_return
+      # Still editing, chained into another editor, or raising a confirm the editor set a
+      # `return_to:` for (^R reset / tab-bar reset) — the flag has to survive all three.
+      return if PREFS_SUB_EDITORS.includes?(@overlay) || @overlay == :confirm
+      @overlay = :preferences if @overlay == :none # a ^P jump to the palette still wins
+      @preferences.refresh(:network)               # the Hostnames editor moves Network's "N entries" row
+      @prefs_return = false
     end
 
     # Live-apply a just-saved settings section and return the toast to show. The ONE seam

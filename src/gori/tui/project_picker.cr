@@ -219,9 +219,11 @@ module Gori::Tui
     # pre-project). ^C still quits the picker.
     private def handle_preferences(ev : Termisu::Event::Key) : Project | Symbol | Nil
       return :quit if ev.ctrl_c?
+      @preedit = "" # a committed key ends any in-progress IME composition (the modal owns its own)
       outcome = @preferences.handle_key(ev)
       case outcome.kind
       when :close then @mode = :list
+      when :saved then @resized = true # a saved Display/Layout pref may change how the picker draws
       when :open
         if outcome.section == :theme
           @theme_card.reload(:theme)
