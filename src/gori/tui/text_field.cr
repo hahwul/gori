@@ -20,10 +20,19 @@ module Gori::Tui
       @undo_stack = [] of UndoState
     end
 
-    # Replace the whole value, clamping the caret to the new end.
+    # Replace the whole value and park the caret at its END.
+    #
+    # This CLAMPED the old caret (`{@caret, v.size}.min`) and that was wrong for every
+    # caller: `set` replaces the value wholesale, so an offset into the *previous* string
+    # means nothing in the new one. The visible bug was path completion — Tab-completing
+    # `/tmp/imp/` to `/tmp/imp/sample.har` left the caret back at column 9, mid-path, so
+    # the next keystroke typed into the middle of the name. Every caller (path completion
+    # in the import / CA-import / fuzzer-wordlist overlays, and the fuzzer + sequence
+    # overlays populating fields from a parsed spec) wants "value in, ready to keep
+    # typing at the end" — same as `initialize`.
     def set(v : String) : Nil
       @value = v
-      @caret = {@caret, v.size}.min
+      @caret = v.size
       @preedit = ""
       @undo_stack.clear
     end

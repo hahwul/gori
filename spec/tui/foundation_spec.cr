@@ -177,12 +177,12 @@ describe Gori::Tui::Chrome do
     backend = MemoryBackend.new(90, 1)
     Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
       focus: "BODY", hints: "↹ pane · esc tabs",
-      activity: {"scanning", Theme.accent}, resource: "CPU  12% MEM 48M")
+      activity: {"scanning", Theme.accent}, resource: "CPU 12% MEM 48M")
     row = backend.row(0)
-    res_x = row.index("CPU  12%").not_nil!
+    res_x = row.index("CPU 12%").not_nil!
     row.index("scanning").not_nil!.should be < res_x # activity sits to its left
     # …and the readout ends flush against render_chips' one-column right pad.
-    (res_x + "CPU  12% MEM 48M".size).should eq(90 - 1)
+    (res_x + "CPU 12% MEM 48M".size).should eq(90 - 1)
     backend.fg_at(res_x, 0).should eq(Theme.muted) # a passive readout, not an alert
   end
 
@@ -192,6 +192,18 @@ describe Gori::Tui::Chrome do
       focus: "BODY", hints: "↹ pane · esc tabs", resource: nil)
     backend.contains?("CPU").should be_false
     backend.contains?("MEM").should be_false
+  end
+
+  it "anchors the clock at the far right of the status bar, right of the resource readout" do
+    backend = MemoryBackend.new(90, 1)
+    Chrome.render_status(Screen.new(backend), Rect.new(0, 0, 90, 1),
+      focus: "BODY", hints: "↹ pane · esc tabs", resource: "CPU 12% MEM 48M", time: "01:37 PM")
+    row = backend.row(0)
+    tx = row.index("01:37 PM").not_nil!
+    row.index("CPU 12%").not_nil!.should be < tx # the readout stays left of the clock
+    (tx + "01:37 PM".size).should eq(90 - 1)      # flush against the one-column right pad
+    backend.fg_at(tx, 0).should eq(Theme.muted)
+    backend.bg_at(tx, 0).should eq(Theme.panel) # nothing on this bar is a button
   end
 
   it "gilds the shell only for single-pane body focus" do
@@ -252,27 +264,51 @@ describe Gori::Tui::Chrome do
     backend.fg_at(9, 0).should eq(Theme.text_bright)    # active label ink on the band
   end
 
-  it "renders the top bar with project, scope, and the right-aligned clock" do
+  it "renders the top bar with project and scope, and no clock (it moved to the status bar)" do
     backend = MemoryBackend.new(80, 1)
     screen = Screen.new(backend)
     Chrome.render_top_bar(screen, Rect.new(0, 0, 80, 1),
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2")
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2")
     backend.row(0).should contain("𝓰𝓸𝓻𝓲")
     backend.row(0).should contain("acme")
     backend.row(0).should contain("scope:2")
-    backend.row(0).should contain("01:37 PM")
     backend.row(0).should contain("⌘")              # far-right palette affordance
     backend.row(0).should contain("127.0.0.1:8080") # listen address always shown, capture state rides its colour
     backend.row(0).should_not contain("notify")     # no unread → badge omitted
+    # The bar is actions-only now; a wall clock isn't pressable, so it lives on the status bar.
+    backend.contains?("PM").should be_false
+  end
+
+  it "leaves every top-bar chip flush on the bar background (no button tint)" do
+    # A lifted band on the clickable chips was tried and dropped — it only pays for itself
+    # alongside a hover highlight, which termisu can't report. Clickability is metadata for
+    # the hit-test, not a paint. This pins that so the tint doesn't creep back.
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), Rect.new(0, 0, 80, 1),
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2", probe: "probe:passive",
+      sandbox: "sandbox")
     row = backend.row(0)
-    row.index("01:37 PM").not_nil!.should be < row.index("⌘").not_nil! # clock left of palette
+    {"scope:2", "probe:passive", "127.0.0.1:8080", "⌘", "⚙", "sandbox"}.each do |label|
+      x = row.index(label).not_nil!
+      backend.bg_at(x, 0).should eq(Theme.bg)
+    end
+  end
+
+  it "colours the probe chip by mode, mirroring the Probe tab's mode band" do
+    {"probe:off" => Theme.muted, "probe:passive" => Theme.accent, "probe:active" => Theme.orange}.each do |label, want|
+      backend = MemoryBackend.new(80, 1)
+      Chrome.render_top_bar(Screen.new(backend), Rect.new(0, 0, 80, 1),
+        project: "acme", listen: "127.0.0.1:8080", scope: "scope:2", probe: label)
+      x = backend.row(0).index(label).not_nil!
+      backend.fg_at(x, 0).should eq(want)
+    end
   end
 
   it "shows the unread notify badge on the top bar, left of scope" do
     backend = MemoryBackend.new(80, 1)
     screen = Screen.new(backend)
     Chrome.render_top_bar(screen, Rect.new(0, 0, 80, 1),
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2", unread: 3)
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2", unread: 3)
     backend.row(0).should contain("notify:3")
     row = backend.row(0)
     row.index("notify:3").not_nil!.should be < row.index("scope:2").not_nil!
@@ -290,7 +326,7 @@ describe Gori::Tui::Chrome do
   it "colours the top-bar listen chip green while capturing (address text unchanged)" do
     backend = MemoryBackend.new(80, 1)
     Chrome.render_top_bar(Screen.new(backend), Rect.new(0, 0, 80, 1),
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2", capturing: true)
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2", capturing: true)
     backend.row(0).should contain("127.0.0.1:8080")
     fx = backend.row(0).index("127.0.0.1:8080").not_nil!
     backend.fg_at(fx, 0).should eq(Theme.green)
@@ -300,7 +336,7 @@ describe Gori::Tui::Chrome do
   it "dims the top-bar listen chip when capture is paused" do
     backend = MemoryBackend.new(80, 1)
     Chrome.render_top_bar(Screen.new(backend), Rect.new(0, 0, 80, 1),
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2", capturing: false)
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2", capturing: false)
     fx = backend.row(0).index("127.0.0.1:8080").not_nil!
     backend.fg_at(fx, 0).should eq(Theme.muted)
   end
@@ -308,7 +344,7 @@ describe Gori::Tui::Chrome do
   it "turns the top-bar listen chip red with the drop count when writes are failing" do
     backend = MemoryBackend.new(80, 1)
     Chrome.render_top_bar(Screen.new(backend), Rect.new(0, 0, 80, 1),
-      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2",
+      project: "acme", listen: "127.0.0.1:8080", scope: "scope:2",
       capturing: true, write_failures: 4)
     backend.row(0).should contain("127.0.0.1:8080 (4)")
     fx = backend.row(0).index("127.0.0.1:8080").not_nil!

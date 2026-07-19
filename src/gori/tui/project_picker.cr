@@ -33,6 +33,14 @@ module Gori::Tui
     # One row in the project-list space menu (mnemonic key → action).
     record SpaceEntry, key : Char, label : String, action : Symbol
 
+    # One token of the footer hint row. `action` non-nil → a click on the token runs it;
+    # inert tokens ("↑/↓ select", "type to search") describe a gesture with no single thing
+    # to press, so they swallow no clicks. `action` is HIT-TEST METADATA ONLY — the row
+    # paints exactly as it always did. (A lifted band marking the pressable tokens was
+    # tried and dropped for the same reason as the top bar's: it only earns its keep next
+    # to a hover highlight, which termisu can't report. See `Chrome::Chip`.)
+    record HintToken, label : String, action : Symbol? = nil
+
     SPACE_ENTRIES = [
       SpaceEntry.new('o', "Open", :open),
       SpaceEntry.new('r', "Rename", :rename),
@@ -707,7 +715,13 @@ module Gori::Tui
 
     # List click: SELECT-FIRST — first click highlights the entry, a second click on
     # the already-selected entry activates it (same model as the History/Issues list).
+    # The footer hint's buttons are checked first and fire on a SINGLE click: they're
+    # commands, not a selection, so select-first would just make them feel broken.
     private def handle_list_mouse(mx : Int32, my : Int32) : Project | Symbol | Nil
+      w, h = @backend.size
+      if action = hint_action_at(mx, my, w, h)
+        return run_hint_action(action)
+      end
       return nil unless idx = entry_at(mx, my)
       if idx == @selected
         activate
@@ -1022,19 +1036,105 @@ module Gori::Tui
         centered(screen, h - 3, flash, @flash_ok ? Theme.green : Theme.red, w)
       end
 
-      hint = case
-             when @mode == :compress
-               "↑/↓ select   ‹/› keep   space toggle   ↵ compress   esc close"
-             when @mode == :compressing
-               "compressing …"
-             when @mode == :space
-               "↑/↓ select   ↵ run   o open   r rename   c compress   d delete   esc close"
-             when @selected >= 3
-               "↑/↓ select   ↵ open   space actions   type to search   ctrl-d delete   ctrl-, settings   ctrl-c quit"
-             else
-               "↑/↓ select   ↵ open   type to search   ctrl-n new   ctrl-t temp   ctrl-d delete   ctrl-, settings   ctrl-c quit"
-             end
-      centered(screen, h - 2, hint, Theme.muted, w)
+      if tokens = list_hint_tokens
+        render_hint(screen, tokens, h - 2, w)
+      else
+        hint = case
+               when @mode == :compress
+                 "↑/↓ select   ‹/› keep   space toggle   ↵ compress   esc close"
+               when @mode == :compressing
+                 "compressing …"
+               else # :space
+                 "↑/↓ select   ↵ run   o open   r rename   c compress   d delete   esc close"
+               end
+        centered(screen, h - 2, hint, Theme.muted, w)
+      end
+    end
+
+    # Gap between footer-hint tokens — the same three cells the flat hint string used, so
+    # tokenizing the row for click support left it pixel-identical to before.
+    HINT_GAP = 3
+
+    # The footer hint for the project LIST, split into tokens so the pressable ones can be
+    # tinted and hit-tested. nil in the modal modes (:compress/:compressing/:space), which
+    # keep the old flat string — their hints describe keys inside an overlay that already
+    # owns the mouse, so there's nothing here to press.
+    private def list_hint_tokens : Array(HintToken)?
+      return nil unless @mode == :list
+      tokens = [
+        HintToken.new("↑/↓ select"),
+        HintToken.new("↵ open", :open),
+      ]
+      # A project row is selected → `space` opens its action menu; on the New/Temp/Search
+      # rows that chord does something else entirely, so the token (and its button) is
+      # offered only where it applies, exactly as the flat hint used to switch.
+      tokens << HintToken.new("space actions", :space) if @selected >= 3
+      tokens << HintToken.new("type to search")
+      if @selected < 3
+        tokens << HintToken.new("ctrl-n new", :new)
+        tokens << HintToken.new("ctrl-t temp", :temp)
+      end
+      tokens << HintToken.new("ctrl-d delete", :delete)
+      tokens << HintToken.new("ctrl-, settings", :settings)
+      tokens << HintToken.new("ctrl-c quit", :quit)
+      tokens
+    end
+
+    # The tokens' cell rects, centered on row `y`. THE single geometry source — `render_hint`
+    # draws from it and `hint_action_at` hit-tests against it, so the cells a token occupies
+    # and the cells that respond to a click are the same cells by construction.
+    private def hint_rects(tokens : Array(HintToken), y : Int32, w : Int32) : Array(Rect)
+      total = tokens.sum { |t| Screen.display_width(t.label) } + HINT_GAP * {tokens.size - 1, 0}.max
+      x = {(w - total) // 2, 0}.max
+      tokens.map do |t|
+        tw = Screen.display_width(t.label)
+        rect = Rect.new(x, y, tw, 1)
+        x += tw + HINT_GAP
+        rect
+      end
+    end
+
+    private def render_hint(screen : Screen, tokens : Array(HintToken), y : Int32, w : Int32) : Nil
+      rects = hint_rects(tokens, y, w)
+      tokens.each_with_index do |token, i|
+        rect = rects[i]
+        break if rect.x >= w
+        screen.text(rect.x, y, token.label, Theme.muted, Theme.bg, width: {w - rect.x, 1}.max)
+      end
+    end
+
+    # The action under a footer click, or nil (not the hint row / an inert token / a mode
+    # whose hint isn't tokenized).
+    private def hint_action_at(mx : Int32, my : Int32, w : Int32, h : Int32) : Symbol?
+      return nil unless my == h - 2
+      return nil unless tokens = list_hint_tokens
+      rects = hint_rects(tokens, h - 2, w)
+      tokens.each_with_index do |token, i|
+        action = token.action
+        return action if action && rects[i].contains?(mx, my)
+      end
+      nil
+    end
+
+    # Run a footer button. Each arm mirrors its chord in `handle_list_key` exactly — notably
+    # `:new`, which (like ctrl-n) direct-creates when the search box already holds a name
+    # rather than opening the form with it retyped.
+    private def run_hint_action(action : Symbol) : Project | Symbol | Nil
+      case action
+      when :open  then activate
+      when :space then open_space_menu
+      when :temp  then return open_temp
+      when :quit  then return :quit
+      when :new
+        name = @query.strip
+        return safe_create(name) unless name.empty?
+        start_new
+      when :delete then request_delete
+      when :settings
+        @preferences.open_default
+        @mode = :settings
+      end
+      nil
     end
 
     # Bottom-right space menu over the project list — open / rename / delete.

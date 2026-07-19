@@ -160,8 +160,15 @@ module Gori::Tui
       Rect.new(x, rect.y, w, 1)
     end
 
+    # One right-aligned bar chip. `clickable` marks the chips that act on a click; it is
+    # HIT-TEST METADATA ONLY and carries no styling. A lifted band was tried here as a
+    # "this is pressable" cue and dropped: it only earns its keep paired with a hover
+    # highlight, and termisu can't report hover (mode 1000 = press/release, no motion — see
+    # `enable_mouse`), so a permanent tint was noise rather than an affordance.
+    record Chip, tag : Symbol, label : String, color : Color, clickable : Bool = false
+
     def self.render_top_bar(screen : Screen, rect : Rect, *, project : String,
-                            listen : String, time : String,
+                            listen : String, probe : String = "",
                             scope : String, rules : String = "", intercept : String = "",
                             sandbox : String = "",
                             unread : Int32 = 0, capturing : Bool = true,
@@ -171,19 +178,20 @@ module Gori::Tui
       x = render_wordmark(screen, rect.x + 1, rect.y, bg: Theme.bg)
       name_x = x + 1
 
-      # right-aligned status chips: notify:N · scope:N · rules:N · intercept:on(N) ·
-      # ●listen · h:MM AM/PM · ⌘ — value-emphasized, dim · separators; the hot
-      # intercept state in RED. The clock is the penultimate anchor; the palette
-      # glyph (`⌘`, click → open palette) is rightmost. `unread` rides just left
-      # of scope so a background-job ping surfaces beside the state it's most
-      # likely to affect. The listen chip's address text never changes — capture
-      # on/off/failing rides as the leading dot + label colour (green/muted/red),
-      # so the one address a user glances at doubles as the capture indicator
-      # instead of a separate chip.
-      tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept, sandbox: sandbox,
-        listen: listen, time: time, unread: unread, capturing: capturing,
+      # right-aligned status chips: notify:N · scope:N · probe:MODE · rules:N ·
+      # intercept:on(N) · ●listen · ⌘ · ⚙ — value-emphasized, dim · separators; the
+      # hot intercept state in RED. `unread` rides just left of scope so a
+      # background-job ping surfaces beside the state it's most likely to affect. The
+      # listen chip's address text never changes — capture on/off/failing rides as the
+      # leading dot + label colour (green/muted/red), so the one address a user glances
+      # at doubles as the capture indicator instead of a separate chip.
+      #
+      # The bar is now ACTIONS ONLY — the passive clock moved down to the status bar (see
+      # `status_chips`), so "top-right = things you can press, bottom-right = things you can
+      # only read" holds by POSITION. Nothing here is tinted to advertise that: see `Chip`.
+      chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
+        sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures)
-      chips = tagged.map { |(_, l, c)| {l, c} }
 
       # Bound the project name and floor the chips past it, so neither overwrites the
       # other at narrow widths (previously the name was unbounded and render_chips got
@@ -196,26 +204,47 @@ module Gori::Tui
 
     # The right-aligned top-bar chips, TAGGED so render and the click hit-test share
     # one ordered source (the geometry can't drift). Mirrors `status_chips` below.
-    private def self.top_bar_chips(*, scope : String, rules : String, intercept : String,
-                                   sandbox : String, listen : String, time : String, unread : Int32,
-                                   capturing : Bool, write_failures : Int32) : Array({Symbol, String, Color})
-      chips = [] of {Symbol, String, Color}
-      chips << {:notify, "notify:#{unread}", Theme.accent} if unread > 0
-      chips << {:scope, scope, scope.ends_with?(":off") ? Theme.muted : Theme.text} unless scope.empty?
+    private def self.top_bar_chips(*, scope : String, probe : String, rules : String,
+                                   intercept : String, sandbox : String, listen : String,
+                                   unread : Int32, capturing : Bool,
+                                   write_failures : Int32) : Array(Chip)
+      chips = [] of Chip
+      chips << Chip.new(:notify, "notify:#{unread}", Theme.accent, clickable: true) if unread > 0
+      unless scope.empty?
+        chips << Chip.new(:scope, scope, scope.ends_with?(":off") ? Theme.muted : Theme.text,
+          clickable: true)
+      end
       # Sandbox rides right of scope (they're the same lens' policy) and in RED — a block gate
       # must read as hot, like intercept.
-      chips << {:sandbox, sandbox, Theme.red} unless sandbox.empty?
-      chips << {:rules, rules, Theme.text} unless rules.empty?
-      chips << {:intercept, intercept, Theme.red} unless intercept.empty?
+      chips << Chip.new(:sandbox, sandbox, Theme.red) unless sandbox.empty?
+      # Probe mode mirrors scope: it's a global lens over captured traffic, so it belongs
+      # beside scope on the bar rather than only inside the Probe tab's mode band. Click
+      # opens the same SET PROBE MODE picker the `m` chord does. Muted when off (nothing is
+      # scanning), accent while passive, orange once active probes are in flight — the same
+      # colour ladder ProbeView#mode_color uses, so the two readouts can't disagree.
+      chips << Chip.new(:probe, probe, probe_chip_color(probe), clickable: true) unless probe.empty?
+      chips << Chip.new(:rules, rules, Theme.text) unless rules.empty?
+      chips << Chip.new(:intercept, intercept, Theme.red) unless intercept.empty?
       label, color = listen_chip(listen, capturing, write_failures)
-      chips << {:listen, label, color}
-      chips << {:time, time, Theme.muted}
+      # Clickable: toggles capture on/off, the same action as the `bind`/capture verb — the
+      # dot the user is already reading for capture state is the natural thing to press.
+      chips << Chip.new(:listen, label, color, clickable: true)
       # Far-right affordances — same actions as their chords, always present so a mouse
       # user can reach them without knowing the keys: ⌘ opens the command palette
       # (Ctrl/Cmd-P), ⚙ opens the unified Preferences modal (Ctrl+,).
-      chips << {:palette, "⌘", Theme.text}
-      chips << {:settings, "⚙", Theme.text}
+      chips << Chip.new(:palette, "⌘", Theme.text, clickable: true)
+      chips << Chip.new(:settings, "⚙", Theme.text, clickable: true)
       chips
+    end
+
+    # The probe chip's colour ladder, keyed off the label's mode suffix so it stays in
+    # lockstep with `ProbeView#mode_color` without reaching into the Probe module here.
+    private def self.probe_chip_color(probe : String) : Color
+      case
+      when probe.ends_with?(":off")    then Theme.muted
+      when probe.ends_with?(":active") then Theme.orange
+      else                                  Theme.accent
+      end
     end
 
     # Label + colour for the merged listen/capture chip. The address (`listen`)
@@ -240,17 +269,39 @@ module Gori::Tui
     # itself bounded by the same floor. `chip_layout`'s `{A, min_x}.max` picks the
     # right one either way, so passing `name_x + 1` here matches the real render
     # exactly regardless of the actual project string or its truncation.
-    def self.top_bar_chip_rect(rect : Rect, tag : Symbol, *, scope : String, rules : String = "",
-                               intercept : String = "", sandbox : String = "", listen : String, time : String,
-                               unread : Int32 = 0, capturing : Bool = true,
+    def self.top_bar_chip_rect(rect : Rect, tag : Symbol, *, scope : String, probe : String = "",
+                               rules : String = "", intercept : String = "", sandbox : String = "",
+                               listen : String, unread : Int32 = 0, capturing : Bool = true,
                                write_failures : Int32 = 0) : Rect?
-      tagged = top_bar_chips(scope: scope, rules: rules, intercept: intercept, sandbox: sandbox,
-        listen: listen, time: time, unread: unread, capturing: capturing,
+      chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
+        sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
         write_failures: write_failures)
-      idx = tagged.index { |(t, _, _)| t == tag }
+      idx = chips.index { |c| c.tag == tag }
       return nil unless idx
       name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
-      chip_layout(rect, tagged.map { |(_, l, c)| {l, c} }, name_x + 1)[idx]?
+      chip_layout(rect, chips, name_x + 1)[idx]?
+    end
+
+    # Which clickable top-bar chip (if any) covers `mx,my` — ONE pass over the same
+    # tagged list, replacing the per-tag `top_bar_chip_rect` calls the runner used to
+    # make (one full rebuild per candidate tag). Non-clickable chips are skipped so a
+    # click on the sandbox/rules readout falls through instead of being swallowed.
+    def self.top_bar_chip_at(rect : Rect, mx : Int32, my : Int32, *, scope : String,
+                             probe : String = "", rules : String = "", intercept : String = "",
+                             sandbox : String = "", listen : String, unread : Int32 = 0,
+                             capturing : Bool = true, write_failures : Int32 = 0) : Symbol?
+      return nil unless rect.contains?(mx, my)
+      chips = top_bar_chips(scope: scope, probe: probe, rules: rules, intercept: intercept,
+        sandbox: sandbox, listen: listen, unread: unread, capturing: capturing,
+        write_failures: write_failures)
+      name_x = rect.x + 1 + Screen.display_width(WORDMARK) + 1
+      rects = chip_layout(rect, chips, name_x + 1)
+      chips.each_with_index do |chip, i|
+        next unless chip.clickable
+        r = rects[i]?
+        return chip.tag if r && r.contains?(mx, my)
+      end
+      nil
     end
 
     # A horizontal tab menu (row 2) styled as a segmented control. The active tab
@@ -470,21 +521,25 @@ module Gori::Tui
     # intact at narrow widths); each draw is clipped to `rect.right` so an
     # over-wide chip row truncates with an ellipsis instead of bleeding past it.
     private def self.render_chips(screen : Screen, rect : Rect,
-                                  chips : Array({String, Color}), bg : Color = Theme.panel,
+                                  chips : Array(Chip), bg : Color = Theme.panel,
                                   min_x : Int32? = nil) : Nil
       return if chips.empty?
       x = {rect.right - chips_width(chips) - 1, min_x || rect.x}.max
-      chips.each_with_index do |(label, color), i|
+      chips.each_with_index do |chip, i|
         break if x >= rect.right
-        x = screen.text(x, rect.y, label, color, bg, width: {rect.right - x, 1}.max)
+        x = screen.text(x, rect.y, chip.label, chip.color, bg, width: {rect.right - x, 1}.max)
         if i < chips.size - 1 && x < rect.right
           x = screen.text(x, rect.y, " · ", Theme.muted, bg, width: {rect.right - x, 1}.max)
         end
       end
     end
 
-    private def self.chips_width(chips : Array({String, Color})) : Int32
-      chips.sum { |(label, _)| label.size } + 3 * {chips.size - 1, 0}.max
+    # Total drawn width. Uses DISPLAY width, not `String#size`: the bar carries non-ASCII
+    # glyphs (`⌘`, `⚙`, the listen dot) whose codepoint count and column count can differ,
+    # and `screen.text` advances by display width — measuring any other way would drift the
+    # right-anchor (and every hit rect with it) by a cell per wide glyph.
+    private def self.chips_width(chips : Array(Chip)) : Int32
+      chips.sum { |c| Screen.display_width(c.label) } + 3 * {chips.size - 1, 0}.max
     end
 
     # Inline badge for the held-intercept count — the one hot state worth flagging
@@ -501,13 +556,14 @@ module Gori::Tui
     # rides the top bar's listen chip; upstream TLS verification is now a settings:network
     # toggle, not a status chip.)
     def self.render_status(screen : Screen, rect : Rect, *, focus : String, hints : String,
-                           activity : {String, Color}? = nil, resource : String? = nil) : Nil
+                           activity : {String, Color}? = nil, resource : String? = nil,
+                           time : String? = nil) : Nil
       screen.fill(rect, Theme.panel)
       badge = " #{focus} "
       screen.text(rect.x, rect.y, badge, Theme.text_bright, Theme.elevated, Attribute::Bold)
       hint_x = rect.x + badge.size + 1
 
-      chips = status_chips(activity: activity, resource: resource).map { |(_, l, c)| {l, c} }
+      chips = status_chips(activity: activity, resource: resource, time: time)
       hint_w = {rect.right - hint_x - chips_width(chips) - 2, 1}.max
       screen.text(hint_x, rect.y, hints, Theme.muted, Theme.panel, width: hint_w)
       # Floor the chips at the hint start so they can never overwrite the badge.
@@ -537,22 +593,27 @@ module Gori::Tui
     # LAST (rightmost) on purpose: it is fixed-width, so anchoring it to the right edge keeps
     # the transient activity chip from shifting the readout every time a job starts or ends.
     # It renders in `muted` — a passive readout, not a state the operator must act on.
-    private def self.status_chips(*, activity : {String, Color}?,
-                                  resource : String? = nil) : Array({Symbol, String, Color})
-      chips = [] of {Symbol, String, Color}
-      chips << {:activity, activity[0], activity[1]} if activity
-      chips << {:resource, resource, Theme.muted} if resource
+    private def self.status_chips(*, activity : {String, Color}?, resource : String? = nil,
+                                  time : String? = nil) : Array(Chip)
+      chips = [] of Chip
+      chips << Chip.new(:activity, activity[0], activity[1]) if activity
+      chips << Chip.new(:resource, resource, Theme.muted) if resource
+      # The clock anchors the far right. It moved off the top bar so that row can be read as
+      # "everything here is pressable" — a wall clock never is. Fixed-width (%I:%M %p is always
+      # 8 cells) so, like the resource readout, it never shifts the chips to its left.
+      chips << Chip.new(:time, time, Theme.muted) if time
       chips
     end
 
     # The drawn rect of each chip, computed IDENTICALLY to render_chips' x-advance, so a
-    # hit-test maps to the same cells. ASCII chips → width == label size.
-    private def self.chip_layout(rect : Rect, chips : Array({String, Color}), min_x : Int32?) : Array(Rect)
+    # hit-test maps to the same cells.
+    private def self.chip_layout(rect : Rect, chips : Array(Chip), min_x : Int32?) : Array(Rect)
       rects = [] of Rect
       x = {rect.right - chips_width(chips) - 1, min_x || rect.x}.max
-      chips.each_with_index do |(label, _), i|
-        rects << Rect.new(x, rect.y, label.size, 1)
-        x += label.size
+      chips.each_with_index do |chip, i|
+        w = Screen.display_width(chip.label)
+        rects << Rect.new(x, rect.y, w, 1)
+        x += w
         x += 3 if i < chips.size - 1 # the " · " separator
       end
       rects

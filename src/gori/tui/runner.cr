@@ -68,6 +68,7 @@ require "./scope_rule_overlay"
 require "./custom_rule_overlay"
 require "./oast_provider_overlay"
 require "./ca_import_overlay"
+require "./import_overlay"
 require "../paths"
 require "../browser"
 require "../external_editor"
@@ -118,7 +119,7 @@ module Gori::Tui
       # Miner is hidden by default). Settings is loaded (cli.cr) before Runner.new.
       vis = Chrome.visible_tabs(Settings.tab_prefs).map(&.first)
       @active_tab = vis.includes?(:project) ? :project : vis.first
-      @overlay = :none # :none | :palette | :detail | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :sequence_config | :probe_active | :fuzz_set | :fuzz_advanced | :scope_rule | :probe_rule | :rewriter_rule | :ca_import
+      @overlay = :none # :none | :palette | :detail | :issue_new | :confirm | :browser | :choice | :tabs_more | :comparer_pick | :repeater_subtab | :links | :issue_pick | :note_pick | :settings | :tabs | :hosts | :env | :hotkeys | :notifications | :mine_config | :sequence_config | :probe_active | :fuzz_set | :fuzz_advanced | :scope_rule | :probe_rule | :rewriter_rule | :ca_import | :import
       # The "space" action menu (helix-style leader popup, bottom-right). Orthogonal
       # to @overlay so it floats over WHATEVER is underneath (the History list, an
       # open detail …) without disturbing that state; the scope is captured at open.
@@ -156,13 +157,10 @@ module Gori::Tui
       @tag_buffer = ""
       @tag_preedit = ""
       @tag_view = nil.as(RepeaterView?)
-      # The import path prompt (palette → import:har/urls/oas) — bottom-anchored like
-      # ^G/^F, with filesystem tab-completion via PathComplete.
-      @import_open = false
-      @import_kind = :har
-      @import_buffer = ""
-      @import_preedit = ""
-      @import_path_complete = PathComplete.new
+      # The import path popup (palette → import:har/urls/oas) — a CENTERED modal
+      # (@overlay is :import), not a bottom prompt: a path is long and the status row
+      # couldn't host it or its completion dropdown legibly. See ImportOverlay.
+      @import_overlay = nil.as(ImportOverlay?)
       # Whitespace reveal (·→␍␊) toggle for the req/res views — global view pref,
       # propagated to the focused view in render_body. Handy for smuggling tests.
       @reveal = false
@@ -914,10 +912,6 @@ module Gori::Tui
         @tag_preedit = text
         return
       end
-      if @import_open
-        @import_preedit = text
-        return
-      end
       if (ctl = @tabs[@active_tab]?) && ctl.subtab_filter_editing?
         ctl.set_subtab_filter_preedit(text)
         return
@@ -947,6 +941,7 @@ module Gori::Tui
       when :probe_rule       then @custom_rule_overlay.try(&.set_preedit(text))
       when :rewriter_rule    then @rewriter_rule_overlay.try(&.set_preedit(text))
       when :ca_import        then @ca_import_overlay.try(&.set_preedit(text))
+      when :import           then @import_overlay.try(&.set_preedit(text))
       when :none             then apply_preedit_body(text)
       end
     end
@@ -997,7 +992,6 @@ module Gori::Tui
       return handle_search_key(ev) if @search_open && @overlay != :confirm
       return handle_rename_key(ev) if @rename_open     # the sub-tab rename prompt is modal while up
       return handle_tag_edit_key(ev) if @tag_edit_open # the Repeater tag editor is modal while up
-      return handle_import_key(ev) if @import_open     # the import path prompt is modal while up
       # ^G "go to line" / ^F "find" — both open a bottom prompt for the focused
       # multi-line view (editors move the cursor, read-only panes scroll). Modifier
       # keys, so they work inside text editors without conflicting with typing.
@@ -1051,6 +1045,7 @@ module Gori::Tui
       return handle_custom_rule_key(ev) if @overlay == :probe_rule
       return handle_rewriter_rule_key(ev) if @overlay == :rewriter_rule
       return handle_ca_import_key(ev) if @overlay == :ca_import
+      return handle_import_key(ev) if @overlay == :import
       # Text-entry modes own Tab (complete) + Esc within themselves — let them run
       # before the global focus ring claims Tab.
       if @active_tab == :history && @overlay == :none && @focus == :body && history_controller.view.querying?
@@ -1260,14 +1255,13 @@ module Gori::Tui
     # Right-click: rename a Repeater/Fuzzer/Decoder/Miner sub-tab chip (the one context menu we have).
     # Only acts on the sub-tab strip; anywhere else is a no-op (no left-click side effects).
     private def handle_right_click(layout : Layout, mx : Int32, my : Int32) : Nil
-      if @goto_open || @search_open || @rename_open || @tag_edit_open || @import_open
+      if @goto_open || @search_open || @rename_open || @tag_edit_open
         # A right-click dismisses an open bottom prompt (like left-click/esc), so it can't
         # stack a second orthogonal prompt on top of the first.
         close_goto if @goto_open
         close_search if @search_open
         close_rename if @rename_open
         close_tag_edit if @tag_edit_open
-        close_import if @import_open
         return
       end
       return unless renameable_subtabs? && @overlay == :none && !@space_menu_open && !copy_as_shown? && !@rename_open && !@tag_edit_open && subtabs_shown?
@@ -1285,12 +1279,11 @@ module Gori::Tui
       return if @space_menu_open && click_space_menu(layout, mx, my)
       return if copy_as_shown? && click_copy_as(layout.body, mx, my) # modal while up — floats over @overlay
       return if send_to_shown? && click_send_to(layout.body, mx, my) # ditto
-      if @goto_open || @search_open || @rename_open || @tag_edit_open || @import_open
+      if @goto_open || @search_open || @rename_open || @tag_edit_open
         close_goto if @goto_open # a click anywhere dismisses the bottom prompt (like esc)
         close_search if @search_open
         close_rename if @rename_open
         close_tag_edit if @tag_edit_open
-        close_import if @import_open
         return
       end
       if modal_overlay?
@@ -1306,8 +1299,8 @@ module Gori::Tui
     # The overlays that fully capture input (a centered card); :detail and :none do not.
     private def modal_overlay? : Bool
       case @overlay
-      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences, :settings, :tabs, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :rewriter_rule, :ca_import then true
-      else                                                                                                                                                                                                                                                                                                                                                                        false
+      when :palette, :issue_new, :confirm, :browser, :choice, :tabs_more, :comparer_pick, :repeater_subtab, :links, :issue_pick, :note_pick, :preferences, :settings, :tabs, :hotkeys, :notifications, :mine_config, :sequence_config, :probe_active, :discover_config, :discover_headers, :fuzz_set, :fuzz_advanced, :scope_rule, :oast_provider, :probe_rule, :rewriter_rule, :ca_import, :import then true
+      else                                                                                                                                                                                                                                                                                                                                                                                               false
       end
     end
 
@@ -1423,55 +1416,38 @@ module Gori::Tui
       when :probe_rule       then click_custom_rule(area, mx, my)
       when :rewriter_rule    then click_rewriter_rule(area, mx, my)
       when :ca_import        then click_ca_import(area, mx, my)
+      when :import           then click_import(area, mx, my)
         # :issue_new is a text form — keyboard-only in Phase 1 (cursor placement is Phase 2)
       end
     end
 
     # Click a top-bar chip: the notification badge (`notify:N`, left of scope) opens
     # the center; the scope chip (`scope:N` / `scope:off`) flips the lens — the same
-    # action as the global `s` chord; the far-right `⌘`/`⚙` glyphs open the command
-    # palette (Ctrl/Cmd-P) / the Preferences modal (Ctrl+,). Returns true when consumed.
-    # Each rect is rebuilt from the same tagged source render uses, so a click can't drift.
+    # action as the global `s` chord; the probe chip opens the SET PROBE MODE picker
+    # (the `m` chord inside the Probe tab); the listen chip toggles capture; the
+    # far-right `⌘`/`⚙` glyphs open the command palette (Ctrl/Cmd-P) / the Preferences
+    # modal (Ctrl+,). Returns true when consumed.
+    #
+    # One `top_bar_chip_at` pass resolves the tag from the SAME tagged source render
+    # uses (so a click can't drift), replacing the four full chip-list rebuilds this
+    # used to do — one per candidate tag.
     private def click_top_bar(rect : Rect, mx : Int32, my : Int32) : Bool
-      return false unless rect.contains?(mx, my)
-      unread = @notifications.unread
-      listen = "#{@session.proxy.host}:#{@session.proxy.port}"
-      capturing = @session.capturing?
-      write_failures = @session.store.write_failures
+      tag = Chrome.top_bar_chip_at(rect, mx, my, scope: scope_label, probe: probe_label,
+        rules: rules_label, intercept: intercept_label, sandbox: sandbox_label,
+        listen: "#{@session.proxy.host}:#{@session.proxy.port}",
+        unread: @notifications.unread, capturing: @session.capturing?,
+        write_failures: @session.store.write_failures)
+      return false unless tag
 
-      nrect = Chrome.top_bar_chip_rect(rect, :notify, scope: scope_label, rules: rules_label,
-        intercept: intercept_label, sandbox: sandbox_label, listen: listen, time: clock_label,
-        unread: unread, capturing: capturing, write_failures: write_failures)
-      if nrect && nrect.contains?(mx, my)
-        open_notifications
-        return true
+      case tag
+      when :notify   then open_notifications
+      when :scope    then scope_toggle_lens
+      when :probe    then probe_set_mode
+      when :listen   then toggle_capture
+      when :palette  then open_palette
+      when :settings then open_preferences
       end
-
-      srect = Chrome.top_bar_chip_rect(rect, :scope, scope: scope_label, rules: rules_label,
-        intercept: intercept_label, sandbox: sandbox_label, listen: listen, time: clock_label,
-        unread: unread, capturing: capturing, write_failures: write_failures)
-      if srect && srect.contains?(mx, my)
-        scope_toggle_lens
-        return true
-      end
-
-      prect = Chrome.top_bar_chip_rect(rect, :palette, scope: scope_label, rules: rules_label,
-        intercept: intercept_label, sandbox: sandbox_label, listen: listen, time: clock_label,
-        unread: unread, capturing: capturing, write_failures: write_failures)
-      if prect && prect.contains?(mx, my)
-        open_palette
-        return true
-      end
-
-      grect = Chrome.top_bar_chip_rect(rect, :settings, scope: scope_label, rules: rules_label,
-        intercept: intercept_label, sandbox: sandbox_label, listen: listen, time: clock_label,
-        unread: unread, capturing: capturing, write_failures: write_failures)
-      if grect && grect.contains?(mx, my)
-        open_preferences
-        return true
-      end
-
-      false
+      true
     end
 
     private def click_notifications(area : Rect, mx : Int32, my : Int32) : Nil
@@ -1557,6 +1533,13 @@ module Gori::Tui
       ov = @ca_import_overlay || return
       box = ov.overlay_box(area)
       return close_ca_import if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel (destructive: never auto-submit)
+      ov.handle_click(box, mx, my)
+    end
+
+    private def click_import(area : Rect, mx : Int32, my : Int32) : Nil
+      ov = @import_overlay || return
+      box = ov.overlay_box(area)
+      return close_import if box.nil? || dismiss_zone?(box, mx, my) # click-away = cancel
       ov.handle_click(box, mx, my)
     end
 
@@ -1731,6 +1714,7 @@ module Gori::Tui
       when :probe_rule      then @custom_rule_overlay.try(&.move(step))
       when :rewriter_rule   then @rewriter_rule_overlay.try(&.move(step))
       when :ca_import       then @ca_import_overlay.try(&.move(step))
+      when :import          then @import_overlay.try(&.move(step))
       end
     end
 
@@ -3810,8 +3794,8 @@ module Gori::Tui
 
       layout = Layout.compute(w, h, statusline_active?)
       Chrome.render_top_bar(screen, layout.topbar, project: @session.project.name,
-        listen: "#{@session.proxy.host}:#{@session.proxy.port}", time: clock_label,
-        scope: scope_label, rules: rules_label, intercept: intercept_label,
+        listen: "#{@session.proxy.host}:#{@session.proxy.port}",
+        scope: scope_label, probe: probe_label, rules: rules_label, intercept: intercept_label,
         sandbox: sandbox_label,
         unread: @notifications.unread, capturing: @session.capturing?,
         write_failures: @session.store.write_failures)
@@ -3825,7 +3809,7 @@ module Gori::Tui
         hidden_count: hid_tabs.size, more_focused: @focus == :menu && @menu_more)
       render_body(screen, layout.body)
       Chrome.render_status(screen, layout.status, focus: focus_label, hints: format_status_message(@toast) || key_hints,
-        activity: activity_chip, resource: @resource.label)
+        activity: activity_chip, resource: @resource.label, time: clock_label)
       Chrome.render_statusline(screen, layout.statusline, @statusline.segments) unless layout.statusline.empty?
       @palette.render(screen, layout.body) if @overlay == :palette
       @issue_form.render(screen, layout.body) if @overlay == :issue_new
@@ -3857,6 +3841,7 @@ module Gori::Tui
       @custom_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :probe_rule
       @rewriter_rule_overlay.try(&.render(screen, layout.body)) if @overlay == :rewriter_rule
       @ca_import_overlay.try(&.render(screen, layout.body)) if @overlay == :ca_import
+      @import_overlay.try(&.render(screen, layout.body)) if @overlay == :import
       # The space menu + bottom prompts float over everything else (drawn last).
       render_prompts(screen, layout)
 
@@ -3888,7 +3873,6 @@ module Gori::Tui
       render_search_prompt(screen, layout.status) if @search_open
       render_rename_prompt(screen, layout.status) if @rename_open
       render_tag_prompt(screen, layout.status) if @tag_edit_open
-      render_import_prompt(screen, layout.status) if @import_open
     end
 
     # Emit the frame: a full repaint right after a resize (the diff renderer would
@@ -3905,6 +3889,14 @@ module Gori::Tui
       @scope.active? ? "scope:#{@scope.size}" : "scope:off"
     end
 
+    # The probe chip, always present like scope: passive scanning is on by default, so an
+    # empty chip would read as "no probing configured" rather than "probing is idle". The
+    # mode label is the enum's own lowercase form, which `Chrome.probe_chip_color` keys its
+    # colour off — keep the `probe:<mode>` shape if you change this.
+    private def probe_label : String
+      "probe:#{@session.probe.mode.label}"
+    end
+
     # A red top-bar chip whenever the sandbox is on — a hard block gate MUST stay visible
     # everywhere, so an operator never wonders why traffic isn't being captured. Empty (no
     # chip) when off. Display-only, unlike the clickable scope chip.
@@ -3912,11 +3904,14 @@ module Gori::Tui
       @scope.sandbox? ? "sandbox" : ""
     end
 
-    # The wall clock shown at the far right of the top bar. Minute granularity — the
+    # The wall clock shown at the far right of the STATUS bar. Minute granularity — the
     # event loop only bumps `dirty` when this string changes (see `last_clock`), so
     # an idle TUI re-renders once a minute, not every second (preserves idle-zero-CPU).
+    #
+    # GOTCHA `%P`, not `%p`: Crystal INVERTS the strftime convention — here `%p` is the
+    # lowercase "pm" and `%P` the uppercase "PM" (GNU date has them the other way round).
     private def clock_label : String
-      Time.local.to_s("%I:%M %p")
+      Time.local.to_s("%I:%M %P")
     end
 
     private def rules_label : String
@@ -3971,6 +3966,7 @@ module Gori::Tui
       when :rewriter_rule    then "REWRITER RULE"
       when :oast_provider    then "OAST PROVIDER"
       when :ca_import        then "IMPORT CA"
+      when :import           then "IMPORT #{@import_overlay.try(&.label) || "FILE"}"
       else
         case @focus
         when :menu    then "TABS"
@@ -4026,6 +4022,7 @@ module Gori::Tui
       when :rewriter_rule    then "↑/↓ field · ←/→ options · type find/value · ↵ save · esc cancel"
       when :oast_provider    then "↑/↓ field · ←/→ type · type name/host/token · ↵ save · esc cancel"
       when :ca_import        then "type to complete · ↹/↵ pick · ⇥/↑↓ field · ↵ submits · esc cancels"
+      when :import           then "type to complete · ↹ pick · ↑↓ browse · ↵ import · esc cancel"
       when :detail           then history_controller.body_hint(:body)
       else
         # Focus on the far-right ⋯ "more" affordance: ↵/↓ expands the hidden-tabs list.
@@ -4419,102 +4416,48 @@ module Gori::Tui
       screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
     end
 
-    # --- Import path prompt (palette → import:har/urls/oas) ------------------
+    # --- Import path popup (palette → import:har/urls/oas) -------------------
 
     private def open_import(kind : Symbol) : Nil
-      @import_kind = kind
-      @import_buffer = ""
-      @import_preedit = ""
-      @import_path_complete.close
-      @import_open = true
+      @import_overlay = ImportOverlay.new(kind)
+      @overlay = :import
     end
 
     private def close_import : Nil
-      @import_open = false
-      @import_preedit = ""
-      @import_path_complete.close
+      @overlay = :none
+      @import_overlay = nil
     end
 
     private def handle_import_key(ev : Termisu::Event::Key) : Nil
-      key = ev.key
-      c = ev.char || key.to_char
-      if key.escape?
-        close_import
-      elsif key.tab? || key.enter?
-        if @import_path_complete.open? && (res = @import_path_complete.accept)
-          insert, is_dir = res
-          @import_buffer = insert
-          if is_dir
-            @import_path_complete.refresh(@import_buffer)
-          else
-            @import_path_complete.close
-            if key.enter?
-              apply_import(@import_buffer)
-              close_import
-            end
-          end
-        elsif key.enter?
-          apply_import(@import_buffer)
-          close_import
-        end
-      elsif key.back_tab? || key.up?
-        @import_path_complete.move(-1) if @import_path_complete.open?
-      elsif key.down?
-        @import_path_complete.move(1) if @import_path_complete.open?
-      elsif key.backspace?
-        @import_buffer = @import_buffer[0, {@import_buffer.size - 1, 0}.max]
-        @import_path_complete.refresh(@import_buffer)
-      elsif c && !ev.ctrl? && !ev.alt?
-        @import_buffer += c
-        @import_preedit = ""
-        @import_path_complete.refresh(@import_buffer)
+      ov = @import_overlay || return
+      case ov.handle_key(ev)
+      when :cancel then close_import
+      when :submit then submit_import(ov)
       end
     end
 
-    private def apply_import(path : String) : Nil
-      trimmed = path.strip
-      if trimmed.empty?
+    # Read the path off the popup, close it, THEN import — so the card is gone before a
+    # slow parse blocks the loop, and the resulting toast isn't drawn behind the modal.
+    private def submit_import(ov : ImportOverlay) : Nil
+      path = ov.path
+      label = ov.label
+      kind = ov.kind
+      close_import
+      if path.empty?
         @toast = "import cancelled — path is empty"
-        close_import
         return
       end
-      result = Import.import_file(@session.store, @import_kind, trimmed)
+      apply_import(kind, label, path)
+    end
+
+    private def apply_import(kind : Symbol, label : String, path : String) : Nil
+      result = Import.import_file(@session.store, kind, path)
       sitemap_controller.reload
-      label = case @import_kind
-              when :har  then "HAR"
-              when :urls then "URLs"
-              when :oas  then "OpenAPI"
-              else            "file"
-              end
-      msg = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{label} · #{trimmed}"
+      msg = "imported #{result.count} flow#{result.count == 1 ? "" : "s"} from #{label} · #{path}"
       msg += " (#{result.skipped} entries skipped)" if result.skipped > 0
       @toast = msg
     rescue ex
       @toast = "import failed: #{ex.message}"
-    end
-
-    private def import_prompt_prefix : String
-      case @import_kind
-      when :har  then "import HAR: "
-      when :urls then "import URLs: "
-      when :oas  then "import OpenAPI: "
-      else            "import: "
-      end
-    end
-
-    private def render_import_prompt(screen : Screen, rect : Rect) : Nil
-      return if rect.w < 6
-      screen.fill(rect, Theme.panel)
-      prefix = import_prompt_prefix
-      screen.text(rect.x, rect.y, prefix, Theme.accent, Theme.panel)
-      hint = "↵ import · tab complete · esc cancel"
-      x = rect.x + prefix.size
-      iw = {rect.right - x - hint.size - 2, 4}.max
-      screen.input_line(x, rect.y, @import_buffer, @import_buffer.size, @import_preedit, Theme.text_bright, Theme.panel, width: iw)
-      screen.text({rect.right - hint.size - 1, x + iw}.max, rect.y, hint, Theme.muted, Theme.panel)
-      if @import_path_complete.open?
-        @import_path_complete.render(screen, x, rect.y - 1, Rect.new(rect.x, rect.y - 9, rect.w, 9))
-      end
     end
 
     private def render_search_prompt(screen : Screen, rect : Rect) : Nil
@@ -4739,13 +4682,19 @@ module Gori::Tui
 
     # ↑/↓ (or j/k) move · ↵ switch to the hidden tab (force-shown on the bar, like a
     # palette "Go to …") · esc/← dismiss back to the ⋯ affordance.
+    #
+    # ↑ ON THE FIRST ROW dismisses too, in the same spirit as ←: the dropdown drops DOWN
+    # out of the tab bar, so "up past the top" is a walk back onto the bar. Clamping there
+    # instead (the old behaviour) left ↑ looking dead at the one spot a user is most likely
+    # to press it — the list opens with row 0 already selected.
     private def handle_more_menu_key(ev : Termisu::Event::Key) : Nil
       key = ev.key
       mm = @more_menu
       return close_more_menu unless mm
       case
-      when key.escape?, key.left?  then close_more_menu
-      when key.up?, key.lower_k?   then mm.move(-1)
+      when key.escape?, key.left? then close_more_menu
+      when key.up?, key.lower_k?
+        mm.selected == 0 ? close_more_menu : mm.move(-1)
       when key.down?, key.lower_j? then mm.move(1)
       when key.enter?, key.space?  then apply_more_menu
       end
