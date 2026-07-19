@@ -370,6 +370,19 @@ describe "Chrome.top_bar_chip_rect" do
       time: "01:37 PM").not_nil!
     prect.x.should be > trect.x
   end
+
+  it "returns a rect matching the drawn far-right settings chip (⚙), right of ⌘" do
+    rect = Rect.new(0, 0, 80, 1)
+    backend = MemoryBackend.new(80, 1)
+    Chrome.render_top_bar(Screen.new(backend), rect,
+      project: "acme", listen: "127.0.0.1:8080", time: "01:37 PM", scope: "scope:2")
+    grect = Chrome.top_bar_chip_rect(rect, :settings, scope: "scope:2", listen: "127.0.0.1:8080",
+      time: "01:37 PM").not_nil!
+    backend.row(0)[grect.x, grect.w].should contain("⚙")
+    prect = Chrome.top_bar_chip_rect(rect, :palette, scope: "scope:2", listen: "127.0.0.1:8080",
+      time: "01:37 PM").not_nil!
+    grect.x.should be > prect.x # ⚙ sits to the right of ⌘
+  end
 end
 
 describe "ComparerView#pane_chip_at" do

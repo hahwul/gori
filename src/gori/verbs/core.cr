@@ -1,4 +1,5 @@
 require "../verb"
+require "../tui/settings_catalog"
 
 module Gori
   # Concrete verb definitions. Each registration is a keybinding + palette entry (P1).
@@ -72,44 +73,18 @@ module Gori
         "browser.open", "Open browser", "Launch a browser pre-trusting gori's CA, routed via the proxy",
         Verb::Scope::Global) { |ctx| ctx.open_browser_picker; nil }
 
-      # Settings (config control) — palette-only. network/editor/theme are
-      # implemented; hotkeys is registered for discoverability (shown "soon") + a TODO toast.
+      # Settings (config control). The generic entry opens the unified Preferences modal
+      # at its group picker (same as Ctrl+, / the ⚙ top-bar chip); the per-section entries
+      # below jump straight to one section. Both the palette list and the modal's groups
+      # come from the SAME Tui::SettingsCatalog, so they can't list different sections.
       r.register Verb::Definition.new(
-        "settings.network", "Settings: Network", "Edit the proxy bind address + upstream proxy",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:network); nil }
-      r.register Verb::Definition.new(
-        "settings.editor", "Settings: Editor", "Set the external editor opened by ^E in editable fields",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:editor); nil }
-      r.register Verb::Definition.new(
-        "settings.theme", "Settings: Theme", "Switch the TUI colour theme (built-ins + your own from ~/.gori/themes/*.json)",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:theme); nil }
-      r.register Verb::Definition.new(
-        "settings.tabs", "Settings: Tabs", "Customize the top tab bar — show/hide tabs and reorder them",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:tabs); nil }
-      r.register Verb::Definition.new(
-        "settings.host-overrides", "Settings: Hostnames", "Edit global hostname overrides — a /etc/hosts mapping hosts to IPs the proxy dials",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hosts); nil }
-      r.register Verb::Definition.new(
-        "settings.env", "Settings: Env", "Global environment variables for $KEY substitution in requests",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:env); nil }
-      r.register Verb::Definition.new(
-        "settings.hotkeys", "Settings: Hotkeys", "Rebind keyboard shortcuts (press a key) + pick an OS default profile",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:hotkeys); nil }
-      r.register Verb::Definition.new(
-        "settings.layout", "Settings: Layout", "History list Req/Res preview and Sitemap default expand depth",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:layout); nil }
-      r.register Verb::Definition.new(
-        "settings.statusline", "Settings: Statusline", "Run a command periodically and show its output as a bottom status line",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:statusline); nil }
-      r.register Verb::Definition.new(
-        "settings.display", "Settings: Display", "Message-body rendering: default detail pane, list time format, line numbers, preview size",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:display); nil }
-      r.register Verb::Definition.new(
-        "settings.notifications", "Settings: Notifications", "Terminal bell + toast on background results, and how many notifications are kept",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:notifications); nil }
-      r.register Verb::Definition.new(
-        "settings.general", "Settings: General", "Clipboard (OSC 52) integration and confirm-before-quit",
-        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(:general); nil }
+        "settings.open", "Settings", "Open Settings — the preferences modal (all sections)",
+        Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_preferences; nil }
+      Tui::SettingsCatalog.all.each do |s|
+        r.register Verb::Definition.new(
+          s.id, "Settings: #{s.title}", s.desc,
+          Verb::Scope::Global, category: Verb::Category::Settings) { |ctx| ctx.open_settings(s.sym); nil }
+      end
 
       # `s` toggles the scope lens from anywhere (its original behavior — this used to jump to
       # the Project scope editor). Jumping there is now the palette-only `scope.edit` below.

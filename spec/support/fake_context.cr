@@ -609,6 +609,8 @@ class FakeExecContext < Gori::Verb::ExecContext
 
   def open_settings(section : Symbol) : Nil; end
 
+  def open_preferences : Nil; end
+
   def import_har : Nil; end
 
   def import_urls : Nil; end

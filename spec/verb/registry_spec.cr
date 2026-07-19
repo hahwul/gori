@@ -1060,6 +1060,10 @@ private class FakeContext < ExecContext
     @calls << :open_settings
   end
 
+  def open_preferences : Nil
+    @calls << :open_preferences
+  end
+
   def import_har : Nil
     @calls << :import_har
   end
@@ -1273,7 +1277,7 @@ describe Gori::Verb do
       end
       ids = body.map(&.id)
       ids.should contain("history.repeater") # an area action surfaces
-      ids.should_not contain("app.quit")   # app-control belongs to Ctrl-P, not ":"
+      ids.should_not contain("app.quit")     # app-control belongs to Ctrl-P, not ":"
       ids.should_not contain("nav.next-tab")
 
       # The palette source is the Global slice (app control) — and it has NO area actions.

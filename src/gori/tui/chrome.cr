@@ -210,9 +210,11 @@ module Gori::Tui
       label, color = listen_chip(listen, capturing, write_failures)
       chips << {:listen, label, color}
       chips << {:time, time, Theme.muted}
-      # Far-right command-palette affordance — same action as Ctrl/Cmd-P. Always
-      # present so a mouse user can open the palette without knowing the chord.
+      # Far-right affordances — same actions as their chords, always present so a mouse
+      # user can reach them without knowing the keys: ⌘ opens the command palette
+      # (Ctrl/Cmd-P), ⚙ opens the unified Preferences modal (Ctrl+,).
       chips << {:palette, "⌘", Theme.text}
+      chips << {:settings, "⚙", Theme.text}
       chips
     end
 
