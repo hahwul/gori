@@ -6,3 +6,26 @@ Naming/BlockParameterName:
 
 Metrics/CyclomaticComplexity:
   MaxComplexity: 12
+
+# --- rules introduced by ameba 1.7 -------------------------------------------
+# These fired ~1240 times the moment we moved off 1.6.4, none of it new debt.
+# Everything they flag predates the bump; the rest of 1.7's new rules are left on.
+
+# `.not_nil!` is how a spec asserts a value is present — 508 of the 548 uses in
+# the tree are under spec/. Still linted in src/, where it is a real smell.
+Lint/NotNil:
+  Excluded:
+    - spec/**/*.cr
+Lint/NotNilAfterNoBang:
+  Excluded:
+    - spec/**/*.cr
+
+# `return nil if ...` is deliberate: the explicit nil documents at the call site
+# that the method returns T?. ~509 sites, no behavioural content in changing them.
+Style/RedundantNilInControlExpression:
+  Enabled: false
+
+# Duplicate signal — `just check` already runs `crystal tool format --check`, and
+# this rule reports the same files a second time.
+Lint/Formatting:
+  Enabled: false
