@@ -77,7 +77,24 @@ describe Gori::FilterAst do
 
   it "negates only with something after the dash" do
     parse("-host:a").should eq("-host:a")
-    parse("-").should eq("-") # a lone dash is a word, not a negation
+    parse("-").should eq("-")   # a lone dash is a word, not a negation
+    parse(%(-")).should eq("-") # ...and a dash followed only by a quote mark is too
+  end
+
+  it "treats a QUOTED leading dash as literal text, like a quoted keyword" do
+    # Quoting forces a literal, and that has to hold for `-` exactly as it does for
+    # AND/OR/NOT — otherwise there is no way to search for a token that starts with a
+    # dash. `sexp` renders both of these as "-a", so assert the parts.
+    quoted = Gori::FilterAst.terms(Gori::FilterAst.parse(%("-a"))).first
+    {quoted.text, quoted.negate?}.should eq({"-a", false})
+
+    # The test is the quoting of the DASH, not of the chunk — a quoted VALUE on a
+    # negated field still negates.
+    bare = Gori::FilterAst.terms(Gori::FilterAst.parse(%(-"a"))).first
+    {bare.text, bare.negate?}.should eq({"a", true})
+
+    field = Gori::FilterAst.terms(Gori::FilterAst.parse(%(-host:"my host"))).first
+    {field.text, field.negate?}.should eq({"host:my host", true})
   end
 
   describe "Term" do
@@ -117,6 +134,26 @@ describe Gori::FilterAst do
       tree.op.should eq(Gori::FilterAst::Op::Or)
       tree.children.map(&.op).should eq([Gori::FilterAst::Op::And, Gori::FilterAst::Op::Leaf])
       tree.children[0].children.map(&.leaf).should eq(["a", "b"])
+    end
+  end
+
+  describe ".spans" do
+    # The promise of the highlighter is that colour is a truthful preview of the parse.
+    # Negation is the one place both sides could compute the answer separately, so pin
+    # the agreement rather than a hand-written span list per query. (The `NOT` KEYWORD
+    # is excluded: it is its own lexeme, painted straight off `Tok::Not`, so it has no
+    # second derivation to drift from — only the `-` prefix ever did.)
+    it "paints a dash operator exactly when the parser negated that term" do
+      [
+        "-host:a", "-", %(-"), %(-""), %("-a"), %(-"a"), %(-host:"my host"),
+        "a -b", "-(a OR b)", "(-a OR -b)", "--", "a-b", "path:/a-b",
+      ].each do |query|
+        dashes = Gori::FilterAst.spans(query).count do |span|
+          span.kind.operator? && query[span.start, span.size] == "-"
+        end
+        negated = Gori::FilterAst.terms(Gori::FilterAst.parse(query)).count(&.negate?)
+        dashes.should eq(negated), "#{query.inspect}: #{dashes} dash spans vs #{negated} negated terms"
+      end
     end
   end
 end

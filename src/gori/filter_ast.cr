@@ -125,7 +125,8 @@ module Gori
         word_len = raw.size - lead - trail
         text = String.build { |io| chars[lead, chars.size - lead - trail].each { |c| io << c[0] } }
         unless text.empty?
-          acc << Lexeme.new(word_tok(text, quoted_any), word_term(text, raw[lead, word_len]),
+          acc << Lexeme.new(word_tok(text, quoted_any),
+            word_term(text, raw[lead, word_len], chars[lead][1]),
             at + lead, word_len)
         end
 
@@ -147,9 +148,15 @@ module Gori
     end
 
     # A leading `-` negates, but only with something after it — a lone `-` is a word
-    # (the backends that free-text it have always done so).
-    private def self.word_term(text : String, source : String) : Term
-      if text.starts_with?('-') && text.size > 1
+    # (the backends that free-text it have always done so) — and only when the `-`
+    # itself was typed OUTSIDE quotes, so `"-a"` searches for the literal text `-a`
+    # exactly as `"AND"` searches for the literal word. The test is the QUOTED FLAG OF
+    # THAT ONE CHARACTER, not `quoted_any`: `-host:"my host"` quotes only the value and
+    # must still negate. This is the single place negation is decided — `word_spans`
+    # paints from the Term it produces rather than re-deriving the rule, so the colour
+    # cannot drift from the parse.
+    private def self.word_term(text : String, source : String, lead_quoted : Bool) : Term
+      if !lead_quoted && text.starts_with?('-') && text.size > 1
         Term.new(text[1..], source, true)
       else
         Term.new(text, source, false)
@@ -335,7 +342,10 @@ module Gori
       s = lexeme.start
       e = s + lexeme.size
       i = s
-      if query[i]? == '-' && lexeme.size > 1
+      # Ask the lexeme whether it negated rather than re-reading the `-` off the source:
+      # re-deriving is how the colour drifts from the parse (`-"` looks negated but is a
+      # literal dash; `"-a"` looks literal but used to negate).
+      if lexeme.term.try(&.negate?)
         acc << Span.new(i, 1, SpanKind::Operator) # `-x` is `NOT x`; colour them alike
         i += 1
       end
