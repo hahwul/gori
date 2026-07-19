@@ -576,19 +576,33 @@ module Gori::Tui
     end
 
     private def render_fields(screen : Screen, box : Rect) : Nil
+      # The overlay's centered card: draw the fields into the interior (1-col inset, 2 rows
+      # below the title). The Settings tab calls render_fields_into against its own content
+      # rect — SAME field drawing, so overlay and tab can never diverge visually.
+      render_fields_into(screen, Rect.new(box.x + 1, box.y + 2, box.w - 2, fields.size), @focused)
+    end
+
+    # Draw this section's fields into `rect`, one row per field starting at rect.y, and
+    # highlight `focused_idx` (-1 = focus is elsewhere, e.g. another stacked section in the
+    # Settings tab: no row is lit and no input caret is drawn). `viewport` bounds the
+    # visible rows (top + bottom clip) — the Settings tab passes its scrolled content rect
+    # so a block that starts above/below the pane is clipped; the overlay lets it default to
+    # `rect` (block == viewport, no extra clipping). Shared by the overlay and the tab.
+    def render_fields_into(screen : Screen, rect : Rect, focused_idx : Int32, viewport : Rect = rect) : Nil
       flds = fields
-      w = box.w
       label_w = flds.max_of(&.label.size)
       flds.each_with_index do |field, i|
-        ry = box.y + 2 + i
-        focused = i == @focused
+        ry = rect.y + i
+        next if ry < viewport.y
+        break if ry >= viewport.bottom
+        focused = i == focused_idx
         bg = focused ? Theme.accent_bg : Theme.panel
-        screen.fill(Rect.new(box.x + 1, ry, w - 2, 1), bg)
-        screen.cell(box.x + 1, ry, focused ? '▎' : ' ', Theme.accent, bg)
-        screen.text(box.x + 3, ry, field.label, focused ? Theme.text_bright : Theme.text, bg)
-        screen.text(box.x + 3 + label_w + 1, ry, "›", focused ? Theme.accent : Theme.muted, bg)
-        vx = box.x + 3 + label_w + 3
-        vw = {box.right - vx - 1, 1}.max
+        screen.fill(Rect.new(rect.x, ry, rect.w, 1), bg)
+        screen.cell(rect.x, ry, focused ? '▎' : ' ', Theme.accent, bg)
+        screen.text(rect.x + 2, ry, field.label, focused ? Theme.text_bright : Theme.text, bg)
+        screen.text(rect.x + 2 + label_w + 1, ry, "›", focused ? Theme.accent : Theme.muted, bg)
+        vx = rect.x + 2 + label_w + 3
+        vw = {rect.right - vx, 1}.max
         render_field_value(screen, field, @values[i], vx, ry, vw, focused, bg)
       end
     end

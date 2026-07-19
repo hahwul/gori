@@ -24,6 +24,7 @@ require "./controllers/comparer_controller"
 require "./controllers/decoder_controller"
 require "./controllers/jwt_controller"
 require "./controllers/rewriter_controller"
+require "./controllers/settings_controller"
 require "./controllers/statusline_controller"
 require "./history_view"
 require "./repeater_view"
@@ -304,6 +305,7 @@ module Gori::Tui
         DecoderController.new(self),
         JwtController.new(self),
         RewriterController.new(self),
+        SettingsController.new(self),
       ].each { |c| @tabs[c.tab] = c }
     end
 
@@ -2870,18 +2872,11 @@ module Gori::Tui
           return
         end
         # :network rebinds the live proxy; :theme swaps the palette + repaints; the
-        # rest just persist (the value is read live or only matters next session).
+        # rest just persist (the value is read live or only matters next session). The
+        # side effects live in apply_settings_saved so the Settings tab applies a save
+        # the same way — one seam, no drift.
         msg = @settings_view.save
-        @toast = case @settings_view.section
-                 when :network then apply_settings(msg).tap { @session.set_verify_upstream(Settings.verify_upstream?); @session.set_serve_landing(Settings.serve_landing?); project_controller.refresh_network } # push the verify + info-page toggles to the live proxy/probe, then re-sync the Project pane's inherited fields to the new global
-                 when :theme   then apply_theme(msg)
-                 when :layout  then apply_layout(msg)
-                 when :display then apply_display(msg)
-                 else               msg
-                 end
-        @theme_restore = Settings.theme if @settings_view.section == :theme # saved → don't revert this on esc
-        reconcile_mouse                                                     # the EDITOR section holds the Mouse toggle — apply it live
-        @pretty = Settings.pretty_bodies_default                            # …and the Pretty-print-bodies toggle — apply it live too
+        @toast = apply_settings_saved(@settings_view.section, msg)
       elsif key.up?
         @settings_view.move_field(-1)
         preview_theme # ↑/↓ moves the theme-list selection in the :theme section
@@ -4605,6 +4600,9 @@ module Gori::Tui
     def focus_tab(tab : Symbol, focus : Symbol = :body) : Nil
       flush_active_tab_edits
       @active_tab = tab
+      # A tab whose sub-tabs are the natural entry point (Settings: pick a group first)
+      # lands on the strip instead of drilling into the body on a "Go to …" jump.
+      focus = :subtabs if focus == :body && subtabs_shown? && @tabs[tab]?.try(&.enter_on_subtabs?)
       @focus = focus
       @menu_more = false
       @overlay = :none
@@ -5424,6 +5422,25 @@ module Gori::Tui
       else
         @toast = "#{section} settings — coming soon (TODO)"
       end
+    end
+
+    # Live-apply a just-saved settings section and return the toast to show. The ONE seam
+    # for settings side effects: the palette overlay (handle_settings_key) and the Settings
+    # tab both route their save through here, so a saved change takes effect identically
+    # from either surface. :network rebinds the live proxy + re-syncs the Project pane;
+    # :theme/:layout/:display refresh live; the mouse + pretty-print toggles always re-sync.
+    def apply_settings_saved(section : Symbol, msg : String) : String
+      toast = case section
+              when :network then apply_settings(msg).tap { @session.set_verify_upstream(Settings.verify_upstream?); @session.set_serve_landing(Settings.serve_landing?); project_controller.refresh_network }
+              when :theme   then apply_theme(msg)
+              when :layout  then apply_layout(msg)
+              when :display then apply_display(msg)
+              else               msg
+              end
+      @theme_restore = Settings.theme if section == :theme # saved → don't revert this on esc
+      reconcile_mouse                                      # the EDITOR section holds the Mouse toggle — apply it live
+      @pretty = Settings.pretty_bodies_default             # …and the Pretty-print-bodies toggle — apply it live too
+      toast
     end
 
     # Layout prefs apply live: History reloads (list order) + preview; Sitemap rebuilds

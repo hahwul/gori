@@ -59,6 +59,13 @@ module Gori::Tui
     abstract def toggle_sandbox : Nil          # flip the scope sandbox — hard block gate (Project NETWORK pane row/click)
     # Persist + apply the Project settings pane's per-project network config; returns a toast.
     abstract def apply_project_network(bind_host : String, bind_port : Int32, upstream : String) : String
+    # Open a settings section's editor overlay (the Settings tab's opener rows + the
+    # Network section's Hostname-overrides field reuse the palette's open_settings path).
+    abstract def open_settings(section : Symbol) : Nil
+    # A settings section was saved from the Settings tab — live-apply it (proxy rebind,
+    # theme/layout/display refresh, mouse/pretty re-sync) and return the toast. Same seam
+    # the palette overlay uses, so both surfaces apply a save identically.
+    abstract def apply_settings_saved(section : Symbol, msg : String) : String
   end
 
   # Shared, state-free body chrome used by BOTH Runner and the per-tab
@@ -244,6 +251,14 @@ module Gori::Tui
     # tab. The Runner reads this (not a raw count) so render + focus + click stay in sync.
     def subtab_strip_shown? : Bool
       (subtab_labels.try(&.size) || 0) >= 2
+    end
+
+    # On a "Go to …" jump (palette / ⋯ dropdown) into this tab, land focus on the sub-tab
+    # STRIP rather than drilling straight to the body — for tabs whose sub-tabs are the
+    # natural entry point (Settings: pick a group first). Default false: most tabs drill
+    # into their body/editor. Only consulted when subtab_strip_shown?.
+    def enter_on_subtabs? : Bool
+      false
     end
 
     # Move the active sub-tab by ±1 (strip ←/→), or jump to an absolute index (^1-9).
