@@ -148,6 +148,43 @@ describe Gori::FilterAst do
     end
   end
 
+  describe ".partition" do
+    # For a surface owning a field the shared backend knows nothing about (Sitemap's
+    # `tag:`, which filters the built tree, not the rows). Cutting from the same lexer is
+    # what gives that hand-rolled field the grammar's quoting and negation.
+    it "cuts matching terms out and hands back the residual" do
+      taken, residual = Gori::FilterAst.partition("host:a tag:x status:200") { |t| t.text.starts_with?("tag:") }
+      taken.map(&.text).should eq(["tag:x"])
+      residual.should eq("host:a status:200")
+    end
+
+    it "keeps a quoted value whole" do
+      taken, residual = Gori::FilterAst.partition(%(tag:"my flow" host:a)) { |t| t.text.starts_with?("tag:") }
+      taken.map(&.text).should eq(["tag:my flow"]) # not torn at the space
+      residual.should eq("host:a")
+    end
+
+    it "carries a NOT keyword onto the term it negates, leaving no dangling operator" do
+      # NOT desugars at PARSE time, so a lexeme-level scan would miss it and strand the
+      # bare `NOT` in the residual — where it means the opposite of what was asked.
+      taken, residual = Gori::FilterAst.partition("NOT tag:done") { |t| t.text.starts_with?("tag:") }
+      taken.map(&.negate?).should eq([true])
+      residual.should eq("")
+    end
+
+    it "treats -tag:x and NOT tag:x identically" do
+      dash, _ = Gori::FilterAst.partition("-tag:x") { |t| t.text.starts_with?("tag:") }
+      word, _ = Gori::FilterAst.partition("NOT tag:x") { |t| t.text.starts_with?("tag:") }
+      dash.map { |t| {t.text, t.negate?} }.should eq(word.map { |t| {t.text, t.negate?} })
+    end
+
+    it "leaves a NOT that does not precede a taken term alone" do
+      taken, residual = Gori::FilterAst.partition("NOT host:a tag:x") { |t| t.text.starts_with?("tag:") }
+      taken.map(&.negate?).should eq([false])
+      residual.should eq("NOT host:a")
+    end
+  end
+
   describe ".spans" do
     it "only treats `~` as a field separator for backends that implement it" do
       # QL has a regex operator; Issues/Probe/Intercept/Subtab do not and free-text the

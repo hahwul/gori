@@ -299,6 +299,52 @@ module Gori
       end
     end
 
+    # Pull the terms a backend handles ITSELF out of a query, returning them plus the
+    # residual for the normal parser. For a surface that owns a field the shared backend
+    # knows nothing about — Sitemap's `tag:`, which has no SQL column and filters the
+    # built TREE rather than the rows — the alternative is re-tokenising with
+    # `String#split`, which sees no quotes, no parens and no `-`/`NOT`, so `tag:"my tag"`
+    # tore in half and `NOT tag:done` INCLUDED what it was asked to exclude.
+    #
+    # Cutting from the same lexer means a hand-rolled field gets the grammar's quoting
+    # and negation for free. It does NOT get the boolean structure: the residual is
+    # rejoined with spaces, so extracted terms end up ANDed with whatever is left.
+    # Callers that care must say so (see SitemapView's tag note).
+    #
+    # NOTE: iterated by index rather than `each` — `yield` inside a block is what the
+    # Crystal compiler refuses here.
+    def self.partition(query : String, & : Term -> Bool) : {Array(Term), String}
+      taken = [] of Term
+      kept = [] of String
+      lexemes = lex(query)
+      i = 0
+      while i < lexemes.size
+        # A run of NOT keywords sitting directly before a term desugars ONTO that term —
+        # `parse_unary` does exactly this — and the desugaring happens at parse time, not
+        # in the lexer, so a lexeme-level scan would hand back `tag:done` unnegated and
+        # leave a bare `NOT` dangling in the residual. Take the run with the term.
+        run = 0
+        while i + run < lexemes.size && lexemes[i + run].tok.not?
+          run += 1
+        end
+        nxt = lexemes[i + run]?
+        if run > 0 && nxt && (nt = nxt.term) && yield nt
+          taken << (run.odd? ? nt.negated : nt)
+          i += run + 1
+          next
+        end
+        lx = lexemes[i]
+        t = lx.term
+        if t && yield t
+          taken << t
+        else
+          kept << query[lx.start, lx.size]
+        end
+        i += 1
+      end
+      {taken, kept.join(' ')}
+    end
+
     # --- syntax highlighting -------------------------------------------------
 
     enum SpanKind
