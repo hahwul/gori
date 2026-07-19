@@ -1121,7 +1121,10 @@ module Gori::Tui
     # rather than opening the form with it retyped.
     private def run_hint_action(action : Symbol) : Project | Symbol | Nil
       case action
-      when :open  then activate
+      # `return`, not a bare call: `activate`'s Project IS how the picker says "open
+      # this" (see `run`). Without it the footer button did nothing, and on the Temp row
+      # it silently created a project directory on disk and abandoned it, once per click.
+      when :open  then return activate
       when :space then open_space_menu
       when :temp  then return open_temp
       when :quit  then return :quit
