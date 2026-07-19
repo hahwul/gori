@@ -1,6 +1,7 @@
 require "uri"
 require "json"
 require "mime/multipart"
+require "./types" # Location, which apply's own signature names
 require "../fuzz/content_length"
 
 module Gori::Miner
@@ -120,22 +121,32 @@ module Gori::Miner
     private def self.inject_form(request : Bytes, params : Array({String, String})) : Bytes
       head, body, eol = split(request)
       extra = encode_pairs(params)
-      btext = String.new(body)
-      new_body = if body.empty?
-                   extra
-                 elsif btext.ends_with?('&')
-                   "#{btext}#{extra}"
-                 else
-                   "#{btext}&#{extra}"
-                 end
-      io = IO::Memory.new(head.size + new_body.bytesize + eol.bytesize * 2)
+      # The body is spliced through as bytes. It used to be copied into a String, then again by
+      # the interpolation that joined it to `extra`, then a third time into the IO — and the
+      # trailing-'&' test is a single byte compare that needs no String at all.
+      io = IO::Memory.new(head.size + body.size + extra.bytesize + eol.bytesize * 2 + 1)
       io.write(head)
-      io << eol << eol << new_body
+      io << eol << eol
+      unless body.empty?
+        io.write(body)
+        io << '&' unless body[body.size - 1] == 0x26_u8 # '&'
+      end
+      io << extra
       io.to_slice
     end
 
+    # Encoded straight into one builder. The map/join form allocated two encoded Strings plus an
+    # interpolated third PER PAIR, plus the intermediate Array, before join copied them all again
+    # — and a bucket is up to 256 pairs, rebuilt for every probe the bisection sends.
     private def self.encode_pairs(params : Array({String, String})) : String
-      params.map { |(n, v)| "#{URI.encode_www_form(n)}=#{URI.encode_www_form(v)}" }.join('&')
+      String.build do |io|
+        params.each_with_index do |(n, v), i|
+          io << '&' if i > 0
+          URI.encode_www_form(n, io)
+          io << '='
+          URI.encode_www_form(v, io)
+        end
+      end
     end
 
     # ── multipart/form-data ──────────────────────────────────────────────────────────
@@ -272,11 +283,20 @@ module Gori::Miner
 
     # ── headers ──────────────────────────────────────────────────────────────────────
 
+    # Appending header lines needs no head parsing: the new lines go at the END, so the existing
+    # head bytes are copied through verbatim. The old path took String.new(head) (a full copy),
+    # split it into a String per line, then rebuild joined them back into another full copy
+    # before writing — three passes over the head to append to it.
     private def self.inject_headers(request : Bytes, params : Array({String, String})) : Bytes
       head, body, eol = split(request)
-      lines = String.new(head).split(eol)
-      params.each { |(n, v)| lines << "#{n}: #{sanitize_value(v)}" if valid_header_name?(n) }
-      rebuild(lines, eol, body)
+      io = IO::Memory.new(head.size + params.size * 48 + body.size + eol.bytesize * 2)
+      io.write(head)
+      params.each do |(n, v)|
+        io << eol << n << ": " << sanitize_value(v) if valid_header_name?(n)
+      end
+      io << eol << eol
+      io.write(body) unless body.empty?
+      io.to_slice
     end
 
     # ── cookies ──────────────────────────────────────────────────────────────────────
