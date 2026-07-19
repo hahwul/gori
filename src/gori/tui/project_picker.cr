@@ -231,7 +231,13 @@ module Gori::Tui
       outcome = @preferences.handle_key(ev)
       case outcome.kind
       when :close then @mode = :list
-      when :saved then @resized = true # a saved Display/Layout pref may change how the picker draws
+      when :saved
+        @resized = true # a saved Display/Layout pref may change how the picker draws
+        # Mouse capture is armed once for the whole process in `App` and reconciled only
+        # by the in-app save seam, so toggling it here used to persist and do nothing —
+        # not even after opening a project — leaving native text selection broken for the
+        # rest of the session with no hint that a restart was needed.
+        Settings.mouse ? @term.enable_mouse : @term.disable_mouse
       when :open
         if outcome.section == :theme
           @theme_card.reload(:theme)
